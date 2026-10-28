@@ -630,8 +630,8 @@ _Avoid_: fleet-router, sizer
 **Routing**:
 The Router's decision for one Pull at its route step: the policy Cell and the
 Pull's Cell, the draw and what made it (burn-in or every 5th Pull), the Stratum
-and the numbers that set it, the Objective, the Cells the guard had tripped,
-and the reason. `ticket-router.mjs route` prints it. The Pull's row step keeps
+and the numbers that set it, a Slice's parent, the Objective, the Cells the
+guard had tripped, and the reason. `ticket-router.mjs route` prints it. The Pull's row step keeps
 it in the run ledger's `## Routed` section, and the Pull's board card shows it
 (compute-board.mjs's cellLine).
 _Avoid_: route (bare: the Tier route is the `modelRoles` mapping), routing
@@ -658,8 +658,8 @@ _Avoid_: tier outcomes, router stats, readout
 **Stratum**:
 The class of ticket the Router keys on: `light`, `heavy` or `unknown`, set by
 the Router's classifier — today a rule on the brief's length and its count of
-acceptance criteria, `unknown` when either is missing. Once #3956 lands, a
-Slice is `heavy` whatever its length. `light` means a short ticket, not an
+acceptance criteria, `unknown` when either is missing. A Slice is `heavy`
+whatever its length. `light` means a short ticket, not an
 easy one. The table's `*` row covers every ticket together and is not a
 stratum.
 _Avoid_: size, difficulty, bucket
@@ -668,7 +668,9 @@ _Avoid_: size, difficulty, bucket
 A ticket cut from another issue, its parent, which holds its design: its body
 opens `Spec: #<N>`, or opens with a `## Parent` section naming the parent. Its
 brief is short because the parent holds the design, so its length does not
-say what the ticket costs.
+say what the ticket costs. The body decides, so a later Agent Brief leaves a
+Slice a Slice; `Spec #<N>` without the colon, a `## Parent` section naming no
+issue and a `Part of #<N>` line make none. Its Routing names the parent.
 _Avoid_: spec ticket, sub-issue, child ticket
 
 **Quality floor**:

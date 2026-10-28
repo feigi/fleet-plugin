@@ -91,7 +91,11 @@ would anchor and contaminate the label.
    `router_usd` from `status().cost`, blank on arm A. *Amended (#3680,
    implemented by #3785): `objective` is appended after `kind` (19) — the
    Objective the Pull was routed by, `cost` or `speed`; it is optional on
-   read, so a row written before the column reads it blank.*
+   read, so a row written before the column reads it blank.* *Amended
+   (#3956): `parent` is appended after `objective` — a Slice's parent
+   issue number, blank for a ticket that is no Slice; optional on read the
+   same way. `slice-fill.mjs` sets it on the rows of a corpus written
+   without it.*
 2. **No `fleet-router` member.** `sizing_pre` on B Pulls comes from one
    `judge()` call in the controller's eval cell (measured: resolves to
    `anthropic/claude-haiku-4-5`, $0.0002, 0.6 s, one-hot probabilities ⇒
@@ -508,7 +512,7 @@ reviewable, coefficients are not.
 
 | id | where it runs | output | used on |
 |---|---|---|---|
-| `rule` | route script, always | `heavy` iff `brief_chars > 3483 ∨ criteria > 5`, else `light`; `unknown` when metrics are blank | every Pull → `policy_cell` |
+| `rule` | route script, always | `unknown` when metrics are blank; else `heavy` for a Slice (a row with a `parent`); else `heavy` iff `brief_chars > 3483 ∨ criteria > 5`, else `light` | every Pull → `policy_cell` |
 | `haiku` | one `judge()` call in the controller's eval cell, `{type:"choice", criteria:{light,heavy}}` over the issue text | `sizing.json` | arm B, once gated |
 | `jev` | the same `judge()` call with TypeSafe credentials present | `sizing.json` | arm B, once gated |
 
@@ -691,7 +695,7 @@ fitted commit's features file, matched by `session` + `agent`, replacing
 node plugin/scripts/ticket-router.mjs route --session <id> [--objective cost|speed] --ticket <N> --arm <A|B> --impl-row <k> \
   --issue <scratch>/impl-<N>/issue.json [--sizing <scratch>/impl-<N>/sizing.json] \
   --guard .fleet/cost-guard.json --table plugin/scripts/router-table.json
-→ POLICY=<cell> CELL=<cell> DRAW=<k/K|-> BY=<burn-in|every-5th|-> STRATUM=<light|heavy|unknown> BRIEF=<chars|-> CRITERIA=<n|-> SIZED=<light|heavy|-> OBJECTIVE=<cost|speed> TRIPPED=<cell,…|-> REASON=<ok|no-issue-json|no-sizing|guard-missing|guard-tripped|table-cell-tripped>
+→ POLICY=<cell> CELL=<cell> DRAW=<k/K|-> BY=<burn-in|every-5th|-> STRATUM=<light|heavy|unknown> BRIEF=<chars|-> CRITERIA=<n|-> PARENT=<N|-> SIZED=<light|heavy|-> OBJECTIVE=<cost|speed> TRIPPED=<cell,…|-> REASON=<ok|no-issue-json|no-sizing|guard-missing|guard-tripped|table-cell-tripped>
 ```
 
 Order: metrics → stratum (`rule`; `sizing.json` on B) → `policy_cell =
@@ -714,6 +718,13 @@ it verbatim in the ledger's `## Routed` section, after the Pull's first
 implementer's member token, in the same `ledger.mjs row … --routing <line>`
 write as the row; `ledger-grammar.mjs` owns the grammar (`parseRouting`,
 `formatRouting`). The row's `route=<REASON>` token is retired.
+
+**Amended (#3956): the Routing names a Slice's parent.** `PARENT` is the
+parent issue the ticket's body names — `Spec: #<N>` at the start of its first
+non-blank line, or the first issue a `## Parent` section the body opens with
+names — and `-` for a ticket that is no Slice or when no issue was read. The
+`rule` Stratum of a Slice is `heavy` whatever its brief's numbers. A `## Routed`
+entry written before the part carries no `PARENT=` and reads as `PARENT=-`.
 
 Guard/table asymmetry, stated on purpose: the guard is pooled, the table
 per-stratum; a cell evicted pooled cannot win a stratum. Conservative by

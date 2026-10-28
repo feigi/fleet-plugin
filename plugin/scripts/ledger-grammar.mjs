@@ -817,10 +817,12 @@ export function drawCell({ session, ticket, policyCell, cells }) {
 //   POLICY    the policy row's Cell        CELL      the Pull's Cell
 //   DRAW      k/K of the draw              BY        burn-in | every-5th
 //   STRATUM   light | heavy | unknown      BRIEF     the brief's chars
-//   CRITERIA  the criteria count           SIZED     arm B's sizing label
-//   OBJECTIVE cost | speed                 TRIPPED   the guard's tripped Cells
-//   REASON    the first thing that went wrong
-// DRAW and BY are `-` together (no draw); so are BRIEF and CRITERIA (no issue read).
+//   CRITERIA  the criteria count           PARENT    a Slice's parent issue
+//   SIZED     arm B's sizing label         OBJECTIVE cost | speed
+//   TRIPPED   the guard's tripped Cells    REASON    the first thing that went wrong
+// DRAW and BY are `-` together (no draw); so are BRIEF and CRITERIA (no issue
+// read), and PARENT is `-` with them. A line written before PARENT was a part
+// carries none, and reads as `PARENT=-`.
 export const STRATA = Object.freeze(["light", "heavy", "unknown"]);
 // What a run asks the router to minimise. phase0.mjs records the run's in its
 // receipt, and every Routing names the one it routed by.
@@ -828,19 +830,22 @@ export const OBJECTIVES = Object.freeze(["cost", "speed"]);
 const DRAWN_BY = Object.freeze(["burn-in", "every-5th"]);
 export const ROUTING_REASONS = Object.freeze(["ok", "no-issue-json", "no-sizing", "guard-missing", "guard-tripped", "table-cell-tripped"]);
 const SIZINGS = Object.freeze(["light", "heavy"]);
-const ROUTING_KEYS = Object.freeze(["POLICY", "CELL", "DRAW", "BY", "STRATUM", "BRIEF", "CRITERIA", "SIZED", "OBJECTIVE", "TRIPPED", "REASON"]);
+const ROUTING_KEYS = Object.freeze(["POLICY", "CELL", "DRAW", "BY", "STRATUM", "BRIEF", "CRITERIA", "PARENT", "SIZED", "OBJECTIVE", "TRIPPED", "REASON"]);
+const PARENT_AT = ROUTING_KEYS.indexOf("PARENT");
+const ISSUE = /^[1-9][0-9]*$/;
 const COUNT = /^(?:0|[1-9][0-9]*)$/;
 const DRAW = /^([1-9][0-9]*)\/([1-9][0-9]*)$/;
 
 /**
  * A Routing line read into its parts, or null when it is not one.
  * @returns {null | { policy: string, cell: string, draw: null | { k: number, K: number }, by: null | string,
- *   stratum: string, brief: null | number, criteria: null | number, sized: null | string, objective: string,
- *   tripped: string[], reason: string }}
+ *   stratum: string, brief: null | number, criteria: null | number, parent: null | number, sized: null | string,
+ *   objective: string, tripped: string[], reason: string }}
  */
 export function parseRouting(line) {
   if (typeof line !== "string") return null;
   const words = line.split(" ");
+  if (words.length === ROUTING_KEYS.length - 1 && !words[PARENT_AT].startsWith("PARENT=")) words.splice(PARENT_AT, 0, "PARENT=-");
   if (words.length !== ROUTING_KEYS.length) return null;
   const v = {};
   for (const [i, key] of ROUTING_KEYS.entries()) {
@@ -859,6 +864,7 @@ export function parseRouting(line) {
     stratum: STRATA.includes(v.STRATUM) ? v.STRATUM : undefined,
     brief: count(v.BRIEF),
     criteria: count(v.CRITERIA),
+    parent: v.PARENT === "-" ? null : ISSUE.test(v.PARENT) ? Number(v.PARENT) : undefined,
     sized: opt(v.SIZED, (x) => SIZINGS.includes(x)),
     objective: OBJECTIVES.includes(v.OBJECTIVE) ? v.OBJECTIVE : undefined,
     tripped: tripped.every((c) => CELL.test(c)) ? tripped : undefined,
@@ -867,15 +873,16 @@ export function parseRouting(line) {
   if (Object.values(r).includes(undefined)) return null;
   if (r.draw !== null && r.draw.k > r.draw.K) return null;
   if ((r.draw === null) !== (r.by === null) || (r.brief === null) !== (r.criteria === null)) return null;
+  if (r.parent !== null && r.brief === null) return null;
   return r;
 }
 
 /** The Routing line for parsed parts; throws on parts no Routing line can carry, so nothing writes one parseRouting refuses. */
-export function formatRouting({ policy, cell, draw, by, stratum, brief, criteria, sized, objective, tripped, reason }) {
+export function formatRouting({ policy, cell, draw, by, stratum, brief, criteria, parent, sized, objective, tripped, reason }) {
   const none = (x) => (x === null ? "-" : String(x));
   const line = [
     `POLICY=${policy}`, `CELL=${cell}`, `DRAW=${draw === null ? "-" : `${draw.k}/${draw.K}`}`, `BY=${none(by)}`,
-    `STRATUM=${stratum}`, `BRIEF=${none(brief)}`, `CRITERIA=${none(criteria)}`, `SIZED=${none(sized)}`,
+    `STRATUM=${stratum}`, `BRIEF=${none(brief)}`, `CRITERIA=${none(criteria)}`, `PARENT=${none(parent)}`, `SIZED=${none(sized)}`,
     `OBJECTIVE=${objective}`, `TRIPPED=${tripped.length === 0 ? "-" : tripped.join(",")}`, `REASON=${reason}`,
   ].join(" ");
   if (parseRouting(line) === null) throw new Error(`not a Routing: ${line}`);

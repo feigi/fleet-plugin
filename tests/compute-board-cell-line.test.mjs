@@ -14,7 +14,7 @@ const lines = (l) => l.lines.map(says);
 
 // A Routing line; every part `route` prints, defaulted to a not-drawn heavy cost Pull.
 const routing = (o = {}) => formatRouting({
-  policy: "slow-high", cell: "slow-high", draw: null, by: null, stratum: "heavy", brief: 9658, criteria: 8,
+  policy: "slow-high", cell: "slow-high", draw: null, by: null, stratum: "heavy", brief: 9658, criteria: 8, parent: null,
   sized: null, objective: "cost", tripped: [], reason: "ok", ...o,
 });
 // An implementer's member record, as gather() keeps it.
@@ -119,6 +119,14 @@ test("cellLine: the Stratum's numbers say which side of each threshold they sit"
 
 test("cellLine: under arm B the Stratum reads its sizing label", () => {
   assert.equal(lines(undrawn({ stratum: "heavy", sized: "heavy" }))[1], "heavy: sized heavy · claude-haiku-5-5 · high");
+});
+
+test("cellLine: a Slice's Stratum names its parent, not the brief's numbers", () => {
+  assert.equal(lines(undrawn({ stratum: "heavy", brief: 400, criteria: 1, parent: 3177 }))[1], "heavy: Slice of #3177 · claude-haiku-5-5 · high");
+  assert.equal(lines(undrawn({ stratum: "light", brief: 400, criteria: 1, sized: "light", parent: 3177 }))[1], "light: sized light · claude-haiku-5-5 · high", "arm B's label still stands for its Pull");
+  const old = `impl-9 ${routing({ stratum: "light", brief: 400, criteria: 1 }).replace(" PARENT=-", "")}`;
+  assert.equal(lines(cellLine({ row: "#9 impl-9", issue: 9, routed: [old], members: members({ "impl-9": rec("slow-high") }) }))[1],
+    "light: 400 chars (not past 3,483), 1 criteria (not past 5) · claude-haiku-5-5 · high", "an entry written before PARENT reads by its numbers");
 });
 
 // -- the model -----------------------------------------------------------------

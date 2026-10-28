@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import {
-  DEFAULT_TABLE, HEAVY_BRIEF_CHARS, HEAVY_CRITERIA, bArmLive, issueMetrics, ruleStratum, route, fitTable, readGuard, validateTable, formatFeatureRow, mergedSince, resolveCommit,
+  DEFAULT_TABLE, HEAVY_BRIEF_CHARS, HEAVY_CRITERIA, bArmLive, issueMetrics, ruleStratum, route, fitTable, readGuard, validateTable, formatFeatureRow, mergedSince, resolveCommit, sliceParent,
 } from "../plugin/scripts/ticket-router.mjs";
 import { FEATURE_COLUMNS as COLUMNS, parseFeatures } from "../plugin/scripts/pull-attribution.mjs";
 import { drawCell, CELL, formatRouting, parseRouting } from "../plugin/scripts/ledger-grammar.mjs";
@@ -69,8 +69,8 @@ test("route: a clean non-exploration Pull prints the full line, REASON=ok, and r
   const p = world(t);
   const r = routeCli(p);
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout, "POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=light BRIEF=31 CRITERIA=2 SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok\n");
-  const lines = readFileSync(p.pending, "utf8").trim().split("\n");
+  assert.equal(r.stdout, "POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=light BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok\n");
+  const lines = readFileSync(p.pending, "utf8").replace(/\n$/, "").split("\n");
   assert.equal(lines[0], COLUMNS.join("\t"), "a new pending file starts with the header");
   const [row] = parseFeatures(lines.join("\n"));
   assert.equal(row.run_date, "2026-10-01");
@@ -85,7 +85,7 @@ test("route: a clean non-exploration Pull prints the full line, REASON=ok, and r
   assert.equal(row.kind, "bug");
   // A second Pull appends, never a second header.
   routeCli(p, { ticket: 43 });
-  const again = readFileSync(p.pending, "utf8").trim().split("\n");
+  const again = readFileSync(p.pending, "utf8").replace(/\n$/, "").split("\n");
   assert.equal(again.length, 3);
   assert.equal(again.filter((l) => l === COLUMNS.join("\t")).length, 1);
 });
@@ -161,7 +161,7 @@ test("route: no-issue-json — a missing or unparseable issue file blanks the me
     const r = routeCli(p);
     assert.equal(r.status, 0, r.stderr);
     assert.deepEqual(parseLine(r.stdout), {
-      POLICY: "slow-high", CELL: "slow-high", DRAW: "-", BY: "-", STRATUM: "unknown", BRIEF: "-", CRITERIA: "-", SIZED: "-", OBJECTIVE: "cost", TRIPPED: "-", REASON: "no-issue-json",
+      POLICY: "slow-high", CELL: "slow-high", DRAW: "-", BY: "-", STRATUM: "unknown", BRIEF: "-", CRITERIA: "-", PARENT: "-", SIZED: "-", OBJECTIVE: "cost", TRIPPED: "-", REASON: "no-issue-json",
     });
     const [row] = parseFeatures(readFileSync(p.pending, "utf8"));
     for (const c of ["brief_chars", "criteria", "comments", "age_days", "paths", "test_paths", "xrefs", "kind"]) assert.equal(row[c], "", c);
@@ -174,7 +174,7 @@ test("route: no-sizing — a live B Pull without a usable sizing file routes `un
   const r = routeCli(p, { arm: "B" });
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(parseLine(r.stdout), {
-    POLICY: "slow-high", CELL: "slow-high", DRAW: "-", BY: "-", STRATUM: "unknown", BRIEF: "31", CRITERIA: "2", SIZED: "-", OBJECTIVE: "cost", TRIPPED: "-", REASON: "no-sizing",
+    POLICY: "slow-high", CELL: "slow-high", DRAW: "-", BY: "-", STRATUM: "unknown", BRIEF: "31", CRITERIA: "2", PARENT: "-", SIZED: "-", OBJECTIVE: "cost", TRIPPED: "-", REASON: "no-sizing",
   });
 });
 
@@ -185,7 +185,7 @@ test("route: a live B Pull WITH a sizing verdict routes by it — the must-accep
   assert.equal(r.status, 0, r.stderr);
   // The table row for the classifier's stratum is dispatched; POLICY stays the free rule's.
   assert.deepEqual(parseLine(r.stdout), {
-    POLICY: "slow-high", CELL: "task-high", DRAW: "-", BY: "-", STRATUM: "heavy", BRIEF: "31", CRITERIA: "2", SIZED: "heavy", OBJECTIVE: "cost", TRIPPED: "-", REASON: "ok",
+    POLICY: "slow-high", CELL: "task-high", DRAW: "-", BY: "-", STRATUM: "heavy", BRIEF: "31", CRITERIA: "2", PARENT: "-", SIZED: "heavy", OBJECTIVE: "cost", TRIPPED: "-", REASON: "ok",
   });
   const [row] = parseFeatures(readFileSync(p.pending, "utf8"));
   assert.equal(row.sizing_src, "haiku");
@@ -197,7 +197,7 @@ test("route: arm B on a table whose B gate is closed routes exactly as arm A and
   const p = world(t);
   const r = routeCli(p, { arm: "B" });
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout, "POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=light BRIEF=31 CRITERIA=2 SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok\n");
+  assert.equal(r.stdout, "POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=light BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok\n");
   assert.equal(parseFeatures(readFileSync(p.pending, "utf8"))[0].sizing_src, "rule");
 });
 
@@ -207,7 +207,7 @@ test("route: guard-missing — no guard (or an unparseable one) dispatches the d
     const r = routeCli(p, { implRow: 5 });
     assert.equal(r.status, 0, r.stderr);
     assert.deepEqual(parseLine(r.stdout), {
-      POLICY: "slow-high", CELL: "slow-high", DRAW: "-", BY: "-", STRATUM: "light", BRIEF: "31", CRITERIA: "2", SIZED: "-", OBJECTIVE: "cost", TRIPPED: "-", REASON: "guard-missing",
+      POLICY: "slow-high", CELL: "slow-high", DRAW: "-", BY: "-", STRATUM: "light", BRIEF: "31", CRITERIA: "2", PARENT: "-", SIZED: "-", OBJECTIVE: "cost", TRIPPED: "-", REASON: "guard-missing",
     });
   }
 });
@@ -231,7 +231,7 @@ test("route: an every-5th draw with a tripped Cell left out prints the draw, BY=
   assert.equal(r.status, 0, r.stderr);
   const d = drawCell({ session: SESSION, ticket: 42, policyCell: "slow-high", cells: ["slow-high", "task-high"] });
   assert.deepEqual(d, { cell: "task-high", k: 1, K: 1 }, "the one Cell left to draw past the policy Cell and the tripped one");
-  assert.equal(r.stdout, "POLICY=slow-high CELL=task-high DRAW=1/1 BY=every-5th STRATUM=light BRIEF=31 CRITERIA=2 SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=guard-tripped\n");
+  assert.equal(r.stdout, "POLICY=slow-high CELL=task-high DRAW=1/1 BY=every-5th STRATUM=light BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=guard-tripped\n");
 });
 
 test("route: a drawn burn-in Pull prints the whole Routing, BY=burn-in", (t) => {
@@ -239,7 +239,7 @@ test("route: a drawn burn-in Pull prints the whole Routing, BY=burn-in", (t) => 
   const r = routeCli(p);
   assert.equal(r.status, 0, r.stderr);
   const d = drawCell({ session: SESSION, ticket: 42, policyCell: null, cells: STAGE1 });
-  assert.equal(r.stdout, `POLICY=slow-high CELL=${d.cell} DRAW=${d.k}/3 BY=burn-in STRATUM=light BRIEF=31 CRITERIA=2 SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok\n`);
+  assert.equal(r.stdout, `POLICY=slow-high CELL=${d.cell} DRAW=${d.k}/3 BY=burn-in STRATUM=light BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok\n`);
 });
 
 test("route: table-cell-tripped — a table row naming a tripped cell is replaced by the default without waiting for a re-fit", (t) => {
@@ -247,14 +247,14 @@ test("route: table-cell-tripped — a table row naming a tripped cell is replace
   const r = routeCli(p);
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(parseLine(r.stdout), {
-    POLICY: "slow-high", CELL: "slow-high", DRAW: "-", BY: "-", STRATUM: "light", BRIEF: "31", CRITERIA: "2", SIZED: "-", OBJECTIVE: "cost", TRIPPED: "task-high", REASON: "table-cell-tripped",
+    POLICY: "slow-high", CELL: "slow-high", DRAW: "-", BY: "-", STRATUM: "light", BRIEF: "31", CRITERIA: "2", PARENT: "-", SIZED: "-", OBJECTIVE: "cost", TRIPPED: "task-high", REASON: "table-cell-tripped",
   });
 });
 
 test("route: a non-default table row is dispatched when its cell is not tripped", (t) => {
   const p = world(t, { table: baseTable({ rows: both({ "*": "slow-high", light: "task-high" }) }) });
   const r = routeCli(p);
-  assert.equal(r.stdout, "POLICY=task-high CELL=task-high DRAW=- BY=- STRATUM=light BRIEF=31 CRITERIA=2 SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok\n");
+  assert.equal(r.stdout, "POLICY=task-high CELL=task-high DRAW=- BY=- STRATUM=light BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok\n");
 });
 
 test("route: burn-in draws on EVERY Pull, uniformly over all cells including the default", (t) => {
@@ -300,7 +300,7 @@ test("route: a chain head on row 5k does not draw — the assignment rolls to th
 test("route: with every non-default cell withdrawn (K=0) an exploration Pull runs the policy cell and records no draw", (t) => {
   const p = world(t, { table: baseTable({ cells: ["slow-high"] }) });
   const r = routeCli(p, { implRow: 5 });
-  assert.equal(r.stdout, "POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=light BRIEF=31 CRITERIA=2 SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok\n", "no draw, so no BY");
+  assert.equal(r.stdout, "POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=light BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok\n", "no draw, so no BY");
   assert.equal(parseFeatures(readFileSync(p.pending, "utf8"))[0].exploration_draw, "");
 });
 
@@ -415,7 +415,7 @@ test("route: pure — the same inputs give the same line, and the line names eve
   const args = { session: SESSION, ticket: 9, arm: "A", implRow: 10, issue: issue(), guard: readGuard(guardFile()), table: baseTable(), objective: "cost" };
   const a = route(args);
   assert.deepEqual(route(args), a);
-  assert.match(a.line, /^POLICY=\S+ CELL=\S+ DRAW=\S+ BY=\S+ STRATUM=(light|heavy|unknown) BRIEF=\S+ CRITERIA=\S+ SIZED=\S+ OBJECTIVE=cost TRIPPED=\S+ REASON=\S+$/);
+  assert.match(a.line, /^POLICY=\S+ CELL=\S+ DRAW=\S+ BY=\S+ STRATUM=(light|heavy|unknown) BRIEF=\S+ CRITERIA=\S+ PARENT=\S+ SIZED=\S+ OBJECTIVE=cost TRIPPED=\S+ REASON=\S+$/);
   assert.equal(formatRouting(parseRouting(a.line)), a.line, "the line is one the ledger's grammar reads back whole");
   assert.equal(formatFeatureRow(a.row).split("\t").length, COLUMNS.length);
 });
@@ -426,7 +426,7 @@ const liveB = (over = {}) => baseTable({ classifier: { b: "haiku", tau: null }, 
 const haikuSizing = { source: "haiku", model: "m", label: "heavy", confidence: 1, usd: 0.5 };
 
 test("route: arm B is live only on arm B, with a classifier set and some row not the default", () => {
-  const ruleLine = "POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=light BRIEF=31 CRITERIA=2 SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok";
+  const ruleLine = "POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=light BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok";
   const cases = [
     ["a classifier but every row the default", liveB({ rows: both({ "*": "slow-high", heavy: "slow-high" }) }), "B"],
     ["a non-default row but no classifier", liveB({ classifier: { b: null, tau: null } }), "B"],
@@ -439,13 +439,13 @@ test("route: arm B is live only on arm B, with a classifier set and some row not
     assert.equal(row.sizing_pre, "", what);
     assert.equal(row.router_usd, "", what);
   }
-  assert.equal(routeIn({ table: liveB(), arm: "B", sizing: haikuSizing }).line, "POLICY=slow-high CELL=task-high DRAW=- BY=- STRATUM=heavy BRIEF=31 CRITERIA=2 SIZED=heavy OBJECTIVE=cost TRIPPED=- REASON=ok", "the same inputs with the gate open and arm B do route by the sizing");
+  assert.equal(routeIn({ table: liveB(), arm: "B", sizing: haikuSizing }).line, "POLICY=slow-high CELL=task-high DRAW=- BY=- STRATUM=heavy BRIEF=31 CRITERIA=2 PARENT=- SIZED=heavy OBJECTIVE=cost TRIPPED=- REASON=ok", "the same inputs with the gate open and arm B do route by the sizing");
 });
 
 test("route: a live B sizing is used only when its source is the table's classifier and its label is light or heavy", () => {
   const refused = (table, sizing, what) => {
     const { line, row } = routeIn({ table, sizing });
-    assert.equal(line, "POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=unknown BRIEF=31 CRITERIA=2 SIZED=- OBJECTIVE=cost TRIPPED=- REASON=no-sizing", what);
+    assert.equal(line, "POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=unknown BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=no-sizing", what);
     assert.equal(row.sizing_src, "", what);
     assert.equal(row.sizing_pre, "", what);
   };
@@ -456,7 +456,7 @@ test("route: a live B sizing is used only when its source is the table's classif
   for (const label of ["medium", "Heavy", "", null, undefined, 1, ["heavy"]]) refused(liveB(), { ...haikuSizing, label }, `label ${JSON.stringify(label)}`);
   // A light verdict on a heavy-by-rule brief: the table row of the classifier's stratum, not the rule's.
   const light = routeIn({ table: liveB({ rows: both({ "*": "slow-high", light: "smol-high" }) }), issue: issue({ body: "x".repeat(4000) }), sizing: { ...haikuSizing, label: "light" } });
-  assert.equal(light.line, "POLICY=slow-high CELL=smol-high DRAW=- BY=- STRATUM=light BRIEF=4000 CRITERIA=0 SIZED=light OBJECTIVE=cost TRIPPED=- REASON=ok");
+  assert.equal(light.line, "POLICY=slow-high CELL=smol-high DRAW=- BY=- STRATUM=light BRIEF=4000 CRITERIA=0 PARENT=- SIZED=light OBJECTIVE=cost TRIPPED=- REASON=ok");
   assert.equal(light.row.sizing_pre, "light");
 });
 
@@ -464,14 +464,14 @@ test("route: a jev sizing below tau abstains to `unknown` but records its label,
   const table = liveB({ classifier: { b: "jev", tau: 0.8 } });
   const jev = (over) => ({ source: "jev", model: "jev-1", label: "heavy", confidence: 0.9, usd: 0.25, ...over });
   const confident = routeIn({ table, sizing: jev() });
-  assert.equal(confident.line, "POLICY=slow-high CELL=task-high DRAW=- BY=- STRATUM=heavy BRIEF=31 CRITERIA=2 SIZED=heavy OBJECTIVE=cost TRIPPED=- REASON=ok");
+  assert.equal(confident.line, "POLICY=slow-high CELL=task-high DRAW=- BY=- STRATUM=heavy BRIEF=31 CRITERIA=2 PARENT=- SIZED=heavy OBJECTIVE=cost TRIPPED=- REASON=ok");
   assert.equal(confident.row.sizing_src, "jev:jev-1");
   assert.equal(confident.row.sizing_pre, "heavy");
   assert.equal(confident.row.router_usd, "0.25");
-  assert.equal(routeIn({ table, sizing: jev({ confidence: 0.8 }) }).line, "POLICY=slow-high CELL=task-high DRAW=- BY=- STRATUM=heavy BRIEF=31 CRITERIA=2 SIZED=heavy OBJECTIVE=cost TRIPPED=- REASON=ok", "confidence exactly at tau does not abstain");
+  assert.equal(routeIn({ table, sizing: jev({ confidence: 0.8 }) }).line, "POLICY=slow-high CELL=task-high DRAW=- BY=- STRATUM=heavy BRIEF=31 CRITERIA=2 PARENT=- SIZED=heavy OBJECTIVE=cost TRIPPED=- REASON=ok", "confidence exactly at tau does not abstain");
   for (const confidence of [0.79, 0, undefined, "high", null]) {
     const r = routeIn({ table, sizing: jev({ confidence }) });
-    assert.equal(r.line, "POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=unknown BRIEF=31 CRITERIA=2 SIZED=heavy OBJECTIVE=cost TRIPPED=- REASON=ok", `confidence ${JSON.stringify(confidence)}`);
+    assert.equal(r.line, "POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=unknown BRIEF=31 CRITERIA=2 PARENT=- SIZED=heavy OBJECTIVE=cost TRIPPED=- REASON=ok", `confidence ${JSON.stringify(confidence)}`);
     assert.equal(r.row.sizing_src, "jev:jev-1");
     assert.equal(r.row.sizing_pre, "heavy", "the abstained label is still recorded");
     assert.equal(r.row.router_usd, "0.25", "the abstained verdict's spend is still recorded");
@@ -481,9 +481,9 @@ test("route: a jev sizing below tau abstains to `unknown` but records its label,
   assert.equal(routeIn({ table, sizing: jev({ usd: "0.25" }) }).row.router_usd, "", "a usd that is not a number: blank");
   // Without a tau the confidence is not consulted; and tau binds only a jev verdict.
   const noTau = routeIn({ table: liveB({ classifier: { b: "jev", tau: null } }), sizing: jev({ confidence: undefined }) });
-  assert.equal(noTau.line, "POLICY=slow-high CELL=task-high DRAW=- BY=- STRATUM=heavy BRIEF=31 CRITERIA=2 SIZED=heavy OBJECTIVE=cost TRIPPED=- REASON=ok");
+  assert.equal(noTau.line, "POLICY=slow-high CELL=task-high DRAW=- BY=- STRATUM=heavy BRIEF=31 CRITERIA=2 PARENT=- SIZED=heavy OBJECTIVE=cost TRIPPED=- REASON=ok");
   const haiku = routeIn({ table: liveB({ classifier: { b: "haiku", tau: 0.8 } }), sizing: { ...haikuSizing, confidence: 0.1 } });
-  assert.equal(haiku.line, "POLICY=slow-high CELL=task-high DRAW=- BY=- STRATUM=heavy BRIEF=31 CRITERIA=2 SIZED=heavy OBJECTIVE=cost TRIPPED=- REASON=ok");
+  assert.equal(haiku.line, "POLICY=slow-high CELL=task-high DRAW=- BY=- STRATUM=heavy BRIEF=31 CRITERIA=2 PARENT=- SIZED=heavy OBJECTIVE=cost TRIPPED=- REASON=ok");
   assert.equal(haiku.row.sizing_src, "haiku");
 });
 
@@ -494,7 +494,7 @@ test("route: a tripped token that is not a cell makes the guard unreadable — d
     const r = routeCli(p, { implRow: 5 });
     assert.equal(r.status, 0, r.stderr);
     assert.deepEqual(parseLine(r.stdout), {
-      POLICY: "slow-high", CELL: "slow-high", DRAW: "-", BY: "-", STRATUM: "light", BRIEF: "31", CRITERIA: "2", SIZED: "-", OBJECTIVE: "cost", TRIPPED: "-", REASON: "guard-missing",
+      POLICY: "slow-high", CELL: "slow-high", DRAW: "-", BY: "-", STRATUM: "light", BRIEF: "31", CRITERIA: "2", PARENT: "-", SIZED: "-", OBJECTIVE: "cost", TRIPPED: "-", REASON: "guard-missing",
     }, JSON.stringify(tripped));
   }
   const real = world(t, { table, guard: guardFile({ tripped: [{ cell: "smol-high" }], verdict: "tripped" }) });
@@ -678,6 +678,75 @@ test("metrics: the rule classifier is heavy past 3483 brief chars or 5 criteria,
   assert.deepEqual([HEAVY_BRIEF_CHARS, HEAVY_CRITERIA], [3483, 5]);
   assert.equal(ruleStratum({ brief_chars: String(HEAVY_BRIEF_CHARS + 1), criteria: String(HEAVY_CRITERIA) }), "heavy");
   assert.equal(ruleStratum({ brief_chars: String(HEAVY_BRIEF_CHARS), criteria: String(HEAVY_CRITERIA + 1) }), "heavy");
+});
+
+test("metrics: a Slice is heavy whatever its brief's numbers, and a Slice with blank metrics stays unknown", () => {
+  assert.equal(ruleStratum({ brief_chars: "10", criteria: "0", parent: "3177" }), "heavy");
+  assert.equal(ruleStratum({ brief_chars: "10", criteria: "0", parent: "" }), "light");
+  assert.equal(ruleStratum({ brief_chars: "10", criteria: "0" }), "light", "a row read from a file without the column is no Slice");
+  assert.equal(ruleStratum({ brief_chars: "", criteria: "", parent: "3177" }), "unknown", "its issue was not read when it was routed");
+});
+
+test("metrics: a Slice's parent is read off the issue body's top — `Spec: #<N>` or an opening `## Parent` section — and nothing else makes one", () => {
+  const cases = [
+    ["Spec: #3177 § D1, D2. Ticket 1 of 6 for that spec.", "3177"],
+    ["\n  \nSpec: #3485 § D8.", "3485", "leading blank lines are not the first non-blank line"],
+    ["## Parent\n\nhttps://github.com/feigi/fleet-plugin/issues/2870\n\n## What to build\nSee #12.", "2870"],
+    ["## Parent\n\n#2870, after #2871\n", "2870", "the first issue named counts"],
+    ["## Parent\nhttps://github.com/o/r/issues/7 and #8", "7", "the first issue named counts, URL or #N"],
+    ["Spec #3182 (`docs/specs/x.md`), D6.", "", "no colon"],
+    ["Spec 7 of the 2026-10-13 determinism review", ""],
+    ["## Parent\n\nnone yet\n\n## What to build\nSee #12.", "", "a Parent section naming no issue; a later section's #12 is not its parent"],
+    ["Part of #3673\n\nSpec: #3177", "", "Part of makes none, and Spec: below the first line is not at the top"],
+    ["## What to build\n\n## Parent\n#5", "", "a Parent section that does not open the body"],
+    ["", ""],
+  ];
+  for (const [body, parent, why] of cases) assert.equal(sliceParent(body), parent, why ?? body);
+  assert.equal(issueMetrics(issue({ body: "Spec: #3177 § D1." })).parent, "3177");
+  assert.equal(issueMetrics(issue()).parent, "");
+  assert.equal(
+    issueMetrics(issue({ body: "Spec: #3177 § D1.", comments: [{ body: "## Agent Brief\nshort, and no Spec line" }] })).parent, "3177",
+    "the body decides, so a later Agent Brief comment leaves a Slice a Slice",
+  );
+  assert.equal(issueMetrics(issue({ body: "short", comments: [{ body: "## Agent Brief\nSpec: #3177" }] })).parent, "", "a brief that opens Spec: on a comment makes none");
+});
+
+test("route: a short-brief Slice routes heavy and names its parent, by either form, even after a later Agent Brief; a ticket that is no Slice routes by its brief", (t) => {
+  const brief = { comments: [{ body: "## Agent Brief\nA short brief.\n- [ ] one" }] };
+  const slices = [
+    [issue({ body: "Spec: #3177 § D3. Ticket 3 of 6 for that spec." }), "3177"],
+    [issue({ body: "## Parent\n\nhttps://github.com/feigi/fleet-plugin/issues/2870\n\n## What to build\nshort" }), "2870"],
+    [issue({ body: "Spec: #3177 § D3.", ...brief }), "3177"],
+  ];
+  for (const [issueJson, parent] of slices) {
+    const p = world(t, { issueJson });
+    const r = routeCli(p);
+    assert.equal(r.status, 0, r.stderr);
+    const line = parseLine(r.stdout);
+    assert.deepEqual([line.STRATUM, line.PARENT], ["heavy", parent], r.stdout);
+    assert.ok(Number(line.BRIEF) < HEAVY_BRIEF_CHARS && Number(line.CRITERIA) <= HEAVY_CRITERIA, `a short brief: ${r.stdout}`);
+    assert.equal(parseFeatures(readFileSync(p.pending, "utf8"))[0].parent, parent, "the features row carries the parent the fit reads");
+  }
+  for (const body of ["Spec #3182 (`docs/specs/x.md`), D6.", "## Parent\n\nnone yet\n\n## What to build\nSee #12.", "Part of #3673\n\nshort"]) {
+    const p = world(t, { issueJson: issue({ body }) });
+    const r = routeCli(p);
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual([parseLine(r.stdout).STRATUM, parseLine(r.stdout).PARENT], ["light", "-"], body);
+    assert.equal(parseFeatures(readFileSync(p.pending, "utf8"))[0].parent, "");
+  }
+});
+
+test("route: a pending file begun before the parent column keeps its width", (t) => {
+  const p = world(t, { issueJson: issue({ body: "Spec: #3177 § D3." }) });
+  const older = COLUMNS.filter((c) => c !== "parent");
+  mkdirSync(dirname(p.pending), { recursive: true });
+  writeFileSync(p.pending, `${older.join("\t")}\n`);
+  const r = routeCli(p);
+  assert.equal(r.status, 0, r.stderr);
+  const lines = readFileSync(p.pending, "utf8").replace(/\n$/, "").split("\n");
+  assert.deepEqual(lines.map((l) => l.split("\t").length), [older.length, older.length]);
+  const [row] = parseFeatures(lines.join("\n"));
+  assert.deepEqual([row.ticket, row.objective, row.parent], ["42", "cost", ""], "the row is written at the file's width; the fill sets its parent later");
 });
 
 test("metrics: a backticked token is a path only without whitespace and with a slash or an extension, and test_paths needs a .test. infix or a tests?/ segment", () => {
@@ -1300,6 +1369,16 @@ test("fit: a ticket Pulled twice is two units, each in its own row's cell and st
   assert.equal(next.estimates["*"]["smol-high"].usd_per_merged, 3, "the hollow first Pull's $1 is task-high's spend, not smol-high's");
 });
 
+test("fit: a short-brief Slice's Pull is booked heavy, as it was routed; the same brief with no parent is booked light", () => {
+  const spec = exploring({ ticket: "1", chosen_cell: "task-high", brief_chars: "100", criteria: "1", parent: "3177" });
+  const parented = exploring({ ticket: "2", chosen_cell: "task-high", brief_chars: "100", criteria: "1", parent: "2870", session: SESSION2 });
+  const own = exploring({ ticket: "3", chosen_cell: "smol-high", brief_chars: "100", criteria: "1" });
+  const next = fitDirect({ features: [spec, parented, own], members: [], verdicts: [] });
+  assert.equal(next.estimates.heavy["task-high"].n, 2, "both Slices, one per form");
+  assert.equal(next.estimates.light?.["task-high"]?.n ?? 0, 0);
+  assert.equal(next.estimates.light["smol-high"].n, 1);
+});
+
 test("fit: a features row whose run_date is blank is no input row", () => {
   // route() writes a blank run_date for a session id with no date prefix; ticket 9's blank row sits in another cell.
   const features = [
@@ -1874,9 +1953,9 @@ test("fit: with every stage-1 cell at MIN_N, stage 2 opens when only the speed `
 
 test("route: a speed run routes by the speed rows and a cost run by the cost rows; the exploration draw is the same under both", () => {
   const table = baseTable({ rows: both({ "*": "task-high" }, { "*": "smol-high" }) });
-  assert.equal(routeIn({ arm: "A", table, objective: "cost" }).line, "POLICY=task-high CELL=task-high DRAW=- BY=- STRATUM=light BRIEF=31 CRITERIA=2 SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok");
+  assert.equal(routeIn({ arm: "A", table, objective: "cost" }).line, "POLICY=task-high CELL=task-high DRAW=- BY=- STRATUM=light BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok");
   const speed = routeIn({ arm: "A", table, objective: "speed" });
-  assert.equal(speed.line, "POLICY=smol-high CELL=smol-high DRAW=- BY=- STRATUM=light BRIEF=31 CRITERIA=2 SIZED=- OBJECTIVE=speed TRIPPED=- REASON=ok");
+  assert.equal(speed.line, "POLICY=smol-high CELL=smol-high DRAW=- BY=- STRATUM=light BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=speed TRIPPED=- REASON=ok");
   assert.equal(speed.row.objective, "speed");
   const draws = (objective, over = {}) => Array.from({ length: 30 }, (_, i) => {
     const { line } = routeIn({ arm: "A", ticket: i + 1, implRow: 5, table: { ...table, ...over }, objective });
@@ -1908,7 +1987,7 @@ test("route: arm B reads the run's own row set — not live when that set is all
   assert.equal(bArmLive(table, "cost"), false);
   assert.equal(bArmLive(table, "speed"), true);
   assert.equal(routeIn({ table, objective: "cost", sizing: haikuSizing }).row.sizing_src, "rule");
-  assert.equal(routeIn({ table, objective: "speed", sizing: haikuSizing }).line, "POLICY=slow-high CELL=task-high DRAW=- BY=- STRATUM=heavy BRIEF=31 CRITERIA=2 SIZED=heavy OBJECTIVE=speed TRIPPED=- REASON=ok");
+  assert.equal(routeIn({ table, objective: "speed", sizing: haikuSizing }).line, "POLICY=slow-high CELL=task-high DRAW=- BY=- STRATUM=heavy BRIEF=31 CRITERIA=2 PARENT=- SIZED=heavy OBJECTIVE=speed TRIPPED=- REASON=ok");
 });
 
 test("route: the features row and the line carry the objective, and a features file written before the column reads it blank", (t) => {

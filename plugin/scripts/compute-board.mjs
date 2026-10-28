@@ -371,11 +371,12 @@ function reasonWords(r, table) {
   }
 }
 
-// The Stratum and the numbers that set it.
+// The Stratum and the numbers that set it: a Slice's parent sets it, ahead of the brief's numbers.
 function stratumWords(r) {
   if (r.sized !== null) return `${r.stratum}: sized ${r.sized}`;
   if (r.brief === null) return `${r.stratum}: no brief read`;
   if (r.reason === "no-sizing") return `${r.stratum}: no sizing`;
+  if (r.parent !== null) return `${r.stratum}: Slice of #${r.parent}`;
   const past = (n, at) => `${n > at ? "past" : "not past"} ${grouped(at)}`;
   return `${r.stratum}: ${grouped(r.brief)} chars (${past(r.brief, HEAVY_BRIEF_CHARS)}), ${r.criteria} criteria (${past(r.criteria, HEAVY_CRITERIA)})`;
 }

@@ -9,7 +9,7 @@
 //         [--chain-head] [--pending <tsv>]
 //     Prints one line, the Pull's Routing (ledger-grammar.mjs owns its
 //     grammar): `POLICY=<cell> CELL=<cell> DRAW=<k/K|-> BY=<burn-in|every-5th|->
-//     STRATUM=<light|heavy|unknown> BRIEF=<chars|-> CRITERIA=<n|->
+//     STRATUM=<light|heavy|unknown> BRIEF=<chars|-> CRITERIA=<n|-> PARENT=<N|->
 //     SIZED=<light|heavy|-> OBJECTIVE=<cost|speed> TRIPPED=<cell,…|->
 //     REASON=<reason>`,
 //     routing by the objective's row set, and appends the Pull's
@@ -83,6 +83,32 @@ const DAY_MS = 86_400_000;
 // metrics — every one free, deterministic and known before dispatch
 // ---------------------------------------------------------------------------
 
+// A Slice names its parent at the top of its issue body: `Spec: #<N>` at the
+// start of the first non-blank line, or a `## Parent` section the body opens
+// with, whose first issue named (`#<N>` or an issue URL) is the parent.
+const SPEC_LINE = /^Spec: #([1-9][0-9]*)(?![0-9])/;
+const PARENT_HEADING = /^##\s+Parent\s*$/;
+const HEADING = /^#{1,6}\s/;
+const ISSUE_REF = /(?:^|[^\w/&])#([1-9][0-9]*)(?![0-9])|https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/issues\/([1-9][0-9]*)(?![0-9])/;
+
+/**
+ * A Slice's parent issue number off its issue body, as a string, or "" when
+ * the body makes no Slice. The body alone decides: a later `## Agent Brief`
+ * comment leaves a Slice a Slice. `Spec #<N>` with no colon, a `## Parent`
+ * section naming no issue and a `Part of #<N>` line make none.
+ */
+export function sliceParent(body) {
+  const lines = String(body ?? "").split(/\r?\n/);
+  const at = lines.findIndex((l) => l.trim() !== "");
+  if (at === -1) return "";
+  const spec = SPEC_LINE.exec(lines[at]);
+  if (spec !== null) return spec[1];
+  if (!PARENT_HEADING.test(lines[at])) return "";
+  const end = lines.findIndex((l, i) => i > at && HEADING.test(l));
+  const ref = ISSUE_REF.exec(lines.slice(at + 1, end === -1 ? undefined : end).join("\n"));
+  return ref === null ? "" : ref[1] ?? ref[2];
+}
+
 /** The metric columns for a parsed `gh issue view --json title,body,comments,labels,createdAt`, or null when it is not one. */
 export function issueMetrics(issue, now = Date.now()) {
   if (issue === null || typeof issue !== "object" || Array.isArray(issue) || typeof issue.body !== "string") return null;
@@ -100,12 +126,19 @@ export function issueMetrics(issue, now = Date.now()) {
     test_paths: String(paths.filter((p) => /\.test\.|(^|\/)tests?\//.test(p)).length),
     xrefs: String(new Set([...brief.matchAll(/#(\d+)/g)].map((m) => m[1])).size),
     kind,
+    parent: sliceParent(issue.body),
   };
 }
 
-/** The `rule` classifier, over a row's metric columns: blank metrics are `unknown`. */
-export function ruleStratum({ brief_chars, criteria }) {
+/**
+ * The `rule` classifier, over a row's metric columns: blank metrics are
+ * `unknown`, a Slice (a row with a `parent`) is `heavy`, and any other row is
+ * `heavy` past the brief length or the criteria count. A Slice whose metrics
+ * are blank stays `unknown`, as it was routed: its issue was not read then.
+ */
+export function ruleStratum({ brief_chars, criteria, parent }) {
   if (brief_chars === "" || brief_chars === undefined || criteria === "" || criteria === undefined) return "unknown";
+  if (parent !== "" && parent !== undefined) return "heavy";
   return Number(brief_chars) > HEAVY_BRIEF_CHARS || Number(criteria) > HEAVY_CRITERIA ? "heavy" : "light";
 }
 
@@ -219,7 +252,7 @@ export function route({ session, ticket, arm, implRow, chainHead = false, issue,
 
   const metrics = issueMetrics(issue, now);
   if (metrics === null) degrade("no-issue-json");
-  const blank = Object.fromEntries(["brief_chars", "criteria", "comments", "age_days", "paths", "test_paths", "xrefs", "kind"].map((c) => [c, ""]));
+  const blank = Object.fromEntries(["brief_chars", "criteria", "comments", "age_days", "paths", "test_paths", "xrefs", "kind", "parent"].map((c) => [c, ""]));
   const m = metrics ?? blank;
   const ruleS = ruleStratum(m);
 
@@ -284,13 +317,16 @@ export function route({ session, ticket, arm, implRow, chainHead = false, issue,
   const line = formatRouting({
     policy, cell, draw, by, stratum,
     brief: metrics === null ? null : Number(metrics.brief_chars), criteria: metrics === null ? null : Number(metrics.criteria),
+    parent: m.parent === "" ? null : Number(m.parent),
     sized: sizingPre === "" ? null : sizingPre, objective, tripped: guard?.tripped ?? [], reason,
   });
   return { line, row };
 }
 
-export function formatFeatureRow(row) {
-  return FEATURE_COLUMNS.map((c) => String(row[c] ?? "").replace(/[\t\r\n]/g, " ")).join("\t");
+// `columns` is the header of the file the row joins: a pending file a run
+// began before a column was added keeps its own width.
+export function formatFeatureRow(row, columns = FEATURE_COLUMNS) {
+  return columns.map((c) => String(row[c] ?? "").replace(/[\t\r\n]/g, " ")).join("\t");
 }
 
 // ---------------------------------------------------------------------------
@@ -686,11 +722,14 @@ function main() {
     // The header decision and the append are not atomic and take no lock. That is
     // safe only while the run's controller is the only process that routes or
     // drains on a checkout, doing both serially: one controller per checkout is
-    // the rule, and neither this append nor the drain checks it.
+    // the rule, and neither this append nor the drain checks it. A pending file
+    // already begun keeps its header's columns, so a plugin updated mid-run
+    // never appends a row wider or narrower than the file.
     try {
       mkdirSync(dirname(pending), { recursive: true });
-      const header = statSync(pending, { throwIfNoEntry: false })?.size > 0 ? "" : `${FEATURE_COLUMNS.join("\t")}\n`;
-      appendFileSync(pending, `${header}${formatFeatureRow(row)}\n`);
+      const had = statSync(pending, { throwIfNoEntry: false })?.size > 0 ? readFileSync(pending, "utf8").split("\n", 1)[0].split("\t") : null;
+      const header = had === null ? `${FEATURE_COLUMNS.join("\t")}\n` : "";
+      appendFileSync(pending, `${header}${formatFeatureRow(row, had ?? FEATURE_COLUMNS)}\n`);
     } catch (e) {
       process.stderr.write(`${NAME}: WARNING could not append to ${pending}: ${e.message} — this Pull's ticket-features row is not recorded\n`);
     }

@@ -214,27 +214,35 @@ test("a pending file with a column the corpus lacks fails the drain, leaves the 
   assert.deepEqual(f.ghCalls(), []);
 });
 
-test("a corpus written before the objective column gains it, blank on the rows it holds, when the pending file carries it", () => {
-  const rows = corpus();
-  ruled(rows, { ticket: 1 });
-  const older = FEATURE_COLUMNS.filter((c) => c !== "objective");
-  const fresh = pull({ ticket: "2", agent: "impl-2", objective: "speed" });
-  const f = fixture({ rows, pending: featuresTsv([fresh]) });
-  write(f.repo, FEATURES, featuresTsv(rows.features, older));
-  const r = f.run();
-  assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /drain: 1 row from/);
-  assert.equal(readFileSync(join(f.repo, FEATURES), "utf8"), featuresTsv([{ ...rows.features[0], objective: "" }, fresh]));
+// A corpus or pending file from before `objective` lacks `parent` too, the later column.
+const OLDER = [["objective", "parent"], ["parent"]];
+
+test("a corpus written before the objective or parent column gains it, blank on the rows it holds, when the pending file carries it", () => {
+  for (const lacks of OLDER) {
+    const rows = corpus();
+    ruled(rows, { ticket: 1 });
+    const older = FEATURE_COLUMNS.filter((c) => !lacks.includes(c));
+    const fresh = pull({ ticket: "2", agent: "impl-2", objective: "speed", parent: "3177" });
+    const f = fixture({ rows, pending: featuresTsv([fresh]) });
+    write(f.repo, FEATURES, featuresTsv(rows.features, older));
+    const r = f.run();
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /drain: 1 row from/);
+    const blank = Object.fromEntries(lacks.map((c) => [c, ""]));
+    assert.equal(readFileSync(join(f.repo, FEATURES), "utf8"), featuresTsv([{ ...rows.features[0], ...blank }, fresh]), lacks.join());
+  }
 });
 
-test("a pending file written before the objective column drains, its rows blank in that column", () => {
-  const older = FEATURE_COLUMNS.filter((c) => c !== "objective");
-  const fresh = pull({ ticket: "2", agent: "impl-2" });
-  const f = fixture({ pending: featuresTsv([fresh], older) });
-  const r = f.run();
-  assert.equal(r.status, 0, r.stderr);
-  const last = readFileSync(join(f.repo, FEATURES), "utf8").split("\n").filter(Boolean).at(-1);
-  assert.equal(last, FEATURE_COLUMNS.map((c) => (c === "objective" ? "" : fresh[c] ?? "")).join("\t"));
+test("a pending file written before the objective or parent column drains, its rows blank in that column", () => {
+  for (const lacks of OLDER) {
+    const older = FEATURE_COLUMNS.filter((c) => !lacks.includes(c));
+    const fresh = pull({ ticket: "2", agent: "impl-2", parent: "3177" });
+    const f = fixture({ pending: featuresTsv([fresh], older) });
+    const r = f.run();
+    assert.equal(r.status, 0, r.stderr);
+    const last = readFileSync(join(f.repo, FEATURES), "utf8").split("\n").filter(Boolean).at(-1);
+    assert.equal(last, FEATURE_COLUMNS.map((c) => (lacks.includes(c) ? "" : fresh[c] ?? "")).join("\t"), lacks.join());
+  }
 });
 
 test("an empty or blank-only pending file is removed with its own line, exit 0, and the corpus is untouched", () => {
