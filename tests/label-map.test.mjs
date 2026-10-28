@@ -158,62 +158,44 @@ test("the reader throws LabelMapUnreadable naming ensure and the error code when
   );
 });
 
-// A cache that exists and cannot be read, as a function that leaves it in `ws`
-// and returns the undo, and the error code the read fails with.
+// A cache that exists and cannot be read, as a function that leaves it in `ws`,
+// and the error code the read fails with. Nothing reads a fixture again after
+// its refusal, so none is restored: tempDir's own cleanup removes it.
 const UNREADABLE = [
-  ["a directory at labels.json", "EISDIR", (ws) => {
-    mkdirSync(join(ws, ".fleet", LABEL_MAP_FILE), { recursive: true });
-    return () => {};
-  }],
-  ["a labels.json chmod 000", "EACCES", (ws) => {
-    const file = seedLabelMap(ws);
-    chmodSync(file, 0o000);
-    return () => chmodSync(file, 0o600);
-  }],
-  ["a .fleet/ chmod 000", "EACCES", (ws) => {
-    const dir = join(ws, ".fleet");
-    seedLabelMap(ws);
-    chmodSync(dir, 0o000);
-    return () => chmodSync(dir, 0o700);
-  }],
+  ["a directory at labels.json", "EISDIR", (ws) => mkdirSync(join(ws, ".fleet", LABEL_MAP_FILE), { recursive: true })],
+  ["a labels.json chmod 000", "EACCES", (ws) => chmodSync(seedLabelMap(ws), 0o000)],
+  ["a .fleet/ chmod 000", "EACCES", (ws) => { seedLabelMap(ws); chmodSync(join(ws, ".fleet"), 0o000); }],
+  ["a regular file at .fleet", "ENOTDIR", (ws) => writeFileSync(join(ws, ".fleet"), "x")],
 ];
 
 // The refusal for a cache that cannot be read: a filesystem fault, its repair,
 // then `ensure` as the following step.
 const unreadableRefusal = (code) => new RegExp(
   `cannot read the Label map at .*labels\\.json \\(${code}\\): a filesystem fault, not a map fault — `
-  + "make that path a readable file \\(check its and \\.fleet/'s permissions\\) or remove what is there, "
-  + "then run `label-map\\.mjs ensure`, the Label map derivation step",
+  + "make that path a readable file \\(check its and \\.fleet/'s permissions, and that \\.fleet/ is a directory\\) "
+  + "or remove what is in the way, then run `label-map\\.mjs ensure`, the Label map derivation step",
 );
 
 for (const [name, code, leave] of UNREADABLE) {
   test(`the reader throws LabelMapUnreadable for ${name}, naming ${code} as a filesystem fault, its repair, then ensure`, (t) => {
     if (code === "EACCES" && process.getuid?.() === 0) return t.skip("root reads every file");
     const ws = repo();
-    const undo = leave(ws);
-    try {
-      assert.throws(
-        () => readLabelMap({ cwd: ws }),
-        (e) => e instanceof LabelMapUnreadable && unreadableRefusal(code).test(e.message) && e.cause?.code === code,
-      );
-    } finally {
-      undo();
-    }
+    leave(ws);
+    assert.throws(
+      () => readLabelMap({ cwd: ws }),
+      (e) => e instanceof LabelMapUnreadable && unreadableRefusal(code).test(e.message) && e.cause?.code === code,
+    );
   });
 
   test(`show refuses ${name}: exit 1, naming ${code} as a filesystem fault, its repair, then ensure`, (t) => {
     if (code === "EACCES" && process.getuid?.() === 0) return t.skip("root reads every file");
     const ws = repo();
-    const undo = leave(ws);
-    try {
-      for (const args of [["show"], ["show", "needs-triage"]]) {
-        const r = cli(ws, ...args);
-        assert.equal(r.status, 1, `${args.join(" ")}: ${r.stdout}${r.stderr}`);
-        assert.equal(r.stdout, "");
-        assert.match(r.stderr, unreadableRefusal(code));
-      }
-    } finally {
-      undo();
+    leave(ws);
+    for (const args of [["show"], ["show", "needs-triage"]]) {
+      const r = cli(ws, ...args);
+      assert.equal(r.status, 1, `${args.join(" ")}: ${r.stdout}${r.stderr}`);
+      assert.equal(r.stdout, "");
+      assert.match(r.stderr, unreadableRefusal(code));
     }
   });
 }
