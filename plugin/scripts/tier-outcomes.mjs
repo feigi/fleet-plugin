@@ -892,8 +892,7 @@ function append(pr, paths) {
   if (text === null) {
     mkdirSync(dirname(paths.file), { recursive: true });
     writeFileSync(paths.file, `# ${COLUMNS.join("\t")}\n${line}\n`);
-  }
-  else appendFileSync(paths.file, `${text === "" || text.endsWith("\n") ? "" : "\n"}${line}\n`);
+  } else appendFileSync(paths.file, `${text === "" || text.endsWith("\n") ? "" : "\n"}${line}\n`);
   console.log(line);
 }
 
