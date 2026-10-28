@@ -182,12 +182,14 @@ const COVERED_MJS = {
   // the checkout whose triage-label table is read, and an ambient GIT_DIR would
   // name another repository's (or, with no work tree set, the working
   // directory itself), so the map would be derived from a table that is not
-  // this checkout's; `readLiveLabels()`'s `gh label list` also blanks GH_REPO,
-  // since an ambient one would list another repository's labels and derive this
-  // repository's map from them. Measured in label-map.test.mjs, "ensure: an
-  // ambient GIT_DIR or GH_REPO naming another repository does not change what
-  // it reads". Its other git call is `fleetFile()`'s, counted under
-  // fleet-dir.mjs.
+  // this checkout's; `spawnGh()`, the one place a `gh` is spawned (the label
+  // list and `set`'s `label create`), also blanks GH_REPO, since an ambient
+  // one would list another repository's labels and derive this repository's
+  // map from them, or create labels there. Measured in label-map.test.mjs,
+  // "ensure: an ambient GIT_DIR or GH_REPO naming another repository does not
+  // change what it reads", and for the create "set: an ambient GH_REPO does
+  // not move the label create". Its other git call is `fleetFile()`'s,
+  // counted under fleet-dir.mjs.
   "label-map.mjs": 2,
   // TWO git-invoking primitives. `readInstruments()`'s `rev-parse
   // --git-common-dir` names the checkout instruments.sh is sent to audit. An
