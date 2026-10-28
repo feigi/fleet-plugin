@@ -319,8 +319,13 @@ them update the shape below.)
   background. One line in SKILL.md. The controller never touches it again — the
   cockpit is a read-only mirror of `ledger + gh`, so it adds **nothing** to the
   event loop and cannot introduce a new silent-failure rule there.
-- **No teardown required** — the server is harmless and serves the last state
-  after a run ends. `build --once` remains for an explicit static snapshot.
+- **No teardown step** (amended by #3875) — the server exits itself once the
+  controller its run recorded is gone: every tick it judges the Controller
+  record in the heartbeat file and, once it has seen that controller alive,
+  stops on the first tick that finds it dead. A drained run's cockpit stays up
+  while its omp session does, so the operator can still watch it. An unreadable
+  heartbeat file or process table is not a death, and the cockpit signals no
+  other process. `build --once` remains for an explicit static snapshot.
 - **Enrichment tokens** (later) are additive edits to rows the controller already
   rewrites — no new write path is ever introduced.
 

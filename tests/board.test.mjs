@@ -24,7 +24,7 @@ const SCRIPT = fileURLToPath(new URL("../plugin/scripts/board.mjs", import.meta.
 // the sibling holding the NEWER transcripts — the shape a newest-mtime pick
 // gets wrong. With no --spend-dir each tick reads the session the phase-0
 // receipt records, and a receipt rewritten between ticks is followed: a
-// cockpit outlives the run that launched it.
+// cockpit serves the next run too, while its controller's session lives.
 test("CLI: a live serve reads the receipt's session on every tick — never the newest sibling — and follows a rewritten receipt", async () => {
   // realpath, not the bare mkdtemp path: on darwin $TMPDIR is under /var, a
   // symlink to /private/var, and the child's process.cwd() reports the RESOLVED

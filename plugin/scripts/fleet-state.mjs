@@ -356,9 +356,10 @@ export function writeState(path, name, prev, patch) {
 // Two readers consume this key and neither of them writes it: fleet-tick at
 // the start of a run (so a run that died overnight announces itself even when
 // no cockpit survived it) and board.mjs on every cockpit tick (the better
-// surface, the weaker guarantee — whether a backgrounded cockpit outlives the
-// session that spawned it is unmeasured and harness-dependent, so the mark is
-// the artifact and the cockpit is one renderer of it).
+// surface, the weaker guarantee — the cockpit lives as long as its run's
+// controller (cockpit-lifetime.mjs), so a stopped or stalled run's mark stays
+// on screen while that controller's omp session is open and is gone with it,
+// and the mark is the artifact that outlasts it, the cockpit one renderer of it).
 //
 // Both live here for the reason the module header already gives about the
 // path and the shape: what travels between scripts is the rule, never a copy

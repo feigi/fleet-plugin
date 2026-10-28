@@ -23,6 +23,7 @@ import { serve, resolveCockpitInstance, cockpitWorkspace } from "./board-server.
 // the `canonicalise` opt-in only that caller takes, and a second resolution
 // could answer differently.
 import { stateFileIn } from "./fleet-state.mjs";
+import { cockpitLifetime, controllerVerdict } from "./cockpit-lifetime.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { join } from "node:path";
 import { inspect } from "node:util";
@@ -317,10 +318,16 @@ async function main() {
 // owns the socket, the timer and the identity handshake; what a tick reads and
 // writes is owned here.
 //
+// The tick answers `true` when the cockpit is to exit: it has just written its
+// board and the Controller record in the heartbeat file names a controller
+// that is gone (cockpit-lifetime.mjs says when). serve() stops through its own
+// stop() on that answer. Nothing else is ever signalled.
+//
 // The spend source is settled per TICK, never held across ticks: with no
 // --spend-dir, every tick reads the session the phase-0 receipt records now.
-// A cockpit outlives the run that launched it — a phase-0 relaunch reuses a
-// running server — so it has to follow the next run's receipt.
+// A cockpit lives as long as its run's controller, and a new run from the same
+// omp session — or a phase-0 relaunch that reuses a running server — has to be
+// followed through its receipt.
 async function boardTick({ ledgerFile, interval, spendDir, spendSince }) {
   const { computeBoard } = await import("./compute-board.mjs");
   // One tick at a time, and the flag is load-bearing rather than defensive.
@@ -341,6 +348,11 @@ async function boardTick({ ledgerFile, interval, spendDir, spendSince }) {
   // every other repeating condition in this file uses — a board falling
   // behind its interval is worth saying, and worth saying only once.
   let ticking = false;
+  // The one thing carried from tick to tick besides `ticking`: whether this
+  // cockpit has yet seen its run's controller alive. The record itself is
+  // read afresh every tick — a latched controller would end a cockpit whose
+  // record a new run had replaced.
+  let armed = false;
   // `served` is the port this process actually BOUND, handed in rather than
   // closed over: it is not knowable until listen() returns (--port 0 is an
   // ephemeral bind, and serve()'s port loop may also land past a
@@ -369,7 +381,7 @@ async function boardTick({ ledgerFile, interval, spendDir, spendSince }) {
       // assignment that used to sit below this line wrote a field the pure
       // model did not declare, so `build` printed a board with no identity
       // at all and only the served copy carried one.
-      const model = computeBoard(await gather({
+      const gathered = await gather({
         // The ledger's own default (ledger.mjs's defaultLedgerPath()) is
         // never reached here — board.mjs always passes an explicit --file — so an
         // absent --ledger has to be defaulted against the SAME instance the state
@@ -390,10 +402,23 @@ async function boardTick({ ledgerFile, interval, spendDir, spendSince }) {
         // The operator's --spend-dir, else the receipt as it stands at this
         // tick, read from the same state directory as the ledger and heartbeat.
         ...spendSource(spendDir, stateDir), spendSince,
-      }));
+      });
+      const model = computeBoard(gathered);
       const tmp = `${jsonPath}.tmp`;
       writeFileSync(tmp, JSON.stringify(model));   // atomic: write tmp, rename over target
       renameSync(tmp, jsonPath);
+      // After the board is written, so the last board an exiting cockpit
+      // leaves is this tick's. A record or process table that cannot be read
+      // gives no verdict, and a drain (the Liveness mark's `stopped`) is not
+      // read at all.
+      const verdict = controllerVerdict(gathered.controller, undefined, (why) =>
+        warnOnce("controller-unreadable", "", `${why} — the cockpit cannot tell whether its run's controller is alive, so it keeps serving`));
+      const next = cockpitLifetime(armed, verdict);
+      armed = next.armed;
+      if (next.exit) {
+        console.error(`${NAME}: the controller of this run (pid ${gathered.controller.pid}) is gone — the cockpit exits`);
+        return true;
+      }
     } catch (e) { console.error(`${NAME}: build tick failed: ${e.message}`); }
     finally { ticking = false; }
   };
