@@ -102,8 +102,8 @@ async function reap(child) {
 const readJson = (path) => { try { return JSON.parse(readFileSync(path, "utf8")); } catch { return null; } };
 
 // One cockpit on its own state directory (the cwd is no git checkout, so that
-// is the cwd's `.fleet`), ticking every second, offline: gh fails on every call
-// and the reads degrade.
+// is the cwd's `.fleet`), ticking every second, offline: gh and omp fail on
+// every call and the reads degrade.
 function cockpit() {
   const cwd = realpathSync(tempDir("cockpit-lifetime-cwd-"));
   const bin = offlineBoardBin("cockpit-lifetime-bin-");

@@ -189,9 +189,10 @@ for (const body of ACCEPTED) {
 //
 // Only observable out here: `gather()`'s return says nothing about the exit
 // code, and the diagnostic's CHANNEL is the thing a cockpit consuming
-// `board build` stdout depends on. The stub `gh` fails every call — each gh
-// read degrades through tryRun — so the board still builds with no network and
-// no read of this repo's live issue list.
+// `board build` stdout depends on. The stubs `gh` and `omp` fail every call —
+// each gh read degrades through tryRun, and the modelRoles read takes the omp
+// stub's failure — so the board still builds with no network, no read of this
+// repo's live issue list and no read of the host's omp config.
 function runBuild(prevArgs) {
   const cwd = tempDir("board-prevshape-cli-");
   const home = tempDir("board-prevshape-home-");
