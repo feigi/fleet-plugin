@@ -658,10 +658,18 @@ _Avoid_: tier outcomes, router stats, readout
 **Stratum**:
 The class of ticket the Router keys on: `light`, `heavy` or `unknown`, set by
 the Router's classifier — today a rule on the brief's length and its count of
-acceptance criteria, `unknown` when either is missing. `light` means a short
-ticket, not an easy one. The table's `*` row covers every ticket together and
-is not a stratum.
+acceptance criteria, `unknown` when either is missing. Once #3956 lands, a
+Slice is `heavy` whatever its length. `light` means a short ticket, not an
+easy one. The table's `*` row covers every ticket together and is not a
+stratum.
 _Avoid_: size, difficulty, bucket
+
+**Slice**:
+A ticket cut from another issue, its parent, which holds its design: its body
+opens `Spec: #<N>`, or opens with a `## Parent` section naming the parent. Its
+brief is short because the parent holds the design, so its length does not
+say what the ticket costs.
+_Avoid_: spec ticket, sub-issue, child ticket
 
 **Quality floor**:
 How far a Cell's fail rate (false claims over claims) may rise above
