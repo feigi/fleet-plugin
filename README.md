@@ -47,7 +47,8 @@ install above answers 404. Background:
 [`docs/adr/0006-rename-to-fleet-ctl.md`](docs/adr/0006-rename-to-fleet-ctl.md).
 
 The plugin also ships an omp extension, `member-write-guard`, which refuses a
-fleet member's write into the main checkout
+fleet member's write into the main checkout, and its `write`/`edit`/`ast_edit`
+into the Install root, the installed plugin the fleet executes
 ([ADR 0020](docs/adr/0020-member-write-boundary-is-enforced-by-a-shipped-omp-extension.md)).
 An existing install picks up a new release with `omp plugin install
 @feigi/fleet-ctl@latest`, a `fleet-bootstrap` re-run (above), and a session

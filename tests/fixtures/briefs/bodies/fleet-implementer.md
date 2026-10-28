@@ -22,9 +22,9 @@ substitutes it for you.
 So: prefix every `edit` and `read` path with an absolute path — the
 worktree `<abs-path>` for repo files, `<scratch>/impl-<N>/` for scratch —
 never a bare relative one, and never `plugin/scripts/foo.mjs` on its own.
-A `member-write-guard` refusal means the path hit the main checkout — for
-`bash`, a missing or main-checkout `cwd` — so re-issue it absolute, under
-your worktree.
+A `member-write-guard` refusal means the path hit the main checkout or the
+Install root — for `bash`, a missing or main-checkout `cwd` — so re-issue it
+absolute, under your worktree.
 
 Here is the ticket's distilled brief, already read once at the Pull —
 title, plus whichever of the `## Agent Brief` comment or the issue body

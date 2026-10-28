@@ -188,12 +188,12 @@ test("the edit/read block binds the session-root mechanism to the discipline tha
   // The refusal bound to what it means and what to do about it. A member that
   // meets a refused `write` with no such line reads it as a tool fault or a
   // permission problem and works around it; the pin keeps the cause (the path
-  // hit the main checkout) and the remedy (re-issue it absolute) in one span,
-  // with the bash case between them.
+  // hit the main checkout or the Install root) and the remedy (re-issue it
+  // absolute) in one span, with the bash case between them.
   assert.match(
     b,
     Pin.phrase(
-      "A `member-write-guard` refusal means the path hit the main checkout — for `bash`, a missing or main-checkout `cwd` — so re-issue it absolute, under your worktree",
+      "A `member-write-guard` refusal means the path hit the main checkout or the Install root — for `bash`, a missing or main-checkout `cwd` — so re-issue it absolute, under your worktree",
     ),
     "the block no longer tells the member what a member-write-guard refusal means and that the remedy is to re-issue the path absolute under its worktree",
   );

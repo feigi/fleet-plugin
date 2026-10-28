@@ -7,6 +7,7 @@ itself is measured fail-open on both install routes — `omp plugin doctor`
 never imports an extension module — which is why §7's silent-failure finding
 stands under the native route too.)
 Amended by #2305: the protected set includes the main checkout's HEAD — symbolic ref and commit
+Amended by #3853: the protected set is now the main checkout's non-ignored paths plus, for path writers (`write`, `edit`, `ast_edit`), the live Install root, resolved the way the Resolver resolves it on every guarded path-writer call, with no gitignore exemption; a package entry that exists but does not resolve refuses every guarded path-writer call (§5). A `bash` or `eval` write into the Install root is not covered, by design — the `bash`-cwd rule stays the main checkout's — and the instrument re-check detects such a write.
 
 ## Context
 

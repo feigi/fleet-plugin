@@ -9,10 +9,10 @@ them before every gate decision.** Per-member worktrees and `./agent-test`'s por
 derivation protect members from each other; neither protects the Install root,
 the tree you run every gate probe out of and read these runbooks from. It is
 the main checkout only when that checkout is linked as the install. The
-`member-write-guard` extension refuses a `write`/`edit`/`ast_edit` inside the
-main checkout only, and a `bash` or `eval` write lands anyway; under a package
-install nothing prevents a write to the Install root, and this re-check is
-what catches one. Measured: a
+`member-write-guard` extension refuses a `write`/`edit`/`ast_edit` into the
+Install root, as it does into the main checkout, but a `bash` or `eval` write
+into the Install root still lands, and this re-check is what catches one.
+Measured: a
 member edited two files in the main checkout instead of in its worktree while
 the CI monitor was polling one of them every 120s and a live finisher was using
 it to decide a label. It caught itself; nothing in the fleet would have. That is

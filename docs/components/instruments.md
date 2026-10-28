@@ -6,9 +6,9 @@ Detecting — never preventing — a silent change to the scripts and
 runbooks the controller's own gate decisions depend on. The controller
 reads its instruments out of the Install root — the tree `fleet-run`
 executes and omp loads the runbooks from — and any dispatched member can
-write to that tree: `member-write-guard` refuses edits inside the main
-checkout only, which is the Install root only when that checkout is
-linked as the install.
+write to that tree: `member-write-guard` refuses a member's
+`write`/`edit`/`ast_edit` into the Install root, but a `bash` or `eval`
+write lands there anyway.
 
 ## How it works
 1. **Scope.** [`instruments.sh`](../../plugin/scripts/instruments.sh)
