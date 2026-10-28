@@ -79,6 +79,17 @@ test("controllerVerdict: no record, and a process table that cannot be read, giv
   assert.match(told[0], /cannot read the process table/);
 });
 
+// Only an unreadable table is a non-verdict: any other fault is a bug, and the
+// tick's own catch is where it belongs, never a silent "keeps serving".
+test("controllerVerdict: a fault that is not an unreadable process table propagates", () => {
+  const told = [];
+  const fault = new TypeError("not a table fault");
+  assert.throws(
+    () => controllerVerdict({ pid: process.pid, lstart: "start-A", prior: "none", at: 1 }, () => { throw fault; }, (why) => told.push(why)),
+    (e) => e === fault);
+  assert.deepEqual(told, [], "a fault that is not an unreadable table is not handed on as one");
+});
+
 // --- a real cockpit -------------------------------------------------------------
 
 const sleeper = () => spawn(process.execPath, ["-e", "setInterval(() => {}, 1e6)"], { stdio: "ignore" });
@@ -162,11 +173,18 @@ test("CLI: an armed cockpit whose controller dies writes its board and exits 0",
     // Two ticks after the first board: the first tick's judgement has armed
     // the cockpit by then, whatever the timing of the kill below.
     await rig.ticks(2);
+    // Read just before the kill: the exit tick judges the controller dead, so
+    // it runs after the kill and the board it writes is strictly newer than
+    // this one. A cockpit that exited before writing would leave this board,
+    // unless a tick landed in the instant between this read and the kill.
+    const before = readJson(rig.jsonPath)?.generatedAt;
     await reap(controller);
     const { code } = await rig.exits();
     assert.equal(code, 0, rig.stderr);
     assert.match(rig.stderr, /controller of this run \(pid \d+\) is gone/);
-    assert.ok(readJson(rig.jsonPath)?.generatedAt, "the board it leaves is a whole board");
+    const left = readJson(rig.jsonPath)?.generatedAt;
+    assert.ok(typeof before === "number" && left > before,
+      `the board it leaves is the exit tick's own: generatedAt ${left}, last seen before the kill ${before}`);
   } finally { await rig.cleanup(); }
 });
 
@@ -269,8 +287,31 @@ test("CLI: a process table that cannot be read never arms the cockpit", async ()
     rig.start();
     await rig.ticks(2);
     await reap(controller);
+    // The table reads again, and says the controller is gone: a cockpit that a
+    // null verdict had armed would exit on this, one that stayed unarmed does
+    // not.
+    rig.table({});
     await rig.ticks(3);
     assert.equal(rig.process.exitCode, null, rig.stderr);
     assert.match(rig.stderr, /cannot read the process table/);
+  } finally { await rig.cleanup(); }
+});
+
+test("CLI: a process table that cannot be read is said once per outage, and again after it reads", async () => {
+  const rig = cockpit();
+  try {
+    const said = () => rig.stderr.match(/cannot read the process table/g)?.length ?? 0;
+    const controller = rig.spawnChild();
+    rig.record(controller);
+    rig.corrupt(rig.procs);
+    rig.start();
+    await rig.ticks(3);
+    assert.equal(said(), 1, `one outage, said once over every tick it lasts: ${rig.stderr}`);
+    // The table reads again, the controller alive in it, then fails again.
+    rig.record(controller);
+    await rig.ticks(2);
+    rig.corrupt(rig.procs);
+    await rig.ticks(3);
+    assert.equal(said(), 2, `a second outage is said too: ${rig.stderr}`);
   } finally { await rig.cleanup(); }
 });

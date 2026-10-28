@@ -17,8 +17,10 @@ import { judgeController, processSource, ProcUnreadable } from "./proc.mjs";
 // that with no record.
 //
 // Any verdict but `dead` is a live controller, and the first one ARMS the
-// cockpit. Until then a `dead` verdict means nothing: a cockpit launched by
-// hand between runs finds the last run's record and must not exit on it.
+// cockpit. judgeController()'s `none`, its answer for a missing record, never
+// arrives here: controllerVerdict() below answers a missing record with null.
+// Until the cockpit is armed a `dead` verdict means nothing: a cockpit launched
+// by hand between runs finds the last run's record and must not exit on it.
 // Once armed, the first `dead` ends it. `armed` is the caller's to carry from
 // tick to tick; the record is judged afresh on every one, so a record
 // replaced by a new live controller keeps an armed cockpit serving.
@@ -32,8 +34,8 @@ export function cockpitLifetime(armed, verdict) {
 }
 
 // judgeController() for the cockpit: the record against the process table as
-// it stands now, with no ancestry — the cockpit's own ancestors name no
-// controller, and every verdict but `dead` reads the same here. Null when
+// it stands now, with no ancestry — it passes an empty chain, so `ancestor`
+// never occurs, and every verdict but `dead` reads the same here. Null when
 // there is no record or the table cannot be read, `onUnreadable` told why.
 // `makeSource` is a parameter for the reason proc.mjs's FLEET_PROC_TABLE
 // exists: a test suite run under a live omp session must not judge that one.

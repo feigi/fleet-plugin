@@ -344,15 +344,20 @@ async function boardTick({ ledgerFile, interval, spendDir, spendSince }) {
   //
   // SKIPPED, not queued: a tick recomputes the whole board from scratch, so
   // the one that would have been queued has nothing in it the next one does
-  // not redo. Announced once per process through the same warn-once gate
-  // every other repeating condition in this file uses — a board falling
-  // behind its interval is worth saying, and worth saying only once.
+  // not redo. Announced once per process through board-common.mjs's warn-once
+  // gate — a board falling behind its interval is worth saying, and worth
+  // saying only once.
   let ticking = false;
-  // The one thing carried from tick to tick besides `ticking`: whether this
-  // cockpit has yet seen its run's controller alive. The record itself is
-  // read afresh every tick — a latched controller would end a cockpit whose
-  // record a new run had replaced.
+  // Carried from tick to tick besides `ticking`: whether this cockpit has yet
+  // seen its run's controller alive, and why the process table last could not
+  // be read. The record itself is read afresh every tick — a latched
+  // controller would end a cockpit whose record a new run had replaced.
   let armed = false;
+  // Null until the table fails to read, and null again from the first tick it
+  // reads. Each outage is said once, and so is each new reason within one: a
+  // warnOnce gate would say the first outage of the process's life and none
+  // after it.
+  let unreadable = null;
   // `served` is the port this process actually BOUND, handed in rather than
   // closed over: it is not knowable until listen() returns (--port 0 is an
   // ephemeral bind, and serve()'s port loop may also land past a
@@ -411,8 +416,11 @@ async function boardTick({ ledgerFile, interval, spendDir, spendSince }) {
       // leaves is this tick's. A record or process table that cannot be read
       // gives no verdict, and a drain (the Liveness mark's `stopped`) is not
       // read at all.
-      const verdict = controllerVerdict(gathered.controller, undefined, (why) =>
-        warnOnce("controller-unreadable", "", `${why} — the cockpit cannot tell whether its run's controller is alive, so it keeps serving`));
+      const verdict = controllerVerdict(gathered.controller, undefined, (why) => {
+        if (why !== unreadable) console.error(`${NAME}: ${why} — the cockpit cannot tell whether its run's controller is alive, so it keeps serving`);
+        unreadable = why;
+      });
+      if (verdict !== null) unreadable = null;
       const next = cockpitLifetime(armed, verdict);
       armed = next.armed;
       if (next.exit) {

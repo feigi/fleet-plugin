@@ -578,12 +578,6 @@ export async function serve({ port: portGiven, interval, open, tick }) {
   // a turn of the loop costs nothing.
   await new Promise((resolve) => setImmediate(resolve));
 
-  // Deliberately not awaited: the first tick is the slow one, and everything
-  // below it — the timer, and the two signal handlers — must be in place
-  // before it returns, not after. Nothing here rejects; tick() catches its own
-  // faults and the `ticking` flag it sets is cleared in a finally (see
-  // boardTick()).
-  //
   // A tick that answers `true` has written its board and found the run's
   // controller gone: the cockpit lives as long as that controller, and stop()
   // below is its way out, the same one a signal takes. Any other answer, a
@@ -600,6 +594,10 @@ export async function serve({ port: portGiven, interval, open, tick }) {
   };
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
+  // Deliberately not awaited: the first tick is the slow one, and the timer
+  // and both signal handlers above are already in place. Nothing here
+  // rejects; tick() catches its own faults and the `ticking` flag it sets is
+  // cleared in a finally (see boardTick()).
   runTick();
 
   // --open, from this launch alone: it is the one that bound a port and
@@ -613,5 +611,5 @@ export async function serve({ port: portGiven, interval, open, tick }) {
   // could hold the first tick back for the whole session. openBrowser()
   // never throws; a launcher that is missing or fails is one warning line.
   if (open) await openBrowser(`http://${COCKPIT_HOST}:${bound}/`);
-  await new Promise(() => {}); // run until signalled
+  await new Promise(() => {}); // run until signalled, or until a tick answers true (the run's controller is gone)
 }
