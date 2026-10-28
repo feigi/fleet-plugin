@@ -5,6 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseRow, deriveColumn, deriveFlags, STALE_MS } from "../plugin/scripts/compute-board.mjs";
+import { identityRoles } from "./support/label-map-seed.mjs";
 
 test("parseRow: a merged row", () => {
   const r = parseRow("#332 impl-332=PR#344 → PR#344 → MERGED 73b356de");
@@ -45,22 +46,25 @@ test("parseRow: a non-ticket line returns null", () => {
 
 test("deriveColumn: MERGED wins from the ledger alone", () => {
   const p = parseRow("#332 impl-332=PR#344 → PR#344 → MERGED 73b356de");
-  assert.equal(deriveColumn(p, { open: false, labels: [] }), "MERGED");
+  assert.equal(deriveColumn(p, { open: false, labels: [] }, "ready-to-merge"), "MERGED");
 });
 
-test("deriveColumn: READY when the PR carries ready-to-merge", () => {
+test("deriveColumn: READY when the PR carries the mapped ready-to-merge string", () => {
   const p = parseRow("#324 impl-324=PR#346 → PR#346 · review=member:review-pr-346");
-  assert.equal(deriveColumn(p, { open: true, labels: ["ready-to-merge"] }), "READY");
+  assert.equal(deriveColumn(p, { open: true, labels: ["ready-to-merge"] }, "ready-to-merge"), "READY");
+  assert.equal(deriveColumn(p, { open: true, labels: ["queue-ok"] }, "queue-ok"), "READY");
 });
 
-test("deriveColumn: REVIEW when a PR exists without the label", () => {
+test("deriveColumn: REVIEW when a PR exists without the mapped label", () => {
   const p = parseRow("#324 impl-324=PR#346 → PR#346 · review=member:review-pr-346");
-  assert.equal(deriveColumn(p, { open: true, labels: [] }), "REVIEW");
+  assert.equal(deriveColumn(p, { open: true, labels: [] }, "ready-to-merge"), "REVIEW");
+  assert.equal(deriveColumn(p, { open: true, labels: ["ready-to-merge"] }, "queue-ok"), "REVIEW", "the role's own name is not the mapped string");
+  assert.equal(deriveColumn(p, { open: true, labels: ["ready-to-merge"] }, null), "REVIEW", "with no Label map no PR is READY");
 });
 
 test("deriveColumn: IMPLEMENTING when there is no PR yet", () => {
   const p = parseRow("#340 impl-340");
-  assert.equal(deriveColumn(p, null), "IMPLEMENTING");
+  assert.equal(deriveColumn(p, null, "ready-to-merge"), "IMPLEMENTING");
 });
 
 const MIN = 60 * 1000;
@@ -127,6 +131,7 @@ const baseInputs = () => ({
     filed: ["#351 flaky retry marker in ci logs"],
     ruled: ["#346 6-applies keep the fallback"],
   },
+  roles: identityRoles(),
   issues: [{ number: 341, title: "add a --json flag", labels: ["ready-for-agent"] }],
   prs: [
     { number: 344, state: "MERGED", labels: [], title: "impl 332" },
@@ -714,6 +719,39 @@ test("#2331: the label present, a live repair, a label-off'd attempt, or a close
   const past = cardFor("#941 impl-941=PR#931 → MERGED abc1234 · finisher-pr-931=labelled", 941).card;
   assert.equal(past.column, "MERGED");
   assert.deepEqual(past.flags, []);
+});
+
+// #3868: the board reads `ready-to-merge` as the Label map maps it, for READY
+// and for the unqueued set the finisher flags read.
+const remapped = (over) => computeBoard(reproInputs({
+  rows: ["#941 impl-941=PR#931 · finisher-pr-931=labelled"], prev: { tickets: [] },
+  roles: { ...identityRoles(), "ready-to-merge": "queue-ok" }, ...over,
+}));
+
+test("#3868: with ready-to-merge mapped to queue-ok, a PR carrying queue-ok is READY and not unqueued", () => {
+  const b = remapped({ prs: [openPr(931, ["queue-ok"])] });
+  assert.equal(card(b, 941).column, "READY");
+  assert.deepEqual(card(b, 941).flags, [], "a PR carrying the mapped string was read as lacking it");
+});
+
+test("#3868: with ready-to-merge mapped to queue-ok, a PR carrying only the role's name is REVIEW and unqueued", () => {
+  const b = remapped({ prs: [openPr(931, ["ready-to-merge"])] });
+  assert.equal(card(b, 941).column, "REVIEW");
+  assert.deepEqual(card(b, 941).flags, ["unlabelled"]);
+});
+
+test("#3868: with no Label map no PR is READY, none is flagged unlabelled, POOL is unknown, and the board says why", () => {
+  const why = "no Label map at /w/.fleet/labels.json: run `label-map.mjs ensure`, the Label map derivation step";
+  const b = remapped({ prs: [openPr(931, ["ready-to-merge"])], roles: null, labelMapError: why, poolOk: false });
+  assert.equal(card(b, 941).column, "REVIEW");
+  assert.deepEqual(card(b, 941).flags, [], "an unread label flagged the PR as lacking it");
+  assert.equal(b.queue.pool, null, "an unread pool rendered as an empty one");
+  assert.equal(b.queue.supply, null);
+  assert.equal(b.labelMapNotice, `no Label map was read, so POOL and READY are unknown: ${why}`);
+});
+
+test("#3868: a board whose Label map was read carries no Label map notice", () => {
+  assert.equal(remapped({}).labelMapNotice, null);
 });
 
 // The tick reads `## Dispatched` as well as the rows, and a whole-line `row`

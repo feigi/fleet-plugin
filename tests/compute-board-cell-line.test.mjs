@@ -6,6 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { cellLine, computeBoard } from "../plugin/scripts/compute-board.mjs";
 import { formatRouting } from "../plugin/scripts/ledger-grammar.mjs";
+import { identityRoles } from "./support/label-map-seed.mjs";
 
 // A part list as one string: each part after its separator, a hole in _…_, a link's hash in <…>.
 const says = (parts) => parts.map((p) => `${p.sep}${p.dim ? `_${p.text}_` : p.text}${p.href ? `<${p.href}>` : ""}`).join("");
@@ -298,6 +299,7 @@ const liveInputs = () => ({
   prs: [{ number: 3949, state: "OPEN", labels: [], title: "t" }, { number: 3901, state: "OPEN", labels: [], title: "t" }],
   ci: {},
   prev: null,
+  roles: identityRoles(),
   now: 1000,
   implementers: [
     { member: "impl-3862", ...rec("slow-high", { model: "claude-opus-5" }) },

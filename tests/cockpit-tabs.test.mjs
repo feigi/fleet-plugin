@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { computeCellEvidence } from "../plugin/scripts/compute-cell-evidence.mjs";
 import { computeBoard } from "../plugin/scripts/compute-board.mjs";
 import { formatRouting } from "../plugin/scripts/ledger-grammar.mjs";
+import { identityRoles } from "./support/label-map-seed.mjs";
 
 // The cockpit page's tab strip and hash router. `board.html` is one
 // self-contained file, so the decision is lifted out of its source text and
@@ -654,6 +655,7 @@ const implRec = (member, cell, model) => ({ member, model, resolvedModelIdentity
 // transcript (#25), a rescue at another Cell (#26) and a Pull with no
 // Admissible row (#27).
 const linkedBoard = ({ guard, modelRoles }) => computeBoard({
+  roles: identityRoles(),
   ledger: {
     rows: [
       "#21 impl-21=PR#121", "#22 impl-22", "#23 impl-23", "#24 impl-24 · tier=smol-high", "#25 impl-25",

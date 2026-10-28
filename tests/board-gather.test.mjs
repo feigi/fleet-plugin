@@ -20,6 +20,7 @@ import { computeBoard } from "../plugin/scripts/compute-board.mjs";
 import { encodeProjectDir, readOmpMember } from "../plugin/scripts/member-record.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { TURN, fixture, withStderr, writeReceipt } from "./support/board-rig.mjs";
+import { seededRepo } from "./support/label-map-seed.mjs";
 
 const GATHER = fileURLToPath(new URL("../plugin/scripts/board-gather.mjs", import.meta.url));
 
@@ -168,7 +169,9 @@ test("an unparseable payload warns ONCE per PR across ticks, and a second PR is 
 // test's stub bin until the test ends, and gather()'s stderr — its own lines
 // and the ones it re-emits from its children — is read off this process's
 // stream while the gather runs. `spendDir: null` is the "no session yet"
-// answer, so no row reads this machine's transcript tree.
+// answer, so no row reads this machine's transcript tree. `cwd`, whose Label
+// map gather() reads, is a fresh repository seeded with the identity map
+// unless `opts` names one.
 async function gatherHere(t, bin, opts, ticks = 1) {
   const savedPath = process.env.PATH;
   t.after(() => { process.env.PATH = savedPath; });
@@ -182,7 +185,8 @@ async function gatherHere(t, bin, opts, ticks = 1) {
   };
   let r;
   try {
-    for (let i = 0; i < ticks; i++) r = await gather({ interval: 15, spendDir: null, ...opts });
+    const cwd = opts.cwd ?? seededRepo("board-gather-map-");
+    for (let i = 0; i < ticks; i++) r = await gather({ interval: 15, spendDir: null, ...opts, cwd });
   } finally {
     process.stderr.write = write;
   }
@@ -565,6 +569,55 @@ test("#2108: a pool read AND an open-PR read that both fill their --limit are bo
     "the ready-for-agent read hit its --limit, so POOL may be missing tickets" +
     "; the open-PR read hit its --limit, so a PR past it shows REVIEW with CI unknown",
     "capNotice must join simultaneous cap messages with '; ', not run them together or use a different separator");
+});
+
+// #3868: the pool read asks for the `ready-for-agent` string the Label map
+// holds, and the board built from a map-less gather renders POOL as unknown.
+// Every `gh` argv is logged; the issue list answers one ticket.
+async function gatherPool(t, cwd) {
+  const dir = tempDir("board-gather-pool-");
+  const bin = tempDir("board-gather-pool-bin-");
+  const scriptDir = tempDir("board-gather-pool-scripts-");
+  const log = join(dir, "gh-calls.jsonl");
+  writeFileSync(join(scriptDir, "ci-state.mjs"), "process.stdout.write('{}');\n");
+  writeFileSync(join(scriptDir, "ledger.mjs"),
+    `process.stdout.write(${JSON.stringify(JSON.stringify({ rows: [], filed: [], ruled: [] }))});\n`);
+  writeExecStub(join(bin, "gh"), `#!/usr/bin/env node
+const a = process.argv.slice(2);
+require("node:fs").appendFileSync(${JSON.stringify(log)}, JSON.stringify(a) + "\\n");
+if (a[0] === "issue" && a[1] === "list") process.stdout.write(JSON.stringify([{ number: 7, title: "t", labels: [] }]));
+else if (a[0] === "pr" && a[1] === "list") process.stdout.write("[]");
+else process.exit(1);
+`);
+  const { r: inputs, stderr } = await gatherHere(t, bin, { ledgerFile: join(dir, "ledger.md"), prevFile: null, scriptDir, cwd });
+  const calls = readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  return { inputs, board: computeBoard(inputs), poolReads: calls.filter((c) => c[0] === "issue" && c[1] === "list"), stderr };
+}
+
+test("#3868: with ready-for-agent mapped to agent-ready, the pool read asks gh for --label agent-ready", async (t) => {
+  const r = await gatherPool(t, seededRepo("board-gather-remap-", { roles: { "ready-for-agent": "agent-ready" } }));
+  assert.equal(r.poolReads.length, 1, r.stderr);
+  const argv = r.poolReads[0];
+  assert.equal(argv[argv.indexOf("--label") + 1], "agent-ready");
+  assert.equal(r.inputs.roles["ready-for-agent"], "agent-ready");
+  assert.equal(r.board.queue.pool, 1);
+});
+
+test("#3868: with the identity map the pool read asks for ready-for-agent", async (t) => {
+  const r = await gatherPool(t, seededRepo("board-gather-identity-"));
+  const argv = r.poolReads[0];
+  assert.equal(argv[argv.indexOf("--label") + 1], "ready-for-agent");
+  assert.equal(r.board.labelMapNotice, null);
+});
+
+test("#3868: with no Label map the gather reports the refusal naming ensure, asks gh for no pool, and the board shows no empty POOL", async (t) => {
+  const r = await gatherPool(t, seededRepo("board-gather-nomap-", null));
+  assert.deepEqual(r.poolReads, [], "a pool read ran with no string to ask for");
+  assert.match(r.stderr, /Label map could not be read.*\bensure\b/);
+  assert.equal(r.inputs.roles, null);
+  assert.equal(r.inputs.poolOk, false);
+  assert.equal(r.board.queue.pool, null, "an unread pool rendered as an empty one");
+  assert.match(r.board.labelMapNotice, /POOL and READY are unknown: no Label map at .*\bensure\b/);
 });
 
 // #1820 read MERGED from gh; #1840 scoped that read to the ledger's own row

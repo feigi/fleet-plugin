@@ -19,13 +19,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync, execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync, realpathSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, realpathSync } from "node:fs";
 import { tempDir } from "./support/temp-dir.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { encodeProjectDir } from "../plugin/scripts/member-record.mjs";
 import { writeReceipt, offlineBoardBin } from "./support/board-rig.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { seededRepo } from "./support/label-map-seed.mjs";
 
 const BOARD = fileURLToPath(new URL("../plugin/scripts/board.mjs", import.meta.url));
 const LEDGER = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
@@ -52,11 +53,12 @@ const ompTurn = (cacheWrite) => [
 // receipt the child's board reads its spend session from.
 function runBoard(sinceArgs, ledgerFile, seed = seedDefault) {
   const home = tempDir("since-home-");
-  // realpath, not the bare mkdtemp path: on darwin $TMPDIR is under /var, which
-  // is a symlink to /private/var, and the child's process.cwd() reports the
-  // RESOLVED form. Encoding the unresolved one puts the fixture at a path
+  // A fresh repository seeded with the identity Label map, realpath'd by
+  // seededRepo(), not the bare mkdtemp path: on darwin $TMPDIR is under /var,
+  // which is a symlink to /private/var, and the child's process.cwd() reports
+  // the RESOLVED form. Encoding the unresolved one puts the fixture at a path
   // omp would never write for this cwd.
-  const cwd = realpathSync(tempDir("since-cwd-"));
+  const cwd = seededRepo("since-cwd-");
   const bin = offlineBoardBin("since-bin-");
   seed(home, cwd);
   return spawnSync(process.execPath, [BOARD, "build", "--ledger", ledgerFile ?? join(cwd, "nope.md"), ...sinceArgs], {
@@ -73,8 +75,8 @@ function runBoard(sinceArgs, ledgerFile, seed = seedDefault) {
 
 // The session sits where omp would write it for this cwd — encodeProjectDir
 // is the real function, not a hand-rolled path — under an `<ISO>_<uuid>`
-// name, and the receipt records it. The cwd is no git checkout, so the
-// board's state directory is the cwd's own `.fleet`, and the receipt goes there.
+// name, and the receipt records it. The cwd is its own repository's top level,
+// so the board's state directory is the cwd's own `.fleet`, and the receipt goes there.
 function seedDefault(home, cwd) {
   const dir = join(home, ".omp", "agent", "sessions", encodeProjectDir(cwd, { home }),
     "2026-08-25T09-00-00-000Z_01a08126-ee04-7095-a695-14e3249f1127");
@@ -557,4 +559,40 @@ test("fault()'s writeSync loop spends real time retrying a saturated stderr, not
   // job is only the floor above. An upper bound here would also be the first
   // thing to false-positive under real scheduling contention, since each
   // Atomics.wait(…, 1) is a 1ms TARGET, not a guarantee, under load.
+});
+
+// #3868: the board's pool read and READY state follow the Label map, driven
+// through `board.mjs build` against a `gh` that logs every argv and answers
+// one pool ticket.
+function buildIn(cwd) {
+  const bin = offlineBoardBin("board-map-bin-");
+  const log = join(cwd, "gh-calls.jsonl");
+  writeExecStub(join(bin, "gh"), `#!/usr/bin/env node
+const a = process.argv.slice(2);
+require("node:fs").appendFileSync(${JSON.stringify(log)}, JSON.stringify(a) + "\\n");
+if (a[0] === "issue" && a[1] === "list") process.stdout.write(JSON.stringify([{ number: 7, title: "t", labels: [] }]));
+else process.exit(1);
+`);
+  const r = spawnSync(process.execPath, [BOARD, "build", "--ledger", join(cwd, "nope.md")], {
+    cwd, encoding: "utf8", env: { ...process.env, HOME: cwd, PATH: `${bin}:${process.env.PATH}` },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const poolReads = readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l)).filter((c) => c[0] === "issue" && c[1] === "list");
+  return { board: JSON.parse(r.stdout), stderr: r.stderr, poolReads };
+}
+
+test("#3868: board build with ready-for-agent mapped to agent-ready asks gh for --label agent-ready", () => {
+  const { board, poolReads, stderr } = buildIn(seededRepo("board-map-remap-", { roles: { "ready-for-agent": "agent-ready" } }));
+  assert.equal(poolReads.length, 1, stderr);
+  assert.equal(poolReads[0][poolReads[0].indexOf("--label") + 1], "agent-ready");
+  assert.equal(board.queue.pool, 1);
+  assert.equal(board.labelMapNotice, null);
+});
+
+test("#3868: board build with no Label map reports the refusal naming ensure and renders no empty POOL", () => {
+  const { board, poolReads, stderr } = buildIn(seededRepo("board-map-none-", null));
+  assert.match(stderr, /Label map could not be read.*\bensure\b/);
+  assert.deepEqual(poolReads, [], "a pool read ran with no string to ask for");
+  assert.equal(board.queue.pool, null, "an unread pool rendered as an empty one");
+  assert.match(board.labelMapNotice, /POOL and READY are unknown: .*\bensure\b/);
 });

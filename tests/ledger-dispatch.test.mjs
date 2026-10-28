@@ -20,6 +20,7 @@ import { rowPr } from "../plugin/scripts/ledger-grammar.mjs";
 import { rendering, renderBrief } from "./support/rendered-brief.mjs";
 import { writeQueueGh, closes, titled, failsOn, ghCalls, ref, prUrl, labelled, defines } from "./support/queue-gh.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { identityRoles } from "./support/label-map-seed.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
 
@@ -680,7 +681,7 @@ test("settle impl-N=PR#M folds the PR-keyed row a pre-settle dispatch created in
   // Both readers see one PR with one live review on it.
   const board = computeBoard({
     ledger: { rows: l.rows, filed: [], ruled: [] }, issues: [], merged: [], ci: {}, prev: { tickets: [] }, now: 0,
-    prs: [{ number: 1301, state: "OPEN", labels: [], title: "pr 1301" }],
+    prs: [{ number: 1301, state: "OPEN", labels: [], title: "pr 1301" }], roles: identityRoles(),
   });
   const cards = board.tickets.filter((c) => c.pr === 1301);
   assert.equal(cards.length, 1);
@@ -888,7 +889,7 @@ test("settle does not fold when its own row already names a PR", (t) => {
 const REPLACED_HEAD = "abc1234";
 const boardOf = (ledger, prs) => computeBoard({
   ledger: { rows: ledger.rows, dispatched: ledger.dispatched, filed: [], ruled: [] },
-  issues: [], merged: [], ci: {}, prev: { tickets: [] }, now: 0, prs,
+  issues: [], merged: [], ci: {}, prev: { tickets: [] }, now: 0, prs, roles: identityRoles(),
 });
 
 test("a ticket row retried under a second PR is one board card on the latest PR, with that PR's own state", (t) => {

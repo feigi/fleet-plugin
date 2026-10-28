@@ -10,6 +10,7 @@ import {
 } from "../plugin/scripts/board-gather.mjs";
 import { CLOSEOUT_RECEIPT, RECEIPT, RECEIPT_HELD, formatRouting } from "../plugin/scripts/ledger-grammar.mjs";
 import { computeBoard } from "../plugin/scripts/compute-board.mjs";
+import { identityRoles, seededRepo } from "./support/label-map-seed.mjs";
 
 // What gather() reads for the Cell evidence tab: the guard through the tick's
 // reader, the receipts' `metrics` steps, the installed definitions and `modelRoles`,
@@ -181,10 +182,11 @@ test("readAgents: every definition's own `model:`, and a directory that cannot b
 
 // -- gather(): the whole read, and the board it makes --------------------------------------------
 
-// A cockpit workspace in a temp dir: `.fleet/` with a guard and a phase-0 receipt, an
-// installed `agents/` beside `scripts/`, and a stub `omp` that counts its spawns.
+// A cockpit workspace in a temp repository seeded with the identity Label map:
+// `.fleet/` with a guard and a phase-0 receipt, an installed `agents/` beside
+// `scripts/`, and a stub `omp` that counts its spawns.
 function workspace(t, { guard = GUARD, ompBody = null } = {}) {
-  const root = tempDir("cell-evidence-gather-");
+  const root = seededRepo("cell-evidence-gather-");
   const stateDir = join(root, ".fleet");
   const scriptDir = join(root, "scripts");
   const bin = join(root, "bin");
@@ -200,7 +202,7 @@ function workspace(t, { guard = GUARD, ompBody = null } = {}) {
   t.after(() => { process.env.PATH = saved; });
   process.env.PATH = `${bin}:${saved}`;
   const spawns = () => (existsSync(calls) ? readFileSync(calls, "utf8").split("\n").filter(Boolean).length : 0);
-  return { root, stateDir, scriptDir, spawns, opts: { ledgerFile: join(root, "none.md"), prevFile: join(root, "prev.json"), scriptDir, stateDir, interval: 15, spendDir: null } };
+  return { root, stateDir, scriptDir, spawns, opts: { ledgerFile: join(root, "none.md"), prevFile: join(root, "prev.json"), scriptDir, stateDir, interval: 15, spendDir: null, cwd: root } };
 }
 
 async function quiet(fn) {
@@ -283,7 +285,7 @@ test("gather: a caller that names no state directory reads no guard, no receipt 
 });
 
 test("computeBoard: inputs that read none of the tab's records draw its no-guard state, not a missing field", () => {
-  const board = computeBoard({ ledger: { rows: [] }, issues: [], prs: [], ci: {}, prev: null, now: 1 });
+  const board = computeBoard({ ledger: { rows: [] }, issues: [], prs: [], ci: {}, prev: null, now: 1, roles: identityRoles() });
   assert.equal(board.cellEvidence.guard.heading, "no cost guard");
   assert.equal(board.cellEvidence.guard.cells.length, 5);
   assert.equal(board.modelRoles, null);

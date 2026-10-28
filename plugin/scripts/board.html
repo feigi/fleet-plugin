@@ -529,7 +529,8 @@ function render(m) {
     // POOL's own count is `q.pool` — the same number, except that a
     // capped pool read makes it `"100+"`, and a header reading a bare 100
     // beside a footer reading 100+ would be the exact claim the `+` retracts.
-    h.append(el("span", null, String(name === "POOL" ? q.pool ?? inCol.length : inCol.length)));
+    // A pool that was not read is null and shows `?`, never an empty count.
+    h.append(el("span", null, String(name === "POOL" ? poolCount(q, inCol.length) : inCol.length)));
     return [h, ...inCol.map(card)];
   });
   COLUMNS.forEach((name, i) => {
@@ -550,10 +551,14 @@ function render(m) {
   // (found by review: capNotice was reachable but unrenderable whenever
   // ledgerMsg/stallMsg/stale also held).
   const capMsg = m.capNotice ? "⚠ " + m.capNotice : null;
+  // The footer too, for capMsg's reason: a higher-priority banner must not
+  // swallow the one line that says POOL and READY were not read.
+  const mapMsg = m.labelMapNotice ? "⚠ " + m.labelMapNotice : null;
   // footer
   const foot = document.getElementById("footer");
   foot.innerHTML = "";
-  foot.append(el("div", null, `pool ${q.pool ?? 0} · supply ${q.supply ?? 0} · review-backlog ${q.reviewBacklog ?? 0}`));
+  foot.append(el("div", null, `pool ${poolCount(q, 0)} · supply ${q.supply === null ? "?" : q.supply ?? 0} · review-backlog ${q.reviewBacklog ?? 0}`));
+  if (mapMsg) foot.append(el("div", null, mapMsg));
   if (capMsg) foot.append(el("div", null, capMsg));
   const filed = el("div", "filed", `filed follow-ups (${(m.filed || []).length}): ` +
     (m.filed || []).map((f) => "#" + f.issue).join(" "));
@@ -588,6 +593,8 @@ function render(m) {
     showBanner(stallMsg, "dead");
   } else if (ledgerMsg) {
     showBanner(ledgerMsg);
+  } else if (mapMsg) {
+    showBanner(mapMsg);
   } else if (capMsg) {
     showBanner(capMsg);
   } else { banner.style.display = "none"; banner.className = ""; }
@@ -624,6 +631,12 @@ function render(m) {
 // nobody is working the board at all.
 function livenessBanner(l) {
   return l && l.text ? "⚠ " + l.text : null;
+}
+
+// POOL's count: `?` for a pool the board did not read (`pool: null`),
+// `fallback` for a payload with no `queue.pool` at all.
+function poolCount(q, fallback) {
+  return q.pool === null ? "?" : q.pool ?? fallback;
 }
 
 // Three ledger states, three renderings. `read` refuses an absent ledger
