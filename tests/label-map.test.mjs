@@ -45,11 +45,15 @@ const cli = (cwd, ...args) => spawnSync(process.execPath, [SCRIPT, ...args], { c
 
 const long = "x".repeat(51);
 
-// Every cache the reader must refuse, as a function that leaves it in `ws`.
+// Every cache the reader must refuse, as a function that leaves it in `ws`,
+// and for a cache with no usable `roles` object the refusal the reader names.
+const NO_ROLES = /holds no `roles` object/;
 const INVALID = [
+  ["nothing at all, not even the file", () => {}],
   ["unparsable JSON", (ws) => writeRaw(ws, "{not json")],
-  ["no roles object", (ws) => writeRaw(ws, JSON.stringify({ derivedAt: "2026-10-27T00:00:00.000Z" }))],
-  ["roles an array", (ws) => writeRaw(ws, JSON.stringify({ roles: LABEL_ROLES }))],
+  ["no roles object", (ws) => writeRaw(ws, JSON.stringify({ derivedAt: "2026-10-27T00:00:00.000Z" })), NO_ROLES],
+  ["roles an array", (ws) => writeRaw(ws, JSON.stringify({ roles: LABEL_ROLES })), NO_ROLES],
+  ["roles null", (ws) => writeRaw(ws, JSON.stringify({ roles: null })), NO_ROLES],
   ["a role missing", (ws) => seedLabelMap(ws, { roles: { "in-progress": undefined } })],
   ["a role not a string", (ws) => seedLabelMap(ws, { roles: { onhold: 7 } })],
   ["a string containing a double quote", (ws) => seedLabelMap(ws, { roles: { onhold: 'on"hold' } })],
@@ -115,15 +119,7 @@ test("the seeder passes origin, table and derivedAt overrides through to the cac
   assert.equal(cache.derivedAt, "2026-10-01T00:00:00.000Z");
 });
 
-test("show with no cache exits 1 and names ensure as the derivation step", () => {
-  const ws = repo();
-  const r = cli(ws, "show", "in-progress");
-  assert.equal(r.status, 1, r.stdout + r.stderr);
-  assert.equal(r.stdout, "");
-  assert.match(r.stderr, /\bensure\b/);
-});
-
-for (const [name, leave] of INVALID) {
+for (const [name, leave, refusal] of INVALID) {
   test(`show refuses a cache with ${name}: exit 1 naming ensure, with or without a role`, () => {
     const ws = repo();
     leave(ws);
@@ -138,19 +134,26 @@ for (const [name, leave] of INVALID) {
   test(`the reader throws LabelMapUnreadable naming ensure for a cache with ${name}`, () => {
     const ws = repo();
     leave(ws);
-    assert.throws(() => readLabelMap({ cwd: ws }), (e) => e instanceof LabelMapUnreadable && /\bensure\b/.test(e.message));
+    assert.throws(
+      () => readLabelMap({ cwd: ws }),
+      (e) => e instanceof LabelMapUnreadable && /\bensure\b/.test(e.message) && (!refusal || refusal.test(e.message)),
+    );
   });
 }
-
-test("the reader throws LabelMapUnreadable naming ensure when there is no cache", () => {
-  const ws = repo();
-  assert.throws(() => readLabelMap({ cwd: ws }), (e) => e instanceof LabelMapUnreadable && /\bensure\b/.test(e.message));
-});
 
 test("the reader returns the roles of a valid seeded cache", () => {
   const ws = repo();
   seedLabelMap(ws, { roles: { "ready-for-agent": "agent-ready" } });
   assert.deepEqual(readLabelMap({ cwd: ws }), { ...identity(), "ready-for-agent": "agent-ready" });
+});
+
+test("the reader throws LabelMapUnreadable naming ensure and the error code when the cache cannot be read", () => {
+  const ws = repo();
+  mkdirSync(join(ws, ".fleet", LABEL_MAP_FILE), { recursive: true });
+  assert.throws(
+    () => readLabelMap({ cwd: ws }),
+    (e) => e instanceof LabelMapUnreadable && /\bensure\b/.test(e.message) && /\(EISDIR\)/.test(e.message),
+  );
 });
 
 test("the reader outside a repository throws FleetDirUnresolvable, not LabelMapUnreadable", () => {
@@ -219,16 +222,35 @@ test("labelStringFaults names the role and the rule for each D8 break, and nothi
   assert.equal(byRole.onhold, undefined);
   const dup = labelStringFaults({ ...identity(), onhold: "WONTFIX" });
   assert.equal(dup.length, 1);
-  assert.match(dup[0].role, /^(onhold|wontfix)$/);
-  assert.match(dup[0].rule, /onhold|wontfix/);
-  assert.match(dup[0].rule, /case/);
+  assert.equal(dup[0].role, "onhold");
+  assert.match(dup[0].rule, /\bwontfix\b.*case/);
 });
 
-test("the writer replaces the cache through a temp file beside it, leaving no temp file behind", () => {
+const PAUSED = { derivedAt: "2026-10-27T00:00:00.000Z", table: { present: false, rows: {} }, roles: { ...identity(), onhold: "paused" }, origin: {} };
+
+test("the writer replaces the cache and leaves no temp file behind", () => {
   const ws = repo();
   seedLabelMap(ws);
-  const file = writeLabelMap({ derivedAt: "2026-10-27T00:00:00.000Z", table: { present: false, rows: {} }, roles: { ...identity(), onhold: "paused" }, origin: {} }, { cwd: ws });
+  const file = writeLabelMap(PAUSED, { cwd: ws });
   assert.equal(file, join(ws, ".fleet", LABEL_MAP_FILE));
   assert.equal(JSON.parse(readFileSync(file, "utf8")).roles.onhold, "paused");
+  assert.deepEqual(readdirSync(join(ws, ".fleet")), [LABEL_MAP_FILE]);
+});
+
+// The writer's temp file is `<cache>.<pid>.tmp`; a directory there makes the
+// write to it fail, which a writer writing the cache in place never meets.
+test("the writer writes through a temp file beside the cache: with that path blocked it throws the write's own error and the cache keeps its bytes", () => {
+  const ws = repo();
+  const file = seedLabelMap(ws);
+  const before = readFileSync(file, "utf8");
+  mkdirSync(`${file}.${process.pid}.tmp`);
+  assert.throws(() => writeLabelMap(PAUSED, { cwd: ws }), { code: "EISDIR" });
+  assert.equal(readFileSync(file, "utf8"), before);
+});
+
+test("a write that fails at the rename throws and leaves no temp file behind", () => {
+  const ws = repo();
+  mkdirSync(join(ws, ".fleet", LABEL_MAP_FILE), { recursive: true });
+  assert.throws(() => writeLabelMap(PAUSED, { cwd: ws }));
   assert.deepEqual(readdirSync(join(ws, ".fleet")), [LABEL_MAP_FILE]);
 });

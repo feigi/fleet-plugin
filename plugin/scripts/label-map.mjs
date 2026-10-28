@@ -117,7 +117,9 @@ export function writeLabelMap(map, { cwd = process.cwd() } = {}) {
     writeFileSync(tmp, `${JSON.stringify(map)}\n`);
     renameSync(tmp, file);
   } catch (e) {
-    rmSync(tmp, { force: true });
+    // The write's own error is the one to report: a temp file that cannot be
+    // removed (a directory in its place) must not replace it.
+    try { rmSync(tmp, { force: true }); } catch {}
     throw e;
   }
   return file;
