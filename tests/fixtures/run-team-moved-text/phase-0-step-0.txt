@@ -14,20 +14,17 @@
 
    **Pin the instruments, after that fast-forward and before anything reads
    them, from this main checkout.** `~/.fleet/bin/fleet-run instruments.sh --pin`
-   records what the scripts and runbooks in this repo say right now, which is
-   what every later gate compares against; SKILL.md's **Re-check before you act
-   on any instrument reading** says what its exit codes mean. Pinning before that fast-forward would instead pin the
-   superseded text and certify it for the rest of the run.
-   **When this workspace does not track `plugin/…`** — fleets run here on an
-   installed plugin rather than a vendored tree — the bare pin refuses on an
-   empty instrument set, because this checkout holds no instruments to certify.
-   Name the plugin checkout to the pin instead:
-   `~/.fleet/bin/fleet-run instruments.sh --pin --audit <plugin-checkout>`.
-   The baseline records the audited tree beside the digest, and every later
-   check — yours, a finisher's, the merge gate's own leg — follows that
-   recorded root without being told twice. Refusing the bare pin and naming
-   the tree once is the whole cross-workspace contract; never dispatch a
-   member into a run whose phase-0 pin refused.
+   records what the scripts and runbooks of the Install root — the tree the
+   fleet executes — say right now, which is what every later gate compares
+   against; SKILL.md's **Re-check before you act on any instrument reading** says
+   what its exit codes mean. When this main checkout is the linked install,
+   pinning before that fast-forward would instead pin the superseded text and
+   certify it for the rest of the run. The pin certifies the Install root and
+   keeps its baseline in this checkout's `.fleet/`, so a workspace that tracks no
+   `plugin/…` of its own pins with no flag. The baseline records the root it
+   certified beside the digest, and every later check — yours, a finisher's, the
+   merge gate's own leg — compares it with the live root and refuses when they
+   differ. Never dispatch a member into a run whose phase-0 pin refused.
 
    **Record the main-checkout baseline in the same step, right after the
    pin.** `~/.fleet/bin/fleet-run main-checkout.mjs --record` writes

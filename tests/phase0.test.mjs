@@ -12,7 +12,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
@@ -277,12 +277,11 @@ test("a clean run passes every step in order, writes one receipt and exits 0", (
 
 test("every flag reaches the step that owns it", () => {
   const f = fixture();
-  const plugin = join(f.dir, "plugin-checkout");
   const spend = join(f.dir, "spend");
-  const r = f.run(["--session", f.session, "--in-flight", "3", "--plugin-checkout", plugin, "--spend-dir", spend, "--workflow", "CI"]);
+  const r = f.run(["--session", f.session, "--in-flight", "3", "--spend-dir", spend, "--workflow", "CI"]);
   assert.equal(r.status, 0, r.err);
   const receipt = f.receipt();
-  assert.deepEqual(f.calls("instruments")[0].args, ["--pin", "--audit", plugin]);
+  assert.deepEqual(f.calls("instruments")[0].args, ["--pin"], "the pin certifies the Install root and takes no tree");
   assert.deepEqual(f.calls("tier-roles")[0].args, ["--check", "--in-flight", "3"], "--in-flight reaches tier-roles, the step that owns it");
   assert.deepEqual(f.calls("preflight")[0].args, [], "preflight.mjs takes no arguments, so the CI flag is recorded and never passed");
   assert.match(receipt.steps.preflight.output, /CI: workflow CI/);
@@ -292,6 +291,24 @@ test("every flag reaches the step that owns it", () => {
   const g = fixture();
   assert.equal(g.run(["--session", g.session, "--declare-no-ci"]).status, 0);
   assert.match(g.receipt().steps.preflight.output, /CI: declared absent/);
+});
+
+test("--plugin-checkout is gone: phase 0 refuses it as an unknown flag", () => {
+  const f = fixture();
+  const r = f.run(["--session", f.session, "--plugin-checkout", join(f.dir, "plugin-checkout")]);
+  assert.equal(r.status, 2, r.err);
+  assert.match(r.err, /unknown flag --plugin-checkout/);
+  assert.equal(f.calls("instruments").length, 0);
+});
+
+test("the pin step's ok line names the kind, the root, and the version or commit, from --pin's stderr line", () => {
+  for (const tail of ["npm-install /home/u/.omp/plugins/node_modules/@feigi/fleet-ctl (version 3.102.7)", "linked-checkout /home/u/dev/fleet-plugin (commit 0123456789abcdef0123456789abcdef01234567)"]) {
+    const f = fixture();
+    f.control("instruments", { out: `${"a".repeat(64)}\n`, err: `instruments: pinned ${"a".repeat(64)} over ${tail}\n` });
+    const r = f.run(["--session", f.session]);
+    assert.equal(r.status, 0, r.err);
+    assert.equal(f.receipt().steps.pin.output, `instruments pinned: ${tail}`);
+  }
 });
 
 test("tier-roles gets the in-flight bound: --in-flight when given, else the default, and the receipt records the bound", () => {
@@ -1382,7 +1399,12 @@ test("the instruments pin covers phase0.mjs: a rewrite of it is a changed instru
   git(dir, "init", "-q", "-b", "main");
   git(dir, "add", "-A");
   git(dir, "commit", "-q", "-m", "i");
-  const pin = (...a) => spawnSync("sh", [join(REAL_SCRIPTS, "instruments.sh"), ...a], { cwd: dir, encoding: "utf8", env: GIT_ENV });
+  // The pin certifies the Install root: a fixture HOME whose package entry
+  // links to this checkout's plugin/, so the real install is never read.
+  const home = realpathSync(tempDir("phase0-home-"));
+  mkdirSync(join(home, ".omp", "plugins", "node_modules", "@feigi"), { recursive: true });
+  symlinkSync(join(dir, "plugin"), join(home, ".omp", "plugins", "node_modules", "@feigi", "fleet-ctl"));
+  const pin = (...a) => spawnSync("sh", [join(REAL_SCRIPTS, "instruments.sh"), ...a], { cwd: dir, encoding: "utf8", env: { ...GIT_ENV, HOME: home } });
   assert.equal(pin("--pin").status, 0);
   assert.equal(pin().status, 0, "unchanged");
   writeFileSync(join(dir, "plugin", "scripts", "scratch.txt"), "untracked\n");

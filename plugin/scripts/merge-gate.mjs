@@ -225,10 +225,11 @@ const CHILD = { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] };
 // own top level: from a worktree that has no baseline, and instruments.sh
 // exits 2 on a missing baseline instead of comparing anything. gitEnv():
 // an ambient GIT_DIR would otherwise answer `--git-common-dir` for a
-// different repository, and the gate would certify that tree's instruments.
-// `--repo` locates the baseline only; the baseline itself names the tree to
-// audit, so a workspace that does not track `plugin/…` still reaches a
-// verdict over the checkout its run pinned — no flag here repoints it.
+// different repository, and the gate would judge against that repository's
+// baseline. `--repo` locates the baseline only: instruments.sh certifies the
+// live Install root and compares it with the baseline's `root=`, never
+// following it, so a workspace that does not track `plugin/…` still reaches a
+// verdict and no flag here repoints the audited tree.
 // `root` is returned too: main-gain.mjs reads the same main checkout.
 function readInstruments() {
   const common = spawnSync("git", ["rev-parse", "--git-common-dir"], { ...CHILD, env: gitEnv() });

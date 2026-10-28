@@ -92,6 +92,13 @@ const CORRECTIONS = [
     "with the same weight as a ruling you have already made.**",
     "with the same weight as a reply you have already decided on.**",
   ],
+  // The instrument check certifies the Install root, which is the main
+  // checkout only when that checkout is the linked install (#3845).
+  [
+    "neither protects the main checkout, which you run every gate probe out of and which any member can edit — except through a `write`/`edit`/`ast_edit` the `member-write-guard` extension refuses; a `bash` or `eval` write still lands.",
+    "neither protects the Install root, the tree you run every gate probe out of and read these runbooks from. It is the main checkout only when that checkout is linked as the install. The `member-write-guard` extension refuses a `write`/`edit`/`ast_edit` inside the main checkout only, and a `bash` or `eval` write lands anyway; under a package install nothing prevents a write to the Install root, and this re-check is what catches one.",
+  ],
+  ["Measured: a member edited two files there instead of in its worktree", "Measured: a member edited two files in the main checkout instead of in its worktree"],
 ];
 
 // The removed text as its blocks — paragraphs, a table, a code block — each

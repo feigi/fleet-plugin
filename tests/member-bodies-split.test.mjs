@@ -180,6 +180,13 @@ const PHASE_3_POINTERS_RETIRED = [
   "The inline `$(printf '%s\\n' \"$prs\")` form splits correctly too and is what Phase 3's block uses, but it splits on *every* whitespace character, so it is safe only for values that cannot contain one — PR numbers cannot, branch names and paths can.",
   "**A probe that could not look emits an event; it never `continue`s.** Stated in full at *A probe that cannot read is a transition event, not silence* in Phase 3, and it binds every watcher in this file rather than that one block: the third value beside pass and fail is what turns a broken loop into a loud failure instead of a quiet one.",
 ];
+// The instrument check certifies the Install root, never a tree the baseline
+// names (#3845), so the finisher's two sentences about an audited checkout
+// are replaced, not lost.
+const INSTALL_ROOT_RETIRED = [
+  "`--repo` is required and the spelling is the point — the run's baseline lives in the audited checkout's gitignored `.fleet/`, which the scratch worktree you take at duty 2 does not carry, so a bare invocation from there exits 2 on a missing baseline instead of comparing anything.",
+  "The baseline itself names the tree to audit: a cross-workspace run pinned it once at phase 0, and your `--repo` only locates that baseline, never the audited tree — so an exit 2 naming a moved or unreadable audited tree is a halt like every other, not a spelling for you to correct.",
+];
 // The placeholder each argument fills, per role — the arguments are values no
 // other argument shares, so a swapped substitution cannot pass.
 const PAIRS = [
@@ -192,10 +199,10 @@ const PAIRS = [
   { role: "fix-applier", kind: "dispositions-retry", fixture: "fix-applier-dispositions-retry.md", retired: [...REPORT_FILE_RETIRED, ...DIGEST_PROJECTION_RETIRED, ...RECIPE_CHECK_RETIRED, ...CLOSED_RECORD_RETIRED],
     args: { worktree: "/abs/wt-retry", branch: "retry-branch", testCmd: "TESTCMD-3", scratch: "/abs/scratch-retry", pr: "3294", run: "run-ZyXw9876", "mismatched-record": "/abs/scratch-retry/dispositions-fix-pr-3294.json", violations: "VIOLATION-LIST-1" },
     fills: { "abs-path": "worktree", branch: "branch", testCmd: "testCmd", scratch: "scratch", pr: "pr", run: "run", "mismatched record": "mismatched-record", violations: "violations" } },
-  { role: "finisher", kind: "fresh", fixture: "finisher-fresh.md", retired: DUTY3_TICKETLESS_RETIRED,
+  { role: "finisher", kind: "fresh", fixture: "finisher-fresh.md", retired: [...DUTY3_TICKETLESS_RETIRED, ...INSTALL_ROOT_RETIRED],
     args: { worktree: "/abs/wt-fin", pin: PIN, pr: "3295", testCmd: "TESTCMD-4", scratch: "/abs/scratch-fin" },
     fills: { "abs-path": "worktree", "your dispatch pin": "pin", M: "pr", testCmd: "testCmd", scratch: "scratch" } },
-  { role: "finisher", kind: "repair", fixture: "finisher-repair.md", retired: [...DUTY3_POINTER_RETIRED, ...DUTY3_TICKETLESS_RETIRED],
+  { role: "finisher", kind: "repair", fixture: "finisher-repair.md", retired: [...DUTY3_POINTER_RETIRED, ...DUTY3_TICKETLESS_RETIRED, ...INSTALL_ROOT_RETIRED],
     args: { worktree: "/abs/wt-fin-r", pin: PIN, pr: "3296", testCmd: "TESTCMD-5", scratch: "/abs/scratch-fin-r" },
     fills: { "abs-path": "worktree", "your dispatch pin": "pin", M: "pr", testCmd: "testCmd", scratch: "scratch" } },
   { role: "merge-bot", kind: null, fixture: "merge-bot.md", retired: PHASE_3_POINTERS_RETIRED,

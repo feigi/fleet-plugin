@@ -1,11 +1,11 @@
 // Regression gate for instruments.sh, the check that says whether the
-// controller's instrument set changed under a run (#436), re-contracted to
-// audit the WORKING DIRECTORY's checkout rather than the checkout the script
-// itself lives in (#1337). The install-only dev loop (ADR 0003) means this
-// script normally runs out of a plugin cache; resolving from its own
-// location measured whatever git checkout happens to CONTAIN that cache
-// path, which was the operator's unrelated personal repo, not the plugin's
-// own tree.
+// controller's instrument set changed under a run (#436). It certifies the
+// live Install root under $HOME (#3845); the WORKING DIRECTORY's checkout,
+// never the checkout the script itself lives in (#1337), only locates the
+// baseline. The install-only dev loop (ADR 0003) means this script normally
+// runs out of a plugin cache; resolving from its own location measured
+// whatever git checkout happens to CONTAIN that cache path, which was the
+// operator's unrelated personal repo, not the plugin's own tree.
 //
 // The defect it guards is not observable from inside the fleet: a member that
 // edits a script in the MAIN checkout — where the controller runs every gate
@@ -29,24 +29,32 @@
 //            a tracked instrument, which a content digest cannot see (#1059).
 //
 // Every case builds a throwaway checkout and runs the script with its cwd set
-// to it — the script resolves the tree to measure from $PWD (or --repo), so a
-// fixture repo is measured regardless of where the copy of instruments.sh
-// invoked actually lives, and the live checkout is never touched.
+// to it — the script finds the baseline's `.fleet/` from $PWD (or --repo) —
+// and with HOME set to a fixture whose `@feigi/fleet-ctl` entry is the
+// Install root the script certifies (#3845): by default a link to that same
+// checkout's `plugin/`, the linked-checkout shape. A fixture repo is measured
+// regardless of where the copy of instruments.sh invoked actually lives, and
+// neither the live checkout nor a real omp install is ever read: ENV's own
+// HOME is an empty directory, so a spawn that names no fixture HOME refuses
+// instead of reaching the machine's install.
 //
 // Zero deps: `node --test tests/instruments.test.mjs`.
 
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   chmodSync,
   copyFileSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   utimesSync,
@@ -62,11 +70,18 @@ const SCRIPT = fileURLToPath(new URL("../plugin/scripts/instruments.sh", import.
 // "under the set".
 const SET = "plugin";
 
+// An empty HOME, removed when the file's cases are done: the default for every
+// spawn below, so a case that names no fixture install refuses with "no omp
+// plugin" rather than certifying whatever this machine has installed.
+const NO_INSTALL = realpathSync(mkdtempSync(join(tmpdir(), "instruments-noinstall-")));
+after(() => rmSync(NO_INSTALL, { recursive: true, force: true }));
+
 // Pin identity and cut the developer's ~/.gitconfig out of the fixture, so a
 // local `core.excludesfile` or hook cannot change what these repos look like.
 // The GIT_* redirects would point the fixture out of its own temp dir.
 const ENV = {
   ...process.env,
+  HOME: NO_INSTALL,
   GIT_DIR: undefined,
   GIT_WORK_TREE: undefined,
   GIT_TEMPLATE_DIR: undefined,
@@ -78,6 +93,47 @@ const ENV = {
   GIT_CONFIG_GLOBAL: "/dev/null",
   GIT_CONFIG_SYSTEM: "/dev/null",
 };
+
+// The package entry every resolver of the Install root reads, under a HOME.
+const entryOf = (home) => join(home, ".omp", "plugins", "node_modules", "@feigi", "fleet-ctl");
+
+/** A fixture HOME with `.omp/plugins/node_modules/@feigi/` in place and no entry yet. */
+function fakeHome(t) {
+  const home = realpathSync(mkdtempSync(join(tmpdir(), "instruments-home-")));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  mkdirSync(join(entryOf(home), ".."), { recursive: true });
+  return home;
+}
+
+/** A fixture HOME whose package entry is a link to `to` — a linked install. */
+function linkHome(t, to) {
+  const home = fakeHome(t);
+  symlinkSync(to, entryOf(home));
+  return home;
+}
+
+// An installed package's payload: four of the five component directories
+// (no `workflows/`, which a package may lack) and a `package.json` beside
+// them, outside the set.
+function writePackage(pkg, version = "3.102.7") {
+  for (const d of ["scripts", "skills/run-team", "commands", "agents"]) mkdirSync(join(pkg, d), { recursive: true });
+  writeFileSync(join(pkg, "scripts", "ci-state.mjs"), "console.log('green');\n");
+  writeFileSync(join(pkg, "skills", "run-team", "SKILL.md"), "# runbook\n");
+  writeFileSync(join(pkg, "commands", "run-team.md"), "# command\n");
+  writeFileSync(join(pkg, "agents", "fleet-finisher.agent.md"), "# agent\n");
+  writeFileSync(join(pkg, "package.json"), `${JSON.stringify({ name: "@feigi/fleet-ctl", version }, null, 2)}\n`);
+}
+
+/** A fixture HOME whose package entry is a real directory — an npm install. */
+function npmHome(t, version) {
+  const home = fakeHome(t);
+  const pkg = entryOf(home);
+  writePackage(pkg, version);
+  return { home, pkg };
+}
+
+// Each repo(t)'s own linked install, so `run(root)` certifies that checkout.
+const HOMES = new Map();
 
 const git = (cwd, ...args) =>
   execFileSync("git", args, { cwd, env: ENV, encoding: "utf8" }).trim();
@@ -99,23 +155,30 @@ function repo(t) {
   writeFileSync(join(root, "unrelated.md"), "outside the set\n");
   git(root, "add", "-A");
   git(root, "commit", "-qm", "fixture");
+  HOMES.set(root, linkHome(t, join(root, SET)));
   return root;
 }
 
 // Runs the copy of instruments.sh that lives INSIDE `root`, with cwd set to
-// `root` by default — the audited repo is now derived from cwd, never from
+// `root` by default — the state home is derived from cwd, never from
 // where the script itself sits, so the default here is what an ordinary
-// invocation from inside the checkout looks like. `cwd` is overridable for
-// the tests that specifically exercise cwd-vs-script-location divergence, and
-// `env` for the one #1020 case that has to put back a variable ENV scrubs —
-// that scrub is what keeps every other case here deterministic, so the opt-in
-// is per-call rather than a hole in ENV.
+// invocation from inside the checkout looks like — and HOME set to `root`'s
+// own linked install, so the tree certified is that checkout. `cwd` is
+// overridable for the tests that specifically exercise cwd-vs-script-location
+// divergence, and `env` for HOME and for the one #1020 case that has to put
+// back a variable ENV scrubs — that scrub is what keeps every other case here
+// deterministic, so the opt-in is per-call rather than a hole in ENV.
 const run = (root, args = [], { cwd = root, env = {} } = {}) =>
   spawnSync(join(root, SET, "scripts", "instruments.sh"), args, {
     cwd,
-    env: { ...ENV, ...env },
+    env: { ...ENV, HOME: HOMES.get(root) ?? NO_INSTALL, ...env },
     encoding: "utf8",
   });
+
+// Runs this checkout's instruments.sh from `cwd` under `home` — the shape for
+// an Install root that is not a fixture checkout's own `plugin/`.
+const runAt = (cwd, home, args = []) =>
+  spawnSync("sh", [SCRIPT, ...args], { cwd, env: { ...ENV, HOME: home }, encoding: "utf8" });
 
 const pin = (root) => {
   const r = run(root, ["--pin"]);
@@ -300,7 +363,7 @@ test("a checkout with no tracked file under the set refuses to certify it", (t) 
   writeFileSync(join(root, "only.md"), "x\n");
   git(root, "add", "only.md");
   git(root, "commit", "-qm", "fixture");
-  const r = run(root, ["--pin"]);
+  const r = run(root, ["--pin"], { env: { HOME: linkHome(t, join(root, SET)) } });
   assert.equal(r.status, 2);
   assert.match(r.stderr, /empty instrument set/);
 });
@@ -658,11 +721,13 @@ test("a commit that changes no byte in the set still exits 0 and prints nothing 
 });
 
 // ---------------------------------------------------------------------------
-// CWD CONTRACT (#1337). The audited repository comes from $PWD (or --repo),
-// never from where the invoked copy of instruments.sh happens to live. Every
-// test below places the SCRIPT somewhere other than the repo it must audit,
-// which the tests above never do — proving the resolution is cwd-driven, not
-// merely untested against $0.
+// CWD CONTRACT (#1337). The state home — the checkout whose `.fleet/` holds
+// the baseline — comes from $PWD (or --repo), never from where the invoked
+// copy of instruments.sh happens to live; the tree it certifies is the
+// Install root under $HOME. Every test below places the SCRIPT somewhere
+// other than the repo whose baseline it must use, which the tests above never
+// do — proving the state-home resolution is cwd-driven, not merely untested
+// against $0.
 // ---------------------------------------------------------------------------
 
 // A plugin-cache-shaped fixture: instruments.sh nested several directories
@@ -684,15 +749,16 @@ function foreignAncestorCache(t) {
   return { foreign, script };
 }
 
-test("(1) run from an installed cache nested in a foreign repo, cwd inside a separate repo, audits the cwd repo", (t) => {
+test("(1) run from an installed cache nested in a foreign repo, cwd inside a separate repo, keeps its baseline in the cwd repo", (t) => {
   const cwdRepo = repo(t);
   const { foreign, script } = foreignAncestorCache(t);
-  const r = spawnSync(script, ["--pin"], { cwd: cwdRepo, env: ENV, encoding: "utf8" });
+  const r = spawnSync(script, ["--pin"], { cwd: cwdRepo, env: { ...ENV, HOME: HOMES.get(cwdRepo) }, encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
-  // The baseline path it reports names the cwd repo, not the cache's own tree.
+  // The tree it reports is the Install root — here the cwd repo, linked —
+  // never the cache the script itself ran out of.
   assert.match(r.stderr, /pinned/);
   assert.ok(
-    r.stderr.includes(`over ${cwdRepo} (`),
+    r.stderr.includes(`over linked-checkout ${cwdRepo} (`),
     `expected the pin report to name ${cwdRepo}, got: ${r.stderr}`,
   );
   assert.ok(existsSync(join(cwdRepo, ".fleet", "instruments.sha")));
@@ -711,7 +777,7 @@ test("(2) cwd outside any git repository refuses, non-zero, and writes nothing a
   assert.deepEqual(findFleetDirs(foreign), []);
 });
 
-test("(3) --repo audits the named repository regardless of the working directory", (t) => {
+test("(3) --repo names the state home regardless of the working directory", (t) => {
   const target = repo(t);
   const elsewhere = realpathSync(mkdtempSync(join(tmpdir(), "instruments-elsewhere-")));
   t.after(() => rmSync(elsewhere, { recursive: true, force: true }));
@@ -728,10 +794,10 @@ test("(3) --repo audits the named repository regardless of the working directory
 
   // And the reverse: cwd IS a DIFFERENT repo but --repo points at the
   // already-pinned target — the flag wins either way, not merely when it
-  // agrees with cwd, and the check reports the target's own digest, not
-  // anything derived from `other`.
+  // agrees with cwd, and the check reads the target's own baseline, not
+  // anything under `other`, against the same Install root.
   const other = repo(t);
-  const r2 = run(other, ["--repo", target]);
+  const r2 = run(other, ["--repo", target], { env: { HOME: HOMES.get(target) } });
   assert.equal(r2.status, 0, r2.stderr);
   assert.equal(r2.stdout.trim(), pinnedDigest);
   assert.deepEqual(findFleetDirs(other), []);
@@ -772,7 +838,7 @@ test("(4) --pin from a directory nested inside a foreign git repo never writes i
 
   const r = spawnSync(script, ["--pin"], {
     cwd: nestedDir,
-    env: ENV,
+    env: { ...ENV, HOME: linkHome(t, join(nestedDir, "plugin")) },
     encoding: "utf8",
   });
   assert.equal(r.status, 0, r.stderr);
@@ -827,16 +893,17 @@ test("(5) an ambient GIT_WORK_TREE cannot certify a tampered tree from a clean t
     "and it must refuse for the real reason rather than tripping over the variable");
 });
 
-// --- #2284: the audited tree and the state home may be different checkouts ---
+// --- #3845: the certified tree is the live Install root ---
 //
-// A fleet running in a workspace that does not track `plugin/…` (installed
-// plugin, not vendored) has no instrument set of its own: every gate leg that
-// hashed cwd died on the empty-set refusal, and a correctly-labelled PR could
-// never merge because `merge-gate.mjs`'s instruments leg could only ever read
-// the workspace tree. The fix names both trees: `--pin --audit <path>`
-// certifies a checkout that DOES track the set and records its toplevel beside
-// the digest, in the workspace's own `.fleet/`; a check reads the baseline
-// first and audits the RECORDED tree, never cwd's.
+// fleet-run executes `<Install root>/scripts/<name>` and omp loads the
+// runbooks from the same tree, so that is the tree the pin certifies — never
+// the checkout the run stands in, which only `.fleet/` is taken from. Three
+// install kinds, told apart the way fleet-provenance tells them: a real
+// directory (npm-install) and a link into omp's plugin cache
+// (marketplace-install) are hashed file by file; any other link
+// (linked-checkout) must point at a checkout's `plugin/` and is hashed as that
+// checkout, exactly as a checkout always was. The check compares the
+// baseline's `root=` with the live root and never follows it.
 
 // A consumer workspace: a real git checkout with no plugin/ tree at all.
 function wsRepo(t) {
@@ -849,146 +916,273 @@ function wsRepo(t) {
   return root;
 }
 
-test("--pin --audit certifies another checkout, records its root beside the digest, and a later check follows it", (t) => {
-  const plugin = repo(t);
-  const ws = wsRepo(t);
+const baselineOf = (dir) => readFileSync(join(dir, ".fleet", "instruments.sha"), "utf8");
+const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+const rootChanged = (live, kind, rec) =>
+  `instruments: Install root now resolves to ${live} (${kind}), pinned ${rec} — the installed plugin changed under this run; the maintainer adopts it (re-pin) or restores the pinned install\n`;
 
-  const r = run(plugin, ["--pin", "--audit", plugin], { cwd: ws });
+test("a package install pins its realpath and version from a workspace that tracks no plugin/, and a missing workflows/ is tolerated", (t) => {
+  const { home, pkg } = npmHome(t, "3.102.7");
+  assert.equal(existsSync(join(pkg, "workflows")), false, "fixture: the package has no workflows/");
+  const ws = wsRepo(t);
+  const r = runAt(ws, home, ["--pin"]);
   assert.equal(r.status, 0, r.stderr);
   const digest = r.stdout.trim();
   assert.match(digest, /^[0-9a-f]{64}$/);
-  assert.match(r.stderr, new RegExp(`pinned ${digest} over`));
-
-  // The STATE lives in the workspace — every later reader finds it without
-  // configuration — and it is three lines: the digest first (a reader that
-  // knows only the old shape still gets it), the audited root second, the
-  // audited tree's HEAD third — the plugin's, not the workspace's.
-  const lines = readFileSync(join(ws, ".fleet", "instruments.sha"), "utf8").split("\n");
-  assert.equal(lines[0], digest);
-  assert.equal(lines[1], `root=${plugin}`);
-  assert.equal(lines[2], `commit=${git(plugin, "rev-parse", "HEAD")}`);
-  assert.notEqual(lines[2], `commit=${git(ws, "rev-parse", "HEAD")}`);
-  assert.equal(lines[3], "");
-  assert.equal(lines.length, 4, "three lines and the trailing newline, nothing else");
-  // The audited tree gains no state of its own; a `--pin` is not allowed to
-  // write into the tree it merely reads.
-  assert.deepEqual(findFleetDirs(plugin), []);
-
-  // A bare check from the workspace audits the RECORDED tree, not cwd's:
-  // identical bytes elsewhere make no difference — the verdict travels with
-  // the digest.
-  const ok = run(plugin, [], { cwd: ws });
+  assert.equal(r.stdout, `${digest}\n`, "stdout is the digest alone");
+  assert.equal(baselineOf(ws), `${digest}\nroot=${pkg}\nversion=3.102.7\n`);
+  assert.equal(r.stderr, `instruments: pinned ${digest} over npm-install ${pkg} (version 3.102.7)\n`);
+  assert.deepEqual(findFleetDirs(home), [], "the certified tree gains no state of its own");
+  const ok = runAt(ws, home);
   assert.equal(ok.status, 0, ok.stderr);
-  assert.equal(ok.stdout.trim(), digest);
-
-  // Tampering the plugin tree is what the gate exists to catch, and now the
-  // catch reaches across workspaces: exit 1, the refusal naming the change.
-  writeFileSync(join(plugin, SET, "scripts", "ci-state.mjs"), "console.log('TAMPERED');\n");
-  const hit = run(plugin, [], { cwd: ws });
-  assert.equal(hit.status, 1, `a tampered instrument must still refuse across the seam\n${hit.stdout}${hit.stderr}`);
-  assert.match(hit.stderr, /instrument set CHANGED/);
-  // The cold-path diagnostics name the AUDITED tree, which is the one the
-  // verdict is about — `git status` here must show the tampered file.
-  assert.match(hit.stderr, new RegExp(` M ${SET}/scripts/ci-state\\.mjs`));
+  assert.equal(ok.stdout, `${digest}\n`);
 });
 
-test("a bare --pin in a plugin-less workspace still refuses — naming the tree once is the only way through", (t) => {
-  const plugin = repo(t);
+test("a package with no readable version pins without a version= line, and says so", (t) => {
+  const { home, pkg } = npmHome(t);
+  // A nested "version" must not answer for the package.
+  writeFileSync(join(pkg, "package.json"), `{"name": "@feigi/fleet-ctl", "engines": {"version": "9.9.9"}}\n`);
   const ws = wsRepo(t);
-  const r = run(plugin, ["--pin"], { cwd: ws });
-  assert.equal(r.status, 2, r.stdout + r.stderr);
-  assert.match(r.stderr, /empty instrument set/);
-  assert.match(r.stderr, new RegExp(`under ${ws} for`),
-    "the refusal names the workspace tree it found empty, which is what tells the operator to pass --audit");
-  assert.deepEqual(findFleetDirs(ws), []);
+  const r = runAt(ws, home, ["--pin"]);
+  assert.equal(r.status, 0, r.stderr);
+  const digest = r.stdout.trim();
+  assert.equal(baselineOf(ws), `${digest}\nroot=${pkg}\n`);
+  assert.equal(r.stderr, `instruments: pinned ${digest} over npm-install ${pkg} (version ?)\n`);
+  rmSync(join(pkg, "package.json"));
+  assert.equal(runAt(ws, home).status, 0, "no package.json at all is no refusal either");
 });
 
-test("--audit without --pin refuses: a check audits the tree its baseline names, never one its caller names", (t) => {
-  const plugin = repo(t);
+test("a one-byte change under a package's scripts/ is exit 1, naming the versions and printing no git output", (t) => {
+  const { home, pkg } = npmHome(t, "3.102.7");
   const ws = wsRepo(t);
-  const pinned = run(plugin, ["--pin", "--audit", plugin], { cwd: ws });
-  assert.equal(pinned.status, 0, pinned.stderr);
-  const baseline = readFileSync(join(ws, ".fleet", "instruments.sha"), "utf8");
-  // If a check accepted `--audit`, whoever can spell a path could move the
-  // gate onto a tree they control — the same repointing power a writable
-  // `.fleet/` must not additionally buy.
-  const r = run(plugin, ["--audit", plugin], { cwd: ws });
-  assert.equal(r.status, 2, r.stdout + r.stderr);
-  assert.match(r.stderr, /only accepted with --pin/);
-  const empty = run(plugin, ["--pin", "--audit", ""], { cwd: ws });
+  const digest = runAt(ws, home, ["--pin"]).stdout.trim();
+  writeFileSync(join(pkg, "scripts", "ci-state.mjs"), "console.log('greeN');\n");
+  const r = runAt(ws, home);
+  assert.equal(r.status, 1, r.stderr);
+  assert.notEqual(r.stdout.trim(), digest);
+  assert.equal(r.stderr, [
+    `instruments: instrument set CHANGED under this run — expected ${digest}`,
+    "instruments: refuse the gate and report. Do NOT re-read the instrument.",
+    `instruments: npm-install ${pkg}: version 3.102.7 pinned, 3.102.7 now`,
+    "instruments: the installed package changed or was reinstalled — the maintainer adopts it (re-pin) or restores version 3.102.7",
+    "",
+  ].join("\n"));
+
+  // A reinstall of another release in place: the same root, other bytes.
+  writePackage(pkg, "3.103.0");
+  writeFileSync(join(pkg, "scripts", "ci-state.mjs"), "console.log('upgraded');\n");
+  const upgraded = runAt(ws, home);
+  assert.equal(upgraded.status, 1, upgraded.stderr);
+  assert.match(upgraded.stderr, /: version 3\.102\.7 pinned, 3\.103\.0 now$/m);
+  assert.match(upgraded.stderr, /restores version 3\.102\.7$/m);
+});
+
+test("under a package install the workspace checkout's own plugin/ is not the set, and moving the workspace with its .fleet/ does not refuse", (t) => {
+  const { home } = npmHome(t);
+  const ws = repo(t); // a workspace that DOES track plugin/
+  const digest = runAt(ws, home, ["--pin"]).stdout.trim();
+  writeFileSync(join(ws, SET, "scripts", "ci-state.mjs"), "console.log('TAMPERED');\n");
+  const r = runAt(ws, home);
+  assert.equal(r.status, 0, `the checkout is not what executes, so its bytes are not the verdict\n${r.stderr}`);
+  assert.equal(r.stdout, `${digest}\n`);
+
+  const moved = `${ws}-moved`;
+  t.after(() => rmSync(moved, { recursive: true, force: true }));
+  renameSync(ws, moved);
+  const after = runAt(moved, home);
+  assert.equal(after.status, 0, `the baseline records the Install root, not the workspace\n${after.stderr}`);
+  assert.equal(after.stdout, `${digest}\n`);
+});
+
+test("files mode: an added file under skills/ and a changed dotfile are exit 1; a changed package.json is exit 0", (t) => {
+  const { home, pkg } = npmHome(t);
+  const ws = wsRepo(t);
+  writeFileSync(join(pkg, "scripts", ".env"), "A=1\n");
+  const digest = runAt(ws, home, ["--pin"]).stdout.trim();
+
+  writeFileSync(join(pkg, "package.json"), `${JSON.stringify({ name: "@feigi/fleet-ctl", version: "3.102.7", description: "rewritten" })}\n`);
+  const pj = runAt(ws, home);
+  assert.equal(pj.status, 0, `package.json is outside the set\n${pj.stderr}`);
+  assert.equal(pj.stdout, `${digest}\n`);
+
+  writeFileSync(join(pkg, "scripts", ".env"), "A=2\n");
+  assert.equal(runAt(ws, home).status, 1, "a dotfile is in the set");
+  writeFileSync(join(pkg, "scripts", ".env"), "A=1\n");
+  assert.equal(runAt(ws, home).status, 0, "control: restoring the dotfile restores the pin");
+
+  writeFileSync(join(pkg, "skills", "run-team", "extra.md"), "# smuggled\n");
+  assert.equal(runAt(ws, home).status, 1, "an added file under skills/ is in the set — nothing in a package is untracked");
+});
+
+test("files mode: a package with none of the five directories, or only empty ones, refuses to pin, exit 2", (t) => {
+  const home = fakeHome(t);
+  const pkg = entryOf(home);
+  mkdirSync(pkg);
+  writeFileSync(join(pkg, "package.json"), `{"version": "1.0.0"}\n`);
+  writeFileSync(join(pkg, "README.md"), "top level only\n");
+  const ws = wsRepo(t);
+  const message = `instruments: no file under ${pkg} for: commands scripts skills agents workflows — refusing to certify an empty instrument set\n`;
+  const none = runAt(ws, home, ["--pin"]);
+  assert.equal(none.status, 2, none.stdout + none.stderr);
+  assert.equal(none.stderr, message);
+  mkdirSync(join(pkg, "scripts"));
+  const empty = runAt(ws, home, ["--pin"]);
   assert.equal(empty.status, 2, empty.stdout + empty.stderr);
-  assert.match(empty.stderr, /--audit requires a non-empty path/);
-  // Content, not directory presence: an empty-string `--pin --audit` that
-  // got far enough to truncate the baseline before refusing would leave the
-  // .fleet directory standing and read as untouched here.
-  assert.equal(readFileSync(join(ws, ".fleet", "instruments.sha"), "utf8"), baseline,
-    "neither refusal rewrote the baseline");
+  assert.equal(empty.stderr, message);
+  assert.deepEqual(findFleetDirs(ws), [], "a refused pin writes no baseline");
 });
 
-test("a recorded root that is no longer a checkout, or no longer THAT checkout, refuses with exit 2 — never a verdict about a different tree", (t) => {
-  const plugin = repo(t);
+test("files mode: a symlink is hashed by its target's bytes; a dangling one, or one to a directory, refuses exit 2", (t) => {
+  const { home, pkg } = npmHome(t);
   const ws = wsRepo(t);
-  const digest = run(plugin, ["--pin", "--audit", plugin], { cwd: ws }).stdout.trim();
+  writeFileSync(join(pkg, "lib.mjs"), "export const x = 1;\n");
+  const link = join(pkg, "scripts", "lib.mjs");
+  symlinkSync("../lib.mjs", link);
+  const digest = runAt(ws, home, ["--pin"]).stdout.trim();
 
-  // Deleted or de-repo'd: the pinned tree is simply gone.
-  rmSync(join(plugin, ".git"), { recursive: true, force: true });
-  const gone = run(plugin, [], { cwd: ws });
-  assert.equal(gone.status, 2, gone.stdout + gone.stderr);
-  assert.match(gone.stderr, /is not a git checkout/);
+  writeFileSync(join(pkg, "lib.mjs"), "export const x = 2;\n");
+  assert.equal(runAt(ws, home).status, 1, "the link's target changed, so the set did");
+  writeFileSync(join(pkg, "lib.mjs"), "export const x = 1;\n");
+  // The link's own text is not what is hashed: a regular file holding the
+  // target's bytes in its place digests the same.
+  rmSync(link);
+  writeFileSync(link, "export const x = 1;\n");
+  const same = runAt(ws, home);
+  assert.equal(same.status, 0, same.stderr);
+  assert.equal(same.stdout, `${digest}\n`);
 
-  // Moved: the recorded path now sits INSIDE another checkout, so
-  // `--show-toplevel` answers with a different tree than the one pinned. An
-  // attacker repointing root= at one of their own checkouts gets the same
-  // door: to certify a decoy they must make it resolve to the recorded path.
-  const outer = repo(t);
-  const sub = join(outer, "sub");
-  mkdirSync(sub);
-  writeFileSync(join(ws, ".fleet", "instruments.sha"), `${digest}\nroot=${sub}\n`);
-  const moved = run(outer, [], { cwd: ws });
-  assert.equal(moved.status, 2, moved.stdout + moved.stderr);
-  assert.match(moved.stderr, /audited tree moved/);
+  symlinkSync("missing.mjs", join(pkg, "scripts", "gone.mjs"));
+  const dangling = runAt(ws, home);
+  assert.equal(dangling.status, 2, dangling.stdout + dangling.stderr);
+  assert.match(dangling.stderr, /gone\.mjs/);
+  assert.match(dangling.stderr, /could not hash every tracked file/);
+  assert.equal(dangling.stdout, "");
+  rmSync(join(pkg, "scripts", "gone.mjs"));
+
+  symlinkSync("../skills", join(pkg, "scripts", "dir-link"));
+  const dir = runAt(ws, home, ["--pin"]);
+  assert.equal(dir.status, 2, dir.stdout + dir.stderr);
+  assert.match(dir.stderr, /dir-link/);
+  assert.equal(baselineOf(ws).split("\n")[0], digest, "a refused re-pin leaves the baseline it could not replace");
 });
 
-test("a legacy one-line baseline still audits the state home — the recorded root is an addition, not a requirement", (t) => {
+test("a link into $HOME/.omp/plugins/cache/ is a marketplace install, pinned in files mode", (t) => {
+  const home = fakeHome(t);
+  const cache = join(home, ".omp", "plugins", "cache", "fleet-ctl", "3.102.7");
+  writePackage(cache, "3.102.7");
+  symlinkSync(cache, entryOf(home));
+  const ws = wsRepo(t);
+  const r = runAt(ws, home, ["--pin"]);
+  assert.equal(r.status, 0, r.stderr);
+  const digest = r.stdout.trim();
+  assert.equal(baselineOf(ws), `${digest}\nroot=${cache}\nversion=3.102.7\n`);
+  assert.equal(r.stderr, `instruments: pinned ${digest} over marketplace-install ${cache} (version 3.102.7)\n`);
+  // Files mode digests the payload, not where it is installed.
+  const npm = npmHome(t, "3.102.7");
+  assert.equal(runAt(wsRepo(t), npm.home, ["--pin"]).stdout.trim(), digest);
+});
+
+test("a linked checkout's pin is a checkout's pin byte for byte: the tracked set's digest, its toplevel, its HEAD", (t) => {
   const root = repo(t);
-  const digest = pin(root);
-  // Rewrite the baseline into the pre-cross-workspace shape: one line.
-  writeFileSync(join(root, ".fleet", "instruments.sha"), `${digest}\n`);
-  assert.equal(run(root).status, 0, "the check must not start refusing baselines it used to read");
-  writeFileSync(join(root, SET, "scripts", "ci-state.mjs"), "console.log('TAMPERED');\n");
-  assert.equal(run(root).status, 1, "and it must still catch the tamper it caught before");
+  const r = run(root, ["--pin"]);
+  assert.equal(r.status, 0, r.stderr);
+  // The digest recomputed from its definition: `shasum -a 256` over every
+  // tracked file under the five `plugin/…` pathspecs, in `ls-files` order,
+  // then the digest of those lines.
+  const pathspecs = ["commands", "scripts", "skills", "agents", "workflows"].map((d) => `${SET}/${d}`);
+  const listed = git(root, "ls-files", "-z", "--", ...pathspecs).split("\0").filter(Boolean);
+  const lines = listed.map((p) => `${sha256(readFileSync(join(root, p)))}  ${p}`);
+  const digest = sha256(Buffer.from(`${lines.join("\n")}\n`));
+  const head = git(root, "rev-parse", "HEAD");
+  assert.equal(r.stdout, `${digest}\n`);
+  assert.equal(baselineOf(root), `${digest}\nroot=${root}\ncommit=${head}\n`);
+  assert.equal(r.stderr, `instruments: pinned ${digest} over linked-checkout ${root} (commit ${head})\n`);
 });
 
-test("a bare re-pin after a --audit pin re-certifies the RECORDED tree, not cwd's — the controller's tooling-fix path", (t) => {
-  const plugin = repo(t);
-  const ws = wsRepo(t);
-  run(plugin, ["--pin", "--audit", plugin], { cwd: ws });
-  writeFileSync(join(plugin, SET, "skills", "run-team", "SKILL.md"), "# fixed mid-run\n");
-  // The SKILL says: fix the tooling, then re-pin with the same bare
-  // `instruments.sh --pin`. If the re-pin hashed cwd instead, this would die
-  // on the empty-set refusal in the workspace — the controller could not
-  // complete its one legitimate re-pin, and the run would strand.
-  const again = run(plugin, ["--pin"], { cwd: ws });
-  assert.equal(again.status, 0, again.stdout + again.stderr);
-  const lines = readFileSync(join(ws, ".fleet", "instruments.sha"), "utf8").split("\n");
-  assert.equal(lines[1], `root=${plugin}`, "the re-pin must keep certifying the plugin tree");
-  assert.equal(run(plugin, [], { cwd: ws }).status, 0, "and the check now passes over the fixed text");
+test("a package's pin is its files-mode digest byte for byte: every file under the five directories, in byte order, then the digest of those lines", (t) => {
+  const { home, pkg } = npmHome(t, "3.102.7");
+  // `B.mjs` sorts before `a.mjs` in byte order and after it in a locale
+  // collation, and the list as a whole reads differently backwards, so only
+  // the byte-order sort the digest is defined over reproduces it.
+  writeFileSync(join(pkg, "scripts", "B.mjs"), "upper\n");
+  writeFileSync(join(pkg, "scripts", "a.mjs"), "lower\n");
+  const r = runAt(wsRepo(t), home, ["--pin"]);
+  assert.equal(r.status, 0, r.stderr);
+  // The digest recomputed from its definition: `shasum -a 256` over every
+  // file under the component directories, paths relative to the realpath,
+  // in byte order, then the digest of those lines.
+  const listed = [
+    "agents/fleet-finisher.agent.md",
+    "commands/run-team.md",
+    "scripts/B.mjs",
+    "scripts/a.mjs",
+    "scripts/ci-state.mjs",
+    "skills/run-team/SKILL.md",
+  ];
+  const lines = listed.map((p) => `${sha256(readFileSync(join(pkg, p)))}  ${p}`);
+  const digest = sha256(Buffer.from(`${lines.join("\n")}\n`));
+  assert.equal(r.stdout, `${digest}\n`);
 });
 
-test("--audit on a checkout that tracks its own set is refused — the pointer exists for set-less homes only", (t) => {
-  const home = repo(t);
-  const decoy = repo(t); // byte-identical, so its digest would MATCH a home pin
-  const r = run(home, ["--pin", "--audit", decoy]);
-  assert.equal(r.status, 2, r.stdout + r.stderr);
-  assert.match(r.stderr, /tracks no instrument set/);
-  assert.deepEqual(findFleetDirs(home), [], "a refused pin writes no baseline");
+test("a link that is not a checkout's plugin/ refuses exit 2 at pin and at check — the checkout's root, a nested copy, a directory outside any checkout", (t) => {
+  const root = repo(t);
+  const nested = join(root, "vendor", "plugin");
+  cpSync(join(root, SET), nested, { recursive: true });
+  const outside = realpathSync(mkdtempSync(join(tmpdir(), "instruments-nocheckout-")));
+  t.after(() => rmSync(outside, { recursive: true, force: true }));
+  cpSync(join(root, SET), join(outside, "plugin"), { recursive: true });
+  pin(root); // a good baseline, so the check reaches the resolution
+  const before = baselineOf(root);
+  for (const [what, to] of [["the checkout's root", root], ["a nested copy", nested], ["a directory outside any checkout", join(outside, "plugin")]]) {
+    const home = linkHome(t, to);
+    for (const args of [["--pin"], []]) {
+      const r = run(root, args, { env: { HOME: home } });
+      assert.equal(r.status, 2, `${what}, ${args.join(" ") || "check"}: ${r.stdout}${r.stderr}`);
+      assert.equal(r.stderr, `instruments: Install root ${to} is not the plugin/ directory of a git checkout — a linked install must point at <checkout>/plugin\n`);
+      assert.equal(r.stdout, "");
+      assert.equal(baselineOf(root), before, "a refusal rewrites nothing");
+    }
+  }
 });
 
-test("a forged baseline pointing a set-tracking home at a matching clone alarms exit 2 — the #1020 twin through the file", (t) => {
+test("an Install root that changed under the run — package to link, link to package, a link retargeted — refuses exit 2 naming both, and hashes nothing", (t) => {
+  const root = repo(t);
+  const other = repo(t);
+  const { home: npm, pkg } = npmHome(t);
+  // Each live tree is booby-trapped so that hashing it could only fail loudly:
+  // a check that hashed before comparing would print that failure instead.
+  const trapLink = (checkout) => {
+    const f = join(checkout, SET, "scripts", "ci-state.mjs");
+    renameSync(f, `${f}.away`);
+    return () => renameSync(`${f}.away`, f);
+  };
+  const trapPackage = () => {
+    const f = join(pkg, "scripts", "trap.mjs");
+    symlinkSync("nowhere.mjs", f);
+    return () => rmSync(f);
+  };
+  const cases = [
+    ["package to link", npm, HOMES.get(root), pkg, root, "linked-checkout", () => trapLink(root)],
+    ["link to package", HOMES.get(root), npm, root, pkg, "npm-install", trapPackage],
+    ["link retargeted", HOMES.get(root), HOMES.get(other), root, other, "linked-checkout", () => trapLink(other)],
+  ];
+  for (const [what, pinnedHome, liveHome, pinnedRoot, liveRoot, liveKind, trap] of cases) {
+    const pinned = run(root, ["--pin"], { env: { HOME: pinnedHome } });
+    assert.equal(pinned.status, 0, `${what}: fixture pin\n${pinned.stderr}`);
+    const untrap = trap();
+    const r = run(root, [], { env: { HOME: liveHome } });
+    untrap();
+    assert.equal(r.status, 2, `${what}: ${r.stdout}${r.stderr}`);
+    assert.equal(r.stderr, rootChanged(liveRoot, liveKind, pinnedRoot), what);
+    assert.equal(r.stdout, "", `${what}: no digest — nothing was hashed`);
+  }
+});
+
+test("a forged root= naming a byte-identical clone refuses exit 2, and the clone is never certified", (t) => {
   // The attack review measured: tamper the workspace's instrument (uncommitted),
   // keep the HONEST run-start digest on line 1, set root= to a pristine clone
-  // whose bytes hash to exactly that digest. A check that trusted the pointer
-  // exits 0 over a tree nobody read; the old script, hashing cwd, exited 1.
+  // whose bytes hash to exactly that digest. A check that followed the
+  // pointer would exit 0 over a tree nobody read.
   const home = repo(t);
   const digest = pin(home);
   const clone = repo(t);
@@ -996,21 +1190,66 @@ test("a forged baseline pointing a set-tracking home at a matching clone alarms 
   writeFileSync(join(home, SET, "scripts", "ci-state.mjs"), "console.log('TAMPERED');\n");
   writeFileSync(join(home, ".fleet", "instruments.sha"), `${digest}\nroot=${clone}\n`);
   const r = run(home);
-  assert.equal(r.status, 2, `a foreign root on a set-tracking home must alarm, not certify the clone\n${r.stdout}${r.stderr}`);
-  assert.match(r.stderr, /foreign audited tree/);
+  assert.equal(r.status, 2, `a forged root= must refuse, not certify the clone\n${r.stdout}${r.stderr}`);
+  assert.equal(r.stdout, "", "no digest: nothing was hashed, the clone least of all");
+  assert.equal(r.stderr, rootChanged(home, "linked-checkout", clone));
 });
 
-test("a bare --pin over an unreadable baseline in a set-less workspace refuses rather than overwrite the recorded root blind", (t) => {
-  const plugin = repo(t);
-  const ws = wsRepo(t);
-  run(plugin, ["--pin", "--audit", plugin], { cwd: ws });
-  const base = join(ws, ".fleet", "instruments.sha");
-  const before = readFileSync(base, "utf8");
-  chmodSync(base, 0o000);
-  const r = run(plugin, ["--pin"], { cwd: ws });
-  chmodSync(base, 0o644);
+test("a legacy one-line baseline refuses exit 2 — it records no root to compare the live one with", (t) => {
+  const root = repo(t);
+  const digest = pin(root);
+  writeFileSync(join(root, ".fleet", "instruments.sha"), `${digest}\n`);
+  const r = run(root);
   assert.equal(r.status, 2, r.stdout + r.stderr);
-  assert.match(r.stderr, /exists but is unreadable/);
-  assert.equal(readFileSync(base, "utf8"), before,
-    "the refusal must leave the pointer it could not read intact");
+  assert.equal(r.stderr, rootChanged(root, "linked-checkout", "<none recorded>"));
+  assert.equal(r.stdout, "");
+});
+
+test("an Install root that cannot be resolved refuses exit 2, never 1 — no entry, a dangling link, HOME unset or empty", (t) => {
+  const root = repo(t);
+  pin(root);
+  const before = baselineOf(root);
+  const empty = fakeHome(t);
+  const dangling = fakeHome(t);
+  symlinkSync(join(dangling, "gone"), entryOf(dangling));
+  const unset = "instruments: HOME is unset — cannot resolve the Install root\n";
+  const cases = [
+    ["no entry", { HOME: empty }, `instruments: no omp plugin "@feigi/fleet-ctl" at ${entryOf(empty)}\n`],
+    ["a dangling link", { HOME: dangling }, `instruments: omp plugin "@feigi/fleet-ctl" link ${entryOf(dangling)} is dangling\n`],
+    ["HOME unset", { HOME: undefined }, unset],
+    ["HOME empty", { HOME: "" }, unset],
+  ];
+  for (const [what, env, message] of cases) {
+    for (const args of [[], ["--pin"]]) {
+      const r = run(root, args, { env });
+      assert.equal(r.status, 2, `${what}, ${args.join(" ") || "check"}: ${r.stdout}${r.stderr}`);
+      assert.equal(r.stderr, message, what);
+      assert.equal(baselineOf(root), before, `${what}: a refusal rewrites nothing`);
+    }
+  }
+});
+
+test("root= is the Install root fleet-run resolves under the same HOME — the package itself, or the linked checkout's toplevel", (t) => {
+  const fleetRun = fileURLToPath(new URL("../plugin/scripts/fleet-run", import.meta.url));
+  const resolverRoot = (home) => {
+    const r = spawnSync(process.execPath, [fleetRun, "--root"], { env: { ...ENV, HOME: home }, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    return r.stdout.trim();
+  };
+  const { home } = npmHome(t);
+  const ws = wsRepo(t);
+  assert.equal(runAt(ws, home, ["--pin"]).status, 0);
+  assert.equal(baselineOf(ws).split("\n")[1], `root=${resolverRoot(home)}`);
+
+  const root = repo(t);
+  pin(root);
+  assert.equal(baselineOf(root).split("\n")[1], `root=${git(resolverRoot(HOMES.get(root)), "rev-parse", "--show-toplevel")}`);
+});
+
+test("--audit is gone: it refuses as an unknown argument and writes nothing", (t) => {
+  const root = repo(t);
+  const r = run(root, ["--pin", "--audit", root]);
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /usage: instruments\.sh \[--pin\] \[--repo <path>\]/);
+  assert.deepEqual(findFleetDirs(root), []);
 });

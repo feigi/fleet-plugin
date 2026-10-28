@@ -313,6 +313,7 @@ The directory omp actually loaded the plugin from — the realpath of its
 `node_modules/@feigi/fleet-ctl` package entry, the one path every install kind
 (marketplace, link, npm) places. Never a path any artefact may write down:
 it is version- or checkout-dependent and changes across install kinds.
+One exception, evidence: the instrument pin's `root=` line and phase 0's pin line record the root they certified, a check compares it with the live root, and nothing ever follows the recorded path.
 _Avoid_: cache dir, plugin dir, install path
 
 **Resolver**:

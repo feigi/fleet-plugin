@@ -4,7 +4,7 @@
 grilling session against fresh measurements on omp 18.4.4. Amended by #1381:
 run-team-help deleted — on omp 18.8.5 the picker hides skill:run-team through a
 name tie with plugin commands, not through disable-model-invocation; /team and
-/skill:run surface it.
+/skill:run surface it. Amended by #3845: Decision 4 — `instruments.sh` also resolves the Install root, the same path the same way, to certify the tree the Resolver executes; it records the root only as evidence a check compares against the live root, never as a path anything follows.
 
 ## Context
 

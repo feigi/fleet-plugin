@@ -1053,21 +1053,22 @@ test("--out that cannot be written → 2, and no verdict on stdout the file does
   assert.match(r.stderr, /cannot write --out/);
 });
 
-// --- #2284: the instruments root and the gh root are different checkouts ----
+// --- #2284/#3845: the instruments tree and the gh root are different trees ----
 //
 // The live incident: a fleet running in a consumer repo that does not track
 // `plugin/…`. Every leg but instruments was green; instruments.sh hashed the
 // workspace tree, found no tracked instrument, refused on the empty set, and
 // the gate exited 2 `instruments-unanswerable` forever — labelled PRs that
-// could never merge. The fix records the audited root inside the baseline at
-// pin time, so the SAME `--repo <workspace>` call the gate already makes
-// reads one tree's home and another tree's bytes. These cases run the REAL
-// instruments.sh beside the copied gate: the contract being proven is the two
-// scripts' handoff across that seam, and a stubbed child proves only the row
-// table — it can echo an exit code, never derive one from two trees.
+// could never merge. instruments.sh now certifies the Install root, so the
+// SAME `--repo <workspace>` call the gate already makes reads the workspace's
+// `.fleet/` and the installed plugin's bytes. These cases run the REAL
+// instruments.sh beside the copied gate, under a fixture HOME whose package
+// entry is the Install root: the contract being proven is the two scripts'
+// handoff across that seam, and a stubbed child proves only the row table —
+// it can echo an exit code, never derive one from two trees.
 
-// A checkout that carries the instrument set — the plugin's own repo, or an
-// install's cache — separate from every gate fixture's workspace repo.
+// A checkout that carries the instrument set — the plugin's own repo —
+// separate from every gate fixture's workspace repo.
 function pluginTree(t) {
   const dir = mktemp(t, "merge-gate-plugin-");
   git(dir, "init", "-q", "-b", "main");
@@ -1078,26 +1079,38 @@ function pluginTree(t) {
   return dir;
 }
 
+// A fixture HOME whose `@feigi/fleet-ctl` entry links to `to` — the Install
+// root every resolver reads — or, with no `to`, has no entry at all.
+function installHome(t, to) {
+  const home = mktemp(t, "merge-gate-home-");
+  const scope = join(home, ".omp", "plugins", "node_modules", "@feigi");
+  mkdirSync(scope, { recursive: true });
+  if (to) symlinkSync(to, join(scope, "fleet-ctl"));
+  return home;
+}
+
 // The phase-0 pin a controller runs from the plugin-less workspace: the
-// baseline lands in the WORKSPACE's .fleet/, the digest covers the PLUGIN's
-// tree, and the second line records which tree that was.
-function pinAcrossSeam({ repo, scripts }, plugin) {
-  const r = spawnSync("sh", [join(scripts, "instruments.sh"), "--pin", "--audit", plugin], {
+// baseline lands in the WORKSPACE's .fleet/, the digest covers the Install
+// root, and the second line records which root that was.
+function pinAcrossSeam({ repo, scripts }, home) {
+  const r = spawnSync("sh", [join(scripts, "instruments.sh"), "--pin"], {
     cwd: repo,
     encoding: "utf8",
-    env: cleanEnv(),
+    env: { ...cleanEnv(), HOME: home },
   });
   assert.equal(r.status, 0, `fixture pin failed: ${r.stderr}`);
   return r.stdout.trim();
 }
 
-test("a plugin-less workspace reaches a verdict: the gate audits the root the baseline records, gh legs on the workspace", (t) => {
+test("a plugin-less workspace reaches a verdict: the gate audits the Install root, gh legs on the workspace", (t) => {
   const plugin = pluginTree(t);
+  const home = installHome(t, join(plugin, "plugin"));
   let digest = null;
   const r = gate(t, {
     realInstruments: true,
+    env: { HOME: home },
     instrPre: (ws) => {
-      digest = pinAcrossSeam(ws, plugin);
+      digest = pinAcrossSeam(ws, home);
     },
   });
   assertRow(r, 0, "mergeable", null);
@@ -1108,26 +1121,40 @@ test("a plugin-less workspace reaches a verdict: the gate audits the root the ba
   );
 });
 
-test("tampering the recorded plugin tree still closes the gate across the seam: 2 instrument-set-changed", (t) => {
+test("tampering the Install root still closes the gate across the seam: 2 instrument-set-changed", (t) => {
   const plugin = pluginTree(t);
+  const home = installHome(t, join(plugin, "plugin"));
   const r = gate(t, {
     realInstruments: true,
+    env: { HOME: home },
     instrPre: (ws) => {
-      pinAcrossSeam(ws, plugin);
+      pinAcrossSeam(ws, home);
       writeFileSync(join(plugin, "plugin", "scripts", "probe.sh"), "echo TAMPERED\n");
     },
   });
   assertRow(r, 2, "unknown", "instrument-set-changed");
 });
 
-test("a plugin-less workspace with NO pin of any kind keeps its exit 2 — the refusal that says WHICH flag to pass", (t) => {
+test("an Install root that resolves elsewhere than the pin reaches the gate as 2 instruments-unanswerable", (t) => {
+  const plugin = pluginTree(t);
+  const other = pluginTree(t);
+  const pinned = installHome(t, join(plugin, "plugin"));
+  const r = gate(t, {
+    realInstruments: true,
+    env: { HOME: installHome(t, join(other, "plugin")) },
+    instrPre: (ws) => {
+      pinAcrossSeam(ws, pinned);
+    },
+  });
+  assertRow(r, 2, "unknown", "instruments-unanswerable");
+  assert.equal(r.json.instruments, null);
+});
+
+test("a plugin-less workspace with NO pin of any kind keeps its exit 2", (t) => {
   // The incident shape stays a refusal, never a silent pass: with no
-  // baseline there is no recorded root, the instruments leg answers nothing,
-  // and the gate lands on instruments-unanswerable. What changed is WHERE a
-  // run discovers this: the SKILL's phase-0 pin refuses once and names the
-  // empty tree, instead of dispatching finishers and merge bots into this
-  // leg forever.
-  const r = gate(t, { realInstruments: true });
+  // baseline the instruments leg answers nothing, and the gate lands on
+  // instruments-unanswerable.
+  const r = gate(t, { realInstruments: true, env: { HOME: installHome(t) } });
   assertRow(r, 2, "unknown", "instruments-unanswerable");
   assert.equal(r.json.instruments, null);
 });
