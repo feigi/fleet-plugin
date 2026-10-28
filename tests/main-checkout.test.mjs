@@ -970,11 +970,25 @@ test("a baseline commit present but unreadable under a chmod 000 fan-out dir is 
     git(dir, "gc", "-q", "--prune=now");
   }
   chmodSync(fanout, 0o000);
-  let c;
-  try { c = check(dir); } finally { chmodSync(fanout, 0o755); }
+  let c, probe;
+  try {
+    c = check(dir);
+    // The read headMove's probe makes, so the expected `why` follows what this
+    // git does with the unreadable object rather than which version it is.
+    probe = spawnSync("git", ["rev-parse", "-q", "--verify", `${recorded}^{commit}`], { cwd: dir, encoding: "utf8" });
+  } finally { chmodSync(fanout, 0o755); }
   assert.equal(c.state, "unknown");
   assert.equal(c.cause, "read");
-  assert.match(c.why, /^git rev-parse --verify exited 1: error: unable to open loose object/);
+  // Which read names the fault follows the probe's exit: through git 2.55 the
+  // `rev-parse --verify` probe exits 1 with the loose-object error on stderr
+  // and its own failure is the `why`; from 2.56 it exits 128, so the ancestry
+  // failure is kept, and that exits 128 itself. Both are could-not-look.
+  if (probe.status === 1) {
+    assert.match(c.why, /^git rev-parse --verify exited 1: error: unable to open loose object/);
+  } else {
+    assert.equal(probe.status, 128, `the probe must fail on the unreadable object; got ${probe.status} ${probe.stderr}`);
+    assert.match(c.why, /^git merge-base --is-ancestor exited 128/);
+  }
   assert.match(describe(c, []), /NEVER re-baseline over it/);
 });
 

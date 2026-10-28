@@ -635,12 +635,12 @@ fi
 #
 # The count above is only honest when the list can be trusted, and it cannot
 # always be. `git stash list` prints nothing at rc 0 for a reflog this process
-# cannot read (`chmod 000 .git/logs/refs/stash`), nothing at rc 1 for a stash
-# ref whose object is gone (`fatal: bad object refs/stash`), and nothing at rc 0
-# again for a `refs/stash` FILE this process cannot read (`chmod 000
-# .git/refs/stash`) — all measured, and none distinguishable from a genuinely
-# empty stash by the list alone, while `0` is the one value the runbook reads as
-# nothing to look at.
+# cannot read (`chmod 000 .git/logs/refs/stash`), nothing at a nonzero rc — 1 on
+# git <= 2.55, 128 on git >= 2.56 — for a stash ref whose object is gone
+# (`fatal: bad object refs/stash`), and nothing at rc 0 again for a `refs/stash`
+# FILE this process cannot read (`chmod 000 .git/refs/stash`) — all measured,
+# and none distinguishable from a genuinely empty stash by the list alone, while
+# `0` is the one value the runbook reads as nothing to look at.
 #
 # `show-ref` is the discriminator because its exit code separates "no such ref"
 # from "could not read the ref". Measured, git 2.50.1:
@@ -714,11 +714,12 @@ fi
 # A corrupt loose object behind a NON-TIP entry is one shape of that ceiling,
 # and it is not one, because git is loud about it. The reflog there is
 # intact, so `stash list` resolves the ref, prints the entries it could read,
-# says `fatal: loose object ... is corrupt` and exits 1 — a nonempty list at a
-# nonzero rc, a shape none of the rows above has, so `show-ref` agrees with the
-# ref and the cross-check has nothing to disagree with. The rc is the only
-# signal, which is why the list is captured rather than piped: `| wc -l` made
-# this statement's status `wc`'s, always 0, and git's own rc unrecoverable.
+# says `fatal: loose object ... is corrupt` and exits nonzero — 1 on git <= 2.55,
+# 128 on git >= 2.56; nothing below reads which — a nonempty list at a nonzero
+# rc, a shape none of the rows above has, so `show-ref` agrees with the ref and
+# the cross-check has nothing to disagree with. The rc is the only signal, which
+# is why the list is captured rather than piped: `| wc -l` made this statement's
+# status `wc`'s, always 0, and git's own rc unrecoverable.
 # Nothing else moves — the count is still the lines the list printed, its stderr
 # is still dropped here, and a list that succeeds is still read as a count.
 #
@@ -771,7 +772,7 @@ if [ "$stash" = 0 ] && [ "$sr_rc" = 1 ]; then
 fi
 # Two ways to the same answer, and each names its own state. The empty-list
 # states are asked first and keep the sentence they already print, because a
-# corrupt TIP object satisfies both tests (empty list, rc 1, `show-ref` rc 0)
+# corrupt TIP object satisfies both tests (empty list, nonzero rc, `show-ref` rc 0)
 # and `refs/stash` is what is wrong with it — the sentence below is about the
 # ref, and it is the more specific of the two there. What is left for the rc is
 # the state no cross-check can reach: git printed entries and then said it could
@@ -812,17 +813,18 @@ if [ -n "$msg" ]; then
   #
   # `2>&1 >/dev/null` in that order captures stderr and drops stdout — the list
   # itself is not wanted, it was already counted. `|| true` is load-bearing
-  # under `set -e`: git exits 1 in exactly the state this exists for, and an
+  # under `set -e`: git exits nonzero in exactly the state this exists for, and an
   # unguarded substitution would abort the audit before it emits a payload,
   # turning a report into a refusal.
   #
   # `tr` because `$diag` is not one line. A stash object that is CORRUPT
   # rather than missing (`echo junk > .git/objects/<xx>/<rest>`) reaches this
-  # same branch — list empty at rc 1, show-ref rc 0 — and git says it in 7
-  # lines, 10 with a bad `objects/info/alternates`. Unfolded they land at
-  # column 0 in the audit's stderr, which is where only its own `$ git ...`
-  # step headers belong. `$()` has already stripped the trailing newline, so
-  # the fold adds no trailing space and the silent states still append nothing.
+  # same branch — list empty at rc 1 on git <= 2.55 and rc 128 on git >= 2.56,
+  # show-ref rc 0 — and git says it in 7 lines, 10 with a bad
+  # `objects/info/alternates`. Unfolded they land at column 0 in the audit's
+  # stderr, which is where only its own `$ git ...` step headers belong. `$()`
+  # has already stripped the trailing newline, so the fold adds no trailing
+  # space and the silent states still append nothing.
   #
   # `printf`, not `echo`: `$msg` now carries git's text under `#!/bin/sh`, and
   # both dash and macOS sh expand escapes in an `echo` operand — a `\c` in it
