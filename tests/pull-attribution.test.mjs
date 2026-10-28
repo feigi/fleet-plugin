@@ -674,9 +674,98 @@ test("tally counts each status per cell, and only counted Pulls enter n, merged,
     counted, u("slow-high", "excluded"), u("task-high", "left-out"),
     u("task-high", "unpriced", { spend: null }), u("task-high", "untimed", { workS: null }), u("task-high", "pending"),
   ]), [
-    { cell: "slow-high", generation: null, n: 0, merged: 0, claims: 0, failed: 0, spend: 0, workS: 0, pulls: [], excluded: 1, left_out: 0, unpriced: 0, untimed: 0, pending: 0, older: [] },
-    { cell: "task-high", generation: null, n: 1, merged: 1, claims: 1, failed: 0, spend: 3, workS: 600, pulls: [counted], excluded: 0, left_out: 1, unpriced: 1, untimed: 1, pending: 1, older: [] },
+    { cell: "slow-high", generation: null, n: 0, merged: 0, claims: 0, failed: 0, spend: 0, workS: 0, pulls: [], excluded: 1, left_out: 0, unpriced: 0, untimed: 0, pending: 0, by_hand: 0, no_ruling: 0, older: [] },
+    { cell: "task-high", generation: null, n: 1, merged: 1, claims: 1, failed: 0, spend: 3, workS: 600, pulls: [counted], excluded: 0, left_out: 1, unpriced: 1, untimed: 1, pending: 1, by_hand: 0, no_ruling: 0, older: [] },
   ]);
+});
+
+const DERIVED = "review run-aaaaaaa1 at 1111111, no record: counted no survived and no unverified finding";
+const DERIVED_RECORD = "review run-aaaaaaa1 at 1111111, record dispositions-fix-pr-20.json: survived[0] false-claim \"x\" — and a --note";
+
+test("tally: by_hand counts the counted merged Pulls whose Ruling's note is not one append derives, on both derived forms, per generation", () => {
+  const w = world();
+  const notes = { 201: DERIVED, 202: DERIVED_RECORD, 203: "backfill: ruled from the merged PR's review", 204: "", 205: "n" };
+  for (const [t, note] of Object.entries(notes)) {
+    const pr = Number(t) + 1000;
+    w.features.push(pull(t, "task-high"));
+    w.members.push(impl(t, "task-high", { ending: "pr", pr: String(pr) }));
+    w.tiers.push(ruling(t, pr, { note }));
+    merged(w, pr);
+  }
+  const [t] = tally(units(w));
+  assert.deepEqual([t.merged, t.by_hand], [5, 3]);
+  // A hand-given Ruling on a PR that is not merged is no merged Pull, so it is not counted.
+  const open = world();
+  open.features.push(pull(206, "task-high"));
+  open.members.push(impl(206, "task-high", { ending: "pr", pr: "1206" }));
+  open.tiers.push(ruling(206, 1206, { note: "by hand" }));
+  merged(open, 1206, "OPEN");
+  assert.deepEqual([tally(units(open))[0].merged, tally(units(open))[0].by_hand], [0, 0]);
+});
+
+test("the fit's estimates carry by_hand, the guard's count over the same Pulls", () => {
+  const w = world();
+  const notes = { 241: DERIVED, 242: "by hand", 243: DERIVED_RECORD, 244: "by hand again" };
+  for (const [t, note] of Object.entries(notes)) {
+    const pr = Number(t) + 1000;
+    w.features.push(pull(t, "task-high"));
+    w.members.push(impl(t, "task-high", { ending: "pr", pr: String(pr) }));
+    w.tiers.push(ruling(t, pr, { note }));
+    merged(w, pr);
+  }
+  const p = parsed(w);
+  const est = fitTable({ prior, features: p.features, members: p.members, verdicts: p.tiers, guard: { tripped: [], n: {}, window_start: DAY } }).estimates["*"]["task-high"];
+  assert.deepEqual([est.merged, est.by_hand], [4, 2]);
+  assert.equal(computeReport({ ...p, prs: w.prs }).cells[0].by_hand, est.by_hand);
+});
+
+test("tally: by_hand is per generation, so an older generation's hand-given Rulings are not the newest's", () => {
+  const w = world();
+  w.features.push(pull(211, "task-high"), pull(212, "task-high", { session: SESSION2, run_date: "2026-10-05" }));
+  w.members.push(
+    impl(211, "task-high", { ending: "pr", pr: "1211", dispatchModel: "model-a" }),
+    impl(212, "task-high", { ending: "pr", pr: "1212", dispatchModel: "model-b", session: SESSION2, run_date: "2026-10-05" }),
+  );
+  w.tiers.push(ruling(211, 1211, { note: "by hand" }), ruling(212, 1212, { note: DERIVED }));
+  merged(w, 1211);
+  merged(w, 1212);
+  const [t] = tally(units(w));
+  assert.deepEqual([t.generation, t.by_hand, t.older.map((o) => [o.generation, o.by_hand])], ["model-b", 0, [["model-a", 1]]]);
+});
+
+test("attribute: a Pull whose PR merged with no Ruling is noRuling and still not merged, and no_ruling counts it whatever its status", () => {
+  const w = world();
+  w.features.push(pull(221, "task-high"), pull(222, "task-high"), pull(223, "task-high"));
+  w.members.push(
+    impl(221, "task-high", { ending: "pr", pr: "1221" }),
+    impl(222, "task-high", { ending: "pr", pr: "1222", cost: "" }),
+    impl(223, "task-high", { ending: "pr", pr: "1223" }),
+  );
+  merged(w, 1221);
+  merged(w, 1222);
+  merged(w, 1223, "CLOSED");
+  const us = units(w);
+  assert.deepEqual(us.map((u) => [u.noRuling, u.merged, u.status]), [[true, false, "counted"], [true, false, "unpriced"], [false, false, "counted"]]);
+  assert.equal(tally(us)[0].no_ruling, 2);
+  assert.equal(tally(us)[0].merged, 0, "the counted Pull is not merged");
+});
+
+test("attribute: no PR state means no noRuling, and a Pull that holds a Ruling, or whose PR another Pull holds the Ruling of, is not noRuling", () => {
+  const w = world();
+  w.features.push(pull(231, "task-high"), pull(232, "task-high"));
+  w.members.push(
+    impl(231, "task-high", { ending: "pr", pr: "1231" }),
+    // The retry of the same ticket opened the same PR, so only the later Pull carries it.
+    impl(232, "task-high", { ending: "pr", pr: "1231" }),
+  );
+  w.tiers.push(ruling(232, 1231));
+  merged(w, 1231);
+  assert.deepEqual(units(w).map((u) => u.noRuling), [false, false]);
+  const bare = world();
+  bare.features.push(pull(233, "task-high"));
+  bare.members.push(impl(233, "task-high", { ending: "pr", pr: "1233" }));
+  assert.equal(units(bare, null)[0].noRuling, false, "with no PR states there is nothing to say merged");
+  assert.equal(units(bare, [{ number: 1233, state: "MERGED" }])[0].noRuling, true);
 });
 
 test("admissibleRow: the cell's own definition at its level with a dispatch model on record, and nothing short of all three", () => {
@@ -732,7 +821,10 @@ test("a cell's newest generation is judged alone: 25 merged on A then 22 on B re
   assert.deepEqual(smol.older.map((o) => [o.generation, o.n_merged, o.mean_usd, o.fail_rate]), [["model-a", 25, 20, 0.4]]);
   assert.deepEqual(report.tripped, [], "the guard judges B alone, and B does not trip");
   assert.equal(report.verdict, "ok");
-  assert.deepEqual(guardFile(report, "t").cells.find((c) => c.cell === "smol-high"), { cell: "smol-high", generation: "model-b", n: 22, mean_usd: 2, fail_rate: 0, untimed: 0 });
+  const entry = guardFile(report, "t").cells.find((c) => c.cell === "smol-high");
+  assert.deepEqual({ cell: entry.cell, generation: entry.generation, n: entry.n, mean_usd: entry.mean_usd, fail_rate: entry.fail_rate, untimed: entry.untimed },
+    { cell: "smol-high", generation: "model-b", n: 22, mean_usd: 2, fail_rate: 0, untimed: 0 });
+  assert.deepEqual(entry.older.map((o) => [o.generation, o.n_merged, o.n_failed]), [["model-a", 25, 10]], "model-a stays nested under the entry, never its own cells[] one");
   assert.equal(guard.n["smol-high"], 22);
 
   const est = table.estimates["*"]["smol-high"];

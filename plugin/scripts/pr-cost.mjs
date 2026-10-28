@@ -56,7 +56,19 @@
 // whose model changed is judged afresh once its new generation reaches MIN_N
 // merged PRs. Each older generation prints on its own line beside the newest,
 // with no verdict and no interval.
+//
+// THE GUARD FILE keeps each cell's whole entry as the report computed it —
+// `n` (its `n_merged`, which readers key on) beside every figure above and its
+// older generations nested under `older`, never as extra `cells[]` entries,
+// since a reader keys entries by cell — and, per generation, three counts
+// that never enter its figures: `by_hand`, the counted merged Pulls whose
+// Ruling's note is not one `tier-outcomes.mjs append` derives (`isDerivedNote`);
+// `no_ruling`, the Pulls whose PR merged on GitHub with no Ruling, which stay
+// not merged; and `pending`, the Pulls whose PR is still open or not in the
+// list. Beside `min_n` it records `trip_points`, the floor's margin, and
+// `tsv_blobs`: the git blob id of each TSV it read, by the path it read it at.
 
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -66,7 +78,7 @@ import { gitEnv } from "./git-env.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
-import { AttributionError, attribute, bootUnit, bootstrapDiffCI, parseFeatures, tally, underFloor } from "./pull-attribution.mjs";
+import { AttributionError, TRIP_POINTS, attribute, bootUnit, bootstrapDiffCI, parseFeatures, tally, underFloor } from "./pull-attribution.mjs";
 import { RulingError, parseTierOutcomes } from "./tier-outcomes.mjs";
 
 const NAME = "pr-cost";
@@ -117,6 +129,9 @@ export function computeReport({ members, tiers, features, prs, routerTable = nul
     fail_rate: g.claims ? round(g.failed / g.claims) : null,
     mean_usd: round(meanUsd(g), 2),
     median_usd: round(median(g.pulls.filter((u) => u.merged).map((u) => u.spend)), 2),
+    by_hand: g.by_hand,
+    no_ruling: g.no_ruling,
+    pending: g.pending,
     router_usd: round(g.pulls.reduce((s, u) => s + routerUsd(u.pull), 0), 4),
     usd_diff_ci95: !newest || cell === BASELINE_CELL || !base ? null : bootstrapDiffCI(bootUnits(g), bootUnits(base)),
     left_out: g.left_out,
@@ -245,18 +260,27 @@ export function formatReport(report) {
   return lines.join("\n") + "\n";
 }
 
-export function guardFile(report, computedAt) {
+// The git blob id of `bytes` — what `git hash-object` prints for a file of them.
+export const blobId = (bytes) => createHash("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex");
+
+// `tsvBlobs` is the blob id of each TSV the guard read, keyed by path.
+export function guardFile(report, computedAt, tsvBlobs = {}) {
   return {
     computed_at: computedAt,
     window_start: report.window_start,
     baseline: report.baseline,
-    cells: report.cells.map((f) => ({ cell: f.cell, generation: f.generation, n: f.n_merged, mean_usd: f.mean_usd, fail_rate: f.fail_rate, untimed: f.untimed })),
+    cells: report.cells.map((f) => {
+      const { cell, generation, ...rest } = f;
+      return { cell, generation, n: f.n_merged, ...rest };
+    }),
     tripped: report.tripped,
     verdict: report.verdict,
     retire: report.retire,
-    // The n the baseline and every judged cell need, so a reader prints it
-    // rather than restating it.
+    // The n the baseline and every judged cell need, and the margin the fail
+    // leg applies, so a reader prints them rather than restating them.
     min_n: MIN_N,
+    trip_points: TRIP_POINTS,
+    tsv_blobs: Object.fromEntries(Object.entries(tsvBlobs).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
   };
 }
 
@@ -288,8 +312,14 @@ function main() {
   });
   sweep();
   stray();
-  const read = (path, ifMissing = "") => {
-    try { return readFileSync(path, "utf8"); }
+  const tsvBlobs = {};
+  // `blobbed` records the file's git blob id, off the bytes as read.
+  const read = (path, ifMissing = "", blobbed = false) => {
+    try {
+      const bytes = readFileSync(path);
+      if (blobbed) tsvBlobs[path] = blobId(bytes);
+      return bytes.toString("utf8");
+    }
     catch (e) { die(`cannot read ${path}: ${e.code ?? e.message}${e.code === "ENOENT" ? ifMissing : ""}`); }
   };
   const parse = (what, fn) => {
@@ -301,9 +331,9 @@ function main() {
   const featuresPath = arg("ticket-features") ?? "docs/metrics/ticket-features.tsv";
   const pricingArg = arg("pricing");
   const pricingPath = pricingArg ?? "docs/metrics/pricing.json";
-  const members = parse(membersPath, () => parseMemberTsv(read(membersPath)));
-  const tiers = parse(tiersPath, () => parseTierOutcomes(read(tiersPath)));
-  const features = parse(featuresPath, () => parseFeatures(read(featuresPath, " — the router script writes it at dispatch, so there is nothing to price before it has dispatched")));
+  const members = parse(membersPath, () => parseMemberTsv(read(membersPath, "", true)));
+  const tiers = parse(tiersPath, () => parseTierOutcomes(read(tiersPath, "", true)));
+  const features = parse(featuresPath, () => parseFeatures(read(featuresPath, " — the router script writes it at dispatch, so there is nothing to price before it has dispatched", true)));
   // The default pricing.json is optional; one named on the command line is not.
   const pricing = pricingArg === null && !existsSync(pricingPath) ? null : parse(pricingPath, () => JSON.parse(read(pricingPath)));
   const tablePath = join(SCRIPT_DIR, "router-table.json");
@@ -338,7 +368,7 @@ function main() {
   const file = arg("out") ?? defaultGuardPath();
   try {
     mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(`${file}.tmp`, JSON.stringify(guardFile(report, new Date().toISOString()), null, 2) + "\n");
+    writeFileSync(`${file}.tmp`, JSON.stringify(guardFile(report, new Date().toISOString(), tsvBlobs), null, 2) + "\n");
     renameSync(`${file}.tmp`, file);
   } catch (e) {
     die(`cannot write ${file}: ${e.code ?? e.message}`);
