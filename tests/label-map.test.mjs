@@ -8,7 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
@@ -266,8 +266,8 @@ const TABLE_FILE = ["docs", "agents", "triage-labels.md"];
 
 // `gh` answering `label list` with `live` (names), recording every argv, one
 // line per call, and the GH_REPO each call saw. `fail` makes every call exit 1
-// with a message.
-function rig(live, { fail = false } = {}) {
+// with a message; `answer`, a shell snippet, replaces the reply outright.
+function rig(live, { fail = false, answer } = {}) {
   const bin = realpathSync(tempDir("label-map-bin-"));
   const log = join(bin, "gh.log");
   const repoLog = join(bin, "gh.repo");
@@ -275,8 +275,8 @@ function rig(live, { fail = false } = {}) {
   writeFileSync(log, "");
   writeFileSync(repoLog, "");
   writeFileSync(fixture, JSON.stringify(live.map((name) => ({ name }))));
-  const answer = fail ? `echo "gh: boom" >&2\nexit 1\n` : `case "$1 $2" in\n"label list") cat "${fixture}" ;;\n*) exit 1 ;;\nesac\n`;
-  writeExecStub(join(bin, "gh"), `#!/bin/sh\nprintf '%s\\n' "$*" >> "${log}"\nprintf '[%s]\\n' "\${GH_REPO-unset}" >> "${repoLog}"\n${answer}`);
+  const reply = answer ?? (fail ? `echo "gh: boom" >&2\nexit 1\n` : `case "$1 $2" in\n"label list") cat "${fixture}" ;;\n*) exit 1 ;;\nesac\n`);
+  writeExecStub(join(bin, "gh"), `#!/bin/sh\nprintf '%s\\n' "$*" >> "${log}"\nprintf '[%s]\\n' "\${GH_REPO-unset}" >> "${repoLog}"\n${reply}`);
   return {
     env: { ...ENV, PATH: `${bin}:${process.env.PATH}` },
     calls: () => readFileSync(log, "utf8").split("\n").filter(Boolean),
@@ -381,6 +381,45 @@ test("ensure: a file with no `Label in our tracker` table is a present table wit
   assert.equal(entry(payload, "wontfix").suggestion, "declined");
 });
 
+test("ensure: a table written without leading and trailing pipes is read the same as one with them", () => {
+  const ws = repo();
+  mkdirSync(join(ws, ...TABLE_FILE.slice(0, -1)), { recursive: true });
+  writeFileSync(join(ws, ...TABLE_FILE), "Role | Label in our tracker\n--- | ---\n`ready-for-agent` | `agent-ready`\nwontfix | declined |\n");
+  const map = mapOf(ensure(ws, [...without(LABEL_ROLES, "ready-for-agent", "wontfix"), "agent-ready", "declined"]));
+  assert.deepEqual(map, { ...identity(), "ready-for-agent": "agent-ready", wontfix: "declined" });
+  assert.deepEqual(cacheOf(ws).table, tableOf({ "ready-for-agent": "agent-ready", wontfix: "declined" }));
+});
+
+test("ensure: an escaped pipe inside a cell is part of the string, a trailing one included", () => {
+  const ws = repo();
+  writeTable(ws, [["wontfix", "a\\|b"]], { after: "| `needs-info` | info\\|\n" });
+  const map = mapOf(ensure(ws, [...without(LABEL_ROLES, "wontfix", "needs-info"), "a|b", "info|"]));
+  assert.deepEqual(map, { ...identity(), wontfix: "a|b", "needs-info": "info|" });
+  assert.deepEqual(cacheOf(ws).table, tableOf({ "needs-info": "info|", wontfix: "a|b" }));
+});
+
+test("ensure: only a `Label in our tracker` header of two or more cells with a separator beneath starts the table, and only the first such table is read", () => {
+  const live = [...LABEL_ROLES, "declined"];
+  const decline = "| `needs-info` | `x` | m |\n| `wontfix` | `declined` | m |\n";
+
+  const noSeparator = repo();
+  mkdirSync(join(noSeparator, ...TABLE_FILE.slice(0, -1)), { recursive: true });
+  writeFileSync(join(noSeparator, ...TABLE_FILE), `| Role | Label in our tracker | Meaning |\n${decline}`);
+  assert.deepEqual(mapOf(ensure(noSeparator, live)), identity());
+  assert.deepEqual(cacheOf(noSeparator).table, tableOf({}));
+
+  const oneCell = repo();
+  mkdirSync(join(oneCell, ...TABLE_FILE.slice(0, -1)), { recursive: true });
+  writeFileSync(join(oneCell, ...TABLE_FILE), "| Label in our tracker |\n| --- |\n| `wontfix` | `declined` |\n");
+  assert.deepEqual(mapOf(ensure(oneCell, live)), identity());
+  assert.deepEqual(cacheOf(oneCell).table, tableOf({}));
+
+  const twoTables = repo();
+  writeTable(twoTables, fiveRows(), { after: `\n| Role | Label in our tracker | Meaning |\n| --- | --- | --- |\n${decline}` });
+  assert.deepEqual(mapOf(ensure(twoTables, live)), identity());
+  assert.deepEqual(cacheOf(twoTables).table, tableOf(Object.fromEntries(FIVE.map((role) => [role, role]))));
+});
+
 test("ensure: no table and nothing live asks about every role, each suggested as its own name, none existing; nothing written", () => {
   const ws = repo();
   const payload = asked(ensure(ws, []));
@@ -413,6 +452,16 @@ test("ensure: a near match is the suggestion and a candidate; several suggest th
   noCache(ws2);
 });
 
+test("ensure: near matches equal ignoring case are ordered by code point, whatever the live order; a letter outside ASCII counts when matching, punctuation outside ASCII does not", () => {
+  const ws = repo();
+  const tied = asked(ensure(ws, [...without(LABEL_ROLES, "onhold"), "on-hold", "On-Hold"]));
+  assert.deepEqual(tied.uncertain, [{ role: "onhold", suggestion: "On-Hold", origin: "near-match", candidates: ["On-Hold", "on-hold"], exists: true }]);
+
+  const ws2 = repo();
+  const accented = asked(ensure(ws2, [...without(LABEL_ROLES, "onhold"), "onholdé", "on–hold"]));
+  assert.deepEqual(accented.uncertain, [{ role: "onhold", suggestion: "on–hold", origin: "near-match", candidates: ["on–hold"], exists: true }]);
+});
+
 test("ensure: the default beside a near match is asked, the default suggested, the near match a candidate", () => {
   const ws = repo();
   const payload = asked(ensure(ws, [...LABEL_ROLES, "on-hold"]));
@@ -441,6 +490,15 @@ test("ensure: two rows for one role with different strings are asked, the first 
   const payload = asked(ensure(ws, [...LABEL_ROLES, "agent-ready"]));
   assert.deepEqual(payload.uncertain, [{ role: "ready-for-agent", suggestion: "ready-for-agent", origin: "table", candidates: [], exists: true }]);
   noCache(ws);
+});
+
+test("ensure: two rows for one role with the same string are one row: certain, and the cached table holds the string, not an array", () => {
+  const ws = repo();
+  writeTable(ws, [...fiveRows(), ["onhold", "`paused`"], ["onhold", "`paused`"]]);
+  const map = mapOf(ensure(ws, [...LABEL_ROLES, "paused"]));
+  assert.equal(map.onhold, "paused");
+  assert.equal(cacheOf(ws).table.rows.onhold, "paused");
+  assert.equal(cacheOf(ws).origin.onhold, "table");
 });
 
 // A cache `ensure` would have written, for the cases that start from one.
@@ -560,6 +618,20 @@ test("ensure carry-over: a cache that breaks the string rules carries no answer,
     ["wontfix", "wontfix", "default", false],
     ["onhold", "onhold", "default", false],
   ]);
+});
+
+test("ensure carry-over: a cache that lacks a role but breaks no string rule still carries its answers; the role it lacks carries none", () => {
+  const ws = repo();
+  const { "ready-to-merge": _, ...seven } = identity();
+  writeRaw(ws, JSON.stringify({
+    derivedAt: "2026-10-27T00:00:00.000Z",
+    table: { present: false, rows: {} },
+    roles: { ...seven, onhold: "paused" },
+    origin: { onhold: "maintainer", "ready-to-merge": "maintainer" },
+  }));
+  assert.deepEqual(mapOf(ensure(ws, [...without(LABEL_ROLES, "onhold"), "paused"])), { ...identity(), onhold: "paused" });
+  assert.equal(cacheOf(ws).origin.onhold, "maintainer");
+  assert.equal(cacheOf(ws).origin["ready-to-merge"], "default");
 });
 
 const wrongRows = (extra = []) => [["ready-for-human", "needs-triage"], ...extra];
@@ -686,6 +758,46 @@ test("ensure: gh failing is exit 2 with a valid cache and without, the cache unt
   assert.equal(readFileSync(file, "utf8"), before);
   const under = ensure(ws, [...LABEL_ROLES, ...Array.from({ length: 999 - LABEL_ROLES.length }, (_, i) => `l${i}`)]);
   assert.equal(under.status, 0, under.stdout + under.stderr);
+});
+
+test("ensure: a gh killed by a signal, or naming a label with something other than a string, is exit 2 with the cache untouched", () => {
+  const ws = repo();
+  const file = seedLabelMap(ws);
+  const before = readFileSync(file, "utf8");
+  const killed = ensure(ws, LABEL_ROLES, { answer: "kill -TERM $$\n" });
+  assert.equal(killed.status, 2, killed.stdout + killed.stderr);
+  assert.match(killed.stderr, /gh was killed by SIGTERM/);
+  const numbered = ensure(ws, [...LABEL_ROLES, 5]);
+  assert.equal(numbered.status, 2, numbered.stdout + numbered.stderr);
+  assert.match(numbered.stderr, /gh label list did not answer a list of \{ name \}/);
+  assert.equal(readFileSync(file, "utf8"), before);
+});
+
+test("ensure: a cached table with a key that is no Label role is not the table now in the repo, so the map is derived again and the cache rewritten", () => {
+  const ws = repo();
+  writeTable(ws, fiveRows());
+  const rows = Object.fromEntries(FIVE.map((role) => [role, role]));
+  seedLabelMap(ws, { origin: Object.fromEntries(FIVE.map((role) => [role, "table"])), table: tableOf({ ...rows, bogus: "x" }) });
+  assert.deepEqual(mapOf(ensure(ws, LABEL_ROLES)), identity());
+  assert.deepEqual(cacheOf(ws).table, tableOf(rows));
+});
+
+test("ensure: a cache that exists and cannot be read is exit 2 and never written over, so its maintainer answers survive", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root reads every file");
+  const ws = repo();
+  const file = seedLabelMap(ws, { roles: { "in-progress": "mine" }, origin: { "in-progress": "maintainer" } });
+  const before = readFileSync(file, "utf8");
+  chmodSync(file, 0o000);
+  let r;
+  try {
+    r = ensure(ws, [...LABEL_ROLES, "mine"]);
+  } finally {
+    chmodSync(file, 0o600);
+  }
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.equal(r.stdout, "");
+  assert.match(r.stderr, /cannot read the Label map at .*labels\.json \(EACCES\); nothing written/);
+  assert.equal(readFileSync(file, "utf8"), before);
 });
 
 test("ensure outside a repository is exit 2 and never calls gh; a triage-label path that is not a file is exit 2", () => {
