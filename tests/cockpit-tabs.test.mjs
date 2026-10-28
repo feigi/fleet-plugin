@@ -109,9 +109,9 @@ test("a bare URL opens Board: its tab is marked and its pane is the one not hidd
 });
 
 // Above the tabs: header, banner, attention strip. Below every tab: the footer.
-// Each is a sibling of the two panes, never inside one, so hiding a pane
+// Each is a sibling of every pane, never inside one, so hiding a pane
 // hides none of them.
-test("header, banner and attention strip sit above the tabs, the footer below both panes", () => {
+test("header, banner and attention strip sit above the tabs, the footer below every pane", () => {
   const at = (needle) => {
     const i = HTML.indexOf(needle);
     assert.notEqual(i, -1, `board.html no longer carries ${needle} — update this test`);
@@ -119,7 +119,7 @@ test("header, banner and attention strip sit above the tabs, the footer below bo
   };
   const order = ["<header>", 'id="stale-banner"', 'id="attention"', 'id="tabs"', 'id="board"', 'id="cells"', 'id="spend"', 'id="footer"'].map(at);
   assert.deepEqual(order, [...order].sort((a, b) => a - b), "the page's top-level order changed");
-  // Both panes are closed in the same breath they open, so nothing may nest in them.
+  // Every pane is closed in the same breath it opens, so nothing may nest in one.
   assert.match(HTML, /<div id="attention"><\/div>\n<nav id="tabs">/);
   assert.match(HTML, /<div id="spend" hidden><\/div>\n<footer id="footer"><\/footer>/);
 });

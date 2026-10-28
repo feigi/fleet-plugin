@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import {
-  MODEL_ROLES_EVERY_MS, carryModelRoles, gather, readAgents, readGuardFile, readMetricsStep, readModelRoles,
+  MODEL_ROLES_EVERY_MS, MODEL_ROLES_TIMEOUT_MS, carryModelRoles, gather, readAgents, readGuardFile, readMetricsStep, readModelRoles,
 } from "../plugin/scripts/board-gather.mjs";
 import { CLOSEOUT_RECEIPT, RECEIPT } from "../plugin/scripts/ledger-grammar.mjs";
 import { computeBoard } from "../plugin/scripts/compute-board.mjs";
@@ -66,7 +66,9 @@ test("modelRoles: a first read that fails carries no value, and says why", async
 
 test("modelRoles: a carried value that is not a read (a hand-edited or older board.json) is ignored, not trusted", async () => {
   for (const bad of [undefined, null, 5, "x", [], { value: "x", readAt: NOW, error: null }, { value: ROLES, readAt: "now", error: null },
-    { value: ROLES, readAt: NOW, error: "boom" }, { value: ROLES, readAt: NOW, error: { at: "x", message: "m" } }, { value: ROLES, readAt: NOW, error: { at: NOW } }]) {
+    { value: ROLES, readAt: NOW, error: "boom" }, { value: ROLES, readAt: NOW, error: { at: "x", message: "m" } }, { value: ROLES, readAt: NOW, error: { at: NOW } },
+    // A time held as a string that reads as a number: trusted, it would hold a fresh read off for the minute.
+    { value: ROLES, readAt: String(NOW), error: null }, { value: ROLES, readAt: NOW, error: { at: String(NOW), message: "m" } }]) {
     const { read, calls } = reader({ ok: true, value: ROLES });
     assert.deepEqual(await carryModelRoles(bad, NOW + 1000, read), { value: ROLES, readAt: NOW + 1000, error: null }, JSON.stringify(bad));
     assert.equal(calls.length, 1, JSON.stringify(bad));
@@ -118,6 +120,15 @@ test("readModelRoles: a failing omp, non-JSON and a record-less answer are each 
   const gone = await readModelRoles();
   assert.equal(gone.ok, false);
   assert.match(gone.why, /^omp config get modelRoles --json failed \(ENOENT\)$/);
+});
+
+test("readModelRoles: an omp that never answers is killed at the timeout and is a failed read, so it cannot hold the tick", async (t) => {
+  assert.equal(MODEL_ROLES_TIMEOUT_MS, 10_000);
+  await withOmp(t, "exec sleep 5", async () => {
+    const started = Date.now();
+    assert.deepEqual(await readModelRoles(200), { ok: false, why: "omp config get modelRoles --json failed (killed by SIGTERM)" });
+    assert.ok(Date.now() - started < 3_000, "answered at the timeout, not when omp gave up");
+  });
 });
 
 // -- the guard, the receipts and the definitions -------------------------------------------

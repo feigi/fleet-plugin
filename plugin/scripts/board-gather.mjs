@@ -711,12 +711,17 @@ export function readAgents(scriptDir) {
 // child spawn per read, and a role changes rarely.
 export const MODEL_ROLES_EVERY_MS = 60_000;
 
+// A `modelRoles` read that has not answered in this many milliseconds is killed
+// and reported as a failed read: gather() awaits it inside the tick, so a hung
+// `omp` would otherwise hold every tick after it, not just this tab's.
+export const MODEL_ROLES_TIMEOUT_MS = 10_000;
+
 // `omp config get modelRoles --json`, in the cockpit's own environment, which can
 // differ from the controller's. `{ ok: true, value }` with the record, or
 // `{ ok: false, why }`.
-export async function readModelRoles() {
+export async function readModelRoles(timeout = MODEL_ROLES_TIMEOUT_MS) {
   const argv = ["config", "get", "modelRoles", "--json"];
-  const r = await execRead("omp", argv);
+  const r = await execRead("omp", argv, { timeout });
   if (r.error) {
     const how = r.code ?? (r.signal ? `killed by ${r.signal}` : `exit ${r.status}`);
     return { ok: false, why: `omp ${argv.join(" ")} failed (${how})` };
@@ -990,13 +995,12 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, stateDir 
   // minute. `stateDir` is the workspace's `.fleet`: a caller that names none names
   // no workspace, so it reads none of the workspace's records and spawns no `omp`
   // either (a guard that reads as missing, no receipts, the read carried as it was).
-  const heldModelRoles = heldRead(prev?.modelRoles);
   const guard = stateDir === null ? { status: "missing" } : readGuardFile(stateDir);
   const receipts = stateDir === null
     ? { phase0: null, closeout: null }
     : { phase0: readMetricsStep(join(stateDir, RECEIPT)), closeout: readMetricsStep(join(stateDir, CLOSEOUT_RECEIPT)) };
   const agents = readAgents(scriptDir);
-  const modelRoles = stateDir === null ? heldModelRoles : await carryModelRoles(heldModelRoles, now);
+  const modelRoles = stateDir === null ? heldRead(prev?.modelRoles) : await carryModelRoles(prev?.modelRoles, now);
   return { ledger, issues, prs, merged, closed, closedIssues, ci, prev, repo, repoUrl, workspace, port, spend, beat, ticked, acted, controller, stallOwner: stallOwnerOf, poolOk,
     poolCapped, prsCapped, guard, receipts, agents, modelRoles,
     now, interval };

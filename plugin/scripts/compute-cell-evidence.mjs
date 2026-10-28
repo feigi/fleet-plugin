@@ -40,15 +40,20 @@ function when(t) {
   return Number.isNaN(d.getTime()) ? String(t) : `${d.toISOString().slice(0, 16).replace("T", " ")}Z`;
 }
 
-// A difference in tenths, with its sign: the minus is U+2212, as in the spec's own figures.
-const tenths = (x) => Math.round(x * 10);
+// A difference in tenths, with its sign: the minus is U+2212, as in the spec's own
+// figures. Rounded half away from zero, so −43.75 reads −43.8 as +43.75 reads +43.8.
+const tenths = (x) => Math.sign(x) * Math.round(Math.abs(x) * 10);
 const signed = (t, unit) => `${t < 0 ? MINUS : "+"}${(Math.abs(t) / 10).toFixed(1)}${unit}`;
-// failed/claims as a percentage to one place, off the counts.
-const ratePct = (failed, claims) => (Math.round((failed * 1000) / claims) / 10).toFixed(1);
+// failed/claims in tenths of a percent, off the counts, and as a percentage to one place.
+const rateTenths = (failed, claims) => Math.round((failed * 1000) / claims);
+const ratePct = (failed, claims) => (rateTenths(failed, claims) / 10).toFixed(1);
+// A rate the guard file stored, 0–1, as a percentage to one place.
+const storedPct = (rate) => `${(Math.round(rate * 1000) / 10).toFixed(1)}%`;
 
-// The generation a model identity names: member-outcomes.mjs's dispatchModel
-// strips the provider and the level the same way, so a Tier route model and a
-// judged generation can be shown on one scale.
+// The generation a model identity names, put on the scale of a judged
+// generation, which member-outcomes.mjs's dispatchModel strips of its provider
+// and its level: this drops the provider only, so the model it is handed must
+// already be level-free, as resolveRole's answer is.
 const generationOf = (model) => String(model).split("/").at(-1);
 
 // ---------------------------------------------------------------------------
@@ -168,13 +173,13 @@ function failFigure(e, g, baseEntry, isBase) {
   else if (hand > 0) beside.push(`${hand} of ${e.n} Rulings given by hand`);
 
   if (claims === null || failed === null) {
-    const stored = typeof e.fail_rate === "number" ? `${(Math.round(e.fail_rate * 1000) / 10).toFixed(1)}%` : null;
+    const stored = typeof e.fail_rate === "number" ? storedPct(e.fail_rate) : null;
     return { text: stored === null ? "no fail rate yet" : `${stored} · gap and floor: not checked`, beside };
   }
   if (claims === 0) return { text: "no fail rate yet: no claims", beside };
   const rate = `${ratePct(failed, claims)}%`;
   if (isBase) {
-    return { text: trip === null ? `${rate} · the floor: not checked` : `${rate} · the floor is ${((Math.round((failed * 1000) / claims) + trip * 10) / 10).toFixed(1)}%`, beside };
+    return { text: trip === null ? `${rate} · the floor: not checked` : `${rate} · the floor is ${((rateTenths(failed, claims) + trip * 10) / 10).toFixed(1)}%`, beside };
   }
   const bClaims = count(baseEntry?.n_claims);
   const bFailed = count(baseEntry?.n_failed);
@@ -208,7 +213,7 @@ function olderRow(cell, o) {
   const claims = count(o.n_claims);
   const failed = count(o.n_failed);
   const rate = claims === null || failed === null
-    ? typeof o.fail_rate === "number" ? `${(Math.round(o.fail_rate * 1000) / 10).toFixed(1)}%` : "no fail rate yet"
+    ? typeof o.fail_rate === "number" ? storedPct(o.fail_rate) : "no fail rate yet"
     : claims === 0 ? "no fail rate yet" : `${ratePct(failed, claims)}%`;
   return {
     generation: o.generation,
@@ -221,19 +226,20 @@ function olderRow(cell, o) {
 }
 
 // The footnotes one entry's figure needs: the sentence under the section and the
-// mark on the figure.
+// mark on the figure. The middle column is the words the merged figure names as
+// "not checked" when the file does not carry that count.
 const NOTES = [
-  ["excluded", (cell, k) => `${cell}: ${k} drawn here have no Admissible row: they ran under another Cell, at another effort, or with no model on record, so they count in no Cell's figures`],
-  ["unpriced", (cell, k) => `${cell}: ${k} unpriced: part of their Spend can't be booked`],
-  ["untimed", (cell, k) => `${cell}: ${k} untimed: a member's work time isn't on record`],
+  ["excluded", "no Admissible row", (cell, k) => `${cell}: ${k} drawn here have no Admissible row: they ran under another Cell, at another effort, or with no model on record, so they count in no Cell's figures`],
+  ["unpriced", "unpriced", (cell, k) => `${cell}: ${k} unpriced: part of their Spend can't be booked`],
+  ["untimed", "untimed", (cell, k) => `${cell}: ${k} untimed: a member's work time isn't on record`],
 ];
 
 function footnotesFor(cell, e, notes) {
   const marks = [];
   const unchecked = [];
-  for (const [key, text] of NOTES) {
+  for (const [key, words, text] of NOTES) {
     const k = count(e[key]);
-    if (k === null) unchecked.push(key);
+    if (k === null) unchecked.push(words);
     else if (k > 0) {
       const mark = superscript(notes.length + 1);
       notes.push({ mark, text: text(cell, k) });
@@ -242,8 +248,6 @@ function footnotesFor(cell, e, notes) {
   }
   return { marks, unchecked };
 }
-
-const UNCHECKED_WORDS = { excluded: "no Admissible row", unpriced: "unpriced", untimed: "untimed" };
 
 // One Cell's entry: its header line, its three figures (or "no figures yet"), its older generations.
 function guardEntry(cell, g, byCell, modelRoles, notes) {
@@ -284,7 +288,7 @@ function guardEntry(cell, g, byCell, modelRoles, notes) {
   const baseEntry = byCell.get(g.baseline.cell) ?? null;
   const merged = mergedFigure(e, g, isBase);
   const { marks, unchecked } = footnotesFor(cell, e, notes);
-  const checks = [...merged.unchecked, ...unchecked.map((k) => UNCHECKED_WORDS[k])];
+  const checks = [...merged.unchecked, ...unchecked];
   entry.figures = {
     generation,
     anchor: `cell-${cell}@${generation}`,
@@ -392,7 +396,8 @@ function declaredSection(agents, modelRoles) {
  * is `{ phase0, closeout }`, each the receipt's `metrics` step `{ status, at,
  * output }` or null, `agents` is `{ list: [{ file, model }], error }`, and
  * `modelRoles` the carried `{ value, readAt, error }` or null — `error` being
- * `{ at, message }`.
+ * `{ at, message }`. An input left out reads as nothing read: a missing guard,
+ * no receipt, no definitions, no `modelRoles` read.
  */
 export function computeCellEvidence({ guard, receipts, agents, modelRoles = null }) {
   return {

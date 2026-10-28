@@ -278,7 +278,8 @@ them update the shape below.)
   // carried tick to tick like `ci` and `repo` and read again at most once a
   // minute: `value` the record (null before a first good read), `readAt` the epoch
   // ms of the read that gave it, `error` `{ at, message }` of the latest read when
-  // it failed, else null. A failed read keeps `value` and `readAt`.
+  // it failed, else null. A failed read keeps `value` and `readAt`. A read that
+  // has not answered in 10 s is killed and is a failed read like any other.
   // Null until a first read has been attempted: a caller that named no state
   // directory reads none, and the tab says "not checked: modelRoles not read yet".
   "modelRoles": { "value": { "slow": "anthropic/claude-opus-5:high" }, "readAt": 1690000000000, "error": null },

@@ -645,12 +645,13 @@ export function computeBoard(inputs) {
     // The Cell evidence tab's model (compute-cell-evidence.mjs), built from the
     // guard, the receipts' metrics steps, the definitions and the carried
     // `modelRoles` read gather() answered. A caller that read none of them
-    // (every hand-built input in this suite) gets the tab's no-guard state.
+    // (every hand-built input in this suite) gets the tab's no-guard state:
+    // computeCellEvidence reads an input left out as nothing read.
     cellEvidence: computeCellEvidence({
-      guard: inputs.guard ?? { status: "missing" },
-      receipts: inputs.receipts ?? { phase0: null, closeout: null },
-      agents: inputs.agents ?? { list: [], error: null },
-      modelRoles: inputs.modelRoles ?? null,
+      guard: inputs.guard,
+      receipts: inputs.receipts,
+      agents: inputs.agents,
+      modelRoles: inputs.modelRoles,
     }),
     // The `omp config get modelRoles` read, carried tick to tick the way `ci`
     // and `repo` are: `{ value, readAt, error }`, read at most once a minute.

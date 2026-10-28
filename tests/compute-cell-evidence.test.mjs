@@ -284,6 +284,47 @@ test("$ per merged PR reads against the baseline's, and no merged PR is not $0",
   assert.equal(cellOf(ce, "smol-high").figures.usd.text, "no merged PR yet: no $ per merged PR");
 });
 
+test("a gap on an exact half rounds away from zero, a minus as a plus", () => {
+  // 27 of 48 against 1 of 1 is −43.75 pts; 21 of 48 against 0 of 1 is +43.75.
+  const minus = build({ guard: guardOk([entry("slow-high", { n_claims: 1, n_failed: 1 }), entry("task-high", { n_claims: 48, n_failed: 27 })]) });
+  assert.equal(cellOf(minus, "task-high").figures.failRate.text, "56.3% · −43.8 pts on slow-high · 58.8 pts inside the floor");
+  const plus = build({ guard: guardOk([entry("slow-high", { n_claims: 1, n_failed: 0 }), entry("task-high", { n_claims: 48, n_failed: 21 })]) });
+  assert.equal(cellOf(plus, "task-high").figures.failRate.text, "43.8% · +43.8 pts on slow-high · 28.8 pts past the floor");
+});
+
+test("no difference from the baseline reads +0.0, never a minus", () => {
+  const ce = build({ guard: guardOk([entry("slow-high"), entry("task-high")]) });
+  assert.equal(cellOf(ce, "task-high").figures.failRate.text, "11.6% · +0.0 pts on slow-high · 15.0 pts inside the floor");
+  assert.equal(cellOf(ce, "task-high").figures.usd.text, "$14.90 · +0.0% on slow-high");
+});
+
+test("a count that is no count (negative or absent) works no gap: the stored rate shows, gap and floor not checked", () => {
+  for (const o of [{ n_failed: -3 }, { n_claims: undefined }]) {
+    const ce = build({ guard: guardOk([entry("slow-high"), entry("task-high", o)]) });
+    assert.equal(cellOf(ce, "task-high").figures.failRate.text, "11.6% · gap and floor: not checked", JSON.stringify(o));
+  }
+  const noBaseCounts = build({ guard: guardOk([entry("slow-high", { n_claims: undefined }), entry("task-high")]) });
+  assert.equal(cellOf(noBaseCounts, "task-high").figures.failRate.text, "11.6% · gap: not checked: slow-high has no counts");
+});
+
+test("a baseline $ per merged PR that is no number is no comparison, not a figure", () => {
+  const ce = build({ guard: guardOk([entry("slow-high"), entry("task-high")],
+    { baseline: { cell: "slow-high", generation: "claude-opus-5", n: 69, mean_usd: "14.9", fail_rate: 0.1159 } }) });
+  assert.equal(cellOf(ce, "task-high").figures.usd.text, "$14.90 · no comparison: slow-high has no $ per merged PR");
+});
+
+test("an older generation: its stored rate where it has claims but no failures counted; one that names no generation is left out", () => {
+  const ce = build({ guard: guardOk([entry("slow-high", {
+    older: [null, { generation: 5 }, { generation: "" }, { generation: "claude-opus-4", n_claims: 10, fail_rate: 0.3 }],
+  })]) });
+  assert.deepEqual(cellOf(ce, "slow-high").older.map((o) => [o.generation, o.failRate]), [["claude-opus-4", "30.0%"]]);
+});
+
+test("a computed_at that is no time is quoted as it came in the source line", () => {
+  const ce = build({ guard: guardOk([entry("slow-high")], { computed_at: "garbage" }) });
+  assert.match(ce.guard.source, / · computed garbage · /);
+});
+
 test("left out and pending sit beside n when k > 0, and only then", () => {
   const ce = build({ guard: guardOk([entry("slow-high", { left_out: 2, pending: 3 }), entry("task-high", { left_out: 0, pending: 4 })]) });
   assert.deepEqual(cellOf(ce, "slow-high").figures.merged.beside, ["2 left out", "3 pending"]);
