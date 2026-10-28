@@ -5,6 +5,8 @@ argument-hint: "[in-flight] [cost|speed]"
 disable-model-invocation: true
 ---
 
+Label names in this file are roles; the Label map gives the string to type; a member never derives the map.
+
 Run `next-ticket`, `review-and-fix`, `run-merge-bot` as one fleet. You are the
 **controller**, in the main thread, never a member.
 
@@ -12,13 +14,11 @@ Run `next-ticket`, `review-and-fix`, `run-merge-bot` as one fleet. You are the
 a positive integer, default 5, and the Objective, default `cost`.
 Merge bot is at most one, not configurable.
 
-The war story behind a rule ending `See references/<file>` lives in that file; load
-it only when a member needs the *why*. A rule without that line carries its
-reasoning inline — nothing is missing.
+A rule ending `See references/<file>` keeps its war story there, read only for the *why*; a rule without that line carries its reasoning inline.
 
 ## Invariants
 
-These hold in every phase: check a wake against them before you act on it, and report any evidence that one is broken.
+These hold in every phase: check each wake against them, and report evidence that one is broken.
 
 - In-flight tickets at most the bound (default 5), at most one merge bot; the bound counts tickets, not live agents.
 - A grandchild surfaces as its own task-notification; an unrecognized task-id is not a member reporting done.
@@ -28,7 +28,7 @@ These hold in every phase: check a wake against them before you act on it, and r
 - Every member acts through the maintainer's `gh` credentials, so no write is attributable: when a label moves unexpectedly, ask members directly, rule out automation with `grep -rn '<label>' .github/workflows/`, and do not re-add it.
 - Phase 1 is serial; everything else may run concurrently.
 
-The reasoning behind each line is in references/invariants.md.
+Reasoning: references/invariants.md.
 
 ## Phase 0 — shortlist
 

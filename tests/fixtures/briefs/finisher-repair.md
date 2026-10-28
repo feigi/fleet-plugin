@@ -20,4 +20,6 @@ Confirmation state includes warnings received and acted on, even when the outcom
 A member runs its test suite in the foreground and blocks on it. Exit 75 from the suite is not a test result; run the command again.
 Never run `pkill -f` on a pattern: members share one process table, so a pattern such as a test file's name matches every member's run, not only yours. Clearing your own leftover process needs its PID; report a stalled run to the controller instead.
 
+Label names in this file are roles; the Label map gives the string to type; a member never derives the map.
+
 An earlier finisher on this PR reported `labelled`, but its read-back did not carry `ready-to-merge`: you are the repair finisher. Duty 3's script decides whether the label is on, as your agent definition says.

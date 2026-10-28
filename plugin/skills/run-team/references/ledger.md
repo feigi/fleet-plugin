@@ -1,5 +1,7 @@
 # The run ledger: the evidence behind its rules
 
+Label names in this file are roles; the Label map gives the string to type; a member never derives the map.
+
 Evidence for the rules SKILL.md's wake and dispatch sections state, keyed by the rule each justifies.
 
 ## Writer policy: every write is serialized by `<file>.lock`

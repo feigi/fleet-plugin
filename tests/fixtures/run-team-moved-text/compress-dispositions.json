@@ -55,6 +55,14 @@
     [
       "The script fills `run_date`, `pr`, `ticket` and `tier` itself — `tier` from what actually ran, off the implementer's `tier-ok=` ledger verdict or else its one member-outcomes row (a `tier-unverifiable=` member has no ledger verdict, so its one member-outcomes row decides), and BLANK with a WARNING naming why when neither settles it; never type a tier in over that.",
       "`tier-outcomes.mjs append` fills `run_date`, `pr`, `ticket` and `tier` itself — `tier` from what actually ran, off the implementer's `tier-ok=` ledger verdict or else its one member-outcomes row (a `tier-unverifiable=` member has no ledger verdict, so its one member-outcomes row decides), and BLANK with a WARNING naming why when neither settles it; never type a tier in over that."
+    ],
+    [
+      "The war story behind a rule ending `See references/<file>` lives in that file; load it only when a member needs the *why*.",
+      "A rule ending `See references/<file>` keeps its war story there, read only for the *why*; a rule without that line carries its reasoning inline."
+    ],
+    [
+      "A rule without that line carries its reasoning inline — nothing is missing.",
+      "A rule ending `See references/<file>` keeps its war story there, read only for the *why*; a rule without that line carries its reasoning inline."
     ]
   ],
   "deleted": [

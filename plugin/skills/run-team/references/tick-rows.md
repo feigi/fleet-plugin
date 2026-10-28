@@ -1,5 +1,7 @@
 # The tick's rows: what each asks of the controller
 
+Label names in this file are roles; the Label map gives the string to type; a member never derives the map.
+
 The full text of each row `fleet-tick.mjs` prints and what it asks of the controller. SKILL.md's **The tick's rows** carries one line for each.
 
 - `PULL #<N> …` — one Pull per named ticket, in the order printed: phase 1's

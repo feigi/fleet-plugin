@@ -1,5 +1,7 @@
 # CI reading and staleness
 
+Label names in this file are roles; the Label map gives the string to type; a member never derives the map.
+
 Why green not verdict, why absence is its own verdict, why conclusion not
 stable, why behind-count only honest signal, why the tick runs on every wake
 and why the beat is shaped as it is. Assertions live in SKILL.md's wake table,

@@ -127,7 +127,7 @@ const ALLOWED = [
   { files: [A("review-comments"), A("review-correctness"), A("review-silent-failure"), A("review-tests"), A("review-types")], reason: "the specialists' structured-output sentence" },
   { files: [A("review-comments"), A("review-correctness"), A("review-silent-failure"), A("review-simplify"), A("review-tests"), A("review-types")], reason: "the specialists' read-only sentence" },
   { files: [A("review-snapshot"), A("review-test-run"), A("review-verifier")], reason: "the three review-host agents' provenance sentence" },
-  { files: [A("finisher"), A("fix-applier"), A("implementer"), A("merge-bot"), BRIEF("fix-applier"), "commands/review-and-fix.md"], reason: "the one-sentence role rule every file that names a label carries, stated once near the top of its body; label-map-solo-prose pins it above the first role name of each" },
+  { files: [A("finisher"), A("fix-applier"), A("implementer"), A("merge-bot"), BRIEF("finisher"), BRIEF("fix-applier"), "commands/review-and-fix.md"], reason: "the one-sentence role rule every file that names a label carries, stated once near the top of its body; label-map-solo-prose and label-role-rule-prose pin it above the first role name of each" },
   { files: ["commands/review-and-fix.md", "commands/run-merge-bot.md"], reason: "the head-record sentence, beside the record in the one file that writes it and the one that parses it; label-map-member-prose and label-map-solo-prose pin each copy" },
 ];
 const keyOf = (files) => [...files].sort().join(" | ");

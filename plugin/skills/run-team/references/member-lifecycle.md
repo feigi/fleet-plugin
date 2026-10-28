@@ -1,5 +1,7 @@
 # Member lifecycle: naming, fresh context, recovery
 
+Label names in this file are roles; the Label map gives the string to type; a member never derives the map.
+
 Why member name load-bearing, why every member single-use, how a member's job outcome (`completed`/`failed`/`cancelled`) and peer liveness (`running`/`idle`/`parked`) decide its recovery. Assertions these justify live in SKILL.md's wake table, Dispatching the members a wake names, Reading a review result, A member's claims, Failure handling sections; evidence here.
 
 ## Every member is named

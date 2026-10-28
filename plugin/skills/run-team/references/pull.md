@@ -1,5 +1,7 @@
 # The Pull: what each step does and why
 
+Label names in this file are roles; the Label map gives the string to type; a member never derives the map.
+
 `pull.mjs` runs the Pull; SKILL.md's phase 1 says how to drive it, how to read the tick's `PULL` row and how to answer the questions it asks. This file is what each step means, and the measured reasons behind them, for the controller to read when a step refuses or an answer needs more than SKILL.md says.
 
 ## The steps
@@ -174,8 +176,8 @@ terminating in exactly one dispatch or an empty shortlist:
    for. Give exactly one — the direction is not inferable from the string, and
    the wrong one answers the opposite verdict with full confidence.
 
-   A needle that itself starts with `--` — `--label ready-for-agent`
-   is one this backlog carries — needs the end-of-options separator: `--gone
+   A needle that itself starts with `--` — `--label ready-for-agent` is an
+   illustration of one, a role name and not a string to type — needs the end-of-options separator: `--gone
    -- '<string>'`/`--present -- '<string>'`. Given bare, with no `--`
    immediately before it, the value guard still refuses it — `staleness:
    --gone needs a value` — at exit 2, a could-not-check to admit and annotate,
@@ -317,10 +319,10 @@ fleet has already judged unimplementable straight to the next member.
 yours to judge: `pull.mjs` finds it at step 3 and posts its own comment naming
 the stranded comment's heading line and URL, which is not one of the
 `briefs/relabel.md` comments.
-`gh issue edit <N> --remove-label ready-for-agent --add-label <label>` (no
+`gh issue edit <N> --remove-label "<ready-for-agent string>" --add-label "<label string>"` (no
 `in-progress` to drop — it was never claimed), preceded by exactly one comment,
 the one `~/.fleet/bin/fleet-run dispatch-prompt.mjs render relabel --kind <kind> …`
-prints. `--kind needs-triage` takes `--line`, the one-line missing decision;
+prints. Each `<… string>` is what `~/.fleet/bin/fleet-run label-map.mjs show <role>` prints for that role — `<label string>` for the role the cause names — and you type that string, not the role name; where the rendered comment names `ready-for-agent`, file the string `~/.fleet/bin/fleet-run label-map.mjs show ready-for-agent` prints in its place. `--kind needs-triage` takes `--line`, the one-line missing decision;
 `--kind fork` takes `--options`, the options verbatim from the brief, and is
 the `ready-for-human` comment for a fork; `--kind hands` takes `--hands`,
 one of external access, manual testing or judgment during the work, and
