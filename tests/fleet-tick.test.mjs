@@ -2104,7 +2104,7 @@ printf '{"issue":%s,"taken":false,"hits":[],"unknown":[]}\\n' "$1"
 `;
 
 // phase0.mjs's steps, every one present as its receipt always carries them.
-const PHASE0_STEPS = ["alarm", "branch", "fast-forward", "pin", "baseline", "preflight", "ruleset", "tier-roles", "metrics",
+const PHASE0_STEPS = ["alarm", "branch", "fast-forward", "pin", "baseline", "labels", "preflight", "ruleset", "tier-roles", "metrics",
   "cockpit", "rotate", "reclaim", "recipe", "fold-in", "stranded", "shortlist"];
 // A receipt in phase0.mjs's shape with every step `ok`; `steps` overrides
 // individual steps.

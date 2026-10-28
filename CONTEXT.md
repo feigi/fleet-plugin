@@ -333,7 +333,7 @@ _Avoid_: doctor, healthcheck
 **Pre-flight**:
 The check set run-team runs at the start of phase 0 (`preflight.mjs`) — what this
 machine and the consumer repository must have before anything is shortlisted or
-dispatched: the binaries, `gh` auth, `origin/main`, the ignore rules, the labels,
+dispatched: the binaries, `gh` auth, `origin/main`, the ignore rules,
 the repository settings, the Resolver. A pass is remembered in `.fleet/preflight.json`,
 keyed to a hash of the check set. It checks the machine and the repository, never
 the install — that is the Provenance check.

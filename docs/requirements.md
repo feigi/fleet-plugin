@@ -192,7 +192,6 @@ so one pass names every failure.
 | `origin-main` | `git rev-parse --verify -q origin/main` (§2.2) | exit 0 |
 | `worktrees-ignored` | `git check-ignore -q .worktrees/probe` (§2.5) | exit 0 |
 | `fleet-ignored` | `git check-ignore -q .fleet/probe` (§2.5) | exit 0 |
-| `label:ready-for-agent`, `label:in-progress`, `label:ready-to-merge` | `gh label list --search <label> --json name --jq '.[].name'` (§2.4) | a line equal to the label |
 | `allow-merge-commit` | `gh api "repos/{owner}/{repo}" --jq '.allow_merge_commit'` (§2.6) | prints `true` |
 | `ruleset` | `gh api "repos/{owner}/{repo}/rulesets" --jq '.[].name'` (§2.6) | prints a ruleset name |
 | `ci-workflow` | `grep -lE` for a top-level `name: CI` in `.github/workflows/*.y*ml`, quoted or not, with an optional trailing ` # comment` — the way `ci-state.mjs` reads a name (§2.7) | exit 0; a miss is a WARN and passes |

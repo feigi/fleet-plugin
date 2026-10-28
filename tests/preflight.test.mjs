@@ -19,7 +19,6 @@ import { CHECKS, MARKER_FILE, checkSetHash, runPreflight } from "../plugin/scrip
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/preflight.mjs", import.meta.url));
-const LABELS = ["ready-for-agent", "in-progress", "ready-to-merge"];
 
 const git = (cwd, ...args) => {
   const r = spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd, encoding: "utf8" });
@@ -29,7 +28,7 @@ const git = (cwd, ...args) => {
 
 // A repository every check passes against: an `origin` with an `origin/main`,
 // `.worktrees/` and `.fleet/` ignored, and a workflow named CI.
-function fixture({ labels = LABELS, allowMerge = "true", rulesets = ["main"], ci = "name: CI\n" } = {}) {
+function fixture({ allowMerge = "true", rulesets = ["main"], ci = "name: CI\n" } = {}) {
   const root = realpathSync(tempDir("preflight-"));
   const ws = join(root, "ws");
   mkdirSync(ws);
@@ -52,7 +51,6 @@ function fixture({ labels = LABELS, allowMerge = "true", rulesets = ["main"], ci
 printf '%s\\n' "$*" >> '${log}'
 case "$1" in
 auth|--version) exit 0 ;;
-label) { ${lines(labels)}; } | grep -x -- "$4"; exit 0 ;;
 api) case "$2" in
   */rulesets) ${lines(rulesets)} ;;
   *) echo '${allowMerge}' ;;
@@ -96,20 +94,19 @@ test("a second run with the check set unchanged skips every check and calls gh n
   assert.equal(ghCalls(f), before);
 });
 
-test("a missing label fails by that check's name, exits 1, and writes no marker", () => {
-  const f = fixture({ labels: ["ready-for-agent", "in-progress"] });
+test("no row checks a label: the Label map derivation step owns them, so the pre-flight makes no `gh label` call", () => {
+  const f = fixture();
   const r = cli(f);
-  assert.equal(r.status, 1, r.stdout + r.stderr);
-  assert.match(r.stdout, /^FAIL label:ready-to-merge: /m);
-  assert.match(r.stdout, /^ok label:ready-for-agent$/m);
-  assert.match(r.stdout, /^ok label:in-progress$/m);
-  assert.match(r.stdout, /^PREFLIGHT FAILED: label:ready-to-merge$/m);
-  assert.equal(existsSync(f.marker), false);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(CHECKS.filter(({ name, argv }) => name.startsWith("label") || argv.includes("label")), []);
+  assert.doesNotMatch(r.stdout, /label/);
+  assert.doesNotMatch(readFileSync(f.log, "utf8"), /^label /m);
 });
 
 test("a failed run is not remembered: the next run checks again", () => {
-  const f = fixture({ labels: ["ready-for-agent", "in-progress"] });
+  const f = fixture({ allowMerge: "false" });
   assert.equal(cli(f).status, 1);
+  assert.equal(existsSync(f.marker), false, "a failed run writes no marker");
   const r = cli(f);
   assert.equal(r.status, 1);
   assert.doesNotMatch(r.stdout, /SKIPPED/);

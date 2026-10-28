@@ -29,7 +29,7 @@ refreshes the Shortlist itself, and every admission is a **Pull** — one ticket
 into one free implementer slot, the moment it frees (phase 1).
 
 `phase0.mjs` runs the start sequence in
-its fixed order — alarm, branch, fast-forward, pin, baseline, preflight, ruleset,
+its fixed order — alarm, branch, fast-forward, pin, baseline, labels, preflight, ruleset,
 tier-roles, metrics, cockpit, rotate, reclaim, recipe, fold-in, stranded,
 shortlist — prints one `phase0: <step>: <status>` line per step with the
 `NEED` lines last, and records each step in `.fleet/phase0.json`, which the
@@ -102,12 +102,71 @@ repository; the tick's rows say how each is cleared.
 without a tick.
 On `MAIN-CHECKOUT-DIRTY` the maintainer may instead ignore a stray path that is untracked and new since the baseline: an entry in `.git/info/exclude` or in the global excludes file hides it from the check, and the hold clears on the next tick with no re-record. Ignoring never clears a tracked or staged file's change, which `git status` reports whatever the excludes say, nor a pattern that also matches a path the baseline holds, which then reads as changed. Ignoring is the maintainer's decision, never the controller's: the controller never writes an exclude or a `.gitignore` entry. Keep the pattern narrow, because an ignored path is invisible to this check, so a later member write that matches it is never seen.
 
+## Derive the Label map
+
+**Derive the Label map — the Label map derivation step — after the baseline
+and before the pre-flight.** The **Label map** (`.fleet/labels.json`) gives
+the string this repository's tracker uses for each Label role:
+`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`,
+`wontfix`, `in-progress`, `onhold`, `ready-to-merge`. The `labels` step runs
+`~/.fleet/bin/fleet-run label-map.mjs ensure` in this main checkout, which
+reads the cached map, the repository's triage-label table and the tracker's
+live label list, on every call, and never creates a label.
+This step is yours, once per run start: a member never derives the map and
+never asks.
+
+- **Exit 0** — the map is in place: the cached one still matches the tracker,
+  or one was derived and written. The step is `ok`, its line the map.
+- **Exit 3** — a role is uncertain, and nothing was written. The step is
+  `pending`, its line the question payload, one JSON object, and phase 0
+  prints `NEED answer-label-map`. Nothing after it runs — no pre-flight, no
+  Shortlist, no claim — until the map is written.
+- **Exit 1** — the table breaks the string rules; what it printed names each
+  role, the rule and the fix. **Exit 2** — it could not derive at all: no
+  repository, or `gh` could not answer, among the causes its message names.
+  Either fails the step, as does any other exit and an exit 3 that printed no
+  payload: show the maintainer what the step printed and stop. Neither is a
+  question. Once the cause is fixed, run phase 0 again.
+
+**Ask once, as one question, and wait.** The payload holds `certain`, the
+roles already settled (role → string), and `uncertain`, one entry per role to
+ask about: `{role, suggestion, origin, candidates, exists, was, claimedBy}`.
+Put it to the maintainer as one question listing each uncertain role, its
+suggestion, why, and the alternatives (`candidates`, the near matches the
+tracker has). The why, by the entry:
+
+- `origin` `table` — `declared in the triage-label table but not in the tracker`
+- `origin` `near-match` — `near match in the tracker`
+- `origin` `default`, `exists` true — `the default and a near match are both in the tracker`
+- `origin` `default`, `exists` false — `nothing found — the default, to be created`
+- `origin` `gone` — `was <was> when cached; gone from the tracker (renamed or deleted?) — name the label to use`; its `suggestion` is null, never the vanished string
+
+Any other entry carrying `was` takes the prefix `was <was> when cached, now
+gone from the tracker; `, and one carrying `claimedBy` the prefix `your
+earlier answer <string> is now <role>'s in the triage-label table; `
+when its `by` is `table`, `your earlier answer <string> is now <role>'s label
+(its default); ` when it is `default`. End the question with: reply
+`defaults` to accept every suggestion, or name `<role>=<label>` for any you
+want otherwise — a role with no suggestion must be named; labels that do not
+exist are created on your confirmation.
+
+**Write the answer, say how to keep it, run phase 0 again.** Run
+`~/.fleet/bin/fleet-run label-map.mjs set --create` with the reply:
+`--accept-suggestions` for `defaults`, and each `<role>=<label>` the
+maintainer named. Exit 0 prints the map it wrote; exit 1 is a refusal naming
+the role and the rule, nothing written and nothing created — put it to the
+maintainer and ask again. In the same reply, tell the maintainer how to make
+the answer permanent: add or edit the role's row in the repository's
+triage-label table, the role in the first cell and the string in the
+second. The plugin never writes that table, so neither do you. Then run
+phase 0 again; `ensure` now exits 0.
+
 ## Run the pre-flight
 
 **Run the pre-flight, once the pin and the baseline are recorded.**
 `~/.fleet/bin/fleet-run preflight.mjs` checks what this machine and this
 repository must give the fleet — the binaries, `gh` auth, `origin/main`,
-`.worktrees/` and `.fleet/` ignored, the three labels, merge commits on, a
+`.worktrees/` and `.fleet/` ignored, merge commits on, a
 ruleset, the Resolver — and prints one `ok`, `WARN` or `FAIL` line per
 check, each naming its check. **Exit 1 stops the run:** no shortlist, no
 dispatch. Report every `FAIL` line to the maintainer by its check's name;
@@ -132,6 +191,8 @@ or renamed — and the diff it prints says how; **2** the question could not
 be answered at all: no spec, no `gh`, a listing or read that failed
 outright, or a read that succeeded but withheld `bypass_actors` because
 the session lacks repository admin.
+
+A `drift` or `unanswered` ruleset step is advice too: surface the diff and go on.
 
 **3 does not stop the run and is not yours to fix** — reconciling is a
 write to the gate protecting this repo, so it needs the maintainer.
@@ -493,7 +554,8 @@ files under `<scratch>/impl-<N>/`). Record it the ordinary way —
 "impl-<N>-b"`, then `dispatch-prompt.mjs render implementer --member
 impl-<N>-b …`, then `ledger.mjs dispatch <N> impl-<N>-b`, then the `task`
 call naming the `agent` it printed, then the tier check — and never
-`claim-ticket.sh`: the claim already stands. A `report` goes to the
+`claim-ticket.sh`: the claim already stands. A re-run finds the need met
+once its row is written. A `report` goes to the
 maintainer as `#<N> — <why>` and nothing else: no dispatch, no label change,
 no release. One whose `why` reads `PR #<M> closed unmerged` waits on the
 maintainer's `replace #<N>` or `release #<N>`, the two words the tick's

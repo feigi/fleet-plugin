@@ -36,6 +36,15 @@
 //   pin           `instruments.sh --pin`, which certifies the Install root; the
 //                 ok line names its kind, root, and version or commit.
 //   baseline      `main-checkout.mjs --record`; its refusals fail the step.
+//   labels        `label-map.mjs ensure`, the Label map derivation step. Exit 0
+//                 is ok, its output the map ensure printed. Exit 3 is pending,
+//                 the question payload as one JSON line and then
+//                 `NEED answer-label-map`; nothing after it runs, the
+//                 pre-flight included, until the map is written. Exit 1 (the
+//                 triage-label table breaks the string rules), exit 2 (no
+//                 repository, or `gh` could not answer), any other exit, and
+//                 an exit 3 that printed no payload fail the step with
+//                 ensure's own words.
 //   preflight     `preflight.mjs`. A non-zero exit fails the step; the FAIL, WARN
 //                 and PREFLIGHT lines of an exit 1 are printed.
 //   ruleset       `.github/scripts/apply-ruleset.sh --check`, when the workspace
@@ -126,8 +135,9 @@
 // session alone.
 //
 // A step that fails stops the script; so does a pending one — nothing after
-// the recipe may run before it is proven, and the shortlist waits for the
-// stranded claims. The steps after it stay `pending` in the receipt.
+// the Label map may run before it is written, nothing after the recipe before
+// it is proven, and the shortlist waits for the stranded claims. The steps
+// after it stay `pending` in the receipt.
 //
 // `--workflow` and `--declare-no-ci` name how a repository without a workflow
 // called CI runs. `preflight.mjs` takes no arguments, so they are not passed
@@ -237,6 +247,24 @@ function baseline({ cwd }) {
   const r = node("main-checkout.mjs", ["--record"], { cwd });
   if (r.status !== 0) return refusal("main-checkout.mjs --record refused:", r);
   return ok("main-checkout baseline recorded");
+}
+
+function labels({ cwd }) {
+  const r = node("label-map.mjs", ["ensure"], { cwd });
+  if (r.status === 0) return ok(`label-map.mjs ensure: ${lines(r.stdout).at(-1) ?? "no output"}`);
+  if (r.status !== 3) return failed(withText(`label-map.mjs ensure ${r.how}`, r));
+  // The payload is the controller's question, read off the step's output, so
+  // it travels as one line: a pretty-printed one would split across lines.
+  let payload;
+  try {
+    payload = JSON.parse(r.stdout);
+  } catch {
+    payload = null;
+  }
+  if (!isRecord(payload) || !Array.isArray(payload.uncertain)) {
+    return failed(withText(`label-map.mjs ensure ${r.how} printed no question payload`, r));
+  }
+  return { status: "pending", output: [JSON.stringify(payload), "NEED answer-label-map"].join("\n") };
 }
 
 function preflight({ cwd, ci }) {
@@ -503,8 +531,8 @@ function alarm({ fleetDir }) {
 }
 
 const STEPS = {
-  "alarm": alarm, "branch": branch, "fast-forward": fastForward, "pin": pin, "baseline": baseline, "preflight": preflight,
-  "ruleset": ruleset, "tier-roles": tierRoles, "metrics": metrics, "cockpit": cockpit, "rotate": rotate,
+  "alarm": alarm, "branch": branch, "fast-forward": fastForward, "pin": pin, "baseline": baseline, "labels": labels,
+  "preflight": preflight, "ruleset": ruleset, "tier-roles": tierRoles, "metrics": metrics, "cockpit": cockpit, "rotate": rotate,
   "reclaim": reclaim, "recipe": recipe, "fold-in": foldIn, "stranded": stranded, "shortlist": shortlist,
 };
 

@@ -56,7 +56,7 @@
    **Run the pre-flight, once the pin and the baseline are recorded.**
    `~/.fleet/bin/fleet-run preflight.mjs` checks what this machine and this
    repository must give the fleet — the binaries, `gh` auth, `origin/main`,
-   `.worktrees/` and `.fleet/` ignored, the three labels, merge commits on, a
+   `.worktrees/` and `.fleet/` ignored, merge commits on, a
    ruleset, the Resolver — and prints one `ok`, `WARN` or `FAIL` line per
    check, each naming its check. **Exit 1 stops the run:** no shortlist, no
    dispatch. Report every `FAIL` line to the maintainer by its check's name;

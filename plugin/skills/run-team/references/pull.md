@@ -599,6 +599,7 @@ one run.
 
 `$ARGUMENTS` sets B. It becomes
 the tick's `--in-flight` and `tier-roles.mjs --check --in-flight`.
+What it checks is in the header of `scripts/tier-roles.mjs`, under the tier routes.
 
 **Default: In-flight bound 5, fixed for the run.** The level is set by load, not
 throughput: B caps live review units (≤ open PRs ≤ B), and the review side is
