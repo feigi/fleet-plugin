@@ -2,11 +2,22 @@
 description: merge every ready-to-merge open PR in numeric order — rebase, wait green, merge, never jumping a related PR
 ---
 
+Label names in this file are roles; the Label map gives the string to type; a member never derives the map.
+
 Set the goal, then work it until no open PR is left:
 
 `/goal Merge all of this repo's open PRs in numeric order if labeled ready-to-merge. Rebase -> Wait for checks green -> check for the ready-to-merge label -> merge if labeled. Never merge past a lower-numbered PR whose work is related — wait for its label instead.`
 
 Only `ready-to-merge` PRs are in scope — it is the author's sign-off. Never add the label yourself. A PR-body line `main-gain-removal: <path> <key> - <why>` is a second sign-off, scoped to one file and one landing source: it lets through the removal of lines `main` gained after the PR began in that file from that source, and nothing else (step 3's `main-gain-removed`).
+
+## The Label map
+
+**At the start of your pass, before selection, read the Label map — once.** `~/.fleet/bin/fleet-run label-map.mjs show ready-to-merge` prints the string the tracker uses for `ready-to-merge`. Type that one string for the rest of your pass wherever this file polls or compares by label: `<ready-to-merge string>` below is what it printed, in both polls (the grace's and the Monitor's) and in the timeline comparison. You run no `ensure` and ask no one.
+
+**A non-zero exit from `show` ends your pass before selection**, with nothing else done first and `ready-to-merge` never typed in place of the string:
+
+- **A bot a controller dispatched** holds no grace. Read the queue your dispatch recorded, which needs no map — `~/.fleet/bin/fleet-run ledger.mjs read | jq -c '.queued["merge-bot-<n>"]'` — and write your one report giving every PR there `refused` with `reason` `label-map-refused`; an empty or absent queue gives every list empty. Validate it as **One verdict per queued PR** says, then send your final line followed by what `show` printed.
+- **The top-level invocation** prints what `show` printed and stops. It writes no report.
 
 ## Order, and the hold rule
 
@@ -52,7 +63,7 @@ Obeying a fired signal blindly stalls the queue on a non-conflict; ignoring one 
 
 `ready-to-merge` is a finisher's verdict on one tree, and it does not expire when that tree does. **A GitHub label does not follow the branch** — one merged PR's timeline shows it, read with the timeline query below: `labeled ready-to-merge`, then commits and a `head_ref_force_pushed`, then `merged`, with no `unlabeled` anywhere between. The label stayed put while the head moved out from under it. Every other guard in this chain — the finisher's dispatch pin, the halt on a moved head, the worktree audit — runs *before* the label exists, so none of them is watching this window. You are the last gate, and **re-deriving the head is a requirement here, not bot discretion**: merge only a head that still carries the audit the label stands for.
 
-**The labelled head is the head its labeller recorded.** Whoever adds `ready-to-merge` — a finisher, or `review-and-fix` run standalone — posts a PR comment whose whole body is `ready-to-merge-head: <sha>`, naming the head it audited, immediately before the label. Read the newest one before `gh pr update-branch` and before anything else that can move the head:
+**The labelled head is the head its labeller recorded.** Whoever adds `ready-to-merge` — a finisher, or `review-and-fix` run standalone — posts a PR comment whose whole body is `ready-to-merge-head: <sha>`, naming the head it audited, immediately before the label. The prefix `ready-to-merge-head:` is not a label: type it as written, whatever string the Label map gives `ready-to-merge`. Read the newest one before `gh pr update-branch` and before anything else that can move the head:
 
 ```bash
 gh pr view <pr> --json comments \
@@ -70,7 +81,7 @@ Nothing else names that head. A commit's dates are when it was made, not when it
 
 ```bash
 gh api "repos/{owner}/{repo}/issues/<pr>/timeline?per_page=100" --paginate \
-  -q '.[] | select((.event == "labeled" and .label.name == "ready-to-merge")
+  -q '.[] | select((.event == "labeled" and .label.name == "<ready-to-merge string>")
         or .event == "committed" or .event == "head_ref_force_pushed")
       | .event + " " + (.sha // .label.name // "")'
 ```
@@ -318,7 +329,7 @@ Three dots, never two: a two-dot diff on a stale branch renders `main`'s gains a
 **Only a bot a controller dispatched holds a grace** (`/skill:run-team`, or any caller that says it owns the watcher); the top-level invocation arms its Monitor instead (**Then stay armed**). You were dispatched on the first `ready-to-merge` label, never after anyone's report, and a label landing minutes after your last merge is the common case — so the pass does not end the moment the queue empties. It drains, then waits **15 minutes** for late labels, then reports once:
 
 - Grace starts once no labelled PR is actionable — every one merged, skipped or held. Seed the labelled set then, the way **Then stay armed** seeds its Monitor, so a PR you already handled does not re-fire.
-- Every 60s, poll `gh pr list --state open --label ready-to-merge --limit 200 --json number`. A number not in the seed → **re-run selection from the top**, hold rule included, drain what it makes actionable, and restart the grace after that drain. A failed poll is no reading: keep the seed and poll again. A poll that returns 200 numbers is not a whole reading either — gh stops at `--limit` with exit 0 and no warning, so a label past it is unseen: act on the numbers it did return, and name `poll-capped-at-200` in the report, so the controller knows the grace's silence covered only the first 200.
+- Every 60s, poll `gh pr list --state open --label "<ready-to-merge string>" --limit 200 --json number`. A number not in the seed → **re-run selection from the top**, hold rule included, drain what it makes actionable, and restart the grace after that drain. A failed poll is no reading: keep the seed and poll again. A poll that returns 200 numbers is not a whole reading either — gh stops at `--limit` with exit 0 and no warning, so a label past it is unseen: act on the numbers it did return, and name `poll-capped-at-200` in the report, so the controller knows the grace's silence covered only the first 200.
 - At grace start and on every 60s poll after it, also read `gh pr list --state open --limit 1 --json number`. An empty list (no PR open at all, any author, labelled or not) ends the grace: report and exit now. A failed read is no reading: keep waiting. It applies draining or not, and again after a late-label drain restarts the grace.
 - 15 minutes with no new label → report and exit.
 
@@ -343,8 +354,9 @@ top-level invocation.
 The pass ends, the queue does not. Once no labeled PR is actionable, arm a persistent Monitor so a later sign-off restarts the loop without re-running this command:
 
 ```bash
+label="<ready-to-merge string>"            # the string `show ready-to-merge` printed
 cap=200                                     # the poll's --limit; gh stops there with exit 0 and no warning
-poll() { gh pr list --state open --label ready-to-merge --limit "$cap" --json number --jq '.[].number' 2>/dev/null; }
+poll() { gh pr list --state open --label "$label" --limit "$cap" --json number --jq '.[].number' 2>/dev/null; }
 capped=
 capcheck() {                                # a full page may have been cut there: say so once, and once when it clears
   if [ "$(printf '%s\n' "$1" | grep -c .)" -ge "$cap" ]; then

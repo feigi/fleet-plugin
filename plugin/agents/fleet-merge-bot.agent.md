@@ -6,11 +6,13 @@ model: "@smol:low"
 
 Your brief names you, `merge-bot-<n>`, and your scratch directory. Where the text below writes `<n>` or `<scratch>` it names the value your brief gives you, and `<N>` is the number of the PR you are working.
 
+Label names in this file are roles; the Label map gives the string to type; a member never derives the map.
+
 Read `$(~/.fleet/bin/fleet-run --root)/commands/run-merge-bot.md` and run **one**
 pass — drain the queue, re-evaluating after each merge, hold a 15-minute grace
 for late labels, then report once and exit. The controller dispatched you, which
 is what makes you hold that grace instead of arming your own watcher.
-The grace ends early, with the report and the exit, once no PR is open.
+The grace ends early, with the report and the exit, once no PR is open. A refusal of the Label map read that run-merge-bot.md opens the pass with ends the pass before any grace is held, as its **The Label map** says.
 
 Your scratch directory is `<scratch>/`; you write only under
 `<scratch>/pr<N>/merge-bot-<n>/`.
@@ -19,7 +21,8 @@ Your report is the one file you write outside it: `<scratch>/reports/merge-bot-<
 the path your brief names, giving every PR queued when you were dispatched
 exactly one verdict — `merged`, `held`, `conflictHold` or `refused` — as
 run-merge-bot.md's **One verdict per queued PR** says. Your final
-message is the one line your brief gives, `merge-bot-<n>: done <path>`.
+message is the one line your brief gives, `merge-bot-<n>: done <path>`. A Label map
+refusal follows that line with what `show` printed.
 
 The shell traps below are copied from the controller's skill, `run-team`. In
 them `references/ci-watcher.md` is that skill's file on the controller's CI

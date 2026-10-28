@@ -1333,7 +1333,7 @@ test("a dispatched bot holds a 15-minute grace, polling every 60s, before its on
   const s = grace();
   assert.match(s, Pin.phrase("**Only a bot a controller dispatched holds a grace**"));
   assert.match(s, Pin.phrase("then waits **15 minutes** for late labels, then reports once"));
-  assert.match(s, Pin.phrase("Every 60s, poll `gh pr list --state open --label ready-to-merge --limit 200 --json number`"),
+  assert.match(s, Pin.phrase('Every 60s, poll `gh pr list --state open --label "<ready-to-merge string>" --limit 200 --json number`'),
     "the grace poll lost its --limit, so it reads gh's bare default of 30 as the whole labelled queue (#2108)");
   assert.match(
     s,

@@ -4,6 +4,8 @@ will answer you, and no approval gate will ever clear for you. Report to the
 controller and to nobody else. Where a skill offers a maintainer-present step
 and an unattended one, yours is the unattended one.
 
+Label names in this file are roles; the Label map gives the string to type; a member never derives the map.
+
 You are ALREADY in worktree `<abs-path>` on branch `<branch>`. Do NOT create
 another worktree. Verify with `git rev-parse --git-dir` and
 `git rev-parse --git-common-dir`. Skip the using-git-worktrees skill's Step 1.

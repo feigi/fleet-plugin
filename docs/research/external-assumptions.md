@@ -37,7 +37,7 @@ refuses, misreads, or silently does nothing.
 - GitHub, driven through `gh` (≥ 2.94.0 for `blockedBy`; `--json`/`--jq`, `gh api`, `gh api graphql`). No other tracker, no REST-only path. — tracker#7, prose#37–41
 - Labels exist, with these exact strings, created before use (`gh` fails the whole write on an unknown label — tracker#11, prose#39):
   - triage roles: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix` — prose#1
-  - claim: `in-progress` (bootstrapped by `gh label create`) — shell#1, prose#10
+  - claim: `in-progress` (created by `label-map.mjs set --create` on the maintainer's confirmation, in the Label map derivation step) — shell#1, prose#10
   - merge authority: `ready-to-merge`, applied by a reviewer only — tracker#4, prose#7
   - release: exactly one of `patch` / `minor` / `major` per PR — shell#3, prose#8
   - modifiers/exclusions: `onhold`, `wayfinder:{map,research,prototype,grilling,task}` — tracker#1, prose#3–5

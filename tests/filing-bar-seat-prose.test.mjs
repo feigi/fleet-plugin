@@ -63,7 +63,7 @@ const decidedNote = () => flat(PULL_MD.between("It does not run a reproduction."
 
 test("step 5 files every issue needs-triage, a confirmed defect with an open remedy included, with the evidence triage needs", () => {
   const s = step5();
-  assert.match(s, Pin.phrase("`gh issue create --label needs-triage`"), "step 5's filing command no longer files `needs-triage`");
+  assert.match(s, Pin.phrase('`gh issue create --label "<needs-triage string>"`'), "step 5's filing command no longer files `needs-triage`");
   assert.match(
     s,
     Pin.phrase("**Every issue you create is labelled `needs-triage`; only triage sets `ready-for-agent`**"),
