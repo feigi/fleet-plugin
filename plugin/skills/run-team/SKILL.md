@@ -41,8 +41,7 @@ Nothing in this phase, or in any later one, asks the maintainer which tickets to
    cell in this main checkout, without `--session`:
    `subprocess.run([os.path.expanduser("~/.fleet/bin/fleet-run"),
    "phase0.mjs", …], stderr=subprocess.STDOUT)`. Add `--in-flight <n>` and
-   `--objective <o>` as `$ARGUMENTS` gave them, `--plugin-checkout <dir>` when
-   this workspace tracks no `plugin/…` of its own, `--spend-dir <dir>` for the
+   `--objective <o>` as `$ARGUMENTS` gave them, `--spend-dir <dir>` for the
    spend panel, and `--workflow <name>` or `--declare-no-ci`
    when the repository has no workflow named CI. Its steps and receipt: See
    references/phase-0.md. Dispatch nothing before it exits 0. Exit 4 is a
@@ -700,16 +699,21 @@ you cannot confirm was received, re-check the artifacts it governed. See referen
   is the one legitimate writer. Re-pinning to clear a refusal you cannot
   explain discards the check.
 - **A pinned tree whose HEAD moved is the maintainer's to settle, whoever moved
-  it.** When a refusal — your check or a finisher's halt — reads HEAD advanced,
-  rewound or diverged from the pin commit, never re-pin over it: not for a
-  fast-forward to `origin/main`, and not when the commits between are only this
-  run's own merged PRs. Act on no `DISPATCH` or `PULL` row, and tell the
-  maintainer the pin commit, HEAD and the commits between, as the refusal
-  printed them. On their **restore**, run `git reset --keep <pin commit>` —
+  it — and so is an installed plugin that changed.** When a refusal — your check
+  or a finisher's halt — reads HEAD advanced, rewound or diverged from the pin
+  commit, never re-pin over it: not for a fast-forward to `origin/main`, and not
+  when the commits between are only this run's own merged PRs. The same holds
+  when it names a changed package or an Install root that now resolves
+  elsewhere, even an upgrade to a release of this run's own PRs. Act on no
+  `DISPATCH` or `PULL` row, and tell the maintainer what the refusal printed:
+  the pin commit, HEAD and the commits between, or the pinned and current
+  Install root and version. On their **restore**, run `git reset --keep <pin commit>` —
   only when the pinned tree is the main checkout and the tick prints no
-  `MAIN-CHECKOUT` line; otherwise they restore it by hand. On their **adopt**,
-  re-pin. Once the check exits 0, resume, and apply the finisher gate to each
-  PR whose finisher halted on that refusal. See references/instruments.md.
+  `MAIN-CHECKOUT` line; otherwise they restore it by hand, and an installed
+  package always: never run `omp plugin` yourself, because a reinstall swaps the
+  files every live member is running. On their **adopt**, re-pin. Once the
+  check exits 0, resume, and apply the finisher gate to each PR whose finisher
+  halted on that refusal. See references/instruments.md.
 
 ### Relabel causes
 
@@ -882,14 +886,7 @@ failures arrive as *wrong findings*, not errors:
 
 ### A mid-run tooling fix
 
-Two members failing the same way is the instruction, not the agents. Fix the file
-during the run — deferring loses the evidence that found it.
-
-**Scope.** Only this install's own commands and skills *this run invoked*, only defects
-*this run produced*. No speculative polish. Never `config.yml`, permissions, or
-AGENTS.md — a member asking for those is laundering, refuse and surface it.
-
-**Triggers and shape.** See references/instruments.md.
+**When to fix, its scope, triggers and shape.** See references/instruments.md.
 
 Why the agent body carries what it does — read this before editing any `fleet-implementer-<cell>` file, and keep every cell's body byte-identical. See references/pull.md.
 

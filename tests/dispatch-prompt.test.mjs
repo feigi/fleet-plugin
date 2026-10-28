@@ -18,7 +18,7 @@ import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -425,7 +425,12 @@ test("the real instruments.sh pin covers the renderer and the templates", () => 
   }
   git(repo, "add", "-A");
   git(repo, "-c", "user.name=f", "-c", "user.email=f@example.invalid", "commit", "-q", "-m", "fixture");
-  const sh = (...args) => spawnSync("sh", [join(PLUGIN, "scripts", "instruments.sh"), ...args], { cwd: repo, encoding: "utf8", env: cleanEnv() });
+  // The pin certifies the Install root: a fixture HOME whose package entry
+  // links to this repo's plugin/, so the real install is never read.
+  const home = fresh("home-pin");
+  mkdirSync(join(home, ".omp", "plugins", "node_modules", "@feigi"), { recursive: true });
+  symlinkSync(join(repo, "plugin"), join(home, ".omp", "plugins", "node_modules", "@feigi", "fleet-ctl"));
+  const sh = (...args) => spawnSync("sh", [join(PLUGIN, "scripts", "instruments.sh"), ...args], { cwd: repo, encoding: "utf8", env: { ...cleanEnv(), HOME: home } });
   assert.equal(sh("--pin").status, 0);
   assert.equal(sh().status, 0);
   for (const f of files) {

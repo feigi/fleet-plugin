@@ -13,7 +13,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
@@ -856,7 +856,12 @@ test("the instruments pin covers closeout.mjs: a rewrite of it is a changed inst
   git(dir, "init", "-q", "-b", "main");
   git(dir, "add", "-A");
   git(dir, "commit", "-q", "-m", "i");
-  const pin = (...a) => spawnSync("sh", [join(REAL_SCRIPTS, "instruments.sh"), ...a], { cwd: dir, encoding: "utf8", env: GIT_ENV });
+  // The pin certifies the Install root: a fixture HOME whose package entry
+  // links to this checkout's plugin/, so the real install is never read.
+  const home = realpathSync(tempDir("closeout-home-"));
+  mkdirSync(join(home, ".omp", "plugins", "node_modules", "@feigi"), { recursive: true });
+  symlinkSync(join(dir, "plugin"), join(home, ".omp", "plugins", "node_modules", "@feigi", "fleet-ctl"));
+  const pin = (...a) => spawnSync("sh", [join(REAL_SCRIPTS, "instruments.sh"), ...a], { cwd: dir, encoding: "utf8", env: { ...GIT_ENV, HOME: home } });
   assert.equal(pin("--pin").status, 0);
   assert.equal(pin().status, 0, "unchanged");
   writeFileSync(join(dir, "plugin", "scripts", "scratch.txt"), "untracked\n");

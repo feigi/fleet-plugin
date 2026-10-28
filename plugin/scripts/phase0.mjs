@@ -2,7 +2,7 @@
 // Phase 0 as one command: the run's start sequence, in order, with a receipt.
 //
 //   phase0.mjs [--session <dir>] [--in-flight n] [--objective cost|speed]
-//              [--plugin-checkout <dir>] [--spend-dir <dir>]
+//              [--spend-dir <dir>]
 //              [--workflow <name> | --declare-no-ci]
 //
 // The session directory is `--session`, else `PI_ARTIFACTS_DIR`, which omp
@@ -33,8 +33,8 @@
 //                 script came from are superseded: prints `SUPERSEDED <n>
 //                 commits; re-run phase0.mjs` and fails, so the re-run executes
 //                 from the new tree.
-//   pin           `instruments.sh --pin`, with `--audit <plugin-checkout>` when
-//                 given (a workspace that tracks no `plugin/…` of its own).
+//   pin           `instruments.sh --pin`, which certifies the Install root; the
+//                 ok line names its kind, root, and version or commit.
 //   baseline      `main-checkout.mjs --record`; its refusals fail the step.
 //   preflight     `preflight.mjs`. A non-zero exit fails the step; the FAIL, WARN
 //                 and PREFLIGHT lines of an exit 1 are printed.
@@ -225,10 +225,12 @@ function fastForward({ cwd }) {
   return failed(`SUPERSEDED ${behind} commits; re-run phase0.mjs`);
 }
 
-function pin({ cwd, pluginCheckout }) {
-  const r = sh("instruments.sh", ["--pin", ...(pluginCheckout ? ["--audit", pluginCheckout] : [])], { cwd });
+function pin({ cwd }) {
+  const r = sh("instruments.sh", ["--pin"], { cwd });
   if (r.status !== 0) return refusal("instruments.sh --pin failed:", r);
-  return ok(pluginCheckout ? `instruments pinned, auditing ${pluginCheckout}` : "instruments pinned");
+  // `instruments: pinned <digest> over <kind> <root> (version <v>|commit <sha>)`
+  const m = /^instruments: pinned [0-9a-f]+ over (.+)$/m.exec(r.stderr);
+  return ok(`instruments pinned: ${m ? m[1] : r.stderr || "?"}`);
 }
 
 function baseline({ cwd }) {
@@ -545,7 +547,7 @@ function main() {
   const die = makeDie(NAME);
   const F = defineFlags(die, {
     flags: {
-      session: "value", "in-flight": "value", objective: "value", "plugin-checkout": "value",
+      session: "value", "in-flight": "value", objective: "value",
       "spend-dir": "value", workflow: "value", "declare-no-ci": "bool",
     },
   });
@@ -588,7 +590,6 @@ function main() {
   if (F.has("declare-no-ci") && !absent("workflow")) die("--workflow and --declare-no-ci are alternatives, not a pair");
   const ci = F.has("declare-no-ci") ? "CI: declared absent (--declare-no-ci)" : absent("workflow") ? null : `CI: workflow ${F.arg("workflow")} (--workflow)`;
   const pathOf = (name) => (absent(name) ? null : resolve(F.arg(name)));
-  const pluginCheckout = pathOf("plugin-checkout");
   const spendDir = pathOf("spend-dir");
 
   let fleetDir;
@@ -668,7 +669,7 @@ function main() {
     receipt.steps[name] = was?.status === "ok" ? was : { status: "pending", at: now, output: "not run" };
   }
 
-  const ctx = { cwd, fleetDir, held, receipt, receiptPath, scratch, pluginCheckout, spendDir, ci };
+  const ctx = { cwd, fleetDir, held, receipt, receiptPath, scratch, spendDir, ci };
   const say = (line) => process.stdout.write(`${line}\n`);
   say(`session ${session} (from ${source})`);
   let stop = null;

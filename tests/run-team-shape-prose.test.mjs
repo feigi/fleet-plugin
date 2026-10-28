@@ -638,7 +638,13 @@ const CHANGED = [
   ],
   [
     "Add `--in-flight <n>` when `$ARGUMENTS` gave one, `--plugin-checkout <dir>` when this workspace tracks no `plugin/…` of its own, `--spend-dir <dir>` to name the directory the cockpit's spend panel reads, and `--workflow <name>` or `--declare-no-ci` when the repository has no workflow named CI.",
-    "Add `--in-flight <n>` and `--objective <o>` as `$ARGUMENTS` gave them, `--plugin-checkout <dir>` when this workspace tracks no `plugin/…` of its own, `--spend-dir <dir>` for the spend panel, and `--workflow <name>` or `--declare-no-ci` when the repository has no workflow named CI.",
+    "Add `--in-flight <n>` and `--objective <o>` as `$ARGUMENTS` gave them, `--spend-dir <dir>` for the spend panel, and `--workflow <name>` or `--declare-no-ci` when the repository has no workflow named CI.",
+  ],
+  // The instrument pin certifies the Install root, and phase 0 lost its
+  // `--plugin-checkout` flag with the `--audit` it passed through (#3845).
+  [
+    "It covers every tracked file under this repo's own plugin component directories — `plugin/commands/`, `plugin/scripts/`, `plugin/skills/`, `plugin/agents/`, `plugin/workflows/` — the probes, the libraries they source, and these runbooks, which you also read from that tree.",
+    "It covers the Install root's plugin component directories — `commands/`, `scripts/`, `skills/`, `agents/`, `workflows/` — the probes, the libraries they source, and these runbooks, which you also read from that tree: the tracked files of a linked checkout's `plugin/…`, or every file of an installed package.",
   ],
 ];
 

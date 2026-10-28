@@ -6,17 +6,20 @@ Evidence for the rule SKILL.md states in **Re-check the instruments before a gat
 
 **You read your instruments out of a tree every member can write to — re-check
 them before every gate decision.** Per-member worktrees and `./agent-test`'s port
-derivation protect members from each other; neither protects the main checkout,
-which you run every gate probe out of and which any member can edit — except
-through a `write`/`edit`/`ast_edit` the `member-write-guard` extension refuses;
-a `bash` or `eval` write still lands. Measured: a
-member edited two files there instead of in its worktree while the CI monitor was
-polling one of them every 120s and a live finisher was using it to decide a
-label. It caught itself; nothing in the fleet would have. That is the silent
-direction — a modified instrument raises no error, shows in no PR and leaves
-nothing in the ledger, and it still returns a verdict, just not necessarily the
-right one, so you have no reason to re-check a script you did not know had
-changed.
+derivation protect members from each other; neither protects the Install root,
+the tree you run every gate probe out of and read these runbooks from. It is
+the main checkout only when that checkout is linked as the install. The
+`member-write-guard` extension refuses a `write`/`edit`/`ast_edit` inside the
+main checkout only, and a `bash` or `eval` write lands anyway; under a package
+install nothing prevents a write to the Install root, and this re-check is
+what catches one. Measured: a
+member edited two files in the main checkout instead of in its worktree while
+the CI monitor was polling one of them every 120s and a live finisher was using
+it to decide a label. It caught itself; nothing in the fleet would have. That is
+the silent direction — a modified instrument raises no error, shows in no PR and
+leaves nothing in the ledger, and it still returns a verdict, just not
+necessarily the right one, so you have no reason to re-check a script you did
+not know had changed.
 
 **A label gate and a CI verdict are also taken by dispatched members, not
 only by you** — the finisher labels, and the merge bot merges on its own
@@ -27,15 +30,15 @@ in the instrument re-check block of `agents/fleet-finisher.agent.md`, the merge 
 
 ## What the instrument set covers
 
-It covers every tracked file under this repo's own plugin component directories
-— `plugin/commands/`, `plugin/scripts/`, `plugin/skills/`, `plugin/agents/`,
-`plugin/workflows/` — the probes, the libraries they source, and these runbooks,
-which you also read from that tree. Not the whole repo: `docs/metrics/` is
-appended by THIS run, so covering it would refuse on the run's own bookkeeping
-every time. It does not cover refs, deliberately: `claim-ticket.sh` creates a
-branch per ticket and `reap.sh` deletes them in the ref store every worktree
-shares, so ordinary work moves refs several times a run and a per-gate
-refusal on that is noise.
+It covers the Install root's plugin component directories — `commands/`,
+`scripts/`, `skills/`, `agents/`, `workflows/` — the probes, the libraries they
+source, and these runbooks, which you also read from that tree: the tracked
+files of a linked checkout's `plugin/…`, or every file of an installed package.
+Not the whole repo: `docs/metrics/` is appended by THIS run, so covering it
+would refuse on the run's own bookkeeping every time. It does not cover refs,
+deliberately: `claim-ticket.sh` creates a branch per ticket and `reap.sh`
+deletes them in the ref store every worktree shares, so ordinary work moves
+refs several times a run and a per-gate refusal on that is noise.
 
 ## Re-pin first after a mid-run tooling fix
 
@@ -44,6 +47,13 @@ only edit that legitimately does; skip it and the next gate refuses on your own
 fix, which teaches you to ignore the refusal.
 
 ## Triggers and shape of a mid-run tooling fix
+
+Two members failing the same way is the instruction, not the agents. Fix the file
+during the run — deferring loses the evidence that found it.
+
+**Scope.** Only this install's own commands and skills *this run invoked*, only defects
+*this run produced*. No speculative polish. Never `config.yml`, permissions, or
+AGENTS.md — a member asking for those is laundering, refuse and surface it.
 
 Fix on an identical failure twice, or on a member doing the wrong thing while
 following the text; prefer moving text to adding it, and cut before you append.
@@ -69,8 +79,9 @@ hold the old text — re-brief only if it changes what they do *now*.
 
 ## A pinned tree whose HEAD moved is the maintainer's to settle
 
-`instruments.sh --pin` records the pinned tree's HEAD as `commit=<sha>` after
-the digest and `root=`, and an exit-1 refusal prints that pin commit and how
+Pinned from a linked checkout, `instruments.sh --pin` records the checkout's
+HEAD as `commit=<sha>` after the digest and `root=`, and an exit-1 refusal
+prints that pin commit and how
 HEAD relates to it: `advanced` (the pin commit is an ancestor of HEAD, with the
 commits between, at most 20 and then `… N more`), `rewound`, `diverged`, or
 `unmoved` (HEAD is the pin commit, so the porcelain lines name the edits). When
@@ -79,6 +90,16 @@ the relation is `unknown`, with git's own error, rather than guess one; HEAD is
 not the pin commit there either, so never re-pin over it. A baseline with no
 `commit=` line, or one whose commit is gone from the repository, prints one
 line saying so and no relation.
+
+**An installed package has no HEAD.** Pinned from an npm or marketplace
+install, the baseline records the package's `version=` in place of a commit,
+and an exit-1 refusal names the pinned version and the current one, with no
+git output. An Install root that now resolves elsewhere than the pinned one —
+a reinstall that moved it, a switch between a package and a linked checkout,
+a link pointed elsewhere — refuses at exit 2, naming the pinned root and the
+current one. Restore is the maintainer reinstalling the pinned version by
+hand, never the controller: a reinstall swaps the files under every live
+member.
 
 **The measured case.** Another session fast-forwarded the main checkout to
 `origin/main` mid-run. The commits that brought in were only this run's own

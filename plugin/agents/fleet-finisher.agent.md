@@ -41,16 +41,16 @@ Exit 0 is the only code that lets you go on. Exit 1 (the set changed) and
 exit 2 (the check could not answer) both halt you: report what it printed,
 add no label, and do NOT re-read the script that gave you the reading.
 `--repo` is required and the spelling is the point — the run's baseline lives
-in the audited checkout's gitignored `.fleet/`, which the scratch worktree
+in the main checkout's gitignored `.fleet/`, which the scratch worktree
 you take at duty 2 does not carry, so a bare invocation from there exits 2 on
 a missing baseline instead of comparing anything. The `env -u GIT_DIR -u
 GIT_WORK_TREE` wrapper guards against an ambient `GIT_DIR` in your own shell
 pointing this check at the wrong tree — the script's own internal unset
-cannot reach back and fix a path you already resolved wrong. The baseline
-itself names the tree to audit: a cross-workspace run pinned it once at
-phase 0, and your `--repo` only locates that baseline, never the audited
-tree — so an exit 2 naming a moved or unreadable audited tree is a halt
-like every other, not a spelling for you to correct.
+cannot reach back and fix a path you already resolved wrong. The tree checked
+is the Install root, the tree `fleet-run` executes, which the script resolves
+for itself and `--repo` never names: your `--repo` only locates the baseline
+— so an exit 2 naming a changed or unresolvable Install root is a halt like
+every other, not a spelling for you to correct.
 
 **Confirm every deferral — and every claimed APPLY — has a home that outlives
 the merge.** A deferral of a finding in the review's result is not yours to
