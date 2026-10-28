@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { computeCellEvidence } from "../plugin/scripts/compute-cell-evidence.mjs";
+import { computeBoard } from "../plugin/scripts/compute-board.mjs";
+import { formatRouting } from "../plugin/scripts/ledger-grammar.mjs";
 
 // The cockpit page's tab strip and hash router. `board.html` is one
 // self-contained file, so the decision is lifted out of its source text and
@@ -636,4 +638,103 @@ test("Cell evidence: the Board and Tokens panes are still filled on a tick while
   open("#cells");
   render(model({ cellEvidence: evidence(), tickets: [{ issue: 12, column: "POOL" }], spend: null }));
   assert.ok(document.getElementById("card-12"), "the Board is drawn behind the open tab");
+});
+
+// -- the card's Cell line, and links both ways ----------------------------------------
+
+const routed = (member, o) => `${member} ${formatRouting({
+  policy: "slow-high", cell: "slow-high", draw: null, by: null, stratum: "heavy", brief: 9658, criteria: 8,
+  sized: null, objective: "cost", tripped: [], reason: "ok", ...o,
+})}`;
+const implRec = (member, cell, model) => ({ member, model, resolvedModelIdentity: `anthropic/${model}`, thinking: cell.split("-")[1], subagent_type: `fleet-implementer-${cell}` });
+
+// A board whose cards link to every kind of place on the guard section: the
+// newest generation (#21), an older one (#22), a generation the guard has no
+// figures for (#23), a Cell the guard does not hold (#24), a Pull with no
+// transcript (#25), a rescue at another Cell (#26) and a Pull with no
+// Admissible row (#27).
+const linkedBoard = ({ guard, modelRoles }) => computeBoard({
+  ledger: {
+    rows: [
+      "#21 impl-21=PR#121", "#22 impl-22", "#23 impl-23", "#24 impl-24 · tier=smol-high", "#25 impl-25",
+      "#26 impl-26=killed impl-26-b · tier=task-max", "#27 impl-27", "#28 excluded · behind-pr:#121",
+    ],
+    routed: [
+      routed("impl-21", { cell: "task-high", draw: { k: 1, K: 2 }, by: "burn-in" }), routed("impl-22", { cell: "task-high", draw: { k: 1, K: 2 }, by: "burn-in" }),
+      routed("impl-23", {}), routed("impl-24", { cell: "smol-high", draw: { k: 2, K: 2 }, by: "burn-in" }),
+      routed("impl-25", { cell: "slow-medium", draw: { k: 1, K: 4 }, by: "burn-in" }), routed("impl-26", { cell: "smol-high", draw: { k: 2, K: 2 }, by: "burn-in" }),
+      routed("impl-27", { cell: "task-high", policy: "task-high" }),
+    ],
+    agents: { "impl-26-b": "fleet-implementer-task-max", "impl-27": "fleet-implementer-slow-high" },
+    filed: [], ruled: [],
+  },
+  issues: [], prs: [{ number: 121, state: "OPEN", labels: [], title: "t" }], ci: {}, prev: null, now: Date.now(),
+  implementers: [
+    implRec("impl-21", "task-high", "claude-sonnet-5-5"), implRec("impl-22", "task-high", "claude-sonnet-5-4"),
+    implRec("impl-23", "slow-high", "claude-opus-6"), implRec("impl-24", "smol-high", "claude-haiku-5-5"),
+    implRec("impl-26", "smol-high", "claude-haiku-5-4"), implRec("impl-26-b", "task-max", "claude-sonnet-6"),
+    implRec("impl-27", "slow-high", "claude-opus-5"),
+  ],
+  guard, modelRoles, receipts: { phase0: null, closeout: null }, agents: ceAgents,
+});
+
+const linksIn = (n) => [...(n.tag === "a" ? [n.href] : []), ...(n.children ?? []).flatMap(linksIn)];
+
+test("a card draws its Cell line under the meta line: Cell · why, Stratum · model · level, then the mark", () => {
+  const { document, render } = harness();
+  render(linkedBoard({ guard: ceGuard(), modelRoles: ceRoles }));
+  const [, , why, stratum] = document.getElementById("card-21").children;
+  assert.deepEqual([why.className, stratum.className], ["cl", "cl"]);
+  assert.equal(textOf(why).replace(/\s+/g, " ").trim(), "task-high · drawn 1 of 2: burn-in");
+  assert.equal(textOf(stratum).replace(/\s+/g, " ").trim(), "heavy: 9,658 chars (past 3,483), 8 criteria (past 5) · claude-sonnet-5-5 · high");
+  const cell = why.children.find((c) => c.tag === "a");
+  assert.equal(cell.href, "#cells/task-high@claude-sonnet-5-5");
+  assert.equal(cell.target, undefined, "a hash link must not open a new window");
+
+  const red = document.getElementById("card-27").children.at(-1);
+  assert.equal(red.className, "cl mark red");
+  assert.equal(red.textContent, "⚑ ran as fleet-implementer-slow-high: no Admissible row, so it counts in no Cell's figures");
+
+  const hole = document.getElementById("card-25").children[3].children.find((c) => c.textContent === "not on record");
+  assert.equal(hole.className, "nr", "not on record is drawn dim and italic in its place");
+  assert.equal(document.getElementById("card-28").children.length, 2, "an Exclusion's POOL card carries no Cell line");
+});
+
+test("card → guard entry and guard entry → card links land in every state, a generation with no figures included", () => {
+  const states = {
+    "today's guard": { guard: ceGuard(), modelRoles: ceRoles },
+    "today's guard, no modelRoles": { guard: ceGuard(), modelRoles: null },
+    "no cost guard": { guard: { status: "missing" }, modelRoles: ceRoles },
+    "no cost guard, no modelRoles": { guard: { status: "missing" }, modelRoles: null },
+  };
+  for (const [name, state] of Object.entries(states)) {
+    const { document, render, open, scrolls, tops } = harness();
+    const board = linkedBoard(state);
+    render(board);
+    const toCells = linksIn(document.getElementById("board")).filter((h) => h.startsWith("#cells/") && !h.startsWith("#cells/row/"));
+    assert.ok(toCells.includes("#cells/slow-high@claude-opus-6"), `${name}: the fixture links a generation with no figures`);
+    assert.ok(toCells.includes("#cells/task-max@claude-sonnet-6"), `${name}: the fixture links a rescue`);
+    for (const href of toCells) {
+      open(href);
+      assert.equal(scrolls().at(-1), `cell-${href.slice("#cells/".length)}`, `${name}: ${href} does not land`);
+    }
+    const toCards = linksIn(document.getElementById("cells")).filter((h) => h.startsWith("#board/"));
+    assert.deepEqual(toCards.sort(), ["#board/21", "#board/22", "#board/23", "#board/24", "#board/25", "#board/26", "#board/27"], name);
+    for (const href of toCards) {
+      open(href);
+      assert.equal(scrolls().at(-1), `card-${href.slice("#board/".length)}`, `${name}: ${href} does not land`);
+    }
+    assert.deepEqual(tops(), [], `${name}: a link fell to a tab's top`);
+  }
+});
+
+test("a guard entry lists this run's Pulls booked to it, each with its mark", () => {
+  const { document, render } = harness();
+  render(linkedBoard({ guard: ceGuard(), modelRoles: ceRoles }));
+  const task = document.getElementById("cell-task-high");
+  const pulls = task.children.find((c) => c.className === "ce-pulls");
+  assert.equal(pulls.children[0].textContent, "this run's Pulls");
+  assert.deepEqual(pulls.children.filter((c) => c.tag === "a").map((a) => a.textContent), ["#21", "#22", "#27"]);
+  assert.equal(pulls.children.at(-1).textContent, "⚑ ran as fleet-implementer-slow-high: no Admissible row, so it counts in no Cell's figures");
+  assert.ok(textOf(document.getElementById("cell-slow-high@claude-opus-6")).includes("no figures yet for claude-opus-6"));
 });

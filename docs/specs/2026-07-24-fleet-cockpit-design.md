@@ -252,7 +252,17 @@ them update the shape below.)
       "ci": "green",                 // green|red|unknown|null  (null = no PR)
       "sinceEnteredStage": 1690…,    // epoch ms, for dwell / stale
       "flags": ["stale"],            // [] normal; red-ci|held-behind:#N|stale|killed|tier-mismatch|blocked|sha-off-branch; POOL badge excluded:#M (never in attention) (amended by #1820)
-      "ruling": "6-applies"          // from ledger `ruled`, on PR cards only
+      "ruling": "6-applies",         // from ledger `ruled`, on PR cards only
+      // The card's Cell line (cockpit-tabs spec § 7), built by compute-board.mjs's
+      // pure cellLine() from the row, its `## Routed` entry, its `## Dispatched`
+      // `agent=` and each implementer's transcript record; null on a POOL card
+      // and a row with no impl token. `lines` is [why, stratum], each a list of
+      // parts `{ text, dim, href, sep }` (`dim`: "not on record", drawn dim and
+      // italic; `href`: a hash link); `mark` is null or `{ text, severity:
+      // "amber" | "red" }`; `generation` is the Pull's (null when none is on
+      // record) and `targets` every guard entry the line links to.
+      "cellLine": { "cell": "smol-high", "generation": "claude-haiku-5-5", "lines": [[/* … */], [/* … */]], "mark": null,
+                    "targets": [{ "cell": "smol-high", "generation": "claude-haiku-5-5" }] }
     }
   ],
   "filed": [{ "issue": 351, "subject": "…" }],
@@ -268,7 +278,9 @@ them update the shape below.)
   //               cells: [{ cell, anchor, baseline, judged, route: { model, text, label, flag },
   //                         figures: null | { generation, anchor, merged, failRate, usd },
   //                         none: null | { text, generation, anchor, marks },
-  //                         older: [{ generation, anchor, mark, merged, failRate, usd }] }],
+  //                         older: [{ generation, anchor, mark, merged, failRate, usd }],
+  //                         unfigured: [{ text, generation, anchor }],   // a card's generation with no figures
+  //                         pulls: [{ issue, href, mark }] }],           // this run's Pulls, booked As-routed
   //               footnotes: [{ mark, text }] }
   //   declared: { heading, members: [{ name, declared, route }] }
   // All five implementer Cells are always in `guard.cells`, in a fixed order.

@@ -34,11 +34,13 @@ import {
   isOmpSessionDirName, ompSessionTranscripts, foldOmpTranscript, ompMemberRecord,
 } from "./member-record.mjs";
 import { readReceipt } from "./phase0-receipt.mjs";
-import { RECEIPT, CLOSEOUT_RECEIPT } from "./ledger-grammar.mjs";
+import { RECEIPT, RECEIPT_HELD, CLOSEOUT_RECEIPT } from "./ledger-grammar.mjs";
 import { NAME, warnOnce, execRead } from "./board-common.mjs";
 import { mergedReadPrs, issuesOfPrs } from "./compute-board.mjs";
 import { readCostGuard } from "./fleet-tick.mjs";
 import { parseFrontmatter } from "./tier-roles.mjs";
+import { isImplementer } from "./member-outcomes.mjs";
+import { validateTable } from "./ticket-router.mjs";
 // The heartbeat's liveness mark and the controller record beside it, read here
 // and never written: the heartbeat is the mark's only writer and
 // `ledger.mjs rotate` the record's. stallOwner() reads the process table to
@@ -490,7 +492,12 @@ export function receiptSpendDir(stateDir) {
 // truthiness check returning, because nothing in the data says which field is
 // the tag. This follows `ledger.mjs`'s `tracker`: a boolean checked before any
 // success-only field is read.
-export function gatherSpend({ dir, sinceMs = null, topN = 8, explicit = false } = {}) {
+//
+// `implementers`, when the caller hands in a Map, receives each implementer
+// transcript's dispatch record (implementerRecord below) by member name, from
+// the same fold the spend is read off: the cards' Cell lines read it, and the
+// return value stays the panel's alone.
+export function gatherSpend({ dir, sinceMs = null, topN = 8, explicit = false, implementers = null } = {}) {
   try {
     // `dir` is the caller's resolution, never one made here: the operator's
     // --spend-dir, or the session the phase-0 receipt records
@@ -533,7 +540,7 @@ export function gatherSpend({ dir, sinceMs = null, topN = 8, explicit = false } 
       return { ok: false, error };
     }
 
-    const { agents, toolTables, skipped, damaged } = readOmpSpend(dir, sinceMs);
+    const { agents, toolTables, skipped, damaged } = readOmpSpend(dir, sinceMs, implementers);
     if (!agents.length) {
       // `damaged` belongs here beside `skipped`. An omp transcript with
       // no parseable assistant-with-usage line folds to no model, so
@@ -626,7 +633,7 @@ export function gatherSpend({ dir, sinceMs = null, topN = 8, explicit = false } 
 // the transcript regardless of whether the file ends up booked as an agent,
 // so a transcript that is corrupt where its assistant-with-usage line should
 // be still surfaces here instead of falling through `if (!m) continue` unseen.
-function readOmpSpend(dir, sinceMs) {
+function readOmpSpend(dir, sinceMs, implementers = null) {
   const agents = [];
   const toolTables = [];
   let skipped = 0;
@@ -646,6 +653,7 @@ function readOmpSpend(dir, sinceMs) {
         cacheWrite: m.tokens_cache_create, output: m.tokens_out, cacheRead: m.tokens_cache_read,
       });
       toolTables.push(tools);
+      if (implementers !== null && isImplementer(m.member)) implementers.set(m.member, implementerRecord(m));
     } catch (e) {
       skipped++;
       // The prefix already names `file`; Node's errno text (`..., open|stat
@@ -659,6 +667,51 @@ function readOmpSpend(dir, sinceMs) {
     }
   }
   return { agents, toolTables, skipped, damaged };
+}
+
+// An implementer's dispatch record, off its member record: the last turn's
+// `model` beside what was fixed at dispatch — `session_init`'s model identity,
+// the harness-written thinking level and the definition it was dispatched as.
+// compute-board.mjs's cellLine reads it the way the figures read an
+// implementer row.
+function implementerRecord(m) {
+  return { member: m.member, model: m.model, resolvedModelIdentity: m.resolvedModelIdentity, thinking: m.thinking, subagent_type: m.subagent_type };
+}
+
+// Between runs: close-out has moved `phase0.json` to `phase0.previous.json`
+// while `ledger.md` still holds that run's rows, so the cards read the
+// implementer transcripts of the session the held receipt names — the cards
+// only: the spend panel keeps following `phase0.json` (receiptSpendDir). Into
+// `implementers`, as readOmpSpend fills it; a held receipt that is absent,
+// unreadable or names no omp session directory, and a directory not there,
+// add nothing. A transcript that will not read is skipped under readOmpSpend's
+// own once-per-file warning.
+export function readHeldImplementers(stateDir, implementers) {
+  const read = readReceipt(join(stateDir, RECEIPT_HELD));
+  if (read.state !== "ok" || !isOmpSessionDirName(basename(read.receipt.session))) return;
+  let transcripts;
+  try { transcripts = ompSessionTranscripts(read.receipt.session); } catch { return; }
+  for (const { file, agent, spawnDepth } of transcripts) {
+    if (!isImplementer(agent)) continue;
+    try {
+      const m = ompMemberRecord(foldOmpTranscript(readFileSync(file, "utf8"), file), agent, spawnDepth);
+      if (m) implementers.set(m.member, implementerRecord(m));
+    } catch (e) {
+      warnOnce("skips", file, `skipping ${file}: ${e.message}`);
+    }
+  }
+}
+
+// The installed router table, `router-table.json` beside the scripts, when
+// `validateTable` accepts it, else null: a card words a policy row that has no
+// row for its Stratum ("follows *") only off a table it could read.
+export function readRouterTable(scriptDir) {
+  try {
+    const t = validateTable(JSON.parse(readFileSync(join(scriptDir, "router-table.json"), "utf8")));
+    return t instanceof Error ? null : t;
+  } catch {
+    return null;
+  }
 }
 
 // The Cell evidence tab's reads. Each is the whole of one input, kept apart from
@@ -961,7 +1014,13 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, stateDir 
   // The guard's own rationale (fail loud, gate on presence and on range,
   // not just finiteness) lives at argSpendSince()'s definition in board.mjs,
   // whose main() runs it and hands the answer in as `spendSince`.
-  const spend = gatherSpend({ dir: spendDir, sinceMs: spendSince, explicit: spendDirExplicit });
+  // Each implementer's dispatch record, for the cards' Cell lines: off the
+  // same transcripts the spend is read from, or — with no `phase0.json`, the
+  // state between runs — off the session `phase0.previous.json` names.
+  const implementers = new Map();
+  const spend = gatherSpend({ dir: spendDir, sinceMs: spendSince, explicit: spendDirExplicit, implementers });
+  if (stateDir !== null && !spendDirExplicit && !existsSync(join(stateDir, RECEIPT))) readHeldImplementers(stateDir, implementers);
+  const routerTable = readRouterTable(scriptDir);
   // The heartbeat's mark, raw. readState() never throws — an absent
   // file is the ordinary state of a run whose heartbeat has not beaten yet,
   // and an unreadable or corrupt one announces itself on stderr and degrades
@@ -1002,6 +1061,6 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, stateDir 
   const agents = readAgents(scriptDir);
   const modelRoles = stateDir === null ? heldRead(prev?.modelRoles) : await carryModelRoles(prev?.modelRoles, now);
   return { ledger, issues, prs, merged, closed, closedIssues, ci, prev, repo, repoUrl, workspace, port, spend, beat, ticked, acted, controller, stallOwner: stallOwnerOf, poolOk,
-    poolCapped, prsCapped, guard, receipts, agents, modelRoles,
+    poolCapped, prsCapped, guard, receipts, agents, modelRoles, implementers: [...implementers.values()], routerTable,
     now, interval };
 }

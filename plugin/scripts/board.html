@@ -55,6 +55,15 @@
   .card .n { color:var(--blue); font-weight:600; }
   .card .title { color:var(--fg); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .card .meta { color:var(--dim); font-size:12px; margin-top:3px; display:flex; gap:8px; flex-wrap:wrap; }
+  /* The Cell line: two lines under the meta line, and a third for the mark.
+     "not on record" is a hole, drawn dim and italic in its place. */
+  .card .cl { color:var(--dim); font-size:12px; margin-top:2px; }
+  .card .cl .nr { font-style:italic; opacity:.65; }
+  .card .cl.mark.amber { color:var(--amber); }
+  .card .cl.mark.red { color:var(--red); }
+  .ce-pulls { display:flex; gap:8px; flex-wrap:wrap; font-size:12px; margin-top:4px; }
+  .ce-pulls a { color:var(--blue); text-decoration:none; }
+  .ce-pulls .red { color:var(--red); }
   .card a { color:var(--blue); text-decoration:none; }
   .dot { width:8px; height:8px; border-radius:50%; display:inline-block; vertical-align:middle; }
   .dot.green{background:var(--green)} .dot.red{background:var(--red)} .dot.unknown{background:var(--dim)}
@@ -391,7 +400,9 @@ function ceOlder(o) {
   return box;
 }
 
-// One Cell's entry: its header line, then its figures or "no figures yet".
+// One Cell's entry: its header line, then its figures or "no figures yet", a
+// "no figures yet" for each generation a card links to that has none, its older
+// generations, and this run's Pulls booked to it, each linking to its card.
 function ceEntry(e) {
   const box = ceBox("div", "ce-entry", e.anchor);
   const hd = el("div", "ce-hd");
@@ -409,7 +420,23 @@ function ceEntry(e) {
     if (e.none.marks.length) none.append(el("span", "ce-beside", " " + e.none.marks.join(", ")));
     box.append(none);
   }
+  for (const u of e.unfigured || []) {
+    const none = ceBox("div", "ce-gen", u.anchor);
+    none.append(el("span", "ce-dim", u.text));
+    box.append(none);
+  }
   for (const o of e.older) box.append(ceOlder(o));
+  if ((e.pulls || []).length) {
+    const row = el("div", "ce-pulls");
+    row.append(el("span", "ce-lbl", "this run's Pulls"));
+    for (const p of e.pulls) {
+      const a = el("a", null, "#" + p.issue);
+      a.href = p.href;
+      row.append(a);
+      if (p.mark) row.append(el("span", p.mark.severity === "red" ? "red" : "ce-amber", p.mark.text));
+    }
+    box.append(row);
+  }
   return box;
 }
 
@@ -635,8 +662,27 @@ function card(t) {
   for (const f of t.flags || []) meta.append(el("span", "badge flag", f));
   if (t.ruling) meta.append(el("span", "badge", "ruled:" + t.ruling));
   c.append(meta);
+  if (t.cellLine) {
+    for (const line of t.cellLine.lines) c.append(cellLineRow(line));
+    if (t.cellLine.mark) c.append(el("div", "cl mark " + t.cellLine.mark.severity, t.cellLine.mark.text));
+  }
   resumeFlash(c);
   return c;
+}
+
+// One line of a card's Cell line: its parts, each after its own separator. A
+// part with an `href` is a hash link, a guard entry or a policy row on Cell
+// evidence, and opens in this window; a hole ("not on record") is drawn dim and
+// italic in its place. Every word is the model's (compute-board.mjs's cellLine).
+function cellLineRow(parts) {
+  const row = el("div", "cl");
+  for (const p of parts) {
+    if (p.sep) row.append(document.createTextNode(p.sep));
+    const node = el(p.href ? "a" : "span", p.dim ? "nr" : null, p.text);
+    if (p.href) node.href = p.href;
+    row.append(node);
+  }
+  return row;
 }
 
 // The one writer of a shown banner: display, class and text move together, so

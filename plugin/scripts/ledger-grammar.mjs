@@ -811,8 +811,8 @@ export function drawCell({ session, ticket, policyCell, cells }) {
 // after the Pull's first implementer's member token, and it never changes
 // after: the row's `tier=`/`cell=` stay the mutable "Cell the next
 // implementer runs at". One grammar for the line, here, read by `pull.mjs` off
-// the router's stdout and by `ledger.mjs` to refuse a malformed one; the
-// cockpit's board card is to read it too, and does not yet. Its words, in
+// the router's stdout, by `ledger.mjs` to refuse a malformed one, and by the
+// cockpit's board card (compute-board.mjs's cellLine). Its words, in
 // this order, `-` for none:
 //   POLICY    the policy row's Cell        CELL      the Pull's Cell
 //   DRAW      k/K of the draw              BY        burn-in | every-5th
