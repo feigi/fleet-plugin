@@ -50,6 +50,7 @@
 // could-not-evaluate row fires further down instead:
 //
 //   label `ready-to-merge` absent            1  label-pulled
+//     (the Label map's string for the role)
 //   reviewDecision CHANGES_REQUESTED         1  changes-requested
 //   PR head not in {pre, post} and not a     1  head-moved-after-label
 //     proven rebase-carry of pre
@@ -79,6 +80,12 @@
 // so a conflict-free rebase keeps it. Anything the proof cannot establish —
 // a missing object, an unresolvable base, a git failure, a merge conflict — is
 // no carry, and the head row blocks exactly as it does for any other moved head.
+//
+// THE LABEL MAP: `ready-to-merge` is a Label role (label-map.mjs). Its string
+// is read off the Label map once, after the arguments are checked and before
+// any child runs, and the label row compares the PR's labels against that
+// string. A run with no valid map is a refusal at exit 2 carrying the
+// reader's message, which names `label-map.mjs ensure`; nothing runs.
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -87,6 +94,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeDie, defineFlags, writeAll } from "./arg.mjs";
 import { gitEnv, mainCheckoutDirFromGitCommonDir } from "./git-env.mjs";
+import { readLabelMap } from "./label-map.mjs";
 
 const NAME = "merge-gate";
 
@@ -128,6 +136,15 @@ function sha(name, value) {
 const pre = sha("pre", preArg);
 const post = postArg === null ? null : sha("post", postArg);
 const heads = new Set([pre, post ?? pre]);
+
+// The tracker's string for the `ready-to-merge` role. Every refusal here,
+// typed or not, is exit 2: an uncaught throw would exit 1, "blocked".
+let ready;
+try {
+  ready = readLabelMap()["ready-to-merge"];
+} catch (e) {
+  die(e.message);
+}
 
 // --- rebase-carry proof ----------------------------------------------------
 // Same net change: `git diff-tree` of each head against its own merge base
@@ -358,7 +375,7 @@ function decide(instruments, prView, mainGain, ciRead, rebaseCarry) {
   // at ci-state's read is still not one of them.
   const accepted = rebaseCarry === null ? heads : new Set([...heads, rebaseCarry.accepted]);
   if (prView !== null) {
-    if (!prView.labels.some((l) => l.name === "ready-to-merge")) return blocked("label-pulled");
+    if (!prView.labels.some((l) => l.name === ready)) return blocked("label-pulled");
     if (prView.reviewDecision === "CHANGES_REQUESTED") return blocked("changes-requested");
     if (!accepted.has(prView.headRefOid)) return blocked("head-moved-after-label");
   }

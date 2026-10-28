@@ -14,6 +14,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { seedLabelMap } from "./support/label-map-seed.mjs";
 import { computeBoard } from "../plugin/scripts/compute-board.mjs";
 import { deriveRun, LedgerError } from "../plugin/scripts/fleet-tick.mjs";
 import { rowPr } from "../plugin/scripts/ledger-grammar.mjs";
@@ -32,8 +33,10 @@ function fixture(t, body = null) {
   const dir = join(root, ".fleet");
   mkdirSync(dir);
   // A git repository, as a main checkout is: the gh a finisher dispatch runs
-  // resolves its repo from the ledger's root.
+  // resolves its repo from the ledger's root, and `dispatch merge-bot` reads
+  // the identity Label map seeded there.
   assert.equal(spawnSync("git", ["init", "-q", root]).status, 0);
+  seedLabelMap(root);
   const file = join(dir, "ledger.md");
   if (body !== null) writeFileSync(file, body);
   const tierOutcomes = join(root, "docs", "metrics", "tier-outcomes.tsv");
@@ -97,7 +100,7 @@ function fixture(t, body = null) {
     path: join(dir, "briefs", `${member}.md`),
     sha256: JSON.parse(readFileSync(join(dir, "briefs", `${member}.json`), "utf8")).sha256,
   });
-  return { dir, file, bin, env, bare, cli, ok, read, bytes, refused, put, briefOf, tierOutcomes, rule };
+  return { root, dir, file, bin, env, bare, cli, ok, read, bytes, refused, put, briefOf, tierOutcomes, rule };
 }
 
 test("dispatch appends a live member row and records the dispatch in ## Dispatched", (t) => {
@@ -302,6 +305,49 @@ test("dispatch merge-bot refuses, writing nothing, when gh does not give it the 
   }
   writeQueueGh(bin, Array.from({ length: 1000 }, (_, i) => i + 1));
   refused(["dispatch", "merge-bot"], /answered 1000 PRs, the limit, so the queue may be longer/);
+});
+
+// #3869: the queue is the open PRs carrying the Label map's string for
+// `ready-to-merge`, passed to gh as one argument however it is spelled.
+test("dispatch merge-bot lists the queue by the Label map's string for ready-to-merge", (t) => {
+  const { ok, bin, dir, root } = fixture(t);
+  seedLabelMap(root, { roles: { "ready-to-merge": "queue-ok" } });
+  writeQueueGh(bin, [7]);
+  assert.deepEqual(ok("dispatch", "merge-bot").queued, [7]);
+  // A bare `dispatch merge-bot` runs twice under `ok`, the brief its refusal
+  // names rendered between the two (rendered-brief.mjs): the same list each time.
+  assert.deepEqual([...new Set(ghCalls(bin).filter((c) => c.startsWith("pr list")))], ["pr list --state open --label queue-ok --limit 1000 --json number"]);
+  seedLabelMap(root, { roles: { "ready-to-merge": "queue ok" } });
+  const log = join(dir, "gh-argv.log");
+  writeExecStub(join(bin, "gh"), `#!/bin/sh\nprintf '%s\\n' "$@" > '${log}'\nprintf '[]\\n'\n`);
+  ok("dispatch", "merge-bot");
+  assert.deepEqual(readFileSync(log, "utf8").split("\n").slice(4, 6), ["--label", "queue ok"]);
+});
+
+test("dispatch merge-bot with no Label map refuses before gh runs, naming ensure, and writes nothing", (t) => {
+  const { refused, bin, root } = fixture(t);
+  rmSync(join(root, ".fleet", "labels.json"));
+  refused(["dispatch", "merge-bot"], /dispatch merge-bot: no Label map at .*label-map\.mjs ensure.*; nothing written/);
+  assert.deepEqual(ghCalls(bin), []);
+});
+
+// Only `dispatch merge-bot` and settle --from-report read the Label map:
+// every other verb reads and writes in a repository that has none.
+test("every verb but dispatch merge-bot and settle --from-report runs with no Label map", (t) => {
+  const { ok, read, root } = fixture(t);
+  rmSync(join(root, ".fleet", "labels.json"));
+  ok("row", "8", "impl-8 · class=routine");
+  ok("token", "8", "tier=slow-high");
+  ok("filed", "501", "some finding");
+  ok("ruled", "70", "kept");
+  ok("dispatch", "8", "impl-8");
+  ok("dispatch", "70", "fix-pr-70");
+  ok("settle", "impl-8", "PR#70");
+  ok("review", "70", "review=member:review-pr-70");
+  ok("drain", "stop for the test");
+  ok("undrain", "resume");
+  assert.deepEqual(read().rows, ["#8 impl-8=PR#70 · class=routine · tier=slow-high · fix-pr-70 · review=member:review-pr-70"]);
+  assert.equal(existsSync(join(root, ".fleet", "labels.json")), false);
 });
 
 test("merge-bot-<n> numbers past a settled merge-bot token a row holds that ## Dispatched never saw", (t) => {

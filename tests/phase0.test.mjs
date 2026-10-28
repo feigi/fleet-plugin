@@ -102,9 +102,10 @@ cpSync(PLUGIN, join(TREE, "plugin"), { recursive: true });
 const SCRIPTS = join(TREE, "plugin", "scripts");
 const STUBBED = join(SCRIPTS, "stub-driver.mjs");
 writeFileSync(STUBBED, DRIVER);
-// Two of them are imported by other scripts for their exports, so the real
-// module stays importable behind the stub and only its command line is replaced.
-const IMPORTED = ["main-checkout", "tier-roles"];
+// The ones in IMPORTED are imported by other scripts for their exports
+// (ledger.mjs imports label-map.mjs's reader), so the real module stays
+// importable behind the stub and only its command line is replaced.
+const IMPORTED = ["main-checkout", "tier-roles", "label-map"];
 for (const n of MJS_STUBS) {
   if (IMPORTED.includes(n)) {
     cpSync(join(SCRIPTS, `${n}.mjs`), join(SCRIPTS, `${n}-real.mjs`));

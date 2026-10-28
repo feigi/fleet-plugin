@@ -39,6 +39,13 @@
 // head record names this pin is left as it is — no comment, no label write —
 // and still answers 0 off the read-back, `added: false`.
 //
+// `ready-to-merge` above is a Label role (label-map.mjs): the label written,
+// and the one the idempotence check and the read-back look for, is the Label
+// map's string for it, read once from the repository `--repo` names (the cwd
+// when omitted) before step 0. The head record is not a label: its prefix is
+// `ready-to-merge-head:` whatever the map says, the grammar the merge bot
+// parses back.
+//
 // Stdout is always one JSON line, the receipt:
 //
 //   {pr, pin, ticketless, releaseLabels, patchAdded, inert, commented, added,
@@ -54,8 +61,8 @@
 //   added          this run wrote the label
 //   readBack       every label name the step 4 read carried, null if it never ran
 //   firstRead      every label name step 1 read carried, null if it never ran
-//   step           on exit 2 only, the step that failed: `pin`, `repo`, or the
-//                  step whose `gh` call failed
+//   step           on exit 2 only, the step that failed: `pin`, `repo`,
+//                  `label-map`, or the step whose `gh` call failed
 //   error          on exit 2 only, what `gh` (or the invocation) said
 //
 // A usage error that never reaches `gh` — a missing or unknown flag — is a
@@ -64,8 +71,10 @@
 // Exit vocabulary:
 //
 //   0  the read-back carries `ready-to-merge`
-//   2  the invocation or a `gh` call failed, or the Ticketless test could not
-//      look — its stderr is in the receipt and on stderr, and no later step ran
+//   2  the invocation or a `gh` call failed, the Label map could not be read
+//      (an absent or invalid map's error names `label-map.mjs ensure`), or the
+//      Ticketless test could not look — its stderr is in the receipt and on
+//      stderr, and no later step ran
 //   3  the PR does not carry exactly one release label — nothing was written
 //   4  every write returned 0 and the read-back does not carry the label
 //   5  a Ticketless PR whose diff is not inert, or whose verdict could not
@@ -79,10 +88,10 @@ import { makeDie, defineFlags, writeAll } from "./arg.mjs";
 import { inertVerdict } from "./finisher-scope.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { LABEL_LIST_ARGS, LABEL_LIST_LIMIT, releaseLabelsDefined, releaseLabelsIn } from "./release-labels.mjs";
+import { readLabelMap } from "./label-map.mjs";
 import { ticketlessVerdict } from "./ticketless.mjs";
 
 const NAME = "finisher-label";
-const LABEL = "ready-to-merge";
 
 const die = makeDie(NAME);
 const { arg, numArg, sweep, stray } = defineFlags(die, {
@@ -138,6 +147,15 @@ receipt.pin = pin;
 // blame the binary for a bad --repo.
 if (repo !== null && !statSync(repo, { throwIfNoEntry: false })?.isDirectory()) {
   fail("repo", `--repo is not a directory: ${repo}`);
+}
+
+// The tracker's string for the `ready-to-merge` role, in the repository `gh`
+// runs in.
+let LABEL;
+try {
+  LABEL = readLabelMap({ cwd: repo === null ? process.cwd() : resolve(repo) })["ready-to-merge"];
+} catch (e) {
+  fail("label-map", e.message);
 }
 
 // `gh` resolves its repository from the cwd's git remotes, so an ambient
