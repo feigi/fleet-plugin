@@ -2322,6 +2322,18 @@ test("CLI: a partial drop through the real shortlist.mjs is named beside the PUL
   assert.match(r.stdout, pullRows(String.raw`implementers 0\/2`, [2160], String.raw`\(implementers=0 prs=0 unclaimed=1 supply=1 shortlist=missing specs-dropped=#2151 \(to-spec: User Stories heading\)\)$`));
 });
 
+// The tick keeps only the last line of a failed refresh's stderr, so a
+// missing Label map is named on the REFRESH FAILED row only because
+// shortlist.mjs carries candidates.mjs's cause onto its own refusal line.
+test("CLI: a refresh with no Label map prints REFRESH FAILED naming the map and `label-map.mjs ensure`", () => {
+  const r = runCli([], {
+    candidates: [plainIssue(2160)],
+    beforeRun: (repo) => rmSync(join(repo, ".fleet", "labels.json")),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^shortlist {4}→ REFRESH FAILED {3}\(shortlist missing — shortlist\.mjs exited 2: shortlist: candidates\.mjs exited 2 — the scan did not answer, so there is no shortlist to write: candidates: no Label map at .*: run `label-map\.mjs ensure`, the Label map derivation step\)$/m);
+});
+
 test("CLI: a tick that does not refresh still names the drops, read back from shortlist.json", () => {
   const dropped = [{ n: 2151, reason: "to-spec: User Stories heading" }];
   // Two unclaimed at cap 2: nothing short, so no refresh runs this tick.

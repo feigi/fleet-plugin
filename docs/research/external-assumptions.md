@@ -82,7 +82,7 @@ What a ticket must look like to be admitted, claimed, and worked.
 
 | Assumption | Where |
 |---|---|
-| Open, carries `ready-for-agent`, carries none of the ten `EXCLUDE` labels (`in-progress`, `onhold`, `wontfix`, `needs-triage`, `needs-info`, `wayfinder:*`). Search terms are quoted `label:"…"` because an unquoted value ends at the first space. | tracker#1, tracker#11, prose#5 |
+| Open, carries `ready-for-agent`, carries none of the labels `candidates.mjs`'s `query()` negates (the Label map's strings for the roles `in-progress`, `onhold`, `wontfix`, `needs-triage`, `needs-info`, plus the literal `wayfinder:*` set, `WAYFINDER_EXCLUDE`). Search terms are quoted `label:"…"` because an unquoted value ends at the first space. | tracker#1, tracker#11, prose#5 |
 | Not a spec: a body whose `##` heading is `User Stories`/`Acceptance Criteria`-style spec structure is dropped by `dropSpecs` (a false admit means "a member implements a whole spec as one ticket"). | tracker (candidates.mjs `dropSpecs`, cited in-slice) |
 | Blocking is `blockedBy` (GraphQL, ≤ 50 edges per issue, same-repo numbers only); `parent`/`subIssues` are hierarchy, not blocking, and are never fetched. | tracker#8–10 |
 | A comment headed literally `## Agent Brief` overrides the body. Fetch is `gh issue view N --json title,body,comments`; bare `--comments` drops title and body silently. | prose#14, prose#22 |

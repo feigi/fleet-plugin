@@ -44,7 +44,8 @@
 //
 // What REFUSES instead (exit 2), leaving the previous file exactly as it was: a
 // scan that did not answer (a missing or invalid Label map among its causes,
-// named on the stderr candidates.mjs passes through), a ledger that could not be read, a workspace that
+// whose reason candidates.mjs's last stderr line carries onto this refusal's
+// own line), a ledger that could not be read, a workspace that
 // could not be resolved, a file that could not be written. An empty shortlist
 // written in any of those cases would read as "no work". Exit 0 is the file
 // written, an empty shortlist included — the empty queue is an answer. Never
@@ -61,8 +62,8 @@
 // of it; stdout carries the same object plus `file`.
 //
 // The ledger is read through `ledger.mjs read`, never parsed here, so the
-// ledger keeps one parser. candidates.mjs's stderr passes straight through —
-// the per-candidate lines phase 0 always read, the dependency-heading
+// ledger keeps one parser. candidates.mjs's stderr is relayed whole once it
+// exits — the per-candidate lines phase 0 always read, the dependency-heading
 // notice among them. inflight.sh's and gh's are captured and summarised, one
 // line per dropped ticket.
 
@@ -157,14 +158,22 @@ function shortlistPath() {
 
 function scan() {
   const r = spawnSync(process.execPath, [join(SCRIPT_DIR, "candidates.mjs"), "--require-label", ROLE, "--with-dropped"], {
-    encoding: "utf8", maxBuffer: MAX_BUFFER, stdio: ["ignore", "pipe", "inherit"],
+    encoding: "utf8", maxBuffer: MAX_BUFFER, stdio: ["ignore", "pipe", "pipe"],
   });
+  // Captured, then relayed whole before anything else is said, so this
+  // stderr still carries every line candidates.mjs wrote, in its order.
+  if (r.stderr) writeAll(2, r.stderr);
   if (r.error) die(`candidates.mjs did not run: ${how(r)}`);
   // Exit 1 (an empty queue) and exit 3 (every row a to-spec spec) are both the
   // empty answer. Exit 1 is also Node's own code for a crash, so the payload
   // decides: it must parse, with no rows.
   if (r.status !== 0 && r.status !== 1 && r.status !== 3) {
-    die(`candidates.mjs ${r.signal ? `killed by ${r.signal}` : `exited ${r.status}`} — the scan did not answer, so there is no shortlist to write`);
+    // A refusal's cause is candidates.mjs's own last line — a missing Label
+    // map's names `label-map.mjs ensure` — and the tick keeps only the LAST
+    // line of this stderr for its REFRESH FAILED row, so the cause rides on
+    // this one rather than sitting above it. A kill has no such line.
+    const cause = r.signal ? "" : lastLine(r.stderr);
+    die(`candidates.mjs ${r.signal ? `killed by ${r.signal}` : `exited ${r.status}`} — the scan did not answer, so there is no shortlist to write${cause ? `: ${cause}` : ""}`);
   }
   let out;
   try {

@@ -411,7 +411,9 @@ test("a remapped Label map's ready-for-agent string is the one the scan asks gh 
 
 // No valid map is a scan that did not answer — exit 2, never the empty
 // shortlist that would read as "no work" — and the reader's message, which
-// names `ensure`, reaches stderr through candidates.mjs.
+// names `ensure`, reaches stderr through candidates.mjs. It also ends the
+// refusal line itself, the last line, which is all of this stderr the tick's
+// REFRESH FAILED row keeps.
 test("no Label map refuses at exit 2, naming ensure, and leaves the file untouched", (t) => {
   const f = fixture(t);
   const before = JSON.stringify({ scanned: 1, shortlist: [{ n: 1701, t: "t1701" }], dropped: [] });
@@ -420,7 +422,7 @@ test("no Label map refuses at exit 2, naming ensure, and leaves the file untouch
   const r = f.run({ issues: [issue(1701)] });
   assert.equal(r.status, 2, r.stderr);
   assert.match(r.stderr, /^candidates: no Label map at .*label-map\.mjs ensure/m);
-  assert.match(r.stderr, /shortlist: candidates\.mjs exited 2/);
+  assert.match(r.stderr.trim().split("\n").at(-1), /^shortlist: candidates\.mjs exited 2 — .*: candidates: no Label map at .*label-map\.mjs ensure/);
   assert.equal(readFileSync(f.shortlistFile, "utf8"), before);
 });
 

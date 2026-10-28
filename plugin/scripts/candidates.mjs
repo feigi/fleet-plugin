@@ -527,8 +527,8 @@ function query(label) {
 // shortlist that silently omits work — "no silent caps" is the rule this
 // enforces. Applied verbatim to BOTH the labeled query and the fallback
 // query below — the fallback result was previously never re-checked, so
-// --require-label <nonexistent> --allow-fallback could ship a silently
-// truncated unfiltered list.
+// `--require-label ready-for-human --allow-fallback`, against a queue holding
+// no `ready-for-human` issue, could ship a silently truncated unfiltered list.
 function refuseIfCapped(rows, description) {
   if (rows.length === limit) {
     die(
