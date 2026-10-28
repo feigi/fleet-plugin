@@ -37,14 +37,15 @@ const markdown = (dir) =>
 // A markdown file's body: what follows the frontmatter fence.
 const bodyOf = (text) => (text.startsWith("---\n") ? text.slice(text.indexOf("\n---\n", 4) + "\n---\n".length) : text);
 
-const rulePattern = new RegExp(Pin.phrase(ROLE_RULE).source, "g");
+// A fresh regex per use: a global one shared across assertions carries `lastIndex` from one into the next.
+const rulePattern = () => new RegExp(Pin.phrase(ROLE_RULE).source, "g");
 
 // What is wrong with a body's role rule, or null: a body naming no role needs none; one naming a role states
 // the rule exactly once, above the first role name.
 function ruleProblem(body) {
   const role = body.search(ROLE);
   if (role === -1) return null;
-  const rules = [...body.matchAll(rulePattern)];
+  const rules = [...body.matchAll(rulePattern())];
   if (rules.length === 0) return "names a role and does not carry the role rule";
   if (rules.length > 1) return "states the role rule more than once";
   if (rules[0].index > role) return "names a role before it states the role rule";
@@ -82,7 +83,7 @@ test("a file filed as written is still a file that names a role, so its exemptio
     const file = SHIPPED.find((f) => f.name === name);
     assert.ok(file, `${name} is gone: drop it from FILED_AS_WRITTEN`);
     assert.match(file.body, ROLE, `${name} names no role: drop it from FILED_AS_WRITTEN`);
-    assert.doesNotMatch(file.body, rulePattern, `${name} carries the role rule, which the tracker would be filed: drop the rule or the exemption`);
+    assert.doesNotMatch(file.body, rulePattern(), `${name} carries the role rule, which the tracker would be filed: drop the rule or the exemption`);
   }
 });
 
