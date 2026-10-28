@@ -107,7 +107,7 @@ for (const [claim, re] of [
   ["a text-only decision reaches the DOM", /el\("div", "spend-wrap", \w+\.text\)/],
   ["the lede string fills the lede slot", /el\("span", "lede", \w+\.lede\)/],
   ["the note string fills the note slot", /el\("span", "note", \w+\.note\)/],
-  ["the role list fills the column headed `by role`", /(\w+)\.append\(el\("h3", null, "by role"\),?\); spendRows\(\1, \w+\.roles,/],
+  ["the role list fills the column headed `by member role`", /(\w+)\.append\(el\("h3", null, "by member role"\),?\); spendRows\(\1, \w+\.roles,/],
   ["the tool list fills the column headed by the tool heading", /(\w+)\.append\(el\("h3", null, \w+\.toolHeading\),?\); spendRows\(\1, \w+\.tools,/],
 ]) {
   test(`renderSpend wires the decision through: ${claim}`, () => {

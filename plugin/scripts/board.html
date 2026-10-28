@@ -8,12 +8,13 @@
   :root { color-scheme: dark; --bg:#0d1117; --panel:#161b22; --line:#30363d;
     --fg:#e6edf3; --dim:#8b949e; --red:#f85149; --amber:#d29922; --green:#3fb950; --blue:#58a6ff; }
   * { box-sizing: border-box; }
-  /* The page is the window's height: header, banner, attention strip,
-     spend panel and footer keep their natural height and never shrink; #board
-     takes the rest, and each column scrolls on its own past that. The board's
-     min-height is the floor for a window too short for the fixed parts — they
-     then overflow body and the PAGE scrolls, rather than squeezing the
-     columns to nothing or clipping anything off. */
+  /* The page is the window's height: header, banner, attention strip, the tab
+     strip and footer keep their natural height and never shrink; the open
+     tab's pane (#board or #spend, the other is hidden) takes the rest, and
+     each board column scrolls on its own past that. The panes' min-height is
+     the floor for a window too short for the fixed parts — they then overflow
+     body and the PAGE scrolls, rather than squeezing the columns to nothing or
+     clipping anything off. */
   body { margin:0; background:var(--bg); color:var(--fg);
     font:14px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;
     height:100vh; display:flex; flex-direction:column; }
@@ -32,7 +33,8 @@
   #stale-banner.dead { background:var(--red); color:#fff; }
   #attention { padding:8px 16px; border-bottom:1px solid var(--line); background:#2d1618; }
   #attention:empty { display:none; }
-  .att { display:inline-block; margin:2px 10px 2px 0; }
+  .att { display:inline-block; margin:2px 10px 2px 0; color:inherit; text-decoration:none; }
+  .att:hover { text-decoration:underline; }
   .att .n { color:var(--blue); font-weight:600; }
   .flag { color:var(--red); font-weight:600; }
   #board { display:grid; grid-template-columns:repeat(5,1fr); grid-template-rows:minmax(0,1fr); gap:10px; padding:14px; align-items:start;
@@ -59,9 +61,19 @@
   .badge { border:1px solid var(--line); border-radius:10px; padding:0 6px; }
   .badge.flag { border-color:var(--red); color:var(--red); }
   footer { color:var(--dim); padding:10px 16px; border-top:1px solid var(--line); font-size:12px; }
+  /* A pane carries its own display (grid, block), which would beat the UA's
+     [hidden] rule; the closed tab's pane must stay closed. */
+  [hidden] { display:none !important; }
+  #tabs { display:flex; gap:4px; padding:8px 14px 0; border-bottom:1px solid var(--line); }
+  #tabs a { color:var(--dim); text-decoration:none; padding:5px 14px; border:1px solid transparent; border-bottom:0;
+    border-radius:6px 6px 0 0; margin-bottom:-1px; }
+  #tabs a:hover { color:var(--fg); }
+  #tabs a.on { color:var(--fg); background:var(--bg); border-color:var(--line); }
+  /* A hash link's target flashes once on arrival. The duration is FLASH_MS in the script. */
+  .card.flash { animation:flash 1.2s ease-out 1; }
+  @keyframes flash { from { box-shadow:0 0 0 2px var(--blue); background:#12233a; } to { box-shadow:0 0 0 2px transparent; } }
   footer .filed { margin-top:4px; }
-  #spend { padding:0 14px 14px; }
-  #spend:empty { display:none; }
+  #spend { padding:14px; flex:1 1 0; min-height:200px; overflow-y:auto; }
   .spend-wrap { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
   .spend-hd { display:flex; align-items:baseline; gap:10px; margin-bottom:8px; }
   .spend-hd h2 { font-size:11px; letter-spacing:.06em; color:var(--dim); margin:0; text-transform:uppercase; }
@@ -83,8 +95,9 @@
 <header><h1 id="heading">🛰 fleet cockpit</h1><span id="age"></span></header>
 <div id="stale-banner"></div>
 <div id="attention"></div>
+<nav id="tabs"><a id="tab-board" class="on" href="#board" aria-current="page">Board</a><a id="tab-tokens" href="#tokens">Tokens</a></nav>
 <div id="board"></div>
-<div id="spend"></div>
+<div id="spend" hidden></div>
 <footer id="footer"></footer>
 <script>
 const COLUMNS = ["POOL", "IMPLEMENTING", "REVIEW", "READY", "MERGED"];
@@ -109,6 +122,37 @@ let repoUrl = null; // full repo URL from the model (carries the host) — PR li
 // ledgerBanner already use.
 const TITLE = "fleet cockpit";
 function boardTitle(repo) { return repo ? `${TITLE} — ${repo}` : TITLE; }
+
+// Where a URL hash lands: which tab is open, and which card (an issue number,
+// as a string) to bring into view on it. The router's whole decision, as a
+// value with no DOM or location touched, so it is liftable out of the source
+// the way spendView is. It closes over nothing, for the same reason.
+//
+// Every hash the page draws is a tab (`#board`, `#tokens`) or a card on the
+// Board (`#board/<issue>`). Anything else — no hash, a tab the page does not
+// have, a target the tab does not have — lands on Board's top, or the named
+// tab's top, never on a blank page and never on an error.
+function routeHash(hash) {
+  const [tab, target, ...more] = String(hash).replace(/^#/, "").split("/");
+  if (tab === "board") return { tab, target: more.length === 0 && /^[1-9]\d*$/.test(target) ? target : null };
+  if (tab === "tokens") return { tab, target: null };
+  return { tab: "board", target: null };
+}
+
+// Each tab, and the pane it opens.
+const PANES = { board: "board", tokens: "spend" };
+
+// Which card is still owed a scroll. The cards are rebuilt every tick, so a
+// hash that arrives before the first render (a reload, a pasted link) cannot
+// scroll yet: it waits here for the render.
+let rendered = false;
+let pending = null;
+
+// The card flashing now, and when it started. A tick rebuilds every card, so
+// the flash lives here rather than on a node the next tick throws away.
+// FLASH_MS is `.card.flash`'s animation duration.
+const FLASH_MS = 1200;
+let flashing = null;
 
 const el = (t, cls, txt) => { const e = document.createElement(t); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
 const mins = (ms) => Math.floor((Date.now() - ms) / 60000);
@@ -236,14 +280,14 @@ function renderSpend(sp) {
 
   const wrap = el("div", "spend-wrap");
   const hd = el("div", "spend-hd");
-  hd.append(el("h2", null, "spend"));
+  hd.append(el("h2", null, "tokens"));
   hd.append(el("span", "lede", v.lede));
   hd.append(el("span", "note", v.note));
   wrap.append(hd);
 
   const cols = el("div", "spend-cols");
   const byRole = el("div");
-  byRole.append(el("h3", null, "by role"));
+  byRole.append(el("h3", null, "by member role"));
   spendRows(byRole, v.roles, {
     label: (r) => `${r.role} ×${r.agents}`,
     value: (r) => k(r.cacheWrite),
@@ -285,10 +329,12 @@ function render(m) {
   const att = document.getElementById("attention");
   att.innerHTML = "";
   for (const t of m.attention || []) {
-    const span = el("span", "att");
-    span.append(el("span", "n", "#" + t.issue), document.createTextNode(" "));
-    span.append(el("span", "flag", (t.flags || []).join(" ")));
-    att.append(span);
+    // A link into the Board, never a new window: the hash carries the card.
+    const a = el("a", "att");
+    a.href = "#board/" + t.issue;
+    a.append(el("span", "n", "#" + t.issue), document.createTextNode(" "));
+    a.append(el("span", "flag", (t.flags || []).join(" ")));
+    att.append(a);
   }
   // columns — each built once and kept, its contents rewritten every tick.
   // A column scrolls on its own and a scroll offset lives on
@@ -374,6 +420,12 @@ function render(m) {
   } else if (capMsg) {
     showBanner(capMsg);
   } else { banner.style.display = "none"; banner.className = ""; }
+  // Last, once the banner and footer have taken their place in the layout, so
+  // a card scrolled to is scrolled to where it will stay.
+  rendered = true;
+  // Its own catch: the board above is already written, so a failed scroll is
+  // not a failed render.
+  try { settle(); } catch (e) { warn("⚠ scroll to card failed: " + e.message); }
 }
 
 // The heartbeat's mark, rendered. A dead run's tickets keep the label
@@ -421,6 +473,7 @@ function ledgerBanner(state) {
 
 function card(t) {
   const c = el("div", "card");
+  c.id = "card-" + t.issue;
   const top = el("div", "top");
   top.append(el("span", "n", "#" + t.issue));
   top.append(el("span", "title", t.title || ""));
@@ -438,6 +491,9 @@ function card(t) {
   for (const f of t.flags || []) meta.append(el("span", "badge flag", f));
   if (t.ruling) meta.append(el("span", "badge", "ruled:" + t.ruling));
   c.append(meta);
+  // A card rebuilt mid-flash picks the flash up where it was, not from the start.
+  const age = flashing && flashing.issue === String(t.issue) ? Date.now() - flashing.at : Infinity;
+  if (age < FLASH_MS) flash(c, age);
   return c;
 }
 
@@ -452,6 +508,49 @@ function showBanner(text, cls = "") {
 
 function warn(msg) {
   showBanner(msg);
+}
+
+// Opens the tab the hash names and settles the card it targets. The two
+// panes stay in the page either way, so a tick keeps filling both.
+function applyHash() {
+  const r = routeHash(location.hash);
+  for (const [t, pane] of Object.entries(PANES)) {
+    const on = t === r.tab;
+    document.getElementById(pane).hidden = !on;
+    const a = document.getElementById("tab-" + t);
+    a.classList.toggle("on", on);
+    if (on) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+  }
+  pending = r;
+  settle();
+}
+
+// The arrival: the target card scrolls into view and flashes once; no target,
+// or a target no card on the board carries, lands on the tab's top. Taken
+// off `pending` first, so a later tick never scrolls the page again; nothing
+// settles before the first render.
+function settle() {
+  if (!pending || !rendered) return;
+  const { target } = pending;
+  pending = null;
+  const hit = target && document.getElementById("card-" + target);
+  if (!hit) {
+    window.scrollTo(0, 0);
+    document.getElementById("spend").scrollTop = 0;
+    return;
+  }
+  hit.scrollIntoView({ block: "center" });
+  flashing = { issue: target, at: Date.now() };
+  flash(hit, 0);
+}
+
+// Runs the flash on a card `age` ms into it.
+function flash(node, age) {
+  node.classList.remove("flash");
+  void node.offsetWidth; // restart the animation when the same card is targeted again
+  node.style.animationDelay = -age + "ms";
+  node.classList.add("flash");
+  node.addEventListener("animationend", () => node.classList.remove("flash"), { once: true });
 }
 
 async function poll() {
@@ -473,7 +572,21 @@ async function poll() {
   }
   setTimeout(poll, interval * 1000);
 }
-poll();
+
+// Clicking the link to the hash already open fires no hashchange, so the
+// click is routed to applyHash by hand: a card scrolled away from can be
+// brought back by the same link.
+function boot() {
+  window.addEventListener("hashchange", applyHash);
+  document.addEventListener("click", (e) => {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    const a = e.target.closest?.('a[href^="#"]');
+    if (a && a.getAttribute("href") === location.hash) { e.preventDefault(); applyHash(); }
+  });
+  applyHash();
+  poll();
+}
+boot();
 </script>
 </body>
 </html>
