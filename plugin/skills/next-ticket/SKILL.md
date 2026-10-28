@@ -5,6 +5,8 @@ description: Use when user wants pick up new work — "what's next", "next ticke
 
 # Next Ticket
 
+Label names in this file are roles; the Label map gives the string to type; a member never derives the map.
+
 Suggest ready tickets, maintainer picks, mark in-progress, implement at depth ticket needs, end with PR rebased on `origin/main`.
 
 **Never grab ticket unilaterally.** Labels and git state record only some claims; others live in maintainer's head or another agent session.
@@ -12,6 +14,14 @@ Suggest ready tickets, maintainer picks, mark in-progress, implement at depth ti
 **Never `--no-verify` on a commit you push, or on the push itself.** A failing hook is a finding to fix or report, not an obstacle to route around.
 
 ## 1. Candidates
+
+Before the query, run the Label map derivation step:
+
+```bash
+~/.fleet/bin/fleet-run label-map.mjs ensure
+```
+
+Exit 0 → the map is in place; go on. Exit 3 → it printed the question payload, a JSON object with `certain` and `uncertain`: render it to the maintainer as one question listing each uncertain role, its suggestion, why it is uncertain and the alternatives, ending with "reply `defaults` to accept every suggestion, or name `<role>=<label>` for any you want otherwise — a role with no suggestion must be named; labels that do not exist are created on your confirmation". **Wait for the answer**, then run `~/.fleet/bin/fleet-run label-map.mjs set --create` with it — `--accept-suggestions` for `defaults`, plus each `<role>=<label>` the maintainer named — and run `ensure` again, which now exits 0. Tell the maintainer how to make the answer permanent: add or edit the row for the role in the repository's triage-label table, the role in the first cell and the string in the second; never write that table yourself. Exit 1 or 2 → show what it printed and stop; neither is a question.
 
 ```bash
 ~/.fleet/bin/fleet-run candidates.mjs --require-label ready-for-agent --allow-fallback
@@ -74,15 +84,16 @@ Ask which. **Wait for answer.** Maintainer says taken → drop, re-suggest.
 ## 5. Claim it
 
 ```bash
-gh label create in-progress --color FBCA04 --force   # first time only
-gh issue edit <N> --add-label in-progress
+gh issue edit <N> --add-label "<in-progress string>"
 ```
+
+`<in-progress string>` is what `~/.fleet/bin/fleet-run label-map.mjs show in-progress` prints. The derivation step in step 1 already confirmed the label exists in the tracker, creating it on the maintainer's confirmation where it was missing.
 
 Infer branch/worktree convention from `git worktree list` / `git branch -r` — commonly `feat|fix|refactor/<N>-slug` and `.worktrees/<N>-slug`. Branch off fresh `origin/main`, run the Install step, run the Check step, run the Test entrypoint as the baseline — the repo's **Recipe**, read from its Recipe cache: `~/.fleet/bin/fleet-run derive-testcmd.sh . install`, `… . check` and `… . test --at origin/main` print them. **No usable cache (any of the three exits 1) → run the Recipe derivation step first:** dispatch a `task` member, agent `fleet-recipe-deriver`, its prompt naming the main checkout's absolute path as `<repo>` and `<scratch>/derive-recipe/` as its scratch directory, `<scratch>` the output of `~/.fleet/bin/fleet-run scratch-root.mjs`; it reads the repo, proves all three commands in a throwaway worktree and writes the cache only on proof. `RECIPE NOT PROVEN` → stop and give the maintainer its reason; never pick a command yourself. Exit 3 is no verdict on the cache — the reader could not run a tool it needs — so fix that environment fault and re-run instead of deriving.
 
 **Run the Install step with `CI` removed**, from the new worktree's root: `env -u CI sh -c "<install>"`, `<install>` the output of `derive-testcmd.sh . install`. A setup script that skips under `CI` installs no git hooks there, and you would then commit with the repository's commit-time checks silently absent. Only the Install step loses `CI`; the Check step and the Test entrypoint baseline run in your shell's own environment.
 
-Abandoned before PR opens → remove `in-progress`.
+Abandoned before PR opens → remove the `<in-progress string>` label.
 
 ## 6. Size the ticket, then pick a path
 

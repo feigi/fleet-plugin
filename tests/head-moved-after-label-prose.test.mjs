@@ -167,7 +167,7 @@ test("without a record the timeline is the fallback, keyed on the three events t
   const s = labelledHead();
   assert.match(s, Pin.phrase("**No record — a hand-added label, or one applied before its labeller recorded a head — falls back to the timeline, which can refuse a moved head but never name the labelled one.**"));
   assert.match(s, /issues\/<pr>\/timeline\?per_page=100/);
-  assert.match(s, /\.event == "labeled" and \.label\.name == "ready-to-merge"/);
+  assert.match(s, /\.event == "labeled" and \.label\.name == "<ready-to-merge string>"/);
   assert.match(s, /\.event == "committed" or \.event == "head_ref_force_pushed"/);
 });
 
@@ -391,7 +391,7 @@ test("the recovery removes the label before approving, and says why messaging th
 // branch tip reads.
 const recordBeforeLabel = (slice, where, head) => {
   const record = slice.indexOf(`gh pr comment <`);
-  const label = slice.indexOf("--add-label ready-to-merge");
+  const label = slice.indexOf('--add-label "<ready-to-merge string>"');
   assert.ok(record !== -1, `${where} posts no record before labelling`);
   assert.ok(label !== -1, `${where} no longer adds the label`);
   assert.ok(record < label, `${where} labels before it records the head`);

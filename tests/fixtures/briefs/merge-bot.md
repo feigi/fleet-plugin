@@ -7,7 +7,9 @@ Your report is a file, `/abs/scratch-bot/reports/merge-bot-17.json`, in the shap
 before your final message, and send nothing until
 `~/.fleet/bin/fleet-run report-schema.mjs validate merge-bot /abs/scratch-bot/reports/merge-bot-17.json`
 answers `valid`. Your final message is then one line,
-`merge-bot-17: done /abs/scratch-bot/reports/merge-bot-17.json`.
+`merge-bot-17: done /abs/scratch-bot/reports/merge-bot-17.json`. A Label map
+refusal, which `run-merge-bot.md` describes, follows that line with what
+`show` printed.
 
 The controller does not acknowledge reports. Send once and exit; never re-send unless the controller asks by name.
 Confirmation state includes warnings received and acted on, even when the outcome is no change: say so when you report.

@@ -403,7 +403,7 @@ test("the fix-applier's step citations match review-and-fix.md's actual numberin
     /`dimension`[\s\S]{0,120}?(optional|may be omitted|need not|where available|if known)/i,
     "step 5 now makes the dimension optional — the backlog goes back to being unattributable",
   );
-  assert.match(steps["6"] ?? "", /add-label ready-to-merge/, "step 6 is no longer the labelling step the prompt skips");
+  assert.match(steps["6"] ?? "", /add-label "<ready-to-merge string>"/, "step 6 is no longer the labelling step the prompt skips");
 });
 
 test("the in-scope-suggestion refuter carries its anti-rubber-stamp clause, in both files", () => {

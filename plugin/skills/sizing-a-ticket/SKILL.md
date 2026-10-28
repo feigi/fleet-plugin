@@ -5,6 +5,8 @@ description: Use before implementing ticket — decides how much process work ne
 
 # Sizing a Ticket
 
+Label names in this file are roles; the Label map gives the string to type; a member never derives the map.
+
 Judge ticket **as written**, not as hoped. Torn between rows → take heavier —
 process depth, not admissibility.
 

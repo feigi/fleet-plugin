@@ -15,6 +15,7 @@ ticket ticket
 literal your name
 literal outcome
 literal that path
+literal what show printed
 ---
 ## kind: review, dispositions-retry
 You are ALREADY in worktree `<abs-path>`, whose PR branch is `<branch>` — the
@@ -42,6 +43,19 @@ and 5 only**: split apply-now/defer, commit, push, file every deferral as its
 own issue with the label the finding's state calls for. Skip step 1 — the
 review already ran — and steps 4 and 6: the controller owns the CI wait and
 dispatches the finisher.
+
+Label names in this file are roles; the Label map gives the string to type; a member never derives the map.
+
+**Before your first edit or refuter dispatch, read the Label map — the two
+roles you type or compare, once — and use those strings for the rest of your
+run.** `~/.fleet/bin/fleet-run label-map.mjs show needs-triage` and
+`~/.fleet/bin/fleet-run label-map.mjs show wontfix` each print the string the
+tracker uses; every `gh` command and label comparison those steps of
+`review-and-fix.md` type for those two roles takes it. You never run `ensure`
+and never ask anyone. **A non-zero exit from `show` ends you with no report** —
+the one ending in this brief that writes none, whatever the report paragraph
+below says: do nothing else first, never type the role name in place of the
+string, send `<your name>: failed (no report): <what show printed>` and exit.
 
 **The review's result is `<scratch>/pr<pr>/<run>/review.json`** — the digest first
 (`jq '{pr, head, resume, testEnvironment, suiteVerdict, dimensionsRun, dimensionsUnrun, cwdAudit, counts}'`),

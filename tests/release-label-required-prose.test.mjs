@@ -45,7 +45,7 @@ const REVIEW_AND_FIX = Pin.file(join(REPO, "commands", "review-and-fix.md"));
 const step6ReleaseLabelClause = () =>
   REVIEW_AND_FIX.between(
     "the PR carrying exactly one release label",
-    "gh pr edit <pr> --add-label ready-to-merge",
+    'gh pr edit <pr> --add-label "<ready-to-merge string>"',
     "review-and-fix.md step 6",
   ).text;
 
