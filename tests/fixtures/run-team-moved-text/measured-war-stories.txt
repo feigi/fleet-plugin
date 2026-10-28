@@ -100,8 +100,7 @@ is an Exploration Pull, and the router draws its cell: `k = 1 +
 true every Pull draws, over every cell, the policy cell included. An
 Exploration Pull records `tier=<cell>` in the row, and a replacement inherits the row's tier —
 written at the Pull's row step, ahead of `ledger.mjs dispatch`, which reads it
-and prints `fleet-implementer-<cell>` as the `agent` to dispatch; a row with
-no `tier=` runs the policy cell. The
+and prints `fleet-implementer-<cell>` as the `agent` to dispatch. The
 assignment rolls to the next Pull when another open ticket sequences after
 it — a ticket the rest of the run
 depends on; `class` is not read. Do not tell the member it is a control: a member that

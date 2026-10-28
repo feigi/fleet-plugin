@@ -58,7 +58,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits, writeAll } from "./arg.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
-import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, settledOnLedger, retiredOnLedger, retiredName, readRetired, agentDefinition, expectedDefinition, CELL, POLICY_CELL, tierValues, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, HALT_CAUSES, ROWS, DISPATCHED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, CLOSEOUT_RECEIPT, closeoutArchiveName, BRIEFS, briefsArchiveName, memberRole, parseDispatchedEntry, dispatchedEntry, headerRe, escapeText, ledgerSection, nextReviewerName } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, settledOnLedger, retiredOnLedger, retiredName, readRetired, agentDefinition, expectedDefinition, CELL, POLICY_CELL, tierValues, cellValues, decidingCell, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, HALT_CAUSES, ROWS, DISPATCHED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, CLOSEOUT_RECEIPT, closeoutArchiveName, BRIEFS, briefsArchiveName, memberRole, parseDispatchedEntry, dispatchedEntry, headerRe, escapeText, ledgerSection, nextReviewerName } from "./ledger-grammar.mjs";
 import { deriveRun, LedgerError, labelOffMember, HELD, CONFLICT_HOLD, PARKED } from "./fleet-tick.mjs";
 import { stateFileIn, readState, writeState, assessBeat, stallsAt } from "./fleet-state.mjs";
 import { processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "./proc.mjs";
@@ -748,11 +748,14 @@ if (cmd === "read") {
   // rewrite alike; a well-formed token, live or settled, still goes through.
   const malformed = memberTokens(line).find((t) => t.error !== null);
   if (malformed) die(`row ${key}: malformed member token '${malformed.name}=${malformed.outcome}' — ${malformed.error}`);
-  // `tier=` names the implementer cell an exploration Pull dispatched, so its
-  // value must be a cell token: a retired or misspelt tier written here would
-  // only be refused later, by `dispatch`, after the claim.
-  const badTier = tierValues(line).find((v) => !CELL.test(v));
-  if (badTier !== undefined) die(`row ${key}: 'tier=${badTier}' is not tier=<cell> — a cell is <slow|task|smol>-<level>`);
+  // `tier=` names the implementer cell an exploration Pull dispatched, and
+  // `cell=` the cell a Pull the router routed without a draw did, so each value
+  // must be a cell token: a retired or misspelt one written here would only be
+  // refused later, by `dispatch`, after the claim.
+  for (const name of ["tier", "cell"]) {
+    const bad = (name === "tier" ? tierValues(line) : cellValues(line)).find((v) => !CELL.test(v));
+    if (bad !== undefined) die(`row ${key}: '${name}=${bad}' is not ${name}=<cell> - a cell is <slow|task|smol>-<level>`);
+  }
   // A Pull's cell binds its implementer until that member settles; see
   // cellChangeRefusal(). A new row binds nothing yet.
   const i = data.rows.findIndex((r) => r.split(/\s/)[0] === key);
@@ -2287,7 +2290,7 @@ async function runDispatch() {
     const failures = labelled === null ? closing.failures : [...closing.failures, labelled];
     if (failures.length > 0) die(`${member.name}: ${failures.join("; ")} — not dispatching ${member.name}`);
   }
-  // Every error caught here carries its own cause and remedy — a row's `tier=`
+  // Every error caught here carries its own cause and remedy — a row's `tier=` or `cell=`
   // (fix it with `ledger.mjs row`) for an implementer, a family
   // ledger-grammar.mjs has no definition case for otherwise — so this
   // refusal's tail names neither.
@@ -2295,7 +2298,7 @@ async function runDispatch() {
   try {
     agent = agentDefinition(member, i === -1 ? "" : data.rows[i]);
     if (member.family === "impl" && !existsSync(join(AGENTS_DIR, `${agent}.agent.md`))) {
-      throw new Error(`row #${member.number}'s tier= names ${agent}, which has no agents/${agent}.agent.md — fix the row with \`ledger.mjs row\``);
+      throw new Error(`row #${member.number}'s ${decidingCell(data.rows[i]).name}= names ${agent}, which has no agents/${agent}.agent.md — fix the row with \`ledger.mjs row\``);
     }
   } catch (e) {
     die(`${member.name}: ${e.message} — not dispatching ${member.name}`);
@@ -2925,10 +2928,11 @@ function badLabelOff(words) {
   });
 }
 
-// The cell a row's implementer runs at — its `tier=`, or POLICY_CELL on a row
-// with none — read the way `dispatch` reads it: null for a row whose `tier=`
-// values conflict or name no agents/<definition>.agent.md, which `dispatch`
-// refuses, so such a row has no draw to bind.
+// The cell a row's implementer runs at — its `tier=`, else its `cell=`, or
+// POLICY_CELL on a row with neither — read the way `dispatch` reads it: null
+// for a row whose deciding values conflict or name no
+// agents/<definition>.agent.md, which `dispatch` refuses, so such a row has no
+// draw to bind.
 function runnableCell(rowText) {
   let definition;
   try {
@@ -2937,7 +2941,7 @@ function runnableCell(rowText) {
     return null;
   }
   if (!existsSync(join(AGENTS_DIR, `${definition}.agent.md`))) return null;
-  return tierValues(rowText)[0] ?? POLICY_CELL;
+  return decidingCell(rowText).values[0] ?? POLICY_CELL;
 }
 
 // The member a row's cell binds, while it has not settled, else null: the
@@ -2966,7 +2970,7 @@ function cellChangeRefusal(oldLine, line) {
   if (oldLine === null) return null;
   const cell = runnableCell(oldLine);
   if (cell === null) return null;
-  const tiers = [...new Set(tierValues(line))];
+  const tiers = [...new Set(decidingCell(line).values)];
   const to = tiers.length === 0 ? POLICY_CELL : tiers.join(" and ");
   if (to === cell) return null;
   const member = unsettledImplementer(oldLine);
@@ -2991,7 +2995,8 @@ function withTier(line, tok) {
 // then dedupe against), and the row's ` · ` separator are no token. A member
 // token is `dispatch`'s or `settle`'s, a review token `review`'s. A word
 // shaped like a member that the grammar cannot parse, a `tier=` that is not
-// a cell, a `tier=` naming a second tier in one call, a `held-behind`,
+// a cell, a `tier=` naming a second tier in one call, any `cell=` (the row
+// step's, never a token), a `held-behind`,
 // `conflict-hold` or `parked` token the tick cannot read, and a lone `→` — an
 // arrow with no PR beside it points at nothing — are refused. Every other
 // word is a freeform token.
@@ -3025,6 +3030,9 @@ function tokenRefusal(tok, earlier) {
     if (other !== undefined) {
       return `names a second tier — this call already names tier=${other}, and a row names one`;
     }
+  }
+  if (tok.startsWith("cell=")) {
+    return "is the cell the Pull's row step wrote for a Pull routed without a draw — a replacement's cell is `tier=<cell>`";
   }
   if (tok === "→") return "is the row's arrow, which is written with the PR it points at — ledger.mjs row writes the whole line";
   if (badLabelOff([tok]) !== undefined) return LABEL_OFF_UNKNOWN;

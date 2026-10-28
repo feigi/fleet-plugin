@@ -149,7 +149,7 @@ Each member's outcome arrives as its own job status. Settle (CONTEXT.md § Coord
 
 ## The implementer's tier is the definition's
 
-The tier lives in that definition's frontmatter (`agents/fleet-implementer-<cell>.agent.md`; `slow-high`, the policy cell, for a row with no `tier=`), which is what an omitted `model` takes first — the session's tier applies only when the definition names none, and a member dispatched with `model` set does not get the declared tier back. Omitting `model` is therefore still the mechanism; what changed is that the tier it resolves to is now declared and pinned rather than inherited by accident. Keep `name: impl-<N>`: the name is what makes a member, and both the spend classifier and `member-outcomes.mjs` read it.
+The tier lives in that definition's frontmatter (`agents/fleet-implementer-<cell>.agent.md`; `slow-high`, the policy cell, for a row with no `tier=` or `cell=`), which is what an omitted `model` takes first — the session's tier applies only when the definition names none, and a member dispatched with `model` set does not get the declared tier back. Omitting `model` is therefore still the mechanism; what changed is that the tier it resolves to is now declared and pinned rather than inherited by accident. Keep `name: impl-<N>`: the name is what makes a member, and both the spend classifier and `member-outcomes.mjs` read it.
 
 ## The merge bot's tier buys nothing its backstop does not cover
 

@@ -58,7 +58,7 @@
 // ledger's terms, not the caller's: the definition it should have
 // run under is the one its `## Dispatched` entry recorded at dispatch
 // (`agent=`, read through `ledger.mjs read`), falling back for an entry
-// without one to its ticket row's `tier=` token (ledger-grammar.mjs's
+// without one to its ticket row's `tier=` or `cell=` token (ledger-grammar.mjs's
 // `expectedDefinition` — the same function `ledger.mjs dispatch` prints the
 // definition from), the agent type
 // it was actually dispatched as is
