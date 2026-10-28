@@ -118,6 +118,9 @@ export function readReportIn(dir, member) {
   return violation === null ? { state: "ok", path, report: parsed.value } : { state: "invalid", path, violation };
 }
 
+/** Every value reportStatus() returns: readReport()'s three states, and `-`. */
+export const REPORT_STATUSES = ["ok", "invalid", "absent", "-"];
+
 /** `ok`, `invalid`, `absent`, or `-` when no schema covers the member. */
 export function reportStatus(scratch, member) {
   return reportFamily(member) === null ? "-" : readReport(scratch, member).state;

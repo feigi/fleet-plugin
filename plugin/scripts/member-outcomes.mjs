@@ -21,7 +21,7 @@ import { FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { FIXED_SHA } from "./fleet-event.mjs";
-import { parseReport, reportViolation } from "./report-schema.mjs";
+import { parseReport, reportViolation, SCHEMAS } from "./report-schema.mjs";
 
 export { normalizeModel, parseMemberName };
 
@@ -232,6 +232,16 @@ export function withReports(rows, scratch) {
 //   hollow        none of the above: the member stopped on its own.
 const IMPLEMENTER_LEAF = /^impl-\d+(?:-[a-z0-9]+)?$/;
 export const isImplementer = (member) => IMPLEMENTER_LEAF.test(member.split("/").pop());
+
+// Every value endingOf() returns on an implementer's row: its own literals,
+// `bail:<cause>` for each cause the impl schema admits, since lastReport()
+// keeps only a report that schema accepts, and bailEnding()'s
+// `bail:fixed-refuted`. A non-implementer's row reads blank, which is not here.
+export const ENDINGS = new Set([
+  "pr", "blocked",
+  ...SCHEMAS.impl.properties.bailCause.enum.filter((c) => c !== null).map((c) => `bail:${c}`), "bail:fixed-refuted",
+  "provider", "budget", "abort", "crash", "hollow", "unknown",
+]);
 
 export function endingOf({ member, pr, signals = null, earlierPrs = new Set(), verifyMain = verifyMainWithGit }) {
   if (!isImplementer(member)) return "";
