@@ -12,9 +12,10 @@ import { writeExecStub } from "./support/exec-stub.mjs";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import { COLUMNS as MEMBER_COLUMNS, formatTsv, parseTsv as parseMemberTsv } from "../plugin/scripts/member-outcomes.mjs";
 import { COLUMNS as TIER_COLUMNS, formatRow, parseTierOutcomes } from "../plugin/scripts/tier-outcomes.mjs";
-import { computeReport, trips, guardFile, formatReport, crossCheck, WINDOW_START, MIN_N } from "../plugin/scripts/pr-cost.mjs";
+import { computeReport, trips, guardFile, formatReport, crossCheck, blobId, WINDOW_START, MIN_N } from "../plugin/scripts/pr-cost.mjs";
 import { FEATURE_COLUMNS, parseFeatures } from "../plugin/scripts/pull-attribution.mjs";
 import { readCostGuard, routerRows } from "../plugin/scripts/fleet-tick.mjs";
+import { readGuard } from "../plugin/scripts/ticket-router.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/pr-cost.mjs", import.meta.url));
 const DAY = WINDOW_START;
@@ -111,7 +112,14 @@ test("--guard: a cell exactly 15 points worse than the baseline trips, exits 3 a
   assert.equal(read.status, "ok");
   assert.deepEqual(routerRows({ router: read }).map((x) => [x.action, x.detail]),
     [["DEFAULT-ONLY", `cost guard: task-high $5.00 vs $10.00, fail 45% vs 30%, n=20/20; guard computed ${r.guard.computed_at}`]]);
-  assert.deepEqual(r.guard.cells.find((c) => c.cell === "task-high"), { cell: "task-high", generation: "claude-opus-5", n: 20, mean_usd: 5, fail_rate: 0.45, untimed: 0 });
+  const rep = computeReport(parsed(w));
+  const whole = (c) => JSON.parse(JSON.stringify({ ...c, n: c.n_merged }));
+  assert.deepEqual(r.guard.cells.find((c) => c.cell === "task-high"), whole(rep.cells.find((c) => c.cell === "task-high")));
+  assert.deepEqual(r.guard.cells.find((c) => c.cell === "task-high"), {
+    cell: "task-high", generation: "claude-opus-5", n: 20, n_pulls: 20, n_merged: 20, n_claims: 20, n_failed: 9, fail_rate: 0.45,
+    mean_usd: 5, median_usd: 5, router_usd: 0, usd_diff_ci95: r.guard.cells.find((c) => c.cell === "task-high").usd_diff_ci95,
+    by_hand: 20, no_ruling: 0, pending: 0, left_out: 0, unpriced: 0, untimed: 0, excluded: 0, older: [],
+  }, "the whole entry, so the gap to the floor is exact: 9 of 20 claims failed");
   assert.equal(r.guard.window_start, WINDOW_START);
   assert.ok(!Number.isNaN(Date.parse(r.guard.computed_at)));
   assert.match(r.stdout, /^task-high\tclaude-opus-5\t20\t20\t20\t9\t0\.45\t5\t5\t0\t[^\t]*\t0\t0\t0\t0\ttripped$/m);
@@ -452,7 +460,11 @@ test("a top-level booked row with a blank work_s makes its Pull untimed: out of 
   const r = runCli(w);
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.guard.baseline, { cell: "slow-high", generation: "claude-opus-5", n: MIN_N, mean_usd: 10, fail_rate: 0 });
-  assert.deepEqual(r.guard.cells, [{ cell: "slow-high", generation: "claude-opus-5", n: MIN_N, mean_usd: 10, fail_rate: 0, untimed: 1 }]);
+  assert.deepEqual(r.guard.cells, [{
+    cell: "slow-high", generation: "claude-opus-5", n: MIN_N, n_pulls: MIN_N, n_merged: MIN_N, n_claims: MIN_N, n_failed: 0, fail_rate: 0,
+    mean_usd: 10, median_usd: 10, router_usd: 0, usd_diff_ci95: null, by_hand: MIN_N, no_ruling: 0, pending: 0, left_out: 0,
+    unpriced: 0, untimed: 1, excluded: 0, older: [],
+  }]);
   assert.match(r.stdout, /^slow-high\tclaude-opus-5\t20\t20\t20\t0\t0\t10\t10\t0\t\t0\t0\t0\t1\tbaseline$/m);
   assert.doesNotMatch(r.stdout, /minute/, "the guard prints no time figure");
 });
@@ -690,4 +702,150 @@ test("a Pull whose only implementer ran at another effort than its cell's level 
   w.members.at(-1).effort = "medium";
   const slow = computeReport(parsed(w)).cells.find((c) => c.cell === "slow-high");
   assert.deepEqual({ n_pulls: slow.n_pulls, n_merged: slow.n_merged, excluded: slow.excluded }, { n_pulls: 0, n_merged: 0, excluded: 1 });
+});
+
+// ---------------------------------------------------------------------------
+// The guard file's whole entries, counts and provenance.
+
+const DERIVED_NOTE = "review run-aaaaaaa1 at 1111111, no record: counted no survived and no unverified finding";
+const DERIVED_RECORD_NOTE = "review run-aaaaaaa1 at 1111111, record dispositions-fix-pr-20.json: survived[0] false-claim \"x\" — also by hand";
+const slowOf = (guard) => guard.cells.find((c) => c.cell === "slow-high");
+
+test("--guard: every entry is the report's whole entry with older generations nested, and the file records trip_points and the blob id of each TSV it read", () => {
+  const w = world();
+  addCell(w, "slow-high", MIN_N, 0, 10);
+  addCell(w, "smol-high", MIN_N, MIN_N, 20);
+  for (const m of w.members.slice(-MIN_N)) m.dispatchModel = "model-a";
+  addCell(w, "smol-high", 2, 0, 5);
+  const r = runCli(w);
+  assert.equal(r.status, 0, r.stderr);
+  const report = JSON.parse(JSON.stringify(computeReport(parsed(w))));
+  assert.deepEqual(r.guard.cells.map((c) => c.cell), ["slow-high", "smol-high"], "older generations are never extra cells[] entries");
+  const smol = r.guard.cells.find((c) => c.cell === "smol-high");
+  assert.deepEqual(smol, { ...report.cells.find((c) => c.cell === "smol-high"), n: 2 });
+  assert.equal(smol.generation, "claude-opus-5");
+  assert.equal(smol.n_claims, 2);
+  assert.deepEqual(smol.older.map((o) => [o.generation, o.n_merged, o.n_claims, o.n_failed]), [["model-a", MIN_N, MIN_N, MIN_N]]);
+  assert.equal(r.guard.trip_points, 15);
+  assert.equal(r.guard.min_n, MIN_N);
+  const names = ["member-outcomes", "tier-outcomes", "ticket-features"].map((n) => `docs/metrics/${n}.tsv`);
+  assert.deepEqual(Object.keys(r.guard.tsv_blobs), [...names].sort());
+  for (const name of names) {
+    const git = spawnSync("git", ["hash-object", join(r.dir, name)], { encoding: "utf8", env: gitEnv() });
+    assert.equal(git.status, 0, git.stderr);
+    assert.equal(r.guard.tsv_blobs[name], git.stdout.trim(), name);
+  }
+});
+
+test("blobId is git's blob id of the bytes, including multibyte UTF-8 and bytes that are not UTF-8", () => {
+  const dir = tempDir("pr-cost-blob-");
+  for (const bytes of [Buffer.alloc(0), Buffer.from("a\tb\n"), Buffer.from("é\n"), Buffer.from([0xff, 0xfe, 0x00, 0x80, 0x0a])]) {
+    const file = join(dir, "f");
+    writeFileSync(file, bytes);
+    assert.equal(blobId(bytes), spawnSync("git", ["hash-object", file], { encoding: "utf8", env: gitEnv() }).stdout.trim());
+  }
+});
+
+test("--guard: a TSV's blob id is of its bytes as read, not of their UTF-8 decoding", () => {
+  const w = world();
+  addCell(w, "slow-high", MIN_N, 0, 10);
+  // A comment line the parser skips, holding a byte that is not UTF-8.
+  const r = runCli(w, undefined, { features: Buffer.concat([Buffer.from([0x23, 0x20, 0xff, 0x0a]), Buffer.from(featuresText(w))]) });
+  assert.equal(r.status, 0, r.stderr);
+  const name = "docs/metrics/ticket-features.tsv";
+  const git = spawnSync("git", ["hash-object", join(r.dir, name)], { encoding: "utf8", env: gitEnv() });
+  assert.equal(git.status, 0, git.stderr);
+  assert.equal(r.guard.tsv_blobs[name], git.stdout.trim());
+});
+
+test("--guard: a TSV flag's path is the key its blob id is recorded under", () => {
+  const w = world();
+  addCell(w, "slow-high", MIN_N, 0, 10);
+  const r = runCli(w, null, {
+    at: (dir) => ({
+      cwd: dir,
+      args: ["--guard", "--tier-outcomes", join(dir, "docs", "metrics", "tier-outcomes.tsv")],
+    }),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(Object.keys(r.guard.tsv_blobs).sort(), [
+    "docs/metrics/member-outcomes.tsv", "docs/metrics/ticket-features.tsv", join(r.dir, "docs", "metrics", "tier-outcomes.tsv"),
+  ].sort());
+});
+
+test("--guard: by_hand counts a Ruling given by hand and neither derived note form, no_ruling a merged PR with no Ruling, pending an open or unlisted PR", () => {
+  const w = world();
+  addPr(w, { ticket: 1, pr: 101, cell: "slow-high", usd: 10 });
+  w.tiers.at(-1).note = DERIVED_NOTE;
+  addPr(w, { ticket: 2, pr: 102, cell: "slow-high", usd: 10 });
+  w.tiers.at(-1).note = DERIVED_RECORD_NOTE;
+  addPr(w, { ticket: 3, pr: 103, cell: "slow-high", usd: 10 });
+  w.tiers.at(-1).note = "backfill: ruled from the merged PR's review";
+  // A merged PR with no Ruling: the Pull is counted, and is not a merged one.
+  w.features.push(pull({ ticket: "4", agent: "impl-4", chosen_cell: "slow-high" }));
+  w.members.push(member({ agent: "impl-4", ticket: "4", cost: 10, pr: "104", subagentType: "fleet-implementer-slow-high" }));
+  w.prs.push({ number: 104, state: "MERGED" });
+  addPr(w, { ticket: 5, pr: 105, cell: "slow-high", usd: 10, state: "OPEN" });
+  addPr(w, { ticket: 6, pr: 106, cell: "slow-high", usd: 10 });
+  w.prs.pop();
+  const r = runCli(w);
+  assert.equal(r.status, 4, r.stderr);
+  const slow = slowOf(r.guard);
+  assert.deepEqual(
+    { n_pulls: slow.n_pulls, n_merged: slow.n, by_hand: slow.by_hand, no_ruling: slow.no_ruling, pending: slow.pending },
+    { n_pulls: 4, n_merged: 3, by_hand: 1, no_ruling: 1, pending: 2 },
+  );
+  assert.equal(r.guard.baseline.n, 3, "the no-Ruling Pull does not count as merged");
+});
+
+test("--guard: the three counts are per generation, the newest's beside the entry and an older one's under older", () => {
+  const w = world();
+  addCell(w, "slow-high", 2, 0, 10);
+  for (const m of w.members) m.dispatchModel = "model-a";
+  addCell(w, "slow-high", 3, 0, 10);
+  w.tiers.at(-1).note = DERIVED_NOTE;
+  addPr(w, { ticket: 9001, pr: 9101, cell: "slow-high", usd: 10, state: "OPEN" });
+  const r = runCli(w);
+  const slow = slowOf(r.guard);
+  assert.deepEqual([slow.generation, slow.by_hand, slow.pending], ["claude-opus-5", 2, 1]);
+  assert.deepEqual(slow.older.map((o) => [o.generation, o.by_hand, o.pending]), [["model-a", 2, 0]]);
+});
+
+test("--guard: a PR merged with no Ruling whose Ruling another Pull holds is not counted no_ruling", () => {
+  const w = world();
+  addPr(w, { ticket: 1, pr: 101, cell: "slow-high", usd: 10 });
+  // Ticket 2's implementer carries the same PR, later in the file, so its Pull takes PR 101's Ruling.
+  w.features.push(pull({ ticket: "2", agent: "impl-2", chosen_cell: "slow-high" }));
+  w.members.push(member({ agent: "impl-2", ticket: "2", cost: 10, pr: "101", subagentType: "fleet-implementer-slow-high" }));
+  const r = runCli(w);
+  assert.equal(slowOf(r.guard).no_ruling, 0);
+});
+
+test("the extended guard file is accepted by the router's reader and the tick's, and an entry missing n, mean_usd or fail_rate is still refused", () => {
+  const w = world();
+  addCell(w, "slow-high", MIN_N, 0, 10);
+  addCell(w, "task-high", MIN_N, 0, 5);
+  const r = runCli(w);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(readGuard(r.guard), { tripped: [], n: { "slow-high": MIN_N, "task-high": MIN_N }, window_start: WINDOW_START });
+  assert.equal(readCostGuard(r.guardPath).status, "ok");
+  const refused = (mutate) => {
+    const g = JSON.parse(JSON.stringify(r.guard));
+    mutate(g.cells.find((c) => c.cell === "task-high"));
+    const path = join(r.dir, ".fleet", "mutated-guard.json");
+    writeFileSync(path, JSON.stringify(g));
+    return [readGuard(g), readCostGuard(path).status];
+  };
+  assert.deepEqual(refused((c) => { delete c.n; }), [null, "unreadable"]);
+  assert.equal(refused((c) => { delete c.mean_usd; })[1], "unreadable");
+  assert.equal(refused((c) => { delete c.fail_rate; })[1], "unreadable");
+  assert.equal(refused((c) => { c.mean_usd = "5"; })[1], "unreadable");
+});
+
+test("guardFile with no blob ids keeps an empty tsv_blobs, and sorts the ones it is given", () => {
+  const w = world();
+  addCell(w, "slow-high", 1, 0, 1);
+  const rep = computeReport(parsed(w));
+  assert.deepEqual(guardFile(rep, "t").tsv_blobs, {});
+  assert.deepEqual(Object.keys(guardFile(rep, "t", { b: "2", a: "1" }).tsv_blobs), ["a", "b"]);
 });

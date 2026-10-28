@@ -36,6 +36,9 @@
 // MERGED: the Pull holds a Ruling and, when PR states are given, its PR is
 // MERGED. With PR states, a ruled PR that is OPEN or not in the list, or an
 // unruled Pull whose implementer opened a PR still OPEN, is pending.
+// A Pull with no Ruling whose implementer's PR is MERGED, and whose PR no
+// other Pull holds the Ruling of, is `noRuling`: still not merged, its status
+// unchanged — a count beside the figures, not a state.
 //
 // STATUS, first that applies:
 //   excluded  no Admissible row among the Pull's implementer rows;
@@ -84,7 +87,7 @@ import { isDigits } from "./arg.mjs";
 import { CELL } from "./ledger-grammar.mjs";
 import { parseMemberName } from "./member-record.mjs";
 import { isImplementer } from "./member-outcomes.mjs";
-import { DATE, rulingFor, rulingsByTicket } from "./tier-outcomes.mjs";
+import { DATE, isDerivedNote, rulingFor, rulingsByTicket } from "./tier-outcomes.mjs";
 
 // The ticket-features row, one per Pull, in this order. `objective` came last
 // and is optional on read: a file whose header lacks it reads it blank.
@@ -277,7 +280,7 @@ function numberOf(row, field, column = field) {
 /**
  * One unit per ticket-features row dated on or after `windowStart` (every dated
  * row when null), in file order: `{ pull, cell, stratum, generation, status,
- * merged, pr, ruling, pendingPr, claims, falseClaims, rows, spend, workS }`,
+ * merged, pr, ruling, pendingPr, noRuling, claims, falseClaims, rows, spend, workS }`,
  * `generation` null exactly when the Pull is excluded. `spend` is null when a
  * booked `cost` is blank, and `workS`, its work time in seconds, when a booked
  * `work_s` of a row naming no parent is. `prs` is `gh pr list`'s
@@ -342,6 +345,8 @@ export function attribute({ features, members, tiers, prs = null, windowStart = 
     const ruling = cands.reduce((a, c) => (fileOrder.get(c.ruling) > fileOrder.get(a) ? c.ruling : a), cands[0].ruling);
     ruled.set(cands.at(-1).pull, { pr, ruling, carried: false });
   }
+  // Every PR some Pull holds the Ruling of, carried or taken by date.
+  const held = new Set([...ruled.values()].map((r) => r.pr));
 
   const state = prs && new Map(prs.map((p) => [String(p.number), p.state]));
   return inWindow.map((pull) => {
@@ -350,12 +355,16 @@ export function attribute({ features, members, tiers, prs = null, windowStart = 
     const r = ruled.get(pull) ?? null;
     let merged = r !== null;
     let pendingPr = null;
+    let noRuling = false;
     if (state) {
       if (r) {
         const s = state.get(r.pr);
         if (s === undefined || s === "OPEN") pendingPr = r.pr;
         merged = s === "MERGED";
-      } else pendingPr = own.find((m) => m.pr && state.get(m.pr) === "OPEN")?.pr ?? null;
+      } else {
+        pendingPr = own.find((m) => m.pr && state.get(m.pr) === "OPEN")?.pr ?? null;
+        noRuling = own.some((m) => m.pr && state.get(m.pr) === "MERGED" && !held.has(m.pr));
+      }
     }
     let claims = 0, falseClaims = 0;
     if (merged) {
@@ -384,7 +393,7 @@ export function attribute({ features, members, tiers, prs = null, windowStart = 
     else if (blank || (r && !r.carried)) status = "unpriced";
     else if (untimed) status = "untimed";
     return {
-      pull, cell: pull.chosen_cell, stratum: stratum(pull), generation, status, merged, pr: r?.pr ?? null, ruling: r?.ruling ?? null,
+      pull, cell: pull.chosen_cell, stratum: stratum(pull), generation, status, merged, pr: r?.pr ?? null, ruling: r?.ruling ?? null, noRuling,
       pendingPr, claims, falseClaims, rows: booked, spend: blank ? null : spend, workS: untimed ? null : workS,
     };
   });
@@ -410,13 +419,16 @@ export function generations(units) {
 
 /**
  * Per cell, in cell-name order: `{ cell, generation, n, merged, claims, failed,
- * spend, workS, pulls, excluded, left_out, unpriced, untimed, pending, older }`.
+ * spend, workS, pulls, excluded, left_out, unpriced, untimed, pending,
+ * by_hand, no_ruling, older }`.
  * `generation` is the cell's newest (null when no Pull of it has one), and the
  * figures beside it are that generation's alone: `n`, `merged`, `claims`,
  * `failed`, `spend` and `workS` (work time, in seconds) over its counted
  * Pulls, `pulls` those counted units themselves in the order of `units`, then
- * its left-out, unpriced, untimed and pending Pull counts.
- * `excluded` counts the cell's excluded Pulls, which have no generation.
+ * its left-out, unpriced, untimed and pending Pull counts. `by_hand` counts
+ * those counted merged Pulls whose Ruling's note is not one `append` derives
+ * (`isDerivedNote`); `no_ruling` counts the generation's Pulls of any status
+ * whose unit is `noRuling`.
  * `older` is an array, newest first, of every other generation's figures in
  * the same shape, each carrying its `generation`. `order` is `generations()`
  * of the units that place each cell's generations; by default these same
@@ -427,7 +439,7 @@ export function tally(units, order = generations(units)) {
   // `n` is read off `pulls`, so the count and the list cannot drift apart.
   const figures = (generation) => ({
     generation, get n() { return this.pulls.length; }, merged: 0, claims: 0, failed: 0, spend: 0, workS: 0, pulls: [],
-    left_out: 0, unpriced: 0, untimed: 0, pending: 0,
+    left_out: 0, unpriced: 0, untimed: 0, pending: 0, by_hand: 0, no_ruling: 0,
   });
   const cells = new Map();
   for (const u of units) {
@@ -438,8 +450,12 @@ export function tally(units, order = generations(units)) {
     }
     const g = u.generation ?? null;
     const f = c.gens.get(g) ?? c.gens.set(g, figures(g)).get(g);
+    if (u.noRuling) f.no_ruling++;
     if (u.status === "counted") {
-      if (u.merged) f.merged++;
+      if (u.merged) {
+        f.merged++;
+        if (u.ruling && !isDerivedNote(u.ruling.note)) f.by_hand++;
+      }
       f.claims += u.claims;
       f.failed += u.falseClaims;
       f.spend += u.spend;

@@ -747,6 +747,15 @@ export function deriveRuling({ run, head, review, record }) {
   };
 }
 
+// Is `note` one `append` derives — deriveRuling's opening, `review <run> at
+// <head7>`, then `, record <file>: …` or `, no record: …`, with ` — <--note>`
+// after it when `--note` was given — rather than typed by hand with the
+// verdicts? Pure: the note alone is read, never the verdicts. A blank or
+// missing note is by hand.
+export function isDerivedNote(note) {
+  return /^review \S+ at [0-9a-fA-F]{7}, (?:no record: |record \S+: )/.test(String(note ?? ""));
+}
+
 // PR `pr`'s first review read from scratch and tied to the ledger, then ruled
 // by deriveRuling: its Ruling plus `review`, the review's run, or `{missing}`
 // saying what is not there to read. `scratch` is `{root}` or `{unresolvable}`.

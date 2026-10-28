@@ -10,7 +10,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { COLUMNS, LEGACY_WIDTH, RulingError, TIER_SWITCH_DATE, deriveRuling, lastPullByTicket, parseTierOutcomes, rulingFor, rulingsByTicket } from "../plugin/scripts/tier-outcomes.mjs";
+import { COLUMNS, LEGACY_WIDTH, RulingError, TIER_SWITCH_DATE, deriveRuling, isDerivedNote, lastPullByTicket, parseTierOutcomes, rulingFor, rulingsByTicket } from "../plugin/scripts/tier-outcomes.mjs";
 import { COLUMNS as MEMBER_COLUMNS } from "../plugin/scripts/member-outcomes.mjs";
 import { sessionDate } from "../plugin/scripts/ticket-router.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
@@ -1752,4 +1752,42 @@ test("append: a PR that already has a row gets nothing written and nothing asked
   }
   assert.equal(readFileSync(f.tier, "utf8"), before);
   assert.deepEqual(f.ghCalls(), []);
+});
+
+// ---------------------------------------------------------------------------
+// isDerivedNote: which notes `append` derives
+// ---------------------------------------------------------------------------
+
+test("isDerivedNote: both note forms deriveRuling writes are derived, with or without unrun dimensions", () => {
+  const record = derive({ record: lookup([charged("survived", 0, "false-claim")]) }).note;
+  const noRecord = derive({ survived: [], record: lookup([]) }).note;
+  const unrun = derive({ survived: [], record: lookup([]), dimensionsUnrun: ["tests"] }).note;
+  assert.match(record, /^review \S+ at 1111111, record /);
+  assert.match(noRecord, /^review \S+ at 1111111, no record: /);
+  for (const note of [record, noRecord, unrun]) assert.equal(isDerivedNote(note), true, note);
+});
+
+test("isDerivedNote: a derived note followed by --note's text is still derived", () => {
+  const note = derive({ survived: [], record: lookup([]) }).note;
+  assert.equal(isDerivedNote(`${note} — also seen by hand`), true);
+});
+
+test("isDerivedNote: a note typed by hand, blank, missing or merely resembling the opening is not derived", () => {
+  for (const note of [
+    "backfill: ruled from the merged PR's review", "n", "", null, undefined,
+    `review ${RUN_1} at 1111111`, `review ${RUN_1} at 1111111, by hand`, `review ${RUN_1} at 111, no record: x`,
+    `see review ${RUN_1} at 1111111, no record: x`, `review ${RUN_1} at 1111111, record : x`,
+  ]) assert.equal(isDerivedNote(note), false, String(note));
+});
+
+test("isDerivedNote: the note append writes for a derived Ruling is derived, and for verdicts given by hand is not", (t) => {
+  const derived = oneReview(t, { entries: [chargedNone("survived", 0, "defect-outside-acceptance")] });
+  assert.equal(derived.derive().code, 0);
+  assert.equal(isDerivedNote(verdicts(derived).note), true);
+  const withNote = oneReview(t, { entries: [chargedNone("survived", 0, "defect-outside-acceptance")] });
+  assert.equal(withNote.derive("--note", "also seen by hand").code, 0);
+  assert.equal(isDerivedNote(verdicts(withNote).note), true);
+  const byHand = fixture(t);
+  assert.equal(byHand.run("append", "20", ...BY_HAND, "--scratch", byHand.scratch).code, 0);
+  assert.equal(isDerivedNote(verdicts(byHand).note), false);
 });

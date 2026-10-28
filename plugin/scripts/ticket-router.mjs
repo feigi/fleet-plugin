@@ -308,7 +308,8 @@ function fitPulls({ features, members, verdicts, window }) {
 
 // Per stratum and `*`, per cell, its newest generation's figures: `n` counted
 // Pulls, `merged`, $ per merged PR, minutes of work time per merged PR, false
-// claims over claims, fix rounds per merged PR, and its left-out, unpriced and
+// claims over claims, fix rounds per merged PR, `by_hand` (the counted merged Pulls whose
+// Ruling was given by hand), and its left-out, unpriced and
 // untimed Pull counts. Both per merged PR figures take every counted Pull,
 // merged or not, over the merged ones. Beside them the cell's
 // excluded Pull count, `generation` naming the newest generation's model, and
@@ -329,6 +330,7 @@ function estimate(units, order) {
         return {
           n: g.n,
           merged: g.merged,
+          by_hand: g.by_hand,
           claims: g.claims,
           failed: g.failed,
           usd_per_merged: g.merged ? round4(g.spend / g.merged) : null,

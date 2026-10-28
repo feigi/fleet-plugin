@@ -431,12 +431,23 @@ for the full, amended rule (baseline, trip margin, retire condition). New
 pure per-role library with no PR concept and stays untouched. Inputs: the
 three TSVs + the one `gh pr list`. Output: stdout TSV per cell (`--json`
 optional); `.fleet/cost-guard.json` (gitignored — `computed_at`,
-`window_start`, `baseline{cell,generation,n,mean_usd,fail_rate}`, `cells[]`
-(each with `cell`, `generation`, `n`, `mean_usd`, `fail_rate`, `untimed` — the
-router reads per-cell `n` to end
-burn-in), `tripped[]`, `verdict: ok|tripped|none`, `retire` (true when every
+`window_start`, `baseline{cell,generation,n,mean_usd,fail_rate}`, `cells[]`,
+`tripped[]`, `verdict: ok|tripped|none`, `retire` (true when every
 non-default stage-1 cell tripped before any row of either Objective's set
-adopted one) and `min_n`, the n the baseline and every judged cell need).
+adopted one), `min_n` (the n the baseline and every judged cell need),
+`trip_points` (the fail-rate margin the floor applies, in points) and
+`tsv_blobs` (the git blob id of each TSV the guard read, keyed by the path it
+read it at, computed in-process)). Each `cells[]` entry is the cell's newest
+generation's whole report entry: `cell`, `generation`, `n` (its merged PRs,
+which the router reads per cell to end burn-in), `n_pulls`, `n_merged`,
+`n_claims`, `n_failed`, `fail_rate`, `mean_usd`, `median_usd`, `router_usd`,
+`usd_diff_ci95`, `left_out`, `unpriced`, `untimed`, `excluded`, three counts
+(`by_hand`: merged Pulls whose Ruling's note is not one `tier-outcomes.mjs
+append` derives; `no_ruling`: Pulls whose PR merged on GitHub with no Ruling,
+which stay not merged; `pending`: Pulls whose PR is still open or not in the
+PR list) and `older`, each older generation's entry in the same shape,
+newest first — nested, never an extra `cells[]` entry, since the router keys
+entries by cell.
 Runs at **phase 0 and
 close-out** through the repo-local hook (§ 5). No committed report
 snapshot; the numbers a ruling turns on go into the ADR that rules, not
@@ -468,7 +479,8 @@ exists — see ADR 0016 § Decision point 5.
 **Amendment from `#2038` (folded in above):**
 1. Trip rule margin (15 pts) — in the ADR's Guard section.
 2. `cost-guard.json` per-cell shape (`cell`, `generation`, `n`, `mean_usd`,
-   `fail_rate`, `untimed`) — above.
+   `fail_rate`, `untimed`) — above. *Amended (#3892): each entry is now the
+   cell's whole figures, as the Guard paragraph lists.*
 3. `router_usd` from `status().cost`, not a member-outcomes join — above.
 4. **Fit objective is $ per merged PR only.** *Amended (#3753): the fit
    also holds the quality floor, per row; the guard holds it pooled and alone
@@ -540,7 +552,7 @@ classifier could change.*
   "burn_in": true,
   "rows": { "cost": { "*": "slow-high" }, "speed": { "*": "slow-high" } },
   "classifier": { "b": null, "tau": null },
-  "estimates": { "<stratum>": { "<cell>": { "generation": "<model>", "n": 0, "merged": 0, "claims": 0, "failed": 0, "usd_per_merged": null, "minutes_per_merged": null, "fail_rate": null, "fix_rounds": null, "review_findings": null, "left_out": 0, "unpriced": 0, "untimed": 0, "excluded": 0, "older": { "<model>": { "n": 0, "merged": 0, "claims": 0, "failed": 0, "usd_per_merged": null, "minutes_per_merged": null, "fail_rate": null, "fix_rounds": null, "review_findings": null, "left_out": 0, "unpriced": 0, "untimed": 0 } } } } },
+  "estimates": { "<stratum>": { "<cell>": { "generation": "<model>", "n": 0, "merged": 0, "by_hand": 0, "claims": 0, "failed": 0, "usd_per_merged": null, "minutes_per_merged": null, "fail_rate": null, "fix_rounds": null, "review_findings": null, "left_out": 0, "unpriced": 0, "untimed": 0, "excluded": 0, "older": { "<model>": { "n": 0, "merged": 0, "by_hand": 0, "claims": 0, "failed": 0, "usd_per_merged": null, "minutes_per_merged": null, "fail_rate": null, "fix_rounds": null, "review_findings": null, "left_out": 0, "unpriced": 0, "untimed": 0 } } } } },
   "reasons": { "cost": { "*": { "cell": "slow-high", "reason": "unjudged", "cells": {}, "pairs": [] } }, "speed": { "*": { "cell": "slow-high", "reason": "unjudged", "cells": {}, "pairs": [] } } },
   "guard": { "tripped": [], "n": {} }
 }
@@ -561,7 +573,8 @@ model); `older` keys each older generation's model to the same figures, less
 PR — are each over every counted Pull, merged or not, divided by the merged
 ones. `left_out`, `unpriced` and `untimed` count the cell's Pulls that never
 reached its figures, `untimed` being the Pulls with no Work time, and
-`excluded` those with no Admissible row.
+`excluded` those with no Admissible row. `by_hand` counts the counted merged
+Pulls whose Ruling's note is not one `tier-outcomes.mjs append` derives.
 *Amended (#3680, implemented by #3785): `rows` and `reasons` hold one set
 per Objective, `cost` and `speed`, as the sample shows; the route script
 reads the set of the run's Objective, `rows[objective][stratum]` when
