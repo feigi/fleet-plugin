@@ -72,13 +72,15 @@ One line per ticket, rewritten in place (`ledger.mjs row <ticket> <text>`; `ledg
 #<t5> excluded · behind-issue:#<t3>
 ```
 
+A row's cell is its `tier=` (the cell a draw picked), else its `cell=` (the cell the router printed for a Pull it routed without a draw, like `#<t6> impl-<t6> · cell=task-high`; `row` writes it, `token` refuses it), else the policy cell, `slow-high`.
+
 ## Writing before dispatch
 
 A member that dies between spawn and write is invisible — and members die in batches.
 
 `dispatch merge-bot` also records the queue the bot is dispatched against: its `## Dispatched` entry carries `queued=<pr>,<pr>…` (`queued=none` for an empty queue), the open `ready-to-merge` PRs gh lists at that moment. A gh that cannot answer refuses the dispatch, nothing written. `settle merge-bot-<n> --from-report` judges the bot's report against that queue, not against anything the report names: a PR from it that is still open and carries the label, with no verdict in `merged`, `held`, `conflictHold` or `refused`, fails the settle at exit 3, naming the PR, and an entry without `queued=` cannot be judged (exit 2) — settle that bot by hand.
 
-`dispatch impl-<N>` also records the definition it prints: the implementer's `## Dispatched` entry ends with `agent=<definition>` (`agent=fleet-implementer-<cell>`), and `ledger.mjs read` prints it under `agents`, by member name. tier-check judges the implementer against that record, falling back to the row's `tier=` for an entry without one, so a `tier=` replaced after the implementer settled does not change what it is judged against. `settle` and `rotate` keep the word with its entry. A value that is not `[a-z0-9]` words joined by `-` makes the entry malformed, and the ledger is refused.
+`dispatch impl-<N>` also records the definition it prints: the implementer's `## Dispatched` entry ends with `agent=<definition>` (`agent=fleet-implementer-<cell>`), and `ledger.mjs read` prints it under `agents`, by member name. tier-check judges the implementer against that record, falling back to the row's `tier=` (else `cell=`) for an entry without one, so a `tier=` replaced after the implementer settled does not change what it is judged against. `settle` and `rotate` keep the word with its entry. A value that is not `[a-z0-9]` words joined by `-` makes the entry malformed, and the ledger is refused.
 
 ## filed and ruled
 
@@ -110,4 +112,4 @@ The ledger half reports its own readability as its own field, `ledger.ok`, the p
 
 ## Adding a token
 
-Token additions go through `ledger.mjs token`. `ledger.mjs token <key> <token>…` adds a token and keeps every token already on the row. A `tier=` replaces the row's `tier=` instead and keeps every other token; while the row's implementer has not settled, `token` and `row` both refuse a write that changes the row's cell. Re-typing the row with `row` replaces the whole line, so it drops the tokens you do not restate.
+Token additions go through `ledger.mjs token`. `ledger.mjs token <key> <token>…` adds a token and keeps every token already on the row. A `tier=` replaces the row's `tier=` instead and keeps every other token, a `cell=` beside it included, which the `tier=` then overrides; while the row's implementer has not settled, `token` and `row` both refuse a write that changes the row's cell. Re-typing the row with `row` replaces the whole line, so it drops the tokens you do not restate.

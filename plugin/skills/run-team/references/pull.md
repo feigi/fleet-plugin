@@ -252,7 +252,9 @@ terminating in exactly one dispatch or an empty shortlist:
    `POLICY=… CELL=… DRAW=… STRATUM=… OBJECTIVE=… REASON=…` (the router's arguments paragraph below the list
    says what each argument is); then `ledger.mjs row <N> "impl-<N>[ · tier=<CELL>][ · route=<REASON>]"`,
    `tier=<CELL>` exactly when `DRAW` is not `-`; then the dispatch at once: claim
-   what you are about to dispatch; dispatch what you have just claimed. Router
+   what you are about to dispatch; dispatch what you have just claimed. A Pull
+   routed without a draw writes `cell=<CELL>` instead, unless `CELL` is the policy
+   cell, `slow-high`, which a row with neither runs. Router
    exit 2 → no row and no dispatch: release the claim (`release-ticket.sh`, SKILL.md's
    Failure handling row for a claim abandoned mid-run) and emit an event, a probe that could not look — a table the router
    refuses refuses every Pull.
@@ -261,7 +263,8 @@ terminating in exactly one dispatch or an empty shortlist:
 row count the Pull creates — or, while an assignment is rolling (the latest
 row 5k and every row after it carry no `tier=`), that row's number;
 `--chain-head` marks a ticket another open ticket sequences after, which is
-what rolls it. `--arm` is `A` for an even ticket number and `B` for an odd
+what rolls it. A `cell=` is no draw: a row carrying one and no `tier=` still
+rolls. `--arm` is `A` for an even ticket number and `B` for an odd
 one; a B Pull routes exactly as an A one until the table opens arm B.
 `--session` is this run's own session directory. The router routes by the
 row set of the run's Objective, `OBJECTIVE`, which it reads off the phase-0
@@ -399,7 +402,8 @@ the `render` command to run first, and refuses once the
 run is draining: drain stops supply. It also refuses a row whose `tier=`
 names no single definition — two different values, or one that is not a
 definition suffix — or names one with no `agents/<definition>.agent.md`,
-before the member is live; fix the row with `row` first. Once every refusal
+before the member is live; fix the row with `row` first. A row with no `tier=`
+is held to the same through its `cell=`. Once every refusal
 has passed, `dispatch` deletes the member's prior report,
 `<scratch>/reports/<member>.json`, when its brief's sidecar names an absolute
 `scratch`, so a prior run's report cannot settle this one. A sidecar naming
@@ -436,8 +440,12 @@ policy cell is the `cost` row set's, so the draw is the same under both. While t
 true every Pull draws, over every cell, the policy cell included. An
 Exploration Pull records `tier=<cell>` in the row, and a replacement inherits the row's tier —
 written at the Pull's row step, ahead of `ledger.mjs dispatch`, which reads it
-and prints `fleet-implementer-<cell>` as the `agent` to dispatch; a row with
-no `tier=` runs the policy cell. The Pull's cell binds the row's implementer
+and prints `fleet-implementer-<cell>` as the `agent` to dispatch. A Pull the
+router routes without a draw records the cell it printed as `cell=<cell>`
+instead, and dispatches there the same way; `cell=` is no draw, so a row
+carrying it and no `tier=` still reads as "the draw has not happened yet",
+and a draw skipped on a chain head still passes to the next Pull. A `tier=` on the row decides over a
+`cell=`. A row with neither runs the policy cell. The Pull's cell binds the row's implementer
 (its newest, on a resumed or re-Pulled row):
 `ledger.mjs row` and `ledger.mjs token` refuse a write that changes it until that implementer has
 settled. Once it has, a replacement may run at another cell, set with

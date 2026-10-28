@@ -361,6 +361,17 @@ test("expectedDefinition refuses a tier= it cannot name one definition file by",
   assert.equal(expectedDefinition("impl-7 · tier=task-high · tier=task-high"), "fleet-implementer-task-high");
 });
 
+test("expectedDefinition reads a routed-but-undrawn row's cell=, lets tier= decide when both are there, and names no cell for neither", () => {
+  assert.equal(expectedDefinition("impl-7 · cell=task-high"), "fleet-implementer-task-high");
+  assert.equal(expectedDefinition("impl-7 · cell=task-high · cell=task-high · route=guard-missing"), "fleet-implementer-task-high");
+  assert.equal(expectedDefinition("impl-7 · cell=task-high · tier=smol-high"), "fleet-implementer-smol-high", "tier= is the replacement's cell and decides");
+  assert.equal(expectedDefinition("impl-7 · cell=alt · tier=smol-high"), "fleet-implementer-smol-high", "a cell= a tier= overrides is not read");
+  assert.equal(expectedDefinition("impl-7"), "fleet-implementer-slow-high", "a row with no carrier is the policy cell");
+  assert.throws(() => expectedDefinition("impl-7 · cell=alt · cell=slow-high"), /conflicting cell= tokens \(cell=alt, cell=slow-high\)/);
+  assert.throws(() => expectedDefinition("impl-7 · cell=Task-High"), /cell=Task-High is not a definition suffix/);
+  assert.equal(expectedDefinition("impl-7 · x-cell=task-high"), "fleet-implementer-slow-high", "only a word that starts with cell= is one");
+});
+
 // A family agentDefinition has no case for must throw, never read as a
 // definition. This walks every family parseMember can yield (MEMBER is built
 // from MEMBER_FAMILIES) — a family added to FAMILIES without a case here fails

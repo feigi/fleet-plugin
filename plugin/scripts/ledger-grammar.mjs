@@ -781,9 +781,10 @@ export function nextRetry(name, names) {
 export const CELL = /^(slow|task|smol)-(minimal|low|medium|high|xhigh|max)$/;
 export const CELL_DEF = new RegExp(`^fleet-implementer-${CELL.source.slice(1)}`);
 
-// The cell a row with no `tier=` runs at: `policy_cell`, `slow-high` on every
-// Pull until the router's table picks one per stratum. Exported so
-// ticket-router.mjs defaults to the same cell this file maps a bare row to.
+// The cell a row with neither `tier=` nor `cell=` runs at: `policy_cell`,
+// `slow-high` on every Pull until the router's table picks one per stratum.
+// Exported so ticket-router.mjs defaults to the same cell this file maps a
+// bare row to.
 export const POLICY_CELL = "slow-high";
 
 // The Exploration Pull's draw: uniform over every cell but
@@ -804,13 +805,18 @@ export function drawCell({ session, ticket, policyCell, cells }) {
 }
 
 // The definition an implementer is dispatched under, off its ticket
-// row's `tier=` token — none means `fleet-implementer-<POLICY_CELL>`,
-// `tier=<x>` means `fleet-implementer-<x>`. The value becomes a file
+// row's cell token — none means `fleet-implementer-<POLICY_CELL>`,
+// `tier=<x>` or `cell=<x>` means `fleet-implementer-<x>`. `tier=` is the
+// cell a draw picked (a row carrying one is a drawn Pull, which `implRow`
+// reads); `cell=` is the cell the router printed for a Pull it routed without
+// a draw, and reads as no draw. When a row carries both, `tier=` decides: it
+// is the replacement's cell `ledger.mjs token` writes. The value becomes a file
 // name under `agents/`, so it is held to `[a-z0-9]` words joined by `-`
-// rather than joined into a path as written, and two different `tier=`
-// values on one row name no single definition — refused, never resolved by
-// position. A value with no definition behind it (the retired `tier=alt`) is
-// `ledger.mjs dispatch`'s to refuse: it checks the file exists.
+// rather than joined into a path as written, and two different values
+// of the deciding token on one row name no single definition — refused,
+// never resolved by position. A value with no definition behind it (the
+// retired `tier=alt`) is `ledger.mjs dispatch`'s to refuse: it checks the file
+// exists.
 //
 // Here, not in tier-check.mjs, because two readers must agree on it:
 // `ledger.mjs dispatch` prints the definition before the call and records
@@ -820,16 +826,36 @@ export function drawCell({ session, ticket, policyCell, cells }) {
 // definitions for one row and fail a dispatch made exactly as printed.
 const TIER_SUFFIX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
+const tokenValues = (rowText, name) =>
+  String(rowText ?? "").split(/\s+/).filter((t) => t.startsWith(`${name}=`)).map((t) => t.slice(name.length + 1));
+
 /** Every `tier=` value a row's text carries, in order, duplicates kept. */
 export function tierValues(rowText) {
-  return String(rowText ?? "").split(/\s+/).filter((t) => t.startsWith("tier=")).map((t) => t.slice("tier=".length));
+  return tokenValues(rowText, "tier");
+}
+
+/** Every `cell=` value a row's text carries, in order, duplicates kept. */
+export function cellValues(rowText) {
+  return tokenValues(rowText, "cell");
+}
+
+/**
+ * The token that decides a row's cell, and its values: `tier=` when the row
+ * carries one, else `cell=`. Values are empty on a row with neither, and
+ * `name` then names no token the row carries.
+ * @returns {{name: "tier"|"cell", values: string[]}}
+ */
+export function decidingCell(rowText) {
+  const tiers = tierValues(rowText);
+  return tiers.length > 0 ? { name: "tier", values: tiers } : { name: "cell", values: cellValues(rowText) };
 }
 
 export function expectedDefinition(rowText) {
-  const values = [...new Set(tierValues(rowText))];
+  const { name, values: all } = decidingCell(rowText);
+  const values = [...new Set(all)];
   if (values.length === 0) return `fleet-implementer-${POLICY_CELL}`;
-  if (values.length > 1) throw new Error(`row carries conflicting tier= tokens (${values.map((v) => `tier=${v}`).join(", ")}) — fix the row with \`ledger.mjs row\``);
-  if (!TIER_SUFFIX.test(values[0])) throw new Error(`tier=${values[0]} is not a definition suffix — expected [a-z0-9] words joined by '-' — fix the row with \`ledger.mjs row\``);
+  if (values.length > 1) throw new Error(`row carries conflicting ${name}= tokens (${values.map((v) => `${name}=${v}`).join(", ")}) — fix the row with \`ledger.mjs row\``);
+  if (!TIER_SUFFIX.test(values[0])) throw new Error(`${name}=${values[0]} is not a definition suffix — expected [a-z0-9] words joined by '-' — fix the row with \`ledger.mjs row\``);
   return `fleet-implementer-${values[0]}`;
 }
 

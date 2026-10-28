@@ -524,7 +524,9 @@ _Avoid_: exclusion, held-behind, blocked
 A Pull whose implementer cell is drawn rather than dispatched at the
 policy cell — every 5th `impl-` row by ledger count (every Pull, during
 the router's burn-in). Recorded as `exploration_draw = <k>/<K>` in
-`ticket-features.tsv`; the member is never told.
+`ticket-features.tsv`; the member is never told. A Pull the Router routes
+without a draw still dispatches at the Cell the Router printed, and is no
+Exploration Pull.
 _Avoid_: alt-tier, A/B pull
 
 **Exploration draw**:
@@ -576,7 +578,9 @@ _Avoid_: recorded intent, dispatch-time intent
 What omp wrote about the member after dispatch: `session_init.resolvedModel`
 identity plus the `thinking_level_change.thinkingLevel` event — never the
 `:suffix`, which is absent when resolution came from an agent's own
-frontmatter rather than a `modelRoles` alias.
+frontmatter rather than a `modelRoles` alias. It is judged against the
+definition the member's dispatch recorded — for a Pull's first
+implementer, that of the Cell the Router printed, drawn or not.
 _Avoid_: effective tier, actual model
 
 **Tier route**:

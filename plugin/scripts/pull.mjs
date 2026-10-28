@@ -135,7 +135,7 @@ import { isDigits, makeDie } from "./arg.mjs";
 import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
-import { EXCLUDED_REASON, memberTokens, premisesOf, pullEnded, tierValues } from "./ledger-grammar.mjs";
+import { EXCLUDED_REASON, POLICY_CELL, memberTokens, premisesOf, pullEnded, tierValues } from "./ledger-grammar.mjs";
 import { sessionFromReceipt } from "./phase0-receipt.mjs";
 import { briefPaths, briefText, defang, outOfScope, strandedRuling, ticketText } from "./ticket-text.mjs";
 
@@ -217,7 +217,8 @@ const isImplRow = (row) => memberTokens(row).some((t) => t.family === "impl");
 /**
  * The `--impl-row` the router is given: the row count the Pull creates — or,
  * while an exploration assignment is rolling (the latest row 5k and every row
- * after it carry no `tier=`), that row's number.
+ * after it carry no `tier=`: a `cell=` is a routed Pull's cell, not a draw), that
+ * row's number.
  */
 export function implRow(rows) {
   const impl = rows.filter(isImplRow);
@@ -964,7 +965,10 @@ class Pull {
   stage_row() {
     const { st } = this;
     const { cell, draw, reason } = st.route;
-    const text = `${st.member}${draw === "-" ? "" : ` · tier=${cell}`}${reason === "ok" ? "" : ` · route=${reason}`}`;
+    // `tier=` marks a draw; a Pull routed without one still dispatches at the
+    // cell the router printed, carried as `cell=` so the row reads as undrawn.
+    const carrier = draw !== "-" ? ` · tier=${cell}` : cell !== POLICY_CELL ? ` · cell=${cell}` : "";
+    const text = `${st.member}${carrier}${reason === "ok" ? "" : ` · route=${reason}`}`;
     const r = this.script("row", "ledger.mjs", ["row", String(st.ticket), text]);
     if (r.status !== 0) return this.stop(withText(`ledger.mjs row failed (${r.how})`, r));
     st.stage = "render";

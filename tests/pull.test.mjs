@@ -1584,6 +1584,11 @@ test("chainHead and implRow read the ledger's own grammar", () => {
   assert.equal(implRow([1, 2, 3, 4, 5, 6, 7].map((n) => impl(n))), 5, "and stays on row 5 while every row after it carries none");
   assert.equal(implRow([1, 2, 3, 4, 5, 6].map((n) => impl(n, n === 6 ? "task-max" : ""))), 7, "a tier= after row 5 ends the rolling");
   assert.equal(implRow([1, 2, 3, 4].map((n) => impl(n, "task-max"))), 5, "below row 5 there is nothing to roll");
+  // A `cell=` is the routed Cell of a Pull the router did not draw for: it is no draw.
+  const routed = (n, cell) => `#${n} impl-${n} · cell=${cell}`;
+  assert.equal(implRow([1, 2, 3, 4, 5].map((n) => (n === 5 ? routed(n, "task-high") : impl(n)))), 5, "row 5 routed but undrawn: the draw is still row 5's");
+  assert.equal(implRow([1, 2, 3, 4, 5, 6].map((n) => (n >= 5 ? routed(n, "task-high") : impl(n)))), 5, "and stays on row 5 while every row after it is routed undrawn");
+  assert.equal(implRow([1, 2, 3, 4, 5].map((n) => (n === 5 ? `${routed(n, "task-high")} · tier=smol-high` : impl(n)))), 6, "a drawn tier= beside it ends the rolling");
 });
 
 test("--impl-row is read off the ledger", () => {
@@ -1701,11 +1706,13 @@ test("a router that prints no routing line is a refusal and releases the claim",
   }
 });
 
-test("the row carries tier=<CELL> exactly when DRAW is not `-`, and route=<REASON> exactly when REASON is not ok", () => {
+test("the row carries tier=<CELL> exactly when DRAW is not `-`, cell=<CELL> when it is `-` and the cell is not the policy cell, and route=<REASON> exactly when REASON is not ok", () => {
   const cases = [
     [ROUTE_OK, ["#12 impl-12", "fleet-implementer-slow-high"]],
     ["POLICY=slow-high CELL=task-high DRAW=2/5 STRATUM=heavy OBJECTIVE=cost REASON=ok", ["#12 impl-12 · tier=task-high", "fleet-implementer-task-high"]],
+    ["POLICY=task-high CELL=task-high DRAW=- STRATUM=heavy OBJECTIVE=cost REASON=ok", ["#12 impl-12 · cell=task-high", "fleet-implementer-task-high"]],
     ["POLICY=slow-high CELL=slow-high DRAW=- STRATUM=unknown OBJECTIVE=cost REASON=guard-missing", ["#12 impl-12 · route=guard-missing", "fleet-implementer-slow-high"]],
+    ["POLICY=task-high CELL=task-high DRAW=- STRATUM=heavy OBJECTIVE=cost REASON=table-cell-tripped", ["#12 impl-12 · cell=task-high · route=table-cell-tripped", "fleet-implementer-task-high"]],
     ["POLICY=slow-high CELL=smol-high DRAW=1/3 STRATUM=light OBJECTIVE=speed REASON=table-cell-tripped", ["#12 impl-12 · tier=smol-high · route=table-cell-tripped", "fleet-implementer-smol-high"]],
   ];
   for (const [line, [row, agent]] of cases) {

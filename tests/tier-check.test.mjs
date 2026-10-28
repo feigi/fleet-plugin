@@ -720,6 +720,17 @@ test("implementer: the expected definition follows the row's tier= — none is t
   assert.match(r.stderr, /impl-7: dispatched fleet-implementer-slow-high, expected fleet-implementer-task-high/);
 });
 
+test("implementer: a routed-but-undrawn row's cell= names the expected definition, and the policy cell's definition then fails", () => {
+  const definitions = { "fleet-implementer-slow-high": "@slow:high", "fleet-implementer-task-high": "@slow:high" };
+  const ok = implWorld({ row: "impl-7 · cell=task-high", definitions, agent: "fleet-implementer-task-high" });
+  const r = ok.check();
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.ok(ok.row().endsWith(" · tier-ok=impl-7:fleet-implementer-task-high"), ok.row());
+  const slip = implWorld({ row: "impl-7 · cell=task-high", definitions }).check();
+  assert.equal(slip.status, 1, slip.stdout + slip.stderr);
+  assert.match(slip.stderr, /impl-7: dispatched fleet-implementer-slow-high, expected fleet-implementer-task-high/);
+});
+
 test("implementer: a cell with no definition file under agents/ fails as a mismatch rather than crashing the check", () => {
   const w = implWorld({ row: "impl-7 · tier=slow-medium", agent: "fleet-implementer-slow-medium" });
   const r = w.check();

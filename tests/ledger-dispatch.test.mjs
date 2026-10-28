@@ -345,6 +345,32 @@ test("dispatch prints the agent definition the call names: the row's tier for an
   assert.equal(ok("dispatch", "merge-bot").agent, "fleet-merge-bot");
 });
 
+// A Pull the router routed without a draw writes `cell=<CELL>` and no `tier=`:
+// the cell it printed is what dispatches, and a row with neither is the policy
+// cell.
+test("dispatch prints the definition a routed-but-undrawn row's cell= names, records it, and falls back to the policy cell with no carrier", (t) => {
+  const { ok, read, refused } = fixture(t);
+  ok("row", "7", "impl-7 · cell=task-high");
+  assert.equal(ok("dispatch", "7", "impl-7").agent, "fleet-implementer-task-high");
+  assert.equal(read().agents["impl-7"], "fleet-implementer-task-high", "the record names it");
+  ok("row", "8", "impl-8");
+  assert.equal(ok("dispatch", "8", "impl-8").agent, "fleet-implementer-slow-high");
+  ok("row", "9", "impl-9 · cell=task-high · route=guard-missing");
+  assert.equal(ok("dispatch", "9", "impl-9").agent, "fleet-implementer-task-high");
+  ok("row", "10", "impl-10 · cell=task-high · tier=smol-high");
+  assert.equal(ok("dispatch", "10", "impl-10").agent, "fleet-implementer-smol-high", "tier= decides when both are on the row");
+  // `row` holds cell= to the cell grammar, as it does tier=.
+  refused(["row", "11", "impl-11 · cell=alt"], /'cell=alt' is not cell=<cell>/);
+  refused(["row", "11", "impl-11 · cell=smol-max · cell=Task-High"], /'cell=Task-High' is not cell=<cell>/);
+});
+
+test("dispatch refuses a cell= naming no definition file or two definitions, naming cell= and not tier=", (t) => {
+  const { read, refused } = fixture(t, `# Fleet run ledger\n\n## Rows\n\n- #7 impl-7 · cell=alt · cell=slow-high\n- #8 impl-8 · cell=smol-max\n\n## Filed\n\n## Ruled\n\n`);
+  refused(["dispatch", "7", "impl-7"], /impl-7: row carries conflicting cell= tokens \(cell=alt, cell=slow-high\)/);
+  refused(["dispatch", "8", "impl-8"], /impl-8: row #8's cell= names fleet-implementer-smol-max, which has no agents\/fleet-implementer-smol-max\.agent\.md/);
+  assert.deepEqual(read().dispatched, []);
+});
+
 // A `tier=` of the right shape whose definition has no file is refused the
 // same way: a `task` call naming it cannot resolve. Two of those: a cell
 // outside the shipped grid (`smol-max` — haiku has no `max`), and the

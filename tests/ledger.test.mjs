@@ -3846,6 +3846,35 @@ test("token and row refuse a write that changes the Pull's cell while its implem
   reordered.refused(["token", "7", "tier=slow-high"], /from smol-high to slow-high while impl-7-c has not settled/);
 });
 
+// A routed-but-undrawn Pull's cell is its row's `cell=`: it binds the row's
+// implementer exactly as a drawn `tier=` does, and `tier=` is still the one
+// token that replaces it once that implementer has settled.
+test("a row's cell= binds its implementer like tier= does, and token tier= replaces it after settle", (t) => {
+  const row = "#3570 impl-3570 · cell=task-high";
+  for (const dispatched of [["impl-3570"], []]) {
+    const { refused, run, rows } = tokenFixture(t, [row], { dispatched });
+    const why = /from task-high to smol-high while impl-3570 has not settled/;
+    refused(["token", "3570", "tier=smol-high"], why);
+    refused(["row", "3570", "impl-3570 · tier=smol-high"], why);
+    refused(["row", "3570", "impl-3570 · cell=smol-high"], why);
+    refused(["row", "3570", "impl-3570"], /from task-high to slow-high while impl-3570 has not settled/);
+    assert.deepEqual(rows(), [row]);
+    // A write that leaves the cell as it was is not refused.
+    run("token", "3570", "route=explore");
+    run("row", "3570", "impl-3570 · cell=task-high · route=explore · class=routine");
+    assert.deepEqual(rows(), ["#3570 impl-3570 · cell=task-high · route=explore · class=routine"]);
+  }
+  const settled = tokenFixture(t, ["#3571 impl-3571=killed · cell=task-high"], { dispatched: ["impl-3571=killed"] });
+  const r = settled.run("token", "3571", "tier=smol-high");
+  assert.equal(r.payload.line, "#3571 impl-3571=killed · cell=task-high · tier=smol-high");
+  assert.match(settled.rows()[0], /^#3571 impl-3571=killed · cell=task-high · tier=smol-high$/);
+  const refusedCell = tokenFixture(t, ["#3572 impl-3572=killed · cell=task-high"], { dispatched: ["impl-3572=killed"] });
+  refusedCell.refused(["token", "3572", "cell=smol-high"], /'cell=smol-high' is the cell the Pull's row step wrote/);
+  // A bare row is the policy cell: it binds slow-high, and still refuses a change.
+  const bare = tokenFixture(t, ["#3573 impl-3573"], { dispatched: ["impl-3573"] });
+  bare.refused(["row", "3573", "impl-3573 · cell=task-high"], /from slow-high to task-high while impl-3573 has not settled/);
+});
+
 test("token replaces tier= once the row's implementer has settled, whatever its outcome, keeping every other token", (t) => {
   for (const outcome of ["killed", "bailed", "blocked", "released", "tier-mismatch", "PR#12"]) {
     const before = `#3541 impl-3541=${outcome} · ports=163541 · tier=smol-high · class=routine`;

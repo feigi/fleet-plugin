@@ -15,10 +15,12 @@ layer underneath the [Implementer](implementer.md) role.
    ([ADR 0011](../adr/0011-omp-tier-routes-through-roles.md)).
 2. **Route.** Each implementer cell `<role>-<level>` is one definition,
    `fleet-implementer-<cell>.agent.md`, declaring `@<role>:<level>`
-   (`CELL` in `ledger-grammar.mjs`). A row with no `tier=` runs at the
-   policy cell, `slow-high`; every 5th Pull (counted off
-   `.fleet/ledger.md`'s `impl-` rows) records `tier=<cell>` and runs at
-   that exploration cell — the router's draw over
+   (`CELL` in `ledger-grammar.mjs`). A row with neither `tier=` nor
+   `cell=` runs at the policy cell, `slow-high`. A Pull the router
+   routes without a draw records the cell it printed as `cell=<cell>`
+   (nothing when that is the policy cell) and runs at it; every 5th Pull
+   (counted off `.fleet/ledger.md`'s `impl-` rows) records `tier=<cell>`
+   and runs at that exploration cell — the router's draw over
    [`router-table.json`](../../plugin/scripts/router-table.json)'s cells
    minus the policy cell — as a running, unconfounded comparison.
 3. **Check statically.**

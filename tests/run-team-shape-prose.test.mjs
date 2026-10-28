@@ -646,6 +646,12 @@ const CHANGED = [
     "It covers every tracked file under this repo's own plugin component directories — `plugin/commands/`, `plugin/scripts/`, `plugin/skills/`, `plugin/agents/`, `plugin/workflows/` — the probes, the libraries they source, and these runbooks, which you also read from that tree.",
     "It covers the Install root's plugin component directories — `commands/`, `scripts/`, `skills/`, `agents/`, `workflows/` — the probes, the libraries they source, and these runbooks, which you also read from that tree: the tracked files of a linked checkout's `plugin/…`, or every file of an installed package.",
   ],
+  // A routed-but-undrawn row names its cell with `cell=`, so the policy cell is
+  // what a row with neither token runs.
+  [
+    "The tier lives in that definition's frontmatter (`agents/fleet-implementer-<cell>.agent.md`; `slow-high`, the policy cell, for a row with no `tier=`), which is what an omitted `model` takes first — the session's tier applies only when the definition names none, and a member dispatched with `model` set does not get the declared tier back.",
+    "The tier lives in that definition's frontmatter (`agents/fleet-implementer-<cell>.agent.md`; `slow-high`, the policy cell, for a row with no `tier=` or `cell=`), which is what an omitted `model` takes first — the session's tier applies only when the definition names none, and a member dispatched with `model` set does not get the declared tier back.",
+  ],
 ];
 
 // Sentences deleted outright, each named with what stands in its place.
