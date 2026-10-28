@@ -34,6 +34,8 @@ these pages use.
   CI is genuinely green.
 - [Recipe](recipe.md) — deriving a consumer repo's install step, check step
   and test entrypoint by reasoning, not a lookup table.
+- [Label map](label-map.md) — the string the consumer repo's tracker uses for each
+  label role, derived from what the repo declares and what its tracker has.
 - [Reaping & Liveness](reaping-and-liveness.md) — cleaning up claims after
   they end, and the heartbeat that keeps a drained queue from stalling
   silently.

@@ -25,6 +25,8 @@ renamed from `feigi/claude-config`, where the original 2026-07-30 check was made
 
 When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
 
+The fleet reads this table too: it takes the string for each role from the `Label in our tracker` column.
+
 Edit the right-hand column to match whatever vocabulary you actually use.
 
 

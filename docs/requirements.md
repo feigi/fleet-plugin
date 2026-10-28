@@ -77,24 +77,26 @@ Check, once a run's phase 0 has derived the Recipe:
 ```
 
 ### 2.4 Labels — HARD
-Create these exact strings:
+The fleet reads and writes eight **Label roles**. Each role's default string is its own name, so a repository whose labels are exactly these needs nothing declared:
 
-| Label | Role |
+| Role (and default string) | Meaning |
 |---|---|
 | `ready-for-agent` | Shortlist source; only issues with this are considered |
 | `in-progress` | Claimed; set by fleet, excluded from Shortlist |
 | `ready-to-merge` | Merge-gate approval; set by reviewer once diff-check is green, deferrals are filed, one release label present; a human may add or remove it at any time (§3.4) |
 | `needs-triage`, `needs-info`, `ready-for-human`, `wontfix` | Triage roles; excluded from Shortlist |
 | `onhold` | Excluded from Shortlist |
+
+These stay literal strings in every repository:
+
+| Label | Role |
+|---|---|
 | `wayfinder:map`, `wayfinder:research`, `wayfinder:prototype`, `wayfinder:grilling`, `wayfinder:task` | Wayfinder children; excluded |
 | `patch`, `minor`, `major` | Release labels (if your repo gates releases on them) |
 
-Check:
-```sh
-for l in ready-for-agent in-progress ready-to-merge needs-triage needs-info ready-for-human wontfix onhold; do
-  gh label list --search "$l" --json name --jq '.[].name' | grep -qx "$l" || echo "missing: $l"
-done
-```
+A repository whose tracker spells a role differently declares it in the `Label in our tracker` column of the triage-label table in `docs/agents/triage-labels.md` (the file `/setup-matt-pocock-skills` writes; the fleet only reads it). A role that neither the table nor the tracker's live labels settles is asked once, with a suggestion for each role — the default when nothing else fits; the answer is kept as fleet state, not written into the repository. A confirmed label the tracker lacks is created, but only on that confirmation.
+
+The Label map derivation step (`label-map.mjs ensure`, see [Label map](components/label-map.md)) replaces a hand-run check loop. At the start of every entry point it checks every mapped string against the tracker's live label list, so a label renamed or deleted since the last run is caught before the pre-flight and before any dispatch.
 
 ### 2.5 `.gitignore` — HARD
 ```
