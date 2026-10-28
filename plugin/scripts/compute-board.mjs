@@ -251,7 +251,7 @@ export function deriveColumn(parsed, prState, readyToMerge) {
   if (parsed.merged) return "MERGED";
   if (parsed.pr != null) {
     if (prState && prState.merged) return "MERGED";
-    if (prState && readyToMerge != null && prState.labels.includes(readyToMerge)) return "READY";
+    if (prState && prState.labels.includes(readyToMerge)) return "READY";
     return "REVIEW";
   }
   if (parsed.implOutcome === "released" || parsed.implOutcome === "bailed") return null;
@@ -655,7 +655,9 @@ export function issuesOfPrs({ ledger, prs }) {
 // string), null when it could not be read, with `labelMapError` saying why.
 // With no map no PR is READY and none is known to lack `ready-to-merge`, so
 // `unqueued` is empty rather than every open PR: a PR its finisher labelled
-// would otherwise flag `unlabelled` off a label nobody could name.
+// would otherwise flag `unlabelled` off a label nobody could name. The
+// finisher flags all read that set, so `finisher:failed` and
+// `finisher:killed` go unflagged too, and `labelMapNotice` says so.
 export function computeBoard(inputs) {
   const { ledger, issues, prs, ci, prev, now } = inputs;
   const readyToMerge = inputs.roles?.["ready-to-merge"] ?? null;
@@ -802,10 +804,12 @@ export function computeBoard(inputs) {
     port: inputs.port ?? null,
     queue: { pool, supply: pool, reviewBacklog },
     capNotice: capNotice(inputs),
-    // Null when the Label map was read; else what POOL and READY lack and the
-    // reader's reason, which names the derivation step that writes the map.
+    // Null when the Label map was read; else what POOL, READY and the
+    // finisher flags lack and the reader's reason, which names the derivation
+    // step that writes the map.
     labelMapNotice: inputs.roles ? null
-      : `no Label map was read, so POOL and READY are unknown${inputs.labelMapError ? `: ${inputs.labelMapError}` : ""}`,
+      : "no Label map was read, so POOL and READY are unknown and no PR is flagged unlabelled, finisher:failed or finisher:killed"
+        + (inputs.labelMapError ? `: ${inputs.labelMapError}` : ""),
     tickets,
     filed: (ledger.filed || []).map(splitNumbered),
     // Not derivable from anything else in this model: a ledger that was never

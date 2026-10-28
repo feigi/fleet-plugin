@@ -880,12 +880,18 @@ export async function carryModelRoles(carried, now, read = readModelRoles) {
 //
 // `cwd` is the checkout whose Label map is read, once per gather, through
 // label-map.mjs's reader; it defaults to this process's cwd, where every `gh`
-// read below runs. The map's strings go to computeBoard() as `roles` and the
-// pool read asks for the mapped `ready-for-agent`. A map the reader refuses,
-// or no repository to find one in, is reported on stderr like a failed read,
-// and leaves `roles` null with `labelMapError` saying why: the pool is then
-// not read at all (`poolOk` false), since no string names it.
-export async function gather({ ledgerFile, prevFile, stateFile = null, stateDir = null, scriptDir = SCRIPT_DIR, interval, workspace = null, port = null, spendDir, spendDirExplicit = false, spendSince = null, cwd = process.cwd() }) {
+// read below runs. `labelMapFile` is that map's path when the caller has
+// resolved it already, and is then read in place of `cwd`'s: the reader's
+// own resolution is a synchronous `git rev-parse`, and a serving cockpit's
+// tick shares its event loop with /board.json, which must keep answering a
+// relaunch's identity probe — so board.mjs passes the map in the state
+// directory it resolved at bind time. The map's strings go to
+// computeBoard() as `roles` and the pool read asks for the mapped
+// `ready-for-agent`. A map the reader refuses, or no repository to find one
+// in, is reported on stderr like a failed read, and leaves `roles` null with
+// `labelMapError` saying why: the pool is then not read at all (`poolOk`
+// false), since no string names it.
+export async function gather({ ledgerFile, prevFile, stateFile = null, stateDir = null, scriptDir = SCRIPT_DIR, interval, workspace = null, port = null, spendDir, spendDirExplicit = false, spendSince = null, cwd = process.cwd(), labelMapFile = null }) {
   // The one read that must not crash the gather: a corrupt/partial board.json
   // (the fallback safety net itself) is ignored, not fatal. That holds for a
   // SHAPE fault as much as a parse fault — the guard below rejects the
@@ -970,7 +976,7 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, stateDir 
   let roles = null;
   let labelMapError = null;
   try {
-    roles = readLabelMap({ cwd });
+    roles = readLabelMap({ cwd, file: labelMapFile });
   } catch (e) {
     if (!(e instanceof LabelMapUnreadable) && !(e instanceof FleetDirUnresolvable)) throw e;
     labelMapError = e.message;

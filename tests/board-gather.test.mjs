@@ -10,7 +10,7 @@
 // stderr is read off this process's stream while it runs.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync, utimesSync, readFileSync, symlinkSync, chmodSync } from "node:fs";
+import { mkdirSync, writeFileSync, utimesSync, readFileSync, symlinkSync, chmodSync, existsSync } from "node:fs";
 import { tempDir } from "./support/temp-dir.mjs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -573,8 +573,9 @@ test("#2108: a pool read AND an open-PR read that both fill their --limit are bo
 
 // #3868: the pool read asks for the `ready-for-agent` string the Label map
 // holds, and the board built from a map-less gather renders POOL as unknown.
-// Every `gh` argv is logged; the issue list answers one ticket.
-async function gatherPool(t, cwd) {
+// Every `gh` argv is logged; the issue list answers one ticket. `gitLog`, when
+// given, puts a `git` on PATH that logs its argv there and fails.
+async function gatherPool(t, cwd, { labelMapFile, gitLog } = {}) {
   const dir = tempDir("board-gather-pool-");
   const bin = tempDir("board-gather-pool-bin-");
   const scriptDir = tempDir("board-gather-pool-scripts-");
@@ -589,7 +590,8 @@ if (a[0] === "issue" && a[1] === "list") process.stdout.write(JSON.stringify([{ 
 else if (a[0] === "pr" && a[1] === "list") process.stdout.write("[]");
 else process.exit(1);
 `);
-  const { r: inputs, stderr } = await gatherHere(t, bin, { ledgerFile: join(dir, "ledger.md"), prevFile: null, scriptDir, cwd });
+  if (gitLog) writeExecStub(join(bin, "git"), `#!/bin/sh\necho "$*" >> ${JSON.stringify(gitLog)}\nexit 1\n`);
+  const { r: inputs, stderr } = await gatherHere(t, bin, { ledgerFile: join(dir, "ledger.md"), prevFile: null, scriptDir, cwd, labelMapFile });
   const calls = readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l));
   return { inputs, board: computeBoard(inputs), poolReads: calls.filter((c) => c[0] === "issue" && c[1] === "list"), stderr };
 }
@@ -617,7 +619,19 @@ test("#3868: with no Label map the gather reports the refusal naming ensure, ask
   assert.equal(r.inputs.roles, null);
   assert.equal(r.inputs.poolOk, false);
   assert.equal(r.board.queue.pool, null, "an unread pool rendered as an empty one");
-  assert.match(r.board.labelMapNotice, /POOL and READY are unknown: no Label map at .*\bensure\b/);
+  assert.match(r.board.labelMapNotice, /POOL and READY are unknown .*finisher:killed: no Label map at .*\bensure\b/);
+});
+
+// The serving cockpit hands gather() the map's path it resolved at bind time,
+// so a tick reads that file and spawns no `git rev-parse`: a synchronous probe
+// blocks the event loop the tick shares with /board.json (#1713).
+test("#3868: given labelMapFile, gather reads that map whatever cwd is, and spawns no git", async (t) => {
+  const repo = seededRepo("board-gather-file-", { roles: { "ready-for-agent": "agent-ready" } });
+  const gitLog = join(tempDir("board-gather-git-"), "git-calls.log");
+  const r = await gatherPool(t, tempDir("board-gather-norepo-"), { labelMapFile: join(repo, ".fleet", "labels.json"), gitLog });
+  assert.equal(existsSync(gitLog), false, `gather spawned git: ${existsSync(gitLog) ? readFileSync(gitLog, "utf8") : ""}`);
+  assert.equal(r.inputs.roles?.["ready-for-agent"], "agent-ready", r.stderr);
+  assert.equal(r.poolReads[0][r.poolReads[0].indexOf("--label") + 1], "agent-ready");
 });
 
 // #1820 read MERGED from gh; #1840 scoped that read to the ledger's own row

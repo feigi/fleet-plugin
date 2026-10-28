@@ -178,13 +178,11 @@ export function writeLabelMap(map, { cwd = process.cwd() } = {}) {
   return file;
 }
 
-// The parsed cache of the repository `cwd` belongs to, with its path. Throws
-// LabelMapUnreadable, its message naming `ensure`, when the file is absent or
-// does not parse; when it exists and cannot be read, the message names the
-// errno as a filesystem fault and its repair before `ensure`.
-// FleetDirUnresolvable outside a repository.
-function loadCache(cwd) {
-  const file = fleetFile(LABEL_MAP_FILE, { cwd });
+// The parsed cache at `file`. Throws LabelMapUnreadable, its
+// message naming `ensure`, when the file is absent or does not parse; when it
+// exists and cannot be read, the message names the errno as a filesystem
+// fault and its repair before `ensure`.
+function loadCache(file) {
   let text;
   try {
     text = readFileSync(file, "utf8");
@@ -198,7 +196,7 @@ function loadCache(cwd) {
     );
   }
   try {
-    return { file, cache: JSON.parse(text) };
+    return JSON.parse(text);
   } catch (e) {
     throw new LabelMapUnreadable(`the Label map at ${file} does not parse (${e.message}): ${DERIVE}`);
   }
@@ -212,23 +210,26 @@ const inRoleOrder = (roles) => Object.fromEntries(LABEL_ROLES.map((role) => [rol
 
 /**
  * The `roles` object (every Label role -> its string) of the cache of the
- * repository `cwd` belongs to. Throws LabelMapUnreadable, its message naming
- * `ensure`, when the cache is absent, does not parse, lacks a role or breaks
- * the string rules; when the cache exists and cannot be read (e.g. EACCES,
- * EISDIR, ENOTDIR), its message names the errno as a filesystem fault, not a
- * map fault, and the repair, then `ensure` as the following step. Throws
- * FleetDirUnresolvable outside a repository.
+ * repository `cwd` belongs to, or of the cache at `file` when the caller has
+ * resolved that path already — then no git probe runs, which is what a
+ * caller on an event loop it must not block (the cockpit's tick) needs.
+ * Throws LabelMapUnreadable, its message naming `ensure`, when the cache is
+ * absent, does not parse, lacks a role or breaks the string rules; when the
+ * cache exists and cannot be read (e.g. EACCES, EISDIR, ENOTDIR), its message
+ * names the errno as a filesystem fault, not a map fault, and the repair,
+ * then `ensure` as the following step. Throws FleetDirUnresolvable outside a
+ * repository when no `file` is given.
  */
-export function readLabelMap({ cwd = process.cwd() } = {}) {
-  const { file, cache } = loadCache(cwd);
-  const roles = cache?.roles;
+export function readLabelMap({ cwd = process.cwd(), file = null } = {}) {
+  const at = file ?? fleetFile(LABEL_MAP_FILE, { cwd });
+  const roles = loadCache(at)?.roles;
   if (!isRecord(roles)) {
-    throw new LabelMapUnreadable(`the Label map at ${file} holds no \`roles\` object: ${DERIVE}`);
+    throw new LabelMapUnreadable(`the Label map at ${at} holds no \`roles\` object: ${DERIVE}`);
   }
   const faults = labelStringFaults(roles);
   if (faults.length) {
     const why = faults.map(({ role, rule }) => `${role}: ${rule}`).join("; ");
-    throw new LabelMapUnreadable(`the Label map at ${file} is invalid — ${why}: ${DERIVE}`);
+    throw new LabelMapUnreadable(`the Label map at ${at} is invalid — ${why}: ${DERIVE}`);
   }
   return inRoleOrder(roles);
 }
@@ -577,7 +578,7 @@ function readDerivationInputs(cwd) {
   const live = readLiveLabels({ cwd: top });
   let cache = null;
   try {
-    cache = loadCache(cwd).cache;
+    cache = loadCache(fleetFile(LABEL_MAP_FILE, { cwd }));
   } catch (e) {
     if (!(e instanceof LabelMapUnreadable)) throw e;
     // Absent or not parsing is derived again; a cache that exists and cannot

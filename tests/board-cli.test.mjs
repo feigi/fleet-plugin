@@ -594,5 +594,5 @@ test("#3868: board build with no Label map reports the refusal naming ensure and
   assert.match(stderr, /Label map could not be read.*\bensure\b/);
   assert.deepEqual(poolReads, [], "a pool read ran with no string to ask for");
   assert.equal(board.queue.pool, null, "an unread pool rendered as an empty one");
-  assert.match(board.labelMapNotice, /POOL and READY are unknown: .*\bensure\b/);
+  assert.match(board.labelMapNotice, /POOL and READY are unknown .*finisher:killed: .*\bensure\b/);
 });

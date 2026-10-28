@@ -747,11 +747,33 @@ test("#3868: with no Label map no PR is READY, none is flagged unlabelled, POOL 
   assert.deepEqual(card(b, 941).flags, [], "an unread label flagged the PR as lacking it");
   assert.equal(b.queue.pool, null, "an unread pool rendered as an empty one");
   assert.equal(b.queue.supply, null);
-  assert.equal(b.labelMapNotice, `no Label map was read, so POOL and READY are unknown: ${why}`);
+  assert.equal(b.labelMapNotice,
+    `no Label map was read, so POOL and READY are unknown and no PR is flagged unlabelled, finisher:failed or finisher:killed: ${why}`);
+});
+
+// The finisher flags read the same unqueued set `unlabelled` does, so with no
+// map a failed or killed finisher goes unflagged — and the notice says so,
+// rather than leaving a severity-4 flag to vanish from attention unannounced.
+test("#3868: with no Label map a failed or killed finisher is unflagged, and the notice names the finisher flags", () => {
+  for (const outcome of ["failed", "killed"]) {
+    const b = remapped({ rows: [`#941 impl-941=PR#931 · finisher-pr-931=${outcome}`], prs: [openPr(931)],
+      roles: null, labelMapError: "why", poolOk: false });
+    assert.deepEqual(card(b, 941).flags, [], outcome);
+    assert.match(b.labelMapNotice, /no PR is flagged unlabelled, finisher:failed or finisher:killed: why$/, outcome);
+  }
 });
 
 test("#3868: a board whose Label map was read carries no Label map notice", () => {
   assert.equal(remapped({}).labelMapNotice, null);
+});
+
+// The pool is unknown whenever it was not read, not only when no map named its
+// label: a `gh` outage with the map read must not show an empty POOL either.
+test("#3868: a pool read that failed while the Label map was read is unknown, never an empty POOL", () => {
+  const b = remapped({ poolOk: false });
+  assert.equal(b.queue.pool, null, "a failed pool read rendered as an empty one");
+  assert.equal(b.queue.supply, null);
+  assert.equal(b.labelMapNotice, null);
 });
 
 // The tick reads `## Dispatched` as well as the rows, and a whole-line `row`

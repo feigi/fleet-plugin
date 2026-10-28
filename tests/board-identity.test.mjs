@@ -527,18 +527,27 @@ test("#3868: an unread pool renders as `?`, never 0, with the Label map notice i
   const banner = document.getElementById("stale-banner");
   const foot = document.getElementById("footer");
   const pool = () => count(document.getElementById("board").children[0]);
-  const labelMapNotice = "no Label map was read, so POOL and READY are unknown: no Label map at /w/.fleet/labels.json: run `label-map.mjs ensure`, the Label map derivation step";
+  const labelMapNotice = "no Label map was read, so POOL and READY are unknown and no PR is flagged unlabelled, finisher:failed or finisher:killed: no Label map at /w/.fleet/labels.json: run `label-map.mjs ensure`, the Label map derivation step";
   const model = { ...baseModel(), queue: { pool: null, supply: null, reviewBacklog: 0 }, labelMapNotice };
 
   render(model);
   assert.equal(pool(), "?");
   assert.match(foot.children[0].textContent, /^pool \? · supply \? · /);
-  assert.match(banner.textContent, /no Label map was read.*\bensure\b/);
+  assert.equal(banner.textContent, "⚠ " + labelMapNotice);
 
   render({ ...model, ledgerState: "unread" });
   assert.match(banner.textContent, /ledger not read/);
-  assert.ok(foot.children.some((c) => /no Label map was read.*\bensure\b/.test(c.textContent ?? "")),
+  assert.ok(foot.children.some((c) => c.textContent === "⚠ " + labelMapNotice),
     "a co-occurring ledger banner dropped the Label map notice");
+
+  // With a cap notice as well, the Label map notice holds the banner — POOL
+  // unknown outranks POOL possibly short — and the footer carries both.
+  const capNotice = "the open-PR read hit its --limit, so a PR past it shows REVIEW with CI unknown";
+  render({ ...model, capNotice });
+  assert.equal(banner.textContent, "⚠ " + labelMapNotice, "the cap notice took the banner from the Label map notice");
+  for (const notice of [labelMapNotice, capNotice]) {
+    assert.ok(foot.children.some((c) => c.textContent === "⚠ " + notice), `the footer dropped: ${notice}`);
+  }
 
   // The input to ACCEPT: a pool that was read, empty, still counts 0.
   render({ ...baseModel(), queue: { pool: 0, supply: 0, reviewBacklog: 0 } });

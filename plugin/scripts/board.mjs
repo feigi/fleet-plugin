@@ -15,6 +15,7 @@ import { writeFileSync, renameSync, writeSync } from "node:fs";
 import { defineFlags } from "./arg.mjs";
 import { NAME, die, warnOnce } from "./board-common.mjs";
 import { gather, receiptSpendDir } from "./board-gather.mjs";
+import { LABEL_MAP_FILE } from "./label-map.mjs";
 import { serve, resolveCockpitInstance, cockpitWorkspace } from "./board-server.mjs";
 // The heartbeat's liveness mark path, taken from the module that owns the
 // filename rather than spelling `heartbeat.json` a second time. The PATH
@@ -301,6 +302,9 @@ async function main() {
       // The cost guard, the receipts and the carried `modelRoles` the Cell
       // evidence tab reads, from the same directory.
       stateDir: instance.stateDir,
+      // The Label map in that directory too, so the reader runs no git probe
+      // of its own: the instance has already settled where `.fleet` is.
+      labelMapFile: join(instance.stateDir, LABEL_MAP_FILE),
       workspace: instance.workspace, port: instance.port,
       interval, ...spendSource(spendDir, instance.stateDir), spendSince,
     }));
@@ -407,6 +411,12 @@ async function boardTick({ ledgerFile, interval, spendDir, spendSince }) {
         // the ledger default: a pure join on a directory settled at bind time.
         stateFile: stateFileIn(stateDir),
         stateDir,
+        // The Label map out of the same state directory, joined rather than
+        // resolved: the reader's own resolution is a synchronous git probe,
+        // and a tick blocked on it leaves a relaunch's identity probe
+        // unanswered. A map `ensure` writes later is still read, since the
+        // file is read per tick.
+        labelMapFile: join(stateDir, LABEL_MAP_FILE),
         workspace, port: served,
         // The operator's --spend-dir, else the receipt as it stands at this
         // tick, read from the same state directory as the ledger and heartbeat.
