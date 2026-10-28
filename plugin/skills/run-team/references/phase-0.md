@@ -162,7 +162,11 @@ script absorbs them. A workspace that lacks one of the three metrics TSVs
 has no corpus to guard yet — its first run: the script prints a line naming
 the missing file, skips the guard and exits 0. Exit 1 or 2 stops the run
 before its first Pull: report the line the script printed on stderr, fix
-the cause and run it again — each duty is safe to repeat.
+the cause and run it again — each duty is safe to repeat. Between the drain
+and the guard the script also widens a `docs/metrics/member-outcomes.tsv`
+written before the newest columns: each row gains them, `ending` reads
+`unknown` on an implementer's row, and nothing else changes. Without that,
+phase 0, the close-out scrape and `tier-outcomes.mjs append` refuse the file.
 
 ## Launch the cockpit
 

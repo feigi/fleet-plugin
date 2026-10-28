@@ -177,7 +177,7 @@ test("a tripped guard is a verdict and the script exits 0; a guard that cannot b
   assert.match(t.stdout, /cost guard: verdict tripped \(tripped: task-high\), pr-cost\.mjs exit 3/);
 
   const broken = fixture({ rows: corpus() });
-  writeFileSync(join(broken.repo, "docs", "metrics", "member-outcomes.tsv"), "short\trow\n");
+  writeFileSync(join(broken.repo, "docs", "metrics", "tier-outcomes.tsv"), "short\trow\n");
   const b = broken.run();
   assert.equal(b.status, 1);
   assert.match(b.stderr, /metrics-refresh: cost guard failed: pr-cost\.mjs --guard exited 2/);
