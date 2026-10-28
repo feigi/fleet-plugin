@@ -3968,7 +3968,7 @@ test("row --routing writes the row and its ## Routed entry in one write, and eve
   assert.doesNotMatch(bare.bytes(), /## Routed/);
 });
 
-test("row --routing refuses a line that is not a Routing, a second Routing for one member, and a row naming no single live implementer", (t) => {
+test("row --routing refuses a line that is not a Routing, a different second Routing for one member, and a row naming no single live implementer", (t) => {
   const { run, refused, bytes } = tokenFixture(t, ["#3747 impl-3747 · tier=smol-high"], { dispatched: ["impl-3747"] });
   for (const bad of [
     "POLICY=slow-high CELL=smol-high DRAW=2/3 STRATUM=heavy OBJECTIVE=cost REASON=ok",
@@ -3987,10 +3987,14 @@ test("row --routing refuses a line that is not a Routing, a second Routing for o
   refused(["row", "3747", "impl-3747=done · tier=smol-high", "--routing", ROUTING], /malformed member token/);
   run("row", "3747", "impl-3747 · tier=smol-high", "--routing", ROUTING);
   const once = bytes();
-  for (const again of [ROUTING, UNDRAWN]) {
-    refused(["row", "3747", "impl-3747 · tier=smol-high", "--routing", again], /impl-3747 already has its Routing in ## Routed .* written once/);
-  }
+  refused(["row", "3747", "impl-3747 · tier=smol-high", "--routing", UNDRAWN], /impl-3747 already has its Routing in ## Routed .* written once/);
   assert.equal(bytes(), once);
+  // The same Routing again is the row step re-run after its write landed: the
+  // entry is left as it was and the row is still rewritten.
+  const again = run("row", "3747", "impl-3747 · tier=smol-high · ports=163747", "--routing", ROUTING);
+  assert.deepEqual(again.payload, { ticket: "#3747", line: "#3747 impl-3747 · tier=smol-high · ports=163747", created: false, routed: `impl-3747 ${ROUTING}` });
+  assert.match(again.stderr, /routed impl-3747 POLICY=slow-high .* \(already filed; left as it was\)/);
+  assert.deepEqual(routedOf(bytes()), [`- impl-3747 ${ROUTING}`]);
   // Another attempt on the ticket is another member, with an entry of its own.
   run("row", "3747", "impl-3747-b · tier=smol-high", "--routing", ROUTING);
   assert.deepEqual(routedOf(bytes()), [`- impl-3747 ${ROUTING}`, `- impl-3747-b ${ROUTING}`]);

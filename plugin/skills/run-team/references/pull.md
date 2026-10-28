@@ -257,8 +257,9 @@ terminating in exactly one dispatch or an empty shortlist:
    dispatch at once: claim what you are about to dispatch; dispatch what you
    have just claimed. A Pull routed without a draw writes `cell=<CELL>` instead,
    unless `CELL` is the policy cell, `slow-high`, which a row with neither runs.
-   `ledger.mjs` refuses a line that is not a Routing and a second Routing for
-   `impl-<N>`. Router
+   `ledger.mjs` refuses a line that is not a Routing and a second, different
+   Routing for `impl-<N>`; the same line again — the row step re-run after its
+   write landed — rewrites the row and leaves the entry as it was. Router
    exit 2 → no row and no dispatch: release the claim (`release-ticket.sh`, SKILL.md's
    Failure handling row for a claim abandoned mid-run) and emit an event, a probe that could not look — a table the router
    refuses refuses every Pull.

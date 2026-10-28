@@ -595,7 +595,7 @@ test("ledgerSection reads a section's entries unescaped, and none for a section 
 });
 
 // The Routing: one line `ticket-router.mjs route` prints, `pull.mjs` reads,
-// `ledger.mjs` validates and files in `## Routed`, and the cockpit reads.
+// `ledger.mjs` validates and files in `## Routed`, and, once #3898 lands, the cockpit reads.
 const SPEC_ROUTING = "POLICY=slow-high CELL=smol-high DRAW=2/3 BY=burn-in STRATUM=heavy BRIEF=9658 CRITERIA=8 SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok";
 const routingWith = (over) => SPEC_ROUTING.split(" ").map((w) => {
   const key = w.slice(0, w.indexOf("="));
@@ -633,6 +633,10 @@ test("parseRouting refuses a line that is not a Routing, and formatRouting refus
     `${SPEC_ROUTING} `,
     SPEC_ROUTING.replace("POLICY=slow-high CELL=smol-high", "CELL=smol-high POLICY=slow-high"),
     SPEC_ROUTING.replace(" ", "  "),
+    // A misnamed key of the right length, and two same-length keys swapped:
+    // every value still reads, so only the key check refuses them.
+    SPEC_ROUTING.replace("POLICY=", "POLICZ="),
+    SPEC_ROUTING.replace("BRIEF=9658", "SIZED=9658").replace("SIZED=-", "BRIEF=-"),
     routingWith({ POLICY: "alt" }),
     routingWith({ CELL: "slow-ultra" }),
     routingWith({ DRAW: "3/2" }),

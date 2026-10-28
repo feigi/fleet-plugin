@@ -811,20 +811,21 @@ export function drawCell({ session, ticket, policyCell, cells }) {
 // after the Pull's first implementer's member token, and it never changes
 // after: the row's `tier=`/`cell=` stay the mutable "Cell the next
 // implementer runs at". One grammar for the line, here, read by `pull.mjs` off
-// the router's stdout, by `ledger.mjs` to refuse a malformed one, and by the
-// cockpit. Its words, in this order, `-` for none:
+// the router's stdout and by `ledger.mjs` to refuse a malformed one; the
+// cockpit's board card is to read it too, and does not yet. Its words, in
+// this order, `-` for none:
 //   POLICY    the policy row's Cell        CELL      the Pull's Cell
 //   DRAW      k/K of the draw              BY        burn-in | every-5th
 //   STRATUM   light | heavy | unknown      BRIEF     the brief's chars
 //   CRITERIA  the criteria count           SIZED     arm B's sizing label
 //   OBJECTIVE cost | speed                 TRIPPED   the guard's tripped Cells
 //   REASON    the first thing that went wrong
-// DRAW and BY are `-` together, as are BRIEF and CRITERIA (no issue read).
+// DRAW and BY are `-` together (no draw); so are BRIEF and CRITERIA (no issue read).
 export const STRATA = Object.freeze(["light", "heavy", "unknown"]);
 // What a run asks the router to minimise. phase0.mjs records the run's in its
 // receipt, and every Routing names the one it routed by.
 export const OBJECTIVES = Object.freeze(["cost", "speed"]);
-export const DRAWN_BY = Object.freeze(["burn-in", "every-5th"]);
+const DRAWN_BY = Object.freeze(["burn-in", "every-5th"]);
 export const ROUTING_REASONS = Object.freeze(["ok", "no-issue-json", "no-sizing", "guard-missing", "guard-tripped", "table-cell-tripped"]);
 const SIZINGS = Object.freeze(["light", "heavy"]);
 const ROUTING_KEYS = Object.freeze(["POLICY", "CELL", "DRAW", "BY", "STRATUM", "BRIEF", "CRITERIA", "SIZED", "OBJECTIVE", "TRIPPED", "REASON"]);
@@ -848,6 +849,7 @@ export function parseRouting(line) {
   }
   const opt = (x, ok) => (x === "-" ? null : ok(x) ? x : undefined);
   const count = (x) => (x === "-" ? null : COUNT.test(x) ? Number(x) : undefined);
+  const tripped = v.TRIPPED === "-" ? [] : v.TRIPPED.split(",");
   const d = DRAW.exec(v.DRAW);
   const r = {
     policy: CELL.test(v.POLICY) ? v.POLICY : undefined,
@@ -859,7 +861,7 @@ export function parseRouting(line) {
     criteria: count(v.CRITERIA),
     sized: opt(v.SIZED, (x) => SIZINGS.includes(x)),
     objective: OBJECTIVES.includes(v.OBJECTIVE) ? v.OBJECTIVE : undefined,
-    tripped: v.TRIPPED === "-" ? [] : v.TRIPPED.split(",").every((c) => CELL.test(c)) ? v.TRIPPED.split(",") : undefined,
+    tripped: tripped.every((c) => CELL.test(c)) ? tripped : undefined,
     reason: ROUTING_REASONS.includes(v.REASON) ? v.REASON : undefined,
   };
   if (Object.values(r).includes(undefined)) return null;

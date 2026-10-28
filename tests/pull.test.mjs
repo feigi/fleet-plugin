@@ -1867,6 +1867,21 @@ test("a process killed in the middle of a step resumes at that step, with the cl
   assert.equal(f.calls("inflight").length, 1);
 });
 
+test("a Pull resumed at the row step after its ledger write landed rewrites the row and leaves its one Routing", () => {
+  const f = fixture();
+  toCollision(f);
+  // Stop the Pull just past the row step, then set its record back to `row`:
+  // the ledger holds the row and its Routing, pull.json never recorded the step done.
+  f.control("dispatch-prompt", { exit: 2, err: "dispatch-prompt: stopped for the test" });
+  assert.equal(f.answer(12, "collision", "clear").status, 2);
+  writeFileSync(f.statePath(), JSON.stringify({ ...f.state(), stage: "row" }));
+  f.control("dispatch-prompt", {});
+  const r = f.next("--head", "12");
+  assert.equal(r.status, 0, r.stdout + r.err);
+  assert.deepEqual(f.ledgerRouted(), [`impl-12 ${ROUTE_OK}`], "still exactly one ## Routed entry");
+  assert.equal(f.state().commands.filter((c) => c.step === "row").length, 2, "the row step ran again");
+});
+
 test("answers that do not fit the pull are usage: exit 3, nothing recorded", () => {
   const f = fixture();
   assert.equal(f.answer(12, "staleness", "done").status, 3, "no Pull in progress");

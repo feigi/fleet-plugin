@@ -808,19 +808,28 @@ if (cmd === "read") {
   const refusal = rowWriteRefusal(data.rows, after, oldRow, line);
   if (refusal !== null) die(`row ${key}: ${refusal}`);
   // The Routing is filed under the Pull's first implementer, the one live
-  // `impl-` member the row names, and written once: a second entry for that
-  // member would give the cockpit two answers to why the Pull ran on its Cell.
+  // `impl-` member the row names, and written once: a second, different entry
+  // for that member would give the cockpit two answers to why the Pull ran on
+  // its Cell. The same entry again is the row step re-run after its write
+  // landed — a `pull.mjs` stopped before it recorded the step done — so it is
+  // left as it was and the row is still rewritten.
   let routed = null;
+  let routedAlready = false;
   if (routing !== null) {
     if (parseRouting(routing) === null) die(`row ${key}: --routing '${routing}' is not a Routing line — the one \`ticket-router.mjs route\` prints`);
     const impls = memberTokens(line).filter((t) => t.family === "impl" && t.outcome === null);
     if (impls.length !== 1) {
       die(`row ${key}: --routing is filed under the Pull's implementer, so the row must name exactly one live impl- member — it names ${impls.length === 0 ? "none" : impls.map((t) => t.name).join(", ")}`);
     }
-    const prior = data.routed.find((e) => e.split(" ")[0] === impls[0].name);
-    if (prior !== undefined) die(`row ${key}: ${impls[0].name} already has its Routing in ${ROUTED} ('${prior}') — a Pull's Routing is written once`);
     routed = routedEntry(impls[0].name, routing);
-    data.routed = [...data.routed, routed];
+    const prior = data.routed.find((e) => e.split(" ")[0] === impls[0].name);
+    if (prior === undefined) {
+      data.routed = [...data.routed, routed];
+    } else if (prior === routed) {
+      routedAlready = true;
+    } else {
+      die(`row ${key}: ${impls[0].name} already has its Routing in ${ROUTED} ('${prior}') — a Pull's Routing is written once`);
+    }
   }
   data.rows = after;
   // Logged only after save() returns — a failed write must not claim a row
@@ -835,7 +844,7 @@ if (cmd === "read") {
     const dropped = droppedTokens(oldRow, line);
     console.error(`    rewrote row ${key}${dropped.length === 0 ? "" : `; dropped: ${dropped.join(" ")}`}`);
   }
-  if (routed !== null) console.error(`    routed ${routed}`);
+  if (routed !== null) console.error(`    routed ${routed}${routedAlready ? " (already filed; left as it was)" : ""}`);
   console.log(JSON.stringify({ ticket: key, line, created, ...(routed === null ? {} : { routed }) }));
 } else if (cmd === "filed") {
   const [issue, ...subjectParts] = rest;
