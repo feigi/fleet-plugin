@@ -94,9 +94,11 @@ These stay literal strings in every repository:
 | `wayfinder:map`, `wayfinder:research`, `wayfinder:prototype`, `wayfinder:grilling`, `wayfinder:task` | Wayfinder children; excluded |
 | `patch`, `minor`, `major` | Release labels (if your repo gates releases on them) |
 
-A repository whose tracker spells a role differently declares it in the `Label in our tracker` column of the triage-label table in `docs/agents/triage-labels.md` (the file `/setup-matt-pocock-skills` writes; the fleet only reads it). A role that neither the table nor the tracker's live labels settles is asked once, with a suggestion for each role — the default when nothing else fits; the answer is kept as fleet state, not written into the repository. A confirmed label the tracker lacks is created, but only on that confirmation.
+A repository whose tracker spells a role differently declares it in the `Label in our tracker` column of the triage-label table in `docs/agents/triage-labels.md` (the file `/setup-matt-pocock-skills` writes; the fleet only reads it). A role that neither the table nor the tracker's live labels settles is asked once, with a suggestion where one exists — the default when nothing else fits, and never a string that has vanished from the tracker; the answer is kept as fleet state, not written into the repository. A confirmed label the tracker lacks is created, but only on that confirmation.
 
-The Label map derivation step (`label-map.mjs ensure`, see [Label map](components/label-map.md)) replaces a hand-run check loop. At the start of every entry point it checks every mapped string against the tracker's live label list, so a label renamed or deleted since the last run is caught before the pre-flight and before any dispatch.
+The Label map derivation step (`label-map.mjs ensure`, see [Label map](components/label-map.md)) replaces a hand-run check loop. It checks every mapped string against the tracker's live label list, so a label renamed or deleted since the last run is caught before the pre-flight and before any dispatch. Today the run-team controller's phase 0 runs it; the solo entry points are to run it first too (#3865).
+
+Until the scripts read the map (#3867–#3873), they still query and set each role's own name as its string. So, for now, a repository's role labels must be exactly the role names: a different string declared in the table is mapped, but the Shortlist and the other label queries do not use it yet.
 
 ### 2.5 `.gitignore` — HARD
 ```
