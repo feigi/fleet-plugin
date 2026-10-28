@@ -178,6 +178,17 @@ const COVERED_MJS = {
   // pass. Measured in scratch-root.test.mjs, "an ambient GIT_DIR cannot turn
   // the refusal of an enclosing, unignoring repository into a pass".
   "fleet-dir.mjs": 2,
+  // TWO scrubbed envs: `readTriageTable()`'s `rev-parse --show-toplevel` names
+  // the checkout whose triage-label table is read, and an ambient GIT_DIR would
+  // name another repository's (or, with no work tree set, the working
+  // directory itself), so the map would be derived from a table that is not
+  // this checkout's; `readLiveLabels()`'s `gh label list` also blanks GH_REPO,
+  // since an ambient one would list another repository's labels and derive this
+  // repository's map from them. Measured in label-map.test.mjs, "ensure: an
+  // ambient GIT_DIR or GH_REPO naming another repository does not change what
+  // it reads". Its other git call is `fleetFile()`'s, counted under
+  // fleet-dir.mjs.
+  "label-map.mjs": 2,
   // TWO git-invoking primitives. `readInstruments()`'s `rev-parse
   // --git-common-dir` names the checkout instruments.sh is sent to audit. An
   // ambient GIT_DIR answers it for a DIFFERENT repository, so the gate would
