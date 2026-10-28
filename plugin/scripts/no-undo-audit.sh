@@ -635,12 +635,12 @@ fi
 #
 # The count above is only honest when the list can be trusted, and it cannot
 # always be. `git stash list` prints nothing at rc 0 for a reflog this process
-# cannot read (`chmod 000 .git/logs/refs/stash`), nothing at rc 1 for a stash
-# ref whose object is gone (`fatal: bad object refs/stash`), and nothing at rc 0
-# again for a `refs/stash` FILE this process cannot read (`chmod 000
-# .git/refs/stash`) — all measured, and none distinguishable from a genuinely
-# empty stash by the list alone, while `0` is the one value the runbook reads as
-# nothing to look at.
+# cannot read (`chmod 000 .git/logs/refs/stash`), nothing at a nonzero rc — 1 on
+# git <= 2.55, 128 on git >= 2.56 — for a stash ref whose object is gone
+# (`fatal: bad object refs/stash`), and nothing at rc 0 again for a `refs/stash`
+# FILE this process cannot read (`chmod 000 .git/refs/stash`) — all measured,
+# and none distinguishable from a genuinely empty stash by the list alone, while
+# `0` is the one value the runbook reads as nothing to look at.
 #
 # `show-ref` is the discriminator because its exit code separates "no such ref"
 # from "could not read the ref". Measured, git 2.50.1:
@@ -820,11 +820,11 @@ if [ -n "$msg" ]; then
   # `tr` because `$diag` is not one line. A stash object that is CORRUPT
   # rather than missing (`echo junk > .git/objects/<xx>/<rest>`) reaches this
   # same branch — list empty at rc 1 on git <= 2.55 and rc 128 on git >= 2.56,
-  # show-ref rc 0 — and git says it in 7
-  # lines, 10 with a bad `objects/info/alternates`. Unfolded they land at
-  # column 0 in the audit's stderr, which is where only its own `$ git ...`
-  # step headers belong. `$()` has already stripped the trailing newline, so
-  # the fold adds no trailing space and the silent states still append nothing.
+  # show-ref rc 0 — and git says it in 7 lines, 10 with a bad
+  # `objects/info/alternates`. Unfolded they land at column 0 in the audit's
+  # stderr, which is where only its own `$ git ...` step headers belong. `$()`
+  # has already stripped the trailing newline, so the fold adds no trailing
+  # space and the silent states still append nothing.
   #
   # `printf`, not `echo`: `$msg` now carries git's text under `#!/bin/sh`, and
   # both dash and macOS sh expand escapes in an `echo` operand — a `\c` in it

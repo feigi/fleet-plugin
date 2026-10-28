@@ -716,11 +716,11 @@ test("stash entries present but refs/stash is unreadable reports unknown, not ze
 });
 
 // The second, different trap: a corrupted stash ref (missing object) makes
-// `git stash list` itself fail — `fatal: bad object refs/stash`, rc 1 — but
-// the pipeline's exit status was always `wc`'s, never git's, so an rc capture
-// on the old pipeline would not have caught this either. `show-ref` fails
-// here at rc 128 rather than the rc 1 that means genuinely absent, so the
-// same cross-check catches this case too.
+// `git stash list` itself fail — `fatal: bad object refs/stash`, rc 1 on git
+// <= 2.55 and 128 on git >= 2.56 — but the pipeline's exit status was always
+// `wc`'s, never git's, so an rc capture on the old pipeline would not have
+// caught this either. `show-ref` fails here at rc 128 rather than the rc 1
+// that means genuinely absent, so the same cross-check catches this case too.
 test("a corrupted stash ref reports unknown, not zero", (t) => {
   const c = repo(t);
   stashSomething(c.w);
@@ -1009,11 +1009,11 @@ test("a truncated-but-parseable stash reflog reports the too-low count as exact 
 // and stays under #306, which is why this fixture corrupts rather than removes.
 // Corrupt the loose object behind a NON-TIP entry and the reflog stays
 // intact, so `stash list` resolves the ref, prints the entries it could read,
-// names the fault and exits nonzero (1 on git <= 2.55, 128 on git >= 2.56) — a nonempty list at a nonzero rc, which is the
-// one shape none of the `show-ref` states above produce. The cross-check sees
-// no disagreement, so the rc is the whole signal, and the old pipeline gave
-// `wc`'s status instead of git's. The count printed was short by exactly the
-// entries git refused to read.
+// names the fault and exits nonzero (1 on git <= 2.55, 128 on git >= 2.56) — a
+// nonempty list at a nonzero rc, which is the one shape none of the `show-ref`
+// states above produce. The cross-check sees no disagreement, so the rc is the
+// whole signal, and the old pipeline gave `wc`'s status instead of git's. The
+// count printed was short by exactly the entries git refused to read.
 test("a corrupt loose object behind a non-tip stash entry reports unknown, not the count git could not finish, #482", (t) => {
   const c = repo(t);
   stashSomething(c.w, "h1.txt");
@@ -1045,12 +1045,13 @@ test("a corrupt loose object behind a non-tip stash entry reports unknown, not t
 });
 
 // A stash object that is CORRUPT rather than missing reaches the same branch —
-// list empty at a nonzero rc, show-ref rc 0 — but git answers in SEVEN lines there, and
-// a bad `objects/info/alternates` both adds three more and puts a backslash in
-// them. That fixture is what makes the two hazards of `msg="$msg — $diag";
-// echo "$msg"` observable at once: unfolded newlines put git's text at column 0
-// where only the audit's own `$ git ...` step headers belong, and `echo` under
-// `#!/bin/sh` eats the operator's line from the `\c` onward.
+// list empty at a nonzero rc, show-ref rc 0 — but git answers in SEVEN lines
+// there, and a bad `objects/info/alternates` both adds three more and puts a
+// backslash in them. That fixture is what makes the two hazards of
+// `msg="$msg — $diag"; echo "$msg"` observable at once: unfolded newlines put
+// git's text at column 0 where only the audit's own `$ git ...` step headers
+// belong, and `echo` under `#!/bin/sh` eats the operator's line from the `\c`
+// onward.
 //
 // The alternates path also makes git's LATER calls complain at column 0, which
 // is why the fold assertion below is scoped to the diagnostic's own text rather
@@ -1063,13 +1064,14 @@ test("a multi-line diagnostic holding a backslash arrives folded and whole", (t)
   chmodSync(obj, 0o644);
   writeFileSync(obj, "junk\n");
 
-  // The rc both comments name for this state, measured rather than asserted in
-  // prose (#494). It is 1 on git <= 2.55 and 128 on git >= 2.56, so the pin is
-  // that the call FAILED, never its value. `stash list` FAILS here, unlike the
-  // states it stays silent about — and the counting pipeline takes `wc`'s
-  // status, so the branch still fires and the rc is discarded. That discard is
-  // why a wrong rc in the prose above could sit here for as long as it did
-  // without a test noticing.
+  // That the call fails, which both comments name for this state, is measured
+  // here rather than asserted in prose (#494). Its value is not measured: it is
+  // 1 on git <= 2.55 and 128 on git >= 2.56, so the pin is that the call
+  // FAILED, never its value. `stash list` FAILS here, unlike the states it
+  // stays silent about — and the counting pipeline takes `wc`'s status, so the
+  // branch still fires and the rc is discarded. That discard is why a wrong rc
+  // in the prose above could sit here for as long as it did without a test
+  // noticing.
   const list = spawnSync("git", ["stash", "list"], { cwd: c.w, env: ENV, encoding: "utf8" });
   assert.ok(Number.isInteger(list.status) && list.status !== 0, `a corrupt tip object must make the list call itself fail; got ${list.status} ${list.stderr}`);
 
@@ -1095,7 +1097,7 @@ test("a multi-line diagnostic holding a backslash arrives folded and whole", (t)
 // comment instead of the behaviour. Measured — with the fold dropped AND the
 // comment reverted, the fold regression went unnamed and only the comment was
 // reported.
-test("no-undo-audit.sh's own comment names the rc the fixture above measures", () => {
+test("no-undo-audit.sh's own comment names the rc of the failure the fixture above measures", () => {
   // Bounded to the paragraph under test, not matched against the whole file: an
   // unbounded end lets a later, unrelated occurrence of the phrase satisfy this
   // after the real clause is deleted. Measured — that false green reproduces
