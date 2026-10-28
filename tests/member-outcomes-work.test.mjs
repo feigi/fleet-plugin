@@ -67,6 +67,13 @@ test("a member whose session_exit comes 420 s after its last working entry works
   assert.equal(row.wallS, 1020, "wall_s is still first entry to last, teardown included");
 });
 
+test("a member whose last line is stamped before its first reads a wall_s of the span, never negative (#3948)", () => {
+  const dir = session({ "impl-28": [turn(100), turn(50)] }, controllerAt(0, 100));
+  const row = rowsOf(dir)["impl-28"];
+  assert.equal(row.wallS, 50);
+  assert.equal(row.workS, 0, "work_s skips the part whose end is not after its start, as before");
+});
+
 test("a woken member works the sum of its two parts; the wait between them is not counted", () => {
   const dir = session({
     "impl-2": [...writes(0, 300), exit(720), usage(2000), usage(2300), exit(2720)],

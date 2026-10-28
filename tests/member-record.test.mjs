@@ -228,6 +228,42 @@ test("foldOmpTranscript: a torn LAST line stays uncounted — the tear a live wr
   assert.equal(folded.cacheWrite, 100);
 });
 
+// `wall_s` is the span of the parseable stamps, latest minus earliest (#3948).
+const wallTurn = (ts) => assistantEvt("claude-opus-5", { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 }, ts);
+const wallAt = (s) => new Date(Date.parse("2026-09-08T15:00:00.000Z") + s * 1000).toISOString();
+const wallLines = (...stamps) => stamps.map(wallTurn).join("\n") + "\n";
+const wallOf = (...stamps) => foldOmpTranscript(wallLines(...stamps), "/fake/path.jsonl").wallS;
+
+test("foldOmpTranscript: wall_s is the span of the stamps, 50 and not -50, when the last line is stamped before the first (#3948)", () => {
+  const lines = wallLines(wallAt(100), wallAt(50));
+  assert.equal(foldOmpTranscript(lines, "/fake/path.jsonl").wallS, 50);
+  assert.equal(readOmpMember(lines, "/fake/path.jsonl", "impl-1").wall_s, 50);
+});
+
+test("foldOmpTranscript: wall_s is the same non-negative span for every ordering of the same stamps (#3948)", () => {
+  const [a, b, c] = [wallAt(10), wallAt(70), wallAt(40)];
+  for (const order of [[a, b, c], [a, c, b], [b, a, c], [b, c, a], [c, a, b], [c, b, a]]) {
+    assert.equal(wallOf(...order), 60, order.join(" "));
+  }
+});
+
+test("foldOmpTranscript: an in-order transcript's wall_s is first to last, as before (#3948)", () => {
+  assert.equal(wallOf(wallAt(0), wallAt(30), wallAt(1020)), 1020);
+  assert.equal(wallOf(wallAt(5)), 0, "a single stamp spans nothing");
+});
+
+test("foldOmpTranscript: wall_s rounds the span to the nearest whole second (#3948)", () => {
+  assert.equal(wallOf(wallAt(0), wallAt(1.5)), 2);
+  assert.equal(wallOf(wallAt(1.499), wallAt(0)), 1);
+});
+
+test("foldOmpTranscript: an unparseable first or last stamp is skipped; with no parseable stamp wall_s is 0 (#3948)", () => {
+  assert.equal(wallOf("not-a-date", wallAt(10), wallAt(40)), 30);
+  assert.equal(wallOf(wallAt(10), wallAt(40), "not-a-date"), 30);
+  assert.equal(wallOf("not-a-date", "also-not"), 0);
+  assert.equal(foldOmpTranscript("", "/fake/path.jsonl").wallS, 0);
+});
+
 test("readOmpMember: resolvedModelIdentity rides alongside `model` as an additive field, never replacing it", () => {
   const lines = [
     sessionEvt("/Users/chris/dev/fleet-plugin"),
