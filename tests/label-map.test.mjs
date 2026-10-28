@@ -1,5 +1,5 @@
 // Regression gate for label-map.mjs: the Label map's cache format, its
-// reader, the `show` verb and the `ensure` derivation step. Zero deps:
+// reader, the `show` verb, the `ensure` derivation step and `set`. Zero deps:
 //   node --test tests/label-map.test.mjs
 //
 // The CLI runs as a child process in a real temporary git repository, the
@@ -201,15 +201,14 @@ test("show outside a repository exits 2", () => {
   }
 });
 
-test("an unknown verb, no verb, or a second role is a usage refusal, exit 2, naming ensure and show", () => {
+test("an unknown verb, no verb, or a second role is a usage refusal, exit 2, naming ensure, set and show", () => {
   const ws = repo();
   seedLabelMap(ws);
-  for (const args of [["set", "onhold=paused"], ["bogus"], [], ["show", "onhold", "wontfix"], ["ensure", "onhold"]]) {
+  for (const args of [["bogus"], [], ["show", "onhold", "wontfix"], ["ensure", "onhold"]]) {
     const r = cli(ws, ...args);
     assert.equal(r.status, 2, `${args.join(" ")}: ${r.stdout}${r.stderr}`);
     assert.equal(r.stdout, "");
-    assert.match(r.stderr, /usage: label-map\.mjs ensure \| show \[<role>\]/);
-    assert.doesNotMatch(r.stderr, /usage:.*\bset\b/);
+    assert.match(r.stderr, /usage: label-map\.mjs ensure \| set \[--accept-suggestions\] \[--create\] \[<role>=<label> …\] \| show \[<role>\]/);
   }
 });
 
@@ -832,4 +831,349 @@ test("ensure: an ambient GIT_DIR or GH_REPO naming another repository does not c
   assert.equal(mapOf(r)["ready-for-agent"], "agent-ready");
   assert.deepEqual(r.repos, ["[]"]);
   assert.equal(cacheOf(ws).origin["ready-for-agent"], "table");
+});
+
+// ---------------------------------------------------------------------------
+// `set`: the map written from a derivation plus the maintainer's answer. The
+// fake `gh` keeps the live list in a file: `label list` answers from it and
+// `label create` appends to it, so the list read again after a create holds
+// what was created. Every argv is recorded.
+// ---------------------------------------------------------------------------
+
+// `create` is a function of the list file's path returning the shell the stub
+// runs for `label create`; by default it appends the created string.
+function setRig(live, { create } = {}) {
+  const dir = realpathSync(tempDir("label-map-set-"));
+  const names = join(dir, "names");
+  writeFileSync(names, live.map((name) => `${name}\n`).join(""));
+  const onCreate = create?.(names) ?? `shift 2; [ "$1" = -- ] && shift; printf '%s\\n' "$1" >> "${names}"`;
+  const answer = [
+    `case "$1 $2" in`,
+    `"label list") printf '['; sep=''; while IFS= read -r n; do printf '%s{"name":"%s"}' "$sep" "$n"; sep=,; done < "${names}"; printf ']\\n' ;;`,
+    `"label create") ${onCreate} ;;`,
+    `*) exit 1 ;;`,
+    `esac`,
+    ``,
+  ].join("\n");
+  return rig([], { answer });
+}
+
+const setRun = (ws, g, ...args) => spawnSync(process.execPath, [SCRIPT, "set", ...args], { cwd: ws, env: g.env, encoding: "utf8" });
+const ensureRun = (ws, g) => spawnSync(process.execPath, [SCRIPT, "ensure"], { cwd: ws, env: g.env, encoding: "utf8" });
+const created = (...names) => names.map((name) => `label create ${name}`);
+
+// `ensure` run next on the same stub: exit 0 and exactly one `gh label list`, no other call.
+function ensureThenReads(ws, g) {
+  const before = g.calls().length;
+  const r = ensureRun(ws, g);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(g.calls().slice(before), [LIST]);
+  return JSON.parse(r.stdout);
+}
+
+test("set --accept-suggestions --create creates exactly the missing strings with no colour, writes the cache, and ensure then exits 0 with one gh label list and no other gh call", () => {
+  const ws = repo();
+  const g = setRig(["needs-triage", "wontfix"]);
+  const r = setRun(ws, g, "--accept-suggestions", "--create");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout), identity());
+  assert.deepEqual(g.calls(), [LIST, ...created(...without(LABEL_ROLES, "needs-triage", "wontfix")), LIST]);
+  const cache = cacheOf(ws);
+  assert.deepEqual(cache.roles, identity());
+  assert.deepEqual(cache.origin, Object.fromEntries(LABEL_ROLES.map((role) => [role, ["needs-triage", "wontfix"].includes(role) ? "default" : "maintainer"])));
+  assert.deepEqual(cache.table, { present: false, rows: {} });
+  assert.deepEqual(readLabelMap({ cwd: ws }), identity());
+  const bytes = readFileSync(join(ws, ".fleet", LABEL_MAP_FILE), "utf8");
+  assert.deepEqual(ensureThenReads(ws, g), identity());
+  assert.equal(readFileSync(join(ws, ".fleet", LABEL_MAP_FILE), "utf8"), bytes);
+});
+
+test("set without --create refuses every missing string by name and role: exit 1, nothing created, nothing written", () => {
+  const ws = repo();
+  const g = setRig(["needs-triage", "wontfix"]);
+  const r = setRun(ws, g, "--accept-suggestions");
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.equal(r.stdout, "");
+  for (const role of without(LABEL_ROLES, "needs-triage", "wontfix")) assert.match(r.stderr, new RegExp(`${role}: "${role}" does not exist in the tracker; pass --create`));
+  assert.doesNotMatch(r.stderr, /needs-triage: /);
+  assert.deepEqual(g.calls(), [LIST]);
+  noCache(ws);
+
+  const ws2 = repo();
+  const g2 = setRig(LABEL_ROLES);
+  const pair = setRun(ws2, g2, "onhold=paused");
+  assert.equal(pair.status, 1, pair.stdout + pair.stderr);
+  assert.match(pair.stderr, /onhold: "paused" does not exist in the tracker/);
+  assert.deepEqual(g2.calls(), [LIST]);
+  noCache(ws2);
+});
+
+test("set refuses a string D8 rejects, exit 1 naming the role and the rule, with --create too: nothing created, nothing written", () => {
+  const cases = [
+    [["onhold=on\"hold"], /onhold: its answer names "on\\"hold".*contains `"`/],
+    [["onhold=on\\hold"], /onhold: its answer names .*contains `\\`/],
+    [[`onhold=${long}`], /onhold: its answer names .*longer than 50 characters \(51\)/],
+    [["onhold="], /onhold: its answer names "".*empty after trimming/],
+    [["onhold=   "], /onhold: its answer names "   ".*empty after trimming/],
+    [["onhold=WONTFIX"], /onhold: its answer names "WONTFIX".*wontfix resolves to as its default/],
+    [["needs-info=Same", "onhold=same"], /onhold: its answer names "same", the same string as the needs-info=<label> pair \(compared ignoring case\)/],
+  ];
+  for (const [args, expected] of cases) {
+    const ws = repo();
+    const g = setRig(LABEL_ROLES);
+    const r = setRun(ws, g, "--accept-suggestions", "--create", ...args);
+    assert.equal(r.status, 1, `${args.join(" ")}: ${r.stdout}${r.stderr}`);
+    assert.equal(r.stdout, "");
+    assert.match(r.stderr, expected);
+    assert.deepEqual(g.calls(), [LIST], args.join(" "));
+    noCache(ws);
+  }
+});
+
+test("set refuses a table row that breaks D8 on a role no pair covers, as ensure does: exit 1 naming the row, nothing written", () => {
+  const ws = repo();
+  writeTable(ws, [["wontfix", "a\"b"]]);
+  const g = setRig(LABEL_ROLES);
+  const r = setRun(ws, g, "--accept-suggestions", "--create", "onhold=on-hold");
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /wontfix: its row names/);
+  assert.deepEqual(g.calls(), [LIST]);
+  noCache(ws);
+});
+
+test("set: an unknown role, a malformed pair, an unknown flag or a role answered twice is a usage refusal, exit 2, and gh is never called", () => {
+  const cases = [
+    [["ready-for-robot=x"], /unknown role "ready-for-robot"/],
+    [["=x"], /unknown role ""/],
+    [["onhold"], /malformed pair "onhold"/],
+    [["--force"], /unknown flag "--force"/],
+    [["--create=1"], /unknown flag "--create=1"/],
+    [["-c"], /unknown flag "-c"/],
+    [["onhold=a", "onhold=b"], /onhold is answered twice/],
+  ];
+  for (const [args, expected] of cases) {
+    const ws = repo();
+    const g = setRig(LABEL_ROLES);
+    const r = setRun(ws, g, ...args);
+    assert.equal(r.status, 2, `${args.join(" ")}: ${r.stdout}${r.stderr}`);
+    assert.equal(r.stdout, "");
+    assert.match(r.stderr, expected);
+    if (!/unknown role/.test(expected.source)) assert.match(r.stderr, /usage: label-map\.mjs ensure \| set /);
+    assert.deepEqual(g.calls(), [], args.join(" "));
+    noCache(ws);
+  }
+});
+
+test("set refuses an uncertain role no answer covers, naming it: exit 1, nothing created, nothing written", () => {
+  const ws = repo();
+  const g = setRig([]);
+  const none = setRun(ws, g, "--create");
+  assert.equal(none.status, 1, none.stdout + none.stderr);
+  for (const role of LABEL_ROLES) assert.match(none.stderr, new RegExp(`${role}: uncovered; answer ${role}=<label>, or pass --accept-suggestions to take "${role}"`));
+  assert.deepEqual(g.calls(), [LIST]);
+
+  const some = setRun(ws, g, "--create", "needs-triage=a");
+  assert.equal(some.status, 1, some.stdout + some.stderr);
+  assert.match(some.stderr, /needs-info: uncovered/);
+  assert.doesNotMatch(some.stderr, /needs-triage: /);
+  assert.deepEqual(g.calls(), [LIST, LIST]);
+  noCache(ws);
+});
+
+test("set --accept-suggestions refuses a gone role as uncovered, it having no suggestion; a pair for it settles it", () => {
+  const ws = repo();
+  const rows = Object.fromEntries(FIVE.map((r) => [r, r === "ready-for-agent" ? "agent-ready" : r]));
+  writeTable(ws, fiveRows({ "ready-for-agent": "agent-ready" }));
+  seedFrom(ws, { roles: { "ready-for-agent": "agent-ready" }, origin: { "ready-for-agent": "table" }, rows });
+  const before = readFileSync(join(ws, ".fleet", LABEL_MAP_FILE), "utf8");
+  const g = setRig(without(LABEL_ROLES, "ready-for-agent"));
+  const refused = setRun(ws, g, "--accept-suggestions", "--create");
+  assert.equal(refused.status, 1, refused.stdout + refused.stderr);
+  assert.match(refused.stderr, /ready-for-agent: uncovered, and it has no suggestion \(its label "agent-ready" is gone from the tracker\); answer ready-for-agent=<label>/);
+  assert.deepEqual(g.calls(), [LIST]);
+  assert.equal(readFileSync(join(ws, ".fleet", LABEL_MAP_FILE), "utf8"), before);
+
+  const answered = setRun(ws, g, "--accept-suggestions", "--create", "ready-for-agent=agent-ready");
+  assert.equal(answered.status, 0, answered.stdout + answered.stderr);
+  assert.deepEqual(g.calls().slice(1), [LIST, ...created("agent-ready"), LIST]);
+  assert.equal(cacheOf(ws).roles["ready-for-agent"], "agent-ready");
+  assert.equal(cacheOf(ws).origin["ready-for-agent"], "maintainer");
+  ensureThenReads(ws, g);
+});
+
+test("set case rule: a pair differing from the live label only in case stores the live spelling and creates nothing", () => {
+  const ws = repo();
+  const g = setRig(LABEL_ROLES);
+  const r = setRun(ws, g, "--create", "ready-for-agent=READY-FOR-AGENT");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout), identity());
+  assert.deepEqual(g.calls(), [LIST]);
+  assert.equal(cacheOf(ws).roles["ready-for-agent"], "ready-for-agent");
+  assert.equal(cacheOf(ws).origin["ready-for-agent"], "maintainer");
+});
+
+test("set case rule: a label create answered 'already exists' for a case variant counts as existing, and the live list read again gives the spelling stored", () => {
+  const ws = repo();
+  const g = setRig(without(LABEL_ROLES, "ready-for-agent"), {
+    create: (names) => `echo 'label with name "agent-ready" already exists; use \`--force\` to update its color and description' >&2; printf '%s\\n' Agent-Ready >> "${names}"; exit 1`,
+  });
+  const r = setRun(ws, g, "--create", "ready-for-agent=agent-ready");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(g.calls(), [LIST, ...created("agent-ready"), LIST]);
+  assert.deepEqual(JSON.parse(r.stdout), { ...identity(), "ready-for-agent": "Agent-Ready" });
+  assert.equal(cacheOf(ws).roles["ready-for-agent"], "Agent-Ready");
+  assert.deepEqual(ensureThenReads(ws, g), { ...identity(), "ready-for-agent": "Agent-Ready" });
+});
+
+test("set: a label create that fails for another reason is exit 2 naming the labels created before it; nothing is written", () => {
+  const ws = repo();
+  const g = setRig(without(LABEL_ROLES, "needs-info", "onhold"), {
+    create: (names) => `shift 2; if [ "$1" = onhold ]; then echo "gh: HTTP 403" >&2; exit 1; fi; printf '%s\\n' "$1" >> "${names}"`,
+  });
+  const r = setRun(ws, g, "--accept-suggestions", "--create");
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /gh label create "onhold" failed: gh: HTTP 403; created before it: "needs-info"; nothing written/);
+  assert.deepEqual(g.calls(), [LIST, ...created("needs-info", "onhold")]);
+  noCache(ws);
+});
+
+test("set: a label create that answers success but leaves the label out of the list read again is exit 2, nothing written", () => {
+  const ws = repo();
+  const g = setRig(without(LABEL_ROLES, "onhold"), { create: () => "exit 0" });
+  const r = setRun(ws, g, "--accept-suggestions", "--create");
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /onhold: "onhold" is not in the tracker's label list after gh label create; nothing written/);
+  noCache(ws);
+});
+
+test("set needs-triage=triage clears the break a ready-for-human row naming needs-triage causes: the map is written and ensure then exits 0; a break left standing is exit 1", () => {
+  const live = [...without(LABEL_ROLES, "ready-for-human"), "triage"];
+  const ws = repo();
+  writeTable(ws, wrongRows());
+  const g = setRig(live);
+  const first = ensureRun(ws, g);
+  assert.equal(first.status, 1, first.stdout + first.stderr);
+
+  const r = setRun(ws, g, "needs-triage=triage");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const expected = { ...identity(), "ready-for-human": "needs-triage", "needs-triage": "triage" };
+  assert.deepEqual(JSON.parse(r.stdout), expected);
+  assert.deepEqual(cacheOf(ws).roles, expected);
+  assert.equal(cacheOf(ws).origin["needs-triage"], "maintainer");
+  assert.equal(cacheOf(ws).origin["ready-for-human"], "table");
+  assert.deepEqual(ensureThenReads(ws, g), expected);
+
+  const ws2 = repo();
+  writeTable(ws2, wrongRows());
+  const g2 = setRig(live);
+  const left = setRun(ws2, g2, "--accept-suggestions", "--create", "needs-info=needs-info");
+  assert.equal(left.status, 1, left.stdout + left.stderr);
+  assert.match(left.stderr, /ready-for-human: its row names "needs-triage"/);
+  assert.match(left.stderr, /set needs-triage=<label>/);
+  assert.deepEqual(g2.calls(), [LIST]);
+  noCache(ws2);
+});
+
+test("set: a pair for a role beats that role's table row, and the answer carries over the next ensure; a table edit to another role's row keeps it", () => {
+  const ws = repo();
+  writeTable(ws, [["ready-for-agent", "agent-ready"]]);
+  const g = setRig([...LABEL_ROLES, "agent-ready", "ready"]);
+  const r = setRun(ws, g, "ready-for-agent=ready");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(g.calls(), [LIST]);
+  assert.equal(cacheOf(ws).roles["ready-for-agent"], "ready");
+  assert.equal(cacheOf(ws).origin["ready-for-agent"], "maintainer");
+  assert.equal(ensureThenReads(ws, g)["ready-for-agent"], "ready");
+
+  const ws2 = repo();
+  const g2 = setRig([...LABEL_ROLES, "on-hold"]);
+  assert.equal(setRun(ws2, g2, "onhold=on-hold").status, 0);
+  writeTable(ws2, [["needs-info", "needs-info"]]);
+  const map = ensureThenReads(ws2, g2);
+  assert.equal(map.onhold, "on-hold");
+  assert.equal(cacheOf(ws2).origin.onhold, "maintainer");
+});
+
+test("set --accept-suggestions takes a near match that exists as it is: no label created, origin maintainer", () => {
+  const ws = repo();
+  const g = setRig([...without(LABEL_ROLES, "onhold"), "on-hold"]);
+  const r = setRun(ws, g, "--accept-suggestions");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(g.calls(), [LIST]);
+  assert.equal(cacheOf(ws).roles.onhold, "on-hold");
+  assert.equal(cacheOf(ws).origin.onhold, "maintainer");
+});
+
+test("set with nothing uncertain and no flag writes the derived map, origin default for every role", () => {
+  const ws = repo();
+  const g = setRig(LABEL_ROLES);
+  const r = setRun(ws, g);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout), identity());
+  assert.deepEqual(Object.values(cacheOf(ws).origin), LABEL_ROLES.map(() => "default"));
+  assert.deepEqual(g.calls(), [LIST]);
+});
+
+test("set accepts what D8 allows: exactly 50 characters, spaces and punctuation, and a leading dash passed after `--`", () => {
+  const ws = repo();
+  const g = setRig(LABEL_ROLES);
+  const fifty = "y".repeat(50);
+  const r = setRun(ws, g, "--create", "needs-info=Needs Info: waiting", `ready-for-agent=${fifty}`, "onhold=-paused");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout), { ...identity(), "needs-info": "Needs Info: waiting", "ready-for-agent": fifty, onhold: "-paused" });
+  assert.deepEqual(g.calls(), [LIST, "label create Needs Info: waiting", `label create ${fifty}`, "label create -- -paused", LIST]);
+});
+
+test("set: an ambient GH_REPO does not move the label create; gh is run with GH_REPO empty", () => {
+  const ws = repo();
+  const g = setRig([]);
+  const r = spawnSync(process.execPath, [SCRIPT, "set", "--accept-suggestions", "--create"], { cwd: ws, env: { ...g.env, GH_REPO: "other/repo" }, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(g.repos(), LABEL_ROLES.flatMap(() => ["[]"]).concat(["[]", "[]"]));
+});
+
+test("set: gh failing, no repository or an unreadable cache is exit 2, nothing written", (t) => {
+  const ws = repo();
+  const failing = rig(LABEL_ROLES, { fail: true });
+  const r = setRun(ws, failing, "--accept-suggestions", "--create");
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /gh label list failed: gh: boom/);
+  assert.deepEqual(failing.calls(), [LIST]);
+  noCache(ws);
+
+  const dir = realpathSync(tempDir("label-map-norepo-"));
+  const g = setRig(LABEL_ROLES);
+  const norepo = setRun(dir, g, "--accept-suggestions");
+  assert.equal(norepo.status, 2, norepo.stdout + norepo.stderr);
+  assert.deepEqual(g.calls(), []);
+
+  if (process.getuid?.() === 0) return t.skip("root reads every file");
+  const ws3 = repo();
+  const file = seedLabelMap(ws3, { roles: { "in-progress": "mine" }, origin: { "in-progress": "maintainer" } });
+  const bytes = readFileSync(file, "utf8");
+  chmodSync(file, 0o000);
+  let unreadable;
+  try {
+    unreadable = setRun(ws3, setRig([...LABEL_ROLES, "mine"]), "--accept-suggestions");
+  } finally {
+    chmodSync(file, 0o600);
+  }
+  assert.equal(unreadable.status, 2, unreadable.stdout + unreadable.stderr);
+  assert.match(unreadable.stderr, /cannot read the Label map at .*labels\.json \(EACCES\); nothing written/);
+  assert.equal(readFileSync(file, "utf8"), bytes);
+});
+
+test("set: a pair naming the string another role's cached answer holds drops that answer, and the role is asked again like a table row claiming it", () => {
+  const ws = repo();
+  seedFrom(ws, { roles: { onhold: "paused" }, origin: { onhold: "maintainer" } });
+  const live = [...LABEL_ROLES, "paused"];
+  const g = setRig(live);
+  const refused = setRun(ws, g, "wontfix=paused");
+  assert.equal(refused.status, 1, refused.stdout + refused.stderr);
+  assert.match(refused.stderr, /onhold: uncovered; answer onhold=<label>, or pass --accept-suggestions to take "onhold"/);
+
+  const r = setRun(ws, g, "--accept-suggestions", "wontfix=paused");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout), { ...identity(), wontfix: "paused" });
+  assert.equal(cacheOf(ws).origin.onhold, "maintainer");
 });
