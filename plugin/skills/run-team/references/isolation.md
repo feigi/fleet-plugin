@@ -185,8 +185,9 @@ practice: the recipe is the absolute-path discipline above, not a placeholder
 for a `cwd` field that does not exist. The gap is now enforced rather than only
 written down: the plugin's `member-write-guard` omp extension
 refuses a fleet member's `write`/`edit`/`ast_edit` into the main checkout's
-non-ignored tree and an implementer's `bash` from a main-checkout cwd, and the
-missing field itself is requested upstream in `can1357/oh-my-pi`.
+non-ignored tree or into the Install root, and an implementer's `bash` from a
+main-checkout cwd, and the missing field itself is requested upstream in
+`can1357/oh-my-pi`.
 
 ## `task`-dispatched members share one `eval` kernel
 

@@ -5,10 +5,9 @@
 # the Install root — the realpath of
 # `~/.omp/plugins/node_modules/@feigi/fleet-ctl`, the tree fleet-run executes
 # and omp loads the runbooks from — and every member can write to that tree.
-# member-write-guard.mjs refuses a `write`/`edit`/`ast_edit` inside the MAIN
-# checkout only, which is the Install root only when that checkout is linked;
-# a `bash` or `eval` write lands either way, and under a package install
-# nothing refuses any of them. Worktree isolation
+# member-write-guard.mjs refuses a `write`/`edit`/`ast_edit` inside the Install
+# root, whatever the install kind, but a `bash` or `eval` write lands there
+# anyway and nothing refuses it. Worktree isolation
 # and `./agent-test` port derivation protect members from each other; neither
 # protects the tree the controller measures from. Measured: a member edited two
 # files in the main checkout instead of its worktree while the CI monitor was

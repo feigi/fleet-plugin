@@ -7,8 +7,8 @@ against your `bash` cwd, which they share no `cwd` parameter with. Give them
 the absolute worktree path on every call, mutation-probe copies included.**
 The main checkout is the parent of `git rev-parse --path-format=absolute
 --git-common-dir`. A `member-write-guard` refusal means the path hit the
-main checkout — for `bash`, a missing or main-checkout `cwd` — so re-issue
-it absolute, under your worktree.
+main checkout or the Install root — for `bash`, a missing or main-checkout
+`cwd` — so re-issue it absolute, under your worktree.
 
 **Every factual claim your diff restates needs a settling command run
 against the tree first** — the issue body is a lead, never a citation.

@@ -9,8 +9,8 @@ against your `bash` cwd, which they share no `cwd` parameter with. Give them
 the absolute worktree path on every call, mutation-probe copies included.**
 The main checkout is the parent of `git rev-parse --path-format=absolute
 --git-common-dir`. A `member-write-guard` refusal means the path hit the
-main checkout — for `bash`, a missing or main-checkout `cwd` — so re-issue
-it absolute, under your worktree.
+main checkout or the Install root — for `bash`, a missing or main-checkout
+`cwd` — so re-issue it absolute, under your worktree.
 
 Read `$(~/.fleet/bin/fleet-run --root)/commands/review-and-fix.md` and run **steps 2, 3
 and 5 only**: split apply-now/defer, commit, push, file every deferral as its

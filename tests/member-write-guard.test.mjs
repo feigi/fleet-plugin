@@ -1,17 +1,19 @@
 // member-write-guard.mjs, exercised the way omp runs it: the factory is handed
 // a stand-in `pi`, and every call goes through the `tool_call` handler it
-// registers — which resolves the main checkout with real git and hands it to
-// `decide()`. The fixture is a real repository with a claimed-style worktree
-// under `.worktrees/`, a `.gitignore` carrying the fleet's ignored
+// registers — which resolves the main checkout with real git, and for a path
+// writer the Install root from the fixture HOME's package entry, and hands
+// both to `decide()`. The fixture is a real repository with a claimed-style
+// worktree under `.worktrees/`, a `.gitignore` carrying the fleet's ignored
 // directories, and a scratch directory outside it. On macOS `tmpdir()` lives
 // behind the `/var` → `/private/var` symlink, so every row below also crosses
 // the symlink the handler canonicalises away.
 //
 // Both halves are pinned: what the guard must refuse (a main-checkout write,
-// relative or absolute, from a member or a member's child; an implementer's
-// bash from the inherited cwd; a git that cannot answer) and what it must let
-// through (the member's worktree, gitignored run state, scratch, internal
-// URLs, every session that is not a fleet member's).
+// relative or absolute, from a member or a member's child; a write into the
+// Install root however it is spelled or linked; an implementer's bash from
+// the inherited cwd; a git or a package entry that cannot answer) and what it
+// must let through (the member's worktree, gitignored run state, scratch,
+// internal URLs, every session that is not a fleet member's).
 //
 // Zero deps: `node --test tests/member-write-guard.test.mjs`.
 
@@ -20,7 +22,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import memberWriteGuard, { decide } from "../plugin/scripts/member-write-guard.mjs";
 
@@ -52,6 +54,37 @@ const SCRATCH = join(BASE, "scratch");
 mkdirSync(SCRATCH);
 const ELSEWHERE = repo(join(BASE, "elsewhere"));
 
+// The Install root is the realpath of the package entry under `os.homedir()`,
+// which is $HOME, and the guard resolves it on every guarded path-writer call.
+// Every row in this file runs under a fixture HOME, so none reads a real omp
+// install and the file answers the same in CI, which has none, as on a
+// machine that has one. NO_INSTALL has no package entry: the Install-root rule
+// is off there, so every main-checkout row keeps its verdict.
+const NO_INSTALL = join(BASE, "home-none");
+mkdirSync(NO_INSTALL);
+process.env.HOME = NO_INSTALL;
+const ENTRY = [".omp", "plugins", "node_modules", "@feigi", "fleet-ctl"];
+/** A fixture HOME named `name` whose package entry `make(entryPath)` creates. */
+function installHome(name, make) {
+  const home = join(BASE, name);
+  const entry = join(home, ...ENTRY);
+  mkdirSync(dirname(entry), { recursive: true });
+  make(entry);
+  return { home, entry };
+}
+async function underHome(home, fn) {
+  process.env.HOME = home;
+  try {
+    await fn();
+  } finally {
+    process.env.HOME = NO_INSTALL;
+  }
+}
+const pluginTree = (dir) => {
+  for (const sub of ["commands", "scripts", "skills", "agents", "workflows"]) mkdirSync(join(dir, sub), { recursive: true });
+  writeFileSync(join(dir, "scripts", "fleet-tick.mjs"), "export {};\n");
+};
+
 const IMPL = { kind: "sub", id: "impl-42", name: "fleet-implementer-slow-high", depth: 1, parentId: "Main" };
 const OTHER_CELLS = ["slow-medium", "task-high", "task-max", "smol-high"].map((cell) => ({ ...IMPL, name: `fleet-implementer-${cell}` }));
 const REVIEWER = { kind: "sub", id: "review-pr-9.Correctness", name: "fleet-review-correctness", depth: 2, parentId: "review-pr-9" };
@@ -77,6 +110,13 @@ async function refused(agent, toolName, input, cwd, what) {
 }
 async function allowed(agent, toolName, input, cwd, what) {
   assert.equal(await call(agent, toolName, input, cwd), undefined, `${what}: expected the call to run`);
+}
+/** A refusal by the Install-root rule, naming the root it refused for. */
+async function refusedInstall(agent, toolName, input, cwd, root, what) {
+  const r = await refused(agent, toolName, input, cwd, what);
+  assert.ok(r.includes(`inside the Install root ${root}`), `${what}: the refusal does not name the Install root ${root}: ${r}`);
+  assert.match(r, /the installed plugin the fleet executes/, `${what}: the refusal does not say what the Install root is`);
+  return r;
 }
 
 test("a member's relative and absolute writes into the main checkout are refused, naming the resolved path", async () => {
@@ -233,4 +273,204 @@ test("a checkout whose .git is a symlink to a git dir elsewhere is still the mai
   await refused(IMPL, "write", { path: "plugin/tool.mjs" }, proj, "relative write into a symlinked-.git checkout");
   await refused(IMPL, "bash", { command: "true" }, proj, "implementer bash from a symlinked-.git checkout");
   await allowed(IMPL, "write", { path: ".fleet/ledger.md" }, proj, "gitignored .fleet/ in a symlinked-.git checkout");
+});
+
+test("a package install: a guarded write into the Install root is refused however the path is spelled", async () => {
+  const { home, entry } = installHome("home-npm", pluginTree);
+  const root = realpathSync(entry);
+  await underHome(home, async () => {
+    const r = await refusedInstall(IMPL, "write", { path: join(entry, "scripts", "fleet-tick.mjs") }, ROOT, root, "an absolute write into the Install root");
+    assert.ok(r.includes(join(root, "scripts", "fleet-tick.mjs")), `the refusal does not name the resolved path: ${r}`);
+    await refusedInstall(IMPL, "write", { path: "~/.omp/plugins/node_modules/@feigi/fleet-ctl/commands/run-merge-bot.md" }, ROOT, root, "a ~/ write into the Install root");
+    // SCRATCH is in no repository, so only the Install-root rule can refuse this.
+    await refusedInstall(IMPL, "write", { path: "../home-npm/.omp/plugins/node_modules/@feigi/fleet-ctl/skills/x.md" }, SCRATCH, root, "a relative ../ write into the Install root");
+    await refusedInstall(IMPL, "write", { path: entry }, ROOT, root, "a write to the Install root itself");
+    // The one measured stray: a `scheme://` tail after an absolute path is a file under it.
+    await refusedInstall(IMPL, "write", { path: `${entry}/commands/xd://mcp__agent_brain_memory_get` }, ROOT, root, "an internal-URL tail under the Install root");
+    await refusedInstall(FINISHER, "write", { path: join(root, "scripts", "x.mjs") }, ROOT, root, "the finisher's write into the Install root");
+    await refusedInstall(REVIEWER, "write", { path: join(root, "scripts", "x.mjs") }, ROOT, root, "a review specialist's write into the Install root");
+    await refusedInstall(CHILD, "write", { path: join(root, "scripts", "x.mjs") }, ROOT, root, "a member's child's write into the Install root");
+    // Beside the Install root is not inside it.
+    await allowed(IMPL, "write", { path: join(home, ".omp", "plugins", "node_modules", "@feigi", "fleet-ctl-other", "x.mjs") }, ROOT, "a sibling package sharing the root's name as a prefix");
+    await allowed(IMPL, "write", { path: join(WT, "plugin", "new.mjs") }, ROOT, "the worktree, with a package install present");
+  });
+});
+
+test("a linked entry: a write through the entry path or through its realpath is refused", async () => {
+  const market = join(BASE, "cache-home", ".omp", "plugins", "cache", "fleet-ctl", "3.0.0");
+  pluginTree(market);
+  const OTHER = repo(join(BASE, "other"));
+  const fixtures = [
+    ["marketplace-style, outside any repository", installHome("home-market", (e) => symlinkSync(market, e))],
+    ["another repository's plugin/", installHome("home-other", (e) => symlinkSync(join(OTHER, "plugin"), e))],
+  ];
+  for (const [kind, { home, entry }] of fixtures) {
+    const root = realpathSync(entry);
+    await underHome(home, async () => {
+      await refusedInstall(IMPL, "write", { path: join(entry, "scripts", "x.mjs") }, ROOT, root, `${kind}: a write through the entry path`);
+      await refusedInstall(IMPL, "write", { path: join(root, "scripts", "x.mjs") }, ROOT, root, `${kind}: a write through the realpath`);
+    });
+  }
+  // The other repository is not the session's main checkout: outside its plugin/ it is not protected.
+  await underHome(fixtures[1][1].home, async () => {
+    await allowed(IMPL, "write", { path: join(OTHER, "README.md") }, ROOT, "another repository's file outside the Install root");
+  });
+});
+
+test("every edit shape that names the Install root is refused", async () => {
+  const { home, entry } = installHome("home-edit", pluginTree);
+  const root = realpathSync(entry);
+  await underHome(home, async () => {
+    await refusedInstall(IMPL, "edit", { input: `[${join(entry, "scripts", "fleet-tick.mjs")}#ABCD]\nPUT 1.=1:\n+x\n` }, ROOT, root, "a hashline header");
+    await refusedInstall(IMPL, "edit", { input: `[${join(WT, "plugin", "tool.mjs")}#ABCD]\nMV ${join(root, "scripts", "moved.mjs")}\n` }, ROOT, root, "an MV destination");
+    await refusedInstall(IMPL, "edit", { input: "...", paths: [join(root, "scripts", "fleet-tick.mjs")] }, ROOT, root, "omp-normalised paths");
+    await refusedInstall(IMPL, "ast_edit", { ops: [{ pat: "a", out: "b" }], paths: [join(WT, "plugin"), join(entry, "scripts")] }, ROOT, root, "an ast_edit path among good ones");
+    await allowed(IMPL, "edit", { input: `[${join(WT, "plugin", "tool.mjs")}#ABCD]\nPUT 1.=1:\n+x\n` }, ROOT, "a worktree edit");
+  });
+});
+
+test("an Install root linked into the session's own repository has no gitignore exemption", async () => {
+  const own = repo(join(BASE, "own"));
+  writeFileSync(join(own, ".gitignore"), ".worktrees/\n.fleet/\n.agent-brain/\nplugin/*.log\n");
+  const ownWt = join(own, ".worktrees", "7-slug");
+  sh(own, "worktree", "add", "-q", ownWt, "-b", "implementer/7");
+  // The main-checkout rule alone would let this file through.
+  sh(own, "check-ignore", "-q", join(own, "plugin", "debug.log"));
+  const { home, entry } = installHome("home-own", (e) => symlinkSync(join(own, "plugin"), e));
+  const root = realpathSync(entry);
+  await underHome(home, async () => {
+    await refusedInstall(IMPL, "write", { path: "plugin/debug.log" }, own, root, "a gitignored file under the linked plugin/");
+    await allowed(IMPL, "write", { path: join(ownWt, "plugin", "tool.mjs") }, own, "a write under .worktrees/<n>-<slug>/");
+    await allowed(IMPL, "write", { path: ".fleet/ledger.md" }, own, "gitignored run state beside the Install root");
+  });
+});
+
+test("with the session cwd in no repository, a write into the Install root is still refused", async () => {
+  const { home, entry } = installHome("home-norepo", pluginTree);
+  const root = realpathSync(entry);
+  await underHome(home, async () => {
+    await refusedInstall(IMPL, "write", { path: join(entry, "commands", "x.md") }, SCRATCH, root, "an absolute write from outside any repository");
+    await allowed(IMPL, "write", { path: "x.txt" }, SCRATCH, "scratch, outside any repository");
+  });
+});
+
+test("no package entry: the Install-root rule is off and the main-checkout rule still refuses", async () => {
+  // NO_INSTALL has no `.omp` at all; this HOME has the directories up to the entry and no entry.
+  const { home } = installHome("home-partial", () => {});
+  for (const h of [NO_INSTALL, home]) {
+    await underHome(h, async () => {
+      const r = await refused(IMPL, "write", { path: "plugin/tool.mjs" }, ROOT, `no entry under ${h}: a main-checkout write`);
+      assert.match(r, /inside the main checkout/, `the main-checkout rule did not answer: ${r}`);
+      await allowed(IMPL, "write", { path: join(SCRATCH, "x.mjs") }, ROOT, `no entry under ${h}: a scratch write`);
+    });
+  }
+});
+
+test("an entry that does not resolve refuses every guarded path writer, and no bash", async () => {
+  const dangling = installHome("home-dangling", (e) => symlinkSync(join(BASE, "gone-install"), e));
+  // A file where a directory of the entry's path should be: lstat answers ENOTDIR, not ENOENT.
+  const notDir = join(BASE, "home-notdir");
+  mkdirSync(join(notDir, ".omp", "plugins"), { recursive: true });
+  writeFileSync(join(notDir, ".omp", "plugins", "node_modules"), "");
+  const rows = [
+    [dangling.home, dangling.entry, /dangling: ENOENT/],
+    [notDir, join(notDir, ...ENTRY), /ENOTDIR/],
+  ];
+  for (const [home, entry, error] of rows) {
+    await underHome(home, async () => {
+      for (const [toolName, input] of [
+        ["write", { path: join(SCRATCH, "x.txt") }],
+        ["edit", { input: `[${join(WT, "plugin", "tool.mjs")}#ABCD]\nPUT 1.=1:\n+x\n` }],
+        ["ast_edit", { ops: [{ pat: "a", out: "b" }], paths: [join(WT, "plugin")] }],
+      ]) {
+        const r = (await call(IMPL, toolName, input, SCRATCH))?.reason;
+        assert.match(r ?? "", /^member-write-guard: refused/, `${entry}: expected a ${toolName} refusal, got ${r}`);
+        assert.ok(r.includes(entry), `${entry}: the ${toolName} refusal does not name the entry: ${r}`);
+        assert.match(r, error, `${entry}: the ${toolName} refusal does not name the error: ${r}`);
+        // No path the member picks clears a broken entry, so the refusal must not send it to re-issue one.
+        assert.doesNotMatch(r, /\.worktrees\/<n>-<slug>\//, `${entry}: the ${toolName} refusal tells the member to re-issue it: ${r}`);
+        assert.match(r, /needs repair/, `${entry}: the ${toolName} refusal does not say the entry needs repair: ${r}`);
+      }
+      await allowed(IMPL, "bash", { command: "true", cwd: WT }, ROOT, `${entry}: implementer bash with an allowed cwd`);
+      await allowed(FIX_APPLIER, "bash", { command: "true", cwd: SCRATCH }, ROOT, `${entry}: fix-applier bash with an allowed cwd`);
+      await allowed(MAIN, "write", { path: join(SCRATCH, "x.txt") }, SCRATCH, `${entry}: the top-level session's write`);
+      await allowed(UNRELATED, "write", { path: join(SCRATCH, "x.txt") }, SCRATCH, `${entry}: a non-fleet subagent's write`);
+    });
+  }
+});
+
+// On a case-insensitive filesystem (macOS's default) one directory answers to
+// every letter case of its name; the probe below decides whether this one does.
+const CASE_INSENSITIVE = existsSync(join(BASE, "MAIN"));
+test("a letter-case variant of a protected path is refused on a case-insensitive filesystem", { skip: !CASE_INSENSITIVE && "this filesystem is case-sensitive" }, async () => {
+  const { home, entry } = installHome("home-case", pluginTree);
+  const root = realpathSync(entry);
+  await underHome(home, async () => {
+    const variant = join(home, ".OMP", "plugins", "node_modules", "@FEIGI", "FLEET-CTL", "scripts", "fleet-tick.mjs");
+    await refusedInstall(IMPL, "write", { path: variant }, SCRATCH, root, "a case-variant spelling of the Install root");
+    const r = await refused(IMPL, "write", { path: join(BASE, "MAIN", "plugin", "tool.mjs") }, ROOT, "a case-variant spelling of the main checkout");
+    assert.match(r, /inside the main checkout/, `the main-checkout rule did not answer: ${r}`);
+    await allowed(IMPL, "write", { path: join(BASE, "MAIN", ".worktrees", "42-slug", "plugin", "tool.mjs") }, ROOT, "a case-variant spelling of the worktree");
+  });
+});
+
+test("an ast_edit that scans from above the Install root is refused, and one scanning beside it is not", async () => {
+  const { home, entry } = installHome("home-scan", pluginTree);
+  const root = realpathSync(entry);
+  await underHome(home, async () => {
+    for (const [path, what] of [
+      [join(home, ".omp", "plugins"), "an ancestor directory"],
+      [join(home, ".omp", "**", "*.mjs"), "a recursive glob above the root"],
+      [join(home, ".omp", "plugins", "node_modules", "@feigi", "*", "scripts", "*.mjs"), "a wildcard segment standing for the root"],
+    ]) {
+      const r = await refused(IMPL, "ast_edit", { ops: [{ pat: "a", out: "b" }], paths: [path] }, SCRATCH, what);
+      assert.ok(r.includes(`holds the Install root ${root}`), `${what}: the refusal does not name the Install root: ${r}`);
+    }
+    await allowed(IMPL, "ast_edit", { ops: [{ pat: "a", out: "b" }], paths: [join(WT, "plugin", "**", "*.mjs")] }, ROOT, "a worktree glob");
+    await allowed(IMPL, "ast_edit", { ops: [{ pat: "a", out: "b" }], paths: [join(home, ".omp", "plugins", "cache", "*.mjs")] }, SCRATCH, "a glob beside the root");
+    // A write names one file: an ancestor of the root is no target of it.
+    await allowed(IMPL, "write", { path: join(home, ".omp", "plugins", "notes.md") }, SCRATCH, "a write beside the root");
+  });
+});
+
+test("a target the guard cannot canonicalise is refused, naming the error", async () => {
+  // A regular file where a directory of the target's path should be: realpath answers ENOTDIR.
+  const file = join(SCRATCH, "a-file");
+  writeFileSync(file, "");
+  const { home } = installHome("home-notdir-target", pluginTree);
+  for (const [h, cwd, what] of [[home, SCRATCH, "with a package entry, outside any repository"], [NO_INSTALL, ROOT, "with no package entry, inside the main checkout"]]) {
+    await underHome(h, async () => {
+      const r = await refused(IMPL, "write", { path: join(file, "child.txt") }, cwd, what);
+      assert.match(r, /could not resolve it \(ENOTDIR\)/, `${what}: the refusal does not name the error: ${r}`);
+    });
+  }
+  // No package entry and no repository: nothing to compare the target against, so nothing canonicalises it.
+  await allowed(IMPL, "write", { path: join(file, "child.txt") }, SCRATCH, "with no package entry, outside any repository");
+});
+
+test("unchanged: bash with a cwd in the Install root, and every unguarded session's write into it", async () => {
+  const { home, entry } = installHome("home-unchanged", pluginTree);
+  const root = realpathSync(entry);
+  await underHome(home, async () => {
+    await allowed(IMPL, "bash", { command: "cat commands/x.md", cwd: root }, ROOT, "an implementer's bash with cwd in the Install root");
+    await allowed(FIX_APPLIER, "bash", { command: "cat commands/review-and-fix.md", cwd: entry }, ROOT, "a fix-applier's bash with cwd at the entry");
+    await allowed(MAIN, "write", { path: join(root, "scripts", "x.mjs") }, ROOT, "the top-level session's write into the Install root");
+    await allowed(UNRELATED, "write", { path: join(root, "scripts", "x.mjs") }, ROOT, "a non-fleet subagent's write into the Install root");
+    await allowed(IMPL, "read", { path: join(root, "scripts", "fleet-tick.mjs") }, ROOT, "a read from the Install root");
+  });
+});
+
+test("decide() takes the Install root as a path, null or an Error, and reads it for path writers only", async () => {
+  const base = { cwd: "/tmp", agent: IMPL, mainRoot: null };
+  const inside = await decide({ ...base, toolName: "write", input: { path: "/opt/fleet/scripts/x.mjs" }, installRoot: "/opt/fleet" });
+  assert.equal(inside?.block, true, "a write inside a string Install root went through");
+  assert.equal(await decide({ ...base, toolName: "write", input: { path: "/opt/fleetx/a" }, installRoot: "/opt/fleet" }), undefined, "a path sharing the root as a prefix was refused");
+  assert.equal(await decide({ ...base, toolName: "write", input: { path: "/opt/fleet/a" }, installRoot: null }), undefined, "a null Install root refused a write");
+  const err = await decide({ ...base, toolName: "write", input: { path: "/elsewhere" }, installRoot: new Error("the omp plugin link /h/e is dangling: ENOENT") });
+  assert.equal(err?.block, true, "an unresolvable Install root let a write through");
+  assert.match(err.reason, /\/h\/e is dangling: ENOENT/, "the refusal does not carry the resolution error");
+  const empty = await decide({ ...base, toolName: "write", input: { path: "/elsewhere" }, installRoot: "" });
+  assert.equal(empty?.block, true, "an empty-string Install root let a write through");
+  assert.match(empty.reason, /unusable value/, "an empty-string Install root was refused by something other than the unusable-root check");
+  assert.equal(await decide({ ...base, toolName: "bash", input: { command: "true", cwd: "/opt/fleet" }, installRoot: new Error("x") }), undefined, "bash read the Install root");
 });

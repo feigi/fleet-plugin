@@ -39,7 +39,7 @@
 // cause instead (see `headMove`).
 //
 // THE PROTECTED SET is the non-ignored paths of the main checkout — what the
-// member-write-guard protects — and its HEAD. `.fleet/`, `.worktrees/` and
+// member-write-guard protects there — and its HEAD. `.fleet/`, `.worktrees/` and
 // `.agent-brain/` are gitignored in a fleet repo, so run state, members'
 // worktrees and agent-brain's cache never appear in porcelain and never trip
 // this.

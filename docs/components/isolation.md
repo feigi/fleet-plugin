@@ -52,6 +52,12 @@ store.
    (tier-outcomes, member-outcomes and ticket-features) are left out of the
    comparison.
    Ignoring is a third remedy for `MAIN-CHECKOUT-DIRTY`, next to re-baselining and removing: the maintainer may add a stray path that is untracked and new since the baseline to `.git/info/exclude` or the global excludes file, and the hold clears on the next check with no re-baseline. Ignoring never clears a tracked or staged file's change, which `git status` reports whatever the excludes say, nor a pattern that also matches a path the baseline holds, which then reads as changed. The controller never writes an exclude or a `.gitignore` entry, and the pattern is kept narrow, because an ignored path is invisible to this check.
+   The same extension also refuses a member's `write`/`edit`/`ast_edit` whose
+   target lies inside the live Install root, with no gitignore exemption and
+   whichever repository the member's session runs in (#3853); it resolves
+   that root on every such call, the way `fleet-run` does. A `bash` or `eval`
+   write into the Install root is not refused, by design: the
+   [instrument re-check](instruments.md) is what detects one.
 
 ## Opinionated choices
 
