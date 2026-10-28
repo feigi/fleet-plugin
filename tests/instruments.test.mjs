@@ -412,9 +412,10 @@ test("--repo with an empty path or a non-repo directory refuses, and writes noth
 // foreground, so the signal lands mid-hash. sh defers a trap until its
 // foreground child returns, so the signal goes to the script's whole process
 // group — spawned `detached`, the group is its own — and the sleep dies with
-// it. A run with no marker 10 s after it started, or still going 10 s after
-// the signal, has its group SIGKILLed and fails here rather than hanging or
-// leaving the sleep behind.
+// it. A run with no marker 10 s after it started, or not finished 10 s after
+// the signal — the script still running, or anything holding its output open —
+// has its group SIGKILLed and fails here rather than hanging or leaving the
+// sleep behind.
 test("INT, HUP and TERM mid-check exit 2, never 1 — a signalled check could not answer", async (t) => {
   const pause = (ms) => new Promise((r) => setTimeout(r, ms));
   for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) {
@@ -424,6 +425,10 @@ test("INT, HUP and TERM mid-check exit 2, never 1 — a signalled check could no
       const scratch = realpathSync(mkdtempSync(join(tmpdir(), "instruments-signal-")));
       st.after(() => rmSync(scratch, { recursive: true, force: true }));
       const bin = join(scratch, "bin");
+      // TMPDIR keeps the script's temp file inside this scratch dir wherever
+      // mktemp honours it. macOS mktemp with no template ignores TMPDIR, so
+      // the file's removal is not asserted here: on macOS the check would pass
+      // whether or not anything removed it.
       const tmp = join(scratch, "tmp");
       const marker = join(scratch, "hashing");
       mkdirSync(bin);
@@ -457,17 +462,20 @@ test("INT, HUP and TERM mid-check exit 2, never 1 — a signalled check could no
         }
       };
       let guard;
+      let guardFired = false;
       try {
         const deadline = Date.now() + 10_000;
         while (!existsSync(marker) && !done && Date.now() < deadline) await pause(20);
         assert.ok(existsSync(marker), `the stub shasum never started\n${output}`);
-        guard = setTimeout(killGroup, 10_000);
+        guard = setTimeout(() => {
+          guardFired = true;
+          killGroup();
+        }, 10_000);
         process.kill(-child.pid, signal);
         const r = await exited;
-        assert.notEqual(r.sig, "SIGKILL", `instruments.sh was still running 10 s after ${signal}\n${output}`);
+        assert.ok(!guardFired, `instruments.sh, or something holding its output open, was still running 10 s after ${signal}\n${output}`);
         assert.equal(r.sig, null, `${signal} killed instruments.sh instead of its trap exiting\n${output}`);
         assert.equal(r.status, 2, `${signal}: ${output}`);
-        assert.deepEqual(readdirSync(tmp), [], "the trap removed its temp file");
       } finally {
         clearTimeout(guard);
         if (!done) {
