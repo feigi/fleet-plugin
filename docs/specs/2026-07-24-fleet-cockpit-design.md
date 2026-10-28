@@ -258,6 +258,31 @@ them update the shape below.)
   "filed": [{ "issue": 351, "subject": "…" }],
   "attention": [ /* the subset of tickets with a flag other than an excluded: badge, most-severe first (amended by #1820) */ ],
 
+  // The Cell evidence tab's model, built by the pure computeCellEvidence()
+  // (compute-cell-evidence.mjs) from `.fleet/cost-guard.json` as the tick's
+  // reader accepts it, the `metrics` step of `.fleet/phase0.json` and
+  // `.fleet/closeout.json`, the installed `../agents/*.agent.md` and `modelRoles`
+  // below. Every word the tab shows is a string in it; the page only lays it out.
+  //   guard:    { state: "no-guard" | "holds-nothing-back" | "trips-nothing" | "trips",
+  //               heading, source (null with no guard), notes: [string],
+  //               cells: [{ cell, anchor, baseline, judged, route: { model, text, label, flag },
+  //                         figures: null | { generation, anchor, merged, failRate, usd },
+  //                         none: null | { text, generation, anchor, marks },
+  //                         older: [{ generation, anchor, mark, merged, failRate, usd }] }],
+  //               footnotes: [{ mark, text }] }
+  //   declared: { heading, members: [{ name, declared, route }] }
+  // All five implementer Cells are always in `guard.cells`, in a fixed order.
+  "cellEvidence": { "guard": { /* … */ }, "declared": { /* … */ } },
+
+  // `omp config get modelRoles --json` as the cockpit's own environment answers it,
+  // carried tick to tick like `ci` and `repo` and read again at most once a
+  // minute: `value` the record (null before a first good read), `readAt` the epoch
+  // ms of the read that gave it, `error` `{ at, message }` of the latest read when
+  // it failed, else null. A failed read keeps `value` and `readAt`.
+  // Null until a first read has been attempted: a caller that named no state
+  // directory reads none, and the tab says "not checked: modelRoles not read yet".
+  "modelRoles": { "value": { "slow": "anthropic/claude-opus-5:high" }, "readAt": 1690000000000, "error": null },
+
   // Side-car telemetry, read from ~/.claude/projects, never from ledger or gh.
   // Tri-state, discriminated by the explicit `ok` TAG and by nothing else:
   //   null                            — no agents spawned yet (panel hidden)

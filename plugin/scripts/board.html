@@ -10,7 +10,7 @@
   * { box-sizing: border-box; }
   /* The page is the window's height: header, banner, attention strip, the tab
      strip and footer keep their natural height and never shrink; the open
-     tab's pane (#board or #spend, the other is hidden) takes the rest, and
+     tab's pane (#board, #cells or #spend, the others are hidden) takes the rest, and
      each board column scrolls on its own past that. The panes' min-height is
      the floor for a window too short for the fixed parts — they then overflow
      body and the PAGE scrolls, rather than squeezing the columns to nothing or
@@ -74,6 +74,28 @@
   @keyframes flash { from { box-shadow:0 0 0 2px var(--blue); background:#12233a; } to { box-shadow:0 0 0 2px transparent; } }
   footer .filed { margin-top:4px; }
   #spend { padding:14px; flex:1 1 0; min-height:200px; overflow-y:auto; }
+  #cells { padding:14px; flex:1 1 0; min-height:200px; overflow-y:auto; }
+  .ce-links { color:var(--dim); margin-bottom:10px; font-size:12px; }
+  .ce-links a { color:var(--blue); text-decoration:none; }
+  .ce-sec { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-bottom:12px; }
+  .ce-sec h2 { font-size:11px; letter-spacing:.06em; color:var(--dim); margin:0 0 6px; text-transform:uppercase; }
+  .ce-verdict { font-weight:600; }
+  .ce-verdict.trips { color:var(--amber); }
+  .ce-source, .ce-note, .ce-foot, .ce-dim { color:var(--dim); font-size:12px; }
+  .ce-note { margin-top:2px; }
+  .ce-entry { border-top:1px solid var(--line); margin-top:10px; padding-top:8px; }
+  .ce-hd { display:flex; gap:10px; flex-wrap:wrap; align-items:baseline; }
+  .ce-cell { font-weight:600; }
+  .ce-amber { color:var(--amber); }
+  .ce-gen { margin:4px 0 0 0; padding:2px 0; }
+  .ce-older { margin:2px 0 0 18px; color:var(--dim); }
+  .ce-fig { display:flex; gap:8px; flex-wrap:wrap; font-size:12px; }
+  .ce-lbl { color:var(--dim); min-width:9em; }
+  .ce-beside { color:var(--dim); }
+  .ce-foot { margin-top:8px; }
+  #cells-declared summary { cursor:pointer; color:var(--dim); }
+  .ce-member { display:flex; gap:10px; flex-wrap:wrap; font-size:12px; margin:2px 0 0 18px; }
+  .ce.flash { animation:flash 1.2s ease-out 1; }
   .spend-wrap { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
   .spend-hd { display:flex; align-items:baseline; gap:10px; margin-bottom:8px; }
   .spend-hd h2 { font-size:11px; letter-spacing:.06em; color:var(--dim); margin:0; text-transform:uppercase; }
@@ -95,8 +117,9 @@
 <header><h1 id="heading">🛰 fleet cockpit</h1><span id="age"></span></header>
 <div id="stale-banner"></div>
 <div id="attention"></div>
-<nav id="tabs"><a id="tab-board" class="on" href="#board" aria-current="page">Board</a><a id="tab-tokens" href="#tokens">Tokens</a></nav>
+<nav id="tabs"><a id="tab-board" class="on" href="#board" aria-current="page">Board</a><a id="tab-cells" href="#cells">Cell evidence</a><a id="tab-tokens" href="#tokens">Tokens</a></nav>
 <div id="board"></div>
+<div id="cells" hidden></div>
 <div id="spend" hidden></div>
 <footer id="footer"></footer>
 <script>
@@ -123,36 +146,55 @@ let repoUrl = null; // full repo URL from the model (carries the host) — PR li
 const TITLE = "fleet cockpit";
 function boardTitle(repo) { return repo ? `${TITLE} — ${repo}` : TITLE; }
 
-// Where a URL hash lands: which tab is open, and which card (an issue number,
-// as a string) to bring into view on it. The router's whole decision, as a
-// value with no DOM or location touched, so it is liftable out of the source
-// the way spendView is. It closes over nothing, for the same reason.
+// Where a URL hash lands: which tab is open, and what to bring into view on it.
+// The router's whole decision, as a value with no DOM or location touched, so
+// it is liftable out of the source the way spendView is. It closes over
+// nothing, for the same reason.
 //
-// Every hash the page draws is a tab (`#board`, `#tokens`) or a card on the
-// Board (`#board/<issue>`). Anything else — no hash, a tab the page does not
-// have, a target the tab does not have — lands on Board's top, or the named
-// tab's top, never on a blank page and never on an error.
+// Every hash the page draws is a tab (`#board`, `#cells`, `#tokens`), a card on
+// the Board (`#board/<issue>`, the issue number as a string) or a place on Cell
+// evidence: a section (`#cells/guard`, `#cells/declared`), a Cell
+// (`#cells/<cell>`) or one of its generations (`#cells/<cell>@<generation>`).
+// Anything else — no hash, a tab the page does not have, a target the tab does
+// not have — lands on Board's top, or the named tab's top, never on a blank
+// page and never on an error.
 function routeHash(hash) {
   const [tab, target, ...more] = String(hash).replace(/^#/, "").split("/");
   if (tab === "board") return { tab, target: more.length === 0 && /^[1-9]\d*$/.test(target) ? target : null };
+  if (tab === "cells") {
+    const place = /^(guard|declared|(slow|task|smol)-(minimal|low|medium|high|xhigh|max)(@[^\s/@]+)?)$/;
+    return { tab, target: more.length === 0 && place.test(target ?? "") ? target : null };
+  }
   if (tab === "tokens") return { tab, target: null };
   return { tab: "board", target: null };
 }
 
-// Each tab, and the pane it opens.
-const PANES = { board: "board", tokens: "spend" };
+// The element a route's target names: a card on Board, a section, a Cell or a
+// generation on Cell evidence.
+function anchorId(tab, target) {
+  if (tab === "board") return "card-" + target;
+  return target === "guard" || target === "declared" ? "cells-" + target : "cell-" + target;
+}
 
-// Which card is still owed a scroll. The cards are rebuilt every tick, so a
+// Each tab, and the pane it opens.
+const PANES = { board: "board", cells: "cells", tokens: "spend" };
+
+// Which target is still owed a scroll. The cards are rebuilt every tick, so a
 // hash that arrives before the first render (a reload, a pasted link) cannot
 // scroll yet: it waits here for the render.
 let rendered = false;
 let pending = null;
 
-// The card flashing now, and when it started. A tick rebuilds every card, so
-// the flash lives here rather than on a node the next tick throws away.
-// FLASH_MS is `.card.flash`'s animation duration.
+// The element flashing now (by id), and when it started. A tick rebuilds every
+// card and every entry, so the flash lives here rather than on a node the next
+// tick throws away. FLASH_MS is `.card.flash`'s animation duration, and
+// `.ce.flash`'s.
 const FLASH_MS = 1200;
 let flashing = null;
+
+// Whether "Declared, not measured" is open. A tick rebuilds it, and an open
+// section that closed itself every 15 seconds would not stay open to be read.
+let declaredOpen = false;
 
 const el = (t, cls, txt) => { const e = document.createElement(t); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
 const mins = (ms) => Math.floor((Date.now() - ms) / 60000);
@@ -306,6 +348,107 @@ function renderSpend(sp) {
   host.append(wrap);
 }
 
+// A rebuilt element picks a flash up where it was, not from the start.
+function resumeFlash(node) {
+  const age = flashing && flashing.id === node.id ? Date.now() - flashing.at : Infinity;
+  if (age < FLASH_MS) flash(node, age);
+}
+
+// An anchored element on the tab: the target of a hash link, flashing if it is
+// the one that was just arrived at.
+function ceBox(tag, cls, id) {
+  const box = el(tag, "ce " + cls);
+  if (id) { box.id = id; resumeFlash(box); }
+  return box;
+}
+
+// One figure of a Cell's generation: its label, its words, what sits beside it
+// and the footnote marks on it. Every word is the model's (compute-cell-evidence.mjs).
+function ceFigure(label, text, beside = [], marks = []) {
+  const row = el("div", "ce-fig");
+  row.append(el("span", "ce-lbl", label), el("span", null, text));
+  for (const b of beside) row.append(el("span", "ce-beside", "· " + b));
+  if (marks.length) row.append(el("span", "ce-beside", marks.join(", ")));
+  return row;
+}
+
+// A generation with figures: the three, under its own anchor.
+function ceGeneration(f) {
+  const box = ceBox("div", "ce-gen", f.anchor);
+  box.append(
+    ceFigure("merged PRs", f.merged.text, f.merged.beside, f.merged.marks),
+    ceFigure("fail rate", f.failRate.text, f.failRate.beside),
+    ceFigure("$ per merged PR", f.usd.text),
+  );
+  return box;
+}
+
+// An older generation, nested under its Cell and marked not judged.
+function ceOlder(o) {
+  const box = ceBox("div", "ce-older", o.anchor);
+  box.append(el("div", null, `${o.generation} · ${o.mark}`),
+    ceFigure("merged PRs", o.merged), ceFigure("fail rate", o.failRate), ceFigure("$ per merged PR", o.usd));
+  return box;
+}
+
+// One Cell's entry: its header line, then its figures or "no figures yet".
+function ceEntry(e) {
+  const box = ceBox("div", "ce-entry", e.anchor);
+  const hd = el("div", "ce-hd");
+  hd.append(el("span", "ce-cell", e.cell));
+  if (e.baseline) hd.append(el("span", "badge", "baseline"));
+  if (e.judged) hd.append(el("span", "ce-dim", e.judged));
+  hd.append(el("span", "ce-dim", e.route.text));
+  if (e.route.flag) hd.append(el("span", "ce-amber", e.route.flag));
+  if (e.route.label) hd.append(el("span", "ce-amber", e.route.label));
+  box.append(hd);
+  if (e.figures) box.append(ceGeneration(e.figures));
+  else {
+    const none = ceBox("div", "ce-gen", e.none.anchor);
+    none.append(el("span", "ce-dim", e.none.text));
+    if (e.none.marks.length) none.append(el("span", "ce-beside", " " + e.none.marks.join(", ")));
+    box.append(none);
+  }
+  for (const o of e.older) box.append(ceOlder(o));
+  return box;
+}
+
+// The Cell evidence tab. The model is `m.cellEvidence`; this only lays it out.
+// Every Cell and every generation the model names is drawn, so each hash link
+// the page draws has its target.
+function renderCells(ce) {
+  const host = document.getElementById("cells");
+  if (!ce) { host.replaceChildren(el("div", "spend-wrap", "no Cell evidence in this board yet")); return; }
+  const g = ce.guard;
+
+  const links = el("div", "ce-links");
+  for (const [href, text] of [["#cells/guard", "the guard"], ["#cells/declared", "declared, not measured"]]) {
+    if (links.children.length) links.append(document.createTextNode(" · "));
+    const a = el("a", null, text);
+    a.href = href;
+    links.append(a);
+  }
+
+  const sec = ceBox("section", "ce-sec", "cells-guard");
+  sec.append(el("h2", null, "The guard: what it holds each Cell to"), el("div", "ce-verdict " + g.state, g.heading));
+  if (g.source) sec.append(el("div", "ce-source", g.source));
+  for (const n of g.notes) sec.append(el("div", "ce-note", n));
+  for (const e of g.cells) sec.append(ceEntry(e));
+  for (const f of g.footnotes) sec.append(el("div", "ce-foot", `${f.mark} ${f.text}`));
+
+  const dec = ceBox("details", "ce-sec", "cells-declared");
+  dec.open = declaredOpen;
+  dec.addEventListener("toggle", () => { declaredOpen = dec.open; });
+  dec.append(el("summary", null, ce.declared.heading));
+  for (const m of ce.declared.members) {
+    const row = el("div", "ce-member");
+    row.append(el("span", null, m.name), el("span", "ce-dim", m.declared ?? "no Declared tier"), el("span", null, m.route));
+    dec.append(row);
+  }
+
+  host.replaceChildren(links, sec, dec);
+}
+
 function render(m) {
   // A ticket whose column is none of COLUMNS matches no column's filter below
   // and would vanish from the board with nothing said. Throwing before any
@@ -368,6 +511,7 @@ function render(m) {
     col.replaceChildren(...next[i]);
   });
   renderSpend(m.spend);
+  renderCells(m.cellEvidence);
   // Computed here, ahead of the footer, not only inside the banner
   // arm below. The banner is a single slot behind a stale/stall/ledger
   // priority chain (next section): whenever any of those also fires on the
@@ -491,9 +635,7 @@ function card(t) {
   for (const f of t.flags || []) meta.append(el("span", "badge flag", f));
   if (t.ruling) meta.append(el("span", "badge", "ruled:" + t.ruling));
   c.append(meta);
-  // A card rebuilt mid-flash picks the flash up where it was, not from the start.
-  const age = flashing && flashing.issue === String(t.issue) ? Date.now() - flashing.at : Infinity;
-  if (age < FLASH_MS) flash(c, age);
+  resumeFlash(c);
   return c;
 }
 
@@ -510,8 +652,8 @@ function warn(msg) {
   showBanner(msg);
 }
 
-// Opens the tab the hash names and settles the card it targets. The two
-// panes stay in the page either way, so a tick keeps filling both.
+// Opens the tab the hash names and settles the target it names. Every pane
+// stays in the page either way, so a tick keeps filling all of them.
 function applyHash() {
   const r = routeHash(location.hash);
   for (const [t, pane] of Object.entries(PANES)) {
@@ -525,22 +667,24 @@ function applyHash() {
   settle();
 }
 
-// The arrival: the target card scrolls into view and flashes once; no target,
-// or a target no card on the board carries, lands on the tab's top. Taken
-// off `pending` first, so a later tick never scrolls the page again; nothing
+// The arrival: the target scrolls into view and flashes once; no target, or a
+// target nothing on the page carries, lands on the tab's top. Taken off
+// `pending` first, so a later tick never scrolls the page again; nothing
 // settles before the first render.
 function settle() {
   if (!pending || !rendered) return;
-  const { target } = pending;
+  const { tab, target } = pending;
   pending = null;
-  const hit = target && document.getElementById("card-" + target);
+  const hit = target && document.getElementById(anchorId(tab, target));
   if (!hit) {
     window.scrollTo(0, 0);
-    document.getElementById("spend").scrollTop = 0;
+    document.getElementById(PANES[tab]).scrollTop = 0;
     return;
   }
+  // "Declared, not measured" opens on click and on a link to it.
+  if (hit.id === "cells-declared") { hit.open = true; declaredOpen = true; }
   hit.scrollIntoView({ block: "center" });
-  flashing = { issue: target, at: Date.now() };
+  flashing = { id: hit.id, at: Date.now() };
   flash(hit, 0);
 }
 

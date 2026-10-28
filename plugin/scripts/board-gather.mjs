@@ -28,15 +28,17 @@
 // running server; either way it has to follow the next run's receipt.
 // `--spend-dir <path>` overrides the receipt outright.
 
-import { readFileSync, existsSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { computeSpend, attributeTools, mergeTools } from "./compute-spend.mjs";
 import {
   isOmpSessionDirName, ompSessionTranscripts, foldOmpTranscript, ompMemberRecord,
 } from "./member-record.mjs";
 import { readReceipt } from "./phase0-receipt.mjs";
-import { RECEIPT } from "./ledger-grammar.mjs";
+import { RECEIPT, CLOSEOUT_RECEIPT } from "./ledger-grammar.mjs";
 import { NAME, warnOnce, execRead } from "./board-common.mjs";
 import { mergedReadPrs, issuesOfPrs } from "./compute-board.mjs";
+import { readCostGuard } from "./fleet-tick.mjs";
+import { parseFrontmatter } from "./tier-roles.mjs";
 // The heartbeat's liveness mark and the controller record beside it, read here
 // and never written: the heartbeat is the mark's only writer and
 // `ledger.mjs rotate` the record's. stallOwner() reads the process table to
@@ -659,6 +661,96 @@ function readOmpSpend(dir, sinceMs) {
   return { agents, toolTables, skipped, damaged };
 }
 
+// The Cell evidence tab's reads. Each is the whole of one input, kept apart from
+// gather() so a test drives it alone; none of them throws, and a failure is
+// reported in the value, which the tab words.
+
+// The guard in the cockpit's own state directory, through the reader the tick
+// judges the file by: only a guard it accepts shows figures.
+export function readGuardFile(stateDir) {
+  return readCostGuard(join(stateDir, "cost-guard.json"));
+}
+
+// A receipt's `metrics` step, `{ status, at, output }`, or null: no receipt, one
+// that will not read, or one with no such step. Both receipts, `phase0.json` and
+// `closeout.json`, carry `steps: { <name>: { status, at, output } }` and nothing
+// else in common (phase0-receipt.mjs's readReceipt requires a `run` and a
+// `session` that close-out's does not have), so only that is read.
+export function readMetricsStep(path) {
+  let receipt;
+  try { receipt = JSON.parse(readFileSync(path, "utf8")); } catch { return null; }
+  const step = isJsonObject(receipt) && isJsonObject(receipt.steps) ? receipt.steps.metrics : null;
+  if (!isJsonObject(step) || typeof step.status !== "string") return null;
+  return { status: step.status, at: step.at, output: typeof step.output === "string" ? step.output : "" };
+}
+
+// The installed definitions, `../agents/*.agent.md` from the script's directory:
+// `{ list: [{ file, model }], error }`. `model` is the file's own `model:` value,
+// null where it has none. A directory that cannot be listed is `error`, not an
+// empty list: no definitions read is not no definitions.
+export function readAgents(scriptDir) {
+  const dir = join(scriptDir, "..", "agents");
+  let files;
+  try {
+    files = readdirSync(dir).filter((f) => f.endsWith(".agent.md"));
+  } catch (e) {
+    return { list: [], error: `${dir}: ${e.code ?? e.message}` };
+  }
+  const list = [];
+  for (const file of files) {
+    try {
+      list.push({ file, model: parseFrontmatter(readFileSync(join(dir, file), "utf8")).model });
+    } catch (e) {
+      return { list: [], error: `${join(dir, file)}: ${e.code ?? e.message}` };
+    }
+  }
+  return { list, error: null };
+}
+
+// `modelRoles` is read at most once in this many milliseconds: it is one more
+// child spawn per read, and a role changes rarely.
+export const MODEL_ROLES_EVERY_MS = 60_000;
+
+// `omp config get modelRoles --json`, in the cockpit's own environment, which can
+// differ from the controller's. `{ ok: true, value }` with the record, or
+// `{ ok: false, why }`.
+export async function readModelRoles() {
+  const argv = ["config", "get", "modelRoles", "--json"];
+  const r = await execRead("omp", argv);
+  if (r.error) {
+    const how = r.code ?? (r.signal ? `killed by ${r.signal}` : `exit ${r.status}`);
+    return { ok: false, why: `omp ${argv.join(" ")} failed (${how})` };
+  }
+  let value;
+  try { value = JSON.parse(r.stdout)?.value; } catch { return { ok: false, why: `omp ${argv.join(" ")} printed non-JSON` }; }
+  if (!isJsonObject(value)) return { ok: false, why: `omp ${argv.join(" ")} printed no modelRoles record` };
+  return { ok: true, value };
+}
+
+// A carried `{ value, readAt, error }` read, as a previous board.json holds it, or
+// null when it is anything else: the file can be hand-edited or older than this
+// shape, and a carried value nobody validated is a value the page would trust.
+// `error` is `{ at, message }` or null.
+function heldRead(c) {
+  if (!isJsonObject(c)) return null;
+  const okValue = c.value === null || isJsonObject(c.value);
+  const okAt = c.readAt === null || Number.isFinite(c.readAt);
+  const okError = c.error === null || (isJsonObject(c.error) && Number.isFinite(c.error.at) && typeof c.error.message === "string");
+  return okValue && okAt && okError ? { value: c.value, readAt: c.readAt, error: c.error } : null;
+}
+
+// The carried `modelRoles` read, read again only when its last attempt, a
+// success or a failure, is a minute old or more. A failed read keeps the value
+// carried, with the failure beside it: `readAt` stays the time the value was read.
+export async function carryModelRoles(carried, now, read = readModelRoles) {
+  const held = heldRead(carried) ?? { value: null, readAt: null, error: null };
+  const lastTried = Math.max(held.readAt ?? -Infinity, held.error?.at ?? -Infinity);
+  const age = now - lastTried;
+  if (age >= 0 && age < MODEL_ROLES_EVERY_MS) return held;
+  const r = await read();
+  return r.ok ? { value: r.value, readAt: now, error: null } : { ...held, error: { at: now, message: r.why } };
+}
+
 // `workspace`/`port` are the caller's answers, never read in here:
 // resolveCockpitInstance() already decided both, and a second derivation in
 // this function could disagree with the one the server actually bound. They
@@ -684,7 +776,12 @@ function readOmpSpend(dir, sinceMs) {
 // belongs to serve()'s HTTP server, which shares this process — see execRead's
 // note in board-common.mjs for what the synchronous version cost. `build` awaits it and is
 // otherwise unchanged: one gather per process, nothing else waiting on it.
-export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir = SCRIPT_DIR, interval, workspace = null, port = null, spendDir, spendDirExplicit = false, spendSince = null }) {
+//
+// `stateDir` is the workspace's `.fleet` directory, where the cost guard and the
+// receipts the Cell evidence tab reads live. Null, as with `stateFile`, says no
+// caller named one: that tab is then built from no guard and no receipt, and the
+// cockpit's `omp` is not asked for `modelRoles`.
+export async function gather({ ledgerFile, prevFile, stateFile = null, stateDir = null, scriptDir = SCRIPT_DIR, interval, workspace = null, port = null, spendDir, spendDirExplicit = false, spendSince = null }) {
   // The one read that must not crash the gather: a corrupt/partial board.json
   // (the fallback safety net itself) is ignored, not fatal. That holds for a
   // SHAPE fault as much as a parse fault — the guard below rejects the
@@ -887,7 +984,20 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
   // stalled, so a healthy board reads none. computeBoard() words it.
   const now = Date.now();
   const stallOwnerOf = isStalled(assessBeat({ beat, ticked, acted, controller, now })) ? stallOwner(controller, NAME) : null;
+  // The Cell evidence tab's inputs. Every file again on every tick, nothing
+  // cached, the rule of every read here; the one exception is `modelRoles`, one
+  // child spawn, carried from the previous board and read again at most once a
+  // minute. `stateDir` is the workspace's `.fleet`: a caller that names none names
+  // no workspace, so it reads none of the workspace's records and spawns no `omp`
+  // either (a guard that reads as missing, no receipts, the read carried as it was).
+  const heldModelRoles = heldRead(prev?.modelRoles);
+  const guard = stateDir === null ? { status: "missing" } : readGuardFile(stateDir);
+  const receipts = stateDir === null
+    ? { phase0: null, closeout: null }
+    : { phase0: readMetricsStep(join(stateDir, RECEIPT)), closeout: readMetricsStep(join(stateDir, CLOSEOUT_RECEIPT)) };
+  const agents = readAgents(scriptDir);
+  const modelRoles = stateDir === null ? heldModelRoles : await carryModelRoles(heldModelRoles, now);
   return { ledger, issues, prs, merged, closed, closedIssues, ci, prev, repo, repoUrl, workspace, port, spend, beat, ticked, acted, controller, stallOwner: stallOwnerOf, poolOk,
-    poolCapped, prsCapped,
+    poolCapped, prsCapped, guard, receipts, agents, modelRoles,
     now, interval };
 }
