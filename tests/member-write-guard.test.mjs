@@ -1,17 +1,19 @@
 // member-write-guard.mjs, exercised the way omp runs it: the factory is handed
 // a stand-in `pi`, and every call goes through the `tool_call` handler it
-// registers — which resolves the main checkout with real git and hands it to
-// `decide()`. The fixture is a real repository with a claimed-style worktree
-// under `.worktrees/`, a `.gitignore` carrying the fleet's ignored
+// registers — which resolves the main checkout with real git, and for a path
+// writer the Install root from the fixture HOME's package entry, and hands
+// both to `decide()`. The fixture is a real repository with a claimed-style
+// worktree under `.worktrees/`, a `.gitignore` carrying the fleet's ignored
 // directories, and a scratch directory outside it. On macOS `tmpdir()` lives
 // behind the `/var` → `/private/var` symlink, so every row below also crosses
 // the symlink the handler canonicalises away.
 //
 // Both halves are pinned: what the guard must refuse (a main-checkout write,
-// relative or absolute, from a member or a member's child; an implementer's
-// bash from the inherited cwd; a git that cannot answer) and what it must let
-// through (the member's worktree, gitignored run state, scratch, internal
-// URLs, every session that is not a fleet member's).
+// relative or absolute, from a member or a member's child; a write into the
+// Install root however it is spelled or linked; an implementer's bash from
+// the inherited cwd; a git or a package entry that cannot answer) and what it
+// must let through (the member's worktree, gitignored run state, scratch,
+// internal URLs, every session that is not a fleet member's).
 //
 // Zero deps: `node --test tests/member-write-guard.test.mjs`.
 
@@ -274,7 +276,7 @@ test("a checkout whose .git is a symlink to a git dir elsewhere is still the mai
 });
 
 test("a package install: a guarded write into the Install root is refused however the path is spelled", async () => {
-  const { home, entry } = installHome("home-npm", (e) => pluginTree(e));
+  const { home, entry } = installHome("home-npm", pluginTree);
   const root = realpathSync(entry);
   await underHome(home, async () => {
     const r = await refusedInstall(IMPL, "write", { path: join(entry, "scripts", "fleet-tick.mjs") }, ROOT, root, "an absolute write into the Install root");
@@ -316,7 +318,7 @@ test("a linked entry: a write through the entry path or through its realpath is 
 });
 
 test("every edit shape that names the Install root is refused", async () => {
-  const { home, entry } = installHome("home-edit", (e) => pluginTree(e));
+  const { home, entry } = installHome("home-edit", pluginTree);
   const root = realpathSync(entry);
   await underHome(home, async () => {
     await refusedInstall(IMPL, "edit", { input: `[${join(entry, "scripts", "fleet-tick.mjs")}#ABCD]\nPUT 1.=1:\n+x\n` }, ROOT, root, "a hashline header");
@@ -344,7 +346,7 @@ test("an Install root linked into the session's own repository has no gitignore 
 });
 
 test("with the session cwd in no repository, a write into the Install root is still refused", async () => {
-  const { home, entry } = installHome("home-norepo", (e) => pluginTree(e));
+  const { home, entry } = installHome("home-norepo", pluginTree);
   const root = realpathSync(entry);
   await underHome(home, async () => {
     await refusedInstall(IMPL, "write", { path: join(entry, "commands", "x.md") }, SCRATCH, root, "an absolute write from outside any repository");
@@ -381,9 +383,13 @@ test("an entry that does not resolve refuses every guarded path writer, and no b
         ["edit", { input: `[${join(WT, "plugin", "tool.mjs")}#ABCD]\nPUT 1.=1:\n+x\n` }],
         ["ast_edit", { ops: [{ pat: "a", out: "b" }], paths: [join(WT, "plugin")] }],
       ]) {
-        const r = await refused(IMPL, toolName, input, SCRATCH, `${entry}: ${toolName}`);
+        const r = (await call(IMPL, toolName, input, SCRATCH))?.reason;
+        assert.match(r ?? "", /^member-write-guard: refused/, `${entry}: expected a ${toolName} refusal, got ${r}`);
         assert.ok(r.includes(entry), `${entry}: the ${toolName} refusal does not name the entry: ${r}`);
         assert.match(r, error, `${entry}: the ${toolName} refusal does not name the error: ${r}`);
+        // No path the member picks clears a broken entry, so the refusal must not send it to re-issue one.
+        assert.doesNotMatch(r, /\.worktrees\/<n>-<slug>\//, `${entry}: the ${toolName} refusal tells the member to re-issue it: ${r}`);
+        assert.match(r, /needs repair/, `${entry}: the ${toolName} refusal does not say the entry needs repair: ${r}`);
       }
       await allowed(IMPL, "bash", { command: "true", cwd: WT }, ROOT, `${entry}: implementer bash with an allowed cwd`);
       await allowed(FIX_APPLIER, "bash", { command: "true", cwd: SCRATCH }, ROOT, `${entry}: fix-applier bash with an allowed cwd`);
@@ -393,8 +399,57 @@ test("an entry that does not resolve refuses every guarded path writer, and no b
   }
 });
 
+// On a case-insensitive filesystem (macOS's default) one directory answers to
+// every letter case of its name; the probe below decides whether this one does.
+const CASE_INSENSITIVE = existsSync(join(BASE, "MAIN"));
+test("a letter-case variant of a protected path is refused on a case-insensitive filesystem", { skip: !CASE_INSENSITIVE && "this filesystem is case-sensitive" }, async () => {
+  const { home, entry } = installHome("home-case", pluginTree);
+  const root = realpathSync(entry);
+  await underHome(home, async () => {
+    const variant = join(home, ".OMP", "plugins", "node_modules", "@FEIGI", "FLEET-CTL", "scripts", "fleet-tick.mjs");
+    await refusedInstall(IMPL, "write", { path: variant }, SCRATCH, root, "a case-variant spelling of the Install root");
+    const r = await refused(IMPL, "write", { path: join(BASE, "MAIN", "plugin", "tool.mjs") }, ROOT, "a case-variant spelling of the main checkout");
+    assert.match(r, /inside the main checkout/, `the main-checkout rule did not answer: ${r}`);
+    await allowed(IMPL, "write", { path: join(BASE, "MAIN", ".worktrees", "42-slug", "plugin", "tool.mjs") }, ROOT, "a case-variant spelling of the worktree");
+  });
+});
+
+test("an ast_edit that scans from above the Install root is refused, and one scanning beside it is not", async () => {
+  const { home, entry } = installHome("home-scan", pluginTree);
+  const root = realpathSync(entry);
+  await underHome(home, async () => {
+    for (const [path, what] of [
+      [join(home, ".omp", "plugins"), "an ancestor directory"],
+      [join(home, ".omp", "**", "*.mjs"), "a recursive glob above the root"],
+      [join(home, ".omp", "plugins", "node_modules", "@feigi", "*", "scripts", "*.mjs"), "a wildcard segment standing for the root"],
+    ]) {
+      const r = await refused(IMPL, "ast_edit", { ops: [{ pat: "a", out: "b" }], paths: [path] }, SCRATCH, what);
+      assert.ok(r.includes(`holds the Install root ${root}`), `${what}: the refusal does not name the Install root: ${r}`);
+    }
+    await allowed(IMPL, "ast_edit", { ops: [{ pat: "a", out: "b" }], paths: [join(WT, "plugin", "**", "*.mjs")] }, ROOT, "a worktree glob");
+    await allowed(IMPL, "ast_edit", { ops: [{ pat: "a", out: "b" }], paths: [join(home, ".omp", "plugins", "cache", "*.mjs")] }, SCRATCH, "a glob beside the root");
+    // A write names one file: an ancestor of the root is no target of it.
+    await allowed(IMPL, "write", { path: join(home, ".omp", "plugins", "notes.md") }, SCRATCH, "a write beside the root");
+  });
+});
+
+test("a target the guard cannot canonicalise is refused, naming the error", async () => {
+  // A regular file where a directory of the target's path should be: realpath answers ENOTDIR.
+  const file = join(SCRATCH, "a-file");
+  writeFileSync(file, "");
+  const { home } = installHome("home-notdir-target", pluginTree);
+  for (const [h, cwd, what] of [[home, SCRATCH, "with a package entry, outside any repository"], [NO_INSTALL, ROOT, "with no package entry, inside the main checkout"]]) {
+    await underHome(h, async () => {
+      const r = await refused(IMPL, "write", { path: join(file, "child.txt") }, cwd, what);
+      assert.match(r, /could not resolve it \(ENOTDIR\)/, `${what}: the refusal does not name the error: ${r}`);
+    });
+  }
+  // No package entry and no repository: nothing to compare the target against, so nothing canonicalises it.
+  await allowed(IMPL, "write", { path: join(file, "child.txt") }, SCRATCH, "with no package entry, outside any repository");
+});
+
 test("unchanged: bash with a cwd in the Install root, and every unguarded session's write into it", async () => {
-  const { home, entry } = installHome("home-unchanged", (e) => pluginTree(e));
+  const { home, entry } = installHome("home-unchanged", pluginTree);
   const root = realpathSync(entry);
   await underHome(home, async () => {
     await allowed(IMPL, "bash", { command: "cat commands/x.md", cwd: root }, ROOT, "an implementer's bash with cwd in the Install root");
@@ -406,7 +461,7 @@ test("unchanged: bash with a cwd in the Install root, and every unguarded sessio
 });
 
 test("decide() takes the Install root as a path, null or an Error, and reads it for path writers only", async () => {
-  const base = { cwd: "/tmp", agent: IMPL, mainRoot: null, isIgnored: async () => false };
+  const base = { cwd: "/tmp", agent: IMPL, mainRoot: null };
   const inside = await decide({ ...base, toolName: "write", input: { path: "/opt/fleet/scripts/x.mjs" }, installRoot: "/opt/fleet" });
   assert.equal(inside?.block, true, "a write inside a string Install root went through");
   assert.equal(await decide({ ...base, toolName: "write", input: { path: "/opt/fleetx/a" }, installRoot: "/opt/fleet" }), undefined, "a path sharing the root as a prefix was refused");
@@ -416,5 +471,6 @@ test("decide() takes the Install root as a path, null or an Error, and reads it 
   assert.match(err.reason, /\/h\/e is dangling: ENOENT/, "the refusal does not carry the resolution error");
   const empty = await decide({ ...base, toolName: "write", input: { path: "/elsewhere" }, installRoot: "" });
   assert.equal(empty?.block, true, "an empty-string Install root let a write through");
+  assert.match(empty.reason, /unusable value/, "an empty-string Install root was refused by something other than the unusable-root check");
   assert.equal(await decide({ ...base, toolName: "bash", input: { command: "true", cwd: "/opt/fleet" }, installRoot: new Error("x") }), undefined, "bash read the Install root");
 });
