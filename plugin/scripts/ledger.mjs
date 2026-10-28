@@ -752,9 +752,9 @@ if (cmd === "read") {
   // `cell=` the cell a Pull the router routed without a draw did, so each value
   // must be a cell token: a retired or misspelt one written here would only be
   // refused later, by `dispatch`, after the claim.
-  for (const name of ["tier", "cell"]) {
-    const bad = (name === "tier" ? tierValues(line) : cellValues(line)).find((v) => !CELL.test(v));
-    if (bad !== undefined) die(`row ${key}: '${name}=${bad}' is not ${name}=<cell> - a cell is <slow|task|smol>-<level>`);
+  for (const [name, values] of [["tier", tierValues(line)], ["cell", cellValues(line)]]) {
+    const bad = values.find((v) => !CELL.test(v));
+    if (bad !== undefined) die(`row ${key}: '${name}=${bad}' is not ${name}=<cell> — a cell is <slow|task|smol>-<level>`);
   }
   // A Pull's cell binds its implementer until that member settles; see
   // cellChangeRefusal(). A new row binds nothing yet.
@@ -2229,14 +2229,14 @@ async function runDispatch() {
 
   // The definition the `task` call names, printed so the controller reads it
   // off this output rather than recalling it from prose a compaction drops.
-  // An implementer's comes off its row's `tier=`, the same function
-  // tier-check.mjs falls back to for an entry with no record, and `dispatch`
-  // records what it prints on the member's `## Dispatched` entry, which
-  // tier-check judges the member against — so a row that names no single
-  // definition, or names one with no file under `agents/` (a well-formed
-  // `tier=` whose definition has not shipped: a `task` call naming it cannot
-  // resolve), is refused here, before the member is live, not discovered by
-  // the check after the call.
+  // An implementer's comes off its row's `tier=`, else its `cell=`, the same
+  // function tier-check.mjs falls back to for an entry with no record, and
+  // `dispatch` records what it prints on the member's `## Dispatched` entry,
+  // which tier-check judges the member against — so a row that names no
+  // single definition, or names one with no file under `agents/` (a
+  // well-formed `tier=` or `cell=` whose definition has not shipped: a `task`
+  // call naming it cannot resolve), is refused here, before the member is
+  // live, not discovered by the check after the call.
   //
   // A fix-applier is `fleet-fix-applier` for every kind of work — review,
   // conflict hold, dispositions retry — so its definition reads nothing off
@@ -2296,9 +2296,12 @@ async function runDispatch() {
   // refusal's tail names neither.
   let agent;
   try {
-    agent = agentDefinition(member, i === -1 ? "" : data.rows[i]);
+    const row = i === -1 ? "" : data.rows[i];
+    agent = agentDefinition(member, row);
     if (member.family === "impl" && !existsSync(join(AGENTS_DIR, `${agent}.agent.md`))) {
-      throw new Error(`row #${member.number}'s ${decidingCell(data.rows[i]).name}= names ${agent}, which has no agents/${agent}.agent.md — fix the row with \`ledger.mjs row\``);
+      const { name, values } = decidingCell(row);
+      const cause = values.length === 0 ? `row #${member.number} has no tier= or cell=, so it runs the policy cell ${agent}` : `row #${member.number}'s ${name}= names ${agent}`;
+      throw new Error(`${cause}, which has no agents/${agent}.agent.md — fix the row with \`ledger.mjs row\``);
     }
   } catch (e) {
     die(`${member.name}: ${e.message} — not dispatching ${member.name}`);
@@ -2941,7 +2944,7 @@ function runnableCell(rowText) {
     return null;
   }
   if (!existsSync(join(AGENTS_DIR, `${definition}.agent.md`))) return null;
-  return decidingCell(rowText).values[0] ?? POLICY_CELL;
+  return definition.slice("fleet-implementer-".length);
 }
 
 // The member a row's cell binds, while it has not settled, else null: the

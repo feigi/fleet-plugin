@@ -481,7 +481,7 @@ function main() {
       die(`batch entry missing member/agentFile: ${JSON.stringify(raw)}`);
     }
     if (impl && raw.agentFile) {
-      die(`${raw.member}: an impl- entry carries no agentFile — its definition is the one its ## Dispatched entry recorded at dispatch, else the one its ledger row's tier= token names`);
+      die(`${raw.member}: an impl- entry carries no agentFile — its definition is the one its ## Dispatched entry recorded at dispatch, else the one its ledger row's tier= token, or cell= when it has none, names`);
     }
     const hasJobRecord = raw.resolvedModel && raw.resolvedThinkingLevel;
     let frontmatter = null, transcriptText = null, ticket = null, definition = null;

@@ -781,9 +781,10 @@ export function nextRetry(name, names) {
 export const CELL = /^(slow|task|smol)-(minimal|low|medium|high|xhigh|max)$/;
 export const CELL_DEF = new RegExp(`^fleet-implementer-${CELL.source.slice(1)}`);
 
-// The cell a row with no `tier=` runs at: `policy_cell`, `slow-high` on every
-// Pull until the router's table picks one per stratum. Exported so
-// ticket-router.mjs defaults to the same cell this file maps a bare row to.
+// The cell a row with neither `tier=` nor `cell=` runs at: `policy_cell`,
+// `slow-high` on every Pull until the router's table picks one per stratum.
+// Exported so ticket-router.mjs defaults to the same cell this file maps a
+// bare row to.
 export const POLICY_CELL = "slow-high";
 
 // The Exploration Pull's draw: uniform over every cell but
@@ -840,7 +841,8 @@ export function cellValues(rowText) {
 
 /**
  * The token that decides a row's cell, and its values: `tier=` when the row
- * carries one, else `cell=`. Values are empty on a row with neither.
+ * carries one, else `cell=`. Values are empty on a row with neither, and
+ * `name` then names no token the row carries.
  * @returns {{name: "tier"|"cell", values: string[]}}
  */
 export function decidingCell(rowText) {

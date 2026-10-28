@@ -579,7 +579,8 @@ What omp wrote about the member after dispatch: `session_init.resolvedModel`
 identity plus the `thinking_level_change.thinkingLevel` event — never the
 `:suffix`, which is absent when resolution came from an agent's own
 frontmatter rather than a `modelRoles` alias. It is judged against the
-definition of the Cell the Router printed for the Pull, drawn or not.
+definition the member's dispatch recorded — for a Pull's first
+implementer, that of the Cell the Router printed, drawn or not.
 _Avoid_: effective tier, actual model
 
 **Tier route**:
