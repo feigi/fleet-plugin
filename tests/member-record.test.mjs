@@ -231,10 +231,11 @@ test("foldOmpTranscript: a torn LAST line stays uncounted — the tear a live wr
 // `wall_s` is the span of the parseable stamps, latest minus earliest (#3948).
 const wallTurn = (ts) => assistantEvt("claude-opus-5", { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 }, ts);
 const wallAt = (s) => new Date(Date.parse("2026-09-08T15:00:00.000Z") + s * 1000).toISOString();
-const wallOf = (...stamps) => foldOmpTranscript(stamps.map((s) => wallTurn(s)).join("\n") + "\n", "/fake/path.jsonl").wallS;
+const wallLines = (...stamps) => stamps.map(wallTurn).join("\n") + "\n";
+const wallOf = (...stamps) => foldOmpTranscript(wallLines(...stamps), "/fake/path.jsonl").wallS;
 
 test("foldOmpTranscript: wall_s is the span of the stamps, 50 and not -50, when the last line is stamped before the first (#3948)", () => {
-  const lines = [wallTurn(wallAt(100)), wallTurn(wallAt(50))].join("\n") + "\n";
+  const lines = wallLines(wallAt(100), wallAt(50));
   assert.equal(foldOmpTranscript(lines, "/fake/path.jsonl").wallS, 50);
   assert.equal(readOmpMember(lines, "/fake/path.jsonl", "impl-1").wall_s, 50);
 });
@@ -249,6 +250,11 @@ test("foldOmpTranscript: wall_s is the same non-negative span for every ordering
 test("foldOmpTranscript: an in-order transcript's wall_s is first to last, as before (#3948)", () => {
   assert.equal(wallOf(wallAt(0), wallAt(30), wallAt(1020)), 1020);
   assert.equal(wallOf(wallAt(5)), 0, "a single stamp spans nothing");
+});
+
+test("foldOmpTranscript: wall_s rounds the span to the nearest whole second (#3948)", () => {
+  assert.equal(wallOf(wallAt(0), wallAt(1.5)), 2);
+  assert.equal(wallOf(wallAt(1.499), wallAt(0)), 1);
 });
 
 test("foldOmpTranscript: an unparseable first or last stamp is skipped; with no parseable stamp wall_s is 0 (#3948)", () => {

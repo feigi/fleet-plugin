@@ -357,7 +357,7 @@ function createdPrNumbers(text) {
 // numbers in first-seen order.
 export function foldOmpTranscript(jsonlText, filePath) {
   let model = null, thinking = null, task = null, resolvedModelIdentity = null, agent = null;
-  let firstTs = null, lastTs = null;
+  let firstTs = null;
   // For the `work_s` column (member-outcomes.mjs): every timestamped entry's
   // instant, and the member's working parts — each run of timestamped entries
   // between two `session_exit` entries, as [first, last] in epoch ms. The
@@ -391,7 +391,7 @@ export function foldOmpTranscript(jsonlText, filePath) {
     catch { if (i !== lines.length - 1) malformedNonLastLines++; continue; }
     assertOmpShaped(d, filePath);
     let ms = NaN;
-    if (typeof d.timestamp === "string") { firstTs ??= d.timestamp; lastTs = d.timestamp; ms = Date.parse(d.timestamp); }
+    if (typeof d.timestamp === "string") { firstTs ??= d.timestamp; ms = Date.parse(d.timestamp); }
     if (Number.isFinite(ms)) stamps.push(ms);
     if (d.type === "custom" && d.customType === "session_exit") {
       sessionExit = true;
