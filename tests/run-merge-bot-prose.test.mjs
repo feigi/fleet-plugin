@@ -1343,6 +1343,19 @@ test("a dispatched bot holds a 15-minute grace, polling every 60s, before its on
   assert.match(s, Pin.phrase("**One report, at exit, and none before it**"));
 });
 
+test("the grace ends once no PR is open, and a failed read keeps waiting", () => {
+  const s = grace();
+  assert.match(s, Pin.phrase("`gh pr list --state open --limit 1 --json number`"),
+    "the grace lost its open-PR read, so it waits its full 15 minutes with nothing that could be labelled");
+  assert.match(s, Pin.phrase("At grace start and on every 60s poll after it"),
+    "the open-PR read no longer runs at grace start and on every poll");
+  assert.match(s, Pin.phrase("An empty list (no PR open at all, any author, labelled or not) ends the grace: report and exit now."),
+    "an empty open-PR list no longer ends the grace with the report");
+  assert.match(s, Pin.phrase("A failed read is no reading: keep waiting."),
+    "a failed open-PR read no longer keeps the grace waiting");
+  assert.match(s, Pin.phrase("It applies draining or not, and again after a late-label drain restarts the grace."));
+});
+
 test("the grace wait holds in one eval cell, never bash plus wait", () => {
   const pair = DOC.between("The wait:", "**One report, at exit", "run-merge-bot.md grace wait rule").text;
   assert.match(pair, Pin.phrase("hold the whole grace in one Python `eval` cell"));

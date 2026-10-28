@@ -5,6 +5,7 @@ Read `$(~/.fleet/bin/fleet-run --root)/commands/run-merge-bot.md` and run **one*
 pass — drain the queue, re-evaluating after each merge, hold a 15-minute grace
 for late labels, then report once and exit. The controller dispatched you, which
 is what makes you hold that grace instead of arming your own watcher.
+The grace ends early, with the report and the exit, once no PR is open.
 
 Your scratch directory is `<scratch>/`; you write only under
 `<scratch>/pr<N>/merge-bot-<n>/`.

@@ -499,8 +499,8 @@ _Avoid_: WIP limit, PR cap, throttle, backpressure, implementer cap, reviewer ca
 **Pass**:
 One merge bot's lifetime: dispatched on the first `ready-to-merge` label, it merges
 every labelled PR one at a time, re-evaluating after each, waits a short grace for late
-labels, reports once and exits. A label seen after the exit starts a new Pass under a
-fresh name.
+labels, cut short once no PR is open, reports once and exits. A label seen after the
+exit starts a new Pass under a fresh name.
 _Avoid_: wave, batch, cycle, round
 
 **PR's row**:
