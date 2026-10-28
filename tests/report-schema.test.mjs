@@ -315,6 +315,74 @@ test("validate refuses a bailed impl report that names a pr or a head, and accep
   assert.equal(check("impl", covered).status, 0, "a covered bail names its PR in bailDetail, not in pr");
 });
 
+// A conflict hold and a red-check fix write no dispositions record, and a
+// no-op or a failed fix may have run no tests: such a report says `null`
+// there rather than inventing a value (#3889).
+const quiet = (changes) => variant("fix-pr", { applied: [], deferred: [], filed: [], dispositionsRecord: null, testRun: null, ...changes });
+
+test("validate accepts a no-op or failed fix-pr report with a null dispositionsRecord and a null testRun", () => {
+  for (const outcome of ["no-op", "failed"]) {
+    const report = quiet({ outcome });
+    assert.equal(reportViolation("fix-pr", report), null, outcome);
+    const r = check("fix-pr", report);
+    assert.equal(r.status, 0, `${outcome}: ${r.stdout}${r.stderr}`);
+  }
+});
+
+// Null is the absence of a run or a record, never a licence for less: a
+// no-op or failed report that did run its tests or write its record keeps
+// saying so, and a non-null value is still held to its shape.
+test("validate accepts a no-op or failed fix-pr report naming a real test run or record, and still checks a non-null one's shape", () => {
+  for (const outcome of ["no-op", "failed"]) {
+    for (const changes of [
+      { testRun: { cmd: "./agent-test", exit: 0, tests: 640, cancelled: 0 } },
+      { dispositionsRecord: "/tmp/scratch/dispositions-fix-pr-3300.json" },
+    ]) {
+      const r = check("fix-pr", quiet({ outcome, ...changes }));
+      assert.equal(r.status, 0, `${outcome} ${JSON.stringify(changes)}: ${r.stdout}${r.stderr}`);
+    }
+  }
+  assertInvalid(check("fix-pr", quiet({ outcome: "no-op", testRun: { cmd: "t", exit: 0, tests: 1 } })), '$.testRun: missing required field "cancelled"');
+  assertInvalid(check("fix-pr", quiet({ outcome: "no-op", dispositionsRecord: "rel.json" })), '$.dispositionsRecord: "rel.json" does not match ^/');
+  assertInvalid(check("fix-pr", quiet({ outcome: "no-op", testRun: "none" })), "$.testRun: expected object or null, got string");
+});
+
+// An applied fix is a commit the controller trusts on its test run, so a
+// null testRun is invalid there: a rule no schema keyword states, so
+// validate() alone passes it and reportViolation() refuses it.
+test("validate refuses an applied fix-pr report with a null testRun", () => {
+  const said = '$.testRun: null, with outcome "applied" — an applied fix reports the test run behind it';
+  const report = variant("fix-pr", { testRun: null });
+  assert.equal(validate(SCHEMAS["fix-pr"], report), null);
+  assert.equal(reportViolation("fix-pr", report), said);
+  assertInvalid(check("fix-pr", report), said);
+  assert.equal(reportViolation("fix-pr", variant("fix-pr", { dispositionsRecord: null, deferred: [] })), null,
+    "an applied conflict or red-check fix names no dispositions record");
+});
+
+// Settle reads a refuted deferral's reason out of the dispositions record, so
+// a report naming one with no record is invalid, whatever its outcome — the
+// report check refuses it before settle ever opens a path.
+test("validate refuses a fix-pr report deferring a refuted finding with a null dispositionsRecord, and accepts other deferrals without one", () => {
+  for (const outcome of ["applied", "no-op", "failed"]) {
+    const report = variant("fix-pr", { outcome, dispositionsRecord: null, deferred: [{ bucket: "survived", index: 0, issue: 3302 }, { bucket: "refuted", index: 1, issue: 3301 }] });
+    const said = "$.dispositionsRecord: null, with a refuted deferral at $.deferred[1] — settle reads its reason from that record";
+    assert.equal(validate(SCHEMAS["fix-pr"], report), null, outcome);
+    assert.equal(reportViolation("fix-pr", report), said, outcome);
+    assertInvalid(check("fix-pr", report), said);
+  }
+  const r = check("fix-pr", quiet({ outcome: "no-op", deferred: [{ bucket: "survived", index: 0, issue: 3302 }] }));
+  assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
+});
+
+test("print fix-pr shows dispositionsRecord and testRun as nullable", () => {
+  const r = run("print", "fix-pr");
+  assert.equal(r.status, 0, r.stderr);
+  const { properties } = JSON.parse(r.stdout);
+  assert.deepEqual(properties.dispositionsRecord.type, ["string", "null"]);
+  assert.deepEqual(properties.testRun.type, ["object", "null"]);
+});
+
 // Exit 2: the invocation or the file, never the report.
 for (const [why, args, said] of [
   ["no subcommand", [], "usage:"],

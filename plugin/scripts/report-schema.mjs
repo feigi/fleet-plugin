@@ -26,7 +26,12 @@
 //      is no bail`, gives no reason in `bailDetail`, or names a `pr` or a
 //      `head`, as `$.pr: <pr> is not null, with outcome "blocked" — a block
 //      reports no PR`, or whose `bailed` outcome names a `pr` or a `head`, as
-//      `$.pr: <pr> is not null, with outcome "bailed" — a bail reports no PR`
+//      `$.pr: <pr> is not null, with outcome "bailed" — a bail reports no PR`,
+//      and a fix-pr report whose `applied` outcome names no `testRun`, as
+//      `$.testRun: null, with outcome "applied" — an applied fix reports the
+//      test run behind it`, or that defers a `refuted` finding with no
+//      `dispositionsRecord`, as `$.dispositionsRecord: null, with a refuted
+//      deferral at $.deferred[<i>] — settle reads its reason from that record`
 //   2  usage: no or unknown subcommand, a wrong argument count, an unknown
 //      family, any flag; or <file> could not be read; or print could not
 //      write the schema to stdout. Refused on stderr, nothing on stdout
@@ -141,8 +146,10 @@ export const SCHEMAS = {
     deferred: listOf({ bucket: str, index: int, issue: id }),
     filed: issues,
     unrecorded: issues,
-    dispositionsRecord: { type: "string", pattern: "^/" },
-    testRun: obj({ cmd: str, exit: int, tests: int, cancelled: int }),
+    // `null` where nothing exists: a conflict hold or a red-check fix writes no
+    // dispositions record, and a no-op or a failed fix may have run no tests.
+    dispositionsRecord: { type: ["string", "null"], pattern: "^/" },
+    testRun: obj({ cmd: str, exit: int, tests: int, cancelled: int }, ["object", "null"]),
     confirmation: strings,
   }),
   finisher: report({
@@ -188,9 +195,12 @@ export function mergeBotVerdicts(report) {
 // text that is not only whitespace, and names no `pr` or `head`, since a block
 // reports no PR; a `bailed` outcome names no `pr` or `head` either, since a
 // bail is the pre-code outcome — a PR the member opened is outcome `pr`, which
-// settle checks. For a merge-bot report: each PR gets one verdict — merged,
-// held, conflict-held or refused — the last it reached in the pass, so a PR
-// named twice, in one list or in two, is a violation at its second entry.
+// settle checks. For a fix-pr report: an `applied` outcome names its
+// `testRun`, the run behind the commit, and a `refuted` deferral, under any
+// outcome, names the `dispositionsRecord` settle reads its reason from. For a
+// merge-bot report: each PR gets one verdict — merged, held, conflict-held or
+// refused — the last it reached in the pass, so a PR named twice, in one list
+// or in two, is a violation at its second entry.
 export function reportViolation(family, value) {
   const found = validate(SCHEMAS[family], value);
   if (found !== null) return found;
@@ -204,6 +214,15 @@ export function reportViolation(family, value) {
   if (family === "impl" && value.outcome === "bailed") {
     for (const field of ["pr", "head"]) {
       if (value[field] !== null) return `$.${field}: ${show(value[field])} is not null, with outcome "bailed" — a bail reports no PR`;
+    }
+  }
+  if (family === "fix-pr") {
+    if (value.outcome === "applied" && value.testRun === null) {
+      return '$.testRun: null, with outcome "applied" — an applied fix reports the test run behind it';
+    }
+    const refuted = value.deferred.findIndex((d) => d.bucket === "refuted");
+    if (refuted !== -1 && value.dispositionsRecord === null) {
+      return `$.dispositionsRecord: null, with a refuted deferral at $.deferred[${refuted}] — settle reads its reason from that record`;
     }
   }
   if (family !== "merge-bot") return null;

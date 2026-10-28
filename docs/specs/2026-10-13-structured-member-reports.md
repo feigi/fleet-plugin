@@ -67,7 +67,7 @@ brief or a `task` call. Required fields:
 | family | fields |
 |---|---|
 | `impl` | `outcome: "pr" \| "bailed"`, `pr`, `head`, `branch`, `sizing: {verdict: "light"\|"heavy", signal, ranBeforePr: bool}`, `bailCause: "undecided"\|"fork"\|"hands"\|"fixed"\|"covered"\|null`, `bailDetail`, `confirmation: [string]` (warnings received and acted on, rulings not received) |
-| `fix-pr` | `outcome: "applied" \| "no-op" \| "failed"`, `head`, `branch`, `applied: [{bucket, index}]`, `deferred: [{bucket, index, issue}]`, `filed: [{issue, subject}]`, `unrecorded: [{issue, subject}]`, `dispositionsRecord` (path), `testRun: {cmd, exit, tests, cancelled}`, `confirmation` |
+| `fix-pr` | `outcome: "applied" \| "no-op" \| "failed"`, `head`, `branch`, `applied: [{bucket, index}]`, `deferred: [{bucket, index, issue}]`, `filed: [{issue, subject}]`, `unrecorded: [{issue, subject}]`, `dispositionsRecord` (path, or null for a conflict hold or a red-check fix, which write none; a `refuted` deferral requires a path), `testRun: {cmd, exit, tests, cancelled}` or null where no test run exists (`applied` requires one), `confirmation` |
 | `finisher` | `outcome: "labelled" \| "halted" \| "failed"`, `cause` (the ledger's `halted:<cause>` vocabulary or null), `evidence`, `pin`, `labelsReadBack: [string]`, `kill: {red, baseline}` or null, `filed`, `unrecorded`, `confirmation` |
 | `merge-bot` | `merged: [{pr, sha}]`, `held: [{pr, behind}]`, `conflictHold: [pr]`, `refused: [{pr, reason}]`, `branchKept: [{pr, by}]` |
 | `review-pr` | unchanged: `status`, `path`, `ledger`, `attempts`, `errors`, `digest` |

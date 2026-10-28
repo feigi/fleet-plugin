@@ -77,6 +77,17 @@ for (const { role, kind, family, name, outcome, args } of BRIEFS) {
   });
 }
 
+// A fix-pr field with nothing real to point at is `null` (#3889): every kind's
+// brief says which, since the report paragraph is shared by all four.
+for (const { kind, args } of BRIEFS.filter((b) => b.family === "fix-pr")) {
+  test(`the fix-applier ${kind} brief says when dispositionsRecord and testRun are null`, () => {
+    const brief = render("fix-applier", kind, args);
+    assert.ok(brief.includes("A field with nothing real to point at is `null`: `dispositionsRecord` for a conflict hold or a red-check fix, which write no dispositions record, and `testRun` when no test run exists — a `no-op`, or a `failed` that never ran tests."),
+      "the brief no longer says which fix-pr fields are null when nothing exists");
+    assert.ok(brief.includes("A non-null value always reflects a real record or a real run."), "the brief no longer ties a non-null value to a real record or run");
+  });
+}
+
 const AGENTS = join(PLUGIN, "agents");
 const bodyOf = (file) => {
   const text = readFileSync(join(AGENTS, file), "utf8");
@@ -102,3 +113,11 @@ for (const { file, path, line } of BODIES) {
     assert.ok(body.includes(`the one line your brief gives, ${line}`), `the body no longer gives the one-line message ${line}`);
   });
 }
+
+test("fleet-fix-applier.agent.md says when dispositionsRecord and testRun are null", () => {
+  const body = bodyOf("fleet-fix-applier.agent.md");
+  assert.ok(body.includes("a conflict hold and a red-check fix have no review file and write no dispositions record, so their report's `dispositionsRecord` is `null`"),
+    "the body no longer says a conflict hold's or red-check fix's dispositionsRecord is null");
+  assert.ok(body.includes("`testRun` your test result, `null` when no test run exists — a `no-op`, or a `failed` that never ran tests; a non-null `testRun` always reflects a real run."),
+    "the body no longer says when testRun is null");
+});
