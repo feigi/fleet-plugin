@@ -10,7 +10,9 @@
 //      oldest-first and never re-ranked. Its row count is `scanned`, the
 //      supply the tick reports; the rows its to-spec filter removed are
 //      `dropped`, which counts toward nothing and is carried so an empty or
-//      short shortlist still names them.
+//      short shortlist still names them. `ready-for-agent` there is a Label
+//      role, which candidates.mjs resolves through the Label map; this file
+//      reads the map for nothing else.
 //   2. The dependency scan on each row's `d`: an open blocker drops the ticket
 //      (next-ticket step 2). A blocker that is itself a candidate is open by
 //      construction — candidates.mjs queries `--state open` — so only the rest
@@ -41,7 +43,9 @@
 // full read at best and two members on one ticket at worst.
 //
 // What REFUSES instead (exit 2), leaving the previous file exactly as it was: a
-// scan that did not answer, a ledger that could not be read, a workspace that
+// scan that did not answer (a missing or invalid Label map among its causes,
+// whose reason candidates.mjs's last stderr line carries onto this refusal's
+// own line), a ledger that could not be read, a workspace that
 // could not be resolved, a file that could not be written. An empty shortlist
 // written in any of those cases would read as "no work". Exit 0 is the file
 // written, an empty shortlist included — the empty queue is an answer. Never
@@ -58,8 +62,8 @@
 // of it; stdout carries the same object plus `file`.
 //
 // The ledger is read through `ledger.mjs read`, never parsed here, so the
-// ledger keeps one parser. candidates.mjs's stderr passes straight through —
-// the per-candidate lines phase 0 always read, the dependency-heading
+// ledger keeps one parser. candidates.mjs's stderr is relayed whole once it
+// exits — the per-candidate lines phase 0 always read, the dependency-heading
 // notice among them. inflight.sh's and gh's are captured and summarised, one
 // line per dropped ticket.
 
@@ -75,7 +79,7 @@ import { premisesOf } from "./ledger-grammar.mjs";
 const NAME = "shortlist";
 const die = makeDie(NAME);
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
-const LABEL = "ready-for-agent";
+const ROLE = "ready-for-agent";
 // The states that lift a premise or clear a blocker. `gh pr view` answers
 // OPEN, CLOSED or MERGED; `gh issue view` answers OPEN or CLOSED for an issue
 // and the PR's own state for a PR number — so one set serves every probe here.
@@ -153,15 +157,23 @@ function shortlistPath() {
 }
 
 function scan() {
-  const r = spawnSync(process.execPath, [join(SCRIPT_DIR, "candidates.mjs"), "--require-label", LABEL, "--with-dropped"], {
-    encoding: "utf8", maxBuffer: MAX_BUFFER, stdio: ["ignore", "pipe", "inherit"],
+  const r = spawnSync(process.execPath, [join(SCRIPT_DIR, "candidates.mjs"), "--require-label", ROLE, "--with-dropped"], {
+    encoding: "utf8", maxBuffer: MAX_BUFFER, stdio: ["ignore", "pipe", "pipe"],
   });
+  // Captured, then relayed whole before anything else is said, so this
+  // stderr still carries every line candidates.mjs wrote, in its order.
+  if (r.stderr) writeAll(2, r.stderr);
   if (r.error) die(`candidates.mjs did not run: ${how(r)}`);
   // Exit 1 (an empty queue) and exit 3 (every row a to-spec spec) are both the
   // empty answer. Exit 1 is also Node's own code for a crash, so the payload
   // decides: it must parse, with no rows.
   if (r.status !== 0 && r.status !== 1 && r.status !== 3) {
-    die(`candidates.mjs ${r.signal ? `killed by ${r.signal}` : `exited ${r.status}`} — the scan did not answer, so there is no shortlist to write`);
+    // A refusal's cause is candidates.mjs's own last line — a missing Label
+    // map's names `label-map.mjs ensure` — and the tick keeps only the LAST
+    // line of this stderr for its REFRESH FAILED row, so the cause rides on
+    // this one rather than sitting above it. A kill has no such line.
+    const cause = r.signal ? "" : lastLine(r.stderr);
+    die(`candidates.mjs ${r.signal ? `killed by ${r.signal}` : `exited ${r.status}`} — the scan did not answer, so there is no shortlist to write${cause ? `: ${cause}` : ""}`);
   }
   let out;
   try {

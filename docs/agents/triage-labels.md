@@ -47,7 +47,7 @@ The five `wayfinder:*` labels are mandated by `/wayfinder`'s own `SKILL.md` (`:2
 `:65`, `:113`) and were created here 2026-09-08. See `docs/agents/issue-tracker.md`
 "Wayfinding operations". A wayfinder ticket is a **decision** ticket worked one per
 session by `/wayfinder`, never an implementation ticket — but the thing keeping it
-off a fleet run's Shortlist is not its triage role. `plugin/scripts/candidates.mjs`'s `EXCLUDE`
+off a fleet run's Shortlist is not its triage role. `plugin/scripts/candidates.mjs`'s `WAYFINDER_EXCLUDE`
 negates all five `wayfinder:*` labels as their own clauses, unconditionally, so a
 wayfinder ticket never enters a candidate scan whatever role it carries. A
 `ready-for-agent` wayfinder ticket is therefore documentation of readiness, not a
@@ -75,7 +75,7 @@ dispatched at one would find nothing it is allowed to edit. The fleet (`/run-tea
 only ever works `ready-for-agent` tickets, so that is the only place the fleet reads
 `onhold`. Solo `/next-ticket --allow-fallback` is the one documented exception: it
 reruns unfiltered over the wider `ready-for-human`/untriaged pool when the labeled
-pass is empty, and `candidates.mjs`'s `EXCLUDE` still drops `onhold` tickets from that
+pass is empty, and `candidates.mjs`'s `query()` still drops `onhold` tickets from that
 pool too. Outside that one fallback pass — and on `wayfinder:*` or closed tickets
 regardless — the label is the maintainer's own bookkeeping, which nothing in fleet-ctl
 reads.

@@ -124,7 +124,7 @@ test("the spec's candidates row stops reading an all-specs queue as exit 1", () 
 
 test("the spec's candidates row names --with-dropped and where its drops surface", () => {
   const row = candidatesRow();
-  assert.match(row, Pin.phrase("`[--require-label L] [--allow-fallback] [--limit N] [--with-dropped]`"));
+  assert.match(row, Pin.phrase("`[--require-label ROLE] [--allow-fallback] [--limit N] [--with-dropped]`"));
   assert.match(row, Pin.phrase("`{rows: [{n,t,l,d}], dropped: [{n, reason}]}`"));
   assert.match(row, Pin.phrase("prints it as `specs-dropped=#<N> (to-spec: User Stories heading)` on every tick"));
 });

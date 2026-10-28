@@ -13,6 +13,13 @@
 // widen — ready-for-human tickets need a human to brainstorm first, and an
 // unattended fleet has no channel to one.
 //
+// The flag names a Label role (label-map.mjs), never a label string. The
+// role, and the five roles the query excludes, are resolved through the
+// Label map once, after the arguments are checked and before any query. An
+// unknown role is bad args, and a run with no valid map is a query that
+// could not be built: both are exit 2 below, never 1, the map's refusal
+// carrying the reader's message, which names `label-map.mjs ensure`.
+//
 // Exit-code contract — the whole interface for a caller that reads no
 // stderr: 0 = survivors, JSON array on stdout (under `--with-dropped`, the
 // envelope described below). 1 = the query succeeded and returned no rows at
@@ -37,6 +44,7 @@
 import { execFileSync } from "node:child_process";
 import { parseArgs } from "node:util";
 import { makeDie, makeArg, makeHas } from "./arg.mjs";
+import { LABEL_ROLES, readLabelMap } from "./label-map.mjs";
 
 const NAME = "candidates";
 
@@ -107,23 +115,39 @@ try {
 
 if (allowFallback && !requireLabel) die("--allow-fallback is meaningless without --require-label");
 
-// The label quoting's other half, and the half that quoting (query() below)
-// newly makes possible: the label is QUOTED into the search term, so a `"`
-// inside it closes that quote
-// early and the remainder becomes free text — the same misparse, with the fix
-// applied. A `\` breaks the same term from the other side, because GitHub
-// DOES honour `\"` as an escaped quote inside a qualifier: measured against
-// feigi/claude-config 2026-08-17, negating a label no issue carries is a
-// no-op, so `-label:"zzz" label:"ready-for-agent"` returns the same count as
-// `label:"ready-for-agent"` alone — while `-label:"zzz\" label:"ready-for-agent"`
-// returns the count for `ready-for-agent` as FREE TEXT instead, the backslash
-// having eaten the closing quote and swallowed the whole following qualifier.
-// Doubling does not escape it. Here the label term is LAST, so a trailing
-// backslash leaves its value unterminated and the query answers zero rows at
-// HTTP 200, no error — the unquoted label's silent empty, with the fix applied. Neither
-// character can be represented, so refuse both at exit 2 ("the query broke")
-// rather than send a query whose empty answer would read as exit 1.
-if (requireLabel && /["\\]/.test(requireLabel)) die(`--require-label cannot contain a double quote or a backslash, got '${requireLabel}'`);
+// `--require-label` takes a Label role; anything else is a usage refusal,
+// checked before the map is read so a mistyped flag refuses alike with a map
+// or without one.
+if (requireLabel && !LABEL_ROLES.includes(requireLabel)) {
+  die(`--require-label takes a Label role (${LABEL_ROLES.join(", ")}), got '${requireLabel}'`);
+}
+
+// The Label map, read once. query() below QUOTES every mapped string into its
+// search term, so a `"` inside one would close that quote early and the
+// remainder become free text. A `\` breaks the same term from the other
+// side, because GitHub DOES honour `\"` as an escaped quote inside a
+// qualifier: measured against feigi/claude-config 2026-08-17, negating a
+// label no issue carries is a no-op, so `-label:"zzz" label:"ready-for-agent"`
+// returns the same count as `label:"ready-for-agent"` alone — while
+// `-label:"zzz\" label:"ready-for-agent"` returns the count for
+// `ready-for-agent` as FREE TEXT instead, the backslash having eaten the
+// closing quote and swallowed the whole following qualifier. Doubling does
+// not escape it. Neither character can be represented, and the reader
+// refuses a map holding either (label-map.mjs's VALID STRINGS). Every
+// refusal here, typed or not, is exit 2 ("the query broke"): an uncaught
+// throw would exit 1, which reads as "no rows".
+let roles;
+try {
+  roles = readLabelMap();
+} catch (e) {
+  die(e.message);
+}
+// The string the labeled query requires; null for the unfiltered query.
+const label = requireLabel ? roles[requireLabel] : null;
+
+// The roles whose issues no query returns, the labeled one or the unfiltered
+// fallback, in the order query() negates their mapped strings.
+const EXCLUDED_ROLES = ["in-progress", "onhold", "wontfix", "needs-triage", "needs-info"];
 
 // The five `wayfinder:*` terms are separate `-label:` clauses, not a wildcard —
 // GitHub's search has no `-label:"wayfinder:*"` — and none is quoted despite
@@ -137,12 +161,11 @@ if (requireLabel && /["\\]/.test(requireLabel)) die(`--require-label cannot cont
 // comment gives it below: the queue churns hourly, so a digit is wrong within
 // a day and reads as a regression. Quoting every value anyway would cost
 // nothing (`-label:"wayfinder:map"` measured identical: same one-issue
-// exclusion, same issue) — left unquoted here because an unconditional
-// quote-everything rule belongs at the one call site building every label
-// term (`query()` below), and EXCLUDE is a static literal no caller
-// assembles.
-const EXCLUDE =
-  "-label:in-progress -label:onhold -label:wontfix -label:needs-triage -label:needs-info -label:wayfinder:map -label:wayfinder:research -label:wayfinder:prototype -label:wayfinder:grilling -label:wayfinder:task";
+// exclusion, same issue) — left unquoted here because these are not Label
+// roles: the map never names them, so they stay one literal, while query()
+// quotes every term it builds from the map.
+const WAYFINDER_EXCLUDE =
+  "-label:wayfinder:map -label:wayfinder:research -label:wayfinder:prototype -label:wayfinder:grilling -label:wayfinder:task";
 // `d` walks the body line by line rather than one regex over the whole
 // string, because RE2 (gojq's engine — gh applies `--jq` with gojq, not the
 // system jq this file's own tests stub) has no lookahead, so
@@ -399,7 +422,8 @@ const JQ =
   ' dh:((.body//"")|depmiss)}]\n';
 
 function query(label) {
-  // The label is a VALUE in GitHub's query language, not part of its syntax,
+  // Every label string the map supplies — the required one and each excluded
+  // role's — is a VALUE in GitHub's query language, not part of its syntax,
   // so it is quoted rather than interpolated raw. Unquoted, a value
   // ends at the FIRST SPACE and every word after it becomes a free-text term
   // instead — measured 2026-08-17, `label:ready-for-agent candidates` returns
@@ -422,7 +446,9 @@ function query(label) {
   // needing none is a measured no-op (`label:ready-for-agent` and
   // `label:"ready-for-agent"` agree here), so one unconditional form beats a
   // predicate that has to stay in step with GitHub's parser to stay correct.
-  const search = label ? `${EXCLUDE} label:"${label}"` : EXCLUDE;
+  // The unfiltered query (label null) carries every exclusion too.
+  const exclude = `${EXCLUDED_ROLES.map((role) => `-label:"${roles[role]}"`).join(" ")} ${WAYFINDER_EXCLUDE}`;
+  const search = label ? `${exclude} label:"${label}"` : exclude;
   const args = [
     "issue", "list",
     "--state", "open",
@@ -501,8 +527,8 @@ function query(label) {
 // shortlist that silently omits work — "no silent caps" is the rule this
 // enforces. Applied verbatim to BOTH the labeled query and the fallback
 // query below — the fallback result was previously never re-checked, so
-// --require-label <nonexistent> --allow-fallback could ship a silently
-// truncated unfiltered list.
+// `--require-label ready-for-human --allow-fallback`, against a queue holding
+// no `ready-for-human` issue, could ship a silently truncated unfiltered list.
 function refuseIfCapped(rows, description) {
   if (rows.length === limit) {
     die(
@@ -592,9 +618,9 @@ function dropSpecs(rows, pass) {
   return { kept, dropped };
 }
 
-let rows = query(requireLabel);
-console.error(`    ${rows.length} candidate(s)${requireLabel ? ` with label:${requireLabel}` : ""}`);
-refuseIfCapped(rows, requireLabel ? ` with label:${requireLabel}` : "");
+let rows = query(label);
+console.error(`    ${rows.length} candidate(s)${label ? ` with label:${label}` : ""}`);
+refuseIfCapped(rows, label ? ` with label:${label}` : "");
 // After refuseIfCapped, never before: filtering first can shrink the array below
 // `limit` and the cap check would stop seeing a truncated list. Before the
 // emptiness test below, never after: a queue whose every row was filtered out
@@ -609,11 +635,11 @@ refuseIfCapped(rows, requireLabel ? ` with label:${requireLabel}` : "");
 // must read as the fallback's own facts (exit 1), not a merge of the two.
 const rawCount1 = rows.length;
 let dropped;
-({ kept: rows, dropped } = dropSpecs(rows, requireLabel ? `label:${requireLabel}` : "unfiltered"));
+({ kept: rows, dropped } = dropSpecs(rows, label ? `label:${label}` : "unfiltered"));
 let allFilteredOut = rawCount1 > 0 && rows.length === 0;
 
-if (rows.length === 0 && allowFallback && requireLabel) {
-  console.error(`${NAME}: empty with label:${requireLabel}; --allow-fallback given, retrying unfiltered`);
+if (rows.length === 0 && allowFallback && label) {
+  console.error(`${NAME}: empty with label:${label}; --allow-fallback given, retrying unfiltered`);
   rows = query(null);
   console.error(`    ${rows.length} candidate(s) unfiltered`);
   refuseIfCapped(rows, " unfiltered (fallback)");

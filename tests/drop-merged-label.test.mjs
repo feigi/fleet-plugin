@@ -20,6 +20,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { seedLabelMap } from "./support/label-map-seed.mjs";
+import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import { ref, prUrl } from "./support/queue-gh.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/drop-merged-label.sh", import.meta.url));
@@ -340,16 +342,31 @@ test("one failure among several issues does not stop the rest from being process
 
 // The acceptance criterion is "reopening a previously-merged ticket makes it a
 // candidate again" — verified against the real consumer, not against this
-// file's idea of one. candidates.mjs excludes on the literal string
-// `-label:in-progress`; this proves this script issues the exact `gh issue
+// file's idea of one. candidates.mjs excludes on the string the Label map
+// gives the `in-progress` role, so it runs here against a fake gh with the
+// identity map seeded, and the `--search` value it hands gh must carry
+// `-label:"in-progress"`; this proves this script issues the exact `gh issue
 // edit --remove-label in-progress` call that clears the one flag that clause
 // keys on, so a reopened issue this script has touched no longer matches it.
-test("the label this script drops is the exact one candidates.mjs excludes on", (t) => {
-  const candidates = readFileSync(
-    fileURLToPath(new URL("../plugin/scripts/candidates.mjs", import.meta.url)),
-    "utf8",
+test("the label this script drops is the exact one candidates.mjs excludes on under the identity map", (t) => {
+  const repo = mktemp(t);
+  const init = spawnSync("git", ["init", "-q"], { cwd: repo, env: gitEnv({}, process.env), encoding: "utf8" });
+  assert.equal(init.status, 0, `test setup: git init: ${init.stderr}`);
+  seedLabelMap(repo);
+  const bin = join(repo, "bin");
+  mkdirSync(bin);
+  const searchLog = join(repo, "search");
+  writeExecStub(
+    join(bin, "gh"),
+    `#!/bin/sh\nwhile [ $# -gt 0 ]; do\n  [ "$1" = --search ] && printf '%s' "$2" > "${searchLog}"\n  shift\ndone\necho '[]'\n`,
   );
-  assert.match(candidates, /-label:in-progress/, "candidates.mjs moved its exclusion — update this test");
+  const scan = spawnSync(
+    process.execPath,
+    [fileURLToPath(new URL("../plugin/scripts/candidates.mjs", import.meta.url)), "--require-label", "ready-for-agent"],
+    { cwd: repo, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } },
+  );
+  assert.equal(scan.status, 1, `candidates.mjs did not answer an empty queue: ${scan.stderr}`);
+  assert.match(readFileSync(searchLog, "utf8"), /(^| )-label:"in-progress"( |$)/, "candidates.mjs no longer excludes the in-progress role's string — update this test");
 
   const s = stub(t);
   const { code } = run(9, { apply: true, env: s.env({ CLOSES: "41", LABELS_41: "in-progress" }) });

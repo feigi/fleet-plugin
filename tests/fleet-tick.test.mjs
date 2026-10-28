@@ -1929,6 +1929,7 @@ test("refreshWhy: unclaimed below the bound refreshes, held refreshes nothing, d
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, readFileSync, readdirSync, realpathSync, existsSync } from "node:fs";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { seedLabelMap } from "./support/label-map-seed.mjs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -2095,8 +2096,10 @@ const shortlistText = (ns, scanned = ns.length, dropped) =>
   JSON.stringify({ scanned, shortlist: ns.map((n) => ({ n, t: `t${n}` })), ...(dropped === undefined ? {} : { dropped }) });
 
 // For a case that runs the REAL shortlist.mjs (`candidates` given): the
-// scripts it spawns, and an in-flight check that answers every ticket free.
-const REAL_SHORTLIST = ["shortlist.mjs", "candidates.mjs"].map(
+// scripts it spawns, the Label map reader candidates.mjs imports, and an
+// in-flight check that answers every ticket free. Such a case's repository
+// holds the identity Label map.
+const REAL_SHORTLIST = ["shortlist.mjs", "candidates.mjs", "label-map.mjs"].map(
   (m) => [m, fileURLToPath(new URL(`../plugin/scripts/${m}`, import.meta.url))],
 );
 const INFLIGHT_FREE = `#!/bin/sh
@@ -2160,6 +2163,7 @@ function runCli(args = [], {
     else {
       for (const [name, path] of REAL_SHORTLIST) writeFileSync(join(bin, name), readFileSync(path));
       writeFileSync(join(bin, "inflight.sh"), INFLIGHT_FREE);
+      seedLabelMap(repo);
     }
     const fx = (name, content) => { const p = join(dir, name); writeFileSync(p, content); return p; };
     if (ledger !== undefined) writeFileSync(join(repo, ".fleet", "ledger.md"), ledgerText(ledger));
@@ -2316,6 +2320,18 @@ test("CLI: a partial drop through the real shortlist.mjs is named beside the PUL
   const r = runCli([], { candidates: [specIssue(2151), plainIssue(2160)] });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, pullRows(String.raw`implementers 0\/2`, [2160], String.raw`\(implementers=0 prs=0 unclaimed=1 supply=1 shortlist=missing specs-dropped=#2151 \(to-spec: User Stories heading\)\)$`));
+});
+
+// The tick keeps only the last line of a failed refresh's stderr, so a
+// missing Label map is named on the REFRESH FAILED row only because
+// shortlist.mjs carries candidates.mjs's cause onto its own refusal line.
+test("CLI: a refresh with no Label map prints REFRESH FAILED naming the map and `label-map.mjs ensure`", () => {
+  const r = runCli([], {
+    candidates: [plainIssue(2160)],
+    beforeRun: (repo) => rmSync(join(repo, ".fleet", "labels.json")),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^shortlist {4}→ REFRESH FAILED {3}\(shortlist missing — shortlist\.mjs exited 2: shortlist: candidates\.mjs exited 2 — the scan did not answer, so there is no shortlist to write: candidates: no Label map at .*: run `label-map\.mjs ensure`, the Label map derivation step\)$/m);
 });
 
 test("CLI: a tick that does not refresh still names the drops, read back from shortlist.json", () => {

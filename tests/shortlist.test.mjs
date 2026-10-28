@@ -13,8 +13,9 @@
 //     rather than hand-spelled in a format that could drift from the real one.
 //   - `gh` is a PATH stub. `issue list` applies the jq expression gh was
 //     handed to a fixture (the fleet-tick.test.mjs pattern), and answers `[]`
-//     unless the search carries `label:"ready-for-agent"` — so every case that
-//     expects rows back also proves the label was asked for. `issue view` and
+//     unless the search carries `label:"<WANT_LABEL>"`, `ready-for-agent`
+//     unless a case remaps it — so every case that expects rows back also
+//     proves the label was asked for. `issue view` and
 //     `pr view` answer `{"state": …}` from a per-case state table, and fail the
 //     way real gh does for a number or branch the table does not name. It is
 //     NOT env-blind: `issue view`/`pr view` ask `git rev-parse --git-common-dir`
@@ -26,6 +27,8 @@
 //   - inflight.sh is a stub, because the real one needs a remote, a PR list and
 //     python3 to say anything; its own suite is inflight.test.mjs. The stub
 //     keeps the real exit contract: 0 free, 1 taken, 2 could not answer.
+//   - The repository holds the identity Label map (label-map-seed.mjs), which
+//     the real candidates.mjs reads; a case that remaps it or removes it says so.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -37,6 +40,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { seedLabelMap } from "./support/label-map-seed.mjs";
 
 const HERE = fileURLToPath(new URL("../plugin/scripts", import.meta.url));
 // Every file the copied shortlist.mjs reaches at run time: its own imports,
@@ -52,7 +56,9 @@ const COPIED = ["shortlist.mjs", "candidates.mjs", "ledger.mjs", "ledger-grammar
   // fleet-tick.mjs reads a PR's owner by one rule, and ledger.mjs asks the Ticketless test of a finisher's PR.
   "owned-pr.mjs", "ticketless.mjs",
   // ledger.mjs reads a member's report for `settle --from-report`.
-  "report-files.mjs", "report-schema.mjs"];
+  "report-files.mjs", "report-schema.mjs",
+  // candidates.mjs resolves its roles through the Label map's reader.
+  "label-map.mjs"];
 
 const GH_STUB = `#!/bin/sh
 case "$1 $2" in
@@ -68,7 +74,7 @@ case "$1 $2" in
       shift
     done
     case "$search" in
-      *'label:"ready-for-agent"'*) exec jq -c "$expr" "$FIXTURE_ISSUES" ;;
+      *"label:\\"\${WANT_LABEL:-ready-for-agent}\\""*) exec jq -c "$expr" "$FIXTURE_ISSUES" ;;
       *) echo '[]' ;;
     esac ;;
   "issue view"|"pr view")
@@ -137,6 +143,7 @@ function fixture(t) {
   mkdirSync(repo);
   git(repo, "init", "-q");
   git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init");
+  seedLabelMap(repo);
   const scripts = join(root, "scripts");
   mkdirSync(scripts);
   for (const f of COPIED) copyFileSync(join(HERE, f), join(scripts, f));
@@ -336,7 +343,6 @@ test("only an `excluded` row excludes; a branch premise resolves through gh pr v
 
 test("an empty queue is an answer: exit 0, and the file says so", (t) => {
   const f = fixture(t);
-  mkdirSync(join(f.repo, ".fleet"));
   writeFileSync(f.shortlistFile, JSON.stringify({ scanned: 1, shortlist: [{ n: 1, t: "stale" }] }));
   const r = f.run({ issues: [] });
   ok(r);
@@ -369,7 +375,6 @@ test("a partial drop keeps the survivors and names the drops beside them", (t) =
 // shortlist written in its place would read as "no work" to the tick.
 test("a failed scan, an unreadable ledger or a stray argument refuses at exit 2 and leaves the file untouched", (t) => {
   const f = fixture(t);
-  mkdirSync(join(f.repo, ".fleet"));
   const before = JSON.stringify({ scanned: 1, shortlist: [{ n: 1701, t: "t1701" }] });
   writeFileSync(f.shortlistFile, before);
   const issues = [issue(1701)];
@@ -394,13 +399,39 @@ test("a failed scan, an unreadable ledger or a stray argument refuses at exit 2 
   assert.equal(readFileSync(f.shortlistFile, "utf8"), before);
 });
 
+// shortlist.mjs passes the ROLE; candidates.mjs resolves it, so a remapped
+// map reaches gh without shortlist.mjs naming any string.
+test("a remapped Label map's ready-for-agent string is the one the scan asks gh for", (t) => {
+  const f = fixture(t);
+  seedLabelMap(f.repo, { roles: { "ready-for-agent": "agent-ready" } });
+  const r = f.run({ issues: [issue(1701)], env: { WANT_LABEL: "agent-ready" } });
+  ok(r);
+  assert.deepEqual(f.written(), { scanned: 1, shortlist: [{ n: 1701, t: "t1701" }], dropped: [] });
+});
+
+// No valid map is a scan that did not answer — exit 2, never the empty
+// shortlist that would read as "no work" — and the reader's message, which
+// names `ensure`, reaches stderr through candidates.mjs. It also ends the
+// refusal line itself, the last line, which is all of this stderr the tick's
+// REFRESH FAILED row keeps.
+test("no Label map refuses at exit 2, naming ensure, and leaves the file untouched", (t) => {
+  const f = fixture(t);
+  const before = JSON.stringify({ scanned: 1, shortlist: [{ n: 1701, t: "t1701" }], dropped: [] });
+  writeFileSync(f.shortlistFile, before);
+  rmSync(join(f.repo, ".fleet", "labels.json"));
+  const r = f.run({ issues: [issue(1701)] });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /^candidates: no Label map at .*label-map\.mjs ensure/m);
+  assert.match(r.stderr.trim().split("\n").at(-1), /^shortlist: candidates\.mjs exited 2 — .*: candidates: no Label map at .*label-map\.mjs ensure/);
+  assert.equal(readFileSync(f.shortlistFile, "utf8"), before);
+});
+
 // candidates.mjs's `dropped` is carried into the file as the only record of
 // what the filter removed, so a malformed one is a scan that did not answer:
 // the refusal leaves the previous file whole rather than writing drops that
 // name nothing.
 test("a candidates.mjs answer whose dropped is not a list of {n, reason} refuses at exit 2 and leaves the file untouched", (t) => {
   const f = fixture(t);
-  mkdirSync(join(f.repo, ".fleet"));
   const before = JSON.stringify({ scanned: 1, shortlist: [{ n: 1701, t: "t1701" }], dropped: [] });
   writeFileSync(f.shortlistFile, before);
   const stub = join(f.root, "scripts", "candidates.mjs");
@@ -433,7 +464,14 @@ test("a shortlist directory that cannot be created is reported as the write fail
   const f = fixture(t);
   // A regular file where `.fleet/` belongs: mkdirSync fails, and the cleanup of
   // the temp file under it fails too (ENOTDIR) — the first error must survive.
+  // The real candidates.mjs reads its Label map out of `.fleet/` and would
+  // refuse first, so a stub answers the scan in its place.
+  rmSync(join(f.repo, ".fleet"), { recursive: true, force: true });
   writeFileSync(join(f.repo, ".fleet"), "not a directory");
+  writeFileSync(
+    join(f.root, "scripts", "candidates.mjs"),
+    `process.stdout.write(${JSON.stringify(JSON.stringify({ rows: [{ n: 1701, t: "t1701", d: [] }], dropped: [] }))});\n`,
+  );
   const r = f.run({ issues: [issue(1701)] });
   assert.equal(r.status, 2, r.stderr);
   assert.match(r.stderr, /shortlist: cannot write .*shortlist\.json: /);

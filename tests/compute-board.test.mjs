@@ -150,7 +150,7 @@ test("computeBoard: one ticket per column, POOL from an unrowed ready issue", ()
   assert.equal(col(341), "POOL");
 });
 
-// #1331: candidates.mjs's EXCLUDE negates all five wayfinder:* labels so a
+// #1331: candidates.mjs's WAYFINDER_EXCLUDE negates all five wayfinder:* labels so a
 // wayfinder ticket never enters the DISPATCH scan regardless of triage role,
 // but the POOL loop below used to show one anyway — a ready-for-agent
 // wayfinder ticket (#1293's shape) rendered as an undispatchable POOL card,
