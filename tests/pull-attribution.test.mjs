@@ -694,13 +694,18 @@ test("tally: by_hand counts the counted merged Pulls whose Ruling's note is not 
   }
   const [t] = tally(units(w));
   assert.deepEqual([t.merged, t.by_hand], [5, 3]);
-  // A hand-given Ruling on a PR that is not merged is no merged Pull, so it is not counted.
-  const open = world();
-  open.features.push(pull(206, "task-high"));
-  open.members.push(impl(206, "task-high", { ending: "pr", pr: "1206" }));
-  open.tiers.push(ruling(206, 1206, { note: "by hand" }));
-  merged(open, 1206, "OPEN");
-  assert.deepEqual([tally(units(open))[0].merged, tally(units(open))[0].by_hand], [0, 0]);
+  // A hand-given Ruling on a PR that is not merged is no merged Pull, so it is not counted:
+  // OPEN makes the Pull pending, and CLOSED leaves it counted but not merged.
+  for (const [state, status] of [["OPEN", "pending"], ["CLOSED", "counted"]]) {
+    const unmerged = world();
+    unmerged.features.push(pull(206, "task-high"));
+    unmerged.members.push(impl(206, "task-high", { ending: "pr", pr: "1206" }));
+    unmerged.tiers.push(ruling(206, 1206, { note: "by hand" }));
+    merged(unmerged, 1206, state);
+    const us = units(unmerged);
+    assert.equal(us[0].status, status, state);
+    assert.deepEqual([tally(us)[0].merged, tally(us)[0].by_hand], [0, 0], state);
+  }
 });
 
 test("the fit's estimates carry by_hand, the guard's count over the same Pulls", () => {
@@ -766,6 +771,26 @@ test("attribute: no PR state means no noRuling, and a Pull that holds a Ruling, 
   bare.members.push(impl(233, "task-high", { ending: "pr", pr: "1233" }));
   assert.equal(units(bare, null)[0].noRuling, false, "with no PR states there is nothing to say merged");
   assert.equal(units(bare, [{ number: 1233, state: "MERGED" }])[0].noRuling, true);
+});
+
+test("attribute: a Pull whose merged PR another Pull took the Ruling of by date, not by carrying it, is not noRuling", () => {
+  const w = world();
+  const later = { session: SESSION2, run_date: "2026-10-05" };
+  w.features.push(pull(251, "task-high"), pull(251, "task-high", later), pull(252, "task-high", later));
+  w.members.push(
+    impl(251, "task-high", { ending: "pr", pr: "1251" }),
+    // The retry carries PR 1251 too and binds to its own later ruling row, 1252's.
+    impl(251, "task-high", { ...later, ending: "pr", pr: "1251" }),
+    impl(251, "task-high", { ...later, agent: "impl-251-b", ending: "pr", pr: "1252" }),
+    impl(252, "task-high", { ...later, ending: "budget" }),
+  );
+  // So 1251's Ruling, of ticket 252, goes to 252's Pull by the date floor.
+  w.tiers.push(ruling(252, 1251, later), ruling(251, 1252, later));
+  merged(w, 1251);
+  merged(w, 1252);
+  const us = units(w);
+  assert.deepEqual(us.map((u) => [u.pull.ticket, u.pr, u.noRuling]), [["251", null, false], ["251", "1252", false], ["252", "1251", false]]);
+  assert.equal(tally(us)[0].no_ruling, 0, "1251's one merge is held by a Ruling, so no Pull counts it as merged with none");
 });
 
 test("admissibleRow: the cell's own definition at its level with a dispatch model on record, and nothing short of all three", () => {

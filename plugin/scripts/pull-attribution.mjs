@@ -345,6 +345,8 @@ export function attribute({ features, members, tiers, prs = null, windowStart = 
     const ruling = cands.reduce((a, c) => (fileOrder.get(c.ruling) > fileOrder.get(a) ? c.ruling : a), cands[0].ruling);
     ruled.set(cands.at(-1).pull, { pr, ruling, carried: false });
   }
+  // Every PR some Pull holds the Ruling of, carried or taken by date.
+  const held = new Set([...ruled.values()].map((r) => r.pr));
 
   const state = prs && new Map(prs.map((p) => [String(p.number), p.state]));
   return inWindow.map((pull) => {
@@ -361,7 +363,7 @@ export function attribute({ features, members, tiers, prs = null, windowStart = 
         merged = s === "MERGED";
       } else {
         pendingPr = own.find((m) => m.pr && state.get(m.pr) === "OPEN")?.pr ?? null;
-        noRuling = own.some((m) => m.pr && state.get(m.pr) === "MERGED" && !taken.has(m.pr));
+        noRuling = own.some((m) => m.pr && state.get(m.pr) === "MERGED" && !held.has(m.pr));
       }
     }
     let claims = 0, falseClaims = 0;

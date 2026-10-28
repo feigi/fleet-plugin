@@ -737,13 +737,25 @@ test("--guard: every entry is the report's whole entry with older generations ne
   }
 });
 
-test("blobId is git's blob id of the bytes, including bytes that are not UTF-8", () => {
+test("blobId is git's blob id of the bytes, including multibyte UTF-8 and bytes that are not UTF-8", () => {
   const dir = tempDir("pr-cost-blob-");
-  for (const bytes of [Buffer.alloc(0), Buffer.from("a\tb\n"), Buffer.from([0xff, 0xfe, 0x00, 0x80, 0x0a])]) {
+  for (const bytes of [Buffer.alloc(0), Buffer.from("a\tb\n"), Buffer.from("é\n"), Buffer.from([0xff, 0xfe, 0x00, 0x80, 0x0a])]) {
     const file = join(dir, "f");
     writeFileSync(file, bytes);
     assert.equal(blobId(bytes), spawnSync("git", ["hash-object", file], { encoding: "utf8", env: gitEnv() }).stdout.trim());
   }
+});
+
+test("--guard: a TSV's blob id is of its bytes as read, not of their UTF-8 decoding", () => {
+  const w = world();
+  addCell(w, "slow-high", MIN_N, 0, 10);
+  // A comment line the parser skips, holding a byte that is not UTF-8.
+  const r = runCli(w, undefined, { features: Buffer.concat([Buffer.from([0x23, 0x20, 0xff, 0x0a]), Buffer.from(featuresText(w))]) });
+  assert.equal(r.status, 0, r.stderr);
+  const name = "docs/metrics/ticket-features.tsv";
+  const git = spawnSync("git", ["hash-object", join(r.dir, name)], { encoding: "utf8", env: gitEnv() });
+  assert.equal(git.status, 0, git.stderr);
+  assert.equal(r.guard.tsv_blobs[name], git.stdout.trim());
 });
 
 test("--guard: a TSV flag's path is the key its blob id is recorded under", () => {
