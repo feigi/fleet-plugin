@@ -19,7 +19,7 @@ import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
-import { writeExecStub } from "./support/exec-stub.mjs";
+import { offlineBoardBin } from "./support/board-rig.mjs";
 import { cockpitLifetime, controllerVerdict } from "../plugin/scripts/cockpit-lifetime.mjs";
 import { processSource } from "../plugin/scripts/proc.mjs";
 
@@ -106,8 +106,7 @@ const readJson = (path) => { try { return JSON.parse(readFileSync(path, "utf8"))
 // and the reads degrade.
 function cockpit() {
   const cwd = realpathSync(tempDir("cockpit-lifetime-cwd-"));
-  const bin = tempDir("cockpit-lifetime-bin-");
-  writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
+  const bin = offlineBoardBin("cockpit-lifetime-bin-");
   const stateDir = join(cwd, ".fleet");
   mkdirSync(stateDir, { recursive: true });
   const procs = join(tempDir("cockpit-lifetime-procs-"), "procs.json");

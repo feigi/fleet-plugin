@@ -32,6 +32,7 @@ import { tempDir } from "./support/temp-dir.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { offlineBoardBin } from "./support/board-rig.mjs";
 
 const BOARD = fileURLToPath(new URL("../plugin/scripts/board.mjs", import.meta.url));
 const GATHER = fileURLToPath(new URL("../plugin/scripts/board-gather.mjs", import.meta.url));
@@ -194,8 +195,7 @@ for (const body of ACCEPTED) {
 function runBuild(prevArgs) {
   const cwd = tempDir("board-prevshape-cli-");
   const home = tempDir("board-prevshape-home-");
-  const bin = tempDir("board-prevshape-cli-bin-");
-  writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
+  const bin = offlineBoardBin("board-prevshape-cli-bin-");
   return spawnSync(process.execPath, [BOARD, "build", "--ledger", join(cwd, "nope.md"), ...prevArgs], {
     cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024,
     env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}` },

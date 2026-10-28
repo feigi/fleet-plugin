@@ -24,7 +24,7 @@ import { tempDir } from "./support/temp-dir.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { encodeProjectDir } from "../plugin/scripts/member-record.mjs";
-import { writeReceipt } from "./support/board-rig.mjs";
+import { writeReceipt, offlineBoardBin } from "./support/board-rig.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 
 const BOARD = fileURLToPath(new URL("../plugin/scripts/board.mjs", import.meta.url));
@@ -56,8 +56,7 @@ function runBoard(sinceArgs, ledgerFile, seed = seedDefault) {
   // RESOLVED form. Encoding the unresolved one puts the fixture at a path
   // omp would never write for this cwd.
   const cwd = realpathSync(tempDir("since-cwd-"));
-  const bin = tempDir("since-bin-");
-  writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
+  const bin = offlineBoardBin("since-bin-");
   seed(home, cwd);
   return spawnSync(process.execPath, [BOARD, "build", "--ledger", ledgerFile ?? join(cwd, "nope.md"), ...sinceArgs], {
     cwd, encoding: "utf8",
@@ -419,8 +418,7 @@ test("build: a ledger read past node's default stdout cap arrives whole, not as 
 // fixture through python3's saturated-pipe rig instead of spawnSync.
 function boardFaultFixture() {
   const cwd = realpathSync(tempDir("board-fault-cwd-"));
-  const bin = tempDir("board-fault-bin-");
-  writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
+  const bin = offlineBoardBin("board-fault-bin-");
   // Valid JSON, wrong shape: `rows` is an object where every consumer wants an
   // array. Answers any argv, which is all gather()'s single `node` read needs.
   writeExecStub(join(bin, "node"), `#!/bin/sh\necho '{"rows":{},"filed":[],"ruled":[]}'\n`);
