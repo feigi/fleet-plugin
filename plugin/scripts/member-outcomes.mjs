@@ -396,7 +396,7 @@ export function parseTsv(text) {
     });
 }
 
-import { writeFileSync, existsSync, renameSync } from "node:fs";
+import { writeFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
 import { isCLI } from "./is-cli.mjs";
 import { makeDie, isFlagLike } from "./arg.mjs";
 
@@ -499,6 +499,7 @@ if (isCLI(import.meta.url)) {
   // Write-then-rename: writeFileSync truncates before it writes, so an interrupt
   // over the committed corpus left a torn file that the NEXT scrape read, merged
   // and rewrote — losing every other session's rows for good.
+  mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file + ".tmp", (header ? header + "\n" : "") + formatTsv(merged));
   renameSync(file + ".tmp", file);
   // Report the SCRAPE, not just the file. `merged.length` is the whole corpus,

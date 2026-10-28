@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { COLUMNS, LEGACY_WIDTH, RulingError, TIER_SWITCH_DATE, deriveRuling, isDerivedNote, lastPullByTicket, parseTierOutcomes, rulingFor, rulingsByTicket } from "../plugin/scripts/tier-outcomes.mjs";
 import { COLUMNS as MEMBER_COLUMNS } from "../plugin/scripts/member-outcomes.mjs";
@@ -778,6 +778,21 @@ test("check: a missing tier-outcomes.tsv file fails loudly instead of passing 0 
   const r = f.run("check");
   assert.equal(r.code, 2);
   assert.match(r.stderr, /no .*tier-outcomes\.tsv — no rows to check/);
+});
+
+test("append: a fresh consumer with no docs/metrics/ gets the directory, the header and the row", (t) => {
+  const f = fixture(t, {
+    ledger: { rows: ["#10 impl-10=PR#20 · class=routine · tier-ok=impl-10:fleet-implementer"], dispatched: ["impl-10=PR#20"] },
+    members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }],
+  });
+  f.tier = join(dirname(f.ledger), "docs", "metrics", "tier-outcomes.tsv");
+  assert.equal(existsSync(dirname(f.tier)), false);
+  const r = f.append();
+  assert.equal(r.code, 0, r.stderr);
+  const lines = readFileSync(f.tier, "utf8").split("\n").filter(Boolean);
+  assert.equal(lines[0], HEADER.trimEnd());
+  assert.equal(lines.length, 2);
+  assert.equal(f.dataRows()[0][col("pr")], "20");
 });
 
 // Every reader of the file judges the floor as `minted_false_claim === "yes" ||

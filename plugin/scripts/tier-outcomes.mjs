@@ -113,7 +113,7 @@
 // verdict flags is derived when its evidence is still in scratch, and
 // otherwise refused with the flags to give.
 
-import { appendFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -889,8 +889,10 @@ function append(pr, paths) {
   }
 
   const line = formatRow({ ...fields, run_date: today(), pr, ticket, tier: resolved.tier });
-  if (text === null) writeFileSync(paths.file, `# ${COLUMNS.join("\t")}\n${line}\n`);
-  else appendFileSync(paths.file, `${text === "" || text.endsWith("\n") ? "" : "\n"}${line}\n`);
+  if (text === null) {
+    mkdirSync(dirname(paths.file), { recursive: true });
+    writeFileSync(paths.file, `# ${COLUMNS.join("\t")}\n${line}\n`);
+  } else appendFileSync(paths.file, `${text === "" || text.endsWith("\n") ? "" : "\n"}${line}\n`);
   console.log(line);
 }
 
