@@ -233,9 +233,9 @@ export function withReports(rows, scratch) {
 const IMPLEMENTER_LEAF = /^impl-\d+(?:-[a-z0-9]+)?$/;
 export const isImplementer = (member) => IMPLEMENTER_LEAF.test(member.split("/").pop());
 
-// Every value endingOf() returns on an implementer's row, in its precedence
-// order: `bail:<cause>` for each cause the impl schema admits, since
-// lastReport() keeps only a report that schema accepts, and bailEnding()'s
+// Every value endingOf() returns on an implementer's row: its own literals,
+// `bail:<cause>` for each cause the impl schema admits, since lastReport()
+// keeps only a report that schema accepts, and bailEnding()'s
 // `bail:fixed-refuted`. A non-implementer's row reads blank, which is not here.
 export const ENDINGS = new Set([
   "pr", "blocked",

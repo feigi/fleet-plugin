@@ -37,15 +37,15 @@
 // other width, rows of mixed widths and git conflict markers fail the duty,
 // naming the file, and the file is left as it was; the cost guard after it does
 // not run. So does a row whose cell breaks its column's grammar at the file's
-// width (`run_date` a date; the token, time, `turns`, `cost` and `work_s`
+// width (`run_date` blank or a date; the token, time, `turns` and `cost`
 // columns blank or a non-negative decimal; `harness` omp or claude; `report`
 // blank or a reportStatus() value; `ending` one of endingOf()'s values on an
-// implementer's row, blank on any other), the failure naming the line, the
-// column and its value: a tab inside a cell on every row, or on the only one,
-// makes the file look one column wider and moves each cell after it one
-// column right. Its limit: a tab whose split halves still fit their columns'
-// grammar is widened — a trailing tab in the last cell of a reviewer row is
-// byte for byte a real row one column wider.
+// implementer's row, blank on any other), the failure naming the line and the
+// leftmost column that breaks, with its value: a tab inside a cell on every
+// row, or on the only one, makes the file look one column wider and moves each
+// cell after it one column right. Its limit: a tab whose split halves still fit
+// their columns' grammar is widened — a trailing tab in the last cell of a
+// reviewer row is byte for byte a real row one column wider.
 //
 // COST GUARD. `pr-cost.mjs --guard` rewrites `.fleet/cost-guard.json`, which
 // the router reads and fails closed without. It needs all three metrics TSVs;
@@ -106,12 +106,14 @@ const MEMBER_NAME_AT = MEMBER_COLUMNS.indexOf("member");
 
 // The grammar of every member-outcomes column the widen checks, as [test(cell, cells), what it
 // expected]. The free-text columns (`model`, `effort`, `member`, `agent`, `subagent_type`,
-// `dispatch_model`) and `role` have none here.
+// `dispatch_model`) and `role` have none here, and neither does `work_s`: it is the current
+// width's last column, so no width the widen reads reaches it. A blank `run_date` is unknown —
+// rowsForSession() writes one when no transcript's mtime can be read, or every one is the epoch.
 const DECIMAL = [(v) => /^(?:\d+(?:\.\d+)?)?$/.test(v), "blank or a non-negative decimal"];
 const MEMBER_GRAMMAR = {
-  run_date: [(v) => /^\d{4}-\d{2}-\d{2}$/.test(v), "a YYYY-MM-DD date"],
+  run_date: [(v) => /^(?:\d{4}-\d{2}-\d{2})?$/.test(v), "blank or a YYYY-MM-DD date"],
   tokens_cache_create: DECIMAL, tokens_out: DECIMAL, wall_s: DECIMAL, turns: DECIMAL, tokens_in: DECIMAL,
-  tokens_cache_read: DECIMAL, tokens_cache_write_1h: DECIMAL, cost: DECIMAL, work_s: DECIMAL,
+  tokens_cache_read: DECIMAL, tokens_cache_write_1h: DECIMAL, cost: DECIMAL,
   harness: [(v) => v === "omp" || v === "claude", "omp or claude"],
   report: [(v) => v === "" || REPORT_STATUSES.includes(v), `blank or one of ${REPORT_STATUSES.join(", ")}`],
   ending: [
@@ -119,7 +121,10 @@ const MEMBER_GRAMMAR = {
     "one of endingOf()'s values on an implementer's row, blank on any other",
   ],
 };
-const MEMBER_CHECKED = Object.entries(MEMBER_GRAMMAR).map(([c, [ok, what]]) => ({ c, at: MEMBER_COLUMNS.indexOf(c), ok, what }));
+// In column order, so a row that breaks several columns is refused naming the leftmost.
+const MEMBER_CHECKED = Object.entries(MEMBER_GRAMMAR)
+  .map(([c, [ok, what]]) => ({ c, at: MEMBER_COLUMNS.indexOf(c), ok, what }))
+  .sort((a, b) => a.at - b.at);
 
 // `text`, a member-outcomes TSV at an earlier width, at the current one, with the columns it
 // lacks appended to every row. The file has no header row, so a row's width is the only thing
@@ -129,14 +134,15 @@ const MEMBER_CHECKED = Object.entries(MEMBER_GRAMMAR).map(([c, [ok, what]]) => (
 // one width other than the current or an earlier one, and a file whose rows are not all of
 // one width, throw: parseTsv's refusal to guess a row's columns stands, and this does not
 // widen what it would not read. So does a row with a cell that breaks MEMBER_GRAMMAR for the
-// column it sits in at that width: a tab inside a cell, on every row or the only one, makes a
-// file look one column wider than it is and moves each cell after it one column right, where
-// `agent` lands in `harness` and `cost` in `ending`. Its limit: a tab whose split halves still
-// fit the grammar of the columns they land in is widened — a trailing tab in the last cell of
-// a reviewer row is byte for byte a real row one column wider. A row ending in a CR (a CRLF
-// file) is checked without that CR, and gains its cells before it, so the CR stays the row's
-// last byte. A file with no rows comes back as `{ rows: 0 }`, and one already at the current
-// width as null, unchecked: neither has anything to write.
+// column it sits in at that width, the error naming the leftmost such column: a tab inside a
+// cell, on every row or the only one, makes a file look one column wider than it is and moves
+// each cell after it one column right, where `agent` lands in `harness` and `cost` in
+// `ending`. Its limit: a tab whose split halves still fit the grammar of the columns they land
+// in is widened — a trailing tab in the last cell of a reviewer row is byte for byte a real row
+// one column wider. A row ending in a CR (a CRLF file) is checked without that CR, and gains
+// its cells before it, so the CR stays the row's last byte. A file with no rows comes back as
+// `{ rows: 0 }`, and one already at the current width as null, unchecked: neither has anything
+// to write.
 function widenMembers(text) {
   const lines = text.split("\n");
   const rows = [];
@@ -153,7 +159,8 @@ function widenMembers(text) {
     throw new Error(`malformed row: ${width} fields, expected ${MEMBER_COLUMNS.length} (or an earlier ${MEMBER_FIRST_WIDTH} to ${MEMBER_COLUMNS.length - 1}) — ${row.slice(0, 60)}`);
   }
   const checked = MEMBER_CHECKED.filter(({ at }) => at < width);
-  const split = rows.map((i) => {
+  const added = MEMBER_COLUMNS.slice(width);
+  for (const i of rows) {
     const eol = lines[i].endsWith("\r") ? "\r" : "";
     const cells = lines[i].slice(0, lines[i].length - eol.length).split("\t");
     const bad = checked.find(({ at, ok }) => !ok(cells[at], cells));
@@ -161,10 +168,6 @@ function widenMembers(text) {
       throw new Error(`line ${i + 1}: \`${bad.c}\` is ${JSON.stringify(cells[bad.at])}, expected ${bad.what}, read at ${width} columns`
         + ` — a tab inside a cell, or a hand edit, moves every cell after it one column — ${lines[i].slice(0, 60)}`);
     }
-    return { i, cells, eol };
-  });
-  const added = MEMBER_COLUMNS.slice(width);
-  for (const { i, cells, eol } of split) {
     lines[i] = [...cells, ...added.map((c) => (c === "ending" && isImplementer(cells[MEMBER_NAME_AT]) ? "unknown" : ""))].join("\t") + eol;
   }
   return { text: lines.join("\n"), width, rows: rows.length };

@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { COLUMNS, isImplementer, parseTsv } from "../plugin/scripts/member-outcomes.mjs";
+import { REPORT_STATUSES, reportStatus } from "../plugin/scripts/report-files.mjs";
 import { prUrl, ref } from "./support/queue-gh.mjs";
 
 const REFRESH = fileURLToPath(new URL("../plugin/scripts/metrics-refresh.mjs", import.meta.url));
@@ -144,26 +145,74 @@ for (const [why, body, named] of [
 // #3923: a tab inside a cell on EVERY row (or the only one) passes the
 // one-width check, and the file looks one column wider than it is. The widen
 // checks each row against the grammar of the columns at that width, and the
-// cells a tab shifts break it: `agent` lands in `harness`, `cost` in `ending`.
+// cells a tab shifts break it: `agent` lands in `harness`, `cost` in `ending`,
+// the second half of `session` in `run_date`.
 const tabbed = (r) => ({ ...r, model: "claude\topus-5" });
 for (const [why, text, column] of [
   ["case A: a 20-column file whose every row has a tab inside `model`", tsvAt(20, ROWS.slice(0, 2).map(tabbed)), "harness"],
   ["case B: one 20-column reviewer row with a blank `cost` and a tab inside `model`", tsvAt(20, [tabbed({ ...ROWS[1], cost: "" })]), "harness"],
   ["case C: a 21-column file whose every row has a tab inside `model`", tsvAt(21, ROWS.slice(0, 2).map(tabbed)), "harness"],
   ["a 20-column row whose last cell, `cost`, has a tab inside it", tsvAt(20, [{ ...ROWS[0], cost: "0.5\tx" }]), "ending"],
+  ["a 20-column reviewer row whose last cell, `cost`, has a tab inside it", tsvAt(20, [{ ...ROWS[1], cost: "0.5\tx" }]), "ending"],
+  ["a 20-column row with a tab inside `session`", tsvAt(20, [{ ...ROWS[0], session: SESSION.replace("_", "\t") }]), "run_date"],
+  ["a 20-column row with a tab inside `model` and a filled `report`, which breaks a later column too", tsvAt(20, [tabbed({ ...ROWS[0], report: "ok" })]), "harness"],
 ]) {
-  test(`${why} fails the widen, naming ${column}, and leaves the file as it was`, () => {
-    const w = workspace(text);
-    const r = refresh(w.repo);
-    assert.equal(r.status, 1, r.stdout);
-    assert.match(r.stderr, /metrics-refresh: member-outcomes failed: docs\/metrics\/member-outcomes\.tsv: /);
-    assert.match(r.stderr, new RegExp(`\`${column}\``));
-    assert.match(r.stderr, /tab inside a cell/);
-    assert.doesNotMatch(r.stdout, /widened/);
-    assert.equal(w.text(), text);
-    assert.equal(existsSync(`${w.file}.tmp`), false);
-  });
+  test(`${why} fails the widen, naming ${column}, and leaves the file as it was`, () => refusesNaming(text, column));
 }
+
+// The refused row is the file's first data row in every case here, so the
+// error names its line in the file, counted from 1 with the comments.
+function refusesNaming(text, column) {
+  const w = workspace(text);
+  const r = refresh(w.repo);
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stderr, /metrics-refresh: member-outcomes failed: docs\/metrics\/member-outcomes\.tsv: /);
+  const line = text.split("\n").findIndex((l) => l.trim() && !l.startsWith("#")) + 1;
+  assert.match(r.stderr, new RegExp(`: line ${line}: \`${column}\` is `));
+  assert.match(r.stderr, /tab inside a cell/);
+  assert.doesNotMatch(r.stdout, /widened/);
+  assert.equal(w.text(), text);
+  assert.equal(existsSync(`${w.file}.tmp`), false);
+}
+
+// Each rule of the grammar refuses on its own: one row, one cell that breaks
+// its column's rule — the shape a hand edit leaves — and every other cell
+// fitting, so the column the error names is that cell's.
+for (const [why, width, row, column] of [
+  ["a `run_date` that only starts with a date", 20, { ...ROWS[0], run_date: "2026-10-03x" }, "run_date"],
+  ["a negative token count", 20, { ...ROWS[0], tokens_out: "-1" }, "tokens_out"],
+  ["a `turns` with trailing garbage", 20, { ...ROWS[0], turns: "9x" }, "turns"],
+  ["a `tokens_in` with trailing whitespace", 20, { ...ROWS[0], tokens_in: "100 " }, "tokens_in"],
+  ["a `harness` other than omp or claude", 20, { ...ROWS[0], harness: "x" }, "harness"],
+  ["a `report` that no reportStatus() returns", 20, { ...ROWS[0], report: "bogus" }, "report"],
+  ["an implementer row with a blank `ending`", 21, { ...ROWS[0], ending: "" }, "ending"],
+  ["a reviewer row with a non-blank `ending`", 21, { ...ROWS[1], ending: "pr" }, "ending"],
+]) {
+  test(`a ${width}-column row with ${why} fails the widen, naming ${column}, and leaves the file as it was`, () => refusesNaming(tsvAt(width, [row]), column));
+}
+
+// The widen refuses a `report` cell outside REPORT_STATUSES, so the list must
+// be exactly what reportStatus() can return: each `state: "…"` readAt() and
+// readReportIn() return, and reportStatus()'s own literal. A state added or
+// dropped there without REPORT_STATUSES following fails here.
+test("REPORT_STATUSES is every value reportStatus() returns, and nothing else", () => {
+  const src = readFileSync(new URL("../plugin/scripts/report-files.mjs", import.meta.url), "utf8");
+  const body = (sig) => src.slice(src.indexOf(sig), src.indexOf("\n}\n", src.indexOf(sig)));
+  const states = ["function readAt(", "export function readReportIn("].flatMap((sig) => [...body(sig).matchAll(/state: "([^"]*)"/g)].map((m) => m[1]));
+  const own = [...body("export function reportStatus(").matchAll(/"([^"]*)"/g)].map((m) => m[1]);
+  assert.ok(states.includes("absent") && own.includes("-"), "the scan reads readAt()'s and reportStatus()'s own returns");
+  assert.deepEqual([...REPORT_STATUSES].sort(), [...new Set([...states, ...own])].sort());
+
+  const scratch = tempDir("report-statuses-");
+  mkdirSync(join(scratch, "reports"));
+  writeFileSync(join(scratch, "reports", "impl-20.json"), "not json");
+  writeFileSync(join(scratch, "reports", "impl-21.json"), JSON.stringify({
+    member: "impl-21", outcome: "bailed", pr: null, head: null, branch: "implementer/impl-21",
+    sizing: null, bailCause: "undecided", bailDetail: "needs a human line", confirmation: [],
+  }));
+  const seen = ["Explore", "impl-19", "impl-20", "impl-21"].map((m) => reportStatus(scratch, m));
+  assert.deepEqual(seen, ["-", "absent", "invalid", "ok"]);
+});
 
 // What the check must ACCEPT: every column it reads, at each width, filled
 // the ways a real file fills it, in a CRLF file, whose last cell ends in `\r`.
@@ -175,6 +224,7 @@ for (const width of [20, 21, 22]) {
       full({ member: "merge-bot-7", role: "merge-bot", agent: "merge-bot-7", report: "absent", cost: "" }),
       full({ member: "Explore", role: "other", agent: "explore-1", report: "-" }),
       full({ member: "impl-12", ticket: "12", agent: "impl-12", report: "invalid", ending: "bail:fixed-refuted" }),
+      full({ member: "impl-13", ticket: "13", agent: "impl-13", run_date: "", ending: "pr" }),
     ];
     const w = workspace(tsvAt(width, rows).replace(/\n/g, "\r\n"));
     const r = refresh(w.repo);
