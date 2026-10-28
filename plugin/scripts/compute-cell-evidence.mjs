@@ -7,7 +7,8 @@
 // places it.
 //
 // What this part holds is the guard section: what the cost guard holds each
-// implementer Cell to, from the guard file and nothing recomputed, and "Declared,
+// implementer Cell to, from the guard file and nothing recomputed, with this
+// run's Pulls booked to each Cell off the board's cards, and "Declared,
 // not measured". Figures show only from a guard `readCostGuard` (fleet-tick.mjs,
 // the reader the tick judges the file by) accepts; `guard` here is that reader's
 // own answer, `{ status: "ok", guard }` or `{ status: "missing" | "unreadable" }`.
@@ -316,7 +317,31 @@ function guardHeading(g) {
   return { state, heading, source };
 }
 
-function guardSection(read, receipts, modelRoles) {
+// "this run's Pulls" on an entry, and a target for every generation a card
+// links to on it. `pulls` is each card's `{ issue, cell, mark, targets }`, booked
+// As-routed: listed under the Pull's Cell, mark and all, whether or not it has an
+// Admissible row. A generation no figures, older row or "no figures yet" carries
+// gets a "no figures yet for <model>" of its own (the card's model), so a card's
+// link lands in every state: the entry's own "no figures yet" takes it when it
+// names no model.
+function booked(entry, pulls) {
+  const cell = entry.cell;
+  const out = { ...entry, pulls: pulls.filter((p) => p.cell === cell).map((p) => ({ issue: p.issue, href: `#board/${p.issue}`, mark: p.mark })), unfigured: [] };
+  const has = new Set([out.figures?.generation, ...out.older.map((o) => o.generation), out.none?.generation].filter(Boolean));
+  for (const t of pulls.flatMap((p) => p.targets)) {
+    if (t.cell !== cell || !t.generation || has.has(t.generation)) continue;
+    has.add(t.generation);
+    const none = { text: `no figures yet for ${t.generation}`, generation: t.generation, anchor: `cell-${cell}@${t.generation}` };
+    if (out.none !== null && out.none.anchor === null) out.none = { ...out.none, ...none };
+    else out.unfigured.push(none);
+  }
+  return out;
+}
+
+// The Cells drawn: the five, then any the guard holds or a card names beyond them.
+const drawOrder = (held, pulls) => [...new Set([...CELLS, ...held, ...pulls.flatMap((p) => p.targets.map((t) => t.cell)).filter((c) => CELL.test(c))])];
+
+function guardSection(read, receipts, modelRoles, pulls) {
   const label = readLabel(modelRoles);
   const refresh = newestRefresh(receipts);
   const notes = [];
@@ -339,7 +364,7 @@ function guardSection(read, receipts, modelRoles) {
       heading: "no cost guard",
       source: null,
       notes,
-      cells: CELLS.map((cell) => guardEntry(cell, stub, byCell, modelRoles, footnotes)),
+      cells: drawOrder([], pulls).map((cell) => booked(guardEntry(cell, stub, byCell, modelRoles, footnotes), pulls)),
       footnotes,
     };
   }
@@ -347,8 +372,8 @@ function guardSection(read, receipts, modelRoles) {
   const g = read.guard;
   const { state, heading, source } = guardHeading(g);
   const byCell = new Map(g.cells.map((c) => [c.cell, c]));
-  const order = [...CELLS, ...g.cells.map((c) => c.cell).filter((c) => !CELLS.includes(c))];
-  const cells = order.map((cell) => guardEntry(cell, g, byCell, modelRoles, footnotes));
+  const order = drawOrder(g.cells.map((c) => c.cell), pulls);
+  const cells = order.map((cell) => booked(guardEntry(cell, g, byCell, modelRoles, footnotes), pulls));
 
   const missing = FIELD_WORDS.filter(([key]) => g.cells.some((c) => count(c[key]) === null)).map(([, words]) => words);
   if (missing.length > 0) notes.push(`not checked: this guard predates the ${missing.join(", ")}`);
@@ -396,12 +421,14 @@ function declaredSection(agents, modelRoles) {
  * is `{ phase0, closeout }`, each the receipt's `metrics` step `{ status, at,
  * output }` or null, `agents` is `{ list: [{ file, model }], error }`, and
  * `modelRoles` the carried `{ value, readAt, error }` or null — `error` being
- * `{ at, message }`. An input left out reads as nothing read: a missing guard,
- * no receipt, no definitions, no `modelRoles` read.
+ * `{ at, message }`, and `pulls` this run's Pulls, one per card with a Cell line:
+ * `{ issue, cell, mark, targets: [{ cell, generation }] }` (compute-board.mjs's
+ * cellLine). An input left out reads as nothing read: a missing guard, no
+ * receipt, no definitions, no `modelRoles` read, no Pull.
  */
-export function computeCellEvidence({ guard, receipts, agents, modelRoles = null }) {
+export function computeCellEvidence({ guard, receipts, agents, modelRoles = null, pulls = [] }) {
   return {
-    guard: guardSection(guard, receipts, modelRoles),
+    guard: guardSection(guard, receipts, modelRoles, pulls),
     declared: declaredSection(agents, modelRoles),
   };
 }

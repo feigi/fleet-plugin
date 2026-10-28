@@ -33,9 +33,13 @@
 // fleet-tick.mjs's I/O and main() never run here, main() being guarded on
 // argv[1].
 import { assessBeat, isStalled, isReported, stallReport, NO_OWNER } from "./fleet-state.mjs";
-import { parseToken, rowPr, premisesOf, HALT_CAUSES, REVIEW } from "./ledger-grammar.mjs";
+import { parseToken, rowPr, premisesOf, HALT_CAUSES, REVIEW, CELL, POLICY_CELL, parseRoutedEntry, tierValues, cellValues } from "./ledger-grammar.mjs";
 import { latestFinisherAttempts, foldLedger, pastPinDue } from "./fleet-tick.mjs";
 import { computeCellEvidence } from "./compute-cell-evidence.mjs";
+import { admissibleRow, lastSegment } from "./pull-attribution.mjs";
+import { dispatchModel } from "./member-outcomes.mjs";
+import { HEAVY_BRIEF_CHARS, HEAVY_CRITERIA } from "./ticket-router.mjs";
+import { implementerCell, modelsEqual } from "./tier-roles.mjs";
 
 // A ledger row is freeform, controller-authored text. Two example shapes:
 //   #<n> impl-<n>=PR#<m> → PR#<m> → MERGED 73b356de
@@ -303,6 +307,186 @@ export function deriveFlags(parsed, ctx) {
 
 const isBadge = (flag) => flag === "excluded" || flag.startsWith("excluded:");
 
+// ---------------------------------------------------------------------------
+// The card's Cell line: which Cell the card's latest Pull ran on, and why.
+// ---------------------------------------------------------------------------
+
+// A part of a Cell line: its words, whether they are a hole drawn dim and
+// italic ("not on record"), the hash it links to, and the separator the page
+// puts before it (" · " unless said otherwise).
+const NOT_ON_RECORD = "not on record";
+const part = (text, o = {}) => ({ text, dim: false, href: null, sep: " · ", ...o });
+const hole = (o = {}) => part(NOT_ON_RECORD, { dim: true, ...o });
+const grouped = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+
+// A transcript's member record, as gather() keeps it, put the way the figures
+// read an implementer row (member-outcomes.mjs): its definition, its level
+// ("-" is no level), and its dispatch model keyed as the Cell generation is.
+function dispatchRecord(m) {
+  return {
+    subagentType: typeof m.subagent_type === "string" ? m.subagent_type : "",
+    effort: typeof m.thinking === "string" && m.thinking !== "-" ? m.thinking : "",
+    dispatchModel: dispatchModel(m.resolvedModelIdentity),
+    resolved: m.resolvedModelIdentity ?? null,
+    model: m.model ?? null,
+  };
+}
+
+// The row's implementers, in attempt order: its own ticket's impl tokens, or
+// every impl token when it names none of its own.
+function implementersOf(row, issue) {
+  const all = row.split(/\s+/).map(parseToken).filter((t) => t && !t.error && t.family === "impl");
+  const own = all.filter((t) => t.number === issue);
+  const seen = new Set();
+  return (own.length ? own : all)
+    .filter((t) => !seen.has(t.name) && seen.add(t.name))
+    .sort((a, b) => a.number - b.number || (a.retry ?? "").localeCompare(b.retry ?? ""))
+    .map((t) => t.name);
+}
+
+// The words of a recorded reason, after the draw's, and whether they name the
+// policy row. `REASON` keeps only the first thing that went wrong, and nothing
+// here guesses the rest.
+function reasonWords(r, table) {
+  const drawn = r.draw !== null;
+  const row = `${r.objective} row`;
+  switch (r.reason) {
+    case "ok": {
+      if (drawn) return [];
+      const follows = table !== null && !Object.hasOwn(table.rows[r.objective], r.stratum);
+      const href = `#cells/row/${r.objective}/${follows ? "*" : r.stratum}`;
+      return [part(`${row}, ${r.stratum}`, { href }), ...(follows ? [part("follows *")] : [])];
+    }
+    case "table-cell-tripped": {
+      const named = r.tripped.length === 1 ? `${row}'s ${r.tripped[0]}` : `${row}'s Cell (one of ${r.tripped.join(", ")})`;
+      return [part(`${named} tripped${drawn ? "" : ": default Cell"}`, { href: `#cells/row/${r.objective}/${r.stratum}` })];
+    }
+    case "guard-tripped":
+      return [part(drawn ? `left out as tripped: ${r.tripped.join(", ")}` : "every other Cell tripped: no draw")];
+    case "guard-missing": return [part("no cost guard yet: default Cell only")];
+    case "no-issue-json": return [part("issue unreadable when routed")];
+    case "no-sizing": return [part("no sizing")];
+    default: return [part(`recorded as ${r.reason}`)];
+  }
+}
+
+// The Stratum and the numbers that set it.
+function stratumWords(r) {
+  if (r.sized !== null) return `${r.stratum}: sized ${r.sized}`;
+  if (r.brief === null) return `${r.stratum}: no brief read`;
+  if (r.reason === "no-sizing") return `${r.stratum}: no sizing`;
+  const past = (n, at) => `${n > at ? "past" : "not past"} ${grouped(at)}`;
+  return `${r.stratum}: ${grouped(r.brief)} chars (${past(r.brief, HEAVY_BRIEF_CHARS)}), ${r.criteria} criteria (${past(r.criteria, HEAVY_CRITERIA)})`;
+}
+
+// "<model> · <level>" off a dispatch record, holes where it carries none.
+function modelParts(rec, sep) {
+  if (rec === null) return [hole({ sep })];
+  return [rec.dispatchModel ? part(rec.dispatchModel, { sep }) : hole({ sep }), rec.effort ? part(rec.effort) : hole()];
+}
+
+const cellHref = (cell, generation) => `#cells/${cell}${generation ? `@${generation}` : ""}`;
+
+/**
+ * The Cell line of a card whose ledger row has an impl token, or
+ * null when it has none: `{ cell, generation, lines: [why, stratum], mark,
+ * targets }`. `generation` is the Pull's (its first Admissible implementer's
+ * dispatch model), null when none is on record; `targets` is every guard entry
+ * the line links to, `{ cell, generation }`, its Cell's and a rescue's.
+ * `lines` are lists of parts (`part` above); `mark` is null or `{ text,
+ * severity }`, severity `amber` or `red` (red: the Pull counts in no Cell's
+ * figures). `routed` is the ledger's `## Routed` entries, `agents` its
+ * `## Dispatched` member → `agent=` map, `members` each implementer's member
+ * record by name (`{ model, resolvedModelIdentity, thinking, subagent_type }`)
+ * and `table` the installed router table, or null. Pure: the Routing is shown
+ * as recorded and never re-checked against today's guard.
+ */
+export function cellLine({ row, issue, routed = [], agents = {}, members = new Map(), table = null }) {
+  const names = implementersOf(row, issue);
+  if (names.length === 0) return null;
+
+  // The latest Pull: the last implementer with a `## Routed` entry, those after
+  // it rescues or retries under it. A row with no entry predates the Routing,
+  // and its latest Pull is its latest impl token, at the row's Cell: its
+  // `tier=` is rewritten to the Cell each later implementer runs at, so an
+  // earlier one cannot be told off a rescue.
+  const entries = new Map();
+  for (const e of routed) {
+    const sp = typeof e === "string" ? e.indexOf(" ") : -1;
+    if (sp === -1 || entries.has(e.slice(0, sp))) continue;
+    entries.set(e.slice(0, sp), { routing: parseRoutedEntry(e)?.routing ?? null, raw: e.slice(sp + 1) });
+  }
+  const start = names.findLastIndex((n) => entries.has(n));
+  const under = start === -1 ? names.slice(-1) : names.slice(start);
+  const recorded = start === -1 ? null : entries.get(names[start]);
+  const routing = recorded?.routing ?? null;
+  const cell = routing?.cell ?? tierValues(row)[0] ?? cellValues(row)[0] ?? POLICY_CELL;
+  const level = CELL.exec(cell)?.[2] ?? null;
+  const expected = `fleet-implementer-${cell}`;
+
+  const recs = under.map((n) => (members.has(n) ? dispatchRecord(members.get(n)) : null));
+  const tierOk = (n) => row.split(/\s+/).find((w) => w.startsWith(`tier-ok=${n}:`))?.slice(`tier-ok=${n}:`.length) || null;
+  const ranAs = (n, i) => (Object.hasOwn(agents, n) ? agents[n] : null) ?? tierOk(n) ?? (recs[i]?.subagentType || null);
+  const admissible = recs.map((rec) => (rec === null ? null : admissibleRow(rec, cell)));
+  const firstAdmissible = admissible.indexOf(true);
+  const generation = firstAdmissible === -1 ? null : recs[firstAdmissible].dispatchModel;
+
+  // Line 1: the Cell, then why. A `tier=` that names no Cell (a hand-edited
+  // row) has no guard entry to land on, so it links nowhere and books nothing.
+  const isCell = CELL.test(cell);
+  const why = [part(cell, { href: isCell ? cellHref(cell, generation) : null, sep: "" })];
+  const targets = isCell ? [{ cell, generation }] : [];
+  if (routing !== null) {
+    if (routing.draw !== null) why.push(part(`drawn ${routing.draw.k} of ${routing.draw.K}: ${routing.by === "burn-in" ? "burn-in" : "every 5th Pull"}`));
+    why.push(...reasonWords(routing, table));
+  } else if (recorded !== null) {
+    why.push(part(`recorded as ${recorded.raw}`));
+  } else {
+    const route = row.split(/\s+/).find((w) => w.startsWith("route="));
+    why.push(route ? part(`recorded as ${route.slice("route=".length)}`) : hole());
+  }
+  const rescue = under.map((n, i) => ({ i, at: i === 0 ? null : implementerCell(ranAs(n, i) ?? "") })).findLast((x) => x.at !== null && x.at !== cell);
+  if (rescue !== undefined) {
+    const rec = recs[rescue.i];
+    const gen = rec !== null && admissibleRow(rec, rescue.at) ? rec.dispatchModel : null;
+    why.push(part(`rescue at ${rescue.at}`, { href: cellHref(rescue.at, gen) }), ...modelParts(rec, " "));
+    targets.push({ cell: rescue.at, generation: gen });
+  }
+
+  // Line 2: the Stratum with its numbers, then the model and level of the
+  // Pull's first implementer at its Cell.
+  const shown = recs[firstAdmissible === -1 ? 0 : firstAdmissible];
+  const stratum = [routing !== null ? part(stratumWords(routing), { sep: "" }) : hole({ sep: "" }), ...modelParts(shown, " · ")];
+  if (shown !== null && shown.model !== null && shown.resolved !== null && !modelsEqual(shown.model, shown.resolved)) {
+    stratum.push(part(`fell back to ${shown.model}`));
+  }
+
+  // The mark: the first implementer, the one the Pull's Cell binds, ran off it.
+  let mark = null;
+  const first = recs[0];
+  const said = ranAs(under[0], 0);
+  let off = null;
+  if (admissible[0] !== true) {
+    const defOff = first !== null ? first.subagentType !== expected : said !== null && said !== expected;
+    if (defOff) {
+      const as = said !== null && said !== expected ? said : first?.subagentType || "no definition on record";
+      off = { first: `first ran as ${as}`, alone: `ran as ${as}` };
+    } else if (first !== null && !first.dispatchModel) {
+      off = { first: "first ran with no model on record", alone: "no model on record" };
+    } else if (first !== null && first.effort !== level) {
+      const at = first.effort ? `at ${first.effort}` : "with no thinking level on record";
+      off = { first: `first ran ${at}, not ${level}`, alone: `ran ${at}, not ${level}` };
+    }
+  }
+  if (off !== null) {
+    if (admissible.slice(1).includes(true)) mark = { text: `⚑ ${off.first}`, severity: "amber" };
+    else if (admissible.includes(null)) mark = { text: `⚑ ${off.alone}: not checked`, severity: "amber" };
+    else mark = { text: `⚑ ${off.alone}: no Admissible row, so it counts in no Cell's figures`, severity: "red" };
+  }
+
+  return { cell, generation, lines: [why, stratum], mark, targets };
+}
+
 // Internal helpers — not exported; covered through computeBoard's tests.
 
 // Carry the stage-entry timestamp forward while the column is unchanged, else
@@ -484,8 +668,13 @@ export function computeBoard(inputs) {
   const parsed = [];
   for (const [i, row] of rows.entries()) {
     const p = parseRow(row);
-    if (p) parsed.push({ ...p, malformed: p.malformed || fold.malformed.has(i) });
+    if (p) parsed.push({ ...p, row, malformed: p.malformed || fold.malformed.has(i) });
   }
+  // Each implementer's member record by its name, for the Cell lines: the
+  // transcripts gather() read, this run's session's or, between runs, the
+  // previous run's.
+  const members = new Map((inputs.implementers || []).map((m) => [lastSegment(m.member), m]));
+  const lineInputs = { routed: ledger.routed || [], agents: ledger.agents || {}, members, table: inputs.routerTable };
   // The ticket row each PR's latest attempt settled to, first row wins.
   const claimedBy = new Map();
   for (const p of parsed) if (p.impl !== null && p.pr != null && !claimedBy.has(p.pr)) claimedBy.set(p.pr, p);
@@ -540,6 +729,9 @@ export function computeBoard(inputs) {
       sinceEnteredStage,
       flags,
       ruling: p.pr != null ? (ruledByPr.get(p.pr) ?? null) : null,
+      // A POOL card (an Exclusion) carries none, and cellLine gives a PR-only
+      // row none, since it has no impl token.
+      cellLine: column === "POOL" ? null : cellLine({ row: p.row, issue: p.issue, ...lineInputs }),
     });
   }
 
@@ -558,7 +750,7 @@ export function computeBoard(inputs) {
     const sinceEnteredStage = stageEntry(prevByIssue.get(iss.number), "POOL", now);
     tickets.push({
       issue: iss.number, title: iss.title, column: "POOL", agent: null,
-      pr: null, ci: null, sinceEnteredStage, flags: [], ruling: null,
+      pr: null, ci: null, sinceEnteredStage, flags: [], ruling: null, cellLine: null,
     });
   }
 
@@ -644,7 +836,8 @@ export function computeBoard(inputs) {
     attention,
     // The Cell evidence tab's model (compute-cell-evidence.mjs), built from the
     // guard, the receipts' metrics steps, the definitions and the carried
-    // `modelRoles` read gather() answered. A caller that read none of them
+    // `modelRoles` read gather() answered, and this run's Pulls: each card's
+    // Cell line, booked As-routed to its Cell. A caller that read none of them
     // (every hand-built input in this suite) gets the tab's no-guard state:
     // computeCellEvidence reads an input left out as nothing read.
     cellEvidence: computeCellEvidence({
@@ -652,6 +845,7 @@ export function computeBoard(inputs) {
       receipts: inputs.receipts,
       agents: inputs.agents,
       modelRoles: inputs.modelRoles,
+      pulls: tickets.filter((t) => t.cellLine).map((t) => ({ issue: t.issue, cell: t.cellLine.cell, mark: t.cellLine.mark, targets: t.cellLine.targets })),
     }),
     // The `omp config get modelRoles` read, carried tick to tick the way `ci`
     // and `repo` are: `{ value, readAt, error }`, read at most once a minute.
