@@ -69,7 +69,7 @@
     border-radius:6px 6px 0 0; margin-bottom:-1px; }
   #tabs a:hover { color:var(--fg); }
   #tabs a.on { color:var(--fg); background:var(--bg); border-color:var(--line); }
-  /* A hash link's target flashes once on arrival. */
+  /* A hash link's target flashes once on arrival. The duration is FLASH_MS in the script. */
   .card.flash { animation:flash 1.2s ease-out 1; }
   @keyframes flash { from { box-shadow:0 0 0 2px var(--blue); background:#12233a; } to { box-shadow:0 0 0 2px transparent; } }
   footer .filed { margin-top:4px; }
@@ -133,18 +133,26 @@ function boardTitle(repo) { return repo ? `${TITLE} — ${repo}` : TITLE; }
 // have, a target the tab does not have — lands on Board's top, or the named
 // tab's top, never on a blank page and never on an error.
 function routeHash(hash) {
-  const [tab, target, ...more] = String(hash ?? "").replace(/^#/, "").split("/");
-  if (tab === "board") return { tab, target: more.length === 0 && /^[1-9]\d*$/.test(target ?? "") ? target : null };
+  const [tab, target, ...more] = String(hash).replace(/^#/, "").split("/");
+  if (tab === "board") return { tab, target: more.length === 0 && /^[1-9]\d*$/.test(target) ? target : null };
   if (tab === "tokens") return { tab, target: null };
   return { tab: "board", target: null };
 }
 
-// Which tab is open and which card is still owed a scroll. The cards are
-// rebuilt every tick, so a hash that arrives before the first render (a
-// reload, a pasted link) cannot scroll yet: it waits here for the render.
-const TABS = ["board", "tokens"];
+// Each tab, and the pane it opens.
+const PANES = { board: "board", tokens: "spend" };
+
+// Which card is still owed a scroll. The cards are rebuilt every tick, so a
+// hash that arrives before the first render (a reload, a pasted link) cannot
+// scroll yet: it waits here for the render.
 let rendered = false;
 let pending = null;
+
+// The card flashing now, and when it started. A tick rebuilds every card, so
+// the flash lives here rather than on a node the next tick throws away.
+// FLASH_MS is `.card.flash`'s animation duration.
+const FLASH_MS = 1200;
+let flashing = null;
 
 const el = (t, cls, txt) => { const e = document.createElement(t); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
 const mins = (ms) => Math.floor((Date.now() - ms) / 60000);
@@ -415,7 +423,9 @@ function render(m) {
   // Last, once the banner and footer have taken their place in the layout, so
   // a card scrolled to is scrolled to where it will stay.
   rendered = true;
-  settle();
+  // Its own catch: the board above is already written, so a failed scroll is
+  // not a failed render.
+  try { settle(); } catch (e) { warn("⚠ scroll to card failed: " + e.message); }
 }
 
 // The heartbeat's mark, rendered. A dead run's tickets keep the label
@@ -481,6 +491,9 @@ function card(t) {
   for (const f of t.flags || []) meta.append(el("span", "badge flag", f));
   if (t.ruling) meta.append(el("span", "badge", "ruled:" + t.ruling));
   c.append(meta);
+  // A card rebuilt mid-flash picks the flash up where it was, not from the start.
+  const age = flashing && flashing.issue === String(t.issue) ? Date.now() - flashing.at : Infinity;
+  if (age < FLASH_MS) flash(c, age);
   return c;
 }
 
@@ -501,35 +514,43 @@ function warn(msg) {
 // panes stay in the page either way, so a tick keeps filling both.
 function applyHash() {
   const r = routeHash(location.hash);
-  document.getElementById("board").hidden = r.tab !== "board";
-  document.getElementById("spend").hidden = r.tab !== "tokens";
-  for (const t of TABS) {
+  for (const [t, pane] of Object.entries(PANES)) {
+    const on = t === r.tab;
+    document.getElementById(pane).hidden = !on;
     const a = document.getElementById("tab-" + t);
-    a.classList.toggle("on", t === r.tab);
-    if (t === r.tab) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+    a.classList.toggle("on", on);
+    if (on) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
   }
-  pending = { target: r.target };
-  if (rendered) settle();
+  pending = r;
+  settle();
 }
 
 // The arrival: the target card scrolls into view and flashes once; no target,
 // or a target no card on the board carries, lands on the tab's top. Taken
-// off `pending` first, so a later tick never scrolls the page again.
+// off `pending` first, so a later tick never scrolls the page again; nothing
+// settles before the first render.
 function settle() {
-  if (!pending) return;
+  if (!pending || !rendered) return;
   const { target } = pending;
   pending = null;
-  const card = target && document.getElementById("card-" + target);
-  if (!card) {
+  const hit = target && document.getElementById("card-" + target);
+  if (!hit) {
     window.scrollTo(0, 0);
     document.getElementById("spend").scrollTop = 0;
     return;
   }
-  card.scrollIntoView({ block: "center" });
-  card.classList.remove("flash");
-  void card.offsetWidth; // restart the animation when the same card is targeted again
-  card.classList.add("flash");
-  card.addEventListener("animationend", () => card.classList.remove("flash"), { once: true });
+  hit.scrollIntoView({ block: "center" });
+  flashing = { issue: target, at: Date.now() };
+  flash(hit, 0);
+}
+
+// Runs the flash on a card `age` ms into it.
+function flash(node, age) {
+  node.classList.remove("flash");
+  void node.offsetWidth; // restart the animation when the same card is targeted again
+  node.style.animationDelay = -age + "ms";
+  node.classList.add("flash");
+  node.addEventListener("animationend", () => node.classList.remove("flash"), { once: true });
 }
 
 async function poll() {
@@ -558,6 +579,7 @@ async function poll() {
 function boot() {
   window.addEventListener("hashchange", applyHash);
   document.addEventListener("click", (e) => {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     const a = e.target.closest?.('a[href^="#"]');
     if (a && a.getAttribute("href") === location.hash) { e.preventDefault(); applyHash(); }
   });

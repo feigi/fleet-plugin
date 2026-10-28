@@ -131,17 +131,20 @@ test("board.html's <script> still ends in a boot() call this file strips", () =>
 const STATIC_IDS = new Set(["heading", "age", "stale-banner", "attention", "tabs", "tab-board", "tab-tokens", "board", "spend", "footer"]);
 
 class Node {
-  constructor() { this.children = []; this.style = {}; this.className = ""; this.attrs = {}; this.listeners = {}; this.scrollTop = 0; this.offsetWidth = 0; }
+  constructor(tag) { this.tag = tag; this.children = []; this.style = {}; this.className = ""; this.attrs = {}; this.listeners = {}; this.scrollTop = 0; }
   get classList() {
     const set = () => new Set(this.className.split(/\s+/).filter(Boolean));
     const write = (s) => { this.className = [...s].join(" "); };
+    const op = (name, c) => this.log?.push(["class", this.id, name, c]);
     return {
-      add: (c) => write(set().add(c)),
-      remove: (c) => { const s = set(); s.delete(c); write(s); },
+      add: (c) => { op("add", c); write(set().add(c)); },
+      remove: (c) => { op("remove", c); const s = set(); s.delete(c); write(s); },
       toggle: (c, on) => { const s = set(); if (on) s.add(c); else s.delete(c); write(s); },
       contains: (c) => set().has(c),
     };
   }
+  // Reading it is a reflow, which is what restarts a CSS animation.
+  get offsetWidth() { this.log?.push(["reflow", this.id]); return 0; }
   set innerHTML(_) { this.children = []; }
   append(...nodes) { this.children.push(...nodes); }
   replaceChildren(...nodes) { this.children = nodes; }
@@ -162,21 +165,29 @@ function harness() {
     }
     return null;
   };
-  const document = {
+  const listen = (target) => Object.assign(target, {
+    listeners: {},
+    addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); },
+  });
+  const document = listen({
     title: "",
-    createElement: () => { const n = new Node(); n.log = log; return n; },
+    createElement: (tag) => { const n = new Node(tag); n.log = log; return n; },
     createTextNode: (text) => ({ text }),
     getElementById(id) {
       if (statics.has(id)) return statics.get(id);
-      if (STATIC_IDS.has(id)) { const n = this.createElement(); n.id = id; statics.set(id, n); return n; }
+      if (STATIC_IDS.has(id)) { const n = this.createElement("div"); n.id = id; statics.set(id, n); return n; }
       for (const s of statics.values()) { const hit = find(s, id); if (hit) return hit; }
       return null; // a real document answers null for an id nothing carries
     },
-  };
+  });
   const location = { hash: "" };
-  const window = { scrollTo: (x, y) => log.push(["scrollTo", x, y]) };
-  const { render, applyHash } = new Function("document", "location", "window",
-    `${SCRIPT_SRC}\nreturn { render, applyHash };`)(document, location, window);
+  const window = listen({ scrollTo: (x, y) => log.push(["scrollTo", x, y]) });
+  // poll()'s fetch never answers, so a boot() here starts one poll and no more.
+  const fetches = [];
+  const fetch = (url) => { fetches.push(url); return new Promise(() => {}); };
+  const clock = { now: Date.now() };
+  const { render, applyHash, boot } = new Function("document", "location", "window", "fetch", "setTimeout", "Date",
+    `${SCRIPT_SRC}\nreturn { render, applyHash, boot };`)(document, location, window, fetch, () => {}, { now: () => clock.now });
   const model = (o = {}) => ({
     interval: 15, repoUrl: null, generatedAt: Date.now(),
     attention: [], tickets: [], spend: null, queue: {}, filed: [], ...o,
@@ -184,7 +195,7 @@ function harness() {
   const open = (hash) => { location.hash = hash; applyHash(); };
   const scrolls = () => log.filter((e) => e[0] === "scrollIntoView").map((e) => e[1]);
   const tops = () => log.filter((e) => e[0] === "scrollTo");
-  return { document, render, open, model, log, scrolls, tops };
+  return { document, location, window, render, boot, open, model, log, scrolls, tops, fetches, clock };
 }
 
 const paneState = (document) => ({
@@ -214,6 +225,7 @@ test("an attention-strip ticket links #board/<issue>, to a route routeHash resol
   const { document, render, model } = harness();
   render(model({ attention: [{ issue: 3891, flags: ["stale"] }, { issue: 7, flags: ["red-ci", "stall"] }] }));
   const links = document.getElementById("attention").children;
+  assert.deepEqual(links.map((a) => a.tag), ["a", "a"], "each entry is a link");
   assert.deepEqual(links.map((a) => a.href), ["#board/3891", "#board/7"]);
   for (const a of links) {
     assert.equal(a.target, undefined, "a hash link must not open a new window");
@@ -231,16 +243,45 @@ test("a card is the target of its own link: its id is the one settle looks for",
 });
 
 test("#board/<issue> scrolls its card into view and flashes it once, when the card is already drawn", () => {
-  const { document, render, model, open, scrolls } = harness();
+  const { document, render, model, open, scrolls, log } = harness();
   render(model({ tickets: [{ issue: 12, column: "POOL" }, { issue: 13, column: "REVIEW" }] }));
   open("#board/13");
   assert.deepEqual(scrolls(), ["card-13"]);
+  assert.deepEqual(log.find((e) => e[0] === "scrollIntoView")[2], { block: "center" }, "the card lands mid-column, not at an edge");
   const card = document.getElementById("card-13");
   assert.ok(card.classList.contains("flash"));
   assert.ok(!document.getElementById("card-12").classList.contains("flash"), "only the target flashes");
   // The animation ends once; the class must come off with it so a later arrival can flash again.
   for (const fn of card.listeners.animationend) fn();
   assert.ok(!card.classList.contains("flash"));
+});
+
+test("the flash runs once, for FLASH_MS", () => {
+  const css = HTML.match(/\.card\.flash\s*\{\s*animation:\s*flash\s+([\d.]+)s\s+[\w-]+\s+(\S+?);?\s*\}/);
+  const ms = HTML.match(/^const FLASH_MS = (\d+);$/m);
+  assert.ok(css && ms, "board.html no longer declares the flash in the shape this test reads — update it");
+  assert.equal(css[2], "1", "the flash plays once, never on a loop");
+  assert.equal(Number(css[1]) * 1000, Number(ms[1]), "FLASH_MS is the CSS duration");
+});
+
+// A tick rebuilds every card. The flash belongs to the issue, not to the node
+// the arrival found, so a tick inside the flash must not cut it short.
+test("a tick that rebuilds a card mid-flash keeps the flash where it was; a tick after it does not", () => {
+  const { document, render, model, open, clock } = harness();
+  const m = model({ tickets: [{ issue: 12, column: "POOL" }, { issue: 13, column: "REVIEW" }] });
+  render(m);
+  open("#board/13");
+  const first = document.getElementById("card-13");
+  clock.now += 500;
+  render(m);
+  const rebuilt = document.getElementById("card-13");
+  assert.notEqual(rebuilt, first, "the tick rebuilt the card");
+  assert.ok(rebuilt.classList.contains("flash"));
+  assert.equal(rebuilt.style.animationDelay, "-500ms", "picked up 500ms in, not restarted");
+  assert.ok(!document.getElementById("card-12").classList.contains("flash"));
+  clock.now += 800;
+  render(m);
+  assert.ok(!document.getElementById("card-13").classList.contains("flash"), "past FLASH_MS the flash is over");
 });
 
 test("a hash that arrives before the first render waits for the cards, then scrolls once", () => {
@@ -256,21 +297,41 @@ test("a hash that arrives before the first render waits for the cards, then scro
   assert.deepEqual(scrolls(), ["card-13"], "a later tick must not scroll the page out from under the operator");
 });
 
-test("opening the same link again scrolls again", () => {
-  const { render, model, open, scrolls } = harness();
+// The board is fully written before the scroll runs, so a scroll that throws
+// is banner'd as what it is, and never as the render that already succeeded.
+test("a scroll that fails after the board is drawn is reported as a failed scroll, not a failed render", (t) => {
+  t.mock.method(Node.prototype, "scrollIntoView", () => { throw new Error("boom"); });
+  const { document, render, model, open } = harness();
+  open("#board/13");
+  assert.doesNotThrow(() => render(model({ tickets: [{ issue: 13, column: "REVIEW" }] })));
+  assert.ok(document.getElementById("card-13"), "the board was drawn");
+  const banner = document.getElementById("stale-banner");
+  assert.equal(banner.style.display, "block");
+  assert.equal(banner.textContent, "⚠ scroll to card failed: boom");
+});
+
+test("opening the same link again scrolls again, and restarts the flash", () => {
+  const { render, model, open, scrolls, log } = harness();
   render(model({ tickets: [{ issue: 13, column: "REVIEW" }] }));
   open("#board/13");
+  const mark = log.length;
   open("#board/13");
   assert.deepEqual(scrolls(), ["card-13", "card-13"]);
+  const flashOps = log.slice(mark).filter((e) => e[1] === "card-13" && (e[0] === "reflow" || (e[0] === "class" && e[3] === "flash")));
+  assert.deepEqual(flashOps.map((e) => e[0] === "reflow" ? "reflow" : e[2]), ["remove", "reflow", "add"],
+    "the class comes off and a reflow lands before it goes back on, or the running animation never restarts");
 });
 
 test("a target no card carries lands on the tab's top, drawn or not yet", () => {
-  const { render, model, open, scrolls, tops } = harness();
+  const { document, render, model, open, scrolls, tops } = harness();
   open("#board/999");
   render(model({ tickets: [{ issue: 13, column: "REVIEW" }] }));
   assert.deepEqual(scrolls(), []);
   assert.deepEqual(tops(), [["scrollTo", 0, 0]]);
+  const spend = document.getElementById("spend");
+  spend.scrollTop = 40;
   open("#tokens");
+  assert.equal(spend.scrollTop, 0, "Tokens scrolls on its own; landing on its top resets it");
   open("#board");
   assert.deepEqual(scrolls(), []);
   assert.equal(tops().length, 3, "every landing without a target goes to the top");
@@ -284,6 +345,49 @@ test("a pasted #board/<issue> link reaches its card whatever tab was open before
   open("#tokens");
   open("#board/5");
   assert.deepEqual(scrolls(), ["card-5"]);
+});
+
+// -- boot(): the listeners and the first route ---------------------------------
+
+test("boot() routes the hash the page opens on and starts polling", () => {
+  const { document, location, boot, fetches } = harness();
+  location.hash = "#tokens";
+  boot();
+  assert.deepEqual(paneState(document), { boardHidden: true, tokensHidden: false, boardTab: false, tokensTab: true });
+  assert.deepEqual(fetches, ["/board.json"]);
+});
+
+test("after boot(), a hashchange routes the new hash", () => {
+  const { document, location, window, boot } = harness();
+  boot();
+  location.hash = "#tokens";
+  for (const fn of window.listeners.hashchange ?? []) fn();
+  assert.deepEqual(paneState(document), { boardHidden: true, tokensHidden: false, boardTab: false, tokensTab: true });
+});
+
+// A browser fires no hashchange for a link to the hash already open, so the
+// click routes it by hand. A modified click is the browser's (a new tab, a new
+// window, a download), and a link to another hash is hashchange's.
+test("after boot(), a plain click on the link to the open hash routes it again; no other click is taken", () => {
+  const { document, location, render, model, boot, scrolls } = harness();
+  render(model({ tickets: [{ issue: 13, column: "REVIEW" }] }));
+  location.hash = "#board/13";
+  boot();
+  assert.deepEqual(scrolls(), ["card-13"]);
+  const click = (href, mods = {}) => {
+    const e = { button: 0, defaultPrevented: false, ...mods,
+      target: { closest: () => ({ getAttribute: () => href }) },
+      preventDefault() { this.defaultPrevented = true; } };
+    for (const fn of document.listeners.click ?? []) fn(e);
+    return e.defaultPrevented;
+  };
+  assert.equal(click("#board/13"), true);
+  assert.deepEqual(scrolls(), ["card-13", "card-13"]);
+  assert.equal(click("#board/12"), false, "another hash is left to the browser and hashchange");
+  for (const mods of [{ metaKey: true }, { ctrlKey: true }, { shiftKey: true }, { altKey: true }, { button: 1 }]) {
+    assert.equal(click("#board/13", mods), false, JSON.stringify(mods));
+  }
+  assert.deepEqual(scrolls(), ["card-13", "card-13"], "none of those routed the page");
 });
 
 // -- global above the tabs, below every tab ----------------------------------

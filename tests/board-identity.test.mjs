@@ -296,8 +296,8 @@ function fakeDocument() {
 }
 
 // `boot()`'s call at the bottom is the one line this lift must never run —
-// it registers window listeners and fetches immediately, which a test
-// document has nothing to answer.
+// it registers the hashchange and click listeners, routes the current hash
+// and fetches immediately, which a test document has nothing to answer.
 const SCRIPT_SRC = HTML.match(/<script>([\s\S]*)<\/script>/)?.[1]
   ?.replace(/\bboot\(\);\s*$/, "");
 
