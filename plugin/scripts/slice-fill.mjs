@@ -15,10 +15,11 @@
 //
 // Prints one line naming how many rows it set. Exit 0 when every ticket's
 // issue was read; 1 when some could not be — their rows are left as they
-// were, each named on stderr, and the rest are written; 2 on a usage error or
-// a corpus that does not parse, which writes nothing.
+// were, each named on stderr, and the rest are written; 2 on a usage error, a
+// corpus that does not parse, or a corpus that cannot be written, which
+// writes nothing.
 
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { makeDie, defineFlags } from "./arg.mjs";
 import { ghAliasedRead } from "./gh-aliased-read.mjs";
@@ -42,14 +43,15 @@ const GH_TIMEOUT_MS = 120_000;
 export function fillParent(text, parents) {
   parseFeatures(text);
   const lines = String(text).split("\n");
-  let header = null;
+  let ticketAt = -1;
   let at = -1;
   let set = 0;
   let widened = false;
   const out = lines.map((l) => {
     if (!l.trim() || l.startsWith("#")) return l;
-    if (header === null) {
-      header = l.split("\t");
+    if (at === -1) {
+      const header = l.split("\t");
+      ticketAt = header.indexOf("ticket");
       at = header.indexOf("parent");
       if (at !== -1) return l;
       widened = true;
@@ -58,7 +60,7 @@ export function fillParent(text, parents) {
     }
     const cells = l.split("\t");
     if (widened) cells.push("");
-    const parent = parents.get(cells[header.indexOf("ticket")]) ?? "";
+    const parent = parents.get(cells[ticketAt]) ?? "";
     if (parent !== "" && cells[at] !== parent) {
       cells[at] = parent;
       set += 1;
@@ -94,8 +96,15 @@ function main() {
   }
   const filled = fillParent(text, parents);
   if (filled.text !== text) {
-    writeFileSync(`${file}.tmp`, filled.text);
-    renameSync(`${file}.tmp`, file);
+    try {
+      writeFileSync(`${file}.tmp`, filled.text);
+      renameSync(`${file}.tmp`, file);
+    } catch (e) {
+      // A .tmp the rename left behind goes too; one that cannot be removed is
+      // overwritten by the next run, and the die message names the failure.
+      try { rmSync(`${file}.tmp`, { force: true }); } catch {}
+      die(`${file}: cannot write: ${e.message}`);
+    }
   }
   const slices = [...parents.values()].filter((p) => p !== "").length;
   process.stdout.write(`${NAME}: ${file}: parent set on ${filled.set} row${filled.set === 1 ? "" : "s"}${filled.widened ? ", parent column added" : ""}; ${slices} of ${parents.size} ticket${parents.size === 1 ? "" : "s"} read are Slices\n`);

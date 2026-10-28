@@ -666,6 +666,8 @@ test("parseRouting refuses a line that is not a Routing, and formatRouting refus
     routingWith({ PARENT: "03177" }),
     routingWith({ PARENT: "#3177" }),
     routingWith({ PARENT: "" }),
+    // Past 2^53 a parent would read back as another number.
+    routingWith({ PARENT: "9007199254740993" }),
     routingWith({ BRIEF: "-", CRITERIA: "-", PARENT: "3177" }),
     SPEC_ROUTING.replace(" PARENT=-", "").replace("REASON=ok", "PARENT=- REASON=ok"),
     routingWith({ BRIEF: "09658" }),
@@ -680,6 +682,7 @@ test("parseRouting refuses a line that is not a Routing, and formatRouting refus
   ];
   for (const line of refused) assert.equal(parseRouting(line), null, JSON.stringify(line));
   for (const x of [null, undefined, 42, ["POLICY=slow-high"]]) assert.equal(parseRouting(x), null, String(x));
+  assert.equal(parseRouting(routingWith({ PARENT: "9007199254740991" }))?.parent, 9007199254740991, "the largest exact parent reads");
   const parts = parseRouting(SPEC_ROUTING);
   for (const over of [{ cell: "alt" }, { draw: null }, { brief: 1.5 }, { tripped: ["a b"] }, { reason: "explore" }, { objective: undefined }, { parent: undefined }, { parent: 0 }, { brief: null, criteria: null, parent: 3177 }]) {
     assert.throws(() => formatRouting({ ...parts, ...over }), /not a Routing/, JSON.stringify(over));

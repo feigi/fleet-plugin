@@ -55,7 +55,7 @@ import { CELL, OBJECTIVES, POLICY_CELL, STRATA, drawCell, formatRouting, parseMe
 import { objectiveFromReceipt, sessionFromReceipt } from "./phase0-receipt.mjs";
 import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
 import {
-  AttributionError, FEATURE_COLUMNS, TRIP_POINTS, attribute, bootUnit, bootstrapDiffCI, generations, parseFeatures, tally, underFloor,
+  AttributionError, FEATURE_COLUMNS, OPTIONAL_COLUMNS, TRIP_POINTS, attribute, bootUnit, bootstrapDiffCI, generations, parseFeatures, tally, underFloor,
 } from "./pull-attribution.mjs";
 import { RulingError, parseTierOutcomes } from "./tier-outcomes.mjs";
 import { briefPaths, briefText } from "./ticket-text.mjs";
@@ -138,7 +138,7 @@ export function issueMetrics(issue, now = Date.now()) {
  */
 export function ruleStratum({ brief_chars, criteria, parent }) {
   if (brief_chars === "" || brief_chars === undefined || criteria === "" || criteria === undefined) return "unknown";
-  if (parent !== "" && parent !== undefined) return "heavy";
+  if (parent) return "heavy";
   return Number(brief_chars) > HEAVY_BRIEF_CHARS || Number(criteria) > HEAVY_CRITERIA ? "heavy" : "light";
 }
 
@@ -724,10 +724,20 @@ function main() {
     // drains on a checkout, doing both serially: one controller per checkout is
     // the rule, and neither this append nor the drain checks it. A pending file
     // already begun keeps its header's columns, so a plugin updated mid-run
-    // never appends a row wider or narrower than the file.
+    // never appends a row wider or narrower than the file. A first line that is
+    // no features header — a required column missing, or a name no features
+    // file carries — is refused, not appended against.
     try {
       mkdirSync(dirname(pending), { recursive: true });
       const had = statSync(pending, { throwIfNoEntry: false })?.size > 0 ? readFileSync(pending, "utf8").split("\n", 1)[0].split("\t") : null;
+      if (had !== null) {
+        const missing = FEATURE_COLUMNS.filter((c) => !had.includes(c) && !OPTIONAL_COLUMNS.has(c));
+        const unknown = had.filter((c) => !FEATURE_COLUMNS.includes(c));
+        if (missing.length || unknown.length) {
+          const why = [missing.length ? `lacks ${missing.join(", ")}` : "", unknown.length ? `names ${unknown.map((c) => JSON.stringify(c)).join(", ")}` : ""];
+          throw new Error(`its first line is no ticket-features header: it ${why.filter(Boolean).join(" and ")}`);
+        }
+      }
       const header = had === null ? `${FEATURE_COLUMNS.join("\t")}\n` : "";
       appendFileSync(pending, `${header}${formatFeatureRow(row, had ?? FEATURE_COLUMNS)}\n`);
     } catch (e) {

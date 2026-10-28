@@ -5,8 +5,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { FEATURE_COLUMNS, parseFeatures } from "../plugin/scripts/pull-attribution.mjs";
 import { fillParent } from "../plugin/scripts/slice-fill.mjs";
@@ -121,4 +121,21 @@ test("slice-fill refuses a corpus that does not parse at exit 2 and writes nothi
   assert.equal(r.status, 2);
   assert.match(r.stderr, /fields, expected/);
   assert.equal(readFileSync(w.file, "utf8"), bad);
+});
+
+test("slice-fill names a corpus it cannot write at exit 2, in one line with no stack trace, and writes nothing", () => {
+  const text = tsv(ROWS, WITHOUT);
+  const w = world(BODIES, text);
+  chmodSync(dirname(w.file), 0o555);
+  let r;
+  try {
+    r = w.run();
+  } finally {
+    chmodSync(dirname(w.file), 0o755);
+  }
+  assert.equal(r.status, 2, r.stderr);
+  assert.deepEqual(r.stderr.split("\n").filter(Boolean), [r.stderr.trim()], "one line");
+  assert.match(r.stderr, /^\nslice-fill: .*ticket-features\.tsv: cannot write: /);
+  assert.equal(readFileSync(w.file, "utf8"), text);
+  assert.equal(existsSync(`${w.file}.tmp`), false);
 });

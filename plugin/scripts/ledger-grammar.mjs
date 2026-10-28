@@ -845,7 +845,9 @@ const DRAW = /^([1-9][0-9]*)\/([1-9][0-9]*)$/;
 export function parseRouting(line) {
   if (typeof line !== "string") return null;
   const words = line.split(" ");
-  if (words.length === ROUTING_KEYS.length - 1 && !words[PARENT_AT].startsWith("PARENT=")) words.splice(PARENT_AT, 0, "PARENT=-");
+  // A line written before PARENT was a part is one word short; one that holds
+  // PARENT= and lacks another key instead fails the per-key check.
+  if (words.length === ROUTING_KEYS.length - 1) words.splice(PARENT_AT, 0, "PARENT=-");
   if (words.length !== ROUTING_KEYS.length) return null;
   const v = {};
   for (const [i, key] of ROUTING_KEYS.entries()) {
@@ -864,7 +866,7 @@ export function parseRouting(line) {
     stratum: STRATA.includes(v.STRATUM) ? v.STRATUM : undefined,
     brief: count(v.BRIEF),
     criteria: count(v.CRITERIA),
-    parent: v.PARENT === "-" ? null : ISSUE.test(v.PARENT) ? Number(v.PARENT) : undefined,
+    parent: v.PARENT === "-" ? null : ISSUE.test(v.PARENT) && Number.isSafeInteger(Number(v.PARENT)) ? Number(v.PARENT) : undefined,
     sized: opt(v.SIZED, (x) => SIZINGS.includes(x)),
     objective: OBJECTIVES.includes(v.OBJECTIVE) ? v.OBJECTIVE : undefined,
     tripped: tripped.every((c) => CELL.test(c)) ? tripped : undefined,

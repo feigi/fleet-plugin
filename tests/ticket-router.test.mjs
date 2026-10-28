@@ -699,6 +699,9 @@ test("metrics: a Slice's parent is read off the issue body's top — `Spec: #<N>
     ["## Parent\n\nnone yet\n\n## What to build\nSee #12.", "", "a Parent section naming no issue; a later section's #12 is not its parent"],
     ["Part of #3673\n\nSpec: #3177", "", "Part of makes none, and Spec: below the first line is not at the top"],
     ["## What to build\n\n## Parent\n#5", "", "a Parent section that does not open the body"],
+    ["see Spec: #5", "", "Spec: mid-line is no Slice"],
+    ["## Parent\nrepo#7", "", "a # glued to a word is no issue ref"],
+    ["## Parent notes\n#5", "", "a heading that only begins with Parent"],
     ["", ""],
   ];
   for (const [body, parent, why] of cases) assert.equal(sliceParent(body), parent, why ?? body);
@@ -747,6 +750,20 @@ test("route: a pending file begun before the parent column keeps its width", (t)
   assert.deepEqual(lines.map((l) => l.split("\t").length), [older.length, older.length]);
   const [row] = parseFeatures(lines.join("\n"));
   assert.deepEqual([row.ticket, row.objective, row.parent], ["42", "cost", ""], "the row is written at the file's width; the fill sets its parent later");
+});
+
+test("route: a pending file whose first line is no features header is left alone, with the WARNING, and the route still prints", (t) => {
+  const stray = [...COLUMNS.slice(0, -1), "extra"].join("\t");
+  for (const [seed, why] of [["garbage\n", "not a header"], ["\nfoo\n", "a blank first line"], ["ticket\tsession\n", "required columns missing"], [`${stray}\n`, "a name no features file carries"]]) {
+    const p = world(t);
+    mkdirSync(dirname(p.pending), { recursive: true });
+    writeFileSync(p.pending, seed);
+    const r = routeCli(p);
+    assert.equal(r.status, 0, `${why}: ${r.stderr}`);
+    assert.equal(parseLine(r.stdout).REASON, "ok", why);
+    assert.match(r.stderr, /WARNING could not append to .*: its first line is no ticket-features header: .* — this Pull's ticket-features row is not recorded\n$/, why);
+    assert.equal(readFileSync(p.pending, "utf8"), seed, `${why}: the file is not appended to`);
+  }
 });
 
 test("metrics: a backticked token is a path only without whitespace and with a slash or an extension, and test_paths needs a .test. infix or a tests?/ segment", () => {
