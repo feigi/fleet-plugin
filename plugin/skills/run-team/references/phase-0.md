@@ -1,5 +1,7 @@
 # Phase 0: what each step does and why
 
+Label names in this file are roles; the Label map gives the string to type; a member never derives the map.
+
 `phase0.mjs` runs the start sequence and writes the receipt `.fleet/phase0.json`; SKILL.md's phase 0 step 0 says how to drive it and what to do about each `NEED` line. This file is what each step means, in the order the script runs them, for the controller to read when a step refuses or a line asks for more than SKILL.md says. One heading per step.
 
 **Run it from a Python eval cell, never the bash tool.** That kernel's

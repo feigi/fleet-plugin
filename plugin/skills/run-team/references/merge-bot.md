@@ -1,5 +1,7 @@
 # Landing a change on main
 
+Label names in this file are roles; the Label map gives the string to type; a member never derives the map.
+
 Evidence for the rules SKILL.md states in **A mid-run tooling fix** and in the `ready-to-merge` wake, keyed by the rule each justifies.
 
 ## When to fix the tooling mid-run, and its shape

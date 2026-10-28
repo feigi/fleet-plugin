@@ -1,5 +1,7 @@
 # Reaping merged branches and worktrees
 
+Label names in this file are roles; the Label map gives the string to type; a member never derives the map.
+
 Why reap runs after each merge pass, why `commit-commands:clean_gone` disqualified, why hand-rolled reap shaped this way (implemented by `reap.sh`), and why a claim that never became a PR needs a different script (`release-ticket.sh`). Assertions these justify live in SKILL.md's **Merge-bot pass reports done** wake and its Failure handling row for a claim abandoned mid-run; evidence here.
 
 ## Reap after each merge pass, not once at the end

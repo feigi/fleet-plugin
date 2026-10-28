@@ -1,5 +1,7 @@
 # Invariants: the full statements
 
+Label names in this file are roles; the Label map gives the string to type; a member never derives the map.
+
 The invariants SKILL.md states one line each, as they read before they were tightened.
 
 - In-flight tickets at most the bound (default 5), ≤ 1 merge bot. The bound

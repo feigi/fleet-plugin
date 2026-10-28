@@ -1,5 +1,7 @@
 # The finisher: why its gate and duties are shaped the way they are
 
+Label names in this file are roles; the Label map gives the string to type; a member never derives the map.
+
 Evidence for the finisher rules the finisher's agent body, `agents/fleet-finisher.agent.md`, and SKILL.md's **The finisher gate** state, keyed by the rule each justifies.
 
 ## The fix-applier pushes and exits; the finisher is dispatched fresh
