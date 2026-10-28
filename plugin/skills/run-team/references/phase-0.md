@@ -183,8 +183,8 @@ else — either way it gets its own board, just not always on the port its
 hash predicts.
 
 The spend panel reads the session directory this run's phase-0 receipt
-records, re-read on every tick, so a cockpit that outlives a run follows the
-next run's receipt. Until that directory exists and holds a member transcript
+records, re-read on every tick, so a cockpit that serves a later run follows
+that run's receipt. Until that directory exists and holds a member transcript
 the panel stays hidden; with no receipt, or one recording no session, it says
 `no session recorded — run phase 0 or pass --spend-dir`. Passing
 `--spend-dir <path>` to phase 0 overrides the receipt —
@@ -194,6 +194,16 @@ starts the server. A phase 0 that finds this workspace's cockpit already
 running leaves it reading what it read, flag or not. To put a running
 cockpit on `--spend-dir`, stop it first: SIGTERM to the pid phase 0's
 `cockpit` line printed when it launched that server.
+
+The cockpit lives as long as the controller its run recorded — the omp
+session that owns the run — and exits itself once that session is gone. A
+drained run's cockpit stays up while its session stays open, so you can
+still watch it. A run started from the same session, or from a later one,
+records its own controller, and the cockpit keeps serving it. A cockpit
+launched by hand between runs, while the record still names a dead
+controller, keeps serving until a record names a live one. An unreadable
+heartbeat file or process table is not a death. Nothing at close-out stops
+it and nothing signals its pid.
 
 ## Rotate the ledger
 

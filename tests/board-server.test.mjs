@@ -291,9 +291,11 @@ test("CLI: a port already in use must not write board.json before the process di
 
 // The named case that must NOT be refused: listen(0) binds an ephemeral port,
 // a real use, and 0 is falsy — the exact value the old `|| null` idiom lost.
-// serve() only exits on SIGINT/SIGTERM once bound, so a timeout here is the
-// expected shape of success; the refusal this guards against dies with
-// status 2 almost instantly and never reaches listen() at all.
+// Once bound, serve() exits only on SIGINT/SIGTERM or on a tick that finds its
+// run's recorded controller gone, and this test records no controller, so a
+// timeout here is the expected shape of success; the refusal this guards
+// against dies with status 2 almost instantly and never reaches listen() at
+// all.
 //
 // Accepting 0 is only half of it: the announced URL has to be one the operator
 // can open. Echoing the REQUESTED port printed http://localhost:0 — reachable

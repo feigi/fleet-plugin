@@ -126,8 +126,8 @@
    hash predicts.
 
    The spend panel reads the session directory this run's phase-0 receipt
-   records, re-read on every tick, so a cockpit that outlives a run follows the
-   next run's receipt. Until that directory exists and holds a member transcript
+   records, re-read on every tick, so a cockpit that serves a later run follows
+   that run's receipt. Until that directory exists and holds a member transcript
    the panel stays hidden; with no receipt, or one recording no session, it says
    `no session recorded — run phase 0 or pass --spend-dir`. Passing
    `--spend-dir <path>` to phase 0 overrides the receipt —

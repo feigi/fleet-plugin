@@ -23,8 +23,10 @@
 // which session is this run's. The run says it: phase 0 records the
 // controller's own session directory in its receipt, `.fleet/phase0.json`,
 // and receiptSpendDir() below reads it back on every tick — never latched,
-// because a cockpit outlives the run that launched it and has to follow the
-// next run's receipt. `--spend-dir <path>` overrides the receipt outright.
+// because a cockpit lives as long as its run's controller, which can start
+// another run from the same omp session, and a phase-0 relaunch reuses a
+// running server; either way it has to follow the next run's receipt.
+// `--spend-dir <path>` overrides the receipt outright.
 
 import { readFileSync, existsSync, statSync } from "node:fs";
 import { computeSpend, attributeTools, mergeTools } from "./compute-spend.mjs";
@@ -405,9 +407,10 @@ export function mapCi(ciJson, pr) {
 // the directory its ledger and heartbeat come from, so the three cannot
 // disagree about which run they belong to — through phase0-receipt.mjs's
 // readReceipt, the one reading of that file. The caller reads it on EVERY
-// tick and keeps nothing: a cockpit survives across runs (a phase-0 relaunch
-// reuses a running server), so a session held from an earlier tick would
-// keep showing the previous run's spend once the next run's receipt lands.
+// tick and keeps nothing: a cockpit survives across runs (a new run from the
+// same omp session keeps it, and a phase-0 relaunch reuses a running server),
+// so a session held from an earlier tick would keep showing the previous
+// run's spend once the next run's receipt lands.
 //
 // A receipt with no session to give is `{ error }`, which the panel shows:
 // the board names no session rather than guessing one. So is a recorded
