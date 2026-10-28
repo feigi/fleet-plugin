@@ -447,7 +447,12 @@ export function foldOmpTranscript(jsonlText, filePath) {
     if (d.type === "message" && m?.role === "user" && messageText(m).trimStart().startsWith("[budget notice]")) budgetNotice = true;
   }
   if (partFirst !== null) workParts.push([partFirst, partLast]);
-  const span = firstTs && lastTs ? (Date.parse(lastTs) - Date.parse(firstTs)) / 1000 : 0;
+  // `wall_s` is the span of the parseable stamps, latest minus earliest, so it
+  // does not depend on file order and cannot go negative; an unparseable
+  // stamp is skipped, and a transcript with none spans 0.
+  let earliest = Infinity, latest = -Infinity;
+  for (const t of stamps) { if (t < earliest) earliest = t; if (t > latest) latest = t; }
+  const span = stamps.length ? (latest - earliest) / 1000 : 0;
   return {
     model, thinking, task, resolvedModelIdentity, agent,
     input, cacheWrite, cacheRead, output,
@@ -462,7 +467,7 @@ export function foldOmpTranscript(jsonlText, filePath) {
     // a partial sum never passes for the member's whole cost.
     cost: sawCost && !unpriced ? cost : null,
     turns,
-    wallS: Number.isFinite(span) ? Math.round(span) : 0,
+    wallS: Math.round(span),
     entries,
     malformedNonLastLines,
     openedPrs: [...openedPrs],
