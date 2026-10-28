@@ -150,6 +150,24 @@ test("cellLine: a row before the Routing takes its Cell from tier=, reads its ro
   assert.deepEqual(lines(bare), ["task-high<#cells/task-high> · _not on record_", "_not on record_ · _not on record_"]);
 });
 
+test("cellLine: a row naming none of its own ticket's impl tokens takes the others in attempt order, by number then retry", () => {
+  const l = cellLine({
+    row: "#20 impl-31-b impl-30 impl-31 · tier=slow-high", issue: 20,
+    members: members({
+      "impl-30": rec("slow-high", { model: "claude-opus-5" }),
+      "impl-31": rec("slow-high", { model: "claude-sonnet-5" }),
+      "impl-31-b": rec("slow-high", { model: "claude-haiku-5-5" }),
+    }),
+  });
+  assert.equal(l.generation, "claude-haiku-5-5", "the latest attempt, impl-31-b, is the Pull");
+});
+
+test("cellLine: a tier= that names no Cell links nowhere and books no guard entry", () => {
+  const l = cellLine({ row: "#12 impl-12 · tier=bogus", issue: 12 });
+  assert.equal(lines(l)[0], "bogus · _not on record_");
+  assert.deepEqual(l.targets, []);
+});
+
 // -- § 7.3, the mark --------------------------------------------------------------
 
 // #3777: drew task-high, its first implementer dispatched as slow-high and
@@ -163,13 +181,21 @@ const shape3777 = (routed) => cellLine({
 });
 
 test("cellLine: the #3777 shape marks the first implementer, and shows the one that ran at the Cell", () => {
-  for (const l of [shape3777(true), shape3777(false)]) {
-    assert.deepEqual(l.mark, { text: "⚑ first ran as fleet-implementer-slow-high", severity: "amber" });
-    assert.equal(l.generation, "claude-sonnet-5");
-    assert.match(lines(l)[1], / · claude-sonnet-5 · high$/);
-    assert.doesNotMatch(lines(l)[0], /rescue/, "impl-3777-b ran at the Pull's own Cell: no rescue");
-  }
-  assert.equal(lines(shape3777(true))[0], "task-high<#cells/task-high@claude-sonnet-5> · drawn 1 of 2: burn-in");
+  const l = shape3777(true);
+  assert.deepEqual(l.mark, { text: "⚑ first ran as fleet-implementer-slow-high", severity: "amber" });
+  assert.equal(l.generation, "claude-sonnet-5");
+  assert.match(lines(l)[1], / · claude-sonnet-5 · high$/);
+  assert.doesNotMatch(lines(l)[0], /rescue/, "impl-3777-b ran at the Pull's own Cell: no rescue");
+  assert.equal(lines(l)[0], "task-high<#cells/task-high@claude-sonnet-5> · drawn 1 of 2: burn-in");
+});
+
+test("cellLine: before the Routing the Pull is the row's latest impl token, so an earlier implementer is never marked", () => {
+  // tier= is rewritten to each later implementer's Cell, so on a row with no
+  // `## Routed` entry an earlier implementer off it reads the same as a rescue.
+  const l = shape3777(false);
+  assert.equal(l.mark, null);
+  assert.equal(l.generation, "claude-sonnet-5");
+  assert.deepEqual(lines(l), ["task-high<#cells/task-high@claude-sonnet-5> · recorded as ok", "_not on record_ · claude-sonnet-5 · high"]);
 });
 
 test("cellLine: a first implementer at another level, with a later Admissible row, is marked at its level", () => {

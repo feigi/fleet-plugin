@@ -327,7 +327,7 @@ function guardHeading(g) {
 function booked(entry, pulls) {
   const cell = entry.cell;
   const out = { ...entry, pulls: pulls.filter((p) => p.cell === cell).map((p) => ({ issue: p.issue, href: `#board/${p.issue}`, mark: p.mark })), unfigured: [] };
-  const has = new Set([out.figures?.generation, ...out.older.map((o) => o.generation), out.none?.anchor ? out.none.generation : null].filter(Boolean));
+  const has = new Set([out.figures?.generation, ...out.older.map((o) => o.generation), out.none?.generation].filter(Boolean));
   for (const t of pulls.flatMap((p) => p.targets)) {
     if (t.cell !== cell || !t.generation || has.has(t.generation)) continue;
     has.add(t.generation);

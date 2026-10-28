@@ -595,7 +595,7 @@ test("ledgerSection reads a section's entries unescaped, and none for a section 
 });
 
 // The Routing: one line `ticket-router.mjs route` prints, `pull.mjs` reads,
-// `ledger.mjs` validates and files in `## Routed`, and, once #3898 lands, the cockpit reads.
+// `ledger.mjs` validates and files in `## Routed`, and the cockpit's board card reads (compute-board.mjs's cellLine).
 const SPEC_ROUTING = "POLICY=slow-high CELL=smol-high DRAW=2/3 BY=burn-in STRATUM=heavy BRIEF=9658 CRITERIA=8 SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok";
 const routingWith = (over) => SPEC_ROUTING.split(" ").map((w) => {
   const key = w.slice(0, w.indexOf("="));

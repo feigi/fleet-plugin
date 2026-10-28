@@ -8,7 +8,7 @@ import {
   MODEL_ROLES_EVERY_MS, MODEL_ROLES_TIMEOUT_MS, carryModelRoles, gather, readAgents, readGuardFile, readMetricsStep, readModelRoles,
   readHeldImplementers, readRouterTable, receiptSpendDir,
 } from "../plugin/scripts/board-gather.mjs";
-import { CLOSEOUT_RECEIPT, RECEIPT, RECEIPT_HELD } from "../plugin/scripts/ledger-grammar.mjs";
+import { CLOSEOUT_RECEIPT, RECEIPT, RECEIPT_HELD, formatRouting } from "../plugin/scripts/ledger-grammar.mjs";
 import { computeBoard } from "../plugin/scripts/compute-board.mjs";
 
 // What gather() reads for the Cell evidence tab: the guard through the tick's
@@ -305,10 +305,11 @@ const transcript = ({ agent, model, thinking, last = model }) => [
     message: { role: "assistant", content: [{ type: "text", text: "ok" }], model: last, usage: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4, totalTokens: 10, cost: { total: 0.01 } } } },
 ].map((l) => JSON.stringify(l)).join("\n") + "\n";
 
-// A workspace whose ledger holds a row from before the Routing, and an omp
-// session holding its implementer's transcript and a reviewer's. The real scripts
-// read the ledger; every `gh` read degrades.
-function cardsWorkspace(t) {
+// A workspace whose ledger holds a row from before the Routing, or one with the
+// `## Routed` entries given, and an omp session holding its implementer's
+// transcript and a reviewer's. The real scripts read the ledger; every `gh` read
+// degrades.
+function cardsWorkspace(t, { routed = [] } = {}) {
   const root = tempDir("cell-line-gather-");
   const stateDir = join(root, ".fleet");
   const session = join(root, "sessions", SESSION);
@@ -317,7 +318,8 @@ function cardsWorkspace(t) {
   writeFileSync(join(session, "impl-3862.jsonl"), transcript({ agent: "fleet-implementer-slow-high", model: "claude-opus-5", thinking: "high", last: "claude-sonnet-5" }));
   writeFileSync(join(session, "review-pr-9.jsonl"), transcript({ agent: "fleet-reviewer", model: "claude-sonnet-5", thinking: "high" }));
   const ledgerFile = join(root, "ledger.md");
-  writeFileSync(ledgerFile, "# Fleet run ledger\n\n## Rows\n\n- #3862 impl-3862 · tier=slow-high · route=guard-tripped\n\n## Dispatched\n\n- impl-3862 brief=7f685cae agent=fleet-implementer-slow-high\n");
+  writeFileSync(ledgerFile, "# Fleet run ledger\n\n## Rows\n\n- #3862 impl-3862 · tier=slow-high · route=guard-tripped\n\n## Dispatched\n\n- impl-3862 brief=7f685cae agent=fleet-implementer-slow-high\n"
+    + (routed.length ? `\n## Routed\n\n${routed.map((e) => `- ${e}`).join("\n")}\n` : ""));
   writeExecStub(join(bin, "omp"), `#!/bin/sh\necho '{"value":${JSON.stringify(ROLES)}}'\n`);
   writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
   const saved = process.env.PATH;
@@ -354,23 +356,86 @@ test("gather: between runs, with no phase0.json, the cards read the session phas
   assert.deepEqual(live.implementers, []);
 });
 
-test("readHeldImplementers: a held receipt that is absent, unreadable or names no session directory adds nothing", () => {
+test("gather: with --spend-dir named, a held receipt is not read: the operator's directory is the one session read", async (t) => {
+  const w = cardsWorkspace(t);
+  writeFileSync(join(w.stateDir, RECEIPT_HELD), JSON.stringify({ ...receipt({}), session: w.session }));
+  const r = await quiet(() => gather({ ...w.opts, spendDir: tempDir("cell-line-spend-dir-"), spendDirExplicit: true }));
+  assert.deepEqual(r.implementers, []);
+});
+
+test("gather: the Tokens window bounds the spend alone: an implementer transcript older than --spend-since still reaches its card", async (t) => {
+  const w = cardsWorkspace(t);
+  writeFileSync(join(w.stateDir, RECEIPT), JSON.stringify({ ...receipt({}), session: w.session }));
+  const r = await quiet(() => gather({ ...w.opts, spendDir: receiptSpendDir(w.stateDir), spendSince: Date.now() + 3_600_000 }));
+  assert.deepEqual(r.implementers, [IMPL_3862]);
+  assert.equal(r.spend, null, "the spend panel still books nothing from before its window");
+  const line = computeBoard(r).tickets.find((x) => x.issue === 3862).cellLine;
+  assert.equal(line.lines[1].map((p) => p.sep + p.text).join(""), "not on record · claude-opus-5 · high · fell back to claude-sonnet-5");
+});
+
+test("gather: hands the installed router table to the board, so a policy row with no row for its Stratum reads 'follows *'", async (t) => {
+  const w = cardsWorkspace(t, { routed: [`impl-3862 ${formatRouting({
+    policy: "slow-high", cell: "slow-high", draw: null, by: null, stratum: "heavy", brief: 9658, criteria: 8, sized: null, objective: "cost", tripped: [], reason: "ok",
+  })}`] });
+  writeFileSync(join(w.stateDir, RECEIPT), JSON.stringify({ ...receipt({}), session: w.session }));
+  const r = await quiet(() => gather({ ...w.opts, spendDir: receiptSpendDir(w.stateDir) }));
+  assert.deepEqual(r.routerTable, readRouterTable(SCRIPTS));
+  const line = computeBoard(r).tickets.find((x) => x.issue === 3862).cellLine;
+  assert.equal(line.lines[0].map((p) => p.sep + p.text).join(""), "slow-high · cost row, heavy · follows *");
+});
+
+// What `fn` writes to stderr, beside what it returns.
+function stderrOf(fn) {
+  const write = process.stderr.write;
+  let err = "";
+  process.stderr.write = (chunk, ...rest) => { err += chunk; rest.find((a) => typeof a === "function")?.(); return true; };
+  try { return { value: fn(), err }; } finally { process.stderr.write = write; }
+}
+
+test("readHeldImplementers: a held receipt that is absent, unreadable or names no session directory adds nothing, and an unreadable one says why", () => {
   const dir = tempDir("cell-line-held-");
   const into = new Map();
-  readHeldImplementers(dir, into);
+  assert.equal(stderrOf(() => readHeldImplementers(dir, into)).err, "", "no held receipt is the ordinary state, and says nothing");
   writeFileSync(join(dir, RECEIPT_HELD), "{ nope");
-  readHeldImplementers(dir, into);
-  writeFileSync(join(dir, RECEIPT_HELD), JSON.stringify({ ...receipt({}), session: join(dir, "not-a-session") }));
+  assert.match(stderrOf(() => readHeldImplementers(dir, into)).err, /no card reads .*: not JSON/);
+  // A directory holding an implementer's transcript, named as no omp session is.
+  const notSession = join(dir, "not-a-session");
+  mkdirSync(notSession);
+  writeFileSync(join(notSession, "impl-3862.jsonl"), transcript({ agent: "fleet-implementer-slow-high", model: "claude-opus-5", thinking: "high" }));
+  writeFileSync(join(dir, RECEIPT_HELD), JSON.stringify({ ...receipt({}), session: notSession }));
   readHeldImplementers(dir, into);
   writeFileSync(join(dir, RECEIPT_HELD), JSON.stringify({ ...receipt({}), session: join(dir, SESSION) }));
   readHeldImplementers(dir, into);
   assert.equal(into.size, 0);
 });
 
-test("readRouterTable: the installed table when validateTable accepts it, else null", () => {
+test("readHeldImplementers: a transcript with a malformed middle line is still read, and said to be suspect", () => {
+  const dir = tempDir("cell-line-held-damaged-");
+  const session = join(dir, SESSION);
+  mkdirSync(session);
+  const lines = transcript({ agent: "fleet-implementer-slow-high", model: "claude-opus-5", thinking: "high" }).split("\n");
+  lines.splice(2, 0, "{garbage");
+  writeFileSync(join(session, "impl-3862.jsonl"), lines.join("\n"));
+  writeFileSync(join(dir, RECEIPT_HELD), JSON.stringify({ ...receipt({}), session }));
+  const into = new Map();
+  const { err } = stderrOf(() => readHeldImplementers(dir, into));
+  assert.equal(into.get("impl-3862")?.subagent_type, "fleet-implementer-slow-high");
+  assert.match(err, /impl-3862\.jsonl: 1 malformed line\(s\) before its last, so its card's model and level may be wrong/);
+});
+
+test("readRouterTable: the installed table when validateTable accepts it, else null, and a table not read says why", () => {
   assert.equal(readRouterTable(SCRIPTS).rows.cost["*"], "slow-high");
   const dir = tempDir("cell-line-table-");
-  assert.equal(readRouterTable(dir), null, "no table");
+  const missing = stderrOf(() => readRouterTable(dir));
+  assert.equal(missing.value, null, "no table");
+  assert.match(missing.err, /router table not read, so no card says "follows \*": .*router-table\.json: ENOENT/);
+  writeFileSync(join(dir, "router-table.json"), "{ corrupt");
+  const corrupt = stderrOf(() => readRouterTable(dir));
+  assert.equal(corrupt.value, null, "will not parse");
+  assert.match(corrupt.err, /router table not read.*router-table\.json: /);
   writeFileSync(join(dir, "router-table.json"), JSON.stringify({ rows: {} }));
-  assert.equal(readRouterTable(dir), null, "not a table");
+  const refused = stderrOf(() => readRouterTable(dir));
+  assert.equal(refused.value, null, "not a table");
+  assert.match(refused.err, /router table not read/);
+  assert.equal(stderrOf(() => readRouterTable(dir)).err, "", "the same fault is said once");
 });

@@ -619,8 +619,8 @@ The Router's decision for one Pull at its route step: the policy Cell and the
 Pull's Cell, the draw and what made it (burn-in or every 5th Pull), the Stratum
 and the numbers that set it, the Objective, the Cells the guard had tripped,
 and the reason. `ticket-router.mjs route` prints it. The Pull's row step keeps
-it in the run ledger's `## Routed` section; once #3898 lands, the Pull's board
-card shows it.
+it in the run ledger's `## Routed` section, and the Pull's board card shows it
+(compute-board.mjs's cellLine).
 _Avoid_: route (bare: the Tier route is the `modelRoles` mapping), routing
 line, verdict (that word belongs to a Ruling)
 

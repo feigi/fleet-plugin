@@ -340,7 +340,7 @@ function implementersOf(row, issue) {
   const seen = new Set();
   return (own.length ? own : all)
     .filter((t) => !seen.has(t.name) && seen.add(t.name))
-    .sort((a, b) => (a.number !== b.number ? a.number - b.number : (a.retry ?? "") < (b.retry ?? "") ? -1 : (a.retry ?? "") > (b.retry ?? "") ? 1 : 0))
+    .sort((a, b) => a.number - b.number || (a.retry ?? "").localeCompare(b.retry ?? ""))
     .map((t) => t.name);
 }
 
@@ -353,8 +353,7 @@ function reasonWords(r, table) {
   switch (r.reason) {
     case "ok": {
       if (drawn) return [];
-      const rows = table?.rows?.[r.objective];
-      const follows = rows != null && typeof rows === "object" && !Object.hasOwn(rows, r.stratum);
+      const follows = table !== null && !Object.hasOwn(table.rows[r.objective], r.stratum);
       const href = `#cells/row/${r.objective}/${follows ? "*" : r.stratum}`;
       return [part(`${row}, ${r.stratum}`, { href }), ...(follows ? [part("follows *")] : [])];
     }
@@ -408,31 +407,35 @@ export function cellLine({ row, issue, routed = [], agents = {}, members = new M
 
   // The latest Pull: the last implementer with a `## Routed` entry, those after
   // it rescues or retries under it. A row with no entry predates the Routing,
-  // and its implementers are one Pull at the row's Cell.
+  // and its latest Pull is its latest impl token, at the row's Cell: its
+  // `tier=` is rewritten to the Cell each later implementer runs at, so an
+  // earlier one cannot be told off a rescue.
   const entries = new Map();
   for (const e of routed) {
     const sp = typeof e === "string" ? e.indexOf(" ") : -1;
     if (sp === -1 || entries.has(e.slice(0, sp))) continue;
-    entries.set(e.slice(0, sp), parseRoutedEntry(e)?.routing ?? { raw: e.slice(sp + 1) });
+    entries.set(e.slice(0, sp), { routing: parseRoutedEntry(e)?.routing ?? null, raw: e.slice(sp + 1) });
   }
   const start = names.findLastIndex((n) => entries.has(n));
-  const under = start === -1 ? names : names.slice(start);
+  const under = start === -1 ? names.slice(-1) : names.slice(start);
   const recorded = start === -1 ? null : entries.get(names[start]);
-  const routing = recorded !== null && !("raw" in recorded) ? recorded : null;
+  const routing = recorded?.routing ?? null;
   const cell = routing?.cell ?? tierValues(row)[0] ?? cellValues(row)[0] ?? POLICY_CELL;
   const level = CELL.exec(cell)?.[2] ?? null;
   const expected = `fleet-implementer-${cell}`;
 
   const recs = under.map((n) => (members.has(n) ? dispatchRecord(members.get(n)) : null));
   const tierOk = (n) => row.split(/\s+/).find((w) => w.startsWith(`tier-ok=${n}:`))?.slice(`tier-ok=${n}:`.length) || null;
-  const ranAs = (n, i) => (Object.hasOwn(agents ?? {}, n) ? agents[n] : null) ?? tierOk(n) ?? (recs[i]?.subagentType || null);
+  const ranAs = (n, i) => (Object.hasOwn(agents, n) ? agents[n] : null) ?? tierOk(n) ?? (recs[i]?.subagentType || null);
   const admissible = recs.map((rec) => (rec === null ? null : admissibleRow(rec, cell)));
   const firstAdmissible = admissible.indexOf(true);
   const generation = firstAdmissible === -1 ? null : recs[firstAdmissible].dispatchModel;
 
-  // Line 1: the Cell, then why.
-  const why = [part(cell, { href: cellHref(cell, generation), sep: "" })];
-  const targets = [{ cell, generation }];
+  // Line 1: the Cell, then why. A `tier=` that names no Cell (a hand-edited
+  // row) has no guard entry to land on, so it links nowhere and books nothing.
+  const isCell = CELL.test(cell);
+  const why = [part(cell, { href: isCell ? cellHref(cell, generation) : null, sep: "" })];
+  const targets = isCell ? [{ cell, generation }] : [];
   if (routing !== null) {
     if (routing.draw !== null) why.push(part(`drawn ${routing.draw.k} of ${routing.draw.K}: ${routing.by === "burn-in" ? "burn-in" : "every 5th Pull"}`));
     why.push(...reasonWords(routing, table));
@@ -671,7 +674,7 @@ export function computeBoard(inputs) {
   // transcripts gather() read, this run's session's or, between runs, the
   // previous run's.
   const members = new Map((inputs.implementers || []).map((m) => [lastSegment(m.member), m]));
-  const lineInputs = { routed: ledger.routed || [], agents: ledger.agents || {}, members, table: inputs.routerTable ?? null };
+  const lineInputs = { routed: ledger.routed || [], agents: ledger.agents || {}, members, table: inputs.routerTable };
   // The ticket row each PR's latest attempt settled to, first row wins.
   const claimedBy = new Map();
   for (const p of parsed) if (p.impl !== null && p.pr != null && !claimedBy.has(p.pr)) claimedBy.set(p.pr, p);
@@ -726,8 +729,9 @@ export function computeBoard(inputs) {
       sinceEnteredStage,
       flags,
       ruling: p.pr != null ? (ruledByPr.get(p.pr) ?? null) : null,
-      // A POOL card (an Exclusion) and a PR-only row carry none.
-      cellLine: column === "POOL" || p.impl === null ? null : cellLine({ row: p.row, issue: p.issue, ...lineInputs }),
+      // A POOL card (an Exclusion) carries none, and cellLine gives a PR-only
+      // row none, since it has no impl token.
+      cellLine: column === "POOL" ? null : cellLine({ row: p.row, issue: p.issue, ...lineInputs }),
     });
   }
 

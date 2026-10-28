@@ -633,17 +633,29 @@ export function gatherSpend({ dir, sinceMs = null, topN = 8, explicit = false, i
 // the transcript regardless of whether the file ends up booked as an agent,
 // so a transcript that is corrupt where its assistant-with-usage line should
 // be still surfaces here instead of falling through `if (!m) continue` unseen.
+//
+// `sinceMs` is the Tokens window, and it bounds the spend alone: an
+// implementer's transcript older than it is still read into `implementers`,
+// since a card's Cell line is about the card's Pull, not about the window.
 function readOmpSpend(dir, sinceMs, implementers = null) {
   const agents = [];
   const toolTables = [];
   let skipped = 0;
   let damaged = 0;
   for (const { file, agent, spawnDepth } of ompSessionTranscripts(dir)) {
+    let outside = false;
     try {
-      if (sinceMs != null && statSync(file).mtimeMs < sinceMs) continue;
+      outside = sinceMs != null && statSync(file).mtimeMs < sinceMs;
+      const wanted = implementers !== null && isImplementer(agent);
+      if (outside && !wanted) continue;
       const folded = foldOmpTranscript(readFileSync(file, "utf8"), file);
-      damaged += folded.malformedNonLastLines;
+      if (outside) damagedRecord(file, folded);
+      else damaged += folded.malformedNonLastLines;
       const m = ompMemberRecord(folded, agent, spawnDepth);
+      if (outside) {
+        if (m) implementers.set(m.member, implementerRecord(m));
+        continue;
+      }
       if (!m) continue;
       // Both halves before either is recorded, so `skipped++` below always
       // means "this transcript contributed nothing".
@@ -655,7 +667,9 @@ function readOmpSpend(dir, sinceMs, implementers = null) {
       toolTables.push(tools);
       if (implementers !== null && isImplementer(m.member)) implementers.set(m.member, implementerRecord(m));
     } catch (e) {
-      skipped++;
+      // A transcript outside the window was never the spend's, so its
+      // failure is warned but not counted.
+      if (!outside) skipped++;
       // The prefix already names `file`; Node's errno text (`..., open|stat
       // '<file>'`) and member-record's shape refusal (`...: <file>`) end in
       // it too, so that tail is dropped. Any other wording prints whole.
@@ -684,17 +698,22 @@ function implementerRecord(m) {
 // only: the spend panel keeps following `phase0.json` (receiptSpendDir). Into
 // `implementers`, as readOmpSpend fills it; a held receipt that is absent,
 // unreadable or names no omp session directory, and a directory not there,
-// add nothing. A transcript that will not read is skipped under readOmpSpend's
-// own once-per-file warning.
+// add nothing, and an unreadable one says why on stderr. A transcript that
+// will not read is skipped under readOmpSpend's own once-per-file warning,
+// and one with a malformed middle line is warned by damagedRecord.
 export function readHeldImplementers(stateDir, implementers) {
-  const read = readReceipt(join(stateDir, RECEIPT_HELD));
+  const held = join(stateDir, RECEIPT_HELD);
+  const read = readReceipt(held);
+  if (read.state === "unreadable") warnOnce("held-receipt", `${held}\0${read.why}`, `no card reads ${held}: ${read.why}`);
   if (read.state !== "ok" || !isOmpSessionDirName(basename(read.receipt.session))) return;
   let transcripts;
   try { transcripts = ompSessionTranscripts(read.receipt.session); } catch { return; }
   for (const { file, agent, spawnDepth } of transcripts) {
     if (!isImplementer(agent)) continue;
     try {
-      const m = ompMemberRecord(foldOmpTranscript(readFileSync(file, "utf8"), file), agent, spawnDepth);
+      const folded = foldOmpTranscript(readFileSync(file, "utf8"), file);
+      damagedRecord(file, folded);
+      const m = ompMemberRecord(folded, agent, spawnDepth);
       if (m) implementers.set(m.member, implementerRecord(m));
     } catch (e) {
       warnOnce("skips", file, `skipping ${file}: ${e.message}`);
@@ -702,16 +721,33 @@ export function readHeldImplementers(stateDir, implementers) {
   }
 }
 
+// An implementer transcript read for the cards alone, where no spend panel
+// counts it `damaged`: a malformed middle line can drop the turn its model
+// came from, so the card's record is said to be suspect, once per file.
+function damagedRecord(file, folded) {
+  if (folded.malformedNonLastLines > 0) {
+    warnOnce("damaged-implementer", file, `${file}: ${folded.malformedNonLastLines} malformed line(s) before its last, so its card's model and level may be wrong`);
+  }
+}
+
 // The installed router table, `router-table.json` beside the scripts, when
 // `validateTable` accepts it, else null: a card words a policy row that has no
-// row for its Stratum ("follows *") only off a table it could read.
+// row for its Stratum ("follows *") only off a table it could read. The table
+// ships beside the scripts, so one that is missing, will not parse or is
+// refused is a broken install, said once on stderr per fault rather than
+// passed off as "no table".
 export function readRouterTable(scriptDir) {
+  const file = join(scriptDir, "router-table.json");
+  let why;
   try {
-    const t = validateTable(JSON.parse(readFileSync(join(scriptDir, "router-table.json"), "utf8")));
-    return t instanceof Error ? null : t;
-  } catch {
-    return null;
+    const t = validateTable(JSON.parse(readFileSync(file, "utf8")));
+    if (!(t instanceof Error)) return t;
+    why = t.message;
+  } catch (e) {
+    why = String(e.message);
   }
+  warnOnce("router-table", `${file}\0${why}`, `router table not read, so no card says "follows *": ${file}: ${why}`);
+  return null;
 }
 
 // The Cell evidence tab's reads. Each is the whole of one input, kept apart from
