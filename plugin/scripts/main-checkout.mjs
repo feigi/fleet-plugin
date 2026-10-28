@@ -319,10 +319,11 @@ function originMain(root, env) {
  * A failed ancestry read is followed by `git rev-parse -q --verify B^{commit}`.
  * Only exit 1 with nothing on stderr is the missing answer: that is what an
  * absent commit gives. Exit 1 with anything on stderr means git could not
- * settle absence — an unopenable loose object, a broken alternate, an object
- * that is not a commit, or output unrelated to the object such as GIT_TRACE's
- * — and that read's own failure is returned, so `why` carries what git
- * printed. Anything else, a corrupt object's exit 128 included, keeps the
+ * settle absence — an unopenable loose object (git <= 2.55; git >= 2.56 exits
+ * 128 for it, which is the "anything else" below), a broken alternate, an
+ * object that is not a commit, or output unrelated to the object such as
+ * GIT_TRACE's — and that read's own failure is returned, so `why` carries what
+ * git printed. Anything else, a corrupt object's exit 128 included, keeps the
  * ancestry failure.
  */
 function headMove(root, env, was, now) {

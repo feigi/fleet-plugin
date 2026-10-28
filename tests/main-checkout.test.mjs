@@ -974,7 +974,14 @@ test("a baseline commit present but unreadable under a chmod 000 fan-out dir is 
   try { c = check(dir); } finally { chmodSync(fanout, 0o755); }
   assert.equal(c.state, "unknown");
   assert.equal(c.cause, "read");
-  assert.match(c.why, /^git rev-parse --verify exited 1: error: unable to open loose object/);
+  // Which probe names the fault depends on the git version: through 2.55 the
+  // `rev-parse --verify` probe exits 1 with the loose-object error on stderr
+  // and its `why` is returned; from 2.56 it exits 128, the ancestry failure is
+  // kept, and that exits 128 itself. Both are could-not-look.
+  assert.match(
+    c.why,
+    /^(?:git rev-parse --verify exited (?:1|128): .*loose object|git merge-base --is-ancestor exited 128)/,
+  );
   assert.match(describe(c, []), /NEVER re-baseline over it/);
 });
 

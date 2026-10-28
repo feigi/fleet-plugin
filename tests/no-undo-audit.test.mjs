@@ -1009,7 +1009,7 @@ test("a truncated-but-parseable stash reflog reports the too-low count as exact 
 // and stays under #306, which is why this fixture corrupts rather than removes.
 // Corrupt the loose object behind a NON-TIP entry and the reflog stays
 // intact, so `stash list` resolves the ref, prints the entries it could read,
-// names the fault and exits 1 — a nonempty list at a nonzero rc, which is the
+// names the fault and exits nonzero (1 on git <= 2.55, 128 on git >= 2.56) — a nonempty list at a nonzero rc, which is the
 // one shape none of the `show-ref` states above produce. The cross-check sees
 // no disagreement, so the rc is the whole signal, and the old pipeline gave
 // `wc`'s status instead of git's. The count printed was short by exactly the
@@ -1028,7 +1028,7 @@ test("a corrupt loose object behind a non-tip stash entry reports unknown, not t
   // AFTER printing entries. Measured here rather than asserted in prose,
   // because both halves are what the fix reads and neither is obvious.
   const list = spawnSync("git", ["stash", "list"], { cwd: c.w, env: ENV, encoding: "utf8" });
-  assert.equal(list.status, 1, `a corrupt non-tip object must make the list call fail; got ${list.status} ${list.stderr}`);
+  assert.ok(Number.isInteger(list.status) && list.status !== 0, `a corrupt non-tip object must make the list call fail; got ${list.status} ${list.stderr}`);
   assert.equal(list.stdout.split("\n").filter(Boolean).length, 2, "fixture must leave a nonempty, undercounted list — an empty one lands on the show-ref branch instead");
   const showRef = spawnSync("git", ["show-ref", "refs/stash"], { cwd: c.w, env: ENV, encoding: "utf8" });
   assert.equal(showRef.status, 0, `refs/stash must still resolve — this is why the cross-check cannot see it; got ${showRef.status} ${showRef.stderr}`);
@@ -1045,7 +1045,7 @@ test("a corrupt loose object behind a non-tip stash entry reports unknown, not t
 });
 
 // A stash object that is CORRUPT rather than missing reaches the same branch —
-// list empty at rc 1, show-ref rc 0 — but git answers in SEVEN lines there, and
+// list empty at a nonzero rc, show-ref rc 0 — but git answers in SEVEN lines there, and
 // a bad `objects/info/alternates` both adds three more and puts a backslash in
 // them. That fixture is what makes the two hazards of `msg="$msg — $diag";
 // echo "$msg"` observable at once: unfolded newlines put git's text at column 0
@@ -1064,12 +1064,14 @@ test("a multi-line diagnostic holding a backslash arrives folded and whole", (t)
   writeFileSync(obj, "junk\n");
 
   // The rc both comments name for this state, measured rather than asserted in
-  // prose (#494). `stash list` FAILS here, unlike the states it stays silent
-  // about — and the counting pipeline takes `wc`'s status, so the branch still
-  // fires and the rc is discarded. That discard is why a wrong rc in the prose
-  // above could sit here for as long as it did without a test noticing.
+  // prose (#494). It is 1 on git <= 2.55 and 128 on git >= 2.56, so the pin is
+  // that the call FAILED, never its value. `stash list` FAILS here, unlike the
+  // states it stays silent about — and the counting pipeline takes `wc`'s
+  // status, so the branch still fires and the rc is discarded. That discard is
+  // why a wrong rc in the prose above could sit here for as long as it did
+  // without a test noticing.
   const list = spawnSync("git", ["stash", "list"], { cwd: c.w, env: ENV, encoding: "utf8" });
-  assert.equal(list.status, 1, `a corrupt tip object must make the list call itself fail; got ${list.status} ${list.stderr}`);
+  assert.ok(Number.isInteger(list.status) && list.status !== 0, `a corrupt tip object must make the list call itself fail; got ${list.status} ${list.stderr}`);
 
   mkdirSync(join(c.w, ".git", "objects", "info"), { recursive: true });
   writeFileSync(join(c.w, ".git", "objects", "info", "alternates"), "/no\\clue/objects\n");
@@ -1107,7 +1109,7 @@ test("no-undo-audit.sh's own comment names the rc the fixture above measures", (
   ).text;
   assert.match(
     paragraph,
-    Pin.phrase("list empty at rc 1"),
+    Pin.phrase("list empty at rc 1 on git <= 2.55 and rc 128 on git >= 2.56"),
     "no-undo-audit.sh states this same rc in its own comment; the two must not drift apart again",
   );
 });
