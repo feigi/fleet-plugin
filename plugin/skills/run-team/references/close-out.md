@@ -106,11 +106,13 @@ moves `.fleet/ticket-features.pending.tsv` — the row the router script
 appended for each Pull at dispatch — into `docs/metrics/ticket-features.tsv`,
 deduped on `session`+`agent`, so this run's own rows are in the file that gets
 committed; that file is a run artifact too and is committed with the other
-two. It then runs `pr-cost.mjs --guard`, which rewrites
-`.fleet/cost-guard.json` from all three files. Exit 0: both ran. The guard's
+two. It then widens a `docs/metrics/member-outcomes.tsv` written before the
+newest columns, as at phase 0 — a file already at the current width is left
+as it is — and then runs `pr-cost.mjs --guard`, which rewrites
+`.fleet/cost-guard.json` from all three files. Exit 0: every duty ran. The guard's
 own exit 3 (a cell tripped) and 4 (no verdict yet, baseline too thin) are
 verdicts the router and `fleet-tick.mjs` read, never failures; the script
-absorbs them. Exit 1 names the duty that failed on stderr and the duty after it
+absorbs them. Exit 1 names the duty that failed on stderr and the duties after it
 did not run; exit 2 is a usage error. At close-out a failure fails the
 `metrics` step of `closeout.mjs finish`, so `commit-and-pr` stays pending: fix
 the cause and run `finish` again — the pending file stays in `.fleet/` and the

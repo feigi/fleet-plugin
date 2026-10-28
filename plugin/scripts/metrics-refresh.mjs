@@ -46,8 +46,8 @@
 // (no verdict yet — the baseline cell has too few merged PRs) are verdicts the
 // router and `fleet-tick.mjs` consume, not failures; any other non-zero exit is.
 //
-// One `metrics-refresh: <duty>: …` line per duty on stdout. Exit 0 when
-// neither duty failed; 1 when one failed — named on stderr, and the duty after
+// One `metrics-refresh: <duty>: …` line per duty on stdout. Exit 0 when no
+// duty failed; 1 when one failed — named on stderr, and the duties after
 // it did not run (each is safe to run again); 2 on a usage error.
 
 import { spawnSync } from "node:child_process";
@@ -89,8 +89,8 @@ function widen(text, columns) {
 }
 
 // The first width a member-outcomes.tsv was ever written at that a later column widened: the
-// width before `ending` shipped (2026-10-21). Every width from it up to the current one is a
-// file of this corpus written before the columns past that width existed.
+// width before `ending` shipped (merged 2026-10-22). Every width from it up to the current
+// one is a file of this corpus written before the columns past that width existed.
 const MEMBER_FIRST_WIDTH = MEMBER_COLUMNS.indexOf("ending");
 const MEMBER_NAME_AT = MEMBER_COLUMNS.indexOf("member");
 
@@ -101,26 +101,29 @@ const MEMBER_NAME_AT = MEMBER_COLUMNS.indexOf("member");
 // an implementer's row, where blank means "not an implementer": that reads `unknown`. Rows of
 // one width other than the current or an earlier one, and a file whose rows are not all of
 // one width, throw: parseTsv's refusal to guess a row's columns stands, and this does not
-// widen what it would not read. A file already at the current width comes back as it is.
+// widen what it would not read. A row ending in a CR (a CRLF file) gains its cells before that
+// CR, which stays the row's last byte. A file with no rows comes back as `{ rows: 0 }`, and one
+// already at the current width as null: neither has anything to write.
 function widenMembers(text) {
-  const lines = String(text).split("\n");
+  const lines = text.split("\n");
   const rows = [];
   lines.forEach((l, i) => { if (l.trim() && !l.startsWith("#")) rows.push(i); });
-  const marker = rows.map((i) => lines[i]).find((l) => /^(<{7}|={7}|>{7})( |$)/.test(l));
-  if (marker !== undefined) throw new Error(`git conflict marker — ${marker.slice(0, 60)}`);
+  if (!rows.length) return { rows: 0 };
+  const markerAt = rows.find((i) => /^(<{7}|={7}|>{7})( |\r?$)/.test(lines[i]));
+  if (markerAt !== undefined) throw new Error(`git conflict marker — ${lines[markerAt].slice(0, 60)}`);
   const widths = [...new Set(rows.map((i) => lines[i].split("\t").length))].sort((a, b) => a - b);
   if (widths.length > 1) throw new Error(`rows of different widths (${widths.join(", ")}) — a file is written at one width`);
-  const [width = MEMBER_COLUMNS.length] = widths;
-  if (width === MEMBER_COLUMNS.length) return { text, width, rows: 0 };
+  const [width] = widths;
+  if (width === MEMBER_COLUMNS.length) return null;
   if (width < MEMBER_FIRST_WIDTH || width > MEMBER_COLUMNS.length) {
     const row = lines[rows[0]];
     throw new Error(`malformed row: ${width} fields, expected ${MEMBER_COLUMNS.length} (or an earlier ${MEMBER_FIRST_WIDTH} to ${MEMBER_COLUMNS.length - 1}) — ${row.slice(0, 60)}`);
   }
   const added = MEMBER_COLUMNS.slice(width);
   for (const i of rows) {
-    const cells = lines[i].split("\t");
-    const implementer = isImplementer(cells[MEMBER_NAME_AT]);
-    lines[i] = [...cells, ...added.map((c) => (c === "ending" && implementer ? "unknown" : ""))].join("\t");
+    const eol = lines[i].endsWith("\r") ? "\r" : "";
+    const cells = lines[i].slice(0, lines[i].length - eol.length).split("\t");
+    lines[i] = [...cells, ...added.map((c) => (c === "ending" && isImplementer(cells[MEMBER_NAME_AT]) ? "unknown" : ""))].join("\t") + eol;
   }
   return { text: lines.join("\n"), width, rows: rows.length };
 }
@@ -134,7 +137,8 @@ function widenMemberOutcomes(repo) {
   } catch (e) {
     throw new Error(`${MEMBERS}: ${e.message}`);
   }
-  if (widened.rows === 0) return say(`member-outcomes: already ${MEMBER_COLUMNS.length} columns`);
+  if (widened === null) return say(`member-outcomes: already ${MEMBER_COLUMNS.length} columns`);
+  if (widened.rows === 0) return say("member-outcomes: no rows to widen");
   writeFileSync(`${file}.tmp`, widened.text);
   renameSync(`${file}.tmp`, file);
   say(`member-outcomes: widened ${widened.rows} row${widened.rows === 1 ? "" : "s"} from ${widened.width} to ${MEMBER_COLUMNS.length} columns`);

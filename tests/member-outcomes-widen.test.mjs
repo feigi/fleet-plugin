@@ -97,12 +97,24 @@ test("a file already at the current width is left byte for byte, and a second ru
 
 test("a file with comments only, and a workspace with no file, are left alone", () => {
   const w = workspace(COMMENTS);
-  assert.equal(refresh(w.repo).status, 0);
+  const c = refresh(w.repo);
+  assert.equal(c.status, 0, c.stderr);
+  assert.match(c.stdout, /metrics-refresh: member-outcomes: no rows to widen/);
   assert.equal(w.text(), COMMENTS);
   const none = workspace(null);
   const r = refresh(none.repo);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(existsSync(none.file), false);
+});
+
+test("a CRLF file widens with each row's CR kept as its last byte, after the cells it gains", () => {
+  const lf = workspace(tsvAt(20));
+  assert.equal(refresh(lf.repo).status, 0);
+  const w = workspace(tsvAt(20).replace(/\n/g, "\r\n"));
+  const r = refresh(w.repo);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, new RegExp(`widened 3 rows from 20 to ${COLUMNS.length} columns`));
+  assert.equal(w.text(), lf.text().replace(/\n/g, "\r\n"));
 });
 
 const row20 = tsvAt(20, ROWS.slice(0, 1)).slice(COMMENTS.length).trimEnd();
@@ -111,6 +123,9 @@ for (const [why, body, named] of [
   ["a row one cell wider than the current width", `${rowNow}\tx\n`, new RegExp(`${COLUMNS.length + 1} fields`)],
   ["a row too short to be any known width", "short\trow\n", /2 fields/],
   ["git conflict markers", `<<<<<<< HEAD\n${row20}\n=======\n${row20}\n>>>>>>> main\n`, /git conflict marker/],
+  ["a bare `=======` git conflict marker", `${row20}\n=======\n${row20}\n`, /git conflict marker/],
+  ["a `<<<<<<<` git conflict marker with nothing after it", `<<<<<<<\n${row20}\n`, /git conflict marker/],
+  ["a bare `=======` git conflict marker in a CRLF file", `${row20}\r\n=======\r\n${row20}\r\n`, /git conflict marker/],
   ["rows of two different known widths", `${row20}\n${rowNow}\n`, new RegExp(`different widths \\(20, ${COLUMNS.length}\\)`)],
   ["a tab inside a cell, which makes its row one cell too wide", `${row20}\n${row20.replace("claude-opus-5", "claude\topus-5")}\n`, /different widths \(20, 21\)/],
 ]) {
@@ -135,6 +150,18 @@ test("the widen runs before the cost guard, so a corpus it cannot read stops the
   assert.match(r.stderr, /member-outcomes failed/);
   assert.doesNotMatch(r.stderr, /cost guard/);
   assert.equal(existsSync(join(w.repo, ".fleet", "cost-guard.json")), false);
+});
+
+test("the drain runs before the widen, so a member-outcomes file it cannot read stops the run after the drain", () => {
+  const w = workspace("short\trow\n");
+  const pending = join(w.repo, ".fleet", "ticket-features.pending.tsv");
+  mkdirSync(join(w.repo, ".fleet"), { recursive: true });
+  writeFileSync(pending, "");
+  const r = refresh(w.repo);
+  assert.equal(r.status, 1);
+  assert.match(r.stdout, /metrics-refresh: drain: .*ticket-features\.pending\.tsv was empty — removed/);
+  assert.match(r.stderr, /member-outcomes failed/);
+  assert.equal(existsSync(pending), false);
 });
 
 for (const width of [20, 21, 22]) {
