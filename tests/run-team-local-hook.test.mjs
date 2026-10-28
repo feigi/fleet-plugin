@@ -151,6 +151,9 @@ function fixture({ rows = corpus(), table = routerTable(), cells = STAGE1, readd
   write(repo, GUARD, JSON.stringify({ computed_at: "2026-10-03T12:00:00.000Z", verdict: "none", tripped: [], cells: [] }));
   mkdirSync(join(root, "bin"));
   writeExecStub(join(root, "bin", "gh"), GH_STUB);
+  // An `omp` that fails at once, so no spawn with this `bin` first reads the
+  // host's omp config: a run without `--model-roles`/`--catalog` skips the drift notice.
+  writeExecStub(join(root, "bin", "omp"), "#!/bin/sh\nexit 1\n");
   writeFileSync(join(root, "gh.json"), JSON.stringify({ prs: [], openPrs: [], issues: [], ...gh }));
   writeFileSync(join(root, "model-roles.json"), JSON.stringify(MODEL_ROLES));
   writeFileSync(join(root, "catalog.json"), JSON.stringify(CATALOG));
