@@ -151,6 +151,9 @@ function fixture({ rows = corpus(), table = routerTable(), cells = STAGE1, readd
   write(repo, GUARD, JSON.stringify({ computed_at: "2026-10-03T12:00:00.000Z", verdict: "none", tripped: [], cells: [] }));
   mkdirSync(join(root, "bin"));
   writeExecStub(join(root, "bin", "gh"), GH_STUB);
+  // An `omp` that fails at once, so no spawn with this `bin` first reads the
+  // host's omp config: a run without `--model-roles`/`--catalog` skips the drift notice.
+  writeExecStub(join(root, "bin", "omp"), "#!/bin/sh\nexit 1\n");
   writeFileSync(join(root, "gh.json"), JSON.stringify({ prs: [], openPrs: [], issues: [], ...gh }));
   writeFileSync(join(root, "model-roles.json"), JSON.stringify(MODEL_ROLES));
   writeFileSync(join(root, "catalog.json"), JSON.stringify(CATALOG));
@@ -538,4 +541,7 @@ test("usage: no positional, and only the declared flags, else exit 2", () => {
   // A flag's value is not a positional.
   const value = spawnSync(process.execPath, [HOOK, "--repo", f.repo, "--dry-run"], { encoding: "utf8", env: { ...ENV, PATH: `${join(f.root, "bin")}:${process.env.PATH}`, GH_FIXTURE: join(f.root, "gh.json"), GH_LOG: join(f.root, "gh.log") }, cwd: f.repo });
   assert.notEqual(value.status, 2, value.stderr);
+  // No `--model-roles`/`--catalog` here, so the drift notice asks `omp`: the
+  // fixture's failing stub answers it, never the host's omp.
+  assert.match(value.stdout + value.stderr, /drift notice: skipped — omp config get modelRoles --json failed/);
 });
