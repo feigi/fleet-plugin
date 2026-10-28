@@ -10,7 +10,9 @@
 //      oldest-first and never re-ranked. Its row count is `scanned`, the
 //      supply the tick reports; the rows its to-spec filter removed are
 //      `dropped`, which counts toward nothing and is carried so an empty or
-//      short shortlist still names them.
+//      short shortlist still names them. `ready-for-agent` there is a Label
+//      role, which candidates.mjs resolves through the Label map; this file
+//      reads the map for nothing else.
 //   2. The dependency scan on each row's `d`: an open blocker drops the ticket
 //      (next-ticket step 2). A blocker that is itself a candidate is open by
 //      construction — candidates.mjs queries `--state open` — so only the rest
@@ -41,7 +43,8 @@
 // full read at best and two members on one ticket at worst.
 //
 // What REFUSES instead (exit 2), leaving the previous file exactly as it was: a
-// scan that did not answer, a ledger that could not be read, a workspace that
+// scan that did not answer (a missing or invalid Label map among its causes,
+// named on the stderr candidates.mjs passes through), a ledger that could not be read, a workspace that
 // could not be resolved, a file that could not be written. An empty shortlist
 // written in any of those cases would read as "no work". Exit 0 is the file
 // written, an empty shortlist included — the empty queue is an answer. Never
@@ -75,7 +78,7 @@ import { premisesOf } from "./ledger-grammar.mjs";
 const NAME = "shortlist";
 const die = makeDie(NAME);
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
-const LABEL = "ready-for-agent";
+const ROLE = "ready-for-agent";
 // The states that lift a premise or clear a blocker. `gh pr view` answers
 // OPEN, CLOSED or MERGED; `gh issue view` answers OPEN or CLOSED for an issue
 // and the PR's own state for a PR number — so one set serves every probe here.
@@ -153,7 +156,7 @@ function shortlistPath() {
 }
 
 function scan() {
-  const r = spawnSync(process.execPath, [join(SCRIPT_DIR, "candidates.mjs"), "--require-label", LABEL, "--with-dropped"], {
+  const r = spawnSync(process.execPath, [join(SCRIPT_DIR, "candidates.mjs"), "--require-label", ROLE, "--with-dropped"], {
     encoding: "utf8", maxBuffer: MAX_BUFFER, stdio: ["ignore", "pipe", "inherit"],
   });
   if (r.error) die(`candidates.mjs did not run: ${how(r)}`);

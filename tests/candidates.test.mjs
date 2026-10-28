@@ -34,16 +34,29 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stripComments } from "./support/strip-comments.mjs";
 import { Pin } from "./support/prose-pin.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { seedLabelMap } from "./support/label-map-seed.mjs";
+import { gitEnv } from "../plugin/scripts/git-env.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/candidates.mjs", import.meta.url));
 const ARG_MODULE = fileURLToPath(new URL("../plugin/scripts/arg.mjs", import.meta.url));
+const GIT_ENV = gitEnv({}, process.env);
+
+// candidates.mjs reads the Label map of the repository its cwd belongs to, so
+// every run gets a repository of its own: run from this suite's cwd it would
+// read the checkout's real map. `seed` leaves the map in it — the identity map
+// unless a test passes another, or nothing at all.
+function mapRepo(dir, seed) {
+  const r = spawnSync("git", ["init", "-q"], { cwd: dir, env: GIT_ENV, encoding: "utf8" });
+  assert.equal(r.status, 0, `test setup: git init: ${r.stderr}`);
+  seed(dir);
+}
 
 const STUB = `#!/bin/sh
 # Stand-in for \`gh issue list … --jq <expr>\`. Applies the expression gh was
@@ -72,6 +85,7 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+[ -n "$SEARCH_LOG" ] && printf '%s\\n' "$search" >> "$SEARCH_LOG"
 # The fallback is the query with no POSITIVE label: term. The leading space is
 # the whole test and cannot be dropped: every exclusion is spelled \`-label:\`,
 # so a bare \`*label:*\` matches the unfiltered query too and silently serves it
@@ -141,20 +155,22 @@ fi
 exec "$JQ_RAN" -c "$expr" "$fixture"
 `;
 
-function run(issues, args = ["--require-label", "ready-for-agent"], unfiltered = null, extraEnv = {}) {
+function run(issues, args = ["--require-label", "ready-for-agent"], unfiltered = null, extraEnv = {}, seed = seedLabelMap) {
   const dir = mkdtempSync(join(tmpdir(), "candidates-"));
+  mapRepo(dir, seed);
   const fixture = join(dir, "issues.json");
   writeFileSync(fixture, JSON.stringify(issues));
   const gh = join(dir, "gh");
   writeExecStub(gh, STUB);
   const engineLog = join(dir, "engine-version");
-  const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, FIXTURE: fixture, ENGINE_LOG: engineLog, ...extraEnv };
+  const searchLog = join(dir, "searches");
+  const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, FIXTURE: fixture, ENGINE_LOG: engineLog, SEARCH_LOG: searchLog, ...extraEnv };
   if (unfiltered) {
     const second = join(dir, "unfiltered.json");
     writeFileSync(second, JSON.stringify(unfiltered));
     env.FIXTURE_UNFILTERED = second;
   }
-  const r = spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8", env });
+  const r = spawnSync(process.execPath, [SCRIPT, ...args], { cwd: dir, encoding: "utf8", env });
   // Read the engine recording BEFORE the temp dir goes. This is the only
   // evidence of which binary actually applied the expression (#383); it
   // stays "" when the STUB never ran (ENOENT), which is itself a failure the
@@ -169,8 +185,16 @@ function run(issues, args = ["--require-label", "ready-for-agent"], unfiltered =
   } catch (e) {
     if (e.code !== "ENOENT") throw e;
   }
+  // Every `--search` value the stub was handed, in call order: the argv gh
+  // received, not the script's own echo of it.
+  let searches = [];
+  try {
+    searches = readFileSync(searchLog, "utf8").split("\n").slice(0, -1);
+  } catch (e) {
+    if (e.code !== "ENOENT") throw e;
+  }
   rmSync(dir, { recursive: true, force: true });
-  return { ...r, rows: r.stdout.trim() ? JSON.parse(r.stdout) : [], engine };
+  return { ...r, rows: r.stdout.trim() ? JSON.parse(r.stdout) : [], engine, searches };
 }
 
 // For the failure shapes the fixture stub cannot reach — it always `exec`s jq,
@@ -178,16 +202,24 @@ function run(issues, args = ["--require-label", "ready-for-agent"], unfiltered =
 // is absent, is a different `execFileSync` error object entirely.
 function runWithGh(script) {
   const dir = mkdtempSync(join(tmpdir(), "candidates-gh-"));
+  mapRepo(dir, seedLabelMap);
   const gh = join(dir, "gh");
   writeExecStub(gh, script);
   const env = { ...process.env, PATH: `${dir}:${process.env.PATH}` };
   const r = spawnSync(process.execPath, [SCRIPT, "--require-label", "ready-for-agent"], {
+    cwd: dir,
     encoding: "utf8",
     env,
   });
   rmSync(dir, { recursive: true, force: true });
   return r;
 }
+
+// `$ gh …` is echoed by query() before every invocation, so its absence is how
+// these pin that the refusal came BEFORE any query ran. Status 2 alone does not:
+// a query that ran and then died still exits 2, and for --require-label the
+// query that runs is the widening one the whole file exists to prevent.
+const queriesRun = (stderr) => (stderr.match(/^\$ gh /gm) ?? []).length;
 
 // Labels are settled by the fixture, not by the query: the stub ignores
 // `--search`'s label term beyond picking a fixture. A row in the unfiltered
@@ -200,29 +232,95 @@ const ticket = (n, body, labels = ["ready-for-agent"]) => ({
   body,
 });
 
-// #1306: EXCLUDE is a single string literal, pinned whole rather than by N
-// independent `assert.match` calls for individual terms — a dropped or
-// reordered term sits in the gap BETWEEN two such matches and neither would
-// see it. One `assert.equal` over the exact captured span covers every term
-// and their order together.
-//
-// Read through stripComments(), not raw source — the same escape :1039's
-// `die()` pin already closes. An unanchored match against raw text is
-// satisfied by a declaration parked in a `/* */` block above a reverted one:
-// measured, with the correct five-term EXCLUDE moved into a block comment
-// and the live declaration reverted to the pre-#1306 five terms, a raw-source
-// version of this assertion still passed while the unfiltered scan leaked
-// all eight wayfinder tickets back in. stripComments() blanks whole-line and
-// block comments (its own documented ceiling), so the mutant reds under it
-// and the real declaration's capture is unaffected either way.
-test("EXCLUDE carries every canonical exclusion term, in order, as one pinned string (#1306)", () => {
-  const src = stripComments(readFileSync(SCRIPT, "utf8"));
-  const m = src.match(/const EXCLUDE =\n\s*"([^"]+)";/);
-  assert.notEqual(m, null, "candidates.mjs's EXCLUDE declaration no longer matches this pin's shape — update this test");
-  assert.equal(
-    m[1],
-    "-label:in-progress -label:onhold -label:wontfix -label:needs-triage -label:needs-info -label:wayfinder:map -label:wayfinder:research -label:wayfinder:prototype -label:wayfinder:grilling -label:wayfinder:task",
+// #1306: the exclusions are pinned whole rather than by N independent
+// `assert.match` calls for individual terms — a dropped or reordered term
+// sits in the gap BETWEEN two such matches and neither would see it. One
+// `assert.equal` over the whole `--search` value gh was handed covers every
+// term and their order together. Under the identity map the five role terms
+// are their role names, quoted; the five `wayfinder:*` terms are not roles
+// and stay unquoted.
+const IDENTITY_EXCLUSIONS =
+  '-label:"in-progress" -label:"onhold" -label:"wontfix" -label:"needs-triage" -label:"needs-info" -label:wayfinder:map -label:wayfinder:research -label:wayfinder:prototype -label:wayfinder:grilling -label:wayfinder:task';
+
+test("the search carries every canonical exclusion term, in order, and the required label last (#1306)", () => {
+  const { status, searches } = run([ticket(11, "## What to build\n\nx\n")]);
+  assert.equal(status, 0);
+  assert.deepEqual(searches, [`${IDENTITY_EXCLUSIONS} label:"ready-for-agent"`]);
+});
+
+test("the unfiltered fallback query still carries every exclusion", () => {
+  const { status, searches, rows } = run(
+    [],
+    ["--require-label", "ready-for-agent", "--allow-fallback"],
+    [ticket(12, "## What to build\n\ny\n", ["ready-for-human"])],
   );
+  assert.equal(status, 0);
+  assert.deepEqual(rows.map((r) => r.n), [12]);
+  assert.deepEqual(searches, [`${IDENTITY_EXCLUSIONS} label:"ready-for-agent"`, IDENTITY_EXCLUSIONS]);
+});
+
+test("a remapped Label map's strings reach gh — the required label and the exclusions alike", () => {
+  const { status, searches, rows } = run(
+    [ticket(11, "## What to build\n\nx\n", ["agent-ready"])],
+    ["--require-label", "ready-for-agent"],
+    null,
+    { LABEL_EXPECT: "agent-ready" },
+    (ws) => seedLabelMap(ws, { roles: { "ready-for-agent": "agent-ready", "in-progress": "wip" } }),
+  );
+  assert.equal(status, 0);
+  assert.deepEqual(rows.map((r) => r.n), [11]);
+  assert.equal(searches.length, 1);
+  assert.match(searches[0], /(^| )label:"agent-ready"$/);
+  assert.match(searches[0], /(^| )-label:"wip"( |$)/);
+  // The role names are never typed into the query once the map renames them.
+  assert.doesNotMatch(searches[0], /in-progress|ready-for-agent/);
+});
+
+test("--require-label takes any Label role, not only ready-for-agent", () => {
+  const { status, searches } = run(
+    [ticket(11, "## What to build\n\nx\n", ["ready-for-human"])],
+    ["--require-label", "ready-for-human"],
+  );
+  assert.equal(status, 0);
+  assert.deepEqual(searches, [`${IDENTITY_EXCLUSIONS} label:"ready-for-human"`]);
+});
+
+test("--require-label naming no Label role refuses at exit 2 before any query", () => {
+  const { status, stderr } = run([ticket(11, "## What to build\n\nx\n")], ["--require-label", "agent-ready"]);
+  assert.equal(status, 2);
+  assert.match(stderr, /^candidates: --require-label takes a Label role \(.*\), got 'agent-ready'$/m);
+  assert.equal(queriesRun(stderr), 0);
+});
+
+test("an unknown role refuses as a usage error even with no Label map — the flag is checked first", () => {
+  const { status, stderr } = run([ticket(11, "## What to build\n\nx\n")], ["--require-label", "agent-ready"], null, {}, () => {});
+  assert.equal(status, 2);
+  assert.match(stderr, /^candidates: --require-label takes a Label role/m);
+  assert.doesNotMatch(stderr, /Label map/);
+});
+
+// Exit 2, never 1: no map is a query that could not be built, not an empty
+// queue. The reader's message names the step that writes the map.
+for (const [what, args] of [
+  ["the labeled query", ["--require-label", "ready-for-agent"]],
+  ["the unfiltered query", []],
+]) {
+  test(`no Label map refuses ${what} at exit 2, naming ensure, before any query`, () => {
+    const { status, stderr } = run([ticket(11, "## What to build\n\nx\n")], args, null, {}, () => {});
+    assert.equal(status, 2);
+    assert.match(stderr, /^candidates: no Label map at .*label-map\.mjs ensure/m);
+    assert.equal(queriesRun(stderr), 0);
+  });
+}
+
+test("outside a repository there is no Label map to read: exit 2, before any query", () => {
+  const dir = mkdtempSync(join(tmpdir(), "candidates-norepo-"));
+  const env = { ...process.env, GIT_CEILING_DIRECTORIES: dirname(dir) };
+  const r = spawnSync(process.execPath, [SCRIPT, "--require-label", "ready-for-agent"], { cwd: dir, encoding: "utf8", env });
+  rmSync(dir, { recursive: true, force: true });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /^candidates: /m);
+  assert.equal(queriesRun(r.stderr), 0);
 });
 
 test("a to-spec spec is dropped — it is to-tickets' input, not a claimable ticket", () => {
@@ -1288,12 +1386,6 @@ test("the spec predicate never reaches the payload — it is pure token cost dow
   assert.deepEqual(Object.keys(rows[0]).sort(), ["d", "l", "n", "t"]);
 });
 
-// `$ gh …` is echoed by query() before every invocation, so its absence is how
-// these pin that the refusal came BEFORE any query ran. Status 2 alone does not:
-// a query that ran and then died still exits 2, and for --require-label the
-// query that runs is the widening one the whole file exists to prevent.
-const queriesRun = (stderr) => (stderr.match(/^\$ gh /gm) ?? []).length;
-
 test("a trailing --limit refuses — an absent value is not a licence to use the default", () => {
   const { status, stderr } = run(
     [ticket(11, "## What to build\n\nx\n")],
@@ -1444,7 +1536,7 @@ for (const v of ["=true", "=false", "="]) {
   test(`--allow-fallback${v} refuses outright, rather than being silently dropped and falling through`, () => {
     const { status, stderr } = run(
       [],
-      ["--require-label", "nonexistent", `--allow-fallback${v}`],
+      ["--require-label", "ready-for-agent", `--allow-fallback${v}`],
       [ticket(12, "## What to build\n\ny\n", ["ready-for-human"])],
     );
     assert.equal(queriesRun(stderr), 0);
@@ -1463,7 +1555,7 @@ for (const v of ["=true", "=false", "="]) {
 test("--allow-fallback still falls back in its space-separated spelling — the = refusal is not a blanket one", () => {
   const { status, stderr, rows } = run(
     [],
-    ["--require-label", "nonexistent", "--allow-fallback"],
+    ["--require-label", "ready-for-agent", "--allow-fallback"],
     [ticket(12, "## What to build\n\ny\n", ["ready-for-human"])],
   );
   assert.equal(queriesRun(stderr), 2);
@@ -1650,12 +1742,19 @@ test("gh missing entirely is named as ENOENT — the shape that prints nothing a
   // the suite green without this: the jq test above only ever reaches the
   // exit-status branch. ENOENT is the shape where die() is the SOLE diagnostic
   // — nothing spawned, so no child stderr was forwarded to fall back on.
+  // PATH holds git alone: the Label map is read through git before any query,
+  // and the directory git lives in may hold gh as well.
+  const gitOnly = mkdtempSync(join(tmpdir(), "candidates-git-only-"));
+  const gitBin = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+  assert.ok(gitBin, "test setup: no git on PATH");
+  symlinkSync(gitBin, join(gitOnly, "git"));
   const { status, stderr } = run(
     [ticket(11, "## What to build\n\nx\n")],
     ["--require-label", "ready-for-agent"],
     null,
-    { PATH: "/nonexistent" },
+    { PATH: gitOnly },
   );
+  rmSync(gitOnly, { recursive: true, force: true });
   assert.equal(status, 2);
   assert.match(stderr, /^candidates: gh issue list failed: ENOENT$/m);
 });
@@ -1833,13 +1932,14 @@ test("a multi-word label is quoted into the search term — unquoted, every word
   // expensive: the query silently did not mean what was asked, matched
   // nothing, and its empty result read as exit 1 — "the query worked and
   // there is no work" — against a queue that was not empty. Reachable in a
-  // repo that remapped its triage labels (docs/agents/triage-labels.md invites
-  // exactly that), where the AFK-ready role can be spelled `good first issue`.
+  // repo that remapped its triage labels (the Label map exists for exactly
+  // that), where the AFK-ready role can be spelled `good first issue`.
   const { status, rows } = run(
     [ticket(11, "## What to build\n\nx\n", ["good first issue"])],
-    ["--require-label", "good first issue"],
+    ["--require-label", "ready-for-agent"],
     null,
     { LABEL_EXPECT: "good first issue" },
+    (ws) => seedLabelMap(ws, { roles: { "ready-for-agent": "good first issue" } }),
   );
   assert.equal(status, 0);
   assert.deepEqual(rows.map((r) => r.n), [11]);
@@ -1855,7 +1955,7 @@ test("a single-word label still resolves to itself — quoting must not disturb 
   // HERE, which is a fact about GitHub's parser and not one this stub can
   // prove. What the stub can prove is the half that would break: the term
   // still resolves to `ready-for-agent` and nothing else.
-  const { status, rows, stderr } = run(
+  const { status, rows, searches } = run(
     [ticket(11, "## What to build\n\nx\n")],
     ["--require-label", "ready-for-agent"],
     null,
@@ -1863,9 +1963,10 @@ test("a single-word label still resolves to itself — quoting must not disturb 
   );
   assert.equal(status, 0);
   assert.deepEqual(rows.map((r) => r.n), [11]);
-  // Anchored on the `--json` that follows, so this cannot be satisfied by a
-  // term with the label plus trailing free text — the exact shape #175 is.
-  assert.match(stderr, /--search -label:in-progress[^\n]* label:"ready-for-agent" --json/);
+  // Anchored at the value's end, so this cannot be satisfied by a term with
+  // the label plus trailing free text — the exact shape #175 is.
+  assert.equal(searches.length, 1);
+  assert.match(searches[0], /(^| )label:"ready-for-agent"$/);
 });
 
 test("a label with no space is quoted too — the wire form carries every label, not only the ones a space would break", () => {
@@ -1878,57 +1979,51 @@ test("a label with no space is quoted too — the wire form carries every label,
   // `/\s/` predicate that has to stay in step with GitHub's parser; quoting
   // only when /\s/ matched would pass every other test in this suite unnoticed.
   // Behaviour cannot pin this one — the stub's parser resolves the label under
-  // either form — so the wire form is the assertion.
-  const { stderr } = run(
+  // either form — so the wire form is the assertion, for the required label
+  // and for an excluded role's string alike.
+  const { searches } = run(
     [ticket(11, "## What to build\n\nx\n", ["status:ready"])],
-    ["--require-label", "status:ready"],
+    ["--require-label", "ready-for-agent"],
+    null,
+    {},
+    (ws) => seedLabelMap(ws, { roles: { "ready-for-agent": "status:ready", onhold: "blocked" } }),
   );
-  assert.match(stderr, /--search -label:in-progress[^\n]* label:"status:ready" --json/);
+  assert.equal(searches.length, 1);
+  assert.match(searches[0], /(^| )label:"status:ready"$/);
+  assert.match(searches[0], /(^| )-label:"blocked" /);
 });
 
-test("a label containing a double quote refuses — an unrepresentable query must not run as an empty one", () => {
-  // What the fix itself newly makes possible: the term is `label:"<value>"`,
-  // so a `"` inside the value closes it early and the remainder becomes free
-  // text — #175's defect with the quoting applied. Refuse at exit 2 ("the
-  // query broke") rather than send it, because the alternative is the fail-open
-  // this file exists to prevent: a misparsed query whose empty result is
-  // indistinguishable from an empty queue. Escaping instead was not shipped
-  // because there is nothing to escape TO: GitHub does honour `\"` inside a
-  // qualifier, so a backslash cannot rescue a quote — it only moves the same
-  // misparse one character left, which is what the next test pins.
-  const { status, stderr } = run(
-    [ticket(11, "## What to build\n\nx\n")],
-    ["--require-label", 'say "hi"'],
-  );
-  assert.equal(status, 2);
-  assert.match(stderr, /^candidates: --require-label cannot contain a double quote/m);
-  // Refuses BEFORE gh, like every other value guard: a query that cannot be
-  // built correctly must not be sent at all.
-  assert.equal(queriesRun(stderr), 0);
-});
-
-test("a label ending in a backslash refuses too — it eats the closing quote the fix adds", () => {
-  // The same term broken from the other side, and the side that leaves no
-  // trace. Measured against feigi/claude-config 2026-08-17: negating a label
-  // no issue carries is a no-op, so `-label:"zzz" label:"ready-for-agent"`
-  // returns the same count as `label:"ready-for-agent"` alone — but
-  // `-label:"zzz\" label:"ready-for-agent"` returns the count for
-  // `ready-for-agent` as FREE TEXT, the backslash having eaten the closing
-  // quote and swallowed the whole following qualifier. Doubling does not
-  // escape it. In the shape query() actually builds the label term comes
-  // LAST, so a trailing backslash leaves its value unterminated and the query
-  // answers zero rows at HTTP 200, no error — #175's silent empty, reached
-  // through the fix rather than around it. Without this case the widened
-  // guard is unpinned: narrowing it back to `"` alone leaves every other test
-  // in this file green.
-  const { status, stderr } = run(
-    [ticket(11, "## What to build\n\nx\n")],
-    ["--require-label", "trailing\\"],
-  );
-  assert.equal(status, 2);
-  assert.match(stderr, /^candidates: --require-label cannot contain a double quote or a backslash/m);
-  assert.equal(queriesRun(stderr), 0);
-});
+// A `"` or a `\` in a mapped string cannot be represented in a quoted term:
+// a `"` closes the quote early and the remainder becomes free text — #175's
+// defect with the quoting applied — and a `\` eats the closing quote, because
+// GitHub does honour `\"` inside a qualifier (measured against
+// feigi/claude-config 2026-08-17: `-label:"zzz\" label:"ready-for-agent"`
+// returns the count for `ready-for-agent` as FREE TEXT). The Label map's
+// reader refuses a map holding either, and the run refuses with it at exit 2
+// ("the query broke") before gh, because the alternative is the fail-open
+// this file exists to prevent: a misparsed query whose empty result is
+// indistinguishable from an empty queue. The required label's string and an
+// excluded role's are both checked.
+for (const [what, role, value, rule] of [
+  ["the required label's string holds a double quote", "ready-for-agent", 'say "hi"', 'contains `"`'],
+  ["an excluded role's string ends in a backslash", "onhold", "trailing\\", "contains `\\`"],
+]) {
+  test(`a map where ${what} refuses at exit 2 before any query`, () => {
+    const { status, stderr } = run(
+      [ticket(11, "## What to build\n\nx\n")],
+      ["--require-label", "ready-for-agent"],
+      null,
+      {},
+      (ws) => seedLabelMap(ws, { roles: { [role]: value } }),
+    );
+    assert.equal(status, 2);
+    assert.ok(
+      stderr.includes(`is invalid — ${role}: ${rule}: run \`label-map.mjs ensure\``),
+      `expected the reader's refusal naming ${role}, got: ${stderr}`,
+    );
+    assert.equal(queriesRun(stderr), 0);
+  });
+}
 
 // The other half of #173, and the half that produced the refused invocation
 // above: the rule a controller reads lives in another file and was pinned by
