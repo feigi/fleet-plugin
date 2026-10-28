@@ -110,7 +110,8 @@
 //                 still standing. `--chain-head` is given when a ledger row reads
 //                 `excluded · behind-issue:#<N>`: another open ticket
 //                 sequences after this one.
-//   8  row, render, dispatch   `ledger.mjs row`, `dispatch-prompt.mjs render
+//   8  row, render, dispatch   `ledger.mjs row … --routing <line>`, the row and
+//                 the router's line in one write, `dispatch-prompt.mjs render
 //                 implementer --member impl-<N>`, `ledger.mjs dispatch`. The
 //                 brief and the staleness text are given with `‹name›` for each
 //                 `<name>` the implementer template declares: the renderer
@@ -135,7 +136,7 @@ import { isDigits, makeDie } from "./arg.mjs";
 import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
-import { EXCLUDED_REASON, POLICY_CELL, memberTokens, premisesOf, pullEnded, tierValues } from "./ledger-grammar.mjs";
+import { EXCLUDED_REASON, POLICY_CELL, memberTokens, parseRouting, premisesOf, pullEnded, tierValues } from "./ledger-grammar.mjs";
 import { sessionFromReceipt } from "./phase0-receipt.mjs";
 import { briefPaths, briefText, defang, outOfScope, strandedRuling, ticketText } from "./ticket-text.mjs";
 
@@ -945,8 +946,9 @@ class Pull {
       "--impl-row", String(k), ...(head ? ["--chain-head"] : []), "--issue", this.p.issue, "--guard", this.p.guard,
     ];
     const r = this.script("route", "ticket-router.mjs", args);
-    const m = r.status === 0 ? /^POLICY=(\S+) CELL=(\S+) DRAW=(\S+) STRATUM=(\S+) OBJECTIVE=(\S+) REASON=(\S+)$/m.exec(r.stdout) : null;
-    if (m === null) {
+    const line = r.stdout.trim();
+    const routing = r.status === 0 ? parseRouting(line) : null;
+    if (routing === null) {
       const said = r.status === 0 ? `printed no routing line: ${r.stdout}` : withText(`refused (${r.how})`, r);
       const rel = this.script("release", "release-ticket.sh", [String(st.ticket), st.member, "implementer", "--apply"]);
       if (rel.status !== 0) {
@@ -957,19 +959,19 @@ class Pull {
       st.outcome = { exit: 2, reason: `router ${said}`, at: now() };
       return this.stop(`ticket-router.mjs ${said}\nits claim is released`);
     }
-    st.route = { line: m[0], cell: m[2], draw: m[3], reason: m[6], implRow: k, chainHead: head };
+    st.route = { line, cell: routing.cell, draw: routing.draw === null ? "-" : `${routing.draw.k}/${routing.draw.K}`, reason: routing.reason, implRow: k, chainHead: head };
     st.stage = "row";
     return null;
   }
 
   stage_row() {
     const { st } = this;
-    const { cell, draw, reason } = st.route;
+    const { cell, draw } = st.route;
     // `tier=` marks a draw; a Pull routed without one still dispatches at the
     // cell the router printed, carried as `cell=` so the row reads as undrawn.
+    // The Routing itself goes to `## Routed` in the same write.
     const carrier = draw !== "-" ? ` · tier=${cell}` : cell !== POLICY_CELL ? ` · cell=${cell}` : "";
-    const text = `${st.member}${carrier}${reason === "ok" ? "" : ` · route=${reason}`}`;
-    const r = this.script("row", "ledger.mjs", ["row", String(st.ticket), text]);
+    const r = this.script("row", "ledger.mjs", ["row", String(st.ticket), `${st.member}${carrier}`, "--routing", st.route.line]);
     if (r.status !== 0) return this.stop(withText(`ledger.mjs row failed (${r.how})`, r));
     st.stage = "render";
     return null;

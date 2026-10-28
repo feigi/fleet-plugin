@@ -156,9 +156,9 @@ import { readState, stateFileIn } from "./fleet-state.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { GH_LOGIN_ARGS, isOwnedPr, loginOf, ownershipReadable } from "./owned-pr.mjs";
-import { RECEIPT, RECEIPT_HELD, archiveStamp, receiptArchiveName, rowNums } from "./ledger-grammar.mjs";
+import { OBJECTIVES, RECEIPT, RECEIPT_HELD, archiveStamp, receiptArchiveName, rowNums } from "./ledger-grammar.mjs";
 import { ancestry, controllerOf, processSource, ProcUnreadable } from "./proc.mjs";
-import { IN_FLIGHT_DEFAULT, OBJECTIVES, OBJECTIVE_DEFAULT } from "./phase0-receipt.mjs";
+import { IN_FLIGHT_DEFAULT, OBJECTIVE_DEFAULT } from "./phase0-receipt.mjs";
 
 const NAME = "phase0";
 const SCRIPTS = dirname(fileURLToPath(import.meta.url));

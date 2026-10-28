@@ -162,7 +162,9 @@ test("Pull step 7 routes through ticket-router.mjs and writes tier= exactly when
   assert.match(slice, /Router\s+exit\s+2\s+→\s+no\s+row\s+and\s+no\s+dispatch/, "step 7 dispatches on a router usage error");
   assert.match(slice, /--impl-row\s+<k>\[\s+--chain-head\]/, "step 7 no longer passes --chain-head for a ticket another sequences after");
   assert.match(slice, /--guard\s+\.fleet\/cost-guard\.json/, "step 7 no longer hands the router the cost guard");
-  assert.match(slice, /\[\s+·\s+route=<REASON>\]/, "step 7 no longer records the router's REASON on the row");
+  assert.match(slice, /ledger\.mjs\s+row\s+<N>\s+"impl-<N>\[\s+·\s+tier=<CELL>\]"\s+--routing\s+"<that\s+line>"/, "step 7 no longer files the router's line with the row");
+  assert.match(slice, /in\s+`## Routed`\s+in\s+one\s+write/, "step 7 no longer writes the row and its Routing in one write");
+  assert.doesNotMatch(slice, /route=<REASON>\]/, "step 7 writes the retired route= token on the row again");
   assert.match(slice, /release\s+the\s+claim\s+\(`release-ticket\.sh`/, "step 7 no longer releases the claim on a router exit 2");
   // The Pull's one read is what the router reads: a second fetch would be a
   // second network call per Pull.
@@ -180,7 +182,7 @@ test("the router's arguments paragraph pins the roll, the arm parity and the sin
   assert.match(slice, /`A`\s+for\s+an\s+even\s+ticket\s+number\s+and\s+`B`\s+for\s+an\s+odd/, "the --arm parity rule changed");
   assert.match(slice, /never\s+re-derive\s+`CELL`/, "the router's line is no longer the whole decision");
   assert.match(slice, /`REASON=guard-missing`/, "the guard-missing route is no longer named");
-  assert.match(slice, /`REASON`\s+other\s+than\s+`ok`\s+goes\s+on\s+the\s+row\s+as\s+`route=<REASON>`/, "REASON no longer lands on the row as route=");
+  assert.match(slice, /the\s+whole\s+line,\s+`REASON`\s+with\s+it,\s+is\s+the\s+Pull's\s+`## Routed`\s+entry;\s+a\s+row\s+carries\s+no\s+`route=`/, "REASON no longer lands in ## Routed, or a row carries route= again");
 });
 
 // The difficulty caveat lives in pull.md's rate rationale, past the dispatch

@@ -126,7 +126,7 @@ const ISSUE = {
   labels: [{ name: "ready-for-agent" }, { name: "enhancement" }],
   createdAt: "2026-10-01T00:00:00Z",
 };
-const ROUTE_OK = "POLICY=slow-high CELL=slow-high DRAW=- STRATUM=light OBJECTIVE=cost REASON=ok";
+const ROUTE_OK = "POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=light BRIEF=120 CRITERIA=0 SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok";
 const NOW = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/;
 
 // A main checkout cloned from a bare origin, a home directory of its own (the
@@ -174,6 +174,11 @@ function fixture({ issue = ISSUE, shortlist = [12] } = {}) {
       const r = spawnSync(process.execPath, [join(SCRIPTS, "ledger.mjs"), "read"], { cwd: repo, encoding: "utf8", env: GIT_ENV });
       assert.equal(r.status, 0, r.stderr);
       return JSON.parse(r.stdout).rows;
+    },
+    ledgerRouted: () => {
+      const r = spawnSync(process.execPath, [join(SCRIPTS, "ledger.mjs"), "read"], { cwd: repo, encoding: "utf8", env: GIT_ENV });
+      assert.equal(r.status, 0, r.stderr);
+      return JSON.parse(r.stdout).routed;
     },
     env: () => ({ ...GIT_ENV, HOME: home, PATH: `${bin}:${process.env.PATH}`, PULL_STUBS: stubs }),
     run: (args, { cwd = repo, timeout, env = {} } = {}) => {
@@ -1693,8 +1698,8 @@ test("router exit 2 whose claim cannot be released says the claim is STILL stand
 });
 
 test("a router that prints no routing line is a refusal and releases the claim", () => {
-  // A line without OBJECTIVE is not a routing line either.
-  for (const out of ["something else", "POLICY=slow-high CELL=slow-high DRAW=- STRATUM=light REASON=ok"]) {
+  // The retired six-word line, and one without OBJECTIVE, are no Routing either.
+  for (const out of ["something else", "POLICY=slow-high CELL=slow-high DRAW=- STRATUM=light REASON=ok", "POLICY=slow-high CELL=slow-high DRAW=- STRATUM=light OBJECTIVE=cost REASON=ok"]) {
     const f = fixture();
     toCollision(f);
     f.control("ticket-router", { out });
@@ -1706,14 +1711,16 @@ test("a router that prints no routing line is a refusal and releases the claim",
   }
 });
 
-test("the row carries tier=<CELL> exactly when DRAW is not `-`, cell=<CELL> when it is `-` and the cell is not the policy cell, and route=<REASON> exactly when REASON is not ok", () => {
+test("the row carries tier=<CELL> exactly when DRAW is not `-`, cell=<CELL> when it is `-` and the cell is not the policy cell, and never route=; its Routing lands in ## Routed with it", () => {
   const cases = [
     [ROUTE_OK, ["#12 impl-12", "fleet-implementer-slow-high"]],
-    ["POLICY=slow-high CELL=task-high DRAW=2/5 STRATUM=heavy OBJECTIVE=cost REASON=ok", ["#12 impl-12 · tier=task-high", "fleet-implementer-task-high"]],
-    ["POLICY=task-high CELL=task-high DRAW=- STRATUM=heavy OBJECTIVE=cost REASON=ok", ["#12 impl-12 · cell=task-high", "fleet-implementer-task-high"]],
-    ["POLICY=slow-high CELL=slow-high DRAW=- STRATUM=unknown OBJECTIVE=cost REASON=guard-missing", ["#12 impl-12 · route=guard-missing", "fleet-implementer-slow-high"]],
-    ["POLICY=task-high CELL=task-high DRAW=- STRATUM=heavy OBJECTIVE=cost REASON=table-cell-tripped", ["#12 impl-12 · cell=task-high · route=table-cell-tripped", "fleet-implementer-task-high"]],
-    ["POLICY=slow-high CELL=smol-high DRAW=1/3 STRATUM=light OBJECTIVE=speed REASON=table-cell-tripped", ["#12 impl-12 · tier=smol-high · route=table-cell-tripped", "fleet-implementer-smol-high"]],
+    ["POLICY=slow-high CELL=task-high DRAW=2/5 BY=every-5th STRATUM=heavy BRIEF=9658 CRITERIA=8 SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok", ["#12 impl-12 · tier=task-high", "fleet-implementer-task-high"]],
+    ["POLICY=slow-high CELL=smol-high DRAW=2/3 BY=burn-in STRATUM=light BRIEF=120 CRITERIA=0 SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok", ["#12 impl-12 · tier=smol-high", "fleet-implementer-smol-high"]],
+    ["POLICY=task-high CELL=task-high DRAW=- BY=- STRATUM=heavy BRIEF=9658 CRITERIA=8 SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok", ["#12 impl-12 · cell=task-high", "fleet-implementer-task-high"]],
+    ["POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=light BRIEF=120 CRITERIA=0 SIZED=- OBJECTIVE=cost TRIPPED=- REASON=guard-missing", ["#12 impl-12", "fleet-implementer-slow-high"]],
+    ["POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=unknown BRIEF=- CRITERIA=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=no-issue-json", ["#12 impl-12", "fleet-implementer-slow-high"]],
+    ["POLICY=task-high CELL=task-high DRAW=- BY=- STRATUM=heavy BRIEF=120 CRITERIA=0 SIZED=heavy OBJECTIVE=cost TRIPPED=smol-high REASON=table-cell-tripped", ["#12 impl-12 · cell=task-high", "fleet-implementer-task-high"]],
+    ["POLICY=slow-high CELL=smol-high DRAW=1/1 BY=every-5th STRATUM=light BRIEF=120 CRITERIA=0 SIZED=- OBJECTIVE=speed TRIPPED=task-high REASON=guard-tripped", ["#12 impl-12 · tier=smol-high", "fleet-implementer-smol-high"]],
   ];
   for (const [line, [row, agent]] of cases) {
     const f = fixture();
@@ -1722,6 +1729,8 @@ test("the row carries tier=<CELL> exactly when DRAW is not `-`, cell=<CELL> when
     const r = f.answer(12, "collision", "clear");
     assert.equal(r.status, 0, r.stdout + r.err);
     assert.equal(f.ledgerRows().find((l) => l.startsWith("#12 ")).replace(/ · impl-12$/, ""), row, line);
+    assert.deepEqual(f.ledgerRouted(), [`impl-12 ${line}`], "exactly one ## Routed entry, the router's line verbatim");
+    assert.deepEqual(f.state().commands.filter((c) => c.step === "row").map((c) => c.cmd), [["ledger.mjs", "row", "12", row.slice(4), "--routing", line]], "the row and its Routing are one ledger write");
     assert.equal(JSON.parse(r.out.find((l) => l.startsWith("DISPATCH ")).slice(9)).agent, agent, "the agent comes off the row's tier");
   }
 });
@@ -1792,7 +1801,7 @@ test("pull.json records every command, question and answer with a time, in the o
   assert.equal(st.commands[2].stdout, '{"verdict":"live"}');
   assert.deepEqual(st.commands[4].cmd, ["git", "worktree", "list", "--porcelain", "-z"]);
   assert.deepEqual(st.commands[5].cmd, ["git", "for-each-ref", "--format=%(refname:short)%09%(upstream:track)", "refs/heads"]);
-  assert.deepEqual(st.commands[9].cmd, ["ledger.mjs", "row", "12", "impl-12"]);
+  assert.deepEqual(st.commands[9].cmd, ["ledger.mjs", "row", "12", "impl-12", "--routing", ROUTE_OK]);
   for (const c of st.commands) assert.match(c.at, NOW);
   assert.deepEqual(st.questions.map((q) => q.qid), ["staleness", "staleness", "decided", "collision"], "Q1 asked once by `next` and once more after the probe");
   assert.deepEqual(st.answers.map((a) => [a.qid, a.token, a.text, a.path ?? null, a.applied]), [

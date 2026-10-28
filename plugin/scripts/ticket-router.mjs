@@ -7,8 +7,11 @@
 //         --impl-row <k> --issue <issue.json> --guard <cost-guard.json>
 //         [--sizing <sizing.json>] [--table <router-table.json>]
 //         [--chain-head] [--pending <tsv>]
-//     Prints one line, `POLICY=<cell> CELL=<cell> DRAW=<k/K|->
-//     STRATUM=<light|heavy|unknown> OBJECTIVE=<cost|speed> REASON=<reason>`,
+//     Prints one line, the Pull's Routing (ledger-grammar.mjs owns its
+//     grammar): `POLICY=<cell> CELL=<cell> DRAW=<k/K|-> BY=<burn-in|every-5th|->
+//     STRATUM=<light|heavy|unknown> BRIEF=<chars|-> CRITERIA=<n|->
+//     SIZED=<light|heavy|-> OBJECTIVE=<cost|speed> TRIPPED=<cell,…|->
+//     REASON=<reason>`,
 //     routing by the objective's row set, and appends the Pull's
 //     ticket-features row to the pending TSV (by default
 //     `ticket-features.pending.tsv` beside `--guard`, in the run's `.fleet/`). Exit 0 on
@@ -48,8 +51,8 @@ import { isDeepStrictEqual } from "node:util";
 import { isCLI } from "./is-cli.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { makeDie, defineFlags } from "./arg.mjs";
-import { CELL, POLICY_CELL, drawCell, parseMember } from "./ledger-grammar.mjs";
-import { OBJECTIVES, objectiveFromReceipt, sessionFromReceipt } from "./phase0-receipt.mjs";
+import { CELL, OBJECTIVES, POLICY_CELL, STRATA, drawCell, formatRouting, parseMember } from "./ledger-grammar.mjs";
+import { objectiveFromReceipt, sessionFromReceipt } from "./phase0-receipt.mjs";
 import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
 import {
   AttributionError, FEATURE_COLUMNS, TRIP_POINTS, attribute, bootUnit, bootstrapDiffCI, generations, parseFeatures, tally, underFloor,
@@ -61,11 +64,10 @@ const NAME = "ticket-router";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_TABLE = join(SCRIPT_DIR, "router-table.json");
 
-export const STRATA = Object.freeze(["light", "heavy", "unknown"]);
 // The free classifier's thresholds: heavy past the median brief length of
 // the tickets whose sizing verdict is known, or past five criteria.
-const HEAVY_BRIEF_CHARS = 3483;
-const HEAVY_CRITERIA = 5;
+export const HEAVY_BRIEF_CHARS = 3483;
+export const HEAVY_CRITERIA = 5;
 // Exploration cadence after burn-in: the Pull that creates `impl-` row 5k.
 const EXPLORE_EVERY = 5;
 // The fit's adoption floor (merged PRs per side), margin, and cadence.
@@ -244,7 +246,8 @@ export function route({ session, ticket, arm, implRow, chainHead = false, issue,
   const costB = arm === "B" && bArmLive(table, "cost");
   let drawBase = rowFor(table.rows.cost, costB ? sized?.stratum ?? "unknown" : ruleS);
   let cell;
-  let draw = "-";
+  let draw = null;
+  let by = null;
   if (guard === null) {
     // The guard cannot be evaded by deleting it: no guard, default cell only.
     degrade("guard-missing");
@@ -266,7 +269,8 @@ export function route({ session, ticket, arm, implRow, chainHead = false, issue,
       const d = drawCell({ session, ticket, policyCell, cells: table.cells.filter((c) => !tripped.has(c)) });
       if (d.K > 0) {
         cell = d.cell;
-        draw = `${d.k}/${d.K}`;
+        draw = { k: d.k, K: d.K };
+        by = table.burn_in ? "burn-in" : "every-5th";
       }
     }
   }
@@ -274,10 +278,15 @@ export function route({ session, ticket, arm, implRow, chainHead = false, issue,
 
   const row = {
     run_date: sessionDate(session), session, agent: `impl-${ticket}`, ticket: String(ticket),
-    policy_cell: policy, chosen_cell: cell, exploration_draw: draw === "-" ? "" : draw,
+    policy_cell: policy, chosen_cell: cell, exploration_draw: draw === null ? "" : `${draw.k}/${draw.K}`,
     sizing_src: sizingSrc, sizing_pre: sizingPre, router_usd: routerUsd, ...m, objective,
   };
-  return { line: `POLICY=${policy} CELL=${cell} DRAW=${draw} STRATUM=${stratum} OBJECTIVE=${objective} REASON=${reason}`, row };
+  const line = formatRouting({
+    policy, cell, draw, by, stratum,
+    brief: metrics === null ? null : Number(metrics.brief_chars), criteria: metrics === null ? null : Number(metrics.criteria),
+    sized: sizingPre === "" ? null : sizingPre, objective, tripped: guard?.tripped ?? [], reason,
+  });
+  return { line, row };
 }
 
 export function formatFeatureRow(row) {

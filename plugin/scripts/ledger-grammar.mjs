@@ -704,6 +704,7 @@ export const pullEnded = (record) => record.status === "released" || (record.sta
 
 export const ROWS = "## Rows";
 export const DISPATCHED = "## Dispatched";
+export const ROUTED = "## Routed";
 export const FILED = "## Filed";
 export const RULED = "## Ruled";
 export const DRAIN = "## Drain";
@@ -802,6 +803,95 @@ export function drawCell({ session, ticket, policyCell, cells }) {
   if (K === 0) return { cell: policyCell, k: 0, K: 0 };
   const k = 1 + (parseInt(createHash("sha256").update(`${session}\t${ticket}`).digest("hex").slice(0, 8), 16) % K);
   return { cell: E[k - 1], k, K };
+}
+
+// A Pull's Routing: the Router's decision for that Pull, the one line
+// `ticket-router.mjs route` prints. The Pull's row step writes it to the
+// ledger's `## Routed` section in the same `ledger.mjs row` write as the row,
+// after the Pull's first implementer's member token, and it never changes
+// after: the row's `tier=`/`cell=` stay the mutable "Cell the next
+// implementer runs at". One grammar for the line, here, read by `pull.mjs` off
+// the router's stdout, by `ledger.mjs` to refuse a malformed one, and by the
+// cockpit. Its words, in this order, `-` for none:
+//   POLICY    the policy row's Cell        CELL      the Pull's Cell
+//   DRAW      k/K of the draw              BY        burn-in | every-5th
+//   STRATUM   light | heavy | unknown      BRIEF     the brief's chars
+//   CRITERIA  the criteria count           SIZED     arm B's sizing label
+//   OBJECTIVE cost | speed                 TRIPPED   the guard's tripped Cells
+//   REASON    the first thing that went wrong
+// DRAW and BY are `-` together, as are BRIEF and CRITERIA (no issue read).
+export const STRATA = Object.freeze(["light", "heavy", "unknown"]);
+// What a run asks the router to minimise. phase0.mjs records the run's in its
+// receipt, and every Routing names the one it routed by.
+export const OBJECTIVES = Object.freeze(["cost", "speed"]);
+export const DRAWN_BY = Object.freeze(["burn-in", "every-5th"]);
+export const ROUTING_REASONS = Object.freeze(["ok", "no-issue-json", "no-sizing", "guard-missing", "guard-tripped", "table-cell-tripped"]);
+const SIZINGS = Object.freeze(["light", "heavy"]);
+const ROUTING_KEYS = Object.freeze(["POLICY", "CELL", "DRAW", "BY", "STRATUM", "BRIEF", "CRITERIA", "SIZED", "OBJECTIVE", "TRIPPED", "REASON"]);
+const COUNT = /^(?:0|[1-9][0-9]*)$/;
+const DRAW = /^([1-9][0-9]*)\/([1-9][0-9]*)$/;
+
+/**
+ * A Routing line read into its parts, or null when it is not one.
+ * @returns {null | { policy: string, cell: string, draw: null | { k: number, K: number }, by: null | string,
+ *   stratum: string, brief: null | number, criteria: null | number, sized: null | string, objective: string,
+ *   tripped: string[], reason: string }}
+ */
+export function parseRouting(line) {
+  if (typeof line !== "string") return null;
+  const words = line.split(" ");
+  if (words.length !== ROUTING_KEYS.length) return null;
+  const v = {};
+  for (const [i, key] of ROUTING_KEYS.entries()) {
+    if (!words[i].startsWith(`${key}=`)) return null;
+    v[key] = words[i].slice(key.length + 1);
+  }
+  const opt = (x, ok) => (x === "-" ? null : ok(x) ? x : undefined);
+  const count = (x) => (x === "-" ? null : COUNT.test(x) ? Number(x) : undefined);
+  const d = DRAW.exec(v.DRAW);
+  const r = {
+    policy: CELL.test(v.POLICY) ? v.POLICY : undefined,
+    cell: CELL.test(v.CELL) ? v.CELL : undefined,
+    draw: v.DRAW === "-" ? null : d === null ? undefined : { k: Number(d[1]), K: Number(d[2]) },
+    by: opt(v.BY, (x) => DRAWN_BY.includes(x)),
+    stratum: STRATA.includes(v.STRATUM) ? v.STRATUM : undefined,
+    brief: count(v.BRIEF),
+    criteria: count(v.CRITERIA),
+    sized: opt(v.SIZED, (x) => SIZINGS.includes(x)),
+    objective: OBJECTIVES.includes(v.OBJECTIVE) ? v.OBJECTIVE : undefined,
+    tripped: v.TRIPPED === "-" ? [] : v.TRIPPED.split(",").every((c) => CELL.test(c)) ? v.TRIPPED.split(",") : undefined,
+    reason: ROUTING_REASONS.includes(v.REASON) ? v.REASON : undefined,
+  };
+  if (Object.values(r).includes(undefined)) return null;
+  if (r.draw !== null && r.draw.k > r.draw.K) return null;
+  if ((r.draw === null) !== (r.by === null) || (r.brief === null) !== (r.criteria === null)) return null;
+  return r;
+}
+
+/** The Routing line for parsed parts; throws on parts no Routing line can carry, so nothing writes one parseRouting refuses. */
+export function formatRouting({ policy, cell, draw, by, stratum, brief, criteria, sized, objective, tripped, reason }) {
+  const none = (x) => (x === null ? "-" : String(x));
+  const line = [
+    `POLICY=${policy}`, `CELL=${cell}`, `DRAW=${draw === null ? "-" : `${draw.k}/${draw.K}`}`, `BY=${none(by)}`,
+    `STRATUM=${stratum}`, `BRIEF=${none(brief)}`, `CRITERIA=${none(criteria)}`, `SIZED=${none(sized)}`,
+    `OBJECTIVE=${objective}`, `TRIPPED=${tripped.length === 0 ? "-" : tripped.join(",")}`, `REASON=${reason}`,
+  ].join(" ");
+  if (parseRouting(line) === null) throw new Error(`not a Routing: ${line}`);
+  return line;
+}
+
+/** A `## Routed` entry: the Pull's first implementer's member name, then its Routing line. */
+export function routedEntry(member, line) {
+  return `${member} ${line}`;
+}
+
+/** A `## Routed` entry read into its implementer's name and Routing, or null when it is not one. */
+export function parseRoutedEntry(entry) {
+  const sp = typeof entry === "string" ? entry.indexOf(" ") : -1;
+  if (sp === -1) return null;
+  const member = entry.slice(0, sp);
+  const routing = parseRouting(entry.slice(sp + 1));
+  return parseMember(member)?.family === "impl" && routing !== null ? { member, routing } : null;
 }
 
 // The definition an implementer is dispatched under, off its ticket

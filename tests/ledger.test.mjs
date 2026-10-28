@@ -2663,8 +2663,8 @@ test("read hands a pipe the whole ledger — a truncated payload must never read
   // a parsing consumer loses every key, the survivors included, because the
   // object is unterminated. Comparing the whole object also catches a key the
   // payload should not carry, which the per-key assertions let through.
-  // The fixture predates `## Dispatched`, `## Drain` and `## Retired`, so all three read empty.
-  assert.deepEqual(payload, { rows, filed, ruled, dispatched: [], briefs: {}, queued: {}, agents: {}, drain: null, retired: [] });
+  // The fixture predates `## Dispatched`, `## Routed`, `## Drain` and `## Retired`, so all four read empty.
+  assert.deepEqual(payload, { rows, filed, ruled, dispatched: [], briefs: {}, queued: {}, agents: {}, routed: [], drain: null, retired: [] });
 });
 
 // The same mechanism in the three siblings. Their payloads echo the free-text
@@ -2738,6 +2738,7 @@ test("an ordinary ledger still round-trips through a pipe, and an unknown subcom
     briefs: {},
     queued: {},
     agents: {},
+    routed: [],
     drain: null,
     retired: [],
   });
@@ -2947,7 +2948,7 @@ test("check hands a pipe its whole not-filed payload, and still reaches the trac
 // same flag. `check` is the fourth and was already correct; the tests above
 // pin it, and hoisting the guard leaves its message and its exit code alone.
 
-const READ_EMPTY = { rows: [], filed: [], ruled: [], dispatched: [], briefs: {}, queued: {}, agents: {}, drain: null, retired: [] };
+const READ_EMPTY = { rows: [], filed: [], ruled: [], dispatched: [], briefs: {}, queued: {}, agents: {}, routed: [], drain: null, retired: [] };
 
 test("read --require-file refuses an absent ledger, naming the path, with no payload (#816)", (t) => {
   const { dir, cli } = cliFixture(t);
@@ -3938,6 +3939,61 @@ test("a new row at the Pull's row step and a re-Pull over a settled implementer 
   run("row", "3551", "impl-3551-b · tier=slow-high");
   assert.equal(run("token", "3552", "tier=task-high").payload.line, "#3552 tier=task-high", "a token call that creates the row is unchanged");
   assert.deepEqual(rows(), ["#3551 impl-3551-b · tier=slow-high", "#3550 impl-3550 · tier=smol-high · route=explore", "#3552 tier=task-high"]);
+});
+
+// The Pull's row step writes the row and its Routing in one `row --routing`
+// call: the line is filed verbatim in `## Routed` after the Pull's first
+// implementer's name, once, and never on the row.
+const ROUTING = "POLICY=slow-high CELL=smol-high DRAW=2/3 BY=burn-in STRATUM=heavy BRIEF=9658 CRITERIA=8 SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok";
+const UNDRAWN = "POLICY=task-high CELL=task-high DRAW=- BY=- STRATUM=heavy BRIEF=4000 CRITERIA=2 SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=table-cell-tripped";
+const routedOf = (bytes) => /\n## Routed\n\n((?:- .*\n)*)/.exec(bytes)?.[1].trimEnd().split("\n") ?? [];
+
+test("row --routing writes the row and its ## Routed entry in one write, and every later write keeps the entry", (t) => {
+  const { run, rows, bytes } = tokenFixture(t, ["#12 impl-12 · route=guard-missing"], { dispatched: ["impl-12"] });
+  const r = run("row", "3747", "impl-3747 · tier=smol-high", "--routing", ROUTING);
+  assert.deepEqual(r.payload, { ticket: "#3747", line: "#3747 impl-3747 · tier=smol-high", created: true, routed: `impl-3747 ${ROUTING}` });
+  assert.match(r.stderr, /routed impl-3747 POLICY=slow-high/);
+  assert.deepEqual(rows(), ["#12 impl-12 · route=guard-missing", "#3747 impl-3747 · tier=smol-high"], "an old row's route= still loads, and the new row carries none");
+  assert.deepEqual(routedOf(bytes()), [`- impl-3747 ${ROUTING}`]);
+  // The flag may stand anywhere after the ticket, and the entry is the line verbatim.
+  run("row", "3748", "--routing", UNDRAWN, "impl-3748 · cell=task-high");
+  run("token", "3747", "class=routine");
+  run("filed", "3800", "a filed subject");
+  run("row", "3748", "impl-3748 · cell=task-high · ports=163748");
+  assert.deepEqual(routedOf(bytes()), [`- impl-3747 ${ROUTING}`, `- impl-3748 ${UNDRAWN}`], "a write without --routing keeps every entry");
+  assert.deepEqual(JSON.parse(run("read").stdout).routed, [`impl-3747 ${ROUTING}`, `impl-3748 ${UNDRAWN}`]);
+  // A ledger with no Routing is written with no `## Routed` header at all.
+  const bare = tokenFixture(t, ["#12 impl-12"]);
+  bare.run("row", "13", "impl-13");
+  assert.doesNotMatch(bare.bytes(), /## Routed/);
+});
+
+test("row --routing refuses a line that is not a Routing, a second Routing for one member, and a row naming no single live implementer", (t) => {
+  const { run, refused, bytes } = tokenFixture(t, ["#3747 impl-3747 · tier=smol-high"], { dispatched: ["impl-3747"] });
+  for (const bad of [
+    "POLICY=slow-high CELL=smol-high DRAW=2/3 STRATUM=heavy OBJECTIVE=cost REASON=ok",
+    ROUTING.replace("REASON=ok", "REASON=explore"),
+    ROUTING.replace("BY=burn-in", "BY=-"),
+    `${ROUTING} extra`,
+  ]) {
+    refused(["row", "3747", "impl-3747 · tier=smol-high", "--routing", bad], /is not a Routing line/);
+  }
+  refused(["row", "3747", "impl-3747 · tier=smol-high", "--routing"], /--routing needs the line/);
+  refused(["row", "3747", "impl-3747 · tier=smol-high", `--routing=${ROUTING}`], /--routing needs a space-separated value/);
+  refused(["row", "3747", "excluded · behind-pr:#9 · tier=smol-high", "--routing", ROUTING], /exactly one live impl- member — it names none/);
+  refused(["row", "3747", "impl-3747=bailed · tier=smol-high", "--routing", ROUTING], /it names none/);
+  refused(["row", "3747", "impl-3747 · impl-3747-b · tier=smol-high", "--routing", ROUTING], /it names impl-3747, impl-3747-b/);
+  // A row refused for its own reasons files no Routing either: one write or none.
+  refused(["row", "3747", "impl-3747=done · tier=smol-high", "--routing", ROUTING], /malformed member token/);
+  run("row", "3747", "impl-3747 · tier=smol-high", "--routing", ROUTING);
+  const once = bytes();
+  for (const again of [ROUTING, UNDRAWN]) {
+    refused(["row", "3747", "impl-3747 · tier=smol-high", "--routing", again], /impl-3747 already has its Routing in ## Routed .* written once/);
+  }
+  assert.equal(bytes(), once);
+  // Another attempt on the ticket is another member, with an entry of its own.
+  run("row", "3747", "impl-3747-b · tier=smol-high", "--routing", ROUTING);
+  assert.deepEqual(routedOf(bytes()), [`- impl-3747 ${ROUTING}`, `- impl-3747-b ${ROUTING}`]);
 });
 
 // `dispatch` refuses these rows and sends the caller to `row` to fix them; a

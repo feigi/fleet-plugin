@@ -248,13 +248,17 @@ terminating in exactly one dispatch or an empty shortlist:
    --apply` (below). Exit 2 → treat it as taken, next entry.
 7. **Route, row, then dispatch** — `~/.fleet/bin/fleet-run ticket-router.mjs route
    --session <session> --ticket <N> --arm <A|B> --impl-row <k>[ --chain-head] --issue
-   <scratch>/impl-<N>/issue.json --guard .fleet/cost-guard.json` prints
-   `POLICY=… CELL=… DRAW=… STRATUM=… OBJECTIVE=… REASON=…` (the router's arguments paragraph below the list
-   says what each argument is); then `ledger.mjs row <N> "impl-<N>[ · tier=<CELL>][ · route=<REASON>]"`,
-   `tier=<CELL>` exactly when `DRAW` is not `-`; then the dispatch at once: claim
-   what you are about to dispatch; dispatch what you have just claimed. A Pull
-   routed without a draw writes `cell=<CELL>` instead, unless `CELL` is the policy
-   cell, `slow-high`, which a row with neither runs. Router
+   <scratch>/impl-<N>/issue.json --guard .fleet/cost-guard.json` prints the Pull's
+   Routing, `POLICY=… CELL=… DRAW=… BY=… STRATUM=… BRIEF=… CRITERIA=… SIZED=… OBJECTIVE=… TRIPPED=… REASON=…`
+   (the router's arguments paragraph below the list says what each argument is);
+   then `ledger.mjs row <N> "impl-<N>[ · tier=<CELL>]" --routing "<that line>"`,
+   `tier=<CELL>` exactly when `DRAW` is not `-`, which writes the row and files
+   the line verbatim under `impl-<N>` in `## Routed` in one write; then the
+   dispatch at once: claim what you are about to dispatch; dispatch what you
+   have just claimed. A Pull routed without a draw writes `cell=<CELL>` instead,
+   unless `CELL` is the policy cell, `slow-high`, which a row with neither runs.
+   `ledger.mjs` refuses a line that is not a Routing and a second Routing for
+   `impl-<N>`. Router
    exit 2 → no row and no dispatch: release the claim (`release-ticket.sh`, SKILL.md's
    Failure handling row for a claim abandoned mid-run) and emit an event, a probe that could not look — a table the router
    refuses refuses every Pull.
@@ -271,8 +275,9 @@ row set of the run's Objective, `OBJECTIVE`, which it reads off the phase-0
 receipt. The printed line is the
 whole routing decision — never re-derive `CELL` from the table, the guard or
 this paragraph. A missing or unreadable `.fleet/cost-guard.json` routes the
-default cell only (`REASON=guard-missing`), burn-in included, and `REASON`
-other than `ok` goes on the row as `route=<REASON>`, nowhere else.
+default cell only (`REASON=guard-missing`), burn-in included. On the ledger the
+whole line, `REASON` with it, is the Pull's `## Routed` entry; a row carries no
+`route=` (an older row's `route=<REASON>` still reads).
 
 **The Pull table** — every verdict a Pull can reach, and the one thing each
 does:
