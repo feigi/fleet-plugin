@@ -35,6 +35,7 @@
 import { assessBeat, isStalled, isReported, stallReport, NO_OWNER } from "./fleet-state.mjs";
 import { parseToken, rowPr, premisesOf, HALT_CAUSES, REVIEW } from "./ledger-grammar.mjs";
 import { latestFinisherAttempts, foldLedger, pastPinDue } from "./fleet-tick.mjs";
+import { computeCellEvidence } from "./compute-cell-evidence.mjs";
 
 // A ledger row is freeform, controller-authored text. Two example shapes:
 //   #<n> impl-<n>=PR#<m> → PR#<m> → MERGED 73b356de
@@ -641,5 +642,19 @@ export function computeBoard(inputs) {
       owner: inputs.stallOwner ?? NO_OWNER,
     }, now),
     attention,
+    // The Cell evidence tab's model (compute-cell-evidence.mjs), built from the
+    // guard, the receipts' metrics steps, the definitions and the carried
+    // `modelRoles` read gather() answered. A caller that read none of them
+    // (every hand-built input in this suite) gets the tab's no-guard state:
+    // computeCellEvidence reads an input left out as nothing read.
+    cellEvidence: computeCellEvidence({
+      guard: inputs.guard,
+      receipts: inputs.receipts,
+      agents: inputs.agents,
+      modelRoles: inputs.modelRoles,
+    }),
+    // The `omp config get modelRoles` read, carried tick to tick the way `ci`
+    // and `repo` are: `{ value, readAt, error }`, read at most once a minute.
+    modelRoles: inputs.modelRoles ?? null,
   };
 }

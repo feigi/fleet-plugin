@@ -298,6 +298,9 @@ async function main() {
       // worktree names the run's real beat instead of a file that is not
       // there.
       stateFile: stateFileIn(instance.stateDir),
+      // The cost guard, the receipts and the carried `modelRoles` the Cell
+      // evidence tab reads, from the same directory.
+      stateDir: instance.stateDir,
       workspace: instance.workspace, port: instance.port,
       interval, ...spendSource(spendDir, instance.stateDir), spendSince,
     }));
@@ -403,6 +406,7 @@ async function boardTick({ ledgerFile, interval, spendDir, spendSince }) {
         // for. Re-derived per tick rather than closed over, exactly like
         // the ledger default: a pure join on a directory settled at bind time.
         stateFile: stateFileIn(stateDir),
+        stateDir,
         workspace, port: served,
         // The operator's --spend-dir, else the receipt as it stands at this
         // tick, read from the same state directory as the ledger and heartbeat.

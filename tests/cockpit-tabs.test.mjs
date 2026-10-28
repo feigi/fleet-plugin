@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { computeCellEvidence } from "../plugin/scripts/compute-cell-evidence.mjs";
 
 // The cockpit page's tab strip and hash router. `board.html` is one
 // self-contained file, so the decision is lifted out of its source text and
@@ -52,11 +53,17 @@ test("routeHash: an unknown tab lands on Board's top, whatever follows it", () =
   }
 });
 
-// The Cell evidence tab is not in the strip yet, so its routes are unknown
-// ones here: they land on Board's top rather than naming a tab with no pane.
-test("routeHash: a tab the strip does not carry yet lands on Board's top", () => {
-  for (const h of ["#cells", "#cells/smol-high@2", "#cells/row/cost/heavy"]) {
-    assert.deepEqual(routeHash(h), { tab: "board", target: null }, h);
+test("routeHash: #cells opens Cell evidence, a section, a Cell or a generation of it the target", () => {
+  assert.deepEqual(routeHash("#cells"), { tab: "cells", target: null });
+  for (const t of ["guard", "declared", "slow-high", "task-max", "slow-high@claude-opus-5", "smol-high@claude-haiku-5-5", "task-high@claude-opus-5.5"]) {
+    assert.deepEqual(routeHash(`#cells/${t}`), { tab: "cells", target: t }, t);
+  }
+});
+
+test("routeHash: a Cell evidence target nothing draws lands on the tab's top, and the tab still opens", () => {
+  for (const h of ["#cells/", "#cells/nope", "#cells/slow-huge", "#cells/slow-high@", "#cells/slow-high@a@b", "#cells/slow-high@a/b",
+    "#cells/guard/x", "#cells/row/cost/heavy", "#cells/Guard", "#cells/ guard", "#cells//guard"]) {
+    assert.deepEqual(routeHash(h), { tab: "cells", target: null }, h);
   }
 });
 
@@ -79,38 +86,40 @@ const tabLinks = strip
     attrs: m[1], href: m[1].match(/href="([^"]*)"/)?.[1], text: m[2] }))
   : [];
 
-test("the tab strip reads Board · Tokens, in that order, and nothing else", () => {
+test("the tab strip reads Board · Cell evidence · Tokens, in that order, and nothing else", () => {
   assert.ok(strip, "board.html no longer carries <nav id=\"tabs\"> — update this test");
-  assert.deepEqual(tabLinks.map((t) => t.text), ["Board", "Tokens"]);
-  assert.deepEqual(tabLinks.map((t) => t.href), ["#board", "#tokens"]);
+  assert.deepEqual(tabLinks.map((t) => t.text), ["Board", "Cell evidence", "Tokens"]);
+  assert.deepEqual(tabLinks.map((t) => t.href), ["#board", "#cells", "#tokens"]);
 });
 
 test("every tab link routes to its own tab, and none opens a new window", () => {
+  const tabOf = { Board: "board", "Cell evidence": "cells", Tokens: "tokens" };
   for (const t of tabLinks) {
-    assert.equal(routeHash(t.href).tab, t.text.toLowerCase(), t.href);
+    assert.equal(routeHash(t.href).tab, tabOf[t.text], t.href);
     assert.doesNotMatch(t.attrs, /target\s*=/, `${t.href} must not open a new window`);
   }
 });
 
 test("a bare URL opens Board: its tab is marked and its pane is the one not hidden", () => {
   assert.match(HTML, /<a id="tab-board" class="on" href="#board" aria-current="page">/);
-  assert.doesNotMatch(HTML, /<a id="tab-tokens"[^>]*class="on"/);
+  assert.doesNotMatch(HTML, /<a id="tab-(cells|tokens)"[^>]*class="on"/);
   assert.match(HTML, /<div id="board"><\/div>/, "Board's pane must open visible");
+  assert.match(HTML, /<div id="cells" hidden><\/div>/, "Cell evidence's pane must open closed");
   assert.match(HTML, /<div id="spend" hidden><\/div>/, "Tokens' pane must open closed");
 });
 
 // Above the tabs: header, banner, attention strip. Below every tab: the footer.
-// Each is a sibling of the two panes, never inside one, so hiding a pane
+// Each is a sibling of every pane, never inside one, so hiding a pane
 // hides none of them.
-test("header, banner and attention strip sit above the tabs, the footer below both panes", () => {
+test("header, banner and attention strip sit above the tabs, the footer below every pane", () => {
   const at = (needle) => {
     const i = HTML.indexOf(needle);
     assert.notEqual(i, -1, `board.html no longer carries ${needle} — update this test`);
     return i;
   };
-  const order = ["<header>", 'id="stale-banner"', 'id="attention"', 'id="tabs"', 'id="board"', 'id="spend"', 'id="footer"'].map(at);
+  const order = ["<header>", 'id="stale-banner"', 'id="attention"', 'id="tabs"', 'id="board"', 'id="cells"', 'id="spend"', 'id="footer"'].map(at);
   assert.deepEqual(order, [...order].sort((a, b) => a - b), "the page's top-level order changed");
-  // Both panes are closed in the same breath they open, so nothing may nest in them.
+  // Every pane is closed in the same breath it opens, so nothing may nest in one.
   assert.match(HTML, /<div id="attention"><\/div>\n<nav id="tabs">/);
   assert.match(HTML, /<div id="spend" hidden><\/div>\n<footer id="footer"><\/footer>/);
 });
@@ -128,7 +137,7 @@ test("board.html's <script> still ends in a boot() call this file strips", () =>
   assert.match(HTML, /^boot\(\);\n<\/script>/m);
 });
 
-const STATIC_IDS = new Set(["heading", "age", "stale-banner", "attention", "tabs", "tab-board", "tab-tokens", "board", "spend", "footer"]);
+const STATIC_IDS = new Set(["heading", "age", "stale-banner", "attention", "tabs", "tab-board", "tab-cells", "tab-tokens", "board", "cells", "spend", "footer"]);
 
 class Node {
   constructor(tag) { this.tag = tag; this.children = []; this.style = {}; this.className = ""; this.attrs = {}; this.listeners = {}; this.scrollTop = 0; }
@@ -212,7 +221,7 @@ test("#tokens opens Tokens and closes Board; a bare hash or an unknown one opens
   assert.equal(document.getElementById("tab-tokens").attrs["aria-current"], "page");
   assert.equal(document.getElementById("tab-board").attrs["aria-current"], undefined);
 
-  for (const h of ["", "#board", "#nope", "#cells"]) {
+  for (const h of ["", "#board", "#nope"]) {
     open("#tokens");
     open(h);
     assert.deepEqual(paneState(document), { boardHidden: false, tokensHidden: true, boardTab: true, tokensTab: false }, `hash ${JSON.stringify(h)}`);
@@ -472,4 +481,159 @@ test("Tokens: a funded run draws the panel under \"tokens\" and \"by member role
 test("Tokens: the old headings are gone from the page", () => {
   assert.doesNotMatch(HTML, /el\("h2", null, "spend"\)/);
   assert.doesNotMatch(HTML, /el\("h3", null, "by role"\)/);
+});
+
+// -- Cell evidence: the page lays out the model, and every anchor is there --------------
+
+const cellEntry = (cell, o = {}) => ({
+  cell, generation: "claude-opus-5", n: 69, n_merged: 69, n_claims: 69, n_failed: 8, fail_rate: 0.1159, mean_usd: 14.9,
+  by_hand: 56, pending: 0, left_out: 0, unpriced: 0, untimed: 0, excluded: 0, older: [], ...o,
+});
+const ceGuard = (cells = [cellEntry("slow-high"), cellEntry("task-high", { generation: "claude-sonnet-5-5", n_failed: 15, mean_usd: 10.2, excluded: 1,
+  older: [{ generation: "claude-sonnet-5-4", n_merged: 8, n_claims: 8, n_failed: 1, fail_rate: 0.125, mean_usd: 9 }] })]) => ({
+  status: "ok",
+  guard: { computed_at: "2026-10-26T19:17:33.000Z", window_start: "2026-10-03", min_n: 20, trip_points: 15, verdict: "ok", tripped: [], retire: false,
+    baseline: { cell: "slow-high", generation: "claude-opus-5", n: 69, mean_usd: 14.9, fail_rate: 0.1159 }, cells },
+});
+const ceRoles = { value: { slow: "anthropic/claude-opus-5:high", task: "anthropic/claude-sonnet-5-5:high", smol: "anthropic/claude-haiku-5-5:auto" }, readAt: 1, error: null };
+const ceAgents = { list: [{ file: "fleet-finisher.agent.md", model: '"@slow:high"' }], error: null };
+const evidence = (o = {}) => computeCellEvidence({ guard: ceGuard(), receipts: { phase0: null, closeout: null }, agents: ceAgents, modelRoles: ceRoles, ...o });
+
+const textOf = (n) => [n.textContent ?? n.text ?? "", ...(n.children ?? []).map(textOf)].join(" ");
+const idsOf = (n) => [n.id, ...(n.children ?? []).flatMap(idsOf)].filter(Boolean);
+const anchorsOf = (ce) => [
+  "cells-guard", "cells-declared",
+  ...ce.guard.cells.flatMap((c) => [c.anchor, c.figures?.anchor, c.none?.anchor, ...c.older.map((o) => o.anchor)]),
+].filter(Boolean);
+
+test("Cell evidence: opening #cells opens its pane and its tab, and closes the others", () => {
+  const { document, open } = harness();
+  open("#cells");
+  assert.equal(document.getElementById("cells").hidden, false);
+  assert.equal(document.getElementById("board").hidden, true);
+  assert.equal(document.getElementById("spend").hidden, true);
+  assert.ok(document.getElementById("tab-cells").classList.contains("on"));
+  assert.equal(document.getElementById("tab-cells").attrs["aria-current"], "page");
+  assert.ok(!document.getElementById("tab-board").classList.contains("on"));
+});
+
+test("Cell evidence: the pane draws the model's words, the guard section first and Declared, not measured collapsed after it", () => {
+  const { document, render, model, open } = harness();
+  open("#cells");
+  const ce = evidence();
+  render(model({ cellEvidence: ce }));
+  const host = document.getElementById("cells");
+  const text = textOf(host);
+  for (const words of [ce.guard.heading, ce.guard.source, "The guard: what it holds each Cell to", "baseline", "judged on claude-opus-5",
+    "Tier route: anthropic/claude-opus-5 · high", "69 ≥ 20 ✓", "11.6% · the floor is 26.6%", "21.7% · +10.1 pts on slow-high · 4.9 pts inside the floor",
+    "56 of 69 Rulings given by hand", "$10.20 · −31.5% on slow-high", "no figures yet for claude-opus-5", "claude-sonnet-5-4 · not judged",
+    ce.guard.footnotes[0].text, ce.declared.heading, "fleet-finisher", "@slow:high", "anthropic/claude-opus-5 · high"]) {
+    assert.ok(text.includes(words), `the tab does not draw ${JSON.stringify(words)}`);
+  }
+  const [links, guard, declared] = host.children;
+  assert.deepEqual(links.children.filter((c) => c.tag === "a").map((a) => a.href), ["#cells/guard", "#cells/declared"]);
+  assert.equal(guard.id, "cells-guard");
+  assert.equal(declared.tag, "details");
+  assert.equal(declared.open, false, "collapsed until it is opened");
+  const order = guard.children.filter((c) => /^cell-/.test(c.id ?? "")).map((c) => c.id);
+  assert.deepEqual(order, ["cell-slow-high", "cell-task-high", "cell-smol-high", "cell-slow-medium", "cell-task-max"]);
+});
+
+test("Cell evidence: every anchor the model names is an element the page draws, in every state", () => {
+  const states = {
+    "today's guard": evidence(),
+    "no cost guard": evidence({ guard: { status: "missing" } }),
+    "no modelRoles": evidence({ modelRoles: null }),
+    "holds nothing back": evidence({ guard: { status: "ok", guard: { ...ceGuard().guard, verdict: "none", cells: [cellEntry("slow-high", { n: 3, n_merged: 3 })],
+      baseline: { cell: "slow-high", generation: "claude-opus-5", n: 3, mean_usd: 14.9, fail_rate: 0.1 } } } }),
+  };
+  for (const [name, ce] of Object.entries(states)) {
+    const { document, render, model, open } = harness();
+    open("#cells");
+    render(model({ cellEvidence: ce }));
+    const drawn = new Set(idsOf(document.getElementById("cells")));
+    for (const a of anchorsOf(ce)) assert.ok(drawn.has(a), `${name}: ${a} is not drawn`);
+    // and the route a link to each would take lands on that element.
+    for (const a of anchorsOf(ce).filter((x) => /^cell-/.test(x))) {
+      const r = routeHash(`#cells/${a.slice("cell-".length)}`);
+      assert.equal(r.tab, "cells", a);
+      assert.equal(r.target, a.slice("cell-".length), a);
+    }
+  }
+});
+
+test("Cell evidence: #cells/<cell>@<generation> scrolls its generation into view and flashes it once; a nested older one too", () => {
+  const { document, render, model, open, scrolls, tops } = harness();
+  render(model({ cellEvidence: evidence() }));
+  open("#cells/task-high@claude-sonnet-5-5");
+  assert.deepEqual(scrolls(), ["cell-task-high@claude-sonnet-5-5"]);
+  assert.ok(document.getElementById("cell-task-high@claude-sonnet-5-5").classList.contains("flash"));
+  open("#cells/task-high@claude-sonnet-5-4");
+  assert.deepEqual(scrolls().at(-1), "cell-task-high@claude-sonnet-5-4");
+  open("#cells/slow-medium");
+  assert.equal(scrolls().at(-1), "cell-slow-medium", "a Cell with no figures is still a place to land");
+  assert.deepEqual(tops(), []);
+});
+
+test("Cell evidence: a target the page does not draw lands on the tab's top, and the tab still opens", () => {
+  const { document, render, model, open, scrolls, tops } = harness();
+  render(model({ cellEvidence: evidence() }));
+  const pane = document.getElementById("cells");
+  pane.scrollTop = 120;
+  open("#cells/task-high@claude-never-ran");
+  assert.deepEqual(scrolls(), []);
+  assert.equal(tops().length, 1);
+  assert.equal(pane.scrollTop, 0);
+  assert.equal(pane.hidden, false);
+});
+
+test("Cell evidence: a pasted link reaches its place before the first render, then scrolls once", () => {
+  const { render, model, open, scrolls } = harness();
+  open("#cells/guard");
+  assert.deepEqual(scrolls(), []);
+  render(model({ cellEvidence: evidence() }));
+  render(model({ cellEvidence: evidence() }));
+  assert.deepEqual(scrolls(), ["cells-guard"]);
+});
+
+test("Cell evidence: Declared, not measured opens on a link to it, and a tick does not shut it", () => {
+  const { document, render, model, open } = harness();
+  render(model({ cellEvidence: evidence() }));
+  open("#cells/declared");
+  const first = document.getElementById("cells-declared");
+  assert.equal(first.open, true);
+  render(model({ cellEvidence: evidence() }));
+  const rebuilt = document.getElementById("cells-declared");
+  assert.notEqual(rebuilt, first, "the tick rebuilt it");
+  assert.equal(rebuilt.open, true, "and it stayed open");
+  // An operator closing it keeps it closed.
+  rebuilt.open = false;
+  for (const fn of rebuilt.listeners.toggle) fn();
+  render(model({ cellEvidence: evidence() }));
+  assert.equal(document.getElementById("cells-declared").open, false);
+});
+
+test("Cell evidence: a tick that rebuilds an entry mid-flash keeps the flash where it was", () => {
+  const { document, render, model, open, clock } = harness();
+  render(model({ cellEvidence: evidence() }));
+  open("#cells/smol-high");
+  clock.now += 400;
+  render(model({ cellEvidence: evidence() }));
+  const entry = document.getElementById("cell-smol-high");
+  assert.ok(entry.classList.contains("flash"));
+  assert.equal(entry.style.animationDelay, "-400ms");
+});
+
+test("Cell evidence: a board.json from before the tab draws a line, not a thrown render", () => {
+  const { document, render, model, open } = harness();
+  open("#cells");
+  assert.doesNotThrow(() => render(model()));
+  assert.equal(textOf(document.getElementById("cells")).trim(), "no Cell evidence in this board yet");
+});
+
+test("Cell evidence: the Board and Tokens panes are still filled on a tick while Cell evidence is open", () => {
+  const { document, render, model, open } = harness();
+  open("#cells");
+  render(model({ cellEvidence: evidence(), tickets: [{ issue: 12, column: "POOL" }], spend: null }));
+  assert.ok(document.getElementById("card-12"), "the Board is drawn behind the open tab");
 });

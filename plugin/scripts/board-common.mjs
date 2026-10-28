@@ -67,9 +67,12 @@ export const READ_OPTS = { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 };
 // `err.code` (measured: `3`, a number), where the sync one carried `ENOENT` /
 // `ENOBUFS` there and the exit code in `status`, and board-gather.mjs's runCiState()
 // reads all three to tell those causes apart.
-export function execRead(cmd, args) {
+//
+// `opts` joins READ_OPTS for one read, e.g. a `timeout`: a child killed by it
+// is reported like any other kill, its `signal` set.
+export function execRead(cmd, args, opts = {}) {
   return new Promise((resolve) => {
-    execFile(cmd, args, READ_OPTS, (err, stdout, stderr) => {
+    execFile(cmd, args, { ...READ_OPTS, ...opts }, (err, stdout, stderr) => {
       if (stderr) process.stderr.write(stderr);
       resolve(err
         ? {
