@@ -541,4 +541,7 @@ test("usage: no positional, and only the declared flags, else exit 2", () => {
   // A flag's value is not a positional.
   const value = spawnSync(process.execPath, [HOOK, "--repo", f.repo, "--dry-run"], { encoding: "utf8", env: { ...ENV, PATH: `${join(f.root, "bin")}:${process.env.PATH}`, GH_FIXTURE: join(f.root, "gh.json"), GH_LOG: join(f.root, "gh.log") }, cwd: f.repo });
   assert.notEqual(value.status, 2, value.stderr);
+  // No `--model-roles`/`--catalog` here, so the drift notice asks `omp`: the
+  // fixture's failing stub answers it, never the host's omp.
+  assert.match(value.stdout + value.stderr, /drift notice: skipped — omp config get modelRoles --json failed/);
 });
