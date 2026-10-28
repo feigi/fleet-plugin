@@ -57,9 +57,9 @@ const occurrences = (haystack, needle) => {
 const removedSentences = (name) => Pin.sentences(flat(fixture(name))).filter((s) => s !== "");
 
 // How many times the removed text, both fixtures together, says a sentence. The
-// two metrics paragraphs each say "Exit 0: both ran." — once in the step the
-// controller ran at phase 0 and once in the step it ran at close-out — so a
-// sentence is owed as many times as it was said, not once.
+// two metrics paragraphs each said "Exit 0: both ran." when they moved — once in
+// the step the controller ran at phase 0 and once in the step it ran at close-out
+// — so a sentence is owed as many times as it is said, not once.
 const owed = (() => {
   const counts = new Map();
   for (const name of ["phase-0-step-0.txt", "close-out-metrics.txt"]) {
