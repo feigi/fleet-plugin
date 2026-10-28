@@ -5010,7 +5010,7 @@ const REPORTED = {
 const SHA40 = "0123456789abcdef0123456789abcdef01234567";
 const validReport = (name) => {
   if (/^impl-/.test(name)) return { member: name, outcome: "pr", pr: 5, head: SHA40, branch: "b", sizing: null, bailCause: null, bailDetail: null, confirmation: [] };
-  if (/^fix-pr-/.test(name)) return { member: name, outcome: "no-op", head: SHA40, branch: "b", applied: [], deferred: [], filed: [], unrecorded: [], dispositionsRecord: "/r", testRun: { cmd: "t", exit: 0, tests: 1, cancelled: 0 }, confirmation: [] };
+  if (/^fix-pr-/.test(name)) return { member: name, outcome: "no-op", head: SHA40, branch: "b", applied: [], deferred: [], filed: [], unrecorded: [], dispositionsRecord: null, testRun: null, confirmation: [] };
   if (/^finisher-pr-/.test(name)) return { member: name, outcome: "labelled", cause: null, evidence: null, pin: SHA40, labelsReadBack: [], kill: null, filed: [], unrecorded: [], confirmation: [] };
   if (/^merge-bot-/.test(name)) return { member: name, merged: [], held: [], conflictHold: [], refused: [], branchKept: [] };
   return { member: name };

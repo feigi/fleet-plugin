@@ -136,8 +136,12 @@ recorded nothing — so run it again with `timeout: 0` on the call.
 
 Your report is a file, `<scratch>/reports/<your name>.json`, `<your name>` the
 `fix-pr-` name you were dispatched as, in the shape
-`~/.fleet/bin/fleet-run report-schema.mjs print fix-pr` prints. Write it
-before your final message, and send nothing until
+`~/.fleet/bin/fleet-run report-schema.mjs print fix-pr` prints. A field with
+nothing real to point at is `null`: `dispositionsRecord` for a conflict hold or
+a red-check fix, which write no dispositions record, and `testRun` when no test
+run exists — a `no-op`, or a `failed` that never ran tests. A non-null value
+always reflects a real record or a real run. Write the report before your
+final message, and send nothing until
 `~/.fleet/bin/fleet-run report-schema.mjs validate fix-pr <scratch>/reports/<your name>.json`
 answers `valid`. Your final message is then one line,
 `<your name>: <outcome> <scratch>/reports/<your name>.json`, `<outcome>` the

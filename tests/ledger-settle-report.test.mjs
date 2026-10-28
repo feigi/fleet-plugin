@@ -345,6 +345,15 @@ test("fix-pr-M=no-op: origin's branch at the latest reviewed= head settles", () 
   assert.equal(dispatched(f, "fix-pr-6"), "fix-pr-6=no-op");
 });
 
+test("fix-pr-M=no-op: a report with no dispositions record and no test run settles the same", () => {
+  const f = fixture();
+  f.ok("review", "6", "review=member:review-pr-6", `reviewed=${f.head.slice(0, 12)}:0/0/0:run-abcd1234`);
+  f.ok("dispatch", "6", "fix-pr-6");
+  f.report("fix-pr-6", fixReport(f, { outcome: "no-op", dispositionsRecord: null, testRun: null }));
+  assert.equal(f.settled("fix-pr-6").outcome, "no-op");
+  assert.equal(dispatched(f, "fix-pr-6"), "fix-pr-6=no-op");
+});
+
 test("fix-pr-M=no-op: origin's branch moved past the reviewed= head is exit 3", () => {
   const f = fixture();
   f.ok("review", "6", "review=member:review-pr-6", `reviewed=${f.stray}:0/0/0:run-abcd1234`);
@@ -713,6 +722,15 @@ test("a refuted deferral whose disposition record cannot be read is exit 2", () 
   f.ok("dispatch", "6", "fix-pr-6");
   f.report("fix-pr-6", fixReport(f, { deferred: [{ bucket: "refuted", index: 2, issue: 43 }] }));
   f.refused("fix-pr-6", 2, /could not look — the disposition record .* could not be read as JSON: ENOENT/);
+});
+
+// The report check refuses a refuted deferral naming no record before settle
+// reads any path, so it is an invalid report, never a crash on a null path.
+test("a refuted deferral with a null dispositionsRecord is an invalid report, exit 2", () => {
+  const f = fixture();
+  f.ok("dispatch", "6", "fix-pr-6");
+  f.report("fix-pr-6", fixReport(f, { dispositionsRecord: null, deferred: [{ bucket: "refuted", index: 2, issue: 43 }] }));
+  f.refused("fix-pr-6", 2, /is not a fix-pr report — \$\.dispositionsRecord: null, with a refuted deferral at \$\.deferred\[0\]/);
 });
 
 test("a failed report settles =failed with no check", () => {
