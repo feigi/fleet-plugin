@@ -153,7 +153,7 @@ if (repo !== null && !statSync(repo, { throwIfNoEntry: false })?.isDirectory()) 
 // runs in.
 let LABEL;
 try {
-  LABEL = readLabelMap({ cwd: repo === null ? process.cwd() : resolve(repo) })["ready-to-merge"];
+  LABEL = readLabelMap({ cwd: resolve(repo ?? ".") })["ready-to-merge"];
 } catch (e) {
   fail("label-map", e.message);
 }

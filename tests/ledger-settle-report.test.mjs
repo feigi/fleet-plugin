@@ -639,6 +639,19 @@ test("settle --from-report with no Label map: a label check is exit 2 naming ens
   assert.equal(f.settled("merge-bot-1").outcome, "done");
 });
 
+// The map is read only when a queued PR's labels are to be looked at: a queue
+// whose every PR has a verdict needs no label check, so it settles with none.
+test("merge-bot-n=done with no Label map: a queue whose PRs all have verdicts settles without reading it", () => {
+  const f = fixture();
+  f.queue(6, 7);
+  f.ok("dispatch", "merge-bot");
+  rmSync(join(f.fleet, "labels.json"));
+  f.pr(6, { state: "MERGED" });
+  f.pr(7, { state: "MERGED" });
+  f.report("merge-bot-1", botReport(f));
+  assert.equal(f.settled("merge-bot-1").outcome, "done");
+});
+
 test("merge-bot-n=done: a PR given two verdicts, in two lists or in one, is exit 2 naming both entries", () => {
   const f = fixture();
   f.ok("dispatch", "merge-bot");

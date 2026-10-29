@@ -10,7 +10,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, appendFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, appendFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -328,6 +328,23 @@ test("dispatch merge-bot with no Label map refuses before gh runs, naming ensure
   const { refused, bin, root } = fixture(t);
   rmSync(join(root, ".fleet", "labels.json"));
   refused(["dispatch", "merge-bot"], /dispatch merge-bot: no Label map at .*label-map\.mjs ensure.*; nothing written/);
+  assert.deepEqual(ghCalls(bin), []);
+});
+
+// With no repository to find a Label map in, the refusal carries the reader's
+// repository message under the verb, never an uncaught throw's exit 1.
+test("dispatch merge-bot outside any git repository refuses before gh runs, naming the repository, and writes nothing", (t) => {
+  const prior = process.env.GIT_CEILING_DIRECTORIES;
+  t.after(() => {
+    if (prior === undefined) delete process.env.GIT_CEILING_DIRECTORIES;
+    else process.env.GIT_CEILING_DIRECTORIES = prior;
+  });
+  // The fixture's env copies process.env, so git stops at the temp directory
+  // rather than finding whatever repository may enclose it.
+  process.env.GIT_CEILING_DIRECTORIES = [tmpdir(), realpathSync(tmpdir())].join(":");
+  const { refused, bin, root } = fixture(t);
+  rmSync(join(root, ".git"), { recursive: true, force: true });
+  refused(["dispatch", "merge-bot"], /dispatch merge-bot: could not resolve --git-common-dir.*; nothing written/s);
   assert.deepEqual(ghCalls(bin), []);
 });
 

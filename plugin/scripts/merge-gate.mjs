@@ -34,7 +34,11 @@
 // main-gain.mjs's own payload — hits, acknowledged removals, edited lines and unchecked
 // files — or null when it did not run or printed no JSON object; an unusable
 // payload is still echoed. Stderr: the children's own diagnostics, passed
-// straight through and never folded into stdout.
+// straight through and never folded into stdout. A refusal (exit 2 with its
+// reason on stderr: a usage error, a Label map that cannot be read — see THE
+// LABEL MAP below — an `--out` that cannot be written, a gate that failed)
+// prints no JSON line, and one made before any child runs writes no `--out`
+// file.
 //
 // Exit vocabulary — the same three-way contract as inflight.sh, prove-merge.sh
 // and staleness.mjs:
@@ -84,8 +88,9 @@
 // THE LABEL MAP: `ready-to-merge` is a Label role (label-map.mjs). Its string
 // is read off the Label map once, after the arguments are checked and before
 // any child runs, and the label row compares the PR's labels against that
-// string. A run with no valid map is a refusal at exit 2 carrying the
-// reader's message, which names `label-map.mjs ensure`; nothing runs.
+// string. A map that cannot be read, or no repository to find one in, is a
+// refusal at exit 2 carrying the reader's message (an absent or invalid map's
+// names `label-map.mjs ensure`); nothing runs.
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
