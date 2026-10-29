@@ -26,6 +26,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ref, prUrl } from "./support/queue-gh.mjs";
+import { seedLabelMap } from "./support/label-map-seed.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/delete-merged-branch.sh", import.meta.url));
 const REAP = fileURLToPath(new URL("../plugin/scripts/reap.sh", import.meta.url));
@@ -63,8 +64,12 @@ const commit = (w, msg) => {
   return git(w, "rev-parse", "HEAD");
 };
 
-/** Bare origin + clone with one commit on main, `.worktrees/` ignored as §2.5 requires. */
-function repo(t) {
+/**
+ * Bare origin + clone with one commit on main, `.worktrees/` ignored as §2.5
+ * requires, its Label map seeded through seedLabelMap() with `labelMap` (the
+ * identity map by default, none at all when null).
+ */
+function repo(t, labelMap = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "delete-merged-branch-")));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const origin = join(root, "origin.git");
@@ -76,6 +81,7 @@ function repo(t) {
   commit(w, "root");
   git(w, "branch", "-M", "main");
   git(w, "push", "-q", "-u", "origin", "main");
+  if (labelMap !== null) seedLabelMap(w, labelMap);
   return { root, origin, w };
 }
 
@@ -674,6 +680,27 @@ test("end to end: a bot that runs only this step leaves no in-progress on the is
   assert.deepEqual(gh.labelsOf(41), ["bug"], "in-progress is gone, the other label is untouched");
   assert.deepEqual(gh.edits(), [LABEL_EDIT(41)]);
   assert.match(r.stderr, /dropped in-progress/, "the label half's own output is on stderr");
+});
+
+// No Label map: drop-merged-label.sh refuses at exit 2 naming `ensure`, its
+// message reaches this script's stderr, no label is dropped, and the branch
+// half still runs — the label outcome is a label-read-failed token, exit 4.
+test("no Label map: the label half's refusal passes through, nothing is dropped, and the branch is still deleted", (t) => {
+  const branch = "fix/3873-no-map";
+  const { root, origin, w } = repo(t, null);
+  const { oid } = mergedInWorktree(w, branch, "3873-no-map");
+  const gh = ghStub(t, root);
+  gh.setLabels(41, "in-progress");
+
+  const r = run(w, ["7"], gh.env({ PR_HEAD: branch, PR_OID: oid, PR_CLOSES: "41" }));
+
+  assert.equal(r.code, 4, r.stderr);
+  assert.deepEqual(r.tokens, ["label-read-failed-#7"]);
+  assert.match(r.stderr, /drop-merged-label: could not read the in-progress label from the Label map/);
+  assert.match(r.stderr, /run `label-map\.mjs ensure`/);
+  assert.deepEqual(gh.edits(), []);
+  assert.deepEqual(gh.labelsOf(41), ["in-progress"]);
+  assert.equal(onOrigin(origin, branch), false, "the branch half still runs");
 });
 
 test("an issue named only in a commit message loses the label too", (t) => {

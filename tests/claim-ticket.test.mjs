@@ -7,6 +7,7 @@ import { tempDir } from "./support/temp-dir.mjs";
 import { join, dirname } from "node:path";
 import { NPM_PREPARE_STUB, writeExecStub } from "./support/exec-stub.mjs";
 import { slotHome, holdSlots } from "./support/suite-slot-home.mjs";
+import { seedLabelMap } from "./support/label-map-seed.mjs";
 
 const SCRIPT = join(import.meta.dirname, "..", "plugin", "scripts", "claim-ticket.sh");
 
@@ -28,7 +29,10 @@ const FIXTURE_ENV = { ...process.env, GIT_DIR: undefined, GIT_WORK_TREE: undefin
 // derive-testcmd.sh reads it — proven at origin/main. Every field is
 // overridable; `null` writes no cache at all. The default is the smallest
 // Recipe that runs anywhere: nothing to install, nothing to fail.
-function repo(files, local = {}, recipe = {}) {
+//
+// `labelMap` is seeded through seedLabelMap(): the identity map by default,
+// no map at all when null.
+function repo(files, local = {}, recipe = {}, labelMap = {}) {
   const dir = tempDir("claim-");
   const git = (...a) => execFileSync("git", a, { cwd: dir, stdio: "pipe", env: FIXTURE_ENV, encoding: "utf8" });
   git("init", "-q");
@@ -45,6 +49,7 @@ function repo(files, local = {}, recipe = {}) {
     mkdirSync(dirname(join(dir, name)), { recursive: true });
     writeFileSync(join(dir, name), body);
   }
+  if (labelMap !== null) seedLabelMap(dir, labelMap);
   if (recipe !== null) {
     mkdirSync(join(dir, ".fleet"), { recursive: true });
     writeFileSync(join(dir, ".fleet", "recipe.json"), JSON.stringify({
@@ -262,17 +267,20 @@ test("runner: the stamp changes when the script's content changes", () => {
   const scriptDir = tempDir("claim-script-");
   const editedScript = join(scriptDir, "claim-ticket.sh");
   writeFileSync(editedScript, readFileSync(SCRIPT, "utf8") + "\n# a harmless edit\n");
-  // claim-ticket.sh resolves three siblings relative to itself
+  // claim-ticket.sh resolves its siblings relative to itself
   // (`$(dirname -- "$0")`): derive-testcmd.sh for the testcmd, json.sh for the
-  // payload escaping (#119), and worktree.sh for `gone()`, the established-absent
-  // predicate the worktree guard asks (#727). All three have to travel with this
-  // edited copy or the script refuses before it emits anything — which is the
-  // guard working, not a regression.
+  // payload escaping (#119), worktree.sh for `gone()`, the established-absent
+  // predicate the worktree guard asks (#727), and label-map.mjs for the
+  // in-progress string. Each has to travel with this edited copy or the script
+  // refuses before it emits anything — which is the guard working, not a
+  // regression. label-map.mjs travels as a symlink: node resolves a module to
+  // its real path, so its own imports still resolve beside the real file.
   const sibling = join(scriptDir, "derive-testcmd.sh");
   writeExecStub(sibling, readFileSync(join(import.meta.dirname, "..", "plugin", "scripts", "derive-testcmd.sh"), "utf8"));
   for (const lib of ["json.sh", "worktree.sh"]) {
     copyFileSync(join(import.meta.dirname, "..", "plugin", "scripts", lib), join(scriptDir, lib));
   }
+  symlinkSync(join(import.meta.dirname, "..", "plugin", "scripts", "label-map.mjs"), join(scriptDir, "label-map.mjs"));
 
   const after = apply({}, editedScript).text.match(STAMP_RE)[1];
   const before = apply({}).text.match(STAMP_RE)[1];
@@ -412,6 +420,48 @@ test("an absent Recipe cache refuses the claim before anything is claimed, namin
   assert.equal(r.stdout, "", "no receipt for a claim that was never made");
   assert.equal(existsSync(ghLog), false, "the issue was never labelled");
   assert.equal(existsSync(join(dir, ".worktrees", "42-slug")), false, "and no worktree exists");
+});
+
+// The in-progress string is the Label map's, never the role name: remapped to
+// `wip`, the dry run's `would:` line and the recorded `gh issue edit` both
+// carry `wip`.
+test("the claim labels the issue with the in-progress string the Label map holds", () => {
+  const dir = repo({ [TESTS]: "" }, {}, {}, { roles: { "in-progress": "wip" } });
+  const dry = spawnSync("sh", [SCRIPT, "42", "slug", "fix"], { cwd: dir, encoding: "utf8" });
+  assert.equal(dry.status, 0, dry.stderr);
+  assert.match(dry.stderr, /would: gh issue edit 42 --add-label wip$/m);
+
+  const bin = tempDir("claim-bin-");
+  const ghLog = join(bin, "gh.log");
+  writeExecStub(join(bin, "gh"), '#!/bin/sh\nfor a do printf "%s\\n" "$a"; done >> "$GH_LOG"\nexit 0\n');
+  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], {
+    cwd: dir, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GH_LOG: ghLog },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(readFileSync(ghLog, "utf8").split("\n").filter(Boolean), ["issue", "edit", "42", "--add-label", "wip"]);
+});
+
+// No Label map is a refusal in both modes, naming the derivation step, before
+// anything is claimed: no label, no worktree, no branch, no receipt.
+test("no Label map refuses the claim before anything is claimed, naming ensure", () => {
+  const dir = repo({ [TESTS]: "" }, {}, {}, null);
+  const dry = claim(dir);
+  assert.match(dry.err, /label-map: no Label map at .*\/\.fleet\/labels\.json: run `label-map\.mjs ensure`/);
+  assert.match(dry.err, /claim-ticket: could not read the in-progress label from the Label map/);
+
+  const bin = tempDir("claim-bin-");
+  const ghLog = join(bin, "gh.log");
+  writeExecStub(join(bin, "gh"), '#!/bin/sh\necho "$@" >> "$GH_LOG"\nexit 0\n');
+  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], {
+    cwd: dir, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GH_LOG: ghLog },
+  });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /run `label-map\.mjs ensure`/);
+  assert.equal(r.stdout, "", "no receipt for a claim that was never made");
+  assert.equal(existsSync(ghLog), false, "the issue was never labelled");
+  assert.equal(existsSync(join(dir, ".worktrees", "42-slug")), false, "and no worktree exists");
+  const branch = spawnSync("git", ["rev-parse", "--verify", "--quiet", "refs/heads/fix/42-slug"], { cwd: dir, env: FIXTURE_ENV });
+  assert.equal(branch.status, 1, "and no branch exists");
 });
 
 // The acceptance row: a Test entrypoint naming a binary that does not exist

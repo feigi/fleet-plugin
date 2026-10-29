@@ -5,8 +5,9 @@
 // merge.
 //
 // Zero deps: `node --test tests/drop-merged-label.test.mjs`.
-// No git repo needed — the script never touches git, only `gh`, so `gh` is the
-// only thing stubbed, on PATH.
+// `gh` is the only thing stubbed, on PATH. The script reads the in-progress
+// string from the Label map, so every run has a repository with a seeded map
+// for its cwd: IDENTITY below, unless a case brings its own.
 //
 // Each precondition gets a case that proves it blocks ON ITS OWN, same
 // discipline as release-ticket.test.mjs: deleting a check must fail the case
@@ -20,7 +21,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeExecStub } from "./support/exec-stub.mjs";
-import { seedLabelMap } from "./support/label-map-seed.mjs";
+import { seedLabelMap, seededRepo } from "./support/label-map-seed.mjs";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import { ref, prUrl } from "./support/queue-gh.mjs";
 
@@ -109,9 +110,12 @@ function mktemp(t) {
   return root;
 }
 
-function run(pr, { apply = false, env = {} } = {}) {
+// The identity Label map's repository: the cwd of every run that names none.
+const IDENTITY = seededRepo("drop-merged-label-map-");
+
+function run(pr, { apply = false, env = {}, cwd = IDENTITY } = {}) {
   const argv = apply ? [String(pr), "--apply"] : [String(pr)];
-  const res = spawnSync("sh", [SCRIPT, ...argv], { env, encoding: "utf8" });
+  const res = spawnSync("sh", [SCRIPT, ...argv], { cwd, env, encoding: "utf8" });
   return {
     code: res.status,
     json: res.stdout.trim() ? JSON.parse(res.stdout) : null,
@@ -254,6 +258,49 @@ test("--apply drops in-progress from a merged PR's closed issue", (t) => {
   assert.equal(code, 0);
   assert.deepEqual(json.issues, [{ issue: 41, hadLabel: true, removed: true }]);
   assert.ok(s.calls().includes("issue edit 41 --remove-label in-progress"));
+});
+
+// The in-progress string is the Label map's, never the role name: remapped to
+// `wip`, the scan finds `wip`, the dry run's `would:` line names it and the
+// recorded `gh issue edit` removes it.
+test("the scan and the drop use the in-progress string the Label map holds", (t) => {
+  const cwd = seededRepo("drop-merged-label-wip-", { roles: { "in-progress": "wip" } });
+  const s = stub(t);
+  const env = s.env({ CLOSES: "41 42", LABELS_41: "wip bug", LABELS_42: "in-progress" });
+
+  const dry = run(9, { cwd, env });
+  assert.equal(dry.code, 0, dry.stderr);
+  assert.deepEqual(dry.json.issues, [{ issue: 41, hadLabel: true, removed: false }, { issue: 42, hadLabel: false, removed: false }]);
+  assert.match(dry.stderr, /would: gh issue edit 41 --remove-label wip$/m);
+
+  const { code, json, stderr } = run(9, { apply: true, cwd, env });
+  assert.equal(code, 0, stderr);
+  assert.deepEqual(json.issues, [{ issue: 41, hadLabel: true, removed: true }, { issue: 42, hadLabel: false, removed: false }]);
+  assert.deepEqual(s.calls().filter((c) => c.startsWith("issue edit")), ["issue edit 41 --remove-label wip"]);
+});
+
+// A mapped string is matched as a fixed string: a `.` in it is a `.`, so
+// `in.progress` finds only itself and never `inXprogress`.
+test("a mapped in-progress string with a `.` in it matches only itself in the scan", (t) => {
+  const cwd = seededRepo("drop-merged-label-dot-", { roles: { "in-progress": "in.progress" } });
+  const s = stub(t);
+  const { code, json, stderr } = run(9, { apply: true, cwd, env: s.env({ CLOSES: "41 42", LABELS_41: "inXprogress", LABELS_42: "in.progress" }) });
+  assert.equal(code, 0, stderr);
+  assert.deepEqual(json.issues, [{ issue: 41, hadLabel: false, removed: false }, { issue: 42, hadLabel: true, removed: true }]);
+  assert.deepEqual(s.calls().filter((c) => c.startsWith("issue edit")), ["issue edit 42 --remove-label in.progress"]);
+});
+
+test("no Label map refuses at exit 2 naming ensure, scanning and dropping nothing", (t) => {
+  const cwd = seededRepo("drop-merged-label-none-", null);
+  const s = stub(t);
+  for (const apply of [false, true]) {
+    const { code, json, stderr } = run(9, { apply, cwd, env: s.env({ CLOSES: "41", LABELS_41: "in-progress" }) });
+    assert.equal(code, 2, stderr);
+    assert.equal(json, null, "no receipt");
+    assert.match(stderr, /label-map: no Label map at .*\/\.fleet\/labels\.json: run `label-map\.mjs ensure`/);
+    assert.match(stderr, /drop-merged-label: could not read the in-progress label from the Label map/);
+  }
+  assert.ok(!s.calls().some((c) => c.startsWith("issue ")), s.calls().join("\n"));
 });
 
 test("an issue that already lost the label is reported clear, not re-edited", (t) => {

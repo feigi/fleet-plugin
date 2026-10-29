@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { worktreeNames } from "./support/worktree-porcelain.mjs";
+import { seedLabelMap } from "./support/label-map-seed.mjs";
 
 const CLAIM = fileURLToPath(new URL("../plugin/scripts/claim-ticket.sh", import.meta.url));
 const REAP = fileURLToPath(new URL("../plugin/scripts/reap.sh", import.meta.url));
@@ -70,6 +71,9 @@ function fixture(t) {
   writeFileSync(join(w, ".fleet", "recipe.json"), JSON.stringify({
     install: "true", check: true, test: "true", derivedAt: git(w, "rev-parse", "HEAD"), installClean: true, testCount: 1, uncovered: [],
   }));
+  // claim-ticket.sh and release-ticket.sh read the in-progress string from the
+  // Label map: the identity map, in the same `.fleet/`.
+  seedLabelMap(w);
   return { root, origin, w, env, git };
 }
 

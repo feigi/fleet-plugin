@@ -33,6 +33,7 @@ import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFile
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { seedLabelMap } from "./support/label-map-seed.mjs";
 
 const DIR = fileURLToPath(new URL("../plugin/scripts", import.meta.url));
 
@@ -301,12 +302,14 @@ test("reap: a KEEP reason holding a backslashed path reaches the operator whole"
 
 test("claim-ticket: the dry-run plan names a backslashed worktree path verbatim", (t) => {
   const w = repo(t);
-  // A claim needs the repository's Recipe cache (ADR 0015); the smallest
-  // proven one, untracked in the checkout's own `.fleet/`.
+  // A claim needs the repository's Recipe cache (ADR 0015) and its Label map;
+  // the smallest proven Recipe and the identity map, untracked in the
+  // checkout's own `.fleet/`.
   mkdirSync(join(w, ".fleet"), { recursive: true });
   writeFileSync(join(w, ".fleet", "recipe.json"), JSON.stringify({
     install: "true", check: true, test: "true", derivedAt: git(w, "rev-parse", "HEAD").trim(), installClean: true, testCount: 1, uncovered: [],
   }));
+  seedLabelMap(w);
   const r = run(w, "claim-ticket.sh", ["7", "back\\clue", "fix"]);
   assert.equal(r.status, 0, `stderr: ${r.stderr}`);
   assert.ok(

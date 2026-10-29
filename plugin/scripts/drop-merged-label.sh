@@ -27,7 +27,7 @@
 # Dry-run by default; --apply mutates the tracker. Exit 0 done (or dry run),
 # 1 one or more removals failed — REPORT THIS, never swallow it: a merged
 # ticket that keeps the label is a future invisible ticket, 2 could not even
-# tell what this PR closes.
+# tell what this PR closes, or which label to drop (no valid Label map).
 set -eu
 
 NAME=drop-merged-label
@@ -135,6 +135,16 @@ if [ -z "$issues" ]; then
   exit 0
 fi
 
+# The string the tracker uses for the in-progress role, read from the Label
+# map by label-map.mjs's `show`, the sibling beside this script, before the
+# first label scan, so every scan, `would:` line and label drop below types
+# it. No map or an invalid one is `show`'s exit 1, its own message naming
+# `ensure` on stderr, and this script's exit 2: nothing scanned, nothing
+# dropped. `show`'s stdout is the string alone, so stderr is left to reach the
+# terminal rather than merged into it.
+in_progress=$(node "$(dirname "$0")/label-map.mjs" show in-progress) \
+  || die "could not read the in-progress label from the Label map — nothing dropped"
+
 results=""
 failed=""
 for n in $issues; do
@@ -153,7 +163,9 @@ for n in $issues; do
   # scan itself broke — so a scan that could not look would read here exactly
   # like a measurement that looked and found the label already gone, and the
   # loop below would skip the removal a merged ticket still needs.
-  if printf '%s\n' "$labels" | grep -qx in-progress; then gp_rc=0; else gp_rc=$?; fi
+  # Fixed-string, whole-line: a mapped string may hold regex characters, and a
+  # `.` in it read as a pattern would match a label that is not the string.
+  if printf '%s\n' "$labels" | grep -qxF -- "$in_progress"; then gp_rc=0; else gp_rc=$?; fi
   case $gp_rc in
     0) had=true ;;
     1) had=false ;;
@@ -171,13 +183,13 @@ for n in $issues; do
   fi
 
   if [ "$apply" = false ]; then
-    echo "    would: gh issue edit $n --remove-label in-progress" >&2
+    echo "    would: gh issue edit $n --remove-label $in_progress" >&2
     results="${results}{\"issue\":$n,\"hadLabel\":true,\"removed\":false},"
     continue
   fi
 
-  echo "\$ gh issue edit $n --remove-label in-progress" >&2
-  if gh issue edit "$n" --remove-label in-progress >/dev/null; then
+  echo "\$ gh issue edit $n --remove-label $in_progress" >&2
+  if gh issue edit "$n" --remove-label "$in_progress" >/dev/null; then
     echo "    #$n: dropped in-progress" >&2
     results="${results}{\"issue\":$n,\"hadLabel\":true,\"removed\":true},"
   else
