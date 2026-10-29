@@ -205,7 +205,8 @@ export const rowFor = (rows, stratum) => rows[stratum] ?? rows["*"];
  * is `guard-missing`, `table-cell-tripped` or `ok`. `draw` is what an
  * exploring Pull picks from — `by` `burn-in` (every Pull) or `every-5th` —
  * over `cells`: the table's Cells less the tripped, and on an every-5th draw
- * less the `cost` row's Cell for the stratum too, whichever objective routes
+ * less the `cost` row's Cell for the stratum too, as the guard leaves it (the
+ * default cell when that row's Cell is tripped), whichever objective routes
  * the row. It is null with no guard and when no Cell is left to draw.
  * @returns {{ policy: string, reason: "guard-missing"|"table-cell-tripped"|"ok", draw: null | { by: "burn-in"|"every-5th", cells: string[] } }}
  */
@@ -318,7 +319,8 @@ export function route({ session, ticket, arm, implRow, chainHead = false, issue,
       const policyCell = table.burn_in ? null : drawRow.policy;
       if (table.cells.some((c) => c !== policyCell && guard.tripped.includes(c))) degrade("guard-tripped");
       if (drawRow.draw !== null) {
-        const d = drawCell({ session, ticket, policyCell, cells: drawRow.draw.cells });
+        // rowDispatch already left the policy Cell out of `cells`: nothing more to withhold.
+        const d = drawCell({ session, ticket, policyCell: null, cells: drawRow.draw.cells });
         cell = d.cell;
         draw = { k: d.k, K: d.K };
         by = drawRow.draw.by;

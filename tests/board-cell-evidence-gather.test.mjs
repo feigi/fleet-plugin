@@ -457,6 +457,10 @@ test("readInstall: the install's own package.json, ../package.json from the scri
   assert.deepEqual(readInstall(scripts), { name: "x", version: "1.0.0", repository: null, error: null }, "a package naming no repository");
   put({ name: 3, version: null, repository: { directory: "plugin" } });
   assert.deepEqual(readInstall(scripts), { name: null, version: null, repository: null, error: null });
+  for (const repository of [null, [], ["git+https://github.com/feigi/fleet-plugin.git"], 3]) {
+    put({ name: "x", version: "1.0.0", repository });
+    assert.deepEqual(readInstall(scripts), { name: "x", version: "1.0.0", repository: null, error: null }, `a repository field of ${JSON.stringify(repository)} names none`);
+  }
 });
 
 test("readInstall: a package.json that is missing, not JSON or not an object is an error, with nothing guessed", () => {

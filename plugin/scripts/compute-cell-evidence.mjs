@@ -395,10 +395,12 @@ function guardSection(read, receipts, modelRoles, pulls) {
 // ---------------------------------------------------------------------------
 
 // A repository's host and `owner/name` off a `package.json` `repository` url (an
-// npm shorthand, a scp-style address or a URL), or null when it names none.
+// npm shorthand, a scp-style address or a URL), or null when it names none. A
+// `#ref` pin and a `www.` host name the same repository; a segment of dots only
+// names none.
 export function repoIdentity(url) {
   if (typeof url !== "string") return null;
-  const s = url.trim().replace(/^git\+/, "");
+  const s = url.trim().replace(/^git\+/, "").replace(/#.*$/, "");
   let host;
   let path;
   const short = /^(github|gitlab|bitbucket):([^/\s]+\/[^/\s]+)$/.exec(s);
@@ -414,9 +416,10 @@ export function repoIdentity(url) {
   } else {
     try { ({ hostname: host, pathname: path } = new URL(s)); } catch { return null; }
   }
-  const [owner, name] = path.split("/").filter(Boolean);
-  if (!host || !owner || !name) return null;
-  return { host: host.toLowerCase(), name: `${owner}/${name.replace(/\.git$/, "")}` };
+  const [owner, rest] = path.split("/").filter(Boolean);
+  const name = rest?.replace(/\.git$/, "");
+  if (!host || !owner || !name || /^\.+$/.test(owner) || /^\.+$/.test(name)) return null;
+  return { host: host.toLowerCase().replace(/^www\./, ""), name: `${owner}/${name}` };
 }
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -428,8 +431,8 @@ const list = (xs) => (xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", "
 function routesSource(table, install, repoUrl) {
   const named = repoIdentity(install?.repository);
   const here = repoIdentity(repoUrl);
-  const same = named !== null && here !== null ? named.host === here.host && named.name.toLowerCase() === here.name.toLowerCase() : null;
-  const runs = same === true ? "this repository's runs" : named !== null ? `${named.name}'s runs` : "another repository's runs";
+  const same = named !== null && here !== null && named.host === here.host && named.name.toLowerCase() === here.name.toLowerCase();
+  const runs = same ? "this repository's runs" : named !== null ? `${named.name}'s runs` : "another repository's runs";
   let fitted;
   if (table === null) fitted = "no router table read";
   else if (!table.fitted_commit) fitted = "never fitted";
@@ -440,20 +443,23 @@ function routesSource(table, install, repoUrl) {
   let installed;
   if (install == null || install.error) installed = `install not read${install?.error ? `: ${install.error}` : ""}`;
   else installed = `${install.name ?? "unnamed package"} ${install.version === "0.0.0" ? "linked checkout" : (install.version ?? "no version")}`;
-  const check = named === null
-    ? "not checked: the install names no repository"
-    : here === null ? "not checked: this workspace's repository is not known" : null;
+  const check = install == null || install.error
+    ? "not checked: the install was not read"
+    : named === null
+      ? "not checked: the install names no repository"
+      : here === null ? "not checked: this workspace's repository is not known" : null;
   return { same, owner: named === null ? "another repository" : named.name, runs, text: [runs, fitted, installed].join(" · "), check };
 }
 
-// The Cells short of `MIN_N` merged PRs at the fit, in the table's order, as one phrase.
-function shortWords(table, past) {
+// The Cells short of `MIN_N` merged PRs at the fit, in the table's order, as one
+// past-tense phrase: the counts are what the fit saw.
+function shortWords(table) {
   const short = table.cells.filter((c) => (table.guard.n[c] ?? 0) < MIN_N).map((c) => [c, table.guard.n[c] ?? 0]);
   if (short.length === 0) return null;
-  const [verb, each] = short.length === 1 ? [past ? "had" : "has", "it needs"] : [past ? "had" : "have", "each needs"];
+  const each = short.length === 1 ? "it needs" : "each needs";
   const counts = new Set(short.map(([, n]) => n));
-  if (counts.size === 1) return `${list(short.map(([c]) => c))} ${verb} ${short[0][1]} of the ${MIN_N} merged PRs ${each}`;
-  return `${list(short.map(([c, n]) => `${c} ${verb} ${n}`))} of the ${MIN_N} merged PRs ${each}`;
+  if (counts.size === 1) return `${list(short.map(([c]) => c))} had ${short[0][1]} of the ${MIN_N} merged PRs ${each}`;
+  return `${list(short.map(([c, n]) => `${c} had ${n}`))} of the ${MIN_N} merged PRs ${each}`;
 }
 
 // The side's burn-in or no-guard heading, or null while neither holds. Past tense
@@ -465,8 +471,8 @@ function routesHeading(table, guard, source) {
   const K = rowDispatch({ table, guard, objective: "cost", stratum: "*" }).draw?.cells.length ?? 0;
   const drawn = K === 0 ? "no Cell is left to draw, so every Pull runs at its row's Cell" : `every Pull drawn over ${plural(K, "Cell")}`;
   if (!table.fitted_commit) return `never fitted: ${drawn}`;
-  const short = shortWords(table, true);
-  const ends = source.same === true ? "" : "; it ends with a later fit, reaching this install with a plugin release";
+  const short = shortWords(table);
+  const ends = source.same ? "" : "; it ends with a later fit, reaching this install with a plugin release";
   return `stage ${table.stage} at its fit on ${source.owner}'s runs: ${short === null ? "every Cell had its merged PRs" : short}; ${drawn}${ends}`;
 }
 
@@ -505,7 +511,8 @@ function intervalWords(range, objective) {
 }
 
 // One row of the installed table under the guard: the Cell it routes to and why,
-// its dispatch, and each candidate's n, verdict and interval.
+// its dispatch, and each candidate's n (null where the table carries no count),
+// verdict and interval.
 function routesEntry(table, guard, modelRoles, objective, stratum) {
   const rd = rowDispatch({ table, guard, objective, stratum });
   const row = table.rows[objective][stratum];
@@ -520,7 +527,7 @@ function routesEntry(table, guard, modelRoles, objective, stratum) {
     dispatch: dispatchWords(table, rd, row),
     candidates: Object.entries(isRecord(record?.cells) ? record.cells : {}).map(([cell, x]) => ({
       cell,
-      n: count(estimates[cell]?.merged) ?? 0,
+      n: count(estimates[cell]?.merged),
       verdict: typeof x?.verdict === "string" ? x.verdict : "not checked",
       interval: intervalWords(x?.range, objective),
       model: generationCheck(cell, estimates[cell]?.generation, modelRoles),
@@ -533,7 +540,7 @@ function routesEntry(table, guard, modelRoles, objective, stratum) {
 // row of its own. `rows` is null when no table could be read.
 function routesNow({ table, guard, modelRoles, install, repoUrl }) {
   const source = routesSource(table, install, repoUrl);
-  const foot = source.same === true ? [] : [{ mark: "¹", text: "this repository's runs reach routing only through its cost guard, which can hold a Cell back but never picks one" }];
+  const foot = source.same ? [] : [{ mark: "¹", text: "this repository's runs reach routing only through its cost guard, which can hold a Cell back but never picks one" }];
   return {
     title: "routes now",
     source: { text: source.text + (foot.length ? " ¹" : ""), check: source.check },

@@ -731,11 +731,13 @@ guard, objective, stratum })` is what `route` does with one row under one guard,
 with no per-Pull input: `{ policy, reason, draw }`, `reason` one of
 `guard-missing`, `table-cell-tripped` and `ok`, `draw` null or `{ by, cells }`,
 the Cells an exploring Pull picks from — the table's Cells less the tripped,
-and under `every-5th` less the `cost` row's Cell for the Stratum too, whichever
-Objective routes the row. `route` calls it for its policy row, its base row and
-its draw, so the cockpit's Cell evidence tab, which calls it too, cannot
-disagree with routing. `REASON`'s `guard-tripped` stays `route`'s: it needs the
-Pull to be exploring. `rowFor` and `MIN_N` are exported beside it.
+and under `every-5th` less the `cost` row's Cell for the Stratum too, as the
+guard leaves it (the default Cell when that row's Cell is tripped), whichever
+Objective routes the row. `route` calls it for its policy row, its base row
+(the policy row's own unless arm B sizes it) and its draw, so the cockpit's
+Cell evidence tab, which calls it too, cannot disagree with routing.
+`REASON`'s `guard-tripped` stays `route`'s: it needs the Pull to be exploring.
+`rowFor` and `MIN_N` are exported beside it.
 
 Guard/table asymmetry, stated on purpose: the guard is pooled, the table
 per-stratum; a cell evicted pooled cannot win a stratum. Conservative by

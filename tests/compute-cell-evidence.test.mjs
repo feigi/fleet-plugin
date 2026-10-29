@@ -568,10 +568,13 @@ test("a workspace whose repository is not known is not compared", () => {
   assert.equal(s.source.check, "not checked: this workspace's repository is not known");
 });
 
-test("an install that could not be read says so, where its name and version would be", () => {
-  assert.equal(sideOf(policy({ install: { name: null, version: null, repository: null, error: "/x/package.json: ENOENT" } })).source.text,
-    "another repository's runs · never fitted · install not read: /x/package.json: ENOENT ¹");
-  assert.equal(sideOf(policy({ install: null })).source.text.split(" · ")[2], "install not read ¹");
+test("an install that could not be read says so, where its name and version would be, and the comparison says why it is not checked", () => {
+  const unread = sideOf(policy({ install: { name: null, version: null, repository: null, error: "/x/package.json: ENOENT" } }));
+  assert.equal(unread.source.text, "another repository's runs · never fitted · install not read: /x/package.json: ENOENT ¹");
+  assert.equal(unread.source.check, "not checked: the install was not read");
+  const none = sideOf(policy({ install: null }));
+  assert.equal(none.source.text.split(" · ")[2], "install not read ¹");
+  assert.equal(none.source.check, "not checked: the install was not read");
 });
 
 test("repoIdentity reads the shapes a package.json repository takes", () => {
@@ -581,7 +584,19 @@ test("repoIdentity reads the shapes a package.json repository takes", () => {
     assert.deepEqual(repoIdentity(u), want, u);
   }
   assert.deepEqual(repoIdentity("git+ssh://git@ghe.example.com/acme/widgets.git"), { host: "ghe.example.com", name: "acme/widgets" });
+  assert.deepEqual(repoIdentity("git@GitHub.com:feigi/fleet-plugin.git"), want, "an scp host compares without case");
+  assert.deepEqual(repoIdentity("gitlab:acme/widgets"), { host: "gitlab.com", name: "acme/widgets" });
+  assert.deepEqual(repoIdentity("bitbucket:acme/widgets"), { host: "bitbucket.org", name: "acme/widgets" });
+  assert.deepEqual(repoIdentity("bitbucket:acme/widgets"), repoIdentity("https://bitbucket.org/acme/widgets"), "the bitbucket shorthand is bitbucket.org's");
   for (const u of [null, undefined, 3, "", "nope", "https://github.com/owner"]) assert.equal(repoIdentity(u), null, String(u));
+});
+
+test("repoIdentity drops a ref pin and a www. host, and refuses a relative path", () => {
+  const want = { host: "github.com", name: "feigi/fleet-plugin" };
+  for (const u of ["github:feigi/fleet-plugin#main", "feigi/fleet-plugin#main", "git+https://github.com/feigi/fleet-plugin.git#v1", "git@github.com:feigi/fleet-plugin.git#v1", "https://www.github.com/feigi/fleet-plugin"]) {
+    assert.deepEqual(repoIdentity(u), want, u);
+  }
+  for (const u of ["../x", "./x", "x/..", "https://github.com/o/.git"]) assert.equal(repoIdentity(u), null, u);
 });
 
 test("burn-in, fitted: the counts are the table's own, past tense, naming whose runs; a consumer adds what ends it", () => {
@@ -690,6 +705,14 @@ test("each candidate shows its n, verdict and 95% interval, in dollars under cos
   assert.equal(lineOf(p, "speed", "*").sides[0].candidates[0].interval, "95% interval [−12.0 min, 3.3 min]");
   assert.equal(lineOf(p, "cost", "*").sides[0].reason, "no-qualifier");
   assert.equal(lineOf(p, "speed", "heavy").sides[0].reason, "unjudged");
+});
+
+test("a candidate whose estimate carries no count shows its n as not checked, never a measured-looking 0", () => {
+  for (const merged of ["12", -1, 1.5, null, undefined]) {
+    const p = policy({ table: FITTED({ estimates: { "*": { "task-high": { generation: "claude-sonnet-5-5", merged } } } }) });
+    assert.equal(lineOf(p, "cost", "*").sides[0].candidates.find((c) => c.cell === "task-high").n, null, JSON.stringify(merged));
+  }
+  assert.equal(lineOf(policy({ table: FITTED({ estimates: {} }) }), "cost", "*").sides[0].candidates[0].n, null, "no estimate at all");
 });
 
 test("a row with no estimate names no generation and carries no flag", () => {

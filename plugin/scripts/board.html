@@ -481,7 +481,7 @@ function cePolicyCell(s, href) {
   box.append(hd);
   if (s.dispatch) box.append(el("div", "ce-note", "dispatch: " + s.dispatch));
   for (const c of s.candidates) {
-    const line = el("div", "ce-cand", `${c.cell} · n ${c.n} · ${c.verdict} · ${c.interval}`);
+    const line = el("div", "ce-cand", `${c.cell} · n ${c.n ?? "not checked"} · ${c.verdict} · ${c.interval}`);
     if (c.model && c.model.text) line.append(el("span", "ce-amber", " · " + c.model.text));
     box.append(line);
   }
@@ -491,19 +491,19 @@ function cePolicyCell(s, href) {
 // One line of the policy rows: a Stratum's row across every side, or the one
 // line a Stratum with no row of its own collapses to. Either way it is a place
 // `#cells/row/<objective>/<stratum>` lands on.
-function cePolicyLine(line, nSides) {
+function cePolicyLine(line) {
   const box = ceBox("div", "ce-row", line.anchor);
   if (line.collapsed) {
     box.append(el("span", "ce-dim", line.collapsed));
     return box;
   }
-  box.style.gridTemplateColumns = `6em repeat(${nSides}, minmax(0, 1fr))`;
+  box.style.gridTemplateColumns = `6em repeat(${line.sides.length}, minmax(0, 1fr))`;
   box.append(el("span", "ce-stratum", line.stratum));
   for (const s of line.sides) box.append(cePolicyCell(s, line.href));
   return box;
 }
 
-// The policy rows, Objective × Stratum: both sides' headings, then one row-aligned
+// The policy rows, Objective × Stratum: each side's heading, then one row-aligned
 // table with the live run's Objective marked.
 function cePolicy(p) {
   const sec = ceBox("section", "ce-sec", "cells-rows");
@@ -516,7 +516,7 @@ function cePolicy(p) {
     hd.append(el("span", "ce-cell", o.objective));
     if (o.live) hd.append(el("span", "badge", "this run's Objective"));
     sec.append(hd);
-    for (const line of o.lines) sec.append(cePolicyLine(line, p.sides.length));
+    for (const line of o.lines) sec.append(cePolicyLine(line));
   }
   for (const s of p.sides) for (const f of s.footnotes) sec.append(el("div", "ce-foot", `${f.mark} ${f.text}`));
   return sec;

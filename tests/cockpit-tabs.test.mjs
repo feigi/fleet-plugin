@@ -834,6 +834,13 @@ test("a row's own reason is a link to it, and a row of its own draws its Cell, r
   assert.ok(textOf(document.getElementById("cells-row-cost-heavy")).includes("task-high"), "a Stratum with a row of its own keeps it");
 });
 
+test("a candidate whose estimate carries no count reads n not checked on the page, never n 0", () => {
+  const { document, render, model } = harness();
+  render(model({ cellEvidence: policyEvidence({ table: { ...FITTED_ROWS, estimates: { "*": { "task-high": { generation: "claude-sonnet-5-5", merged: "60" } } } } }) }));
+  const text = textOf(document.getElementById("cells-row-cost-*")).replace(/\s+/g, " ");
+  assert.ok(text.includes("task-high · n not checked · not-reliably-cheaper"), text);
+});
+
 test("a consumer's rows read <owner/name>'s runs and carry the footnote under the section", () => {
   const { document, render, model } = harness();
   render(model({ cellEvidence: policyEvidence({ repoUrl: "https://ghe.example.com/acme/widgets" }) }));
