@@ -23,6 +23,7 @@ import { tempDir } from "./support/temp-dir.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { seededRepo } from "./support/label-map-seed.mjs";
 
 const GATHER = fileURLToPath(new URL("../plugin/scripts/board-gather.mjs", import.meta.url));
 const REAL_SCRIPTS = fileURLToPath(new URL("../plugin/scripts/", import.meta.url));
@@ -40,7 +41,7 @@ const EMPTY_LEDGER = "# Fleet run ledger\n\n## Rows\n\n\n## Filed\n\n\n## Ruled\
 // script ignores — which is the whole defect — so the two arms that decide
 // whether the fix works must not use one.
 function gatherLedger({ ledgerBody = null, scriptDir = REAL_SCRIPTS } = {}) {
-  const cwd = tempDir("board-ledger-");
+  const cwd = seededRepo("board-ledger-");
   const bin = tempDir("board-ledger-bin-");
   writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
   const ledgerFile = join(cwd, "ledger.md");

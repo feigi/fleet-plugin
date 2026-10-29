@@ -33,6 +33,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { offlineBoardBin } from "./support/board-rig.mjs";
+import { seededRepo } from "./support/label-map-seed.mjs";
 
 const BOARD = fileURLToPath(new URL("../plugin/scripts/board.mjs", import.meta.url));
 const GATHER = fileURLToPath(new URL("../plugin/scripts/board-gather.mjs", import.meta.url));
@@ -58,7 +59,7 @@ process.exit(2);`;
 // below would read `undefined` from a parse of nothing. Asserting status here
 // keeps that failure legible at the one place it can happen.
 function gathered(prevBody) {
-  const cwd = tempDir("board-prevshape-");
+  const cwd = seededRepo("board-prevshape-");
   const bin = tempDir("board-prevshape-bin-");
   const scriptDir = tempDir("board-prevshape-scripts-");
 

@@ -16,6 +16,7 @@ import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { withStderr, serveArgs, serveOpts, withTimeout } from "./support/board-rig.mjs";
 import { heldOutside, watchWindow } from "./support/cockpit-port.mjs";
+import { seedLabelMap } from "./support/label-map-seed.mjs";
 
 test("createBoardServer serves board.json and the page", async () => {
   const dir = tempDir("board-");
@@ -468,7 +469,9 @@ function gitOnlyPath() {
   return bin;
 }
 
-function gitRepo(prefix) {
+// Seeded with the identity Label map unless `seed` is false: a repository
+// whose `.fleet` must stay absent gets none.
+function gitRepo(prefix, { seed = true } = {}) {
   const dir = tempDir(prefix);
   // GIT_DIR/GIT_WORK_TREE scrubbed off the FIXTURE too: under an ambient one
   // `git init` exits 0 having re-inited whichever directory the variable
@@ -478,6 +481,7 @@ function gitRepo(prefix) {
   const init = spawnSync("git", ["init", "-q"], { cwd: dir, stdio: "ignore", env });
   assert.equal(init.status, 0, "test setup: git init must succeed");
   assert.ok(existsSync(join(dir, ".git")), "test setup: git init must have created a repository HERE");
+  if (seed) seedLabelMap(dir);
   return dir;
 }
 
@@ -489,7 +493,7 @@ function gitRepo(prefix) {
 // write board.json into, someone else's workspace, at exit 0 and in silence.
 // gitEnv() on the probe is what prevents it.
 test("CLI: an ambient GIT_DIR cannot move the cockpit into another repository's workspace", () => {
-  const bin = gitOnlyPath(), mine = gitRepo("board-ws-mine-"), other = gitRepo("board-ws-other-");
+  const bin = gitOnlyPath(), mine = gitRepo("board-ws-mine-"), other = gitRepo("board-ws-other-", { seed: false });
   try {
     const r = spawnSync(process.execPath, serveArgs(["--port", "0", "--interval", "3600"]), {
       cwd: mine,

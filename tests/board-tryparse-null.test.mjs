@@ -36,6 +36,7 @@ import { tempDir } from "./support/temp-dir.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { seededRepo } from "./support/label-map-seed.mjs";
 
 const GATHER = fileURLToPath(new URL("../plugin/scripts/board-gather.mjs", import.meta.url));
 
@@ -48,7 +49,7 @@ const REPO_JSON = '{"nameWithOwner":"o/r","url":"https://example.invalid/o/r"}';
 // `node <scriptDir>/ledger.mjs`, and only a stub can hand it stdout that
 // arrives at exit 0 and parses to something no real ledger.mjs emits.
 function gatherWith({ issuesJson = "[]", prsJson = "[]", ledgerBody = null } = {}) {
-  const cwd = tempDir("board-tpnull-");
+  const cwd = seededRepo("board-tpnull-");
   const bin = tempDir("board-tpnull-bin-");
   const scriptDir = tempDir("board-tpnull-scripts-");
 

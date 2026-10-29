@@ -20,6 +20,7 @@ import { rendering, renderBrief } from "./support/rendered-brief.mjs";
 import { ref, prUrl } from "./support/queue-gh.mjs";
 import { scratchRoot } from "../plugin/scripts/fleet-dir.mjs";
 import { computeBoard } from "../plugin/scripts/compute-board.mjs";
+import { identityRoles } from "./support/label-map-seed.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
 
@@ -503,7 +504,7 @@ test("merge-bot-n=done: a report giving every queued PR one verdict settles, eac
   // The board takes a `## Ruled` line led by `#<n>` as the controller's
   // ruling on PR n, the last one winning: the refusal leaves that ruling
   // on the PR's card.
-  const board = computeBoard({ ledger: l, issues: [], prs: [{ number: 10, state: "OPEN", labels: [] }], ci: {}, prev: null, now: 0 });
+  const board = computeBoard({ ledger: l, issues: [], prs: [{ number: 10, state: "OPEN", labels: [] }], ci: {}, prev: null, now: 0, roles: identityRoles() });
   assert.equal(board.tickets.find((t) => t.pr === 10).ruling, "kept: reviewer finding 3 rejected");
 });
 

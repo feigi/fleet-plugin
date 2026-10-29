@@ -243,14 +243,15 @@ export function parseRow(row) {
 // ticket: MERGED is terminal, so a merged PR never reopens regardless of
 // what this run's merged read says — but a ticket retried under a NEW PR
 // after its earlier one merged gets no such carry-forward; that new PR's
-// state is unknown, not MERGED. READY needs the live PR label; any other
-// PR, closed-unmerged included, is in REVIEW.
-export function deriveColumn(parsed, prState) {
+// state is unknown, not MERGED. READY needs the live PR label, the mapped
+// `ready-to-merge` string `readyToMerge` (null with no Label map, which
+// makes no PR READY); any other PR, closed-unmerged included, is in REVIEW.
+export function deriveColumn(parsed, prState, readyToMerge) {
   if (parsed.excluded) return "POOL";
   if (parsed.merged) return "MERGED";
   if (parsed.pr != null) {
     if (prState && prState.merged) return "MERGED";
-    if (prState && prState.labels.includes("ready-to-merge")) return "READY";
+    if (prState && prState.labels.includes(readyToMerge)) return "READY";
     return "REVIEW";
   }
   if (parsed.implOutcome === "released" || parsed.implOutcome === "bailed") return null;
@@ -650,8 +651,16 @@ export function issuesOfPrs({ ledger, prs }) {
 // among issuesOfPrs(). A pr-closed flag needs both: a missing `closed`
 // flags nothing, and a failed issue read reads as not CLOSED, as closedTickets()
 // reads its own failed probe.
+// `roles` is the Label map gather() read (every Label role -> the tracker's
+// string), null when it could not be read, with `labelMapError` saying why.
+// With no map no PR is READY and none is known to lack `ready-to-merge`, so
+// `unqueued` is empty rather than every open PR: a PR its finisher labelled
+// would otherwise flag `unlabelled` off a label nobody could name. The
+// finisher flags all read that set, so `finisher:failed` and
+// `finisher:killed` go unflagged too, and `labelMapNotice` says so.
 export function computeBoard(inputs) {
   const { ledger, issues, prs, ci, prev, now } = inputs;
+  const readyToMerge = inputs.roles?.["ready-to-merge"] ?? null;
   const prByNum = new Map(prs.map((p) => [p.number, p]));
   const mergedPrs = new Set(inputs.merged || []);
   const closedPrs = new Set(inputs.closed || []);
@@ -692,7 +701,8 @@ export function computeBoard(inputs) {
     claimer.agent = p.agent ?? claimer.agent;
     claimer.merged ||= p.merged;
   }
-  const unqueued = new Set(prs.filter((p) => p.state === "OPEN" && !(p.labels || []).includes("ready-to-merge")).map((p) => p.number));
+  const unqueued = readyToMerge === null ? new Set()
+    : new Set(prs.filter((p) => p.state === "OPEN" && !(p.labels || []).includes(readyToMerge)).map((p) => p.number));
   const latestFinishers = new Map(latestFinisherAttempts({ rows, dispatched: ledger.dispatched || [] }, unqueued).map((u) => [u.pr, u.outcome]));
   // Review state is the PR's, read off the tick's own fold — a card's
   // PR is its row's latest attempt, whichever row carries that PR's tokens.
@@ -712,7 +722,7 @@ export function computeBoard(inputs) {
     const prState = p.pr == null ? null
       : pr ? { open: pr.state === "OPEN", labels: pr.labels || [] }
            : { open: false, labels: [], merged: mergedPrs.has(p.pr) || carriedMerged(prevTicket, p) };
-    const column = deriveColumn(p, prState);
+    const column = deriveColumn(p, prState, readyToMerge);
     if (column === null) continue; // released/bailed: the POOL loop below decides
     rowIssues.add(p.issue);
     const sinceEnteredStage = stageEntry(prevTicket, column, now);
@@ -771,8 +781,11 @@ export function computeBoard(inputs) {
   // A capped pool read makes this count a floor, and it says so the way
   // fleet-tick.mjs's claimed count does — `"100+"`, never a bare 100 that
   // reads as exact. stall() below receives the same value, so the stall line
-  // and the footer cannot disagree about it.
-  const pool = inputs.poolCapped ? `${cardsInPool}+` : cardsInPool;
+  // and the footer cannot disagree about it. A pool that was not read (`gh`
+  // failed, or no Label map named the label to ask for) is null, never 0: an
+  // empty POOL reads as no work.
+  const poolOk = inputs.poolOk ?? true;
+  const pool = !poolOk ? null : inputs.poolCapped ? `${cardsInPool}+` : cardsInPool;
 
   return {
     generatedAt: now,
@@ -791,6 +804,12 @@ export function computeBoard(inputs) {
     port: inputs.port ?? null,
     queue: { pool, supply: pool, reviewBacklog },
     capNotice: capNotice(inputs),
+    // Null when the Label map was read; else what POOL, READY and the
+    // finisher flags lack and the reader's reason, which names the derivation
+    // step that writes the map.
+    labelMapNotice: inputs.roles ? null
+      : "no Label map was read, so POOL and READY are unknown and no PR is flagged unlabelled, finisher:failed or finisher:killed"
+        + (inputs.labelMapError ? `: ${inputs.labelMapError}` : ""),
     tickets,
     filed: (ledger.filed || []).map(splitNumbered),
     // Not derivable from anything else in this model: a ledger that was never
@@ -830,7 +849,7 @@ export function computeBoard(inputs) {
     // succeeded, and only gather() — which now sets both — can say otherwise.
     liveness: stall({ beat: inputs.beat, ticked: inputs.ticked, acted: inputs.acted, controller: inputs.controller }, tickets, pool, {
       ledgerOk: (ledger.state ?? "read") === "read",
-      poolOk: inputs.poolOk ?? true,
+      poolOk,
       owner: inputs.stallOwner ?? NO_OWNER,
     }, now),
     attention,

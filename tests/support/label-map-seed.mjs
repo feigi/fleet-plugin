@@ -4,7 +4,14 @@
 //
 // Deliberately not a `.test.mjs`, so `node --test` never loads it as a suite.
 
+import { spawnSync } from "node:child_process";
+import { realpathSync } from "node:fs";
+import { gitEnv } from "../../plugin/scripts/git-env.mjs";
 import { LABEL_ROLES, writeLabelMap } from "../../plugin/scripts/label-map.mjs";
+import { tempDir } from "./temp-dir.mjs";
+
+/** The identity map's `roles`: every Label role mapped to its own name. */
+export const identityRoles = () => Object.fromEntries(LABEL_ROLES.map((role) => [role, role]));
 
 /**
  * Seed `.fleet/labels.json` for the repository at `workspace` and return the
@@ -27,4 +34,17 @@ export function seedLabelMap(workspace, { roles = {}, origin = {}, table = { pre
     },
     { cwd: workspace },
   );
+}
+
+/**
+ * A fresh `git init` repository under the temp root, its Label map seeded
+ * through seedLabelMap() with `overrides`, or left with no map at all when
+ * `overrides` is null. Returns the repository's real path.
+ */
+export function seededRepo(prefix, overrides = {}) {
+  const ws = realpathSync(tempDir(prefix));
+  const r = spawnSync("git", ["init", "-q"], { cwd: ws, encoding: "utf8", env: gitEnv({}, process.env) });
+  if (r.status !== 0) throw new Error(`test setup: git init in ${ws}: ${r.stderr}`);
+  if (overrides !== null) seedLabelMap(ws, overrides);
+  return ws;
 }

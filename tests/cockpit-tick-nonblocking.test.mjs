@@ -33,6 +33,7 @@ import { resolveCockpitInstance, cockpitPorts, probeCockpitWorkspace } from "../
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { heldOutside, watchWindow } from "./support/cockpit-port.mjs";
+import { seedLabelMap } from "./support/label-map-seed.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/board.mjs", import.meta.url));
 
@@ -72,13 +73,15 @@ function shimPath(mark) {
 
 // realpath, not the bare mkdtemp path: on darwin $TMPDIR lives under /var,
 // which is a symlink to /private/var, and the cockpit canonicalises the
-// workspace it resolves.
+// workspace it resolves. Seeded with the identity Label map, so the tick's
+// pool read asks `gh issue list` at all.
 function gitRepo(prefix) {
   const dir = realpathSync(tempDir(prefix));
   // GIT_DIR/GIT_WORK_TREE scrubbed off the fixture: under an ambient one `git
   // init` exits 0 having re-inited whichever directory the variable names.
   const init = spawnSync("git", ["init", "-q"], { cwd: dir, stdio: "ignore", env: gitEnv() });
   assert.equal(init.status, 0, "test setup: git init must succeed");
+  seedLabelMap(dir);
   return dir;
 }
 
