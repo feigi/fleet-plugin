@@ -596,7 +596,7 @@ test("ledgerSection reads a section's entries unescaped, and none for a section 
 
 // The Routing: one line `ticket-router.mjs route` prints, `pull.mjs` reads,
 // `ledger.mjs` validates and files in `## Routed`, and the cockpit's board card reads (compute-board.mjs's cellLine).
-const SPEC_ROUTING = "POLICY=slow-high CELL=smol-high DRAW=2/3 BY=burn-in STRATUM=heavy BRIEF=9658 CRITERIA=8 SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok";
+const SPEC_ROUTING = "POLICY=slow-high CELL=smol-high DRAW=2/3 BY=burn-in STRATUM=heavy BRIEF=9658 CRITERIA=8 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok";
 const routingWith = (over) => SPEC_ROUTING.split(" ").map((w) => {
   const key = w.slice(0, w.indexOf("="));
   return key in over ? `${key}=${over[key]}` : w;
@@ -605,7 +605,7 @@ const routingWith = (over) => SPEC_ROUTING.split(" ").map((w) => {
 test("parseRouting reads every part of a Routing line, and formatRouting writes the same line back", () => {
   assert.deepEqual(parseRouting(SPEC_ROUTING), {
     policy: "slow-high", cell: "smol-high", draw: { k: 2, K: 3 }, by: "burn-in", stratum: "heavy", brief: 9658, criteria: 8,
-    sized: null, objective: "cost", tripped: [], reason: "ok",
+    parent: null, sized: null, objective: "cost", tripped: [], reason: "ok",
   });
   const valid = [
     SPEC_ROUTING,
@@ -615,6 +615,8 @@ test("parseRouting reads every part of a Routing line, and formatRouting writes 
     routingWith({ DRAW: "-", BY: "-", STRATUM: "unknown", SIZED: "-", REASON: "no-sizing" }),
     routingWith({ DRAW: "-", BY: "-", STRATUM: "light", SIZED: "light", OBJECTIVE: "speed" }),
     routingWith({ DRAW: "-", BY: "-", BRIEF: "0", CRITERIA: "0", REASON: "guard-missing" }),
+    routingWith({ DRAW: "-", BY: "-", BRIEF: "120", CRITERIA: "0", PARENT: "3177" }),
+    routingWith({ STRATUM: "light", SIZED: "light", PARENT: "2870" }),
     ...ROUTING_REASONS.map((r) => routingWith({ REASON: r })),
   ];
   for (const line of valid) {
@@ -623,6 +625,18 @@ test("parseRouting reads every part of a Routing line, and formatRouting writes 
     assert.equal(formatRouting(parsed), line, line);
     assert.deepEqual(parseRouting(formatRouting(parsed)), parsed, line);
   }
+});
+
+test("a Routing written before PARENT was a part still parses, as PARENT=-", () => {
+  const old = "POLICY=slow-high CELL=smol-high DRAW=2/3 BY=burn-in STRATUM=heavy BRIEF=9658 CRITERIA=8 SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok";
+  assert.deepEqual(parseRouting(old), parseRouting(SPEC_ROUTING));
+  assert.equal(formatRouting(parseRouting(old)), SPEC_ROUTING, "written again, it names PARENT=-");
+  const noIssue = "POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=unknown BRIEF=- CRITERIA=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=no-issue-json";
+  assert.equal(parseRouting(noIssue)?.parent, null);
+  assert.deepEqual(parseRoutedEntry(`impl-3747 ${old}`), { member: "impl-3747", routing: parseRouting(SPEC_ROUTING) }, "a ## Routed entry written without PARENT= still reads");
+  // Short a word other than PARENT, it is no Routing.
+  assert.equal(parseRouting(old.replace(" SIZED=-", "")), null);
+  assert.equal(parseRouting(SPEC_ROUTING.replace(" SIZED=-", "")), null);
 });
 
 test("parseRouting refuses a line that is not a Routing, and formatRouting refuses to write one", () => {
@@ -648,6 +662,14 @@ test("parseRouting refuses a line that is not a Routing, and formatRouting refus
     routingWith({ STRATUM: "medium" }),
     routingWith({ BRIEF: "-" }),
     routingWith({ CRITERIA: "-" }),
+    routingWith({ PARENT: "0" }),
+    routingWith({ PARENT: "03177" }),
+    routingWith({ PARENT: "#3177" }),
+    routingWith({ PARENT: "" }),
+    // Past 2^53 a parent would read back as another number.
+    routingWith({ PARENT: "9007199254740993" }),
+    routingWith({ BRIEF: "-", CRITERIA: "-", PARENT: "3177" }),
+    SPEC_ROUTING.replace(" PARENT=-", "").replace("REASON=ok", "PARENT=- REASON=ok"),
     routingWith({ BRIEF: "09658" }),
     routingWith({ CRITERIA: "8.5" }),
     routingWith({ SIZED: "unknown" }),
@@ -660,8 +682,9 @@ test("parseRouting refuses a line that is not a Routing, and formatRouting refus
   ];
   for (const line of refused) assert.equal(parseRouting(line), null, JSON.stringify(line));
   for (const x of [null, undefined, 42, ["POLICY=slow-high"]]) assert.equal(parseRouting(x), null, String(x));
+  assert.equal(parseRouting(routingWith({ PARENT: "9007199254740991" }))?.parent, 9007199254740991, "the largest exact parent reads");
   const parts = parseRouting(SPEC_ROUTING);
-  for (const over of [{ cell: "alt" }, { draw: null }, { brief: 1.5 }, { tripped: ["a b"] }, { reason: "explore" }, { objective: undefined }]) {
+  for (const over of [{ cell: "alt" }, { draw: null }, { brief: 1.5 }, { tripped: ["a b"] }, { reason: "explore" }, { objective: undefined }, { parent: undefined }, { parent: 0 }, { brief: null, criteria: null, parent: 3177 }]) {
     assert.throws(() => formatRouting({ ...parts, ...over }), /not a Routing/, JSON.stringify(over));
   }
 });

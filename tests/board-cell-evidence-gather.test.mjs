@@ -377,7 +377,7 @@ test("gather: the Tokens window bounds the spend alone: an implementer transcrip
 
 test("gather: hands the installed router table to the board, so a policy row with no row for its Stratum reads 'follows *'", async (t) => {
   const w = cardsWorkspace(t, { routed: [`impl-3862 ${formatRouting({
-    policy: "slow-high", cell: "slow-high", draw: null, by: null, stratum: "heavy", brief: 9658, criteria: 8, sized: null, objective: "cost", tripped: [], reason: "ok",
+    policy: "slow-high", cell: "slow-high", draw: null, by: null, stratum: "heavy", brief: 9658, criteria: 8, parent: null, sized: null, objective: "cost", tripped: [], reason: "ok",
   })}`] });
   writeFileSync(join(w.stateDir, RECEIPT), JSON.stringify({ ...receipt({}), session: w.session }));
   const r = await quiet(() => gather({ ...w.opts, spendDir: receiptSpendDir(w.stateDir) }));

@@ -89,14 +89,16 @@ import { parseMemberName } from "./member-record.mjs";
 import { isImplementer } from "./member-outcomes.mjs";
 import { DATE, isDerivedNote, rulingFor, rulingsByTicket } from "./tier-outcomes.mjs";
 
-// The ticket-features row, one per Pull, in this order. `objective` came last
-// and is optional on read: a file whose header lacks it reads it blank.
+// The ticket-features row, one per Pull, in this order. `objective` and
+// `parent` came last and are optional on read: a file whose header lacks
+// either reads it blank. `parent` is a Slice's parent issue number, blank for
+// a ticket that is no Slice (ticket-router.mjs's sliceParent).
 export const FEATURE_COLUMNS = Object.freeze([
   "run_date", "session", "agent", "ticket", "policy_cell", "chosen_cell", "exploration_draw",
   "sizing_src", "sizing_pre", "router_usd", "brief_chars", "criteria", "comments", "age_days",
-  "paths", "test_paths", "xrefs", "kind", "objective",
+  "paths", "test_paths", "xrefs", "kind", "objective", "parent",
 ]);
-const OPTIONAL_COLUMNS = new Set(["objective"]);
+export const OPTIONAL_COLUMNS = new Set(["objective", "parent"]);
 
 // The quality floor's margin, in points of fail rate.
 export const TRIP_POINTS = 15;
@@ -170,6 +172,7 @@ export function parseFeatures(text) {
     const row = Object.fromEntries(header.map((c, j) => [c, cells[j]]));
     for (const c of OPTIONAL_COLUMNS) row[c] ??= "";
     if (!isDigits(row.ticket)) throw new Error(`ticket-features.tsv row ${i + 1}: ticket ${JSON.stringify(row.ticket)} is not a number`);
+    if (row.parent !== "" && !isDigits(row.parent)) throw new Error(`ticket-features.tsv row ${i + 1}: parent ${JSON.stringify(row.parent)} is not blank or a number`);
     if (!CELL.test(row.chosen_cell)) throw new Error(`ticket-features.tsv row ${i + 1}: chosen_cell ${JSON.stringify(row.chosen_cell)} is not a cell`);
     return row;
   });

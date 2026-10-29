@@ -644,7 +644,7 @@ test("Cell evidence: the Board and Tokens panes are still filled on a tick while
 // -- the card's Cell line, and links both ways ----------------------------------------
 
 const routed = (member, o) => `${member} ${formatRouting({
-  policy: "slow-high", cell: "slow-high", draw: null, by: null, stratum: "heavy", brief: 9658, criteria: 8,
+  policy: "slow-high", cell: "slow-high", draw: null, by: null, stratum: "heavy", brief: 9658, criteria: 8, parent: null,
   sized: null, objective: "cost", tripped: [], reason: "ok", ...o,
 })}`;
 const implRec = (member, cell, model) => ({ member, model, resolvedModelIdentity: `anthropic/${model}`, thinking: cell.split("-")[1], subagent_type: `fleet-implementer-${cell}` });

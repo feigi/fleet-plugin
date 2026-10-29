@@ -207,7 +207,7 @@ terminating in exactly one dispatch or an empty shortlist:
 7. **Route, row, then dispatch** — `~/.fleet/bin/fleet-run ticket-router.mjs route
    --session <session> --ticket <N> --arm <A|B> --impl-row <k>[ --chain-head] --issue
    <scratch>/impl-<N>/issue.json --guard .fleet/cost-guard.json` prints the Pull's
-   Routing, `POLICY=… CELL=… DRAW=… BY=… STRATUM=… BRIEF=… CRITERIA=… SIZED=… OBJECTIVE=… TRIPPED=… REASON=…`
+   Routing, `POLICY=… CELL=… DRAW=… BY=… STRATUM=… BRIEF=… CRITERIA=… PARENT=… SIZED=… OBJECTIVE=… TRIPPED=… REASON=…`
    (the router's arguments paragraph below the list says what each argument is);
    then `ledger.mjs row <N> "impl-<N>[ · tier=<CELL>]" --routing "<that line>"`,
    `tier=<CELL>` exactly when `DRAW` is not `-`, which writes the row and files
