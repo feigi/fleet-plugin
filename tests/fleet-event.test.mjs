@@ -18,10 +18,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
+import { seedLabelMap } from "./support/label-map-seed.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { bodyDigest, foldLedger, parkedToken } from "../plugin/scripts/fleet-tick.mjs";
 import { BAILS, reportKind } from "../plugin/scripts/fleet-event.mjs";
@@ -188,8 +189,9 @@ const finisherReport = (member, over = {}) => ({
 const mergeBotReport = (member, held, refused = []) => ({ member, merged: [], held, conflictHold: [], refused, branchKept: [] });
 
 // A main checkout with a fixture ledger, a phase-0 receipt naming the scratch
-// root, caps 3 and 5 and In-flight bound 7, and the gh stub on PATH.
-function fixture({ rows = [], dispatched = [], retired = [], caps = { impl: 3, review: 5 }, inFlight = 7, session = "" } = {}) {
+// root, caps 3 and 5 and In-flight bound 7, the Label map (the identity map
+// unless `labels` remaps roles) and the gh stub on PATH.
+function fixture({ rows = [], dispatched = [], retired = [], caps = { impl: 3, review: 5 }, inFlight = 7, session = "", labels = {} } = {}) {
   const dir = realpathSync(tempDir("fleet-event-"));
   const repo = join(dir, "repo");
   const stubs = join(dir, "stubs");
@@ -203,6 +205,7 @@ function fixture({ rows = [], dispatched = [], retired = [], caps = { impl: 3, r
   writeExecStub(join(bin, "gh"), GH_STUB);
   const fleet = join(repo, ".fleet");
   mkdirSync(join(fleet, "briefs"), { recursive: true });
+  seedLabelMap(repo, { roles: labels });
   writeFileSync(join(fleet, "ledger.md"), ledgerText({ rows, dispatched, retired }));
   writeFileSync(join(fleet, "phase0.json"), JSON.stringify({ run: null, session, steps: {}, scratch, ...(caps === null ? {} : { caps }), ...(inFlight === null ? {} : { inFlight }) }));
   const f = {
@@ -507,6 +510,83 @@ for (const [cause, label, detail, kindArgs] of [
 test("every bailCause the impl report schema admits is a cause impl-report acts on, and impl-report acts on no other", () => {
   assert.deepEqual(SCHEMAS.impl.properties.bailCause.enum.filter((c) => c !== null).sort(), Object.keys(BAILS).sort());
 });
+
+// ── the Label map: the strings the script compares and writes ───────────────
+
+const REMAP = { "ready-for-agent": "agent-ready", "in-progress": "wip", "needs-triage": "triage", "ready-for-human": "human", "ready-to-merge": "merge-ready" };
+
+test("with a remapped Label map a bail relabel records --remove-label agent-ready --remove-label wip --add-label triage, and a second run finds it in place", () => {
+  const f = fixture({ rows: ["#412 impl-412"], labels: REMAP });
+  f.setGh({ issue: { 412: { labels: ["agent-ready", "wip", "enhancement"], comments: [] } }, pr: {} });
+  f.report(bail("impl-412", "undecided", "which flag spelling wins"));
+  f.control("settle", { "impl-412": { outcome: "bailed" } });
+  f.control("dispatch-prompt", { out: "*Relabelled by the fleet controller.* undecided\n" });
+  const first = f.run(["impl-report", "impl-412"]);
+  assert.equal(first.status, 0, first.err + first.stdout);
+  assert.deepEqual(f.ghCalls().find((c) => c.args[1] === "edit").args, ["issue", "edit", "412", "--remove-label", "agent-ready", "--remove-label", "wip", "--add-label", "triage"]);
+  assert.deepEqual(f.gh().issue[412].labels, ["enhancement", "triage"]);
+  assert.match(eventLine(first), /relabelled #412 triage \(undecided\)/);
+
+  const second = f.run(["impl-report", "impl-412"]);
+  assert.equal(second.status, 0, second.err + second.stdout);
+  assert.ok(!writes(second.order).includes("gh issue edit 412"), "nothing left to move");
+  assert.match(eventLine(second), /#412 already triage/);
+});
+
+test("with a remapped Label map every ready-for-human bail adds the mapped string", () => {
+  for (const [cause, detail] of [["fork", "keep the cache or drop it"], ["hands", "judgment the rollout order"], ["covered", "PR#77 — its diff adds the same guard"]]) {
+    const f = fixture({ rows: ["#412 impl-412"], labels: REMAP });
+    f.setGh({ issue: { 412: { labels: ["agent-ready", "wip"], comments: [] } }, pr: {} });
+    f.report(bail("impl-412", cause, detail));
+    f.control("settle", { "impl-412": { outcome: "bailed" } });
+    f.control("dispatch-prompt", { out: `*Relabelled by the fleet controller.* ${cause}\n` });
+    const r = f.run(["impl-report", "impl-412"]);
+    assert.equal(r.status, 0, `${cause}: ${r.err}${r.stdout}`);
+    assert.deepEqual(f.ghCalls().find((c) => c.args[1] === "edit").args, ["issue", "edit", "412", "--remove-label", "agent-ready", "--remove-label", "wip", "--add-label", "human"], cause);
+  }
+});
+
+test("with a remapped Label map a fixed bail drops the mapped ready-for-agent and in-progress, and demotes to the mapped needs-triage when its sha is not on origin/main", () => {
+  const closed = fixture({ rows: ["#412 impl-412"], labels: REMAP });
+  closed.setGh({ issue: { 412: { labels: ["agent-ready", "wip", "bug"], comments: [] } }, pr: {} });
+  closed.report(bail("impl-412", "fixed", FIXED_DETAIL));
+  closed.control("settle", { "impl-412": { outcome: "bailed" } });
+  closed.control("verify-sha", { exit: 0, out: JSON.stringify({ branch: "main", sha: SHORT, reachable: true, tip: HEAD }) });
+  closed.control("dispatch-prompt", { out: CLOSE_BODY });
+  const a = closed.run(["impl-report", "impl-412"]);
+  assert.equal(a.status, 0, a.err + a.stdout);
+  assert.deepEqual(closed.ghCalls().find((c) => c.args[1] === "edit").args, ["issue", "edit", "412", "--remove-label", "agent-ready", "--remove-label", "wip"]);
+  assert.deepEqual(closed.gh().issue[412].labels, ["bug"]);
+
+  const open = fixture({ rows: ["#412 impl-412"], labels: REMAP });
+  open.setGh({ issue: { 412: { labels: ["agent-ready", "wip", "bug"], comments: [] } }, pr: {} });
+  open.report(bail("impl-412", "fixed", FIXED_DETAIL));
+  open.control("settle", { "impl-412": { outcome: "bailed" } });
+  open.control("verify-sha", { exit: 1, out: JSON.stringify({ branch: "main", sha: SHORT, reachable: false, tip: HEAD }) });
+  const b = open.run(["impl-report", "impl-412"]);
+  assert.equal(b.status, 0, b.err + b.stdout);
+  assert.deepEqual(open.ghCalls().find((c) => c.args[1] === "edit").args, ["issue", "edit", "412", "--remove-label", "agent-ready", "--remove-label", "wip", "--add-label", "triage"]);
+});
+
+for (const [what, damage] of [
+  ["no map", (path) => rmSync(path)],
+  ["a map that does not parse", (path) => writeFileSync(path, "{")],
+]) {
+  for (const args of [["impl-report", "impl-412"], ["ci", "88"], ["heartbeat"]]) {
+    test(`${what}: \`${args[0]}\` refuses with exit 2 naming ensure, writes nothing and does not tick`, () => {
+      const f = fixture({ rows: ["#412 impl-412"] });
+      f.report(bail("impl-412", "undecided", "which flag spelling wins"));
+      damage(join(f.fleet, "labels.json"));
+      const ledger = f.ledger();
+      const r = f.run(args);
+      assert.equal(r.status, 2, r.err + r.stdout);
+      assert.match(r.err, /label-map\.mjs ensure/);
+      assert.deepEqual(r.order, [], "no settle, no gh, no tick");
+      assert.equal(f.ledger(), ledger);
+      assert.equal(r.stdout, "");
+    });
+  }
+}
 
 // ── impl-report: a `fixed` bail ──────────────────────────────────────────────
 
@@ -910,6 +990,25 @@ test("finisher-report's escalation quotes the latest earlier finisher's read-bac
   assert.match(comment, /finisher-pr-88-c read back: patch$/m);
   assert.match(comment, /finisher-pr-88-b read back: ready-to-merge, minor$/m);
   assert.doesNotMatch(comment, /finisher-pr-88 read back/);
+});
+
+test("with a remapped Label map the repair-finisher escalation compares the read-back against the mapped ready-to-merge, and names it", () => {
+  const rows = ["#412 impl-412=PR#88 · finisher-pr-88=labelled · finisher-pr-88-b"];
+  const lacks = fixture({ rows, labels: REMAP });
+  lacks.report(finisherReport("finisher-pr-88", { labelsReadBack: ["merge-ready", "patch"] }));
+  lacks.report(finisherReport("finisher-pr-88-b", { labelsReadBack: ["ready-to-merge", "patch"] }));
+  lacks.control("settle", { "finisher-pr-88-b": { exit: 3, err: "ledger: failed: labelsReadBack carries merge-ready\n" } });
+  const a = lacks.run(["finisher-report", "finisher-pr-88-b"]);
+  assert.equal(a.status, 3, a.err + a.stdout);
+  const [comment] = lacks.gh().pr[88].comments;
+  assert.match(comment, /read back no `merge-ready` on PR #88/);
+  assert.match(comment, /finisher-pr-88 read back: merge-ready, patch$/m);
+
+  const has = fixture({ rows, labels: REMAP });
+  has.report(finisherReport("finisher-pr-88-b", { labelsReadBack: ["merge-ready", "patch"] }));
+  has.control("settle", { "finisher-pr-88-b": { exit: 3, err: "x\n" } });
+  const b = has.run(["finisher-report", "finisher-pr-88-b"]);
+  assert.ok(!b.order.some((l) => l.startsWith("gh ")), b.order.join("\n"));
 });
 
 // ── merge-bot-report ─────────────────────────────────────────────────────────

@@ -16,11 +16,13 @@ import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writ
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
+import { seedLabelMap } from "./support/label-map-seed.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { renderBrief } from "./support/render-brief.mjs";
 import { issueMetrics } from "../plugin/scripts/ticket-router.mjs";
 import { briefPaths, briefText, defang, outOfScope, strandedRuling } from "../plugin/scripts/ticket-text.mjs";
 import { chainHead, diffHunks, headings, implRow, parseAnswer, pathHits, relabel, sectionsOf } from "../plugin/scripts/pull.mjs";
+import { LABEL_ROLES } from "../plugin/scripts/label-map.mjs";
 import { pullOf } from "../plugin/scripts/fleet-tick.mjs";
 
 const PLUGIN = fileURLToPath(new URL("../plugin/", import.meta.url));
@@ -130,9 +132,10 @@ const ROUTE_OK = "POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=light BRIE
 const NOW = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/;
 
 // A main checkout cloned from a bare origin, a home directory of its own (the
-// scratch root lands under it), a phase-0 receipt naming a session, a shortlist
-// and the control files.
-function fixture({ issue = ISSUE, shortlist = [12] } = {}) {
+// scratch root lands under it), a phase-0 receipt naming a session, a shortlist,
+// the Label map (the identity map unless `labels` remaps roles) and the control
+// files.
+function fixture({ issue = ISSUE, shortlist = [12], labels = {} } = {}) {
   const dir = realpathSync(tempDir("pull-"));
   const origin = join(dir, "origin.git");
   const repo = join(dir, "repo");
@@ -149,6 +152,7 @@ function fixture({ issue = ISSUE, shortlist = [12] } = {}) {
   writeExecStub(join(bin, "gh"), GH_STUB);
   const fleet = join(repo, ".fleet");
   mkdirSync(fleet);
+  seedLabelMap(repo, { roles: labels });
   const session = "2026-10-15T09-00-00-000Z_fixture";
   writeFileSync(join(fleet, "phase0.json"), JSON.stringify({ run: null, session, steps: { branch: { status: "ok" } } }));
   writeFileSync(join(fleet, "shortlist.json"), JSON.stringify({ scanned: shortlist.length, shortlist: shortlist.map((n) => ({ n, t: `ticket ${n}` })), dropped: [] }));
@@ -1081,12 +1085,81 @@ for (const c of CAUSES) {
   });
 }
 
+const IDENTITY = Object.fromEntries(LABEL_ROLES.map((role) => [role, role]));
+
 test("the comment helper is the template: relabel() agrees with the rendered relabel brief for every cause", () => {
   const t = skillTemplates();
-  assert.equal(relabel("needs-triage", "X").comment, t.triage.replace("LINE-1", "X"));
-  assert.equal(relabel("ready-for-human-fork", "X").comment, t.fork.replace("OPTIONS-1", "X"));
-  assert.equal(relabel("ready-for-human-hands", "external access X").comment, t.hands.replace("HANDS-1", "external access").replace("LINE-2", "X"));
+  assert.equal(relabel("needs-triage", "X", IDENTITY).comment, t.triage.replace("LINE-1", "X"));
+  assert.equal(relabel("ready-for-human-fork", "X", IDENTITY).comment, t.fork.replace("OPTIONS-1", "X"));
+  assert.equal(relabel("ready-for-human-hands", "external access X", IDENTITY).comment, t.hands.replace("HANDS-1", "external access").replace("LINE-2", "X"));
 });
+
+// ── the Label map: the strings the Pull compares, writes and names ──────────
+
+const REMAP = { "ready-for-agent": "agent-ready", "in-progress": "wip", "needs-triage": "triage", "ready-for-human": "human" };
+const REMAPPED_ISSUE = { ...ISSUE, labels: [{ name: "agent-ready" }, { name: "enhancement" }] };
+
+test("relabel() takes the mapped strings: the label returned and the labels the comment names are the map's", () => {
+  const triage = relabel("needs-triage", "X", { ...IDENTITY, ...REMAP });
+  assert.equal(triage.label, "triage");
+  assert.match(triage.comment, /`agent-ready` restored once decided/);
+  assert.equal(relabel("ready-for-human-fork", "X", { ...IDENTITY, ...REMAP }).label, "human");
+  assert.equal(relabel("ready-for-human-hands", "judgment X", { ...IDENTITY, ...REMAP }).label, "human");
+  const stranded = relabel("stranded-ruling", "X", { ...IDENTITY, ...REMAP });
+  assert.equal(stranded.label, "human");
+  assert.match(stranded.comment, /then restore `agent-ready`\.$/);
+});
+
+test("a remapped Label map: a Q2 relabel records --remove-label agent-ready --add-label triage and its comment names agent-ready", () => {
+  const f = fixture({ issue: REMAPPED_ISSUE, labels: REMAP });
+  f.next("--head", "12");
+  f.answer(12, "staleness", "done");
+  const r = f.answer(12, "decided", "needs-triage", "the", "scope");
+  assert.equal(r.status, 1, r.stdout + r.err);
+  assert.match(r.stdout, /^LEFT #12: relabelled triage: needs-triage — next entry$/m);
+  assert.deepEqual(ghCalls(f, /^issue edit/).map((c) => c.args), [["issue", "edit", "12", "--remove-label", "agent-ready", "--add-label", "triage"]]);
+  const comments = ghCalls(f, /^issue comment/);
+  assert.equal(comments.length, 1);
+  assert.match(comments[0].args[4], /`agent-ready` restored once decided/);
+  assert.doesNotMatch(comments[0].args[4], /ready-for-agent/);
+});
+
+test("a remapped Label map: a stranded ruling swaps agent-ready for the mapped ready-for-human, naming agent-ready in its comment", () => {
+  const c = strandedCase("a Ruling after the last Agent Brief");
+  const f = fixture({ issue: { ...REMAPPED_ISSUE, comments: c.comments }, labels: REMAP });
+  const r = f.next("--head", "12");
+  assert.equal(r.status, 1, r.stdout + r.err);
+  assert.match(r.stdout, /^LEFT #12: relabelled human: stranded-ruling — next entry$/m);
+  assert.deepEqual(ghCalls(f, /^issue edit/).map((e) => e.args), [["issue", "edit", "12", "--remove-label", "agent-ready", "--add-label", "human"]]);
+  assert.ok(ghCalls(f, /^issue comment/)[0].args[4].includes("restore `agent-ready`"));
+});
+
+test("a remapped Label map: the ticket's own label is compared by its mapped string, so a ticket still labelled ready-for-agent is `relabelled elsewhere`, one labelled agent-ready is pulled", () => {
+  const elsewhere = fixture({ labels: REMAP });
+  const left = elsewhere.next("--head", "12");
+  assert.equal(left.status, 1, left.stdout + left.err);
+  assert.match(left.stdout, /^LEFT #12: relabelled elsewhere — next entry$/m);
+  const pulled = fixture({ issue: REMAPPED_ISSUE, labels: REMAP });
+  const r = pulled.next("--head", "12");
+  assert.equal(r.status, 10, r.stdout + r.err);
+});
+
+for (const [what, damage] of [
+  ["no map", (path) => rmSync(path)],
+  ["a map that does not parse", (path) => writeFileSync(path, "{")],
+]) {
+  for (const sub of [["next", "--head", "12"], ["answer", "12", "decided", "decided"]]) {
+    test(`${what}: \`pull.mjs ${sub[0]}\` refuses with exit 2 naming ensure, runs no step and calls no gh`, () => {
+      const f = fixture();
+      damage(join(f.fleet, "labels.json"));
+      const r = f.run(sub);
+      assert.equal(r.status, 2, r.stdout + r.err);
+      assert.match(r.err, /label-map\.mjs ensure/);
+      assert.deepEqual(f.order(), []);
+      assert.equal(f.calls("gh").length, 0);
+    });
+  }
+}
 
 test("Q2 decided: the Pull goes on to the collision question and posts nothing", () => {
   const f = fixture();

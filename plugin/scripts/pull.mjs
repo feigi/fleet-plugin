@@ -24,8 +24,11 @@
 //       a Pull for a ticket whose ledger row is an exclusion naming no premise,
 //       or one whose premise still stands, is this exit as well.
 //   2   could not look, named on stderr: a probe that did not answer, a write
-//       that failed, a router that refused. `next --head <N>` runs a step that
-//       failed again; when the failure came from applying an answer, the
+//       that failed, a router that refused, or no valid Label map (the message
+//       names `label-map.mjs ensure`; the labels the Pull compares, writes and
+//       names in its comments are the map's strings, read once at the command's
+//       entry). `next --head <N>` runs a step that failed again; when the failure
+//       came from applying an answer, the
 //       question stands and the answer is given again. A router that refused
 //       has its claim released and the Pull is over, `next --head <N>` starting
 //       the ticket over; one whose claim could not be released leaves the Pull
@@ -136,6 +139,7 @@ import { isDigits, makeDie } from "./arg.mjs";
 import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
+import { LabelMapUnreadable, readLabelMap } from "./label-map.mjs";
 import { EXCLUDED_REASON, POLICY_CELL, memberTokens, parseRouting, premisesOf, pullEnded, tierValues } from "./ledger-grammar.mjs";
 import { sessionFromReceipt } from "./phase0-receipt.mjs";
 import { briefPaths, briefText, defang, outOfScope, strandedRuling, ticketText } from "./ticket-text.mjs";
@@ -154,10 +158,6 @@ const PREVIOUS = "pull.previous.json";
 const EXPLORE_EVERY = 5;
 // The states that lift an exclusion's premise.
 const LIFTED = new Set(["MERGED", "CLOSED"]);
-
-const READY = "ready-for-agent";
-const TRIAGE = "needs-triage";
-const HUMAN = "ready-for-human";
 
 const USAGE = `usage: ${NAME}.mjs next [--head <N>] | ${NAME}.mjs answer <N> <qid> <token> [--path <p>] [--] [<text>…]`;
 
@@ -181,28 +181,31 @@ function handsParts(text) {
 }
 
 /**
- * The comment, and the label that replaces `ready-for-agent`, for a Q2 answer
- * other than `decided` — or, for `stranded-ruling`, for a ruling or triage
- * comment newer than the brief, `text` naming its heading line and its URL.
+ * The comment, and the label that replaces the `ready-for-agent` label, for a
+ * Q2 answer other than `decided` — or, for `stranded-ruling`, for a ruling or
+ * triage comment newer than the brief, `text` naming its heading line and its
+ * URL. `labels` is the Label map (role -> the tracker's string): the label
+ * returned and the labels the comment names are its strings.
  */
-export function relabel(token, text) {
+export function relabel(token, text, labels) {
+  const ready = labels["ready-for-agent"];
   if (token === "stranded-ruling") {
     return {
-      label: HUMAN,
-      comment: `${RELABELLED} a ruling or triage comment is newer than the brief, and the Pull does not read it: ${text}. To make it the brief, rename its heading to \`## Agent Brief — ruling\` and drop anything that is not decided scope, or delete it; then restore \`${READY}\`.`,
+      label: labels["ready-for-human"],
+      comment: `${RELABELLED} a ruling or triage comment is newer than the brief, and the Pull does not read it: ${text}. To make it the brief, rename its heading to \`## Agent Brief — ruling\` and drop anything that is not decided scope, or delete it; then restore \`${ready}\`.`,
     };
   }
   if (token === "needs-triage") {
     return {
-      label: TRIAGE,
-      comment: `${RELABELLED} the brief does not decide what to build. Missing decision: ${text}. Returning to /triage; \`${READY}\` restored once decided.`,
+      label: labels["needs-triage"],
+      comment: `${RELABELLED} the brief does not decide what to build. Missing decision: ${text}. Returning to /triage; \`${ready}\` restored once decided.`,
     };
   }
   if (token === "ready-for-human-fork") {
-    return { label: HUMAN, comment: `${RELABELLED} the brief leaves a decision open. Open fork: ${text}.` };
+    return { label: labels["ready-for-human"], comment: `${RELABELLED} the brief leaves a decision open. Open fork: ${text}.` };
   }
   const { cause, line } = handsParts(text);
-  return { label: HUMAN, comment: `${RELABELLED} needs human hands — ${HANDS[cause]}: ${line}.` };
+  return { label: labels["ready-for-human"], comment: `${RELABELLED} needs human hands — ${HANDS[cause]}: ${line}.` };
 }
 
 /** The comment a `yes` to Q1b closes the issue with. */
@@ -809,7 +812,7 @@ class Pull {
     } catch (e) {
       return this.stop(`cannot write ${this.p.issue}: ${e.message}`);
     }
-    if (!issue.labels.some((l) => l?.name === READY)) return this.leave("relabelled elsewhere");
+    if (!issue.labels.some((l) => l?.name === this.p.labels["ready-for-agent"])) return this.leave("relabelled elsewhere");
     const stranded = strandedRuling(issue);
     if (stranded !== null) {
       if (typeof stranded.url !== "string") return this.stop(`gh issue view printed a ruling comment with no url: "${stranded.heading}"`);
@@ -1103,14 +1106,14 @@ class Pull {
   // again without a second comment.
   relabelled(token, text) {
     const { st } = this;
-    const { label, comment } = relabel(token, text);
+    const { label, comment } = relabel(token, text, this.p.labels);
     if (st.commented !== comment) {
       const c = this.gh("relabel", ["issue", "comment", String(st.ticket), "--body", comment]);
       if (c.status !== 0) return this.stop(withText(`gh issue comment failed (${c.how})`, c));
       st.commented = comment;
       this.save();
     }
-    const e = this.gh("relabel", ["issue", "edit", String(st.ticket), "--remove-label", READY, "--add-label", label]);
+    const e = this.gh("relabel", ["issue", "edit", String(st.ticket), "--remove-label", this.p.labels["ready-for-agent"], "--add-label", label]);
     if (e.status !== 0) return this.stop(withText(`gh issue edit failed (${e.how}) — the comment is posted`, e));
     return this.leave(`relabelled ${label}: ${token}`);
   }
@@ -1257,11 +1260,21 @@ function setup() {
   }
   const root = spawn(process.execPath, [join(SCRIPTS, "scratch-root.mjs")], { cwd });
   if (root.status !== 0) throw new Refusal(withText(`scratch-root.mjs ${root.how}`, root));
+  // The Label map, read once here: every label the Pull compares, writes or names in a comment is its string. No
+  // valid map is exit 2, the reader's message naming `label-map.mjs ensure`; never the exit that reads as "left".
+  let labels;
+  try {
+    labels = readLabelMap({ cwd });
+  } catch (e) {
+    if (!(e instanceof LabelMapUnreadable)) throw e;
+    throw new Refusal(e.message);
+  }
   const scratch = root.stdout;
   const dir = (n) => join(scratch, `impl-${n}`);
   return {
     cwd,
     scratch,
+    labels,
     shortlist: join(fleetDir, "shortlist.json"),
     guard: join(fleetDir, "cost-guard.json"),
     statePath: (n) => join(dir(n), STATE),
