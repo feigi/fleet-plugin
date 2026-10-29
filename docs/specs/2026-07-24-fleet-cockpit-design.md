@@ -283,8 +283,16 @@ them update the shape below.)
   //                         pulls: [{ issue, href, mark }] }],           // this run's Pulls, booked As-routed
   //               footnotes: [{ mark, text }] }
   //   declared: { heading, members: [{ name, declared, route }] }
+  //   policy:   { sides: [{ title, source: { text, check }, heading, dispatch, modelLine, footnotes }],
+  //               objectives: [{ objective, live, lines: [{ stratum, anchor, href,
+  //                 collapsed | sides: [{ cell, held, reason, dispatch, candidates } | { follows } | { unread }] }] }] }
+  //             the policy rows, routes now: each Objective × Stratum row (`*`, light,
+  //             heavy, unknown) with the Cell the installed router table plus the
+  //             guard route to (ticket-router.mjs's rowDispatch), why, how a Pull on
+  //             it is dispatched, and each candidate's n, verdict and 95% interval;
+  //             `live` marks the Objective `.fleet/phase0.json` records, none between runs.
   // All five implementer Cells are always in `guard.cells`, in a fixed order.
-  "cellEvidence": { "guard": { /* … */ }, "declared": { /* … */ } },
+  "cellEvidence": { "policy": { /* … */ }, "guard": { /* … */ }, "declared": { /* … */ } },
 
   // `omp config get modelRoles --json` as the cockpit's own environment answers it,
   // carried tick to tick like `ci` and `repo` and read again at most once a

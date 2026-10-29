@@ -34,7 +34,7 @@ import {
   isOmpSessionDirName, ompSessionTranscripts, foldOmpTranscript, ompMemberRecord,
 } from "./member-record.mjs";
 import { readReceipt } from "./phase0-receipt.mjs";
-import { RECEIPT, RECEIPT_HELD, CLOSEOUT_RECEIPT } from "./ledger-grammar.mjs";
+import { RECEIPT, RECEIPT_HELD, CLOSEOUT_RECEIPT, OBJECTIVES } from "./ledger-grammar.mjs";
 import { NAME, warnOnce, execRead } from "./board-common.mjs";
 import { mergedReadPrs, issuesOfPrs } from "./compute-board.mjs";
 import { readCostGuard } from "./fleet-tick.mjs";
@@ -798,6 +798,37 @@ export function readAgents(scriptDir) {
   return { list, error: null };
 }
 
+// The install's own `package.json`, `../package.json` from the script's
+// directory: `{ name, version, repository, error }`, `repository` the url its
+// field names (the field is a string or `{ url }`), null where it names none.
+// A file that cannot be read or parsed is `error`, with the rest null: the tab
+// words an install it cannot name, never a guess.
+export function readInstall(scriptDir) {
+  const file = join(scriptDir, "..", "package.json");
+  let pkg;
+  try {
+    pkg = JSON.parse(readFileSync(file, "utf8"));
+  } catch (e) {
+    return { name: null, version: null, repository: null, error: `${file}: ${e instanceof SyntaxError ? "not JSON" : (e.code ?? e.message)}` };
+  }
+  if (!isJsonObject(pkg)) return { name: null, version: null, repository: null, error: `${file}: not a JSON object` };
+  const repo = isJsonObject(pkg.repository) ? pkg.repository.url : pkg.repository;
+  return {
+    name: typeof pkg.name === "string" ? pkg.name : null,
+    version: typeof pkg.version === "string" ? pkg.version : null,
+    repository: typeof repo === "string" ? repo : null,
+    error: null,
+  };
+}
+
+// The live run's Objective, off the phase-0 receipt in the workspace's `.fleet`
+// (the file readReceipt owns), or null: no receipt, as between runs, one that
+// will not read, or one that records none.
+export function readObjective(stateDir) {
+  const read = readReceipt(join(stateDir, RECEIPT));
+  return read.state === "ok" && OBJECTIVES.includes(read.receipt.objective) ? read.receipt.objective : null;
+}
+
 // `modelRoles` is read at most once in this many milliseconds: it is one more
 // child spawn per read, and a role changes rarely.
 export const MODEL_ROLES_EVERY_MS = 60_000;
@@ -1121,9 +1152,11 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, stateDir 
     ? { phase0: null, closeout: null }
     : { phase0: readMetricsStep(join(stateDir, RECEIPT)), closeout: readMetricsStep(join(stateDir, CLOSEOUT_RECEIPT)) };
   const agents = readAgents(scriptDir);
+  const install = readInstall(scriptDir);
+  const objective = stateDir === null ? null : readObjective(stateDir);
   const modelRoles = stateDir === null ? heldRead(prev?.modelRoles) : await carryModelRoles(prev?.modelRoles, now);
   return { ledger, issues, prs, merged, closed, closedIssues, ci, prev, repo, repoUrl, workspace, port, spend, beat, ticked, acted, controller, stallOwner: stallOwnerOf, poolOk,
     roles, labelMapError,
-    poolCapped, prsCapped, guard, receipts, agents, modelRoles, implementers: [...implementers.values()], routerTable,
+    poolCapped, prsCapped, guard, receipts, agents, modelRoles, install, objective, implementers: [...implementers.values()], routerTable,
     now, interval };
 }

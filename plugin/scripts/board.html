@@ -104,6 +104,13 @@
   .ce-foot { margin-top:8px; }
   #cells-declared summary { cursor:pointer; color:var(--dim); }
   .ce-member { display:flex; gap:10px; flex-wrap:wrap; font-size:12px; margin:2px 0 0 18px; }
+  .ce-sides { display:flex; gap:18px; flex-wrap:wrap; margin-bottom:8px; }
+  .ce-side { flex:1 1 20em; }
+  .ce-row { display:grid; gap:12px; border-top:1px solid var(--line); padding:6px 0; font-size:12px; }
+  .ce-row a { color:var(--blue); text-decoration:none; }
+  .ce-cand { color:var(--dim); margin-left:10px; }
+  .ce-stratum { font-weight:600; }
+  .ce-obj { margin-top:10px; }
   .ce.flash { animation:flash 1.2s ease-out 1; }
   .spend-wrap { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
   .spend-hd { display:flex; align-items:baseline; gap:10px; margin-bottom:8px; }
@@ -162,8 +169,9 @@ function boardTitle(repo) { return repo ? `${TITLE} — ${repo}` : TITLE; }
 //
 // Every hash the page draws is a tab (`#board`, `#cells`, `#tokens`), a card on
 // the Board (`#board/<issue>`, the issue number as a string) or a place on Cell
-// evidence: a section (`#cells/guard`, `#cells/declared`), a Cell
-// (`#cells/<cell>`) or one of its generations (`#cells/<cell>@<generation>`).
+// evidence: a section (`#cells/rows`, `#cells/guard`, `#cells/declared`), a policy
+// row (`#cells/row/<objective>/<stratum>`, the stratum `*` or one of the three), a
+// Cell (`#cells/<cell>`) or one of its generations (`#cells/<cell>@<generation>`).
 // Anything else — no hash, a tab the page does not have, a target the tab does
 // not have — lands on Board's top, or the named tab's top, never on a blank
 // page and never on an error.
@@ -171,18 +179,24 @@ function routeHash(hash) {
   const [tab, target, ...more] = String(hash).replace(/^#/, "").split("/");
   if (tab === "board") return { tab, target: more.length === 0 && /^[1-9]\d*$/.test(target) ? target : null };
   if (tab === "cells") {
-    const place = /^(guard|declared|(slow|task|smol)-(minimal|low|medium|high|xhigh|max)(@[^\s/@]+)?)$/;
+    if (target === "row") {
+      const [objective, stratum] = more;
+      const ok = more.length === 2 && /^(cost|speed)$/.test(objective) && /^(\*|light|heavy|unknown)$/.test(stratum);
+      return { tab, target: ok ? `row/${objective}/${stratum}` : null };
+    }
+    const place = /^(rows|guard|declared|(slow|task|smol)-(minimal|low|medium|high|xhigh|max)(@[^\s/@]+)?)$/;
     return { tab, target: more.length === 0 && place.test(target ?? "") ? target : null };
   }
   if (tab === "tokens") return { tab, target: null };
   return { tab: "board", target: null };
 }
 
-// The element a route's target names: a card on Board, a section, a Cell or a
-// generation on Cell evidence.
+// The element a route's target names: a card on Board, a section, a policy row, a
+// Cell or a generation on Cell evidence.
 function anchorId(tab, target) {
   if (tab === "board") return "card-" + target;
-  return target === "guard" || target === "declared" ? "cells-" + target : "cell-" + target;
+  if (target === "rows" || target === "guard" || target === "declared") return "cells-" + target;
+  return target.startsWith("row/") ? "cells-" + target.replace(/\//g, "-") : "cell-" + target;
 }
 
 // Each tab, and the pane it opens.
@@ -440,6 +454,74 @@ function ceEntry(e) {
   return box;
 }
 
+// One side's heading on the policy rows: its title, source line, the check it
+// could not make, its burn-in or no-guard heading, its shared dispatch and its
+// model-name line, where each is set.
+function cePolicySide(s) {
+  const box = el("div", "ce-side");
+  box.append(el("div", "ce-verdict", s.title), el("div", "ce-source", s.source.text));
+  if (s.source.check) box.append(el("div", "ce-note", s.source.check));
+  if (s.heading) box.append(el("div", "ce-note", s.heading));
+  if (s.dispatch) box.append(el("div", "ce-note", "dispatch: " + s.dispatch));
+  if (s.modelLine) box.append(el("div", "ce-note ce-amber", s.modelLine));
+  return box;
+}
+
+// One side's cell of a row: the Cell it routes to and why, its own dispatch where
+// it differs from the side's, and each candidate's n, verdict and interval.
+function cePolicyCell(s, href) {
+  const box = el("div", "ce-polcell");
+  if (s.unread || s.follows) { box.append(el("span", "ce-dim", s.unread || s.follows)); return box; }
+  const hd = el("div", "ce-hd");
+  hd.append(el("span", "ce-cell", s.cell));
+  const reason = el("a", "ce-dim", s.reason);
+  reason.href = href;
+  hd.append(reason);
+  if (s.held) hd.append(el("span", "ce-amber", s.held));
+  box.append(hd);
+  if (s.dispatch) box.append(el("div", "ce-note", "dispatch: " + s.dispatch));
+  for (const c of s.candidates) {
+    const line = el("div", "ce-cand", `${c.cell} · n ${c.n} · ${c.verdict} · ${c.interval}`);
+    if (c.model && c.model.text) line.append(el("span", "ce-amber", " · " + c.model.text));
+    box.append(line);
+  }
+  return box;
+}
+
+// One line of the policy rows: a Stratum's row across every side, or the one
+// line a Stratum with no row of its own collapses to. Either way it is a place
+// `#cells/row/<objective>/<stratum>` lands on.
+function cePolicyLine(line, nSides) {
+  const box = ceBox("div", "ce-row", line.anchor);
+  if (line.collapsed) {
+    box.append(el("span", "ce-dim", line.collapsed));
+    return box;
+  }
+  box.style.gridTemplateColumns = `6em repeat(${nSides}, minmax(0, 1fr))`;
+  box.append(el("span", "ce-stratum", line.stratum));
+  for (const s of line.sides) box.append(cePolicyCell(s, line.href));
+  return box;
+}
+
+// The policy rows, Objective × Stratum: both sides' headings, then one row-aligned
+// table with the live run's Objective marked.
+function cePolicy(p) {
+  const sec = ceBox("section", "ce-sec", "cells-rows");
+  sec.append(el("h2", null, "Policy rows: Objective × Stratum"));
+  const sides = el("div", "ce-sides");
+  for (const s of p.sides) sides.append(cePolicySide(s));
+  sec.append(sides);
+  for (const o of p.objectives) {
+    const hd = el("div", "ce-hd ce-obj");
+    hd.append(el("span", "ce-cell", o.objective));
+    if (o.live) hd.append(el("span", "badge", "this run's Objective"));
+    sec.append(hd);
+    for (const line of o.lines) sec.append(cePolicyLine(line, p.sides.length));
+  }
+  for (const s of p.sides) for (const f of s.footnotes) sec.append(el("div", "ce-foot", `${f.mark} ${f.text}`));
+  return sec;
+}
+
 // The Cell evidence tab. The model is `m.cellEvidence`; this only lays it out.
 // Every Cell and every generation the model names is drawn, so each hash link
 // the page draws has its target.
@@ -449,7 +531,8 @@ function renderCells(ce) {
   const g = ce.guard;
 
   const links = el("div", "ce-links");
-  for (const [href, text] of [["#cells/guard", "the guard"], ["#cells/declared", "declared, not measured"]]) {
+  for (const [href, text] of [["#cells/rows", "policy rows"], ["#cells/guard", "the guard"], ["#cells/declared", "declared, not measured"]]) {
+    if (!ce.policy && href === "#cells/rows") continue;
     if (links.children.length) links.append(document.createTextNode(" · "));
     const a = el("a", null, text);
     a.href = href;
@@ -473,7 +556,7 @@ function renderCells(ce) {
     dec.append(row);
   }
 
-  host.replaceChildren(links, sec, dec);
+  host.replaceChildren(links, ...(ce.policy ? [cePolicy(ce.policy)] : []), sec, dec);
 }
 
 function render(m) {

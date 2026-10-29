@@ -1,24 +1,30 @@
 // The cockpit's Cell evidence tab, as a value: computeCellEvidence() turns what
 // gather() read (the cost guard, the receipts' `metrics` steps, the installed
-// definitions, the carried `modelRoles` read) into the model the page lays out.
+// definitions, the installed router table and package, the carried `modelRoles`
+// read) into the model the page lays out.
 // Pure, like compute-board.mjs, which calls it and puts the answer in
 // `board.json` as `cellEvidence`: no file, no process, no clock. Every word the
 // tab shows is built here, so a test pins it where it is made and the page only
 // places it.
 //
-// What this part holds is the guard section: what the cost guard holds each
+// What this holds is the guard section — what the cost guard holds each
 // implementer Cell to, from the guard file and nothing recomputed, with this
-// run's Pulls booked to each Cell off the board's cards, and "Declared,
-// not measured". Figures show only from a guard `readCostGuard` (fleet-tick.mjs,
-// the reader the tick judges the file by) accepts; `guard` here is that reader's
-// own answer, `{ status: "ok", guard }` or `{ status: "missing" | "unreadable" }`.
+// run's Pulls booked to each Cell off the board's cards — "Declared, not
+// measured", and the policy rows' routes-now side: for each Objective × Stratum
+// row, the Cell the installed router table plus the workspace's guard route to,
+// why, and how a Pull on that row is dispatched (ticket-router.mjs's
+// rowDispatch, the function `route` itself calls). Figures show only from a
+// guard `readCostGuard` (fleet-tick.mjs, the reader the tick judges the file by)
+// accepts; `guard` here is that reader's own answer, `{ status: "ok", guard }` or
+// `{ status: "missing" | "unreadable" }`.
 //
 // A figure the guard file lacks reads "not checked", never 0: the file written
 // before the per-Cell counts existed carries only `n`, `mean_usd`, `fail_rate`
 // and `untimed` per Cell, and each count the file does not carry is named as not
 // checked where its figure would show.
 
-import { CELL } from "./ledger-grammar.mjs";
+import { CELL, OBJECTIVES, POLICY_CELL, STRATA } from "./ledger-grammar.mjs";
+import { MIN_N, readGuard, rowDispatch } from "./ticket-router.mjs";
 import { implementerCell, modelsEqual, parseModelRoute, resolveRole } from "./tier-roles.mjs";
 
 // The implementer Cells, in the order the guard section draws them. All five are
@@ -385,6 +391,203 @@ function guardSection(read, receipts, modelRoles, pulls) {
 }
 
 // ---------------------------------------------------------------------------
+// Policy rows: Objective × Stratum, routes now.
+// ---------------------------------------------------------------------------
+
+// A repository's host and `owner/name` off a `package.json` `repository` url (an
+// npm shorthand, a scp-style address or a URL), or null when it names none.
+export function repoIdentity(url) {
+  if (typeof url !== "string") return null;
+  const s = url.trim().replace(/^git\+/, "");
+  let host;
+  let path;
+  const short = /^(github|gitlab|bitbucket):([^/\s]+\/[^/\s]+)$/.exec(s);
+  const scp = /^[^@/\s]+@([^:/\s]+):(.+)$/.exec(s);
+  if (short) {
+    host = `${short[1]}.${short[1] === "bitbucket" ? "org" : "com"}`;
+    path = short[2];
+  } else if (scp) {
+    [, host, path] = scp;
+  } else if (/^[\w.-]+\/[\w.-]+$/.test(s)) {
+    host = "github.com";
+    path = s;
+  } else {
+    try { ({ hostname: host, pathname: path } = new URL(s)); } catch { return null; }
+  }
+  const [owner, name] = path.split("/").filter(Boolean);
+  if (!host || !owner || !name) return null;
+  return { host: host.toLowerCase(), name: `${owner}/${name.replace(/\.git$/, "")}` };
+}
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+const list = (xs) => (xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}`);
+
+// Whose runs the installed table is, and what the install is: "this repository's
+// runs · fitted at 1a2b3c4 on 198 Pulls · @feigi/fleet-ctl 3.105.0". `install` is
+// `{ name, version, repository, error }`, `repository` the package's url.
+function routesSource(table, install, repoUrl) {
+  const named = repoIdentity(install?.repository);
+  const here = repoIdentity(repoUrl);
+  const same = named !== null && here !== null ? named.host === here.host && named.name.toLowerCase() === here.name.toLowerCase() : null;
+  const runs = same === true ? "this repository's runs" : named !== null ? `${named.name}'s runs` : "another repository's runs";
+  let fitted;
+  if (table === null) fitted = "no router table read";
+  else if (!table.fitted_commit) fitted = "never fitted";
+  else {
+    const on = Number.isInteger(table.n_rows) ? `on ${plural(table.n_rows, "Pull")}` : "on a number of Pulls not checked";
+    fitted = `fitted at ${String(table.fitted_commit).slice(0, 7)} ${on}`;
+  }
+  let installed;
+  if (install == null || install.error) installed = `install not read${install?.error ? `: ${install.error}` : ""}`;
+  else installed = `${install.name ?? "unnamed package"} ${install.version === "0.0.0" ? "linked checkout" : (install.version ?? "no version")}`;
+  const check = named === null
+    ? "not checked: the install names no repository"
+    : here === null ? "not checked: this workspace's repository is not known" : null;
+  return { same, owner: named === null ? "another repository" : named.name, runs, text: [runs, fitted, installed].join(" · "), check };
+}
+
+// The Cells short of `MIN_N` merged PRs at the fit, in the table's order, as one phrase.
+function shortWords(table, past) {
+  const short = table.cells.filter((c) => (table.guard.n[c] ?? 0) < MIN_N).map((c) => [c, table.guard.n[c] ?? 0]);
+  if (short.length === 0) return null;
+  const [verb, each] = short.length === 1 ? [past ? "had" : "has", "it needs"] : [past ? "had" : "have", "each needs"];
+  const counts = new Set(short.map(([, n]) => n));
+  if (counts.size === 1) return `${list(short.map(([c]) => c))} ${verb} ${short[0][1]} of the ${MIN_N} merged PRs ${each}`;
+  return `${list(short.map(([c, n]) => `${c} ${verb} ${n}`))} of the ${MIN_N} merged PRs ${each}`;
+}
+
+// The side's burn-in or no-guard heading, or null while neither holds. Past tense
+// for a fitted table, whose counts are what its fit saw.
+function routesHeading(table, guard, source) {
+  if (table === null) return "no router table read: the rows are not known";
+  if (guard === null) return `no cost guard: every Pull runs at ${POLICY_CELL}, the default Cell`;
+  if (!table.burn_in) return null;
+  const K = rowDispatch({ table, guard, objective: "cost", stratum: "*" }).draw?.cells.length ?? 0;
+  const drawn = K === 0 ? "no Cell is left to draw, so every Pull runs at its row's Cell" : `every Pull drawn over ${plural(K, "Cell")}`;
+  if (!table.fitted_commit) return `never fitted: ${drawn}`;
+  const short = shortWords(table, true);
+  const ends = source.same === true ? "" : "; it ends with a later fit, reaching this install with a plugin release";
+  return `stage ${table.stage} at its fit on ${source.owner}'s runs: ${short === null ? "every Cell had its merged PRs" : short}; ${drawn}${ends}`;
+}
+
+// One row's dispatch, in the words a heading or a row carries: what `route` does
+// with a Pull on it under the guard, from rowDispatch.
+function dispatchWords(table, rd, row) {
+  const tripped = rd.reason === "table-cell-tripped" ? `the row's ${row} tripped` : null;
+  if (rd.reason === "guard-missing") return `${POLICY_CELL} only`;
+  if (rd.draw?.by === "burn-in") {
+    return `drawn over ${plural(rd.draw.cells.length, "Cell")}: ${rd.draw.cells.join(", ")}${tripped ? `; ${tripped}, so its policy Cell is ${POLICY_CELL}` : ""}`;
+  }
+  const fifth = rd.draw === null ? "no draw: no other Cell is left" : "every 5th Pull drawn over the rest";
+  return `${tripped ? `${POLICY_CELL}, ${tripped}` : "the row's Cell"}; ${fifth}`;
+}
+
+// A candidate's judged generation against the Tier route model of its Cell:
+// null for a row with no estimate (it names no generation), else `{ state,
+// generation, text }`, `text` set where the two differ or cannot be compared.
+function generationCheck(cell, generation, modelRoles) {
+  if (typeof generation !== "string" || generation === "") return null;
+  const parsed = CELL.exec(cell);
+  if (parsed === null) return { state: "not checked", generation, text: "not checked: not a Cell the fleet defines" };
+  const model = routeModel(parsed[1], modelRoles);
+  if (model === undefined) return { state: "not checked", generation, text: "not checked: modelRoles not read yet" };
+  if (model === null) return { state: "not checked", generation, text: `not checked: modelRoles.${parsed[1]} unset: omp picks the model` };
+  if (modelsEqual(model, generation)) return { state: "same", generation, text: null };
+  return { state: "differs", generation, text: `judged on ${generation}; ${cell} runs ${model} here` };
+}
+
+// A candidate's 95% interval, of (candidate − base) per merged PR: dollars under
+// `cost`, minutes of work time under `speed`.
+function intervalWords(range, objective) {
+  if (!Array.isArray(range) || range.length !== 2 || !range.every(Number.isFinite)) return "no 95% interval";
+  const one = (x) => `${x < 0 ? MINUS : ""}${objective === "cost" ? `$${Math.abs(x).toFixed(2)}` : `${Math.abs(x).toFixed(1)} min`}`;
+  return `95% interval [${one(range[0])}, ${one(range[1])}]`;
+}
+
+// One row of the installed table under the guard: the Cell it routes to and why,
+// its dispatch, and each candidate's n, verdict and interval.
+function routesEntry(table, guard, modelRoles, objective, stratum) {
+  const rd = rowDispatch({ table, guard, objective, stratum });
+  const row = table.rows[objective][stratum];
+  const record = isRecord(table.reasons?.[objective]?.[stratum]) ? table.reasons[objective][stratum] : null;
+  const estimates = isRecord(table.estimates?.[stratum]) ? table.estimates[stratum] : {};
+  const held = row === rd.policy ? null
+    : rd.reason === "guard-missing" ? `${row} held: no cost guard` : `${row} tripped`;
+  return {
+    cell: rd.policy,
+    held,
+    reason: record !== null && typeof record.reason === "string" ? record.reason : "not checked",
+    dispatch: dispatchWords(table, rd, row),
+    candidates: Object.entries(isRecord(record?.cells) ? record.cells : {}).map(([cell, x]) => ({
+      cell,
+      n: count(estimates[cell]?.merged) ?? 0,
+      verdict: typeof x?.verdict === "string" ? x.verdict : "not checked",
+      interval: intervalWords(x?.range, objective),
+      model: generationCheck(cell, estimates[cell]?.generation, modelRoles),
+    })),
+  };
+}
+
+// The routes-now side of the policy rows: its heading words and every row the
+// installed table holds, `rows[objective][stratum]` — `*` and each Stratum with a
+// row of its own. `rows` is null when no table could be read.
+function routesNow({ table, guard, modelRoles, install, repoUrl }) {
+  const source = routesSource(table, install, repoUrl);
+  const foot = source.same === true ? [] : [{ mark: "¹", text: "this repository's runs reach routing only through its cost guard, which can hold a Cell back but never picks one" }];
+  return {
+    title: "routes now",
+    source: { text: source.text + (foot.length ? " ¹" : ""), check: source.check },
+    heading: routesHeading(table, guard, source),
+    footnotes: foot,
+    rows: table === null ? null : Object.fromEntries(OBJECTIVES.map((o) => [o,
+      Object.fromEntries(["*", ...STRATA].filter((s) => Object.hasOwn(table.rows[o], s)).map((s) => [s, routesEntry(table, guard, modelRoles, o, s)])),
+    ])),
+  };
+}
+
+// The policy rows as the page lays them out, from each side built above. Pure
+// and side-agnostic: a side's shared dispatch (the one most rows have, the rest
+// showing theirs on the row), its one model-name line when every candidate it
+// names differs, a Stratum no side has a row for collapsed to one line, and the
+// Objective of the live run marked. Every row, collapsed or not, has an anchor
+// the `#cells/row/<objective>/<stratum>` link lands on.
+export function policyRowsView({ sides, objective = null }) {
+  const entries = (s) => (s.rows === null ? [] : OBJECTIVES.flatMap((o) => Object.values(s.rows[o])));
+  const shared = sides.map((s) => {
+    const seen = new Map();
+    for (const e of entries(s)) seen.set(e.dispatch, (seen.get(e.dispatch) ?? 0) + 1);
+    return [...seen].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  });
+  const modelLine = sides.map((s) => {
+    const checks = entries(s).flatMap((e) => e.candidates.map((c) => c.model)).filter((m) => m !== null);
+    return checks.length > 0 && checks.every((m) => m.state === "differs") ? [...new Set(checks.map((m) => m.text))].join("; ") : null;
+  });
+  const show = (e, i) => ({
+    ...e,
+    dispatch: e.dispatch === shared[i] ? null : e.dispatch,
+    candidates: e.candidates.map((c) => (c.model !== null && modelLine[i] !== null ? { ...c, model: { ...c.model, text: null } } : c)),
+  });
+  return {
+    sides: sides.map((s, i) => ({ title: s.title, source: s.source, heading: s.heading, dispatch: shared[i], modelLine: modelLine[i], footnotes: s.footnotes })),
+    objectives: OBJECTIVES.map((o) => ({
+      objective: o,
+      live: o === objective,
+      lines: ["*", ...STRATA].map((stratum) => {
+        const line = { stratum, anchor: `cells-row-${o}-${stratum}`, href: `#cells/row/${o}/${stratum}` };
+        const own = sides.map((s) => s.rows?.[o]?.[stratum] ?? null);
+        if (stratum !== "*" && sides.every((s) => s.rows !== null) && own.every((e) => e === null)) {
+          return { ...line, collapsed: `${stratum}: ${sides.length > 1 ? "no row on either side" : "no row"}, follows *` };
+        }
+        return {
+          ...line,
+          sides: sides.map((s, i) => (s.rows === null ? { unread: "router table not read" } : own[i] === null ? { follows: "no row of its own: follows *" } : show(own[i], i))),
+        };
+      }),
+    })),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Declared, not measured.
 // ---------------------------------------------------------------------------
 
@@ -423,11 +626,17 @@ function declaredSection(agents, modelRoles) {
  * `modelRoles` the carried `{ value, readAt, error }` or null — `error` being
  * `{ at, message }`, and `pulls` this run's Pulls, one per card with a Cell line:
  * `{ issue, cell, mark, targets: [{ cell, generation }] }` (compute-board.mjs's
- * cellLine). An input left out reads as nothing read: a missing guard, no
- * receipt, no definitions, no `modelRoles` read, no Pull.
+ * cellLine). `table` is the installed router table `validateTable` accepted or
+ * null, `install` the install's `{ name, version, repository, error }`
+ * (`repository` its url), `repoUrl` the workspace's, and `objective` the live
+ * run's Objective or null between runs. An input left out reads as nothing
+ * read: a missing guard, no receipt, no definitions, no `modelRoles` read, no
+ * Pull, no table, no install, no Objective.
  */
-export function computeCellEvidence({ guard, receipts, agents, modelRoles = null, pulls = [] }) {
+export function computeCellEvidence({ guard, receipts, agents, modelRoles = null, pulls = [], table = null, install = null, repoUrl = null, objective = null }) {
+  const routed = guard?.status === "ok" ? readGuard(guard.guard) : null;
   return {
+    policy: policyRowsView({ sides: [routesNow({ table, guard: routed, modelRoles, install, repoUrl })], objective }),
     guard: guardSection(guard, receipts, modelRoles, pulls),
     declared: declaredSection(agents, modelRoles),
   };
