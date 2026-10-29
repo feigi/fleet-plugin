@@ -639,7 +639,7 @@ const pr = (number, labels = [], closes = [number + 1000], headRefOid = HEAD_B, 
   headRefOid, mergeable, body, url: prUrl(number),
   author: { login: RUN_LOGIN }, isDraft: false, owned: true, ...over,
 });
-const run = (ledger, prs = [], closed, prStates) => deriveRun({ rows: [], dispatched: [], drain: null, ...ledger }, prs, closed, prStates);
+const run = (ledger, prs = [], closed, prStates) => deriveRun({ rows: [], dispatched: [], drain: null, ...ledger }, prs, closed, prStates, "ready-to-merge");
 
 test("deriveRun: live implementers are the unsettled impl- tokens — the #1692 shape, read rather than recited", () => {
   // #1692 was two sources disagreeing about the same fleet. There is one
@@ -2051,6 +2051,7 @@ case "$1 $2" in
     printf '%s' "$body" | jq -e 'has("errors") | not' >/dev/null || exit 1 ;;
   "issue list")
     [ -n "$CLAIMED_FAIL" ] && { echo "boom" >&2; exit 1; }
+    [ -n "$ISSUE_LIST_LOG" ] && echo "$*" >> "$ISSUE_LIST_LOG"
     expr=""
     fixture="$FIXTURE_CLAIMED"
     while [ $# -gt 0 ]; do
@@ -2132,7 +2133,7 @@ const receiptOf = ({ run = null, session = "/s", steps = {} } = {}) => ({
 // `null` passes none, which is the tick's own default.
 function runCli(args = [], {
   prs = [], ledger, shortlist, refresh = shortlistText([]), refreshFail = false,
-  issueStates = {}, prStates = {}, claimed = [], candidates, env: extraEnv = {}, defaultState = false, keep = false, beforeRun = () => {},
+  issueStates = {}, prStates = {}, claimed = [], candidates, env: extraEnv = {}, defaultState = false, keep = false, beforeRun = () => {}, labelMap,
   baseline = true, afterBaseline = () => {}, phase0 = (receipt) => receipt, transcripts, bound = 2,
 } = {}) {
   // On macOS tmpdir() is /var -> /private/var; resolving it up front makes
@@ -2163,8 +2164,11 @@ function runCli(args = [], {
     else {
       for (const [name, path] of REAL_SHORTLIST) writeFileSync(join(bin, name), readFileSync(path));
       writeFileSync(join(bin, "inflight.sh"), INFLIGHT_FREE);
-      seedLabelMap(repo);
     }
+    // The tick reads the Label map at its entry, so every repo carries one:
+    // the identity map unless the case remaps roles, or `labelMap: null` for
+    // the case that has none.
+    if (labelMap !== null) seedLabelMap(repo, labelMap);
     const fx = (name, content) => { const p = join(dir, name); writeFileSync(p, content); return p; };
     if (ledger !== undefined) writeFileSync(join(repo, ".fleet", "ledger.md"), ledgerText(ledger));
     if (shortlist !== undefined) writeFileSync(join(repo, ".fleet", "shortlist.json"), shortlist);
@@ -2322,16 +2326,18 @@ test("CLI: a partial drop through the real shortlist.mjs is named beside the PUL
   assert.match(r.stdout, pullRows(String.raw`implementers 0\/2`, [2160], String.raw`\(implementers=0 prs=0 unclaimed=1 supply=1 shortlist=missing specs-dropped=#2151 \(to-spec: User Stories heading\)\)$`));
 });
 
-// The tick keeps only the last line of a failed refresh's stderr, so a
-// missing Label map is named on the REFRESH FAILED row only because
-// shortlist.mjs carries candidates.mjs's cause onto its own refusal line.
-test("CLI: a refresh with no Label map prints REFRESH FAILED naming the map and `label-map.mjs ensure`", () => {
+// The tick reads the Label map before it refreshes anything: a repo whose map
+// is gone is a refusal naming `label-map.mjs ensure`, and no refresh runs
+// against it (shortlist.mjs would only refuse the same way, one row later).
+test("CLI: a repo with no Label map refuses the tick before any refresh, naming `label-map.mjs ensure`", () => {
   const r = runCli([], {
     candidates: [plainIssue(2160)],
     beforeRun: (repo) => rmSync(join(repo, ".fleet", "labels.json")),
   });
-  assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^shortlist {4}→ REFRESH FAILED {3}\(shortlist missing — shortlist\.mjs exited 2: shortlist: candidates\.mjs exited 2 — the scan did not answer, so there is no shortlist to write: candidates: no Label map at .*: run `label-map\.mjs ensure`, the Label map derivation step\)$/m);
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /fleet-tick: no Label map at .*: run `label-map\.mjs ensure`, the Label map derivation step/);
+  assert.equal(r.refreshed, 0);
+  assert.equal(r.stdout, "");
 });
 
 test("CLI: a tick that does not refresh still names the drops, read back from shortlist.json", () => {
@@ -3204,9 +3210,11 @@ test("CLI: an ambient GIT_DIR naming another repository cannot move the shortlis
 // A missing shortlist is also what an empty queue looks like, so a workspace
 // the tick could not resolve has to say so — once, not once per retry — or an
 // operator watching a stalled run cannot tell "outside a repository" from "no
-// candidates yet". The git shim answers every call but the workspace probe,
-// and lands after the baseline so the record itself still resolves.
-test("CLI: a workspace the tick cannot resolve is announced once, and the shortlist reads as missing", () => {
+// candidates yet". With no workspace there is no Label map to read either, so
+// the tick refuses after saying why, rather than reconciling an unknown queue.
+// The git shim answers every call but the workspace probe, and lands after the
+// baseline so the record itself still resolves.
+test("CLI: a workspace the tick cannot resolve is announced once, and the tick refuses — no Label map can be read there", () => {
   const realGit = spawnBounded("sh", ["-c", "command -v git"]).stdout.trim();
   assert.ok(realGit, "test setup: no git on PATH to wrap");
   const r = runCli([], {
@@ -3220,7 +3228,9 @@ test("CLI: a workspace the tick cannot resolve is announced once, and the shortl
   const warnings = r.stderr.split("\n").filter((l) => l.startsWith("fleet-tick: WARNING could not resolve --git-common-dir"));
   assert.deepEqual(warnings, ["fleet-tick: WARNING could not resolve --git-common-dir: fatal: simulated unresolvable workspace; reading the shortlist as missing"],
     `expected exactly one warning naming git's reason: ${r.stderr}`);
-  assert.equal(r.refreshed, 1, "a missing shortlist must still trigger the refresh");
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /fleet-tick: .*simulated unresolvable workspace.* — the queued set and the claimed count cannot be read/);
+  assert.equal(r.refreshed, 0);
   assert.doesNotMatch(r.stdout, /PULL #[78] /, "the shortlist on disk was unreachable, so its entries must not be pulled");
 });
 
@@ -4222,6 +4232,77 @@ test("CLI: the stall is announced even when the reconcile then refuses", (t) => 
   assert.equal(r.status, 2);
   assert.match(r.stderr, /gh pr list failed/);
   assert.match(r.stdout, /heartbeat STALLED/);
+});
+
+// The Label map: the tick compares and queries the tracker's strings, not the
+// role names (docs/specs/2026-10-15-label-map.md D9).
+const REMAP = (roles) => ({ roles });
+
+test("CLI: the claimed-count query carries the in-progress role's mapped string", (t) => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-label-claimed-")));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, "heartbeat.json");
+  const log = join(dir, "issue-list.log");
+  writeFileSync(path, beat(90 * 60_000, 1200));
+  const r = runCli(["--state", path], { ...IDLE, claimed: [{ number: 41 }], labelMap: REMAP({ "in-progress": "wip" }), env: { ISSUE_LIST_LOG: log } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /1 ticket\(s\) claimed and in flight/);
+  const argv = readFileSync(log, "utf8").trim().split("\n");
+  assert.equal(argv.length, 1);
+  assert.match(argv[0], /^issue list --label wip --state open /);
+  assert.doesNotMatch(argv[0], /in-progress/);
+});
+
+test("CLI: the claimed-count query under the identity map carries in-progress", (t) => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-label-claimed-id-")));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, "heartbeat.json");
+  const log = join(dir, "issue-list.log");
+  writeFileSync(path, beat(90 * 60_000, 1200));
+  const r = runCli(["--state", path], { ...IDLE, claimed: [{ number: 41 }], env: { ISSUE_LIST_LOG: log } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(readFileSync(log, "utf8"), /^issue list --label in-progress --state open /);
+});
+
+test("CLI: a PR carrying the ready-to-merge role's mapped string is in the queued set, and one carrying the role's own name is not", () => {
+  const mapped = runCli([], { ...IDLE, prs: [pr(60, ["queue-ok"])], labelMap: REMAP({ "ready-to-merge": "queue-ok" }) });
+  assert.equal(mapped.status, 0, mapped.stderr);
+  assert.match(mapped.stdout, /^merge-bot {4}0\/1 → DISPATCH merge-bot {3}\(merge-queue=1 held=0\)/m);
+  const named = runCli([], { ...IDLE, prs: [pr(60, ["ready-to-merge"])], labelMap: REMAP({ "ready-to-merge": "queue-ok" }) });
+  assert.equal(named.status, 0, named.stderr);
+  assert.doesNotMatch(named.stdout, /DISPATCH merge-bot/);
+  assert.match(named.stdout, /merge-queue=0 /);
+});
+
+test("CLI: a repo with no Label map refuses the tick with the reader's message — exit 2, naming ensure, no queue and no claimed count printed", () => {
+  const r = runCli([], { ...IDLE, prs: [pr(60, ["ready-to-merge"])], claimed: [{ number: 41 }], labelMap: null });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /label-map\.mjs ensure/);
+  assert.equal(r.stdout, "", "a refused tick prints no reconcile");
+});
+
+test("CLI: a stalled prior beat with no Label map is still announced, its claimed count unknown — never 0 — and the tick then refuses", (t) => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-label-stall-")));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, "heartbeat.json");
+  const log = join(dir, "issue-list.log");
+  writeFileSync(path, beat(90 * 60_000, 1200));
+  const r = runCli(["--state", path], { ...IDLE, claimed: [{ number: 41 }], labelMap: null, env: { ISSUE_LIST_LOG: log } });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stdout, /heartbeat STALLED/);
+  assert.match(r.stdout, /unknown ticket\(s\) claimed and in flight/);
+  assert.doesNotMatch(r.stdout, /\b0 ticket\(s\) claimed/);
+  assert.match(r.stderr, /claimed ticket count unknown/);
+  assert.match(r.stderr, /label-map\.mjs ensure/);
+  assert.equal(existsSync(log), false, "no gh issue list ran without a string to ask it with");
+});
+
+test("deriveRun: the queued set is the PRs carrying the passed string; once there are open PRs, no string is a refusal", () => {
+  const prs = [pr(5, ["queue-ok"]), pr(6, ["ready-to-merge"]), pr(7)];
+  assert.equal(deriveRun({ rows: [], dispatched: [], drain: null }, prs, undefined, undefined, "queue-ok").mergeQueue, 1);
+  assert.equal(deriveRun({ rows: [], dispatched: [], drain: null }, prs, undefined, undefined, "ready-to-merge").mergeQueue, 1);
+  assert.throws(() => deriveRun({ rows: [], dispatched: [], drain: null }, prs), /queuedLabel/);
+  assert.equal(deriveRun({ rows: [], dispatched: [], drain: null }, []).mergeQueue, 0);
 });
 
 test("CLI: an unreadable claim count is `unknown`, never zero", (t) => {
@@ -5326,7 +5407,7 @@ test("deriveRun: reporters are every unsettled member token — never a settled 
     ],
     dispatched: ["impl-3=PR#5", "impl-4=PR#6", "impl-8=PR#7", "impl-9=PR#10", "impl-11=PR#12", "impl-13", "fix-pr-5", "merge-bot-1"],
     drain: null,
-  }, [pr(5), pr(6), pr(7), pr(10), pr(12)]);
+  }, [pr(5), pr(6), pr(7), pr(10), pr(12)], undefined, undefined, "ready-to-merge");
   assert.deepEqual([...run.reporters].sort(), ["fix-pr-5", "impl-13", "merge-bot-1"]);
 });
 
@@ -5352,8 +5433,8 @@ test("unrecordedLines: a member-named stem the ledger records nowhere prints UNR
 test("deriveRun: recorded is every member name on a row, in ## Dispatched and in ## Retired, settled or live; a ledger with no ## Retired records the rest", () => {
   const ledger = { rows: ["#3 impl-3=PR#5 → PR#5 · fix-pr-5=applied:abc1234"], dispatched: ["impl-3=PR#5", "merge-bot-1"], drain: null };
   const prs = [pr(5)];
-  assert.deepEqual([...deriveRun({ ...ledger, retired: ["impl-2", "review-pr-4"] }, prs).recorded].sort(), ["fix-pr-5", "impl-2", "impl-3", "merge-bot-1", "review-pr-4"]);
-  assert.deepEqual([...deriveRun(ledger, prs).recorded].sort(), ["fix-pr-5", "impl-3", "merge-bot-1"]);
+  assert.deepEqual([...deriveRun({ ...ledger, retired: ["impl-2", "review-pr-4"] }, prs, undefined, undefined, "ready-to-merge").recorded].sort(), ["fix-pr-5", "impl-2", "impl-3", "merge-bot-1", "review-pr-4"]);
+  assert.deepEqual([...deriveRun(ledger, prs, undefined, undefined, "ready-to-merge").recorded].sort(), ["fix-pr-5", "impl-3", "merge-bot-1"]);
 });
 
 test("deriveRun: a ## Retired line with an outcome records its name, the text before the first `=`", () => {

@@ -18,12 +18,17 @@ plugin knows
 and the run-team controller's phase 0 runs the derivation step. The scripts
 move onto the map ticket by ticket: `claim-ticket.sh` adds the in-progress
 label, and `release-ticket.sh` and `drop-merged-label.sh` scan for and remove
-it, each through `label-map.mjs show in-progress`. A script not yet moved
-still uses each role's own name as its string (`stranded.mjs`'s in-progress
-scan, for one), so until that migration lands a repository's role labels must
+it, each through `label-map.mjs show in-progress`. `stranded.mjs` and
+`fleet-tick.mjs` read the map once at their entry: `stranded.mjs` lists and
+compares claims against the in-progress string, and the tick counts claimed
+tickets by it and takes its queued set from the ready-to-merge string. With
+no valid map `stranded.mjs` exits 2 and the tick refuses, each naming
+`label-map.mjs ensure`. A script not yet moved
+still uses each role's own name as its string, so until that migration lands
+a repository's role labels must
 be exactly the role names. Steps 5 and 6 below, and the opinionated choices
 that name the shipped runbooks and every entry point, describe the target the
-follow-up tickets reach: #3865 and #3866 for the runbook prose, #3870 and #3872
+follow-up tickets reach: #3865 and #3866 for the runbook prose, #3872
 for the scripts still to move.
 
 ## How it works

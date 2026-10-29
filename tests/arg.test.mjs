@@ -7,6 +7,7 @@ import { tempDir } from "./support/temp-dir.mjs";
 import { join } from "node:path";
 import { stripComments } from "./support/strip-comments.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { seededRepo } from "./support/label-map-seed.mjs";
 
 const ARG_MODULE = fileURLToPath(new URL("../plugin/scripts/arg.mjs", import.meta.url));
 
@@ -706,7 +707,9 @@ const GH_FLOOD = [
 // under test takes its execFileSync catch. The payload is a file the stub
 // `cat`s rather than shell-generated, to keep the byte count exact.
 function runWithFloodingGh(script, argv, bytes) {
-  const dir = tempDir("arg-die-flood-");
+  // The tick reads the Label map before any gh call, so it runs in a repo that
+  // has one; the other scripts need no workspace.
+  const dir = script === "fleet-tick" ? seededRepo("arg-die-flood-") : tempDir("arg-die-flood-");
   writeFileSync(join(dir, "flood"), "z".repeat(bytes));
   writeExecStub(join(dir, "gh"), `#!/bin/sh\ncat "${join(dir, "flood")}" >&2\nexit 1\n`);
   return spawnSync(
