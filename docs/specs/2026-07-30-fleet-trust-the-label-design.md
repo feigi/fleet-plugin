@@ -359,6 +359,7 @@ files.
   rename all five labels; `candidates.mjs:43` and `run-team` hardcode them.
   Against a remapped repo the query matches nothing and reads as "no work", which
   `candidates.mjs:11` treats as authoritative. Only bites if this repo remaps.
+  Closed by ADR 0035.
 - **Dead starvation counts.** Moot as of #54 — `needs-triage` and `needs-info`
   now exist, so `2026-07-22:292`'s counts resolve.
 - **Doc gloss mismatch.** `docs/agents/triage-labels.md` glosses `ready-for-human`

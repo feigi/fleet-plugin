@@ -143,6 +143,19 @@ not. Settle requires it of an implementer's and a fix-applier's report. The memb
 produced it, so it is a claim, not an attestation.
 _Avoid_: test receipt, green stamp, CI record
 
+**Label role**:
+A name the fleet's scripts and runbooks use for a label's meaning — the five triage
+roles plus `in-progress`, `onhold` and `ready-to-merge`. A role is never typed into a
+`gh` command; its name is also its default string (ADR 0035).
+_Avoid_: label, canonical label, constant
+
+**Label map**:
+The fleet-state record mapping every Label role to the string the consumer's tracker
+uses, derived from the repository's triage-label table and its live label list,
+confirmed by the maintainer where derivation is uncertain, read by scripts and
+runbooks. Absent means "derive", never "infer".
+_Avoid_: label config, vocabulary file, alias, `labels.json` (as a term)
+
 **Valid green**:
 A test run that completed — the command returned on its own, with no signal and no
 timeout, deadline or kill having fired — with exit 0, `tests` above 0 and `cancelled` 0.
