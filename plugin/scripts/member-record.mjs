@@ -357,7 +357,6 @@ function createdPrNumbers(text) {
 // numbers in first-seen order.
 export function foldOmpTranscript(jsonlText, filePath) {
   let model = null, thinking = null, task = null, resolvedModelIdentity = null, agent = null;
-  let firstTs = null;
   // For the `work_s` column (member-outcomes.mjs): every timestamped entry's
   // instant, and the member's working parts — each run of timestamped entries
   // between two `session_exit` entries, as [first, last] in epoch ms. The
@@ -368,6 +367,9 @@ export function foldOmpTranscript(jsonlText, filePath) {
   let input = 0, cacheWrite = 0, cacheWrite1h = 0, cacheRead = 0, output = 0, cost = 0, turns = 0;
   let sawCost = false, unsplit = false, unpriced = false;
   let malformedNonLastLines = 0;
+  // Entries that carry a `timestamp` from which no finite instant was read;
+  // an entry with no `timestamp` at all is ordinary and not counted.
+  let unparseableStamps = 0;
   // What the transcript's END says, read for the `ending` column: the last
   // assistant turn's stopReason, whether a model fell back, whether the
   // session exited cleanly, whether a budget notice reached the member, and
@@ -391,8 +393,9 @@ export function foldOmpTranscript(jsonlText, filePath) {
     catch { if (i !== lines.length - 1) malformedNonLastLines++; continue; }
     assertOmpShaped(d, filePath);
     let ms = NaN;
-    if (typeof d.timestamp === "string") { firstTs ??= d.timestamp; ms = Date.parse(d.timestamp); }
+    if (typeof d.timestamp === "string") ms = Date.parse(d.timestamp);
     if (Number.isFinite(ms)) stamps.push(ms);
+    else if (Object.hasOwn(d, "timestamp")) unparseableStamps++;
     if (d.type === "custom" && d.customType === "session_exit") {
       sessionExit = true;
       if (partFirst !== null) workParts.push([partFirst, partLast]);
@@ -449,10 +452,12 @@ export function foldOmpTranscript(jsonlText, filePath) {
   if (partFirst !== null) workParts.push([partFirst, partLast]);
   // `wall_s` is the span of the parseable stamps, latest minus earliest, so it
   // does not depend on file order and cannot go negative; an unparseable
-  // stamp is skipped, and a transcript with none spans 0.
+  // stamp is skipped, and a transcript with none spans 0. `startedAt` is the
+  // same earliest stamp as an ISO string, or null when none parsed.
   let earliest = Infinity, latest = -Infinity;
   for (const t of stamps) { if (t < earliest) earliest = t; if (t > latest) latest = t; }
   const span = stamps.length ? (latest - earliest) / 1000 : 0;
+  const startedAt = stamps.length ? new Date(earliest).toISOString() : null;
   return {
     model, thinking, task, resolvedModelIdentity, agent,
     input, cacheWrite, cacheRead, output,
@@ -470,8 +475,9 @@ export function foldOmpTranscript(jsonlText, filePath) {
     wallS: Math.round(span),
     entries,
     malformedNonLastLines,
+    unparseableStamps,
     openedPrs: [...openedPrs],
-    startedAt: firstTs,
+    startedAt,
     stamps, workParts,
     reportWrites,
     lastStopReason, providerFallback, sessionExit, budgetNotice,
@@ -915,6 +921,7 @@ export function readOmpSession(sessionDir, activity = null) {
       lastStopReason: folded.lastStopReason, providerFallback: folded.providerFallback,
       sessionExit: folded.sessionExit, budgetNotice: folded.budgetNotice,
       malformedNonLastLines: folded.malformedNonLastLines,
+      unparseableStamps: folded.unparseableStamps,
       hasYield: existsSync(file.replace(/\.jsonl$/, ".md")),
       timed: folded.stamps.length > 0, workParts: folded.workParts,
     } });
