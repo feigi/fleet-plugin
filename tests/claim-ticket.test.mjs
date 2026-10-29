@@ -449,16 +449,12 @@ test("no Label map refuses the claim before anything is claimed, naming ensure",
   assert.match(dry.err, /label-map: no Label map at .*\/\.fleet\/labels\.json: run `label-map\.mjs ensure`/);
   assert.match(dry.err, /claim-ticket: could not read the in-progress label from the Label map/);
 
-  const bin = tempDir("claim-bin-");
-  const ghLog = join(bin, "gh.log");
-  writeExecStub(join(bin, "gh"), '#!/bin/sh\necho "$@" >> "$GH_LOG"\nexit 0\n');
-  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], {
-    cwd: dir, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GH_LOG: ghLog },
-  });
+  const spy = ghSpy();
+  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], { cwd: dir, encoding: "utf8", env: spy.env });
   assert.equal(r.status, 2);
   assert.match(r.stderr, /run `label-map\.mjs ensure`/);
   assert.equal(r.stdout, "", "no receipt for a claim that was never made");
-  assert.equal(existsSync(ghLog), false, "the issue was never labelled");
+  assert.equal(spy.ran(), false, "the issue was never labelled");
   assert.equal(existsSync(join(dir, ".worktrees", "42-slug")), false, "and no worktree exists");
   const branch = spawnSync("git", ["rev-parse", "--verify", "--quiet", "refs/heads/fix/42-slug"], { cwd: dir, env: FIXTURE_ENV });
   assert.equal(branch.status, 1, "and no branch exists");

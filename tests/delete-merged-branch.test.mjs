@@ -645,8 +645,8 @@ const LABEL_SCRIPT = fileURLToPath(new URL("../plugin/scripts/drop-merged-label.
 const LABEL_EDIT = (n) => `issue edit ${n} --remove-label in-progress`;
 
 /** A merged PR whose branch is checked out in a worktree and still on origin, with a gh stub. */
-function mergedFixture(t, branch, wtName) {
-  const { root, origin, w } = repo(t);
+function mergedFixture(t, branch, wtName, labelMap = {}) {
+  const { root, origin, w } = repo(t, labelMap);
   const { oid } = mergedInWorktree(w, branch, wtName);
   return { root, origin, w, oid, gh: ghStub(t, root) };
 }
@@ -687,9 +687,7 @@ test("end to end: a bot that runs only this step leaves no in-progress on the is
 // half still runs — the label outcome is a label-read-failed token, exit 4.
 test("no Label map: the label half's refusal passes through, nothing is dropped, and the branch is still deleted", (t) => {
   const branch = "fix/3873-no-map";
-  const { root, origin, w } = repo(t, null);
-  const { oid } = mergedInWorktree(w, branch, "3873-no-map");
-  const gh = ghStub(t, root);
+  const { origin, w, oid, gh } = mergedFixture(t, branch, "3873-no-map", null);
   gh.setLabels(41, "in-progress");
 
   const r = run(w, ["7"], gh.env({ PR_HEAD: branch, PR_OID: oid, PR_CLOSES: "41" }));
