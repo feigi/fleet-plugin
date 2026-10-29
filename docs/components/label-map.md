@@ -44,7 +44,8 @@ for the scripts still to move.
    *uncertain* (renamed away, absent, or a near match such as `on-hold` beside
    `onhold`). Every role certain: it prints the map, exit 0, writing the
    cache only when it derived one. Any role uncertain: it prints the question,
-   each uncertain role with its suggestion and the alternatives found, exit 3,
+   each uncertain role with its suggestion and the alternatives found, plus the
+   table's path (`tableFile`) so the question can name the file, exit 3,
    and writes nothing. A table that breaks the string rules is exit 1, naming
    each role, the rule and the fix. A repository, `gh` or cache that cannot be
    read is exit 2.

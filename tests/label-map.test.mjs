@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
 import { seedLabelMap } from "./support/label-map-seed.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
-import { LABEL_MAP_FILE, LABEL_ROLES, LabelMapUnreadable, labelStringFaults, readLabelMap, writeLabelMap } from "../plugin/scripts/label-map.mjs";
+import { LABEL_MAP_FILE, LABEL_ROLES, LabelMapUnreadable, TRIAGE_TABLE_FILE, labelStringFaults, readLabelMap, writeLabelMap } from "../plugin/scripts/label-map.mjs";
 import { FleetDirUnresolvable } from "../plugin/scripts/fleet-dir.mjs";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 
@@ -496,6 +496,18 @@ test("ensure: a table string the tracker lacks is asked, suggested as the table'
   assert.deepEqual(payload.uncertain, [{ role: "ready-for-agent", suggestion: "agent-ready", origin: "table", candidates: [], exists: false }]);
   assert.deepEqual(payload.certain, Object.fromEntries(without(LABEL_ROLES, "ready-for-agent").map((role) => [role, role])));
   noCache(ws);
+});
+
+test("ensure: the exit-3 payload names the table file, whatever the origin of the uncertainty, beside certain and uncertain only", () => {
+  const ws = repo();
+  writeTable(ws, fiveRows({ "ready-for-agent": "agent-ready" }));
+  const fromTable = asked(ensure(ws, without(LABEL_ROLES, "ready-for-agent")));
+  assert.equal(typeof fromTable.tableFile, "string");
+  assert.equal(fromTable.tableFile, TRIAGE_TABLE_FILE);
+  assert.deepEqual(Object.keys(fromTable).sort(), ["certain", "tableFile", "uncertain"]);
+  assert.deepEqual(fromTable.uncertain, [{ role: "ready-for-agent", suggestion: "agent-ready", origin: "table", candidates: [], exists: false }]);
+  // No table at all is still asked about, and still names the file the maintainer would write.
+  assert.equal(asked(ensure(repo(), [])).tableFile, TRIAGE_TABLE_FILE);
 });
 
 test("ensure: a near match is the suggestion and a candidate; several suggest the alphabetically first and all are candidates", () => {

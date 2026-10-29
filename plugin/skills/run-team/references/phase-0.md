@@ -132,13 +132,16 @@ never asks.
   stop. Neither is a question. Once the cause is fixed, run phase 0 again.
 
 **Ask once, as one question, and wait.** The payload holds `certain`, the
-roles already settled (role → string), and `uncertain`, one entry per role to
-ask about: `{role, suggestion, origin, candidates, exists, was, claimedBy}`.
+roles already settled (role → string), `uncertain`, one entry per role to
+ask about: `{role, suggestion, origin, candidates, exists, was, claimedBy}`,
+and `tableFile`, the path of the repository's triage-label table, the file
+the reasons below name. It is the payload's string, read from the echoed
+payload, never a path you spell yourself.
 Put it to the maintainer as one question listing each uncertain role, its
 suggestion, why, and the alternatives (`candidates`, the near matches the
 tracker has). The why, by the entry:
 
-- `origin` `table` — `declared in the triage-label table but not in the tracker`
+- `origin` `table` — `declared in <tableFile> but not in the tracker`
 - `origin` `near-match` — `near match in the tracker`
 - `origin` `default`, `exists` true — `the default and a near match are both in the tracker`
 - `origin` `default`, `exists` false — `nothing found — the default, to be created`
@@ -146,7 +149,7 @@ tracker has). The why, by the entry:
 
 Any other entry carrying `was` takes the prefix `was <was> when cached, now
 gone from the tracker; `, and one carrying `claimedBy` the prefix `your
-earlier answer <string> is now <role>'s in the triage-label table; `
+earlier answer <string> is now <role>'s in <tableFile>; `
 when its `by` is `table`, `your earlier answer <string> is now <role>'s label
 (its default); ` when it is `default`. End the question with: reply
 `defaults` to accept every suggestion, or name `<role>=<label>` for any you
@@ -159,8 +162,8 @@ exist are created on your confirmation.
 maintainer named. Exit 0 prints the map it wrote; exit 1 is a refusal naming
 the role and the rule, nothing written and nothing created — put it to the
 maintainer and ask again. In the same reply, tell the maintainer how to make
-the answer permanent: add or edit the role's row in the repository's
-triage-label table, the role in the first cell and the string in the
+the answer permanent: add or edit the role's row in the file the payload's
+`tableFile` names, the role in the first cell and the string in the
 second. The plugin never writes that table, so neither do you. Then run
 phase 0 again; `ensure` now exits 0. Exit 2 of `set` is no question: a pair
 it could not read (an unknown role, a malformed pair, a role answered twice),
