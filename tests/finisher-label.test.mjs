@@ -21,6 +21,7 @@ import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { prUrl, ref } from "./support/queue-gh.mjs";
 import { tempDir } from "./support/temp-dir.mjs";
+import { seedLabelMap } from "./support/label-map-seed.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/finisher-label.mjs", import.meta.url));
 const PIN = "a".repeat(40);
@@ -68,13 +69,14 @@ function git(cwd, ...args) {
 }
 
 // A rig for one case: a fresh stub directory and a repository the script runs
-// in (`repo`), holding the run ledger (`rows` are its rows) and an
+// in (`repo`), holding the run ledger (`rows` are its rows), the Label map
+// (`roles` merged over the identity map; null for no map) and an
 // `origin/main` to take a pin's merge base against. `outs` and `fails` are
 // keyed by the stub's call keys. The baseline is a ticket PR with one release
 // label and a read-back that carries the label. `commit(files)` makes a commit
 // holding `files` (path → text) on top of origin/main and answers its SHA,
 // the pin of a case about the diff.
-function rig({ outs = {}, fails = {}, closes = [5], rows = [] } = {}) {
+function rig({ outs = {}, fails = {}, closes = [5], rows = [], roles = {} } = {}) {
   const dir = tempDir("finisher-label-");
   const bin = join(dir, "bin");
   mkdirSync(bin);
@@ -87,6 +89,7 @@ function rig({ outs = {}, fails = {}, closes = [5], rows = [] } = {}) {
   git(repo, "commit", "-q", "-m", "base");
   git(repo, "update-ref", "refs/remotes/origin/main", "HEAD");
   writeFileSync(join(repo, ".fleet", "ledger.md"), ledgerText(rows));
+  if (roles !== null) seedLabelMap(repo, { roles });
   const all = {
     "pr-closing": JSON.stringify({ closingIssuesReferences: closes.map((n) => ref(n)), url: prUrl(42) }),
     "pr-view-1": view(["patch", "bug"]),
@@ -156,6 +159,50 @@ test("exit 0: one release label, the head recorded, the label added and read bac
     exit: 0,
     firstRead: ["patch", "bug"],
   });
+});
+
+// --- the Label map -----------------------------------------------------------
+// With the identity map a head record built from the mapped string is the
+// same bytes as the fixed prefix, so only a remapped map tells the two apart.
+
+const QUEUE_OK = { "ready-to-merge": "queue-ok" };
+
+test("a remapped ready-to-merge: the label write and the read-back use the mapped string, and the head record keeps its fixed prefix", () => {
+  const t = rig({ roles: QUEUE_OK, outs: { "pr-view-2": view(["patch", "bug", "queue-ok"]) } });
+  const r = t.run();
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(t.calls(), [VIEW, `pr comment 42 --body ready-to-merge-head: ${PIN}`, "pr edit 42 --add-label queue-ok", BACK]);
+  assert.deepEqual(r.out.readBack, ["patch", "bug", "queue-ok"]);
+});
+
+test("a remapped ready-to-merge: a read-back carrying only the role's own name is exit 4", () => {
+  const t = rig({ roles: QUEUE_OK, outs: { "pr-view-2": view(["patch", "bug", "ready-to-merge"]) } });
+  const r = t.run();
+  assert.equal(r.status, 4, r.stderr);
+  assert.match(r.stderr, /the read-back does not carry queue-ok/);
+});
+
+test("a remapped ready-to-merge: the idempotence check reads the mapped label beside a fixed-prefix record", () => {
+  const recorded = [record(PIN, "2026-01-02T00:00:00Z")];
+  const done = rig({ roles: QUEUE_OK, outs: { "pr-view-1": view(["patch", "queue-ok"], recorded), "pr-view-2": view(["patch", "queue-ok"]) } });
+  const r = done.run();
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(done.calls(), [VIEW, BACK], "the mapped label and this pin's record are already there: nothing is written");
+  // The role's own name is not the mapped label: the label is still written.
+  const literal = rig({ roles: QUEUE_OK, outs: { "pr-view-1": view(["patch", "ready-to-merge"], recorded), "pr-view-2": view(["patch", "ready-to-merge", "queue-ok"]) } });
+  assert.equal(literal.run().status, 0);
+  assert.deepEqual(literal.calls(), [VIEW, "pr edit 42 --add-label queue-ok", BACK]);
+});
+
+test("exit 2: no Label map stops the script before any gh call, the receipt naming the step and ensure", () => {
+  const t = rig({ roles: null });
+  const r = t.run();
+  assert.equal(r.status, 2, r.stderr);
+  assert.equal(r.out.step, "label-map");
+  assert.match(r.out.error, /label-map\.mjs ensure/);
+  assert.match(r.stderr, /label-map\.mjs ensure/);
+  assert.deepEqual(t.calls(), []);
+  assert.deepEqual(t.closing(), [], "not even the Ticketless test's read runs");
 });
 
 // --- a Ticketless PR ---------------------------------------------------------

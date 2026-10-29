@@ -72,6 +72,7 @@ import { mergeBotVerdicts } from "./report-schema.mjs";
 import { ownClosingIssues } from "./closing-refs.mjs";
 import { isTicketless } from "./ticketless.mjs";
 import { RELEASE_LABELS, LABEL_LIST_ARGS, LABEL_LIST_LIMIT, releaseLabelsIn, releaseLabelsDefined } from "./release-labels.mjs";
+import { LabelMapUnreadable, readLabelMap } from "./label-map.mjs";
 
 const NAME = "ledger";
 // The plugin's own agent definitions — the directory tier-check.mjs reads
@@ -2160,20 +2161,40 @@ function releaseLabelRefusal(member, tickets, refs) {
   return `${missing} and ${closes} — add exactly one, the bump its change calls for: gh pr edit ${pr} --add-label <${RELEASE_LABELS.join("|")}>`;
 }
 
+// The tracker's string for the `ready-to-merge` Label role, off the Label map
+// of the repository `dir` belongs to (label-map.mjs). Only the two paths that
+// compare or list that label read it — `dispatch merge-bot`'s queueSnapshot()
+// and settle --from-report's finisher and merge-bot checks — so every other
+// verb runs with no map at all. A map that cannot be read, or no repository
+// to find one in, is exit 2 under `where`, carrying the reader's message (an
+// absent or invalid map's names `label-map.mjs ensure`); nothing written.
+function readyLabel(dir, where) {
+  try {
+    return readLabelMap({ cwd: dir })["ready-to-merge"];
+  } catch (e) {
+    if (!(e instanceof LabelMapUnreadable) && !(e instanceof FleetDirUnresolvable)) throw e;
+    die(`${where}: ${e.message}; nothing written`);
+  }
+}
+
 // The open `ready-to-merge` PRs, ascending, as gh answers from the ledger's
 // own directory with runCheck()'s environment: the queue a merge bot is
 // dispatched against, recorded on its `## Dispatched` entry. Anything but a
 // JSON array of PR numbers, or an answer filling the limit — gh stops there
-// at exit 0 — could not read the queue: refused, nothing written.
+// at exit 0 — could not read the queue: refused, nothing written. The label
+// gh lists by is the Label map's string for the role, see readyLabel().
 function queueSnapshot() {
   const limit = 1000;
-  const what = `gh pr list --state open --label ready-to-merge --limit ${limit} --json number`;
+  let dir = dirname(resolve(file));
+  while (!existsSync(dir) && dirname(dir) !== dir) dir = dirname(dir);
+  const ready = readyLabel(dir, "dispatch merge-bot");
+  // An argv, never `what` split on spaces: a mapped string may hold one.
+  const args = ["pr", "list", "--state", "open", "--label", ready, "--limit", String(limit), "--json", "number"];
+  const what = `gh ${args.join(" ")}`;
   const env = { ...process.env, GH_REPO: "" };
   delete env.GIT_DIR;
   delete env.GIT_WORK_TREE;
-  let dir = dirname(resolve(file));
-  while (!existsSync(dir) && dirname(dir) !== dir) dir = dirname(dir);
-  const r = spawnSync("gh", what.split(" ").slice(1), { encoding: "utf8", cwd: dir, env, timeout: 60_000, stdio: ["ignore", "pipe", "pipe"] });
+  const r = spawnSync("gh", args, { encoding: "utf8", cwd: dir, env, timeout: 60_000, stdio: ["ignore", "pipe", "pipe"] });
   const refuse = (why) => die(`dispatch merge-bot: could not read the queue to record — ${what}${why}; nothing written`);
   if (r.status !== 0) {
     const why = cause(r.error && r.error.message, r.stderr);
@@ -2637,6 +2658,11 @@ function recordFiled(id, subject) {
 //                             conflictHold or refused, or no longer reads
 //                             OPEN with ready-to-merge
 //
+// `ready-to-merge` in both rows is the Label map's string for the role, read
+// by readyLabel() only when one of the two checks runs: on a finisher's
+// `labelled`, and on a merge bot's report that leaves a PR queued at dispatch
+// without a verdict.
+//
 // THE CHECK-STEP RECORD, for `impl-N=PR#M` and `fix-pr-M=applied:<head>`:
 // recipe-check.mjs writes `<reports>/<member>.check.json` on the member's
 // staged tree, and settle requires that it exists and parses, that the Check
@@ -2655,8 +2681,9 @@ function recordFiled(id, subject) {
 // stderr names each failed check; nothing written. Exit 2: the report is
 // absent, unreadable or invalid, a check could not look (a `gh`, `git` or
 // verify-sha.sh call that failed, printed what it was not asked for, or never
-// finished), a merge bot's `## Dispatched` entry records no queued=, or a
-// refusal the bare form makes; nothing written either.
+// finished), a merge bot's `## Dispatched` entry records no queued=, the
+// Label map could not be read, or a refusal the bare form makes; nothing
+// written either.
 //
 // After the settle, in the same write: every `unrecorded` entry goes to `##
 // Filed` the way `filed` records one, for a fix-applier every `deferred`
@@ -2690,7 +2717,6 @@ function mismatch(msg) {
 async function runSettleFromReport() {
   const usage = "usage: ledger.mjs settle <member> --from-report [--reports <dir>]";
   const deriveTestcmd = join(dirname(fileURLToPath(import.meta.url)), "derive-testcmd.sh");
-  const ready = "ready-to-merge";
   let member;
   let reports = null;
   for (let k = 0; k < rest.length; k++) {
@@ -2842,6 +2868,7 @@ async function runSettleFromReport() {
   } else if (live.family === "finisher-pr") {
     if (report.outcome === "labelled") {
       outcome = "labelled";
+      const ready = readyLabel(repoDir(), where);
       const pr = prView(live.number, "labels");
       check(`PR #${live.number} carries ${ready}`, pr.labels.some((l) => l?.name === ready));
       check(`labelsReadBack carries ${ready}`, report.labelsReadBack.includes(ready));
@@ -2865,7 +2892,10 @@ async function runSettleFromReport() {
       die(`${where}: ## Dispatched records no queued= for ${member}, so whether its report gives every PR queued at dispatch a verdict cannot be judged — settle it by hand; nothing written`);
     }
     const given = new Set(mergeBotVerdicts(report).map((v) => v.pr));
-    for (const pr of queued.filter((n) => !given.has(n))) {
+    const unjudged = queued.filter((n) => !given.has(n));
+    // The map is read only when a queued PR's labels are to be looked at.
+    const ready = unjudged.length > 0 ? readyLabel(repoDir(), where) : null;
+    for (const pr of unjudged) {
       const v = prView(pr, "state,labels");
       const left = v.state !== "OPEN" || !v.labels.some((l) => l?.name === ready);
       check(`PR #${pr}, queued at dispatch, has a verdict in merged, held, conflictHold or refused, or has left the queue`, left);

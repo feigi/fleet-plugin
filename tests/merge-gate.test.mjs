@@ -27,12 +27,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { bodyDigest } from "../plugin/scripts/fleet-tick.mjs";
+import { seedLabelMap } from "./support/label-map-seed.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/merge-gate.mjs", import.meta.url));
-// Every non-builtin module the copied gate imports. An unlisted one is a
-// module-not-found at startup — Node's exit 1, which is this gate's
-// "blocked". Add a row whenever merge-gate.mjs gains an import.
-const SIBLING_MODULES = ["arg.mjs", "git-env.mjs"].map((m) => [m, fileURLToPath(new URL(`../plugin/scripts/${m}`, import.meta.url))]);
+// Every non-builtin module the copied gate imports, directly or through
+// label-map.mjs. An unlisted one is a module-not-found at startup — Node's
+// exit 1, which is this gate's "blocked". Add a row whenever merge-gate.mjs
+// gains an import.
+const SIBLING_MODULES = ["arg.mjs", "git-env.mjs", "label-map.mjs", "is-cli.mjs", "fleet-dir.mjs"].map((m) => [m, fileURLToPath(new URL(`../plugin/scripts/${m}`, import.meta.url))]);
 
 const PRE = "a".repeat(40);
 const POST = "b".repeat(40);
@@ -128,6 +130,8 @@ function cleanEnv() {
 /**
  * Runs a copy of the gate against stubbed readings. Every option defaults to
  * the mergeable baseline, so a case names only the one reading it changes.
+ * `roles` is merged over the identity Label map seeded for the gate's cwd;
+ * null seeds no map.
  */
 function gate(
   t,
@@ -146,6 +150,7 @@ function gate(
     env = {},
     realInstruments = false,
     instrPre = null,
+    roles = {},
   } = {},
 ) {
   const root = mktemp(t, "merge-gate-");
@@ -180,6 +185,7 @@ function gate(
   // fixture's workspace repo and scripts dir in hand — this is where a
   // baseline gets pinned over a tree the workspace does not carry.
   if (instrPre) instrPre({ repo, scripts, root });
+  if (roles !== null) seedLabelMap(cwd ?? repo, { roles });
 
   const res = spawnSync(process.execPath, [script, ...argv], {
     cwd: cwd ?? repo,
@@ -307,6 +313,24 @@ test("ready-to-merge absent → 1 label-pulled", (t) => {
   assertRow(r, 1, "blocked", "label-pulled");
 });
 
+// The label row reads the Label map's string for `ready-to-merge`, so with a
+// remapped role the mapped label is the one that clears it and the role's own
+// name is a pulled label.
+test("a remapped ready-to-merge: the mapped label clears the label row, and the role's own name → 1 label-pulled", (t) => {
+  const roles = { "ready-to-merge": "queue-ok" };
+  const mapped = gate(t, { roles, prView: JSON.stringify({ ...PR_VIEW, labels: [{ name: "patch" }, { name: "queue-ok" }] }) });
+  assertRow(mapped, 0, "mergeable", null);
+  assertRow(gate(t, { roles }), 1, "blocked", "label-pulled");
+});
+
+test("no Label map → 2 before any read, the reader's refusal naming ensure, no verdict line", (t) => {
+  const r = gate(t, { roles: null });
+  assert.equal(r.code, 2, `exit ${r.code}\nstderr: ${r.stderr}`);
+  assert.match(r.stderr, /no Label map at .*label-map\.mjs ensure/);
+  assert.equal(r.stdout, "");
+  assert.deepEqual(r.calls, []);
+});
+
 test("reviewDecision CHANGES_REQUESTED → 1 changes-requested", (t) => {
   const r = gate(t, { prView: JSON.stringify({ ...PR_VIEW, reviewDecision: "CHANGES_REQUESTED" }) });
   assertRow(r, 1, "blocked", "changes-requested");
@@ -375,6 +399,9 @@ function fixtureRepo(t, prefix) {
   git(repo, "config", "user.email", "fixture@example.invalid");
   git(repo, "config", "commit.gpgsign", "false");
   git(repo, "config", "core.fileMode", "true");
+  // `.fleet/` is ignored, as a consumer checkout has it: the Label map the
+  // gate's cwd is seeded with is no file a fixture commit or checkout sees.
+  writeFileSync(join(repo, ".git", "info", "exclude"), ".fleet/\n");
   const at = (base, edit) => {
     if (base !== null) git(repo, "checkout", "-q", "--detach", base);
     edit(repo);
@@ -823,11 +850,15 @@ test("instruments.sh exit 0 that printed no digest → 2 instruments-unanswerabl
   assertRow(r, 2, "unknown", "instruments-unanswerable");
 });
 
-test("no git checkout to name the instrument set from → 2 instruments-unanswerable, instruments.sh never run", (t) => {
+// No checkout holds a Label map either, and the map is read before any
+// child runs: the gate refuses at 2 with the reader's refusal, never a verdict.
+test("no git checkout → 2 before any read, the repository refusal on stderr, instruments.sh never run", (t) => {
   const outside = mktemp(t, "merge-gate-nogit-");
-  const r = gate(t, { cwd: outside, env: { GIT_CEILING_DIRECTORIES: outside } });
-  assertRow(r, 2, "unknown", "instruments-unanswerable");
-  assert.equal(r.calls.filter((c) => c.startsWith("instruments.sh")).length, 0);
+  const r = gate(t, { cwd: outside, env: { GIT_CEILING_DIRECTORIES: outside }, roles: null });
+  assert.equal(r.code, 2, `exit ${r.code}\nstderr: ${r.stderr}`);
+  assert.match(r.stderr, /could not resolve --git-common-dir/);
+  assert.equal(r.stdout, "");
+  assert.deepEqual(r.calls, []);
 });
 
 test("gh pr view exits non-zero → 2 pr-unreadable", (t) => {

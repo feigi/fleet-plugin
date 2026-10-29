@@ -22,6 +22,7 @@ import { fileURLToPath } from "node:url";
 import { stallsAt } from "../plugin/scripts/fleet-state.mjs";
 import { rendering, renderBrief } from "./support/rendered-brief.mjs";
 import { writeQueueGh } from "./support/queue-gh.mjs";
+import { seedLabelMap } from "./support/label-map-seed.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
 
@@ -48,6 +49,10 @@ const NO_OMP = { [process.pid]: { ppid: 1, argv: [process.execPath, "--test"], l
 function fixture(t, { ledger = LEDGER, mark = null, controller = null, table = OMP_CHAIN, extra = {} } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "ledger-rotate-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
+  // A repository holding the identity Label map, which `dispatch merge-bot`
+  // reads before it lists the queue.
+  assert.equal(spawnSync("git", ["init", "-q", dir]).status, 0);
+  seedLabelMap(dir);
   const file = join(dir, "ledger.md");
   if (ledger !== null) writeFileSync(file, ledger);
   const beatFile = join(dir, "heartbeat.json");

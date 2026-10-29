@@ -11,10 +11,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
+import { seedLabelMap } from "./support/label-map-seed.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { rendering, renderBrief } from "./support/rendered-brief.mjs";
 import { ref, prUrl } from "./support/queue-gh.mjs";
@@ -60,6 +61,8 @@ function fixture() {
 
   const fleet = join(work, ".fleet");
   mkdirSync(fleet);
+  // The identity Label map, which a finisher's or a merge bot's settle reads.
+  seedLabelMap(work);
   const file = join(fleet, "ledger.md");
   const reports = join(root, "reports");
   mkdirSync(reports);
@@ -413,6 +416,32 @@ test("finisher-pr-M=labelled: a read-back without ready-to-merge is exit 3", () 
   f.refused("finisher-pr-6", 3, /failed: labelsReadBack carries ready-to-merge/);
 });
 
+// #3869: the label checked is the Label map's string for `ready-to-merge`.
+const QUEUE_OK = { roles: { "ready-to-merge": "queue-ok" } };
+
+test("finisher-pr-M=labelled: a remapped ready-to-merge is checked as its mapped string, on the PR and in the read-back", () => {
+  const f = fixture();
+  seedLabelMap(f.work, QUEUE_OK);
+  f.pr(6, { closingIssuesReferences: [], labels: [{ name: "patch" }] });
+  f.ok("dispatch", "6", "finisher-pr-6");
+  f.report("finisher-pr-6", finisherReport(f, { labelsReadBack: ["patch", "queue-ok"] }));
+  f.pr(6, { labels: [{ name: "patch" }, { name: "queue-ok" }] });
+  assert.deepEqual(f.settled("finisher-pr-6").checks, [
+    { name: "PR #6 carries queue-ok", ok: true },
+    { name: "labelsReadBack carries queue-ok", ok: true },
+  ]);
+});
+
+test("finisher-pr-M=labelled: with ready-to-merge remapped, the role's own name on the PR and in the read-back is exit 3 naming both", () => {
+  const f = fixture();
+  seedLabelMap(f.work, QUEUE_OK);
+  f.pr(6, { closingIssuesReferences: [], labels: [{ name: "patch" }] });
+  f.ok("dispatch", "6", "finisher-pr-6");
+  f.report("finisher-pr-6", finisherReport(f));
+  f.pr(6, { labels: [{ name: "patch" }, { name: "ready-to-merge" }] });
+  f.refused("finisher-pr-6", 3, /failed: PR #6 carries queue-ok; failed: labelsReadBack carries queue-ok; nothing written/);
+});
+
 // -- finisher-pr-M=halted:<cause> ---------------------------------------------
 
 test("finisher-pr-M=halted:<cause>: a cause and its evidence settle, and unrecorded filings reach ## Filed", () => {
@@ -570,6 +599,57 @@ test("merge-bot-n=done: a queued PR that left the queue before the settle, or a 
     { name: "PR #9, queued at dispatch, has a verdict in merged, held, conflictHold or refused, or has left the queue", ok: true },
   ]);
   assert.doesNotMatch(readFileSync(join(f.root, "gh.log"), "utf8"), /^pr view 11 /m, "a PR labelled after dispatch is never looked up");
+});
+
+test("merge-bot-n=done: with ready-to-merge remapped, the queue is recorded and judged by the mapped string", () => {
+  const f = fixture();
+  seedLabelMap(f.work, QUEUE_OK);
+  f.queue(6, 7, 8, 9);
+  f.ok("dispatch", "merge-bot");
+  assert.match(readFileSync(join(f.root, "gh.log"), "utf8"), /^pr list --state open --label queue-ok --limit 1000 --json number$/m);
+  f.pr(6, { state: "MERGED" });
+  f.pr(7, { state: "MERGED" });
+  // PR 8 still carries the mapped label, so it is still queued; PR 9 carries
+  // only the role's own name, which is not the queue's label.
+  f.pr(8, { state: "OPEN", labels: [{ name: "queue-ok" }] });
+  f.pr(9, { state: "OPEN", labels: [{ name: "ready-to-merge" }] });
+  f.report("merge-bot-1", botReport(f));
+  const r = f.refused("merge-bot-1", 3, /failed: PR #8, queued at dispatch, has a verdict/);
+  assert.doesNotMatch(r.stderr, /PR #9/);
+});
+
+// Only a label check reads the map: a settle that makes none runs without one.
+test("settle --from-report with no Label map: a label check is exit 2 naming ensure, and a settle making none still settles", () => {
+  const f = fixture();
+  f.ok("dispatch", "5", "impl-5");
+  f.pr(6, { closingIssuesReferences: [], labels: [{ name: "patch" }] });
+  f.ok("dispatch", "6", "finisher-pr-6");
+  f.ok("dispatch", "merge-bot");
+  rmSync(join(f.fleet, "labels.json"));
+  f.report("finisher-pr-6", finisherReport(f));
+  f.pr(6, { closingIssuesReferences: [ref(5)], state: "OPEN", labels: [{ name: "patch" }, { name: "ready-to-merge" }] });
+  f.refused("finisher-pr-6", 2, /settle finisher-pr-6 --from-report: no Label map at .*label-map\.mjs ensure.*; nothing written/);
+  f.report("finisher-pr-6", finisherReport(f, { outcome: "halted", cause: "rebase", evidence: "+ abc123 a commit main lacks", labelsReadBack: [] }));
+  assert.equal(f.settled("finisher-pr-6").outcome, "halted:rebase");
+  f.report("impl-5", implReport(f));
+  assert.equal(f.settled("impl-5").outcome, "PR#6");
+  f.pr(7, { state: "MERGED" });
+  f.pr(6, { state: "MERGED" });
+  f.report("merge-bot-1", botReport(f));
+  assert.equal(f.settled("merge-bot-1").outcome, "done");
+});
+
+// The map is read only when a queued PR's labels are to be looked at: a queue
+// whose every PR has a verdict needs no label check, so it settles with none.
+test("merge-bot-n=done with no Label map: a queue whose PRs all have verdicts settles without reading it", () => {
+  const f = fixture();
+  f.queue(6, 7);
+  f.ok("dispatch", "merge-bot");
+  rmSync(join(f.fleet, "labels.json"));
+  f.pr(6, { state: "MERGED" });
+  f.pr(7, { state: "MERGED" });
+  f.report("merge-bot-1", botReport(f));
+  assert.equal(f.settled("merge-bot-1").outcome, "done");
 });
 
 test("merge-bot-n=done: a PR given two verdicts, in two lists or in one, is exit 2 naming both entries", () => {

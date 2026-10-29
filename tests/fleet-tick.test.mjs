@@ -1939,7 +1939,7 @@ const SCRIPT = fileURLToPath(new URL("../plugin/scripts/fleet-tick.mjs", import.
 // or transitive — and ledger.mjs with its own, because the tick reads the
 // ledger through `ledger.mjs read`. An unlisted sibling is a module-not-found
 // at startup: exit 1, a shape no case below expects.
-const SIBLING_MODULES = ["arg.mjs", "closing-refs.mjs", "fleet-dir.mjs", "fleet-state.mjs", "gh-aliased-read.mjs", "git-env.mjs", "is-cli.mjs", "ledger.mjs", "ledger-grammar.mjs", "main-checkout.mjs", "owned-pr.mjs", "phase0-receipt.mjs", "pid-lock.mjs", "proc.mjs", "release-labels.mjs", "report-files.mjs", "report-schema.mjs", "ticketless.mjs"].map(
+const SIBLING_MODULES = ["arg.mjs", "closing-refs.mjs", "fleet-dir.mjs", "fleet-state.mjs", "gh-aliased-read.mjs", "git-env.mjs", "is-cli.mjs", "label-map.mjs", "ledger.mjs", "ledger-grammar.mjs", "main-checkout.mjs", "owned-pr.mjs", "phase0-receipt.mjs", "pid-lock.mjs", "proc.mjs", "release-labels.mjs", "report-files.mjs", "report-schema.mjs", "ticketless.mjs"].map(
   (m) => [m, fileURLToPath(new URL(`../plugin/scripts/${m}`, import.meta.url))],
 );
 
