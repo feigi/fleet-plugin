@@ -502,12 +502,19 @@ test("ensure: the exit-3 payload names the table file, whatever the origin of th
   const ws = repo();
   writeTable(ws, fiveRows({ "ready-for-agent": "agent-ready" }));
   const fromTable = asked(ensure(ws, without(LABEL_ROLES, "ready-for-agent")));
-  assert.equal(typeof fromTable.tableFile, "string");
   assert.equal(fromTable.tableFile, TRIAGE_TABLE_FILE);
   assert.deepEqual(Object.keys(fromTable).sort(), ["certain", "tableFile", "uncertain"]);
   assert.deepEqual(fromTable.uncertain, [{ role: "ready-for-agent", suggestion: "agent-ready", origin: "table", candidates: [], exists: false }]);
-  // No table at all is still asked about, and still names the file the maintainer would write.
-  assert.equal(asked(ensure(repo(), [])).tableFile, TRIAGE_TABLE_FILE);
+  // Every other origin an uncertain role can have names it too: no table at all (each role a default), a near match, and a cached string gone from the tracker.
+  const fromDefault = asked(ensure(repo(), []));
+  const fromNear = asked(ensure(repo(), [...without(LABEL_ROLES, "onhold"), "on-hold"]));
+  const goneWs = repo();
+  seedFrom(goneWs, {});
+  const fromGone = asked(ensure(goneWs, [...without(LABEL_ROLES, "ready-for-agent"), "agent-ready"]));
+  for (const [origin, payload] of [["default", fromDefault], ["near-match", fromNear], ["gone", fromGone]]) {
+    assert.deepEqual([...new Set(payload.uncertain.map((u) => u.origin))], [origin], `the ${origin} case asks about ${origin} roles only`);
+    assert.equal(payload.tableFile, TRIAGE_TABLE_FILE, `a ${origin} question names the table file`);
+  }
 });
 
 test("ensure: a near match is the suggestion and a candidate; several suggest the alphabetically first and all are candidates", () => {

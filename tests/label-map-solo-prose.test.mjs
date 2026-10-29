@@ -53,10 +53,13 @@ test("/next-ticket runs ensure before its candidates query and no longer creates
   assert.notEqual(queryAt, -1, "step 1 no longer runs the candidates query");
   assert.ok(ensureAt < queryAt, "step 1 runs the candidates query before the derivation step");
   assert.match(step1, Pin.phrase("--require-label ready-for-agent --allow-fallback"), "the query keeps naming the role it requires");
-  // The question, the answer and the second `ensure`, and the two refusals that are no question.
+  // The question, naming the payload's table file; the answer and the second `ensure`; how to make the answer permanent in that file; and the two refusals that are no question.
   assert.match(step1, Pin.phrase("Exit 3 → it printed the question payload"));
+  assert.match(step1, Pin.phrase("a JSON object with `certain`, `uncertain` and `tableFile`, the path of the repository's triage-label table"));
+  assert.match(step1, Pin.phrase("(a role declared in the table but not in the tracker names the payload's `tableFile`)"));
   assert.match(step1, Pin.phrase("**Wait for the answer**, then run `~/.fleet/bin/fleet-run label-map.mjs set --create` with it"));
   assert.match(step1, Pin.phrase("run `ensure` again, which now exits 0"));
+  assert.match(step1, Pin.phrase("add or edit the row for the role in the file the payload's `tableFile` names"));
   assert.match(step1, Pin.phrase("Exit 1 or 2 → show what it printed and stop; neither is a question."));
 
   assert.doesNotMatch(NEXT_TICKET.text, /gh label create in-progress/, "the claim still creates the label itself");
