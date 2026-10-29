@@ -62,7 +62,8 @@ import { fileURLToPath } from "node:url";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits, writeAll } from "./arg.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
-import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, settledOnLedger, retiredOnLedger, retiredName, readRetired, agentDefinition, expectedDefinition, CELL, POLICY_CELL, tierValues, cellValues, decidingCell, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, HALT_CAUSES, ROWS, DISPATCHED, ROUTED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, CLOSEOUT_RECEIPT, closeoutArchiveName, BRIEFS, briefsArchiveName, memberRole, parseDispatchedEntry, dispatchedEntry, parseRouting, parseRoutedEntry, routedEntry, headerRe, escapeText, ledgerSection, nextReviewerName } from "./ledger-grammar.mjs";
+import { readReceipt } from "./phase0-receipt.mjs";
+import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, settledOnLedger, retiredOnLedger, retiredName, readRetired, agentDefinition, expectedDefinition, CELL, POLICY_CELL, tierValues, cellValues, decidingCell, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, HALT_CAUSES, ROWS, DISPATCHED, ROUTED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, CLOSEOUT_RECEIPT, closeoutArchiveName, BRIEFS, briefsArchiveName, memberRole, parseDispatchedEntry, dispatchedEntry, parseRouting, parseRoutedEntry, routedEntry, headerRe, escapeText, ledgerSection, nextReviewerName, isOmpSessionDirName } from "./ledger-grammar.mjs";
 import { deriveRun, LedgerError, labelOffMember, HELD, CONFLICT_HOLD, PARKED } from "./fleet-tick.mjs";
 import { stateFileIn, readState, writeState, assessBeat, stallsAt } from "./fleet-state.mjs";
 import { processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "./proc.mjs";
@@ -528,14 +529,16 @@ function load() {
 
 // `## Dispatched` held as its tokens, which is what every reader of `read`
 // parses, `briefs`, each member's `brief=` hash by name, `queued`, each
-// merge bot's `queued=` PR numbers by name, and `agents`, each implementer's
-// `agent=` definition by name: one token per member name for
+// merge bot's `queued=` PR numbers by name, `agents`, each implementer's
+// `agent=` definition by name, and `sessions`, each carried implementer's
+// `session=` directory name by name: one token per member name for
 // the session, so a settle that rewrites the token keeps the name its brief,
-// its queue and its definition are filed under. save() joins them back.
+// its queue, its definition and its session are filed under. save() joins
+// them back.
 function dispatchedOf(entries) {
   const parsed = entries.map(parseDispatchedEntry);
   const byName = (field) => Object.fromEntries(parsed.filter((p) => p[field] !== null).map((p) => [parseToken(p.token).name, p[field]]));
-  return { dispatched: parsed.map((p) => p.token), briefs: byName("brief"), queued: byName("queued"), agents: byName("agent") };
+  return { dispatched: parsed.map((p) => p.token), briefs: byName("brief"), queued: byName("queued"), agents: byName("agent"), sessions: byName("session") };
 }
 
 // `## Drain` is written only once there is a marker to hold: an empty section
@@ -552,7 +555,7 @@ function save(d) {
     `# Fleet run ledger\n\n${ROWS}\n\n` + list(d.rows) +
     `\n\n${DISPATCHED}\n\n` + list(d.dispatched.map((t) => {
       const name = parseToken(t)?.name;
-      return dispatchedEntry(t, d.briefs[name] ?? null, d.queued[name] ?? null, d.agents[name] ?? null);
+      return dispatchedEntry(t, d.briefs[name] ?? null, d.queued[name] ?? null, d.agents[name] ?? null, d.sessions[name] ?? null);
     })) +
     (d.routed.length === 0 ? "" : `\n\n${ROUTED}\n\n` + list(d.routed)) +
     `\n\n${FILED}\n\n` + list(d.filed) +
@@ -1680,6 +1683,8 @@ function runRotate() {
   // Read before anything moves: a ledger whose live tokens cannot be read is
   // refused with nothing moved, never archived with those tokens dropped.
   let carry = { rows: [], dispatched: [], routed: [], retired: [], skipped: [] };
+  let sessions = { stamped: {}, unstamped: {} };
+  const receiptPath = join(dirname(file), RECEIPT);
   if (prior === "ancestor" && exists) {
     let text;
     try {
@@ -1688,6 +1693,7 @@ function runRotate() {
       die(`refusing to rotate ${file}: cannot read it to carry this session's live members forward: ${e.message}`);
     }
     carry = carryOf(text);
+    sessions = stampSessions(carry, receiptPath);
   }
   const carrying = carry.rows.length > 0 || carry.dispatched.length > 0 || carry.retired.length > 0;
   // The receipts beside the ledger belong to the run being rotated away, so
@@ -1750,6 +1756,8 @@ function runRotate() {
     console.error(`    carried ${carry.rows.length} row(s) and ${carry.dispatched.length} ## Dispatched entr${carry.dispatched.length === 1 ? "y" : "ies"} from ${archive}`);
     if (carry.routed.length > 0) console.error(`    carried ${carry.routed.length} ${ROUTED} entr${carry.routed.length === 1 ? "y" : "ies"} from ${archive}`);
     console.error(`    retired ${carry.retired.length} name(s) from ${archive}`);
+    for (const [name, session] of Object.entries(sessions.stamped)) console.error(`    stamped ${name} session=${session} from ${receiptPath}`);
+    for (const [name, why] of Object.entries(sessions.unstamped)) console.error(`    carried ${name} unstamped: ${why}`);
   }
   // Re-read rather than reuse the read above: the heartbeat file has other
   // writers, and a patch built from an older view would undo what they wrote
@@ -1764,7 +1772,41 @@ function runRotate() {
     carried: { rows: carry.rows, dispatched: carry.dispatched, routed: carry.routed },
     retired: carry.retired,
     skipped: carry.skipped.map((s) => s.line),
+    stamped: sessions.stamped, unstamped: sessions.unstamped,
   }));
+}
+
+// A carried implementer's transcript sits in the session of the run being
+// rotated away, which nothing beside the next run's ledger names once that
+// run's receipt is archived. So each carried implementer entry that names no
+// session yet is stamped `session=<name>` with the session of the receipt this
+// rotate archives: phase 0 puts a held receipt back at `phase0.json` before it
+// rotates, so that is the rotated run's own. An entry that already names one
+// keeps it — the run that dispatched the member, not a run that carried it
+// since. A receipt that is absent, unreadable or names no omp session
+// directory, and an entry with no `brief=` for the word to follow, leave the
+// entry unstamped, its reason returned by member name; the rotation goes on
+// either way. Only an implementer's entry is stamped: its transcript is the
+// one a card reads. Writes the stamps into `carry.sessions`, which save()
+// writes back.
+function stampSessions(carry, receiptPath) {
+  const stamped = {};
+  const unstamped = {};
+  const read = readReceipt(receiptPath);
+  let session = null;
+  let why = null;
+  if (read.state === "missing") why = `no ${receiptPath} to read its session from`;
+  else if (read.state === "unreadable") why = `${receiptPath} unreadable: ${read.why}`;
+  else if (!isOmpSessionDirName(basename(read.receipt.session))) why = `${receiptPath} records ${read.receipt.session}, which is not an omp <ISO>_<uuid> session directory`;
+  else session = basename(read.receipt.session);
+  for (const token of carry.dispatched) {
+    const { name, family } = parseToken(token);
+    if (family !== "impl" || Object.hasOwn(carry.sessions, name)) continue;
+    if (!Object.hasOwn(carry.briefs, name)) unstamped[name] = "its entry has no brief=, which a session= word follows";
+    else if (session === null) unstamped[name] = why;
+    else stamped[name] = carry.sessions[name] = session;
+  }
+  return { stamped, unstamped };
 }
 
 // What an `ancestor` rotate carries out of the archived text, read line by
@@ -1801,12 +1843,13 @@ function carryOf(text) {
       return false;
     }
   });
-  // An entry's `brief=`, `queued=` and `agent=` travel with it: save() writes
-  // them only beside the token it writes, so a carried member's record still
-  // names the brief it was dispatched with — a carried merge bot the queue it
-  // is judged against, a carried implementer the definition it is judged
-  // against — and a dropped member's does not.
-  const { dispatched: allDispatched, briefs: allBriefs, queued: allQueued, agents: allAgents } = dispatchedOf(ledgerSection(text, DISPATCHED));
+  // An entry's `brief=`, `queued=`, `agent=` and `session=` travel with it:
+  // save() writes them only beside the token it writes, so a carried member's
+  // record still names the brief it was dispatched with — a carried merge bot
+  // the queue it is judged against, a carried implementer the definition it
+  // is judged against and the session it ran in — and a dropped member's
+  // does not.
+  const { dispatched: allDispatched, briefs: allBriefs, queued: allQueued, agents: allAgents, sessions: allSessions } = dispatchedOf(ledgerSection(text, DISPATCHED));
   const dispatched = allDispatched.filter((e) => {
     const t = parseToken(e);
     if (t !== null && t.error === null) return true;
@@ -1838,7 +1881,7 @@ function carryOf(text) {
     if (parsed === null) skipped.push({ line: entry, why: "not an implementer's name and a Routing line" });
     else if (named.has(parsed.member)) routed.push(entry);
   }
-  return { ...carried, routed, briefs: allBriefs, queued: allQueued, agents: allAgents, retired, skipped };
+  return { ...carried, routed, briefs: allBriefs, queued: allQueued, agents: allAgents, sessions: allSessions, retired, skipped };
 }
 
 // ── dispatch / settle ────────────────────────────────────────────────────────

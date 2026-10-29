@@ -97,8 +97,8 @@ import { makeDie, defineFlags } from "./arg.mjs";
 import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
-import { CLOSEOUT_RECEIPT, RECEIPT, RECEIPT_HELD, memberTokens, rowPr } from "./ledger-grammar.mjs";
-import { encodeProjectDir, isOmpSessionDirName } from "./member-record.mjs";
+import { CLOSEOUT_RECEIPT, RECEIPT, RECEIPT_HELD, memberTokens, rowPr, isOmpSessionDirName } from "./ledger-grammar.mjs";
+import { encodeProjectDir } from "./member-record.mjs";
 import { tickCaps } from "./phase0-receipt.mjs";
 
 const NAME = "closeout";

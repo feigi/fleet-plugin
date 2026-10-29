@@ -26,6 +26,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { join, basename, relative, isAbsolute, sep } from "node:path";
 
 import { classifyRole, canonicalMemberName, CANONICAL_MEMBER_NAME_PREFIXES } from "./compute-spend.mjs";
+import { isOmpSessionDirName } from "./ledger-grammar.mjs";
 
 // ---------------------------------------------------------------------------
 // cwd encoder
@@ -928,28 +929,8 @@ export function readOmpSession(sessionDir, activity = null) {
   return rows;
 }
 
-// An omp session directory is identified STRICTLY by name — `<ISO>_<uuid>`,
-// e.g. `2026-09-08T13-13-27-300Z_01a08126-…` — never by holding `.jsonl`
-// files directly. That second test used to be a shortcut, and it fired one
-// level too high on the real tree: `~/.omp/agent/sessions/-dev-fleet-plugin/`
-// holds the project's MAIN-session transcripts as plain files SIBLING to the
-// per-session directories, so `findOmpSessionDirs` recursing from the
-// encoded-cwd dir hit the `.jsonl` test there first, returned the whole
-// project as "one session", stamped every row `session=-dev-fleet-plugin`
-// instead of the `<ISO>_<uuid>` name the row key is built on, and booked
-// the controller's own top-level transcripts as members. Name-only matching
-// costs nothing a real fixture needs: every fixture in this repo already
-// names its session dir in the real shape.
-const OMP_SESSION_DIR_RE = /^\d{4}-\d{2}-\d{2}T[\d-]+Z_[0-9a-f-]+$/i;
-
-// Exposed for callers that already hold one EXPLICIT directory rather than a
-// tree to search — member-outcomes.mjs's CLI, so the pattern is defined once.
-export function isOmpSessionDirName(name) {
-  return OMP_SESSION_DIR_RE.test(name);
-}
-
 function findOmpSessionDirs(root) {
-  if (OMP_SESSION_DIR_RE.test(basename(root))) return [root];
+  if (isOmpSessionDirName(basename(root))) return [root];
   let ents;
   try { ents = readdirSync(root, { withFileTypes: true }); }
   catch { return []; }

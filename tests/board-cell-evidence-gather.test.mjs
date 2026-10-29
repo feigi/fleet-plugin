@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
@@ -309,9 +309,9 @@ const transcript = ({ agent, model, thinking, last = model }) => [
 
 // A workspace whose ledger holds a row from before the Routing, or one with the
 // `## Routed` entries given, and an omp session holding its implementer's
-// transcript and a reviewer's. The real scripts read the ledger; every `gh` read
-// degrades.
-function cardsWorkspace(t, { routed = [] } = {}) {
+// transcript and a reviewer's. `entry` is the implementer's `## Dispatched`
+// entry. The real scripts read the ledger; every `gh` read degrades.
+function cardsWorkspace(t, { routed = [], entry = "impl-3862 brief=7f685cae agent=fleet-implementer-slow-high" } = {}) {
   const root = tempDir("cell-line-gather-");
   const stateDir = join(root, ".fleet");
   const session = join(root, "sessions", SESSION);
@@ -320,14 +320,14 @@ function cardsWorkspace(t, { routed = [] } = {}) {
   writeFileSync(join(session, "impl-3862.jsonl"), transcript({ agent: "fleet-implementer-slow-high", model: "claude-opus-5", thinking: "high", last: "claude-sonnet-5" }));
   writeFileSync(join(session, "review-pr-9.jsonl"), transcript({ agent: "fleet-reviewer", model: "claude-sonnet-5", thinking: "high" }));
   const ledgerFile = join(root, "ledger.md");
-  writeFileSync(ledgerFile, "# Fleet run ledger\n\n## Rows\n\n- #3862 impl-3862 · tier=slow-high · route=guard-tripped\n\n## Dispatched\n\n- impl-3862 brief=7f685cae agent=fleet-implementer-slow-high\n"
+  writeFileSync(ledgerFile, `# Fleet run ledger\n\n## Rows\n\n- #3862 impl-3862 · tier=slow-high · route=guard-tripped\n\n## Dispatched\n\n- ${entry}\n`
     + (routed.length ? `\n## Routed\n\n${routed.map((e) => `- ${e}`).join("\n")}\n` : ""));
   writeExecStub(join(bin, "omp"), `#!/bin/sh\necho '{"value":${JSON.stringify(ROLES)}}'\n`);
   writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
   const saved = process.env.PATH;
   t.after(() => { process.env.PATH = saved; });
   process.env.PATH = `${bin}:${saved}`;
-  return { stateDir, session, opts: { ledgerFile, prevFile: join(root, "prev.json"), scriptDir: SCRIPTS, stateDir, interval: 15 } };
+  return { root, stateDir, session, opts: { ledgerFile, prevFile: join(root, "prev.json"), scriptDir: SCRIPTS, stateDir, interval: 15 } };
 }
 
 const IMPL_3862 = { member: "impl-3862", model: "claude-sonnet-5", resolvedModelIdentity: "anthropic/claude-opus-5", thinking: "high", subagent_type: "fleet-implementer-slow-high" };
@@ -384,6 +384,84 @@ test("gather: hands the installed router table to the board, so a policy row wit
   assert.deepEqual(r.routerTable, readRouterTable(SCRIPTS));
   const line = computeBoard(r).tickets.find((x) => x.issue === 3862).cellLine;
   assert.equal(line.lines[0].map((p) => p.sep + p.text).join(""), "slow-high · cost row, heavy · follows *");
+});
+
+// -- a carried row's implementer, in the session its entry's session= names -----------------
+
+const NEW_SESSION = "2026-10-29T09-00-00-000Z_02b19237-ff15-7106-b7a6-25f435a02238";
+const STAMPED_ENTRY = `impl-3862 brief=7f685cae agent=fleet-implementer-slow-high session=${SESSION}`;
+const CELL_LINE_3862 = "not on record · claude-opus-5 · high · fell back to claude-sonnet-5";
+const cellLine2 = (r) => computeBoard(r).tickets.find((x) => x.issue === 3862).cellLine.lines[1].map((p) => p.sep + p.text).join("");
+
+// The next run's phase0.json, naming its own session — empty, or holding `files`.
+function nextRun(w, files = {}) {
+  const next = join(w.root, "sessions", NEW_SESSION);
+  mkdirSync(next);
+  for (const [name, text] of Object.entries(files)) writeFileSync(join(next, name), text);
+  writeFileSync(join(w.stateDir, RECEIPT), JSON.stringify({ ...receipt({}), session: next }));
+  return next;
+}
+
+test("gather: with a new phase0.json naming a new, empty session, a carried row whose entry names session= reads its implementer's record there, and the card shows its model and level", async (t) => {
+  const w = cardsWorkspace(t, { entry: STAMPED_ENTRY });
+  nextRun(w);
+  const r = await quiet(() => gather({ ...w.opts, spendDir: receiptSpendDir(w.stateDir) }));
+  assert.deepEqual(r.implementers, [IMPL_3862]);
+  assert.equal(cellLine2(r), CELL_LINE_3862);
+
+  // Without the word, the same tick reads nothing for it, as before.
+  const unstamped = cardsWorkspace(t);
+  nextRun(unstamped);
+  const before = await quiet(() => gather({ ...unstamped.opts, spendDir: receiptSpendDir(unstamped.stateDir) }));
+  assert.deepEqual(before.implementers, []);
+});
+
+test("gather: a stamped session adds the stamped members' records only, not every implementer's transcript in it", async (t) => {
+  const w = cardsWorkspace(t, { entry: STAMPED_ENTRY });
+  writeFileSync(join(w.session, "impl-3900.jsonl"), transcript({ agent: "fleet-implementer-task-high", model: "claude-sonnet-5", thinking: "high" }));
+  nextRun(w);
+  const r = await quiet(() => gather({ ...w.opts, spendDir: receiptSpendDir(w.stateDir) }));
+  assert.deepEqual(r.implementers, [IMPL_3862]);
+});
+
+test("gather: a member found both in the stamped session and in the session a receipt names takes the stamped session's record", async (t) => {
+  const w = cardsWorkspace(t, { entry: STAMPED_ENTRY });
+  // The current run's session holds a transcript under the same name, run at another level.
+  nextRun(w, { "impl-3862.jsonl": transcript({ agent: "fleet-implementer-smol-high", model: "claude-haiku-5-5", thinking: "low" }) });
+  const live = await quiet(() => gather({ ...w.opts, spendDir: receiptSpendDir(w.stateDir) }));
+  assert.deepEqual(live.implementers, [IMPL_3862]);
+
+  // Between runs alike: the held receipt names that session, and the stamp still wins.
+  const between = cardsWorkspace(t, { entry: STAMPED_ENTRY });
+  const held = nextRun(between, { "impl-3862.jsonl": transcript({ agent: "fleet-implementer-smol-high", model: "claude-haiku-5-5", thinking: "low" }) });
+  rmSync(join(between.stateDir, RECEIPT));
+  writeFileSync(join(between.stateDir, RECEIPT_HELD), JSON.stringify({ ...receipt({}), session: held }));
+  const r = await quiet(() => gather({ ...between.opts, spendDir: receiptSpendDir(between.stateDir) }));
+  assert.deepEqual(r.implementers, [IMPL_3862]);
+  assert.equal(cellLine2(r), CELL_LINE_3862);
+});
+
+test("gather: a stamped session that no longer exists, or cannot be listed, adds nothing and the tick still answers", async (t) => {
+  const gone = cardsWorkspace(t, { entry: STAMPED_ENTRY });
+  rmSync(gone.session, { recursive: true });
+  nextRun(gone);
+  const r = await quiet(() => gather({ ...gone.opts, spendDir: receiptSpendDir(gone.stateDir) }));
+  assert.deepEqual(r.implementers, []);
+  assert.equal(cellLine2(r).startsWith("not on record"), true);
+
+  const locked = cardsWorkspace(t, { entry: STAMPED_ENTRY });
+  nextRun(locked);
+  chmodSync(locked.session, 0o000);
+  t.after(() => chmodSync(locked.session, 0o755));
+  const l = await quiet(() => gather({ ...locked.opts, spendDir: receiptSpendDir(locked.stateDir) }));
+  assert.deepEqual(l.implementers, []);
+});
+
+test("gather: with --spend-dir named, a stamped session is not read either: the operator's directory is the one session read", async (t) => {
+  const w = cardsWorkspace(t, { entry: STAMPED_ENTRY });
+  nextRun(w);
+  const r = await quiet(() => gather({ ...w.opts, spendDir: tempDir("cell-line-spend-dir-"), spendDirExplicit: true }));
+  assert.deepEqual(r.implementers, []);
 });
 
 // What `fn` writes to stderr, beside what it returns.

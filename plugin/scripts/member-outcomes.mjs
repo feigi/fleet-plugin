@@ -14,7 +14,8 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, basename, dirname } from "node:path";
 
-import { readOmpSession, normalizeModel, parseMemberName, isOmpSessionDirName } from "./member-record.mjs";
+import { readOmpSession, normalizeModel, parseMemberName } from "./member-record.mjs";
+import { isOmpSessionDirName } from "./ledger-grammar.mjs";
 import { stripLevel } from "./tier-roles.mjs";
 import { reportFamily, reportStatus, defaultScratch } from "./report-files.mjs";
 import { FleetDirUnresolvable } from "./fleet-dir.mjs";

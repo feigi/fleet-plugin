@@ -1238,7 +1238,7 @@ test("ledger.mjs rotate archives phase0.json beside the ledger under the ledger 
   assert.equal(readFileSync(join(f.repo, ".fleet", receipt[0]), "utf8"), '{"run": 1}\n', "the receipt is archived byte for byte");
   assert.equal(existsSync(f.receiptPath), false, "no receipt is left for the next run to read");
   assert.equal(r.stdout.trim().startsWith("{"), true);
-  assert.deepEqual(Object.keys(JSON.parse(r.stdout)).sort(), ["archive", "carried", "retired", "rotated", "skipped"], "rotate's own answer is unchanged");
+  assert.deepEqual(Object.keys(JSON.parse(r.stdout)).sort(), ["archive", "carried", "retired", "rotated", "skipped", "stamped", "unstamped"], "archiving the receipt adds nothing to rotate's own answer");
 });
 
 test("ledger.mjs rotate with no phase0.json archives the ledger exactly as before", () => {
