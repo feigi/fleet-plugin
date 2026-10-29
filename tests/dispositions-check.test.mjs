@@ -11,7 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync, execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, symlinkSync, existsSync, realpathSync, chmodSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, symlinkSync, existsSync, realpathSync, chmodSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,6 +21,8 @@ import {
 } from "../plugin/scripts/dispositions-check.mjs";
 import { rendering } from "./support/rendered-brief.mjs";
 import { ref, prUrl } from "./support/queue-gh.mjs";
+import { seedLabelMap } from "./support/label-map-seed.mjs";
+import { LABEL_ROLES } from "../plugin/scripts/label-map.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/dispositions-check.mjs", import.meta.url));
 const LEDGER = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
@@ -63,6 +65,10 @@ process.stdout.write(JSON.stringify(fields === "title" ? { title: issue.title } 
 `;
 const openIssue = (label) => ({ state: "OPEN", title: "a deferred finding", labels: [label] });
 const bandRecord = (pr = 40) => ({ state: "CLOSED", title: recordTitle(pr), labels: ["wontfix"] });
+// The identity Label map as the pure core takes it: every role its own name.
+const IDENTITY = Object.fromEntries(LABEL_ROLES.map((role) => [role, role]));
+// The three roles this check reads, remapped: no mapped string is a role name.
+const REMAP = { "needs-triage": "triage", "ready-for-agent": "agent-ready", wontfix: "wont-fix" };
 
 const cleanEnv = (extra = {}) => {
   const env = { ...process.env, ...extra };
@@ -83,7 +89,9 @@ const lines = (n, tag) => Array.from({ length: n }, (_, i) => `${tag} ${i + 1}`)
 // A repository whose `origin/main` holds src/a.js (20 lines) and src/b.js,
 // and whose PR head rewrites src/a.js lines 5-6 and appends line 21. Lines
 // 1-4 and 7-20 are untouched; src/b.js is not in the diff at all.
-function fixture(t) {
+// `labelMap` is seedLabelMap's overrides for the repository's `.fleet/labels.json`;
+// null seeds none.
+function fixture(t, { labelMap = {} } = {}) {
   // `dir` sits in `root` as a run's `.fleet/` sits in its main checkout, so
   // the ledger in `dir` reads `root`'s tier-outcomes file, which holds PR 40's
   // ruling: every finisher dispatched here turns on its dispositions verdict.
@@ -109,6 +117,8 @@ function fixture(t) {
   writeFileSync(join(repo, "src", "a.js"), a.join("\n"));
   git(repo, "commit", "-qam", "pr");
   const head = git(repo, "rev-parse", "HEAD");
+  // After the commits: the cache is no part of the PR's diff or its base.
+  if (labelMap !== null) seedLabelMap(repo, labelMap);
 
   const scratch = join(dir, "scratch");
   mkdirSync(scratch);
@@ -559,7 +569,7 @@ test("with no ledger the exit status is the verdict, and nothing is written to a
   rmSync(f.recordPath());
   mismatch(standalone(f, "--review", f.reviewPath), /record: no disposition record at .*dispositions-fix-pr-40\.json/);
 
-  assert.equal(existsSync(join(f.repo, ".fleet")), false, "no .fleet/ was created");
+  assert.deepEqual(readdirSync(join(f.repo, ".fleet")), ["labels.json"], "no ledger was created beside the seeded Label map");
   assert.equal(readFileSync(join(f.dir, "ledger.md"), "utf8"), ledgerBefore, "a ledger elsewhere is not this run's and is not touched");
 });
 
@@ -648,7 +658,7 @@ test("--no-ledger is a standalone run whatever ledger the repository holds: a st
   const f = fixture(t);
   const wt = linkedWorktree(f);
   const stale = join(f.repo, ".fleet", "ledger.md");
-  mkdirSync(join(f.repo, ".fleet"));
+  mkdirSync(join(f.repo, ".fleet"), { recursive: true });
   const made = spawnSync(process.execPath, [LEDGER, "--file", stale, "row", "11", "impl-11=PR#41 → PR#41"], { encoding: "utf8", env: cleanEnv() });
   assert.equal(made.status, 0, made.stderr);
   const before = readFileSync(stale, "utf8");
@@ -706,22 +716,38 @@ test("with no ledger --review is required, and with a ledger it is refused", (t)
   okVerdict(standalone(f));
 });
 
+// A missing `--review` is a usage error, told before the Label map is read: a
+// run with neither is sent to `--review`, not to `label-map.mjs ensure` first.
+test("a missing --review is told before a missing Label map", (t) => {
+  const f = fixture(t, { labelMap: null });
+  f.writeRecord(f.baseEntries());
+  const r = standalone(f, "--no-ledger");
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /no ledger names PR #40's review — pass --review <path>/);
+});
+
 test("a ledger path that cannot be looked up is a fault, never a standalone run", (t) => {
   const f = fixture(t);
   f.writeRecord(f.baseEntries());
 
   // `.fleet` is a regular file, so `.fleet/ledger.md` fails ENOTDIR, not ENOENT.
+  rmSync(join(f.repo, ".fleet"), { recursive: true });
   writeFileSync(join(f.repo, ".fleet"), "");
   let r = standalone(f);
   assert.equal(r.status, 2, r.stderr);
   assert.match(r.stderr, /could not look for the ledger .*ledger\.md/);
   rmSync(join(f.repo, ".fleet"));
 
-  // A dangling symlink is a ledger that cannot be read, not an absent one.
-  mkdirSync(join(f.repo, ".fleet"));
+  // A dangling symlink is a ledger that cannot be read, not an absent one. The
+  // Label map went with the `.fleet` file above, so it is seeded again: the run
+  // must reach the ledger, not stop at the map. A ledger with no row for the
+  // member is the refusal it reaches; a standalone run would ask for --review.
+  mkdirSync(join(f.repo, ".fleet"), { recursive: true });
+  seedLabelMap(f.repo);
   symlinkSync(join(f.dir, "nowhere.md"), join(f.repo, ".fleet", "ledger.md"));
   r = standalone(f);
   assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /fix-pr-40 is on no row of PR #40/);
   assert.equal(existsSync(join(f.dir, "nowhere.md")), false, "nothing was created through the link");
 });
 
@@ -794,7 +820,7 @@ test("checkDispositions reads an absolute snapshot path onto the diff's touched 
   const review = { head: "abc1234", survived: [{ file: "/snap/src/a.js", line: 5 }], unverified: [], refuted: [] };
   const record = { head: "abc1234", entries: [{ bucket: "survived", index: 0, scope: "out", claimKind: "behavior", disposition: "defer", issue: 9 }] };
   const touched = new Map([["src/a.js", new Set([5])]]);
-  const filing = { pr: 40, issue: () => ({ state: "OPEN", title: "a deferred finding", labels: ["ready-for-agent"] }) };
+  const filing = { pr: 40, roles: IDENTITY, issue: () => ({ state: "OPEN", title: "a deferred finding", labels: ["ready-for-agent"] }) };
   assert.equal(checkDispositions({ review, record, touched, roots: ["/snap"], filing }).violations.length, 1);
   assert.equal(checkDispositions({ review, record, touched: new Map(), roots: ["/snap"], filing }).violations.length, 0);
 });
@@ -911,7 +937,7 @@ const H40 = "abc1234abc1234abc1234abc1234abc1234abcde";
 // `ready-for-agent` one — and `verdicts` the refuter verdicts by path.
 const coreRun = (entries, {
   head = H40, reviewHead = H40, survived = [{ file: "src/a.js", line: 5 }], unverified = [], record, diffFiles = ["src/a.js"],
-  issues = {}, verdicts = {}, charges = false,
+  issues = {}, verdicts = {}, charges = false, roles = IDENTITY,
 } = {}) => checkDispositions({
   review: { head: reviewHead, survived, unverified, refuted: [{ file: "src/b.js", line: 1 }] },
   record: record === undefined ? { head, entries } : record,
@@ -919,7 +945,7 @@ const coreRun = (entries, {
   diffFiles,
   roots: ["/snap"],
   filing: {
-    pr: 40,
+    pr: 40, roles,
     issue: (n) => issues[n] ?? { state: "OPEN", title: "a deferred finding", labels: ["ready-for-agent"] },
     verdict: (p) => verdicts[p] ?? { problem: "names no file that exists" },
   },
@@ -1207,7 +1233,7 @@ const reopened = (issue) => ({ ...issue, state: "OPEN" });
 const BOTH = { ...OPEN_RFA, labels: ["ready-for-agent", "needs-triage"] };
 // Every finding of the table's review answered without a deferral, `entry`
 // standing in for the one it names.
-const tableRun = (entry, issues = {}) => {
+const tableRun = (entry, issues = {}, roles = IDENTITY) => {
   const fill = [
     { bucket: "survived", index: 0, scope: "in", claimKind: "behavior", disposition: "apply" },
     { bucket: "survived", index: 1, scope: "out", claimKind: "behavior", disposition: "apply" },
@@ -1217,9 +1243,9 @@ const tableRun = (entry, issues = {}) => {
   ];
   const answered = fill.some((e) => e.bucket === entry.bucket && e.index === entry.index);
   return coreRun(answered ? fill.map((e) => (e.bucket === entry.bucket && e.index === entry.index ? entry : e)) : [...fill, entry],
-    { survived: TABLE_SURVIVED, unverified: TABLE_UNVERIFIED, issues, verdicts: TABLE_VERDICTS });
+    { survived: TABLE_SURVIVED, unverified: TABLE_UNVERIFIED, issues, verdicts: TABLE_VERDICTS, roles });
 };
-const tableCore = (entry, issues) => tableRun(entry, issues).violations.map(formatViolation);
+const tableCore = (entry, issues, roles) => tableRun(entry, issues, roles).violations.map(formatViolation);
 const deferred = (bucket, index, more = {}) => ({ bucket, index, scope: "in", claimKind: "behavior", disposition: "defer", issue: 9, ...more });
 
 // Each row: its entry, its home, and homes that break it — the wrong label and
@@ -1384,7 +1410,7 @@ test("an out-of-scope suggestion above the claim bar needs refuter evidence whet
 });
 
 test("what the filing check never reads: an applied finding, a crashed finding or an out-of-scope suggestion below the claim bar applied, a reversed refutation applied", () => {
-  const filing = { pr: 40, issue: () => assert.fail("the tracker was read"), verdict: () => assert.fail("a verdict was read") };
+  const filing = { pr: 40, roles: IDENTITY, issue: () => assert.fail("the tracker was read"), verdict: () => assert.fail("a verdict was read") };
   const entries = [
     { bucket: "survived", index: 0, scope: "in", claimKind: "behavior", disposition: "apply", issue: 9 },
     { bucket: "survived", index: 1, scope: "out", claimKind: "behavior", disposition: "apply", issue: 9 },
@@ -1398,6 +1424,73 @@ test("what the filing check never reads: an applied finding, a crashed finding o
     record: { head: H40, entries }, touched: new Map([["src/a.js", new Set([5])]]), diffFiles: ["src/a.js"], roots: [], filing,
   });
   assert.deepEqual([r.violations, r.escalations, r.unchecked], [[], [], []]);
+});
+
+// The Label map is the tracker's own spelling of a role. A home is read, and
+// worded, in the strings the map holds; the row table keeps roles.
+const spelled = (issue) => ({ ...issue, labels: issue.labels.map((l) => REMAP[l] ?? l) });
+for (const [n, entry, home, wrong, note] of ROWS) {
+  test(`filing row ${n}${note ? `, ${note}` : ""}, remapped: its home passes in the mapped strings and the wrong label or state is a mismatch naming them`, () => {
+    assert.deepEqual(tableCore(entry, { 9: spelled(home) }, REMAP), [], "its home");
+    for (const [what, issue] of wrong) {
+      const v = tableCore(entry, { 9: spelled(issue) }, REMAP);
+      assert.equal(v.length, 1, `${what}: ${v}`);
+      assert.match(v[0], new RegExp(`^${entry.bucket}\\[${entry.index}\\]: filing row ${n} \\(${FILING_ROWS[n].finding}\\): it belongs in .*, and #9 is `), what);
+    }
+  });
+}
+
+test("remapped, a home labelled triage is accepted for a needs-triage row, and the role names refused", () => {
+  const open = deferred("survived", 0, { reason: "mutual-exclusion" });
+  const band = deferred("survived", 0, { reason: "false-rationale" });
+  assert.equal(FILING_ROWS[1].open, "needs-triage", "the table keeps the role");
+  const home = (...labels) => ({ state: "OPEN", title: "a deferred finding", labels });
+  assert.deepEqual(tableCore(open, { 9: home("triage") }, REMAP), []);
+  // A stronger label answers the row too, in its mapped spelling.
+  assert.deepEqual(tableCore(open, { 9: home("agent-ready") }, REMAP), []);
+  // What the map does not name is not a triage label, whatever the role is called.
+  assert.match(tableCore(open, { 9: home("needs-triage") }, REMAP)[0],
+    /: it belongs in an open issue labelled triage or agent-ready, and #9 is open, titled "a deferred finding", labelled needs-triage$/);
+  assert.match(tableCore(open, { 9: home("ready-for-agent") }, REMAP)[0], /labelled ready-for-agent$/);
+  assert.deepEqual(tableCore(band, { 9: { ...RECORD, labels: ["wont-fix"] } }, REMAP), []);
+  assert.match(tableCore(band, { 9: RECORD }, REMAP)[0],
+    /: it belongs in the closed "PR #40 review: the suggestion band, checked" issue, labelled wont-fix, and #9 is closed, titled .*, labelled wontfix$/);
+});
+
+test("run as a CLI with a remapped Label map, a home labelled with the mapped strings is judged ok and the role names are not", (t) => {
+  const f = fixture(t, { labelMap: { roles: REMAP } });
+  const log = join(f.dir, "gh.log");
+  const check = () => f.check("fix-pr-40", cleanEnv({ FAKE_GH_LOG: log }));
+  f.writeRecord(f.baseEntries());
+  // The base record files its one deferral to #77, row 6b.
+  f.setIssues({ 77: openIssue("triage") });
+  okVerdict(check());
+  assert.ok(f.row().includes(`dispositions-ok=fix-pr-40:${f.run}`), f.row());
+  f.setIssues({ 77: openIssue("agent-ready") });
+  okVerdict(check());
+  f.setIssues({ 77: openIssue("needs-triage") });
+  mismatch(check(), /unverified\[0\]: filing row 6b \(.*\): it belongs in an open issue labelled triage or agent-ready, and #77 is open, titled "a deferred finding", labelled needs-triage/);
+  // The tracker is asked for the issue, never for a label by name: the mapped
+  // strings reach the comparison and the wording, not gh's argv.
+  const calls = readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l).argv);
+  assert.ok(calls.length > 0);
+  for (const argv of calls) assert.ok(!argv.some((a) => Object.values(REMAP).includes(a) || Object.keys(REMAP).includes(a)), JSON.stringify(argv));
+});
+
+test("run as a CLI with no Label map, nothing is judged or written, and the refusal names ensure", (t) => {
+  const f = fixture(t, { labelMap: null });
+  f.writeRecord(f.baseEntries());
+  const before = f.row();
+  const log = join(f.dir, "gh.log");
+  const r = f.check("fix-pr-40", cleanEnv({ FAKE_GH_LOG: log }));
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /dispositions-check: .*Label map.*label-map\.mjs ensure/);
+  assert.equal(r.stdout, "");
+  assert.equal(f.row(), before);
+  assert.equal(existsSync(log), false, "the tracker was never asked");
+  const standaloneRun = standalone(f, "--review", f.reviewPath);
+  assert.equal(standaloneRun.status, 2, standaloneRun.stderr);
+  assert.match(standaloneRun.stderr, /label-map\.mjs ensure/);
 });
 
 test("an issue the tracker cannot answer leaves that filing unchecked, never a violation", () => {

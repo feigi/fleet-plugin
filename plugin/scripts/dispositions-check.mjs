@@ -132,6 +132,11 @@
 //       7    claimKind shape, below the claim bar                suggestion-band record
 //       8    survived, out of scope, whatever its reason         open, needs-triage
 //
+//     The labels in the table and below are Label roles (label-map.mjs): the
+//     script reads a home's labels, and words the home, as the strings the
+//     Label map maps those roles to — `needs-triage`, `ready-for-agent` and
+//     `wontfix` are the identity map's spellings.
+//
 //     Row 4 outranks row 7, and row 7 every other row. A row-5 deferral is
 //     held to row 1's reasons: one of ALLOWED_DEFER other than
 //     false-rationale, `remedy-outside-diff` under the rule above. A row-6b
@@ -152,7 +157,8 @@
 // check again once `gh` answers.
 //
 // Exit status: 0 ok; 1 mismatch, escalate or unchecked; 2 nothing judged and
-// nothing written — a bad flag, an unreadable or malformed review file, a
+// nothing written — a bad flag, no valid Label map (the message names
+// `label-map.mjs ensure`), an unreadable or malformed review file, a
 // record file that exists but cannot be read, a git or ledger failure. A
 // missing or unparseable RECORD is judged, not refused: the fix-applier wrote
 // nothing a reader can use, so every finding it had to cover is dropped.
@@ -182,6 +188,7 @@ import { makeDie, defineFlags } from "./arg.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
+import { readLabelMap } from "./label-map.mjs";
 import { parseMember, memberTokens, rowNums, dispositionsToken, firstReview, prTokens } from "./ledger-grammar.mjs";
 import { deriveRun, LedgerError } from "./fleet-tick.mjs";
 import { VERDICT_SCHEMA } from "./review-core.mjs";
@@ -212,7 +219,9 @@ export const CHARGES = Object.freeze(["false-claim", "unmet", "both", "none"]);
 export const CHARGE_REASONS = Object.freeze(["defect-outside-acceptance", "not-the-implementers-text", "claim-about-untouched-code"]);
 
 // The filing table: a deferral's home by its finding's state. `record` is the
-// suggestion-band record; `open` the weakest triage label an open home may carry.
+// suggestion-band record; `open` the Label role of the weakest triage label an
+// open home may carry — a role, never a string: homeText and homeHolds read the
+// string it maps to from the Label map handed to checkDispositions.
 export const FILING_ROWS = Object.freeze({
   1: { finding: "an in-scope survived finding deferred for an allowed reason other than false-rationale", open: "needs-triage" },
   2: { finding: "an in-scope survived finding deferred false-rationale", record: true },
@@ -224,22 +233,28 @@ export const FILING_ROWS = Object.freeze({
   7: { finding: "a finding whose claim is about shape, below the claim bar", record: true },
   8: { finding: "an out-of-scope survived finding, whatever its reason", open: "needs-triage" },
 });
-// Strongest first: an open home may carry a label above its row's, never below.
-const TRIAGE_LABELS = ["ready-for-agent", "needs-triage"];
+// The triage roles, strongest first: an open home may carry a label above its
+// row's, never below.
+const TRIAGE_ROLES = ["ready-for-agent", "needs-triage"];
 // Row 1's reasons, which a row-5 deferral is held to.
 const ROW_1_DEFER = ALLOWED_DEFER.filter((r) => r !== "false-rationale");
 export const recordTitle = (pr) => `PR #${pr} review: the suggestion band, checked`;
 
-function homeText(row, pr) {
-  if (row.record) return `the closed "${recordTitle(pr)}" issue, labelled wontfix`;
-  return `an open issue labelled ${TRIAGE_LABELS.slice(0, TRIAGE_LABELS.indexOf(row.open) + 1).reverse().join(" or ")}`;
+// `roles` is the Label map's role -> string table: the tracker spells a label
+// its own way, and the home is read and worded in that spelling.
+function homeText(row, pr, roles) {
+  if (row.record) return `the closed "${recordTitle(pr)}" issue, labelled ${roles.wontfix}`;
+  return `an open issue labelled ${TRIAGE_ROLES.slice(0, TRIAGE_ROLES.indexOf(row.open) + 1).reverse().map((r) => roles[r]).join(" or ")}`;
 }
 
-// Whether an issue `{state, title, labels}` is `row`'s home on PR `pr`.
-function homeHolds(row, { state, title, labels }, pr) {
-  if (row.record) return state === "CLOSED" && title.trim() === recordTitle(pr) && labels.includes("wontfix");
-  const triage = labels.filter((l) => TRIAGE_LABELS.includes(l));
-  return state === "OPEN" && triage.length === 1 && TRIAGE_LABELS.indexOf(triage[0]) <= TRIAGE_LABELS.indexOf(row.open);
+// Whether an issue `{state, title, labels}` is `row`'s home on PR `pr`. The
+// labels are the names `gh` returned, compared as they stand: the map holds
+// the tracker's own spelling.
+function homeHolds(row, { state, title, labels }, pr, roles) {
+  if (row.record) return state === "CLOSED" && title.trim() === recordTitle(pr) && labels.includes(roles.wontfix);
+  const triage = TRIAGE_ROLES.map((role) => roles[role]);
+  const carried = labels.filter((l) => triage.includes(l));
+  return state === "OPEN" && carried.length === 1 && triage.indexOf(carried[0]) <= TRIAGE_ROLES.indexOf(row.open);
 }
 
 // The row a deferral's finding state puts it on, by precedence, or null when
@@ -465,8 +480,10 @@ function chargeProblem(e, { inScope, required }) {
  * defers `remedy-outside-diff`; `run` the review's run root name, or null when
  * no ledger names it — a record answers it only by carrying the same `run`;
  * `roots` the directories an absolute finding
- * or remedy path is read relative to. `filing` is `{pr, issue(n), verdict(path)}`,
- * required only when an entry defers or is a suggestion whose verdict is read: `issue`
+ * or remedy path is read relative to. `filing` is `{pr, roles, issue(n), verdict(path)}`,
+ * required only when an entry defers or is a suggestion whose verdict is read: `roles` is
+ * the Label map's role -> string table, the spelling a home's labels are compared and worded
+ * in; `issue`
  * answers `{state, title, labels}` — `state` upper-case, `labels` names — or
  * `{problem}` when the tracker cannot say; `verdict` answers `{refuted}` for
  * a refuter verdict path or `{problem}` when it is no usable evidence, with
@@ -564,7 +581,7 @@ export function checkDispositions({ review, record, recordProblem = null, run = 
       if (e.disposition === "apply" && (refuted === true || (refuted === null && !inScope))) {
         const rowNo = filingRow({ bucket, inScope, crashed, refuted, shape });
         const though = refuted ? "its verdict is refuted: true —" : `its refuter decided nothing — ${problem};`;
-        at(bucket, index, `filing row ${rowNo} (${FILING_ROWS[rowNo].finding}): applied, though ${though} it belongs in ${homeText(FILING_ROWS[rowNo], filing.pr)}`);
+        at(bucket, index, `filing row ${rowNo} (${FILING_ROWS[rowNo].finding}): applied, though ${though} it belongs in ${homeText(FILING_ROWS[rowNo], filing.pr, filing.roles)}`);
         return;
       }
     }
@@ -603,9 +620,9 @@ export function checkDispositions({ review, record, recordProblem = null, run = 
       return;
     }
     const row = FILING_ROWS[rowNo];
-    const { pr, issue: readIssue } = filingOf();
+    const { pr, roles, issue: readIssue } = filingOf();
     if (e.issue === undefined) {
-      at(bucket, index, `filing row ${rowNo} (${row.finding}): a deferral names the issue it was filed to, and this entry names none — it belongs in ${homeText(row, pr)}`);
+      at(bucket, index, `filing row ${rowNo} (${row.finding}): a deferral names the issue it was filed to, and this entry names none — it belongs in ${homeText(row, pr, roles)}`);
       return;
     }
     const issue = readIssue(e.issue);
@@ -613,8 +630,8 @@ export function checkDispositions({ review, record, recordProblem = null, run = 
       unchecked.push({ bucket, index, issue: e.issue, problem: issue.problem });
       return;
     }
-    if (!homeHolds(row, issue, pr)) {
-      at(bucket, index, `filing row ${rowNo} (${row.finding}): it belongs in ${homeText(row, pr)}, and #${e.issue} is ${describeIssue(issue)}`);
+    if (!homeHolds(row, issue, pr, roles)) {
+      at(bucket, index, `filing row ${rowNo} (${row.finding}): it belongs in ${homeText(row, pr, roles)}, and #${e.issue} is ${describeIssue(issue)}`);
     }
   });
 
@@ -831,18 +848,32 @@ function main() {
   const standalone = has("no-ledger");
   if (standalone && arg("ledger") !== null) die("--no-ledger and --ledger contradict: name one");
   const ledgerFile = standalone ? null : ledgerInUse(arg("ledger"), repo);
+  // Without a ledger nothing names the review the record answers, so `--review`
+  // must; with one, the latest `reviewed=` already does. Both are usage errors,
+  // so they are told before the Label map, the ledger or the tracker is read.
+  if (ledgerFile === null && arg("review") === null) die(`no ledger names PR #${pr}'s review — pass --review <path> for the review file ${member.name}'s record answers`);
+  if (ledgerFile !== null && arg("review") !== null) die(`--review and a ledger contradict: with a ledger the review is the one PR #${pr}'s latest reviewed= names`);
+  // The Label map, read once, here at the I/O boundary — after the flags and the
+  // ledger's location are settled, before the ledger or the tracker is read: a
+  // home's labels are compared and worded in the tracker's own spelling. No
+  // valid map is "nothing judged" (exit 2), never a verdict; the reader's
+  // message names `ensure`.
+  let roles;
+  try {
+    roles = readLabelMap({ cwd: repo });
+  } catch (e) {
+    die(e.message);
+  }
 
   // The review the record answers. With a ledger it is the one PR M's latest
   // `reviewed=` names — `<scratch>/pr<M>/<run>/review.json`, read off the
   // same per-PR fold `ledger.mjs dispatch` gates the finisher by, so the check
-  // and the gate never judge two different reviews. Without one nothing names
-  // it, so `--review` must.
+  // and the gate never judge two different reviews. Without one it is the
+  // `--review` path the checks above required.
   let data = null, row = null, run = null, charges = false, reviewPath;
   if (ledgerFile === null) {
     reviewPath = arg("review");
-    if (reviewPath === null) die(`no ledger names PR #${pr}'s review — pass --review <path> for the review file ${member.name}'s record answers`);
   } else {
-    if (arg("review") !== null) die(`--review and a ledger contradict: with a ledger the review is the one PR #${pr}'s latest reviewed= names`);
     data = JSON.parse(runLedger(ledgerFile, ["read"], "read the ledger"));
     // The verdict lands on the row carrying the member on its own PR's row —
     // where `ledger.mjs dispatch` wrote it, and where the gate reads PR M's
@@ -908,7 +939,7 @@ function main() {
 
   const { violations, escalations, unchecked } = checkDispositions({
     review, record, recordProblem, run, touched: touchedLines(diff), diffFiles, roots: [review.snapshot, top], charges,
-    filing: { pr, issue: issueReader(repo), verdict: verdictReader(scratch, pr) },
+    filing: { pr, roles, issue: issueReader(repo), verdict: verdictReader(scratch, pr) },
   });
   // No ledger, no row: the exit status below is the verdict, and with no
   // earlier fix-applier's verdict to count, a broken rule is always a
