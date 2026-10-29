@@ -168,6 +168,10 @@
 // `NEED <what> …` line, at the left margin, for the controller to make by
 // hand.
 //
+// The labels this script compares and writes are the Label map's strings
+// (label-map.mjs), read once at the command's entry; the label names in this
+// header are Label roles, and the map's string stands where it says one.
+//
 // Exit: 0 every write made and the tick exited 0. 2 a usage error, refused
 // before anything is written or ticked: an unknown kind or flag, a `--reason`
 // that is empty or beside any kind but `drain` and `undrain`, a `--session`
@@ -175,7 +179,8 @@
 // a name that is no ledger member, no session directory, a session directory
 // that cannot be listed, a heartbeat file that cannot be used), a member of
 // the wrong family, a review path outside the PR's partition or a file that
-// is no review result, a ledger or phase-0 receipt that cannot be read. A
+// is no review result, a ledger or phase-0 receipt that cannot be read, no
+// valid Label map (the message names `label-map.mjs ensure`). A
 // ledger write's own refusal — `settle`'s 3 (the report's claim and the world
 // disagree) or 2, `token`'s or `review`'s 2 — passes its exit and message
 // through, as do `closeout.mjs begin`'s and `reopen`'s 2 or 3 and the
@@ -194,6 +199,7 @@ import { makeDie, defineFlags, isDigits, writeAll } from "./arg.mjs";
 import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
+import { LabelMapUnreadable, readLabelMap } from "./label-map.mjs";
 import { BRIEFS, REVIEW, REVIEWED, REVIEWER, dispositionsToken, memberTokens, nextReviewerName, parseDispatchedEntry, parseMember, parseToken, readRetired, rowNums } from "./ledger-grammar.mjs";
 import { NO_TRANSCRIPT_AFTER_DEFAULT, PARKS, controllerState, foldLedger, parkedToken } from "./fleet-tick.mjs";
 import { phase0Gate, readRunReceipt, tickCaps } from "./phase0-receipt.mjs";
@@ -206,7 +212,6 @@ const SCRIPTS = dirname(fileURLToPath(import.meta.url));
 const MAX_BUFFER = 64 * 1024 * 1024;
 const GH_TIMEOUT_MS = 60_000;
 const CHILD_TIMEOUT_MS = 300_000;
-const READY = "ready-to-merge";
 
 const KINDS = {
   "impl-report": { args: ["<member>"], family: "impl" },
@@ -227,14 +232,16 @@ const FLAGS = { "in-flight": "value", reason: "value", session: "value" };
 const USAGE = `usage: ${NAME}.mjs <kind> <args> [--in-flight <n>] — kinds: `
   + Object.entries(KINDS).map(([k, { args, flag }]) => [k, ...args, ...(flag ? [flag] : [])].join(" ")).join(", ");
 
-// The label each `bailCause` demotes to, and the relabel template's kind.
-// `fixed` takes no label: it closes the ticket once `verify-sha.sh` finds the
-// commit on origin/main, and demotes to `needs-triage` when it does not.
+// The Label role each `bailCause` demotes to, and the relabel template's kind;
+// the tracker's string for the role is the map's, resolved where the label is
+// written. `fixed` takes no role: it closes the ticket once `verify-sha.sh`
+// finds the commit on origin/main, and demotes to `needs-triage` when it does
+// not.
 export const BAILS = {
-  undecided: { label: "needs-triage", kind: "needs-triage", flag: "line" },
-  fork: { label: "ready-for-human", kind: "fork", flag: "options" },
-  hands: { label: "ready-for-human", kind: "hands" },
-  covered: { label: "ready-for-human", kind: "covered", flag: "detail" },
+  undecided: { role: "needs-triage", kind: "needs-triage", flag: "line" },
+  fork: { role: "ready-for-human", kind: "fork", flag: "options" },
+  hands: { role: "ready-for-human", kind: "hands" },
+  covered: { role: "ready-for-human", kind: "covered", flag: "detail" },
   fixed: { kind: "fixed", flag: "detail" },
 };
 // The commit a `fixed` bail's detail opens with.
@@ -415,7 +422,8 @@ function relabelArgs(cause, detail) {
 }
 
 // The comment `dispatch-prompt.mjs render relabel` renders for a bail, or null
-// when there is none (the NEED, named `what`, is printed here).
+// when there is none (the NEED, named `what`, is printed here). The template
+// names the role `ready-for-agent`; the comment filed names the map's string.
 function rendered(ev, ticket, cause, detail, what) {
   const relabel = relabelArgs(cause, detail);
   if (relabel.why !== undefined) {
@@ -427,18 +435,23 @@ function rendered(ev, ticket, cause, detail, what) {
     ev.need(`${what} #${ticket} — dispatch-prompt.mjs render relabel refused: ${said(r)}`);
     return null;
   }
-  return r.stdout;
+  return r.stdout.replaceAll("`ready-for-agent`", `\`${ev.labels["ready-for-agent"]}\``);
 }
+
+// The map's strings for the labels a pulled ticket carries, which a demotion
+// or a close takes off.
+const pulledLabels = (ev) => [ev.labels["ready-for-agent"], ev.labels["in-progress"]];
 
 // Moves #ticket to `label`, then posts the comment `body()` returns, if any.
 // False when the move could not be made, so nothing after it may run.
 function demote(ev, ticket, label, cause, body) {
   const seen = ev.comments("issue", ticket, `relabel #${ticket} ${label}`);
   if (seen === null) return false;
-  if (seen.labels.includes(label) && !seen.labels.includes("ready-for-agent") && !seen.labels.includes("in-progress")) {
+  const pulled = pulledLabels(ev);
+  if (seen.labels.includes(label) && !pulled.some((l) => seen.labels.includes(l))) {
     ev.note(`#${ticket} already ${label}`);
   } else {
-    const e = gh(["issue", "edit", String(ticket), "--remove-label", "ready-for-agent", "--remove-label", "in-progress", "--add-label", label]);
+    const e = gh(["issue", "edit", String(ticket), ...pulled.flatMap((l) => ["--remove-label", l]), "--add-label", label]);
     if (e.status !== 0) {
       ev.need(`relabel #${ticket} ${label} — gh issue edit failed: ${said(e)}`);
       return false;
@@ -461,7 +474,7 @@ function fixed(ev, ticket, detail) {
   }
   const v = run("sh", [join(SCRIPTS, "verify-sha.sh"), "main", sha]);
   if (v.status === 1) {
-    return demote(ev, ticket, "needs-triage", "fixed", () => `*Relabelled by the fleet controller.* Pulled for implementation and returned as already fixed by ${sha}: ${sha} not on origin/main.`);
+    return demote(ev, ticket, ev.labels["needs-triage"], "fixed", () => `*Relabelled by the fleet controller.* Pulled for implementation and returned as already fixed by ${sha}: ${sha} not on origin/main.`);
   }
   if (v.status !== 0) {
     ev.need(`close #${ticket} — verify-sha.sh main ${sha} could not answer (${v.how}): ${said(v)}`);
@@ -482,7 +495,7 @@ function fixed(ev, ticket, detail) {
     }
     ev.note(`closed #${ticket}: fixed by ${sha}`);
   }
-  const stale = ["ready-for-agent", "in-progress"].filter((l) => seen.labels.includes(l));
+  const stale = pulledLabels(ev).filter((l) => seen.labels.includes(l));
   if (stale.length > 0) {
     const e = gh(["issue", "edit", String(ticket), ...stale.flatMap((l) => ["--remove-label", l])]);
     if (e.status !== 0) ev.need(`unlabel #${ticket} ${stale.join(" ")} — gh issue edit failed: ${said(e)}`);
@@ -501,7 +514,7 @@ function bailed(ev, member) {
   const detail = read.report.bailDetail;
   const moved = cause === "fixed"
     ? fixed(ev, ticket, detail)
-    : demote(ev, ticket, BAILS[cause].label, cause, () => rendered(ev, ticket, cause, detail, "relabel-comment"));
+    : demote(ev, ticket, ev.labels[BAILS[cause].role], cause, () => rendered(ev, ticket, cause, detail, "relabel-comment"));
   if (!moved) return;
   const release = run("sh", [join(SCRIPTS, "release-ticket.sh"), String(ticket), `impl-${ticket}`, "implementer", "--apply"]);
   if (release.status === 0) ev.note(`released #${ticket}`);
@@ -616,7 +629,7 @@ function finisherReport(ev, member) {
   }
   // The escalation is for a repair finisher that claims the label and reads
   // back none; a halt says why in its own comment above.
-  if (self.retry === null || report?.outcome !== "labelled" || report.labelsReadBack.includes(READY)) return;
+  if (self.retry === null || report?.outcome !== "labelled" || report.labelsReadBack.includes(ev.labels["ready-to-merge"])) return;
   const earlier = ledgerMembers(ev.ledger)
     .filter((t) => t.family === "finisher-pr" && t.number === pr && (t.retry ?? "") < self.retry)
     .sort((a, b) => (a.retry ?? "").localeCompare(b.retry ?? "")).at(-1)?.name;
@@ -625,7 +638,7 @@ function finisherReport(ev, member) {
     const prior = ev.report(earlier);
     before = prior.state === "ok" ? `${earlier} read back: ${listed(prior.report.labelsReadBack)}` : `${earlier}'s report ${prior.path} is ${prior.state}`;
   }
-  const body = `**${member}, a repair finisher, read back no \`${READY}\` on PR #${pr}.**\n\n`
+  const body = `**${member}, a repair finisher, read back no \`${ev.labels["ready-to-merge"]}\` on PR #${pr}.**\n\n`
     + `- ${member} read back: ${listed(report.labelsReadBack)}\n- ${before}`;
   const seen = ev.comments("pr", pr, `escalation-comment PR #${pr}`);
   if (seen !== null) ev.comment("pr", pr, body, seen, "escalation comment");
@@ -977,7 +990,14 @@ function main() {
   const caps = tickCaps(fleetDir);
   if (caps.error) die(`${caps.error} — nothing written`);
   const tickArgs = ["--apply", ...(inFlight === null ? caps.args : ["--in-flight", inFlight]), ...(kind === "heartbeat" ? ["--fold-unchanged"] : [])];
-  const ev = new Event({ fleetDir, scratch, ledger: readLedger() });
+  let labels;
+  try {
+    labels = readLabelMap();
+  } catch (e) {
+    if (!(e instanceof LabelMapUnreadable)) throw e;
+    die(`${e.message} — nothing written`);
+  }
+  const ev = new Event({ fleetDir, scratch, labels, ledger: readLedger() });
   if (kind === "impl-report") implReport(ev, args[0]);
   else if (kind === "fix-report") fixReport(ev, args[0]);
   else if (kind === "finisher-report") finisherReport(ev, args[0]);
