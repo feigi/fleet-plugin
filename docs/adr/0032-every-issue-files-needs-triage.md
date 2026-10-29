@@ -29,7 +29,7 @@ step 5, and run-team finisher duty 2, which files the way step 5 does.
   down.
 - **Satisfaction:** an existing open `ready-for-agent` issue still answers a
   `needs-triage` filing row, because triage already promoted it.
-  `TRIAGE_LABELS` ordering stays; only the filing rows' required label
+  `TRIAGE_ROLES` ordering stays; only the filing rows' required label
   changes — rows 1, 5 and 8 of `dispositions-check.mjs`'s `FILING_ROWS`, the
   rows that required `ready-for-agent`.
 - **Migration:** relabel open review-filed issues (`Deferred from PR` in the

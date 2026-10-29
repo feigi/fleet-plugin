@@ -716,6 +716,16 @@ test("with no ledger --review is required, and with a ledger it is refused", (t)
   okVerdict(standalone(f));
 });
 
+// A missing `--review` is a usage error, told before the Label map is read: a
+// run with neither is sent to `--review`, not to `label-map.mjs ensure` first.
+test("a missing --review is told before a missing Label map", (t) => {
+  const f = fixture(t, { labelMap: null });
+  f.writeRecord(f.baseEntries());
+  const r = standalone(f, "--no-ledger");
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /no ledger names PR #40's review — pass --review <path>/);
+});
+
 test("a ledger path that cannot be looked up is a fault, never a standalone run", (t) => {
   const f = fixture(t);
   f.writeRecord(f.baseEntries());
@@ -728,11 +738,16 @@ test("a ledger path that cannot be looked up is a fault, never a standalone run"
   assert.match(r.stderr, /could not look for the ledger .*ledger\.md/);
   rmSync(join(f.repo, ".fleet"));
 
-  // A dangling symlink is a ledger that cannot be read, not an absent one.
+  // A dangling symlink is a ledger that cannot be read, not an absent one. The
+  // Label map went with the `.fleet` file above, so it is seeded again: the run
+  // must reach the ledger, not stop at the map. A ledger with no row for the
+  // member is the refusal it reaches; a standalone run would ask for --review.
   mkdirSync(join(f.repo, ".fleet"), { recursive: true });
+  seedLabelMap(f.repo);
   symlinkSync(join(f.dir, "nowhere.md"), join(f.repo, ".fleet", "ledger.md"));
   r = standalone(f);
   assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /fix-pr-40 is on no row of PR #40/);
   assert.equal(existsSync(join(f.dir, "nowhere.md")), false, "nothing was created through the link");
 });
 

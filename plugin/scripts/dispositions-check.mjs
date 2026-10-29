@@ -252,8 +252,9 @@ function homeText(row, pr, roles) {
 // the tracker's own spelling.
 function homeHolds(row, { state, title, labels }, pr, roles) {
   if (row.record) return state === "CLOSED" && title.trim() === recordTitle(pr) && labels.includes(roles.wontfix);
-  const carried = labels.flatMap((l) => TRIAGE_ROLES.filter((role) => roles[role] === l));
-  return state === "OPEN" && carried.length === 1 && TRIAGE_ROLES.indexOf(carried[0]) <= TRIAGE_ROLES.indexOf(row.open);
+  const triage = TRIAGE_ROLES.map((role) => roles[role]);
+  const carried = labels.filter((l) => triage.includes(l));
+  return state === "OPEN" && carried.length === 1 && triage.indexOf(carried[0]) <= TRIAGE_ROLES.indexOf(row.open);
 }
 
 // The row a deferral's finding state puts it on, by precedence, or null when
@@ -847,6 +848,11 @@ function main() {
   const standalone = has("no-ledger");
   if (standalone && arg("ledger") !== null) die("--no-ledger and --ledger contradict: name one");
   const ledgerFile = standalone ? null : ledgerInUse(arg("ledger"), repo);
+  // Without a ledger nothing names the review the record answers, so `--review`
+  // must; with one, the latest `reviewed=` already does. Both are usage errors,
+  // so they are told before the Label map, the ledger or the tracker is read.
+  if (ledgerFile === null && arg("review") === null) die(`no ledger names PR #${pr}'s review — pass --review <path> for the review file ${member.name}'s record answers`);
+  if (ledgerFile !== null && arg("review") !== null) die(`--review and a ledger contradict: with a ledger the review is the one PR #${pr}'s latest reviewed= names`);
   // The Label map, read once, here at the I/O boundary — after the flags and the
   // ledger's location are settled, before the ledger or the tracker is read: a
   // home's labels are compared and worded in the tracker's own spelling. No
@@ -862,14 +868,12 @@ function main() {
   // The review the record answers. With a ledger it is the one PR M's latest
   // `reviewed=` names — `<scratch>/pr<M>/<run>/review.json`, read off the
   // same per-PR fold `ledger.mjs dispatch` gates the finisher by, so the check
-  // and the gate never judge two different reviews. Without one nothing names
-  // it, so `--review` must.
+  // and the gate never judge two different reviews. Without one it is the
+  // `--review` path the checks above required.
   let data = null, row = null, run = null, charges = false, reviewPath;
   if (ledgerFile === null) {
     reviewPath = arg("review");
-    if (reviewPath === null) die(`no ledger names PR #${pr}'s review — pass --review <path> for the review file ${member.name}'s record answers`);
   } else {
-    if (arg("review") !== null) die(`--review and a ledger contradict: with a ledger the review is the one PR #${pr}'s latest reviewed= names`);
     data = JSON.parse(runLedger(ledgerFile, ["read"], "read the ledger"));
     // The verdict lands on the row carrying the member on its own PR's row —
     // where `ledger.mjs dispatch` wrote it, and where the gate reads PR M's
