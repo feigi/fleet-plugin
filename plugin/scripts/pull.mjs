@@ -28,16 +28,15 @@
 //       names `label-map.mjs ensure`; the labels the Pull compares, writes and
 //       names in its comments are the map's strings, read once at the command's
 //       entry). `next --head <N>` runs a step that failed again; when the failure
-//       came from applying an answer, the
-//       question stands and the answer is given again. A router that refused
-//       has its claim released and the Pull is over, `next --head <N>` starting
-//       the ticket over; one whose claim could not be released leaves the Pull
-//       at the route step with the claim standing, and `next` routes again. An
-//       exclusion premise `gh` could not read is exit 2 when no other entry is
-//       left, and always exit 2 when `next --head <N>` starts a Pull for the
-//       ticket that holds it, the exclusion standing and no record written. An
-//       unknown flag is exit 2 as well, as for every script that holds a command
-//       line of its own.
+//       came from applying an answer, the question stands and the answer is given
+//       again. A router that refused has its claim released and the Pull is over,
+//       `next --head <N>` starting the ticket over; one whose claim could not be
+//       released leaves the Pull at the route step with the claim standing, and
+//       `next` routes again. An exclusion premise `gh` could not read is exit 2
+//       when no other entry is left, and always exit 2 when `next --head <N>`
+//       starts a Pull for the ticket that holds it, the exclusion standing and no
+//       record written. An unknown flag is exit 2 as well, as for every script
+//       that holds a command line of its own.
 //   3   usage: any other mistake in the command line, or an answer the pending
 //       question does not take. Nothing is recorded.
 //   10  a question is pending: its `QUESTION <qid>:` block, with the tokens it
@@ -188,10 +187,10 @@ function handsParts(text) {
  * returned and the labels the comment names are its strings.
  */
 export function relabel(token, text, labels) {
-  const ready = labels["ready-for-agent"];
+  const { "ready-for-agent": ready, "ready-for-human": human } = labels;
   if (token === "stranded-ruling") {
     return {
-      label: labels["ready-for-human"],
+      label: human,
       comment: `${RELABELLED} a ruling or triage comment is newer than the brief, and the Pull does not read it: ${text}. To make it the brief, rename its heading to \`## Agent Brief — ruling\` and drop anything that is not decided scope, or delete it; then restore \`${ready}\`.`,
     };
   }
@@ -202,10 +201,10 @@ export function relabel(token, text, labels) {
     };
   }
   if (token === "ready-for-human-fork") {
-    return { label: labels["ready-for-human"], comment: `${RELABELLED} the brief leaves a decision open. Open fork: ${text}.` };
+    return { label: human, comment: `${RELABELLED} the brief leaves a decision open. Open fork: ${text}.` };
   }
   const { cause, line } = handsParts(text);
-  return { label: labels["ready-for-human"], comment: `${RELABELLED} needs human hands — ${HANDS[cause]}: ${line}.` };
+  return { label: human, comment: `${RELABELLED} needs human hands — ${HANDS[cause]}: ${line}.` };
 }
 
 /** The comment a `yes` to Q1b closes the issue with. */
@@ -1103,14 +1102,17 @@ class Pull {
 
   // Posts the cause's comment and swaps `ready-for-agent` for its label. One
   // comment per cause: an edit that failed after its comment landed is run
-  // again without a second comment.
+  // again without a second comment. The cause is the token and its text, never
+  // the comment, whose wording takes the Label map's strings and so moves with
+  // the map between the failed edit and the retry.
   relabelled(token, text) {
     const { st } = this;
     const { label, comment } = relabel(token, text, this.p.labels);
-    if (st.commented !== comment) {
+    const cause = JSON.stringify([token, text]);
+    if (st.commented !== cause) {
       const c = this.gh("relabel", ["issue", "comment", String(st.ticket), "--body", comment]);
       if (c.status !== 0) return this.stop(withText(`gh issue comment failed (${c.how})`, c));
-      st.commented = comment;
+      st.commented = cause;
       this.save();
     }
     const e = this.gh("relabel", ["issue", "edit", String(st.ticket), "--remove-label", this.p.labels["ready-for-agent"], "--add-label", label]);

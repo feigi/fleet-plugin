@@ -422,7 +422,8 @@ function relabelArgs(cause, detail) {
 }
 
 // The comment `dispatch-prompt.mjs render relabel` renders for a bail, or null
-// when there is none (the NEED, named `what`, is printed here).
+// when there is none (the NEED, named `what`, is printed here). The template
+// names the role `ready-for-agent`; the comment filed names the map's string.
 function rendered(ev, ticket, cause, detail, what) {
   const relabel = relabelArgs(cause, detail);
   if (relabel.why !== undefined) {
@@ -434,18 +435,23 @@ function rendered(ev, ticket, cause, detail, what) {
     ev.need(`${what} #${ticket} — dispatch-prompt.mjs render relabel refused: ${said(r)}`);
     return null;
   }
-  return r.stdout;
+  return r.stdout.replaceAll("`ready-for-agent`", `\`${ev.labels["ready-for-agent"]}\``);
 }
+
+// The map's strings for the labels a pulled ticket carries, which a demotion
+// or a close takes off.
+const pulledLabels = (ev) => [ev.labels["ready-for-agent"], ev.labels["in-progress"]];
 
 // Moves #ticket to `label`, then posts the comment `body()` returns, if any.
 // False when the move could not be made, so nothing after it may run.
 function demote(ev, ticket, label, cause, body) {
   const seen = ev.comments("issue", ticket, `relabel #${ticket} ${label}`);
   if (seen === null) return false;
-  if (seen.labels.includes(label) && !seen.labels.includes(ev.labels["ready-for-agent"]) && !seen.labels.includes(ev.labels["in-progress"])) {
+  const pulled = pulledLabels(ev);
+  if (seen.labels.includes(label) && !pulled.some((l) => seen.labels.includes(l))) {
     ev.note(`#${ticket} already ${label}`);
   } else {
-    const e = gh(["issue", "edit", String(ticket), "--remove-label", ev.labels["ready-for-agent"], "--remove-label", ev.labels["in-progress"], "--add-label", label]);
+    const e = gh(["issue", "edit", String(ticket), ...pulled.flatMap((l) => ["--remove-label", l]), "--add-label", label]);
     if (e.status !== 0) {
       ev.need(`relabel #${ticket} ${label} — gh issue edit failed: ${said(e)}`);
       return false;
@@ -489,7 +495,7 @@ function fixed(ev, ticket, detail) {
     }
     ev.note(`closed #${ticket}: fixed by ${sha}`);
   }
-  const stale = [ev.labels["ready-for-agent"], ev.labels["in-progress"]].filter((l) => seen.labels.includes(l));
+  const stale = pulledLabels(ev).filter((l) => seen.labels.includes(l));
   if (stale.length > 0) {
     const e = gh(["issue", "edit", String(ticket), ...stale.flatMap((l) => ["--remove-label", l])]);
     if (e.status !== 0) ev.need(`unlabel #${ticket} ${stale.join(" ")} — gh issue edit failed: ${said(e)}`);

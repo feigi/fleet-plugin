@@ -1193,6 +1193,19 @@ test("Q2: an edit that fails after its comment landed is answered again without 
   assert.equal(ghCalls(f, /^issue edit/).length, 2);
 });
 
+test("Q2: an edit that failed after its comment landed is answered again without a second comment when the Label map changed in between, and the retry moves the map's string", () => {
+  const f = fixture();
+  f.next("--head", "12");
+  f.answer(12, "staleness", "done");
+  f.ghRules([{ match: "^issue edit", exit: 1, err: "gh: rate limited" }]);
+  assert.equal(f.answer(12, "decided", "needs-triage", "the", "scope").status, 2);
+  f.ghRules();
+  seedLabelMap(f.repo, { roles: { "ready-for-agent": "agent-ready" } });
+  assert.equal(f.answer(12, "decided", "needs-triage", "the", "scope").status, 1);
+  assert.equal(ghCalls(f, /^issue comment/).length, 1, "no second comment");
+  assert.deepEqual(ghCalls(f, /^issue edit/).at(-1).args, ["issue", "edit", "12", "--remove-label", "agent-ready", "--add-label", "needs-triage"]);
+});
+
 // ── Q3: collision ────────────────────────────────────────────────────────────
 
 // Two open PRs whose diffs the gh stub answers — #7's failing when asked —

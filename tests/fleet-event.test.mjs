@@ -23,6 +23,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
 import { seedLabelMap } from "./support/label-map-seed.mjs";
+import { renderBrief } from "./support/render-brief.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { bodyDigest, foldLedger, parkedToken } from "../plugin/scripts/fleet-tick.mjs";
 import { BAILS, reportKind } from "../plugin/scripts/fleet-event.mjs";
@@ -515,17 +516,21 @@ test("every bailCause the impl report schema admits is a cause impl-report acts 
 
 const REMAP = { "ready-for-agent": "agent-ready", "in-progress": "wip", "needs-triage": "triage", "ready-for-human": "human", "ready-to-merge": "merge-ready" };
 
-test("with a remapped Label map a bail relabel records --remove-label agent-ready --remove-label wip --add-label triage, and a second run finds it in place", () => {
+test("with a remapped Label map a bail relabel records --remove-label agent-ready --remove-label wip --add-label triage, files a comment naming agent-ready, and a second run finds it in place", () => {
   const f = fixture({ rows: ["#412 impl-412"], labels: REMAP });
   f.setGh({ issue: { 412: { labels: ["agent-ready", "wip", "enhancement"], comments: [] } }, pr: {} });
   f.report(bail("impl-412", "undecided", "which flag spelling wins"));
   f.control("settle", { "impl-412": { outcome: "bailed" } });
-  f.control("dispatch-prompt", { out: "*Relabelled by the fleet controller.* undecided\n" });
+  const template = renderBrief("relabel", "needs-triage");
+  f.control("dispatch-prompt", { out: template });
   const first = f.run(["impl-report", "impl-412"]);
   assert.equal(first.status, 0, first.err + first.stdout);
   assert.deepEqual(f.ghCalls().find((c) => c.args[1] === "edit").args, ["issue", "edit", "412", "--remove-label", "agent-ready", "--remove-label", "wip", "--add-label", "triage"]);
   assert.deepEqual(f.gh().issue[412].labels, ["enhancement", "triage"]);
   assert.match(eventLine(first), /relabelled #412 triage \(undecided\)/);
+  const [comment] = f.gh().issue[412].comments;
+  assert.equal(comment, template.replace("`ready-for-agent`", "`agent-ready`"));
+  assert.match(comment, /`agent-ready` restored once decided/);
 
   const second = f.run(["impl-report", "impl-412"]);
   assert.equal(second.status, 0, second.err + second.stdout);
@@ -533,16 +538,33 @@ test("with a remapped Label map a bail relabel records --remove-label agent-read
   assert.match(eventLine(second), /#412 already triage/);
 });
 
-test("with a remapped Label map every ready-for-human bail adds the mapped string", () => {
-  for (const [cause, detail] of [["fork", "keep the cache or drop it"], ["hands", "judgment the rollout order"], ["covered", "PR#77 — its diff adds the same guard"]]) {
+test("with a remapped Label map a bail onto a ticket already holding the mapped target label beside a mapped pulled label (wip or agent-ready) still takes it off", () => {
+  for (const pulled of ["wip", "agent-ready"]) {
+    const f = fixture({ rows: ["#412 impl-412"], labels: REMAP });
+    f.setGh({ issue: { 412: { labels: ["triage", pulled], comments: [] } }, pr: {} });
+    f.report(bail("impl-412", "undecided", "which flag spelling wins"));
+    f.control("settle", { "impl-412": { outcome: "bailed" } });
+    f.control("dispatch-prompt", { out: "*Relabelled by the fleet controller.* undecided\n" });
+    const r = f.run(["impl-report", "impl-412"]);
+    assert.equal(r.status, 0, `${pulled}: ${r.err}${r.stdout}`);
+    assert.deepEqual(f.ghCalls().find((c) => c.args[1] === "edit")?.args, ["issue", "edit", "412", "--remove-label", "agent-ready", "--remove-label", "wip", "--add-label", "triage"], pulled);
+    assert.deepEqual(f.gh().issue[412].labels, ["triage"], pulled);
+  }
+});
+
+test("with a remapped Label map every ready-for-human bail adds the mapped string, and the covered comment names the mapped ready-for-agent", () => {
+  for (const [cause, kind, detail] of [["fork", "fork", "keep the cache or drop it"], ["hands", "hands", "judgment the rollout order"], ["covered", "covered", "PR#77 — its diff adds the same guard"]]) {
     const f = fixture({ rows: ["#412 impl-412"], labels: REMAP });
     f.setGh({ issue: { 412: { labels: ["agent-ready", "wip"], comments: [] } }, pr: {} });
     f.report(bail("impl-412", cause, detail));
     f.control("settle", { "impl-412": { outcome: "bailed" } });
-    f.control("dispatch-prompt", { out: `*Relabelled by the fleet controller.* ${cause}\n` });
+    f.control("dispatch-prompt", { out: renderBrief("relabel", kind) });
     const r = f.run(["impl-report", "impl-412"]);
     assert.equal(r.status, 0, `${cause}: ${r.err}${r.stdout}`);
     assert.deepEqual(f.ghCalls().find((c) => c.args[1] === "edit").args, ["issue", "edit", "412", "--remove-label", "agent-ready", "--remove-label", "wip", "--add-label", "human"], cause);
+    const [comment] = f.gh().issue[412].comments;
+    assert.doesNotMatch(comment, /ready-for-agent/, cause);
+    if (kind === "covered") assert.match(comment, /restore `agent-ready` if it\s+closes unmerged/);
   }
 });
 
@@ -580,7 +602,7 @@ for (const [what, damage] of [
       const ledger = f.ledger();
       const r = f.run(args);
       assert.equal(r.status, 2, r.err + r.stdout);
-      assert.match(r.err, /label-map\.mjs ensure/);
+      assert.match(r.err, /label-map\.mjs ensure.* — nothing written$/m);
       assert.deepEqual(r.order, [], "no settle, no gh, no tick");
       assert.equal(f.ledger(), ledger);
       assert.equal(r.stdout, "");
