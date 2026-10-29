@@ -61,6 +61,7 @@ const INVALID = [
   ["a string containing a double quote", (ws) => seedLabelMap(ws, { roles: { onhold: 'on"hold' } })],
   ["a string containing a backslash", (ws) => seedLabelMap(ws, { roles: { onhold: "on\\hold" } })],
   ["a string over 50 characters", (ws) => seedLabelMap(ws, { roles: { onhold: long } })],
+  ["a string of 51 astral emoji", (ws) => seedLabelMap(ws, { roles: { onhold: "\u{1F41B}".repeat(51) } }), /longer than 50 code points \(51\)/],
   ["an empty string", (ws) => seedLabelMap(ws, { roles: { onhold: "" } })],
   ["a string blank after trimming", (ws) => seedLabelMap(ws, { roles: { onhold: "   " } })],
   ["two roles sharing one string", (ws) => seedLabelMap(ws, { roles: { onhold: "wontfix" } })],
@@ -212,6 +213,21 @@ test("strings D8 allows are accepted: exactly 50 characters, spaces, punctuation
   const r = cli(ws, "show");
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(JSON.parse(r.stdout), { ...identity(), ...roles });
+});
+
+test("D8 counts code points: 50 astral emoji are accepted by the reader and show, 51 are refused", () => {
+  const ws = repo();
+  const fifty = "\u{1F41B}".repeat(50);
+  seedLabelMap(ws, { roles: { onhold: fifty } });
+  assert.equal(readLabelMap({ cwd: ws }).onhold, fifty);
+  const r = cli(ws, "show", "onhold");
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, `${fifty}\n`);
+  assert.deepEqual(labelStringFaults({ ...identity(), onhold: fifty }), []);
+  const faults = labelStringFaults({ ...identity(), onhold: `${fifty}\u{1F41B}` });
+  assert.equal(faults.length, 1);
+  assert.equal(faults[0].role, "onhold");
+  assert.match(faults[0].rule, /longer than 50 code points \(51\)/);
 });
 
 test("a linked worktree's show reads the main checkout's cache", () => {
@@ -958,7 +974,7 @@ test("set refuses a string D8 rejects, exit 1 naming the role and the rule, with
   const cases = [
     [["onhold=on\"hold"], /onhold: its answer names "on\\"hold".*contains `"`\)\. Fix: change the onhold=<label> pair\n/],
     [["onhold=on\\hold"], /onhold: its answer names .*contains `\\`/],
-    [[`onhold=${long}`], /onhold: its answer names .*longer than 50 characters \(51\)/],
+    [[`onhold=${long}`], /onhold: its answer names .*longer than 50 code points \(51\)/],
     [["onhold="], /onhold: its answer names "".*empty after trimming/],
     [["onhold=   "], /onhold: its answer names "   ".*empty after trimming/],
     [["onhold=WONTFIX"], /onhold: its answer names "WONTFIX".*wontfix resolves to as its default.*\. Fix: change the onhold=<label> pair, or run `label-map\.mjs set wontfix=<label>`/],

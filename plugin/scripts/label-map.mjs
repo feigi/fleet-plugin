@@ -18,7 +18,7 @@
 //   origin     every Label role -> "table" | "default" | "maintainer"
 //
 // VALID STRINGS (labelStringFaults): non-empty after trimming, at most 50
-// characters, no `"` and no `\`, and no two roles mapping to one string,
+// code points, no `"` and no `\`, and no two roles mapping to one string,
 // compared ignoring case.
 //
 // THE READER (readLabelMap) returns `roles` when the cache parses, holds every
@@ -125,7 +125,8 @@ function stringFault(value) {
   if (value === undefined) return "missing";
   if (typeof value !== "string") return `not a string (${JSON.stringify(value)})`;
   if (value.trim() === "") return "empty after trimming";
-  if (value.length > MAX_LENGTH) return `longer than ${MAX_LENGTH} characters (${value.length})`;
+  const length = [...value].length;
+  if (length > MAX_LENGTH) return `longer than ${MAX_LENGTH} code points (${length})`;
   if (value.includes('"')) return 'contains `"`';
   if (value.includes("\\")) return "contains `\\`";
   return null;
