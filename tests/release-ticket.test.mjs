@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 import { slowTransport, SSH_URL } from "./support/slow-transport.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { hasAttribute } from "./support/worktree-porcelain.mjs";
+import { seedLabelMap } from "./support/label-map-seed.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/release-ticket.sh", import.meta.url));
 const INFLIGHT = fileURLToPath(new URL("../plugin/scripts/inflight.sh", import.meta.url));
@@ -101,10 +102,12 @@ const commit = (w, msg, content) => {
 };
 
 /**
- * Bare origin + working clone with one commit on main, plus a `gh` stub on
- * PATH. Returns the clone dir, the stub's call log path, and an env builder.
+ * Bare origin + working clone with one commit on main, its Label map seeded
+ * through seedLabelMap() with `labelMap` (the identity map by default, none at
+ * all when null), plus a `gh` stub on PATH. Returns the clone dir, the stub's
+ * call log path, and an env builder.
  */
-function repo(t, dir = "w") {
+function repo(t, dir = "w", labelMap = {}) {
   const root = mkdtempSync(join(tmpdir(), "release-ticket-"));
   // Restore the search bits before deleting, rather than trusting each fixture's
   // own restore to have run. A fixture that chmods a directory unsearchable and
@@ -129,6 +132,13 @@ function repo(t, dir = "w") {
   commit(w, "root", "root\n");
   git(w, "branch", "-M", "main");
   git(w, "push", "-q", "-u", "origin", "main");
+  // `.fleet/` is gitignored in a real checkout; excluded here so the seeded
+  // map never reads as an untracked file in the clone's own status.
+  if (labelMap !== null) {
+    seedLabelMap(w, labelMap);
+    mkdirSync(join(w, ".git", "info"), { recursive: true });
+    appendFileSync(join(w, ".git", "info", "exclude"), ".fleet/\n");
+  }
 
   // The stub answers the two calls release-ticket.sh makes and the two
   // inflight.sh makes, keyed on the whole argument line because both scripts
@@ -400,6 +410,55 @@ test("after a release the in-flight probe no longer reads the ticket as taken", 
 
   assert.equal(release(r, c).code, 0);
   assert.equal(probe().status, 0, "a released ticket must go back into the pool");
+});
+
+// The in-progress string is the Label map's, never the role name: remapped to
+// `wip`, the label scan finds `wip`, the dry run's `would:` line names it and
+// the recorded `gh issue edit` removes it.
+test("the release scans for and removes the in-progress string the Label map holds", (t) => {
+  const r = repo(t, "w", { roles: { "in-progress": "wip" } });
+  const c = claim(r.w, 9, "release-ticket");
+  const env = { GH_LABELS: "bug\nwip" };
+
+  const dry = release(r, c, { apply: false, env });
+  assert.equal(dry.code, 0, dry.stderr);
+  assert.equal(dry.json.label, true);
+  assert.match(dry.stderr, /would: gh issue edit 9 --remove-label wip$/m);
+
+  const { code, json, stderr } = release(r, c, { env });
+  assert.equal(code, 0, stderr);
+  assert.equal(json.label, true);
+  assert.deepEqual(r.calls().filter((l) => l.startsWith("issue edit")), ["issue edit 9 --remove-label wip"]);
+});
+
+// A mapped string is matched as a fixed string: a `.` in it is a `.`, so
+// `in.progress` finds only itself and never `inXprogress`.
+test("a mapped in-progress string with a `.` in it matches only itself in the label scan", (t) => {
+  const r = repo(t, "w", { roles: { "in-progress": "in.progress" } });
+  const c = claim(r.w, 9, "release-ticket");
+
+  const lookalike = release(r, c, { apply: false, env: { GH_LABELS: "inXprogress" } });
+  assert.equal(lookalike.code, 0, lookalike.stderr);
+  assert.equal(lookalike.json.label, false, "`inXprogress` is not the mapped string");
+
+  const { code, json, stderr } = release(r, c, { env: { GH_LABELS: "inXprogress\nin.progress" } });
+  assert.equal(code, 0, stderr);
+  assert.equal(json.label, true);
+  assert.deepEqual(r.calls().filter((l) => l.startsWith("issue edit")), ["issue edit 9 --remove-label in.progress"]);
+});
+
+test("no Label map refuses the release before anything is released, naming ensure", (t) => {
+  const r = repo(t, "w", null);
+  const c = claim(r.w, 9, "release-ticket");
+
+  for (const apply of [false, true]) {
+    const { code, stderr } = release(r, c, { apply });
+    assert.equal(code, 2, stderr);
+    assert.match(stderr, /label-map: no Label map at .*\/\.fleet\/labels\.json: run `label-map\.mjs ensure`/);
+    assert.match(stderr, /release-ticket: could not read the in-progress label from the Label map/);
+  }
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing is released");
+  assert.deepEqual(r.calls().filter((l) => l.includes("--json labels") || l.startsWith("issue edit")), [], "the label is neither read nor written");
 });
 
 test("a commit already upstream-equivalent still blocks: `ahead` catches what `git cherry` cannot", (t) => {

@@ -20,6 +20,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { seedLabelMap } from "./support/label-map-seed.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/stranded.mjs", import.meta.url));
 const REPO_URL = "https://github.com/o/r";
@@ -92,6 +93,8 @@ function fixture(t, { controller = null, heartbeat, worktrees = [] } = {}) {
   git(repo, "push", "-q", "origin", "main");
   for (const name of worktrees) git(repo, "worktree", "add", "-q", "-b", `implementer/${name}`, join(repo, ".worktrees", name));
   mkdirSync(join(repo, ".fleet"), { recursive: true });
+  // release-ticket.sh reads the in-progress string from the Label map.
+  seedLabelMap(repo);
   const beatFile = join(repo, ".fleet", "heartbeat.json");
   if (heartbeat !== undefined) writeFileSync(beatFile, heartbeat);
   else if (controller !== null) writeFileSync(beatFile, JSON.stringify({ quiet: 0, digest: "", controller }));

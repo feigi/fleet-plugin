@@ -264,16 +264,25 @@ tmpl_stamp=${tmpl_stamp%% *}
 # ticket claimed: the rc-0 half of the same hole the pipeline form opened.
 [ -n "$tmpl_stamp" ] || die "cksum $0 produced no checksum — refusing to claim without a runner template stamp"
 
+# The string the tracker uses for the in-progress role, read from the Label
+# map by label-map.mjs's `show`, the sibling beside this script, before the
+# first label use, so every label write and `would:` line below types it. No
+# map or an invalid one is `show`'s exit 1, its own message naming `ensure`
+# on stderr; `show`'s stdout is the string alone, so stderr is left to reach
+# the terminal rather than merged into it.
+in_progress=$(node "$script_dir/label-map.mjs" show in-progress) \
+  || die "could not read the in-progress label from the Label map — nothing claimed"
+
 if [ "$apply" = false ]; then
   echo "$NAME: DRY RUN — nothing created. Pass --apply to act." >&2
-  echo "    would: gh issue edit $issue --add-label in-progress" >&2
+  echo "    would: gh issue edit $issue --add-label $in_progress" >&2
   printf '    would: git worktree add --no-track %s -b %s origin/main\n' "$wt" "$branch" >&2
   printf '    would: (cd %s && %s)\n' "$wt" "$install" >&2
   printf '    would: write %s and add it to .git/info/exclude — skipped if %s is\n' "$runner" "$runner" >&2
   printf '      already present, a repo-local runner checked out with the worktree\n' >&2
 else
-  echo "\$ gh issue edit $issue --add-label in-progress" >&2
-  gh issue edit "$issue" --add-label in-progress >/dev/null || die "could not label issue $issue"
+  echo "\$ gh issue edit $issue --add-label $in_progress" >&2
+  gh issue edit "$issue" --add-label "$in_progress" >/dev/null || die "could not label issue $issue"
 
   # `--no-track`: without it, `-b … origin/main` leaves $branch tracking
   # origin/main, so `@{u}` RESOLVES — to main. Every "did my push land?" check a

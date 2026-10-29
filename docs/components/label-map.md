@@ -15,13 +15,16 @@ plugin knows
 ([ADR 0035](../adr/0035-label-strings-come-from-the-consumer-repo-into-fleet-state-the-shipped-surface-names-roles.md)).
 
 **Status.** The derivation step, the cache, the reader and `show` are shipped,
-and the run-team controller's phase 0 runs the derivation step. Nothing else
-reads the map yet: the scripts that query or set a label still use each role's
-own name as its string (`candidates.mjs`'s Shortlist exclusions, for one), so
-until that migration lands a repository's role labels must be exactly the role
-names. Steps 5 and 6 below, and the opinionated choices that name the shipped
-runbooks and every entry point, describe the target the follow-up tickets
-reach: #3865 and #3866 for the runbook prose, #3867–#3873 for the scripts.
+and the run-team controller's phase 0 runs the derivation step. The scripts
+move onto the map ticket by ticket: `claim-ticket.sh` adds the in-progress
+label, and `release-ticket.sh` and `drop-merged-label.sh` scan for and remove
+it, each through `label-map.mjs show in-progress`. A script not yet moved
+still uses each role's own name as its string (`stranded.mjs`'s in-progress
+scan, for one), so until that migration lands a repository's role labels must
+be exactly the role names. Steps 5 and 6 below, and the opinionated choices
+that name the shipped runbooks and every entry point, describe the target the
+follow-up tickets reach: #3865 and #3866 for the runbook prose, #3870 and #3872
+for the scripts still to move.
 
 ## How it works
 1. **Declare.** The repository's triage-label table,
@@ -52,11 +55,11 @@ reach: #3865 and #3866 for the runbook prose, #3867–#3873 for the scripts.
    table as it was when derived, the string per role and the origin of each
    (`table`, `default` or `maintainer`). It is gitignored, never committed and
    never written by hand; deleting it forces a fresh derivation.
-5. **Read** (target; #3867–#3873). Every script that reads or writes a label
-   is to resolve its role through the one reader in `label-map.mjs`, or
-   `label-map.mjs show <role>` from shell. The reader never reads the tracker
-   and has no defaults: an absent or broken map is a refusal naming the
-   derivation step.
+5. **Read** (target; #3870 and #3872 still to land). Every script that reads
+   or writes a label is to resolve its role through the one reader in
+   `label-map.mjs`, or `label-map.mjs show <role>` from shell. The reader never
+   reads the tracker and has no defaults: an absent or broken map is a refusal
+   naming the derivation step.
 6. **Entry points** (target for all but phase 0; #3865). The run-team
    controller's phase 0 runs the derivation step first, before any query; the
    solo entry points are to do the same, and these are the only places that

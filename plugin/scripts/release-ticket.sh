@@ -1290,6 +1290,15 @@ if [ -n "$blockers" ]; then
   exit 1
 fi
 
+# The string the tracker uses for the in-progress role, read from the Label
+# map by label-map.mjs's `show`, the sibling beside this script, before the
+# label is read, so the scan, the `would:` line and the label drop below all
+# type it. No map or an invalid one is `show`'s exit 1, its own message naming
+# `ensure` on stderr; `show`'s stdout is the string alone, so stderr is left
+# to reach the terminal rather than merged into it.
+in_progress=$(node "$(dirname "$0")/label-map.mjs" show in-progress) \
+  || die "could not read the in-progress label from the Label map — nothing released"
+
 # Read the label before touching anything, so a tracker that cannot answer stops
 # the run before any delete rather than halfway through it.
 #
@@ -1312,7 +1321,9 @@ fi
 # gone, and the release below would leave the ticket invisible to
 # candidates.mjs with no artefact left to explain it — the same failure
 # mode the comment above this block already guards against on the `gh` side.
-if printf '%s\n' "$labels" | grep -qx in-progress; then rt_gp_rc=0; else rt_gp_rc=$?; fi
+# Fixed-string, whole-line: a mapped string may hold regex characters, and a
+# `.` in it read as a pattern would match a label that is not the string.
+if printf '%s\n' "$labels" | grep -qxF -- "$in_progress"; then rt_gp_rc=0; else rt_gp_rc=$?; fi
 case $rt_gp_rc in
   0) has_label=true ;;
   1) has_label=false ;;
@@ -1321,7 +1332,7 @@ esac
 
 if [ "$apply" = false ]; then
   echo "$NAME: DRY RUN — nothing removed. Pass --apply to act." >&2
-  [ "$has_label" = true ] && echo "    would: gh issue edit $issue --remove-label in-progress" >&2
+  [ "$has_label" = true ] && echo "    would: gh issue edit $issue --remove-label $in_progress" >&2
   [ -n "$wt" ] && printf '    would: git worktree remove %s\n' "$wt" >&2
   [ "$has_branch" = true ] && echo "    would: git update-ref -d refs/heads/$branch <its current tip>" >&2
   if [ "$closed_pr" = true ]; then
@@ -1510,8 +1521,8 @@ else
   fi
 
   if [ "$has_label" = true ]; then
-    echo "\$ gh issue edit $issue --remove-label in-progress" >&2
-    gh issue edit "$issue" --remove-label in-progress >/dev/null ||
+    echo "\$ gh issue edit $issue --remove-label $in_progress" >&2
+    gh issue edit "$issue" --remove-label "$in_progress" >/dev/null ||
       halt "could not drop in-progress from issue $issue"
   fi
   # Housekeeping, and the final statement under `set -e`: unchecked, a prune

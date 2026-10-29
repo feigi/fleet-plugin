@@ -98,7 +98,7 @@ A repository whose tracker spells a role differently declares it in the `Label i
 
 The Label map derivation step (`label-map.mjs ensure`, see [Label map](components/label-map.md)) replaces a hand-run check loop. It checks every mapped string against the tracker's live label list, so a label renamed or deleted since the last run is caught before the pre-flight and before any dispatch. Today the run-team controller's phase 0 runs it; the solo entry points are to run it first too (#3865).
 
-Until the scripts read the map (#3867–#3873), they still query and set each role's own name as its string. So, for now, a repository's role labels must be exactly the role names: a different string declared in the table is mapped, but the Shortlist and the other label queries do not use it yet.
+Until every script reads the map (#3870 and #3872 are still to land), a script not yet moved still queries and sets each role's own name as its string — the stranded scan's in-progress query, for one. `claim-ticket.sh` already adds the in-progress label through the map, and `release-ticket.sh` and `drop-merged-label.sh` scan for and remove it through the map. So, for now, a repository's role labels must be exactly the role names: a different string declared in the table is mapped, but the label queries not yet moved do not use it.
 
 ### 2.5 `.gitignore` — HARD
 ```
