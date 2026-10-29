@@ -855,8 +855,9 @@ export function computeBoard(inputs) {
     }, now),
     attention,
     // The Cell evidence tab's model (compute-cell-evidence.mjs), built from the
-    // guard, the receipts' metrics steps, the definitions and the carried
-    // `modelRoles` read gather() answered, and this run's Pulls: each card's
+    // guard, the receipts' metrics steps, the definitions, the installed router
+    // table and package, the live run's Objective and the carried `modelRoles`
+    // read gather() answered, and this run's Pulls: each card's
     // Cell line, booked As-routed to its Cell. A caller that read none of them
     // (every hand-built input in this suite) gets the tab's no-guard state:
     // computeCellEvidence reads an input left out as nothing read.
@@ -865,6 +866,10 @@ export function computeBoard(inputs) {
       receipts: inputs.receipts,
       agents: inputs.agents,
       modelRoles: inputs.modelRoles,
+      table: inputs.routerTable,
+      install: inputs.install,
+      repoUrl: inputs.repoUrl,
+      objective: inputs.objective,
       pulls: tickets.filter((t) => t.cellLine).map((t) => ({ issue: t.issue, cell: t.cellLine.cell, mark: t.cellLine.mark, targets: t.cellLine.targets })),
     }),
     // The `omp config get modelRoles` read, carried tick to tick the way `ci`

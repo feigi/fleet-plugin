@@ -478,3 +478,311 @@ test("figures show from the file pr-cost.mjs writes, as the tick's reader accept
   assert.equal(cellOf(ce, "slow-high").figures.failRate.text, "10.0% · the floor is 25.0%");
   assert.deepEqual(ce.guard.notes, [], "a complete guard needs no 'not checked'");
 });
+
+// -- policy rows: what routes now, row by row ----------------------------------------------------
+
+const { readFileSync } = await import("node:fs");
+const { policyRowsView, repoIdentity } = await import("../plugin/scripts/compute-cell-evidence.mjs");
+const SHIPPED = JSON.parse(readFileSync(new URL("../plugin/scripts/router-table.json", import.meta.url), "utf8"));
+const INSTALL = { name: "@feigi/fleet-ctl", version: "3.104.0", repository: "git+https://github.com/feigi/fleet-plugin.git", error: null };
+const HERE = "https://github.com/feigi/fleet-plugin";
+const FIVE = ["slow-high", "task-high", "smol-high", "slow-medium", "task-max"];
+
+// A table fitted on 198 Pulls, in stage 2, short of the two effort Cells: heavy has a row of its own.
+const FITTED = (o = {}) => ({
+  window_start: "2026-10-03", fitted_commit: "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d", n_rows: 198, stage: 2, cells: FIVE, burn_in: true,
+  rows: { cost: { "*": "slow-high", heavy: "task-high" }, speed: { "*": "slow-high", heavy: "task-high" } },
+  classifier: { b: null, tau: null },
+  estimates: {
+    "*": { "slow-high": { generation: "claude-opus-5", merged: 69 }, "task-high": { generation: "claude-sonnet-5-5", merged: 60 }, "smol-high": { generation: "claude-haiku-5-5", merged: 12 } },
+    heavy: { "slow-high": { generation: "claude-opus-5", merged: 40 }, "task-high": { generation: "claude-sonnet-5-5", merged: 31 } },
+  },
+  reasons: {
+    cost: {
+      "*": { cell: "slow-high", reason: "no-qualifier", cells: { "task-high": { verdict: "not-reliably-cheaper", range: [-1.25, 0.5] }, "smol-high": { verdict: "too-few", range: null } }, pairs: [] },
+      heavy: { cell: "task-high", reason: "sole-qualifier", cells: { "task-high": { verdict: "qualifies", range: [-4.2, -1.1] } }, pairs: [] },
+    },
+    speed: {
+      "*": { cell: "slow-high", reason: "no-qualifier", cells: { "task-high": { verdict: "not-reliably-faster", range: [-12, 3.25] } }, pairs: [] },
+      heavy: { cell: "task-high", reason: "unjudged", cells: {}, pairs: [] },
+    },
+  },
+  guard: { tripped: [], n: { "slow-high": 69, "task-high": 69, "smol-high": 32, "slow-medium": 0, "task-max": 0 } },
+  ...o,
+});
+const policy = (o = {}) => computeCellEvidence({ guard: TODAY(), receipts: NO_RECEIPTS, agents: AGENTS, modelRoles: ROLES, table: SHIPPED, install: INSTALL, repoUrl: HERE, ...o }).policy;
+const sideOf = (p) => p.sides[0];
+const lineOf = (p, objective, stratum) => p.objectives.find((o) => o.objective === objective).lines.find((l) => l.stratum === stratum);
+
+test("today's installed table: this repository's runs, never fitted, every Pull drawn over 3 Cells, every row unjudged slow-high", () => {
+  const p = policy();
+  const s = sideOf(p);
+  assert.equal(s.title, "routes now");
+  assert.equal(s.source.text, "this repository's runs · never fitted · @feigi/fleet-ctl 3.104.0");
+  assert.equal(s.source.check, null);
+  assert.equal(s.heading, "never fitted: every Pull drawn over 3 Cells");
+  assert.equal(s.dispatch, "drawn over 3 Cells: slow-high, task-high, smol-high");
+  assert.deepEqual(s.footnotes, []);
+  for (const o of ["cost", "speed"]) {
+    const star = lineOf(p, o, "*").sides[0];
+    assert.deepEqual([star.cell, star.reason, star.dispatch, star.held, star.candidates], ["slow-high", "unjudged", null, null, []], o);
+  }
+});
+
+test("a checkout's 0.0.0 reads linked checkout, a published version its number", () => {
+  assert.equal(sideOf(policy({ install: { ...INSTALL, version: "0.0.0" } })).source.text, "this repository's runs · never fitted · @feigi/fleet-ctl linked checkout");
+});
+
+test("a fitted table names its commit to 7 characters and its Pulls", () => {
+  assert.equal(sideOf(policy({ table: FITTED(), install: { ...INSTALL, version: "3.105.0" } })).source.text,
+    "this repository's runs · fitted at 1a2b3c4 on 198 Pulls · @feigi/fleet-ctl 3.105.0");
+  assert.match(sideOf(policy({ table: FITTED({ n_rows: 1 }) })).source.text, /on 1 Pull ·/);
+});
+
+test("a consumer — install repository ≠ workspace repo, enterprise host — reads <owner/name>'s runs, with the footnote", () => {
+  const s = sideOf(policy({ repoUrl: "https://ghe.example.com/acme/widgets" }));
+  assert.equal(s.source.text, "feigi/fleet-plugin's runs · never fitted · @feigi/fleet-ctl 3.104.0 ¹");
+  assert.equal(s.source.check, null);
+  assert.deepEqual(s.footnotes, [{ mark: "¹", text: "this repository's runs reach routing only through its cost guard, which can hold a Cell back but never picks one" }]);
+});
+
+test("the same owner/name on another host is another repository's table, never this one", () => {
+  assert.equal(sideOf(policy({ repoUrl: "https://ghe.example.com/feigi/fleet-plugin" })).source.text.split(" · ")[0], "feigi/fleet-plugin's runs");
+  assert.equal(sideOf(policy({ repoUrl: "https://github.com/someone-else/fleet-plugin" })).source.text.split(" · ")[0], "feigi/fleet-plugin's runs");
+  assert.equal(sideOf(policy({ repoUrl: "https://GitHub.com/Feigi/Fleet-Plugin" })).source.text.split(" · ")[0], "this repository's runs", "host and owner/name compare without case");
+});
+
+test("an install naming no repository reads another repository's runs, and the comparison is not checked", () => {
+  for (const repository of [null, "", "not a url", "https://github.com/only-owner"]) {
+    const s = sideOf(policy({ install: { ...INSTALL, repository } }));
+    assert.equal(s.source.text, "another repository's runs · never fitted · @feigi/fleet-ctl 3.104.0 ¹", JSON.stringify(repository));
+    assert.equal(s.source.check, "not checked: the install names no repository");
+    assert.equal(s.footnotes.length, 1);
+  }
+  assert.equal(sideOf(policy({ install: { ...INSTALL, repository: null }, table: FITTED() })).heading.split(":")[0], "stage 2 at its fit on another repository's runs");
+});
+
+test("a workspace whose repository is not known is not compared", () => {
+  const s = sideOf(policy({ repoUrl: null }));
+  assert.equal(s.source.text.split(" · ")[0], "feigi/fleet-plugin's runs");
+  assert.equal(s.source.check, "not checked: this workspace's repository is not known");
+});
+
+test("an install that could not be read says so, where its name and version would be, and the comparison says why it is not checked", () => {
+  const unread = sideOf(policy({ install: { name: null, version: null, repository: null, error: "/x/package.json: ENOENT" } }));
+  assert.equal(unread.source.text, "another repository's runs · never fitted · install not read: /x/package.json: ENOENT ¹");
+  assert.equal(unread.source.check, "not checked: the install was not read");
+  const none = sideOf(policy({ install: null }));
+  assert.equal(none.source.text.split(" · ")[2], "install not read ¹");
+  assert.equal(none.source.check, "not checked: the install was not read");
+});
+
+test("repoIdentity reads the shapes a package.json repository takes", () => {
+  const want = { host: "github.com", name: "feigi/fleet-plugin" };
+  for (const u of ["git+https://github.com/feigi/fleet-plugin.git", "https://github.com/feigi/fleet-plugin", "https://github.com/feigi/fleet-plugin/", "git://github.com/feigi/fleet-plugin.git",
+    "git@github.com:feigi/fleet-plugin.git", "ssh://git@github.com/feigi/fleet-plugin.git", "github:feigi/fleet-plugin", "feigi/fleet-plugin", "https://github.com/feigi/fleet-plugin/tree/main/plugin"]) {
+    assert.deepEqual(repoIdentity(u), want, u);
+  }
+  assert.deepEqual(repoIdentity("git+ssh://git@ghe.example.com/acme/widgets.git"), { host: "ghe.example.com", name: "acme/widgets" });
+  assert.deepEqual(repoIdentity("git@GitHub.com:feigi/fleet-plugin.git"), want, "an scp host compares without case");
+  assert.deepEqual(repoIdentity("gitlab:acme/widgets"), { host: "gitlab.com", name: "acme/widgets" });
+  assert.deepEqual(repoIdentity("bitbucket:acme/widgets"), { host: "bitbucket.org", name: "acme/widgets" });
+  assert.deepEqual(repoIdentity("bitbucket:acme/widgets"), repoIdentity("https://bitbucket.org/acme/widgets"), "the bitbucket shorthand is bitbucket.org's");
+  for (const u of [null, undefined, 3, "", "nope", "https://github.com/owner"]) assert.equal(repoIdentity(u), null, String(u));
+});
+
+test("repoIdentity drops a ref pin and a www. host, and refuses a relative path", () => {
+  const want = { host: "github.com", name: "feigi/fleet-plugin" };
+  for (const u of ["github:feigi/fleet-plugin#main", "feigi/fleet-plugin#main", "git+https://github.com/feigi/fleet-plugin.git#v1", "git@github.com:feigi/fleet-plugin.git#v1", "https://www.github.com/feigi/fleet-plugin"]) {
+    assert.deepEqual(repoIdentity(u), want, u);
+  }
+  for (const u of ["../x", "./x", "x/..", "https://github.com/o/.git"]) assert.equal(repoIdentity(u), null, u);
+});
+
+test("burn-in, fitted: the counts are the table's own, past tense, naming whose runs; a consumer adds what ends it", () => {
+  const here = sideOf(policy({ table: FITTED() }));
+  assert.equal(here.heading, "stage 2 at its fit on feigi/fleet-plugin's runs: slow-medium and task-max had 0 of the 20 merged PRs each needs; every Pull drawn over 5 Cells");
+  const consumer = sideOf(policy({ table: FITTED(), repoUrl: "https://ghe.example.com/acme/widgets" }));
+  assert.equal(consumer.heading, `${here.heading}; it ends with a later fit, reaching this install with a plugin release`);
+});
+
+test("burn-in, fitted: Cells short by different counts are each named, one short is 'it needs'", () => {
+  const n = { "slow-high": 69, "task-high": 69, "smol-high": 32, "slow-medium": 3, "task-max": 0 };
+  assert.match(sideOf(policy({ table: FITTED({ guard: { tripped: [], n } }) })).heading, /: slow-medium had 3 and task-max had 0 of the 20 merged PRs each needs;/);
+  const one = { ...n, "slow-medium": 20, "task-max": 20, "smol-high": 7 };
+  assert.match(sideOf(policy({ table: FITTED({ stage: 1, guard: { tripped: [], n: one } }) })).heading, /^stage 1 at its fit on .*: smol-high had 7 of the 20 merged PRs it needs;/);
+});
+
+test("K counts the Cells the draw uses under the guard: a tripped Cell is not one, and none left is no draw", () => {
+  const tripped = (cells) => guardOk(TODAY().guard.cells, { verdict: "tripped", tripped: cells });
+  assert.equal(sideOf(policy({ guard: tripped(["smol-high"]) })).heading, "never fitted: every Pull drawn over 2 Cells");
+  assert.equal(sideOf(policy({ guard: tripped(["smol-high"]) })).dispatch, "drawn over 2 Cells: slow-high, task-high");
+  assert.equal(sideOf(policy({ guard: tripped(["slow-high", "task-high", "smol-high"]) })).heading, "never fitted: no Cell is left to draw, so every Pull runs at its row's Cell");
+});
+
+test("no cost guard: every Pull runs at slow-high, whatever the table says, and every row dispatches alike", () => {
+  for (const guard of [{ status: "missing" }, { status: "unreadable", why: "not JSON" }]) {
+    const p = policy({ guard, table: FITTED({ burn_in: false }) });
+    const s = sideOf(p);
+    assert.equal(s.heading, "no cost guard: every Pull runs at slow-high, the default Cell");
+    assert.equal(s.dispatch, "slow-high only");
+    const heavy = lineOf(p, "cost", "heavy").sides[0];
+    assert.deepEqual([heavy.cell, heavy.held, heavy.dispatch], ["slow-high", "task-high held: no cost guard", null]);
+  }
+});
+
+test("a guard readCostGuard accepts and the router's readGuard refuses routes as no guard, as route itself would", () => {
+  // A Cell that is no `<role>-<level>` token can be tripped for readCostGuard; readGuard refuses the file.
+  const odd = guardOk([...TODAY().guard.cells, entry("odd")], { verdict: "tripped", tripped: ["odd"] });
+  assert.equal(sideOf(policy({ guard: odd })).heading, "no cost guard: every Pull runs at slow-high, the default Cell");
+});
+
+test("verdict none holds nothing back: the table is the dispatch", () => {
+  const none = guardOk(TODAY().guard.cells, { verdict: "none" });
+  const p = policy({ guard: none, table: FITTED({ burn_in: false }) });
+  assert.equal(sideOf(p).heading, null, "no burn-in, no guard heading");
+  assert.equal(sideOf(p).dispatch, "the row's Cell; every 5th Pull drawn over the rest");
+  assert.equal(lineOf(p, "cost", "heavy").sides[0].cell, "task-high");
+});
+
+test("per-row exceptions: a tripped row Cell replaced by slow-high shows on its row, the shared dispatch in the heading", () => {
+  const tripped = guardOk(TODAY().guard.cells, { verdict: "tripped", tripped: ["task-high"] });
+  const p = policy({ guard: tripped, table: FITTED({ burn_in: false }) });
+  assert.equal(sideOf(p).dispatch, "the row's Cell; every 5th Pull drawn over the rest");
+  const heavy = lineOf(p, "cost", "heavy").sides[0];
+  assert.deepEqual([heavy.cell, heavy.held, heavy.dispatch], ["slow-high", "task-high tripped", "slow-high, the row's task-high tripped; every 5th Pull drawn over the rest"]);
+  const star = lineOf(p, "cost", "*").sides[0];
+  assert.equal(star.dispatch, null, "a row that dispatches like the rest names no dispatch of its own");
+  assert.equal(lineOf(p, "speed", "heavy").sides[0].dispatch, heavy.dispatch, "under both Objectives");
+});
+
+test("per-row exceptions in burn-in: a tripped row Cell keeps the draw and names what the policy Cell became", () => {
+  const tripped = guardOk(TODAY().guard.cells, { verdict: "tripped", tripped: ["task-high"] });
+  const p = policy({ guard: tripped, table: FITTED() });
+  assert.equal(sideOf(p).dispatch, "drawn over 4 Cells: slow-high, smol-high, slow-medium, task-max");
+  assert.equal(lineOf(p, "cost", "heavy").sides[0].dispatch, "drawn over 4 Cells: slow-high, smol-high, slow-medium, task-max; the row's task-high tripped, so its policy Cell is slow-high");
+});
+
+test("collapsed Strata: one with no row on any side is one line under its Objective; one with a row of its own keeps it", () => {
+  const p = policy({ table: FITTED() });
+  for (const o of ["cost", "speed"]) {
+    assert.deepEqual(p.objectives.find((x) => x.objective === o).lines.map((l) => l.stratum), ["*", "light", "heavy", "unknown"], o);
+    assert.equal(lineOf(p, o, "light").collapsed, "light: no row, follows *", o);
+    assert.equal(lineOf(p, o, "unknown").collapsed, "unknown: no row, follows *", o);
+    assert.equal(lineOf(p, o, "heavy").collapsed, undefined, o);
+    assert.equal(lineOf(p, o, "heavy").sides[0].cell, "task-high", o);
+  }
+});
+
+test("collapsing and keeping rows across two sides: a Stratum only one side lacks keeps its row, and that side reads 'no row of its own: follows *'", () => {
+  const side = (title, rows) => ({ title, source: { text: title, check: null }, heading: null, footnotes: [], rows });
+  const entry = (cell) => ({ cell, held: null, reason: "r", dispatch: "d", candidates: [] });
+  const none = { cost: { "*": entry("slow-high") }, speed: { "*": entry("slow-high") } };
+  const left = { cost: { "*": entry("slow-high"), heavy: entry("task-high") }, speed: { "*": entry("slow-high") } };
+  const v = policyRowsView({ sides: [side("a", left), side("b", none)] });
+  const line = (o, s) => v.objectives.find((x) => x.objective === o).lines.find((l) => l.stratum === s);
+  assert.equal(line("cost", "light").collapsed, "light: no row on either side, follows *");
+  assert.equal(line("speed", "heavy").collapsed, "heavy: no row on either side, follows *");
+  assert.equal(line("cost", "heavy").collapsed, undefined);
+  assert.equal(line("cost", "heavy").sides[0].cell, "task-high");
+  assert.deepEqual(line("cost", "heavy").sides[1], { follows: "no row of its own: follows *" });
+  assert.deepEqual(line("cost", "*").sides.map((s) => s.cell), ["slow-high", "slow-high"]);
+});
+
+test("the live run's Objective is marked, and between runs nothing is", () => {
+  assert.deepEqual(policy({ objective: "speed" }).objectives.map((o) => [o.objective, o.live]), [["cost", false], ["speed", true]]);
+  assert.deepEqual(policy({ objective: "cost" }).objectives.map((o) => [o.objective, o.live]), [["cost", true], ["speed", false]]);
+  assert.deepEqual(policy().objectives.map((o) => o.live), [false, false]);
+});
+
+test("each candidate shows its n, verdict and 95% interval, in dollars under cost and minutes under speed", () => {
+  const p = policy({ table: FITTED() });
+  assert.deepEqual(lineOf(p, "cost", "*").sides[0].candidates.map((c) => [c.cell, c.n, c.verdict, c.interval]), [
+    ["task-high", 60, "not-reliably-cheaper", "95% interval [−$1.25, $0.50]"],
+    ["smol-high", 12, "too-few", "no 95% interval"],
+  ]);
+  assert.equal(lineOf(p, "cost", "heavy").sides[0].candidates[0].interval, "95% interval [−$4.20, −$1.10]");
+  assert.equal(lineOf(p, "speed", "*").sides[0].candidates[0].interval, "95% interval [−12.0 min, 3.3 min]");
+  assert.equal(lineOf(p, "cost", "*").sides[0].reason, "no-qualifier");
+  assert.equal(lineOf(p, "speed", "heavy").sides[0].reason, "unjudged");
+});
+
+test("a candidate whose estimate carries no count shows its n as not checked, never a measured-looking 0", () => {
+  for (const merged of ["12", -1, 1.5, null, undefined]) {
+    const p = policy({ table: FITTED({ estimates: { "*": { "task-high": { generation: "claude-sonnet-5-5", merged } } } }) });
+    assert.equal(lineOf(p, "cost", "*").sides[0].candidates.find((c) => c.cell === "task-high").n, null, JSON.stringify(merged));
+  }
+  assert.equal(lineOf(policy({ table: FITTED({ estimates: {} }) }), "cost", "*").sides[0].candidates[0].n, null, "no estimate at all");
+});
+
+test("a row with no estimate names no generation and carries no flag", () => {
+  const p = policy({ table: FITTED({ estimates: {} }) });
+  for (const c of lineOf(p, "cost", "*").sides[0].candidates) assert.equal(c.model, null, c.cell);
+  assert.equal(sideOf(p).modelLine, null);
+  assert.equal(sideOf(policy()).modelLine, null, "an unfitted table has no estimates at all");
+});
+
+test("model names: a candidate's judged generation against its Cell's Tier route model, named only where they differ", () => {
+  const roles = { ...ROLES, value: { ...ROLES.value, task: "anthropic/claude-sonnet-5-6:high" } };
+  const p = policy({ table: FITTED(), modelRoles: roles });
+  const [task, smol] = lineOf(p, "cost", "*").sides[0].candidates;
+  assert.deepEqual(task.model, { state: "differs", generation: "claude-sonnet-5-5", text: "judged on claude-sonnet-5-5; task-high runs anthropic/claude-sonnet-5-6 here" });
+  assert.deepEqual(smol.model, { state: "same", generation: "claude-haiku-5-5", text: null }, "an exact match apart from the provider prefix names nothing");
+  assert.equal(sideOf(p).modelLine, null, "one candidate agrees, so the difference stays on its candidate");
+});
+
+test("model names: exact match — claude-opus-5.5 is not claude-opus-5-5, and both names show", () => {
+  const roles = { ...ROLES, value: { ...ROLES.value, task: "anthropic/claude-opus-5.5:high" } };
+  const t = FITTED({ estimates: { "*": { "task-high": { generation: "claude-opus-5-5", merged: 60 } } } });
+  const c = lineOf(policy({ table: t, modelRoles: roles }), "cost", "*").sides[0].candidates.find((x) => x.cell === "task-high" && x.model?.text);
+  assert.equal(c, undefined, "the heading carries it: the one candidate with a generation differs");
+  assert.equal(sideOf(policy({ table: t, modelRoles: roles })).modelLine, "judged on claude-opus-5-5; task-high runs anthropic/claude-opus-5.5 here");
+});
+
+test("model names: when every candidate on a side differs, it is one line in that side's heading", () => {
+  const roles = { ...ROLES, value: { ...ROLES.value, task: "anthropic/claude-sonnet-5-6:high", smol: "anthropic/claude-haiku-5-6:low" } };
+  const p = policy({ table: FITTED(), modelRoles: roles });
+  assert.equal(sideOf(p).modelLine, "judged on claude-sonnet-5-5; task-high runs anthropic/claude-sonnet-5-6 here; judged on claude-haiku-5-5; smol-high runs anthropic/claude-haiku-5-6 here");
+  for (const c of lineOf(p, "cost", "*").sides[0].candidates) assert.equal(c.model.text, null, `${c.cell}: the heading carries it`);
+});
+
+test("model names: an unset model role, or modelRoles never read, reads not checked", () => {
+  const unset = { ...ROLES, value: { slow: ROLES.value.slow, smol: ROLES.value.smol } };
+  const task = lineOf(policy({ table: FITTED(), modelRoles: unset }), "cost", "*").sides[0].candidates[0];
+  assert.deepEqual([task.model.state, task.model.text], ["not checked", "not checked: modelRoles.task unset: omp picks the model"]);
+  const never = lineOf(policy({ table: FITTED(), modelRoles: null }), "cost", "*").sides[0].candidates[0];
+  assert.deepEqual([never.model.state, never.model.text], ["not checked", "not checked: modelRoles not read yet"]);
+  assert.equal(sideOf(policy({ table: FITTED(), modelRoles: null })).modelLine, null, "a check that cannot run is not a difference");
+});
+
+test("every row, collapsed or not, has an anchor and a link, in every state", () => {
+  const states = {
+    "unfitted": policy(),
+    "fitted": policy({ table: FITTED() }),
+    "no guard": policy({ guard: { status: "missing" } }),
+    "no table": policy({ table: null }),
+    "no install": policy({ install: null, repoUrl: null }),
+  };
+  for (const [name, p] of Object.entries(states)) {
+    const lines = p.objectives.flatMap((o) => o.lines.map((l) => [o.objective, l]));
+    assert.equal(lines.length, 8, name);
+    for (const [o, l] of lines) {
+      assert.equal(l.anchor, `cells-row-${o}-${l.stratum}`, name);
+      assert.equal(l.href, `#cells/row/${o}/${l.stratum}`, name);
+    }
+  }
+});
+
+test("no table read: every row says so, and the heading does not guess", () => {
+  const p = policy({ table: null });
+  assert.equal(sideOf(p).heading, "no router table read: the rows are not known");
+  assert.equal(sideOf(p).source.text, "this repository's runs · no router table read · @feigi/fleet-ctl 3.104.0");
+  assert.equal(sideOf(p).dispatch, null);
+  for (const o of p.objectives) for (const l of o.lines) assert.deepEqual(l.sides, [{ unread: "router table not read" }]);
+});
+
+test("computeCellEvidence with none of the policy inputs reads as no table, no install, no Objective", () => {
+  const ce = build();
+  assert.equal(sideOf(ce.policy).heading, "no router table read: the rows are not known");
+  assert.equal(ce.policy.objectives.some((o) => o.live), false);
+});

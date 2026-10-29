@@ -6,7 +6,7 @@ import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import {
   MODEL_ROLES_EVERY_MS, MODEL_ROLES_TIMEOUT_MS, carryModelRoles, gather, readAgents, readGuardFile, readMetricsStep, readModelRoles,
-  readHeldImplementers, readRouterTable, receiptSpendDir,
+  readHeldImplementers, readInstall, readObjective, readRouterTable, receiptSpendDir,
 } from "../plugin/scripts/board-gather.mjs";
 import { CLOSEOUT_RECEIPT, RECEIPT, RECEIPT_HELD, formatRouting } from "../plugin/scripts/ledger-grammar.mjs";
 import { computeBoard } from "../plugin/scripts/compute-board.mjs";
@@ -440,4 +440,72 @@ test("readRouterTable: the installed table when validateTable accepts it, else n
   assert.equal(refused.value, null, "not a table");
   assert.match(refused.err, /router table not read/);
   assert.equal(stderrOf(() => readRouterTable(dir)).err, "", "the same fault is said once");
+});
+
+// -- the policy rows' reads: the install's package.json and the live run's Objective --------------
+
+test("readInstall: the install's own package.json, ../package.json from the script's directory, with its repository's url", () => {
+  const root = tempDir("cell-evidence-install-");
+  const scripts = join(root, "scripts");
+  mkdirSync(scripts);
+  const put = (pkg) => writeFileSync(join(root, "package.json"), typeof pkg === "string" ? pkg : JSON.stringify(pkg));
+  put({ name: "@feigi/fleet-ctl", version: "3.104.0", repository: { type: "git", url: "git+https://github.com/feigi/fleet-plugin.git", directory: "plugin" } });
+  assert.deepEqual(readInstall(scripts), { name: "@feigi/fleet-ctl", version: "3.104.0", repository: "git+https://github.com/feigi/fleet-plugin.git", error: null });
+  put({ name: "x", version: "1.0.0", repository: "github:feigi/fleet-plugin" });
+  assert.equal(readInstall(scripts).repository, "github:feigi/fleet-plugin", "the string form");
+  put({ name: "x", version: "1.0.0" });
+  assert.deepEqual(readInstall(scripts), { name: "x", version: "1.0.0", repository: null, error: null }, "a package naming no repository");
+  put({ name: 3, version: null, repository: { directory: "plugin" } });
+  assert.deepEqual(readInstall(scripts), { name: null, version: null, repository: null, error: null });
+  for (const repository of [null, [], ["git+https://github.com/feigi/fleet-plugin.git"], 3]) {
+    put({ name: "x", version: "1.0.0", repository });
+    assert.deepEqual(readInstall(scripts), { name: "x", version: "1.0.0", repository: null, error: null }, `a repository field of ${JSON.stringify(repository)} names none`);
+  }
+});
+
+test("readInstall: a package.json that is missing, not JSON or not an object is an error, with nothing guessed", () => {
+  const root = tempDir("cell-evidence-install-");
+  const scripts = join(root, "scripts");
+  mkdirSync(scripts);
+  assert.match(readInstall(scripts).error, /package\.json: ENOENT$/);
+  writeFileSync(join(root, "package.json"), "{ nope");
+  assert.match(readInstall(scripts).error, /package\.json: not JSON$/);
+  writeFileSync(join(root, "package.json"), "[1]");
+  assert.match(readInstall(scripts).error, /package\.json: not a JSON object$/);
+  for (const r of [readInstall(scripts)]) assert.deepEqual([r.name, r.version, r.repository], [null, null, null]);
+});
+
+test("readObjective: the live run's Objective off phase0.json, and null between runs or when it records none", () => {
+  const dir = tempDir("cell-evidence-objective-");
+  assert.equal(readObjective(dir), null, "no receipt: between runs");
+  writeFileSync(join(dir, RECEIPT), JSON.stringify({ ...receipt({}), objective: "speed" }));
+  assert.equal(readObjective(dir), "speed");
+  writeFileSync(join(dir, RECEIPT), JSON.stringify({ ...receipt({}), objective: "cost" }));
+  assert.equal(readObjective(dir), "cost");
+  writeFileSync(join(dir, RECEIPT), JSON.stringify({ ...receipt({}), objective: "fast" }));
+  assert.equal(readObjective(dir), null, "an Objective the router does not know");
+  writeFileSync(join(dir, RECEIPT), JSON.stringify(receipt({})));
+  assert.equal(readObjective(dir), null, "a receipt written before the Objective");
+  writeFileSync(join(dir, RECEIPT), "{ nope");
+  assert.equal(readObjective(dir), null);
+});
+
+test("gather: hands the install and the live Objective to the board, whose policy rows read them", async (t) => {
+  const w = workspace(t);
+  writeFileSync(join(w.root, "package.json"), JSON.stringify({ name: "@feigi/fleet-ctl", version: "3.104.0", repository: { url: "git+https://github.com/feigi/fleet-plugin.git" } }));
+  writeFileSync(join(w.stateDir, RECEIPT), JSON.stringify({ ...receipt({}), objective: "speed" }));
+  const r = await quiet(() => gather(w.opts));
+  assert.deepEqual(r.install, { name: "@feigi/fleet-ctl", version: "3.104.0", repository: "git+https://github.com/feigi/fleet-plugin.git", error: null });
+  assert.equal(r.objective, "speed");
+  const policy = computeBoard(r).cellEvidence.policy;
+  assert.deepEqual(policy.objectives.map((o) => [o.objective, o.live]), [["cost", false], ["speed", true]]);
+  assert.equal(policy.sides[0].source.text.split(" · ")[0], "feigi/fleet-plugin's runs", "the workspace's repository is unknown here, so it is never 'this repository's'");
+  assert.equal(policy.sides[0].source.check, "not checked: this workspace's repository is not known");
+  assert.equal(policy.sides[0].heading, "no router table read: the rows are not known", "this workspace's scripts directory holds no router-table.json");
+});
+
+test("gather: a caller that names no state directory reads no Objective", async (t) => {
+  const w = workspace(t);
+  const r = await quiet(() => gather({ ...w.opts, stateDir: null }));
+  assert.equal(r.objective, null);
 });

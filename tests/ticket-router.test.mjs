@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import {
-  DEFAULT_TABLE, HEAVY_BRIEF_CHARS, HEAVY_CRITERIA, bArmLive, issueMetrics, ruleStratum, route, fitTable, readGuard, validateTable, formatFeatureRow, mergedSince, resolveCommit, sliceParent,
+  DEFAULT_TABLE, HEAVY_BRIEF_CHARS, HEAVY_CRITERIA, bArmLive, issueMetrics, ruleStratum, route, rowDispatch, rowFor, fitTable, readGuard, validateTable, formatFeatureRow, mergedSince, resolveCommit, sliceParent,
 } from "../plugin/scripts/ticket-router.mjs";
 import { FEATURE_COLUMNS as COLUMNS, parseFeatures } from "../plugin/scripts/pull-attribution.mjs";
 import { drawCell, CELL, formatRouting, parseRouting } from "../plugin/scripts/ledger-grammar.mjs";
@@ -2031,4 +2031,104 @@ test("fit: a speed row with no judged candidate holds the cost row's cell", () =
   assert.equal(next.rows.cost["*"], "task-high");
   assert.equal(next.reasons.speed["*"].reason, "unjudged");
   assert.equal(next.rows.speed["*"], "task-high");
+});
+
+// ---------------------------------------------------------------------------
+// rowDispatch: what the cockpit shows is what route does
+// ---------------------------------------------------------------------------
+
+const ROW_CELLS = [...STAGE1, "slow-medium"];
+const rowTable = (over = {}) => baseTable({
+  cells: ROW_CELLS,
+  rows: {
+    cost: { "*": "slow-high", light: "task-high", heavy: "smol-high" },
+    speed: { "*": "task-high", heavy: "slow-medium" },
+  },
+  ...over,
+});
+// A row's stratum is set by its issue alone, and `unknown` is no issue at all.
+const heavyIssue = issue({ body: `a brief\n${"- [ ] a criterion\n".repeat(HEAVY_CRITERIA + 1)}` });
+const STRATUM_ISSUE = { light: issue(), heavy: heavyIssue, unknown: null };
+const row5 = (guard, over) => ({ tripped: [], n: {}, window_start: null, ...guard, ...over });
+const GUARD_STATES = {
+  "missing": null,
+  "verdict none": row5({}),
+  "a tripped row Cell": row5({ tripped: ["task-high"] }),
+  "a tripped draw Cell": row5({ tripped: ["smol-high"] }),
+  "every Cell but the default tripped": row5({ tripped: ["task-high", "smol-high", "slow-medium"] }),
+  "the speed row's Cell tripped": row5({ tripped: ["slow-medium"] }),
+};
+
+test("rowDispatch and route agree for every Objective × Stratum, guard state and phase of the table", () => {
+  for (const burn_in of [true, false]) {
+    const table = rowTable({ burn_in });
+    for (const [state, guard] of Object.entries(GUARD_STATES)) {
+      for (const objective of ["cost", "speed"]) {
+        for (const stratum of ["light", "heavy", "unknown"]) {
+          const at = `${burn_in ? "burn-in" : "fitted"} · ${state} · ${objective} · ${stratum}`;
+          const rd = rowDispatch({ table, guard, objective, stratum });
+          for (let implRow = 1; implRow <= 10; implRow++) {
+            const { line } = route({ session: SESSION, ticket: 40 + implRow, arm: "A", implRow, issue: STRATUM_ISSUE[stratum], guard, table, objective });
+            const r = parseRouting(line);
+            assert.equal(r.stratum, stratum, at);
+            assert.equal(r.policy, rd.policy, `${at}: the policy Cell`);
+            const exploring = guard !== null && (burn_in || implRow % 5 === 0);
+            if (exploring && rd.draw !== null) {
+              assert.equal(r.by, rd.draw.by, `${at} row ${implRow}: by`);
+              assert.equal(r.draw.K, rd.draw.cells.length, `${at} row ${implRow}: K`);
+              assert.ok(rd.draw.cells.includes(r.cell), `${at} row ${implRow}: ${r.cell} is drawn from ${rd.draw.cells}`);
+              assert.equal(r.cell, drawCell({ session: SESSION, ticket: 40 + implRow, policyCell: null, cells: rd.draw.cells }).cell, at);
+            } else {
+              assert.deepEqual([r.draw, r.by, r.cell], [null, null, rd.policy], `${at} row ${implRow}: not drawn`);
+            }
+            // REASON keeps the first thing that went wrong: an unreadable issue first, then rowDispatch's, then the draw's.
+            const expected = stratum === "unknown" ? "no-issue-json" : rd.reason !== "ok" ? rd.reason : r.reason;
+            assert.equal(r.reason, expected, `${at} row ${implRow}: reason`);
+            if (rd.reason === "ok" && stratum !== "unknown") assert.ok(["ok", "guard-tripped"].includes(r.reason), at);
+          }
+        }
+      }
+    }
+  }
+});
+
+test("rowDispatch: no guard dispatches the default Cell only, whatever the table says; a guard that holds nothing back is the table", () => {
+  const table = rowTable({ burn_in: true });
+  assert.deepEqual(rowDispatch({ table, guard: null, objective: "cost", stratum: "light" }), { policy: "slow-high", reason: "guard-missing", draw: null });
+  const none = rowDispatch({ table, guard: row5({}), objective: "cost", stratum: "light" });
+  assert.deepEqual(none, { policy: "task-high", reason: "ok", draw: { by: "burn-in", cells: ROW_CELLS } });
+});
+
+test("rowDispatch: after burn-in the draw leaves out the cost row's Cell, under either Objective, and the tripped", () => {
+  const table = rowTable();
+  assert.deepEqual(rowDispatch({ table, guard: row5({}), objective: "speed", stratum: "light" }).draw,
+    { by: "every-5th", cells: ["slow-high", "smol-high", "slow-medium"] }, "speed's light row follows `*`, and the cost row for light is task-high");
+  assert.deepEqual(rowDispatch({ table, guard: row5({ tripped: ["task-high"] }), objective: "cost", stratum: "light" }),
+    { policy: "slow-high", reason: "table-cell-tripped", draw: { by: "every-5th", cells: ["smol-high", "slow-medium"] } },
+    "a tripped cost row's Cell is replaced by the default, which the draw then leaves out");
+});
+
+test("rowDispatch: no Cell left to draw is no draw", () => {
+  const table = rowTable();
+  const all = row5({ tripped: ["task-high", "smol-high", "slow-medium"] });
+  assert.equal(rowDispatch({ table, guard: all, objective: "cost", stratum: "heavy" }).draw, null);
+  assert.equal(rowDispatch({ table: rowTable({ burn_in: true }), guard: row5({ tripped: ROW_CELLS }), objective: "cost", stratum: "heavy" }).draw, null);
+});
+
+test("rowFor: a stratum without a row of its own follows `*`", () => {
+  assert.equal(rowFor({ "*": "slow-high", heavy: "task-high" }, "heavy"), "task-high");
+  assert.equal(rowFor({ "*": "slow-high", heavy: "task-high" }, "light"), "slow-high");
+});
+
+test("rowDispatch and route agree on arm B: the policy row by the rule, the base row and the draw by the sizing", () => {
+  const table = rowTable({ classifier: { b: "haiku", tau: null } });
+  const guard = row5({ tripped: ["smol-high"] });
+  // A light brief the sizing calls heavy: policy is light's row, the Cell heavy's, the draw the cost heavy row's.
+  const { line } = route({ session: SESSION, ticket: 42, arm: "B", implRow: 5, issue: issue(), sizing: haikuSizing, guard, table, objective: "speed" });
+  const r = parseRouting(line);
+  assert.equal(r.policy, rowDispatch({ table, guard, objective: "speed", stratum: "light" }).policy);
+  const heavy = rowDispatch({ table, guard, objective: "cost", stratum: "heavy" });
+  assert.equal(r.by, heavy.draw.by);
+  assert.ok(heavy.draw.cells.includes(r.cell), `${r.cell} is drawn from the sized cost row's pool ${heavy.draw.cells}`);
+  assert.equal(r.draw.K, heavy.draw.cells.length);
 });

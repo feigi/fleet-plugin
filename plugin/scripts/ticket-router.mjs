@@ -71,7 +71,7 @@ export const HEAVY_CRITERIA = 5;
 // Exploration cadence after burn-in: the Pull that creates `impl-` row 5k.
 const EXPLORE_EVERY = 5;
 // The fit's adoption floor (merged PRs per side), margin, and cadence.
-const MIN_N = 20;
+export const MIN_N = 20;
 const ADOPT_RATIO = 0.75;
 export const FIT_EVERY_MERGED = 50;
 // Stage 2 adds the effort cells on the roles whose stage-1 cell survived.
@@ -195,7 +195,35 @@ export function bArmLive(table, objective) {
   return table.classifier.b !== null && Object.values(table.rows[objective]).some((c) => c !== POLICY_CELL);
 }
 
-const rowFor = (rows, stratum) => rows[stratum] ?? rows["*"];
+/** The row a stratum routes by: its own, else the `*` row's. */
+export const rowFor = (rows, stratum) => rows[stratum] ?? rows["*"];
+
+/**
+ * What `route` does with one row under one guard, with no per-Pull input.
+ * `guard` is readGuard's answer or null. `policy` is the row's Cell, or the
+ * default cell when there is no guard or the row's Cell is tripped; `reason`
+ * is `guard-missing`, `table-cell-tripped` or `ok`. `draw` is what an
+ * exploring Pull picks from — `by` `burn-in` (every Pull) or `every-5th` —
+ * over `cells`: the table's Cells less the tripped, and on an every-5th draw
+ * less the `cost` row's Cell for the stratum too, as the guard leaves it (the
+ * default cell when that row's Cell is tripped), whichever objective routes
+ * the row. It is null with no guard and when no Cell is left to draw.
+ * @returns {{ policy: string, reason: "guard-missing"|"table-cell-tripped"|"ok", draw: null | { by: "burn-in"|"every-5th", cells: string[] } }}
+ */
+export function rowDispatch({ table, guard, objective, stratum }) {
+  if (guard === null) return { policy: POLICY_CELL, reason: "guard-missing", draw: null };
+  const tripped = new Set(guard.tripped);
+  const adjust = (cell) => (tripped.has(cell) ? POLICY_CELL : cell);
+  const row = rowFor(table.rows[objective], stratum);
+  const by = table.burn_in ? "burn-in" : "every-5th";
+  const left = table.cells.filter((c) => !tripped.has(c));
+  const cells = table.burn_in ? left : left.filter((c) => c !== adjust(rowFor(table.rows.cost, stratum)));
+  return {
+    policy: adjust(row),
+    reason: tripped.has(row) ? "table-cell-tripped" : "ok",
+    draw: cells.length > 0 ? { by, cells } : null,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // route
@@ -273,37 +301,29 @@ export function route({ session, ticket, arm, implRow, chainHead = false, issue,
     }
   }
 
-  const rows = table.rows[objective];
-  let policy = rowFor(rows, ruleS);
-  let base = b ? rowFor(rows, stratum) : policy;
+  const dispatch = (o, s) => rowDispatch({ table, guard, objective: o, stratum: s });
+  const policyRow = dispatch(objective, ruleS);
+  const baseRow = b ? dispatch(objective, stratum) : policyRow;
   const costB = arm === "B" && bArmLive(table, "cost");
-  let drawBase = rowFor(table.rows.cost, costB ? sized?.stratum ?? "unknown" : ruleS);
-  let cell;
+  const drawRow = dispatch("cost", costB ? sized?.stratum ?? "unknown" : ruleS);
+  for (const r of [policyRow.reason, baseRow.reason]) if (r !== "ok") degrade(r);
+  // With no guard the default cell is the only one: the guard cannot be
+  // evaded by deleting it.
+  const policy = policyRow.policy;
+  let cell = baseRow.policy;
   let draw = null;
   let by = null;
-  if (guard === null) {
-    // The guard cannot be evaded by deleting it: no guard, default cell only.
-    degrade("guard-missing");
-    policy = POLICY_CELL;
-    cell = POLICY_CELL;
-  } else {
-    const tripped = new Set(guard.tripped);
-    if (tripped.has(policy) || tripped.has(base)) {
-      degrade("table-cell-tripped");
-      if (tripped.has(policy)) policy = POLICY_CELL;
-      if (tripped.has(base)) base = POLICY_CELL;
-    }
-    if (tripped.has(drawBase)) drawBase = POLICY_CELL;
-    cell = base;
+  if (guard !== null) {
     const exploring = table.burn_in || (implRow % EXPLORE_EVERY === 0 && !chainHead);
     if (exploring) {
-      const policyCell = table.burn_in ? null : drawBase;
-      if (table.cells.some((c) => c !== policyCell && tripped.has(c))) degrade("guard-tripped");
-      const d = drawCell({ session, ticket, policyCell, cells: table.cells.filter((c) => !tripped.has(c)) });
-      if (d.K > 0) {
+      const policyCell = table.burn_in ? null : drawRow.policy;
+      if (table.cells.some((c) => c !== policyCell && guard.tripped.includes(c))) degrade("guard-tripped");
+      if (drawRow.draw !== null) {
+        // rowDispatch already left the policy Cell out of `cells`: nothing more to withhold.
+        const d = drawCell({ session, ticket, policyCell: null, cells: drawRow.draw.cells });
         cell = d.cell;
         draw = { k: d.k, K: d.K };
-        by = table.burn_in ? "burn-in" : "every-5th";
+        by = drawRow.draw.by;
       }
     }
   }
