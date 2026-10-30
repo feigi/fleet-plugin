@@ -233,7 +233,8 @@ test("the Label map section words the question as the derivation step's payload 
   assert.match(s, Pin.phrase("show the maintainer what the step printed and stop. Neither is a question."));
   assert.match(s, Pin.phrase("Put it to the maintainer as one question listing each uncertain role, its suggestion, why, and the alternatives"));
   for (const why of [
-    "`declared in <tableFile> but not in the tracker`",
+    "- `origin` `table`, `exists` false — `declared in <tableFile> but not in the tracker`",
+    "- `origin` `table`, `exists` true — `declared more than once in <tableFile> with different labels; the first is the suggestion`",
     "`near match in the tracker`",
     "`the default and a near match are both in the tracker`",
     "`nothing found — the default, to be created`",
@@ -242,6 +243,13 @@ test("the Label map section words the question as the derivation step's payload 
     "`your earlier answer <string> is now <role>'s in <tableFile>; `",
     "`your earlier answer <string> is now <role>'s label (its default); `",
   ]) assert.match(s, Pin.phrase(why));
+  // The `exists` true bullet with any continuation lines: through to the next bullet or blank line.
+  const lines = s.split("\n");
+  const from = lines.findIndex((l) => l.startsWith("- `origin` `table`, `exists` true"));
+  const to = lines.findIndex((l, i) => i > from && (l.trim() === "" || l.startsWith("- ")));
+  const tableExists = lines.slice(from, to === -1 ? lines.length : to).join("\n");
+  assert.doesNotMatch(tableExists, /not in the tracker/, "the reason for a live first table string claims it is missing from the tracker");
+  assert.doesNotMatch(s, /^\s*- `origin` `table` —/m, "the single `origin` `table` reason is back, whatever the entry's `exists`");
   assert.match(s, Pin.phrase("reply `defaults` to accept every suggestion, or name `<role>=<label>` for any you want otherwise — a role with no suggestion must be named; labels that do not exist are created on your confirmation."));
   assert.match(s, Pin.phrase("`~/.fleet/bin/fleet-run label-map.mjs set --create` with the reply: `--accept-suggestions` for `defaults`, and each `<role>=<label>` the maintainer named."));
   assert.match(s, Pin.phrase("and `tableFile`, the path of the repository's triage-label table, the file the reasons below name. It is the payload's string, read from the echoed payload, never a path you spell yourself."));

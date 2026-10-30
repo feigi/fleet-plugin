@@ -141,7 +141,8 @@ Put it to the maintainer as one question listing each uncertain role, its
 suggestion, why, and the alternatives (`candidates`, the near matches the
 tracker has). The why, by the entry:
 
-- `origin` `table` — `declared in <tableFile> but not in the tracker`
+- `origin` `table`, `exists` false — `declared in <tableFile> but not in the tracker`
+- `origin` `table`, `exists` true — `declared more than once in <tableFile> with different labels; the first is the suggestion`
 - `origin` `near-match` — `near match in the tracker`
 - `origin` `default`, `exists` true — `the default and a near match are both in the tracker`
 - `origin` `default`, `exists` false — `nothing found — the default, to be created`
