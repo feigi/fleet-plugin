@@ -4,6 +4,7 @@ import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, rmSync,
 import { join } from "node:path";
 import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { dayOneScripts } from "./support/day-one-router-table.mjs";
 import {
   MODEL_ROLES_EVERY_MS, MODEL_ROLES_TIMEOUT_MS, carryModelRoles, gather, readAgents, readGuardFile, readMetricsStep, readModelRoles,
   readHeldImplementers, readInstall, readObjective, readPreviewFile, readRouterTable, receiptSpendDir,
@@ -191,7 +192,7 @@ function writtenPreview(dir) {
   writeFileSync(join(dir, "docs", "metrics", "ticket-features.tsv"), `${FEATURE_COLUMNS.join("\t")}\n`);
   writeFileSync(join(dir, "docs", "metrics", "member-outcomes.tsv"), `# ${MEMBER_COLUMNS.join("\t")}\n`);
   writeFileSync(join(dir, "docs", "metrics", "tier-outcomes.tsv"), `# ${TIER_COLUMNS.join("\t")}\n`);
-  return writePreview(dir, { computed_at: "2026-10-28T07:59:00.000Z", window_start: "2026-10-03", cells: [], tripped: [] }, { now: new Date("2026-10-28T08:00:30.000Z") });
+  return writePreview(dir, { computed_at: "2026-10-28T07:59:00.000Z", window_start: "2026-10-03", cells: [], tripped: [] }, { now: new Date("2026-10-28T08:00:30.000Z"), tablePath: join(dayOneScripts(), "router-table.json") });
 }
 
 test("readPreviewFile: reads what metrics-refresh writes; a missing file is missing; one it cannot use says why", () => {
@@ -349,7 +350,8 @@ test("computeBoard: inputs that read none of the tab's records draw its no-guard
 
 // -- the cards' Cell lines: each implementer's dispatch record ---------------------------------
 
-const SCRIPTS = join(import.meta.dirname, "..", "plugin", "scripts");
+// A copy of the scripts holding the day-one table: the installed table is not the shipped one a re-fit moves.
+const SCRIPTS = dayOneScripts();
 const SESSION = "2026-10-28T08-00-00-000Z_01a08126-ee04-7095-a695-14e3249f1127";
 
 // An omp member transcript: its `session_init` (definition and dispatch model),

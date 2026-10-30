@@ -576,24 +576,29 @@ export function fitTable({ prior, features, members, verdicts, guard, commit = n
 
   let { stage, cells } = prior;
   cells = [...cells];
-  const star = judgeRow(estimates["*"], pulls["*"], cells, tripped);
-  const rows = { cost: { "*": star.cell ?? POLICY_CELL }, speed: {} };
-  const reasons = { cost: { "*": { ...star, cell: rows.cost["*"] } }, speed: {} };
-  for (const s of STRATA) {
-    if (!estimates[s]) continue;
-    reasons.cost[s] = judgeRow(estimates[s], pulls[s], cells, tripped);
-    if (reasons.cost[s].cell !== null) rows.cost[s] = reasons.cost[s].cell;
-  }
-  for (const s of Object.keys(reasons.cost)) {
-    const costCell = rows.cost[s];
-    if (costCell === undefined) {
-      reasons.speed[s] = unjudged();
-      continue;
+  // The rows and their reasons over `cells`: a fitted table's `reasons` cover exactly its `cells`.
+  const judgeRows = () => {
+    const star = judgeRow(estimates["*"], pulls["*"], cells, tripped);
+    const rows = { cost: { "*": star.cell ?? POLICY_CELL }, speed: {} };
+    const reasons = { cost: { "*": { ...star, cell: rows.cost["*"] } }, speed: {} };
+    for (const s of STRATA) {
+      if (!estimates[s]) continue;
+      reasons.cost[s] = judgeRow(estimates[s], pulls[s], cells, tripped);
+      if (reasons.cost[s].cell !== null) rows.cost[s] = reasons.cost[s].cell;
     }
-    const record = judgeSpeedRow(estimates[s], pulls[s], cells, tripped, costCell);
-    rows.speed[s] = record.cell ?? costCell;
-    reasons.speed[s] = { ...record, cell: rows.speed[s] };
-  }
+    for (const s of Object.keys(reasons.cost)) {
+      const costCell = rows.cost[s];
+      if (costCell === undefined) {
+        reasons.speed[s] = unjudged();
+        continue;
+      }
+      const record = judgeSpeedRow(estimates[s], pulls[s], cells, tripped, costCell);
+      rows.speed[s] = record.cell ?? costCell;
+      reasons.speed[s] = { ...record, cell: rows.speed[s] };
+    }
+    return { rows, reasons };
+  };
+  let { rows, reasons } = judgeRows();
   const atN = (c) => (guard.n[c] ?? 0) >= MIN_N;
   const adopted = Object.values(rows).some((set) => set["*"] !== POLICY_CELL);
   if (stage === 1 && cells.every(atN) && (adopted || cells.some((c) => tripped.has(c)))) {
@@ -601,6 +606,8 @@ export function fitTable({ prior, features, members, verdicts, guard, commit = n
     for (const { cell, survives } of STAGE2) {
       if (!cells.includes(cell) && cells.includes(survives) && !tripped.has(survives)) cells.push(cell);
     }
+    // The stage-2 cells were added after the rows were judged: judge the rows again over the new `cells`.
+    ({ rows, reasons } = judgeRows());
   }
   return {
     window_start: window,

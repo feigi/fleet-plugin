@@ -11,12 +11,14 @@ import {
   MAIN_METRICS_EVERY_MS, carryMainMetrics, readCheckoutTable, readCloseoutPr, readGuardJson, readMainMetrics,
 } from "../plugin/scripts/board-gather.mjs";
 import { CLOSEOUT_RECEIPT } from "../plugin/scripts/ledger-grammar.mjs";
+import { DAY_ONE_TABLE } from "./support/day-one-router-table.mjs";
 
 // The Cell evidence tab's alerts (records not on main, merged with no Ruling,
 // guard readers disagree), the checks that cannot run and are never alerts, and
 // the reads that feed them.
 
-const SHIPPED = JSON.parse(readFileSync(new URL("../plugin/scripts/router-table.json", import.meta.url), "utf8"));
+// The day-one table, not plugin/scripts/router-table.json: a re-fit moves the shipped one.
+const SHIPPED = DAY_ONE_TABLE;
 const INSTALL = { name: "@feigi/fleet-ctl", version: "3.104.0", repository: "git+https://github.com/feigi/fleet-plugin.git", error: null };
 const HERE = "https://github.com/feigi/fleet-plugin";
 const AGENTS = { list: [], error: null };

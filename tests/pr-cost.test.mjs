@@ -118,7 +118,7 @@ test("--guard: a cell exactly 15 points worse than the baseline trips, exits 3 a
   assert.deepEqual(r.guard.cells.find((c) => c.cell === "task-high"), {
     cell: "task-high", generation: "claude-opus-5", n: 20, n_pulls: 20, n_merged: 20, n_claims: 20, n_failed: 9, fail_rate: 0.45,
     mean_usd: 5, median_usd: 5, router_usd: 0, usd_diff_ci95: r.guard.cells.find((c) => c.cell === "task-high").usd_diff_ci95,
-    by_hand: 20, no_ruling: 0, pending: 0, left_out: 0, unpriced: 0, untimed: 0, excluded: 0, older: [],
+    by_hand: 20, no_ruling: 0, no_ruling_prs: [], pending: 0, pending_prs: [], left_out: 0, unpriced: 0, untimed: 0, excluded: 0, older: [],
   }, "the whole entry, so the gap to the floor is exact: 9 of 20 claims failed");
   assert.equal(r.guard.window_start, WINDOW_START);
   assert.ok(!Number.isNaN(Date.parse(r.guard.computed_at)));
@@ -462,7 +462,7 @@ test("a top-level booked row with a blank work_s makes its Pull untimed: out of 
   assert.deepEqual(r.guard.baseline, { cell: "slow-high", generation: "claude-opus-5", n: MIN_N, mean_usd: 10, fail_rate: 0 });
   assert.deepEqual(r.guard.cells, [{
     cell: "slow-high", generation: "claude-opus-5", n: MIN_N, n_pulls: MIN_N, n_merged: MIN_N, n_claims: MIN_N, n_failed: 0, fail_rate: 0,
-    mean_usd: 10, median_usd: 10, router_usd: 0, usd_diff_ci95: null, by_hand: MIN_N, no_ruling: 0, pending: 0, left_out: 0,
+    mean_usd: 10, median_usd: 10, router_usd: 0, usd_diff_ci95: null, by_hand: MIN_N, no_ruling: 0, no_ruling_prs: [], pending: 0, pending_prs: [], left_out: 0,
     unpriced: 0, untimed: 1, excluded: 0, older: [],
   }]);
   assert.match(r.stdout, /^slow-high\tclaude-opus-5\t20\t20\t20\t0\t0\t10\t10\t0\t\t0\t0\t0\t1\tbaseline$/m);
@@ -809,6 +809,62 @@ test("--guard: the three counts are per generation, the newest's beside the entr
   const slow = slowOf(r.guard);
   assert.deepEqual([slow.generation, slow.by_hand, slow.pending], ["claude-opus-5", 2, 1]);
   assert.deepEqual(slow.older.map((o) => [o.generation, o.by_hand, o.pending]), [["model-a", 2, 0]]);
+});
+
+// A Pull with no Ruling whose implementer opened `pr`, now in `state`, dispatched on `model`.
+function addUnruled(w, { ticket, pr, state, cell = "slow-high", model = "claude-opus-5" }) {
+  w.features.push(pull({ ticket: String(ticket), agent: `impl-${ticket}`, chosen_cell: cell }));
+  w.members.push(member({ agent: `impl-${ticket}`, ticket: String(ticket), cost: 10, pr: String(pr), subagentType: `fleet-implementer-${cell}`, dispatchModel: model }));
+  w.prs.push({ number: pr, state });
+}
+
+test("--guard: no_ruling_prs names the merged PRs with no Ruling and pending_prs the open ones, ascending by number, in the guard file and the report", () => {
+  const w = world();
+  addCell(w, "slow-high", 2, 0, 10);
+  addUnruled(w, { ticket: 9001, pr: 1000, state: "MERGED" });
+  addUnruled(w, { ticket: 9002, pr: 999, state: "MERGED" });
+  addUnruled(w, { ticket: 9003, pr: 2000, state: "OPEN" });
+  addUnruled(w, { ticket: 9004, pr: 1500, state: "OPEN" });
+  addUnruled(w, { ticket: 9005, pr: 3000, state: "CLOSED" });
+  const r = runCli(w);
+  const slow = slowOf(r.guard);
+  assert.deepEqual([slow.no_ruling, slow.no_ruling_prs], [2, ["999", "1000"]]);
+  assert.deepEqual([slow.pending, slow.pending_prs], [2, ["1500", "2000"]]);
+  assert.deepEqual(computeReport(parsed(w)).cells[0].no_ruling_prs, ["999", "1000"]);
+});
+
+test("--guard: a Pull with two merged implementer PRs and no Ruling contributes both to no_ruling_prs, and the PRs are listed once each", () => {
+  const w = world();
+  addUnruled(w, { ticket: 9001, pr: 2001, state: "MERGED" });
+  w.members.push(member({ agent: "impl-9001", ticket: "9001", cost: 10, pr: "2002", subagentType: "fleet-implementer-slow-high" }));
+  w.prs.push({ number: 2002, state: "MERGED" });
+  const slow = slowOf(runCli(w).guard);
+  assert.deepEqual([slow.no_ruling, slow.no_ruling_prs], [1, ["2001", "2002"]]);
+});
+
+test("--guard: a ruled merged PR, a closed one and a Ruling given by hand name no PR in either list", () => {
+  const w = world();
+  addCell(w, "slow-high", 3, 0, 10);
+  for (const t of w.tiers) t.note = DERIVED_NOTE;
+  w.tiers.at(-1).note = "backfill: ruled from the merged PR's review";
+  addUnruled(w, { ticket: 9001, pr: 4001, state: "CLOSED" });
+  const slow = slowOf(runCli(w).guard);
+  assert.deepEqual([slow.no_ruling_prs, slow.pending_prs, slow.by_hand], [[], [], 1]);
+});
+
+test("--guard: an older generation's PRs sit in that generation's own older[] entry, not the newest's", () => {
+  const w = world();
+  addCell(w, "slow-high", 2, 0, 10);
+  for (const m of w.members) m.dispatchModel = "model-a";
+  addUnruled(w, { ticket: 9001, pr: 5001, state: "MERGED", model: "model-a" });
+  addUnruled(w, { ticket: 9002, pr: 5002, state: "OPEN", model: "model-a" });
+  addCell(w, "slow-high", 2, 0, 10);
+  addUnruled(w, { ticket: 9003, pr: 6001, state: "MERGED" });
+  addUnruled(w, { ticket: 9004, pr: 6002, state: "OPEN" });
+  const slow = slowOf(runCli(w).guard);
+  assert.equal(slow.generation, "claude-opus-5");
+  assert.deepEqual([slow.no_ruling_prs, slow.pending_prs], [["6001"], ["6002"]]);
+  assert.deepEqual(slow.older.map((o) => [o.generation, o.no_ruling_prs, o.pending_prs]), [["model-a", ["5001"], ["5002"]]]);
 });
 
 test("--guard: a PR merged with no Ruling whose Ruling another Pull holds is not counted no_ruling", () => {

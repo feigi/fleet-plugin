@@ -12,12 +12,14 @@ import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { COLUMNS as MEMBER_COLUMNS, formatTsv } from "../plugin/scripts/member-outcomes.mjs";
 import { COLUMNS as TIER_COLUMNS, formatRow } from "../plugin/scripts/tier-outcomes.mjs";
+import { DAY_ONE_TABLE, dayOneScripts } from "./support/day-one-router-table.mjs";
 import { WINDOW_START, MIN_N } from "../plugin/scripts/pr-cost.mjs";
 import { FEATURE_COLUMNS } from "../plugin/scripts/pull-attribution.mjs";
 import { validateTable } from "../plugin/scripts/ticket-router.mjs";
 import { writePreview } from "../plugin/scripts/metrics-refresh.mjs";
 
-const SCRIPT = fileURLToPath(new URL("../plugin/scripts/metrics-refresh.mjs", import.meta.url));
+// A copy of the scripts holding the day-one table, so the installed table the run reads as its prior does not move with a re-fit.
+const SCRIPT = join(dayOneScripts(), "metrics-refresh.mjs");
 const DAY = WINDOW_START;
 const SESSION = "2026-10-03T10-00-00-000Z_01a00000-0000-7000-8000-000000000000";
 const PENDING = join(".fleet", "ticket-features.pending.tsv");
@@ -271,7 +273,7 @@ test("a pending file with rows but no header fails the drain naming the pending 
 });
 
 const PREVIEW = join(".fleet", "router-preview.json");
-const SHIPPED = JSON.parse(readFileSync(new URL("../plugin/scripts/router-table.json", import.meta.url), "utf8"));
+const SHIPPED = DAY_ONE_TABLE;
 const INSTALLED_VERSION = JSON.parse(readFileSync(new URL("../plugin/package.json", import.meta.url), "utf8")).version;
 
 test("a phase 0 over fixture records writes router-preview.json beside the fresh guard: the guard it read, the records it read, the installed table as prior", () => {

@@ -65,7 +65,10 @@
 // Ruling's note is not one `tier-outcomes.mjs append` derives (`isDerivedNote`);
 // `no_ruling`, the Pulls whose PR merged on GitHub with no Ruling, which stay
 // not merged; and `pending`, the Pulls whose PR is still open or not in the
-// list. Beside `min_n` it records `trip_points`, the floor's margin, and
+// list. `no_ruling_prs` and `pending_prs` name the PRs behind the last two,
+// ascending, as the report's top-level `pending` list does: a `no_ruling`
+// Pull contributes the implementer PRs that make it one. Beside `min_n` it
+// records `trip_points`, the floor's margin, and
 // `tsv_blobs`: the git blob id of each TSV it read, by the path it read it at.
 
 import { createHash } from "node:crypto";
@@ -117,27 +120,43 @@ export function computeReport({ members, tiers, features, prs, routerTable = nul
   const bootUnits = (g) => g.pulls.map((u) => bootUnit(u));
   const meanUsd = (t) => (t.merged ? t.spend / t.merged : null);
   const base = tallies.get(BASELINE_CELL) ?? null;
+  // The PRs behind each generation's `no_ruling` and `pending` counts, as the
+  // top-level `pending` list prints them: ascending, each once.
+  const behind = new Map();
+  for (const u of units) {
+    if (u.status === "excluded") continue;
+    const k = `${u.cell}\0${u.generation}`;
+    const held = behind.get(k) ?? behind.set(k, { no_ruling_prs: new Set(), pending_prs: new Set() }).get(k);
+    for (const pr of u.noRulingPrs) held.no_ruling_prs.add(pr);
+    if (u.status === "pending") held.pending_prs.add(u.pendingPr);
+  }
+  const prList = (set = []) => [...set].sort((x, y) => Number(x) - Number(y));
   // One generation's figures. The interval is the newest generation's against
   // the baseline's newest; an older generation is printed, never compared.
-  const figuresOf = (cell, g, newest) => ({
-    cell,
-    generation: g.generation,
-    n_pulls: g.n,
-    n_merged: g.merged,
-    n_claims: g.claims,
-    n_failed: g.failed,
-    fail_rate: g.claims ? round(g.failed / g.claims) : null,
-    mean_usd: round(meanUsd(g), 2),
-    median_usd: round(median(g.pulls.filter((u) => u.merged).map((u) => u.spend)), 2),
-    by_hand: g.by_hand,
-    no_ruling: g.no_ruling,
-    pending: g.pending,
-    router_usd: round(g.pulls.reduce((s, u) => s + routerUsd(u.pull), 0), 4),
-    usd_diff_ci95: !newest || cell === BASELINE_CELL || !base ? null : bootstrapDiffCI(bootUnits(g), bootUnits(base)),
-    left_out: g.left_out,
-    unpriced: g.unpriced,
-    untimed: g.untimed,
-  });
+  const figuresOf = (cell, g, newest) => {
+    const held = behind.get(`${cell}\0${g.generation}`);
+    return {
+      cell,
+      generation: g.generation,
+      n_pulls: g.n,
+      n_merged: g.merged,
+      n_claims: g.claims,
+      n_failed: g.failed,
+      fail_rate: g.claims ? round(g.failed / g.claims) : null,
+      mean_usd: round(meanUsd(g), 2),
+      median_usd: round(median(g.pulls.filter((u) => u.merged).map((u) => u.spend)), 2),
+      by_hand: g.by_hand,
+      no_ruling: g.no_ruling,
+      no_ruling_prs: prList(held?.no_ruling_prs),
+      pending: g.pending,
+      pending_prs: prList(held?.pending_prs),
+      router_usd: round(g.pulls.reduce((s, u) => s + routerUsd(u.pull), 0), 4),
+      usd_diff_ci95: !newest || cell === BASELINE_CELL || !base ? null : bootstrapDiffCI(bootUnits(g), bootUnits(base)),
+      left_out: g.left_out,
+      unpriced: g.unpriced,
+      untimed: g.untimed,
+    };
+  };
   const figures = [...tallies.values()].map((t) => ({
     ...figuresOf(t.cell, t, true),
     excluded: t.excluded,
