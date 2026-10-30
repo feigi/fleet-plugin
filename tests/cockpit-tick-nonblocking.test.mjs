@@ -145,7 +145,16 @@ test("CLI: a relaunch that lands mid-gather() is answered within 1s and reuses t
   const first = serveProcess(repo, bin, home);
   const exited = new Promise((res) => first.p.once("exit", res));
   try {
-    const port = await withTimeout(first.port, 20000, "the cockpit to announce");
+    let port;
+    try {
+      port = await withTimeout(first.port, 20000, "the cockpit to announce");
+    } catch (e) {
+      // A launch that found something outside this test holding every
+      // candidate in its window exits without announcing — the holders'
+      // doing, which leaves nothing below to measure.
+      if (/^serve exited \([^)]*\) before announcing/.test(e.message) && watch.allHeld()) return t.skip(heldOutside(ports[0]));
+      throw e;
+    }
     // A landing past a candidate something outside this test was seen
     // holding is that holder's doing, and leaves nothing below to measure.
     // The cockpit is still writing its identity into repo when this skips,

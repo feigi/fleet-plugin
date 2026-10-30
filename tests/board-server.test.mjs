@@ -884,6 +884,27 @@ test("watchWindow: a landing past a candidate nothing held is not excused by an 
   }
 });
 
+// allHeld()'s two answers: a window with one candidate free is not
+// exhausted by its holders, and the rows have to fail on a launch that gave up
+// on it; a window whose every candidate answered is.
+test("watchWindow: allHeld() is true only when every candidate was seen held", async (t) => {
+  const [held, free] = [await unheldPort(), await unheldPort()];
+  const holder = createServer();
+  const failure = await new Promise((res) => { holder.once("error", res); holder.listen(held, "127.0.0.1", () => res(null)); });
+  if (failure?.code === "EADDRINUSE") return t.skip(heldOutside(held));
+  if (failure) throw failure;
+  const partial = await watchWindow([held, free]);
+  const whole = await watchWindow([held]);
+  try {
+    assert.equal(partial.allHeld(), false, "a window with a free candidate was read as exhausted by its holders");
+    assert.equal(whole.allHeld(), true, "a window whose every candidate was held was not read as exhausted");
+  } finally {
+    await partial.stop();
+    await whole.stop();
+    await new Promise((res) => holder.close(res));
+  }
+});
+
 // The reuse path end to end, and the claim no unit row can make: a second
 // launch against a LIVE cockpit for the same workspace starts no server,
 // says where the board already is, and exits 0. The exit code is the whole
@@ -912,7 +933,16 @@ test("CLI: a second launch for the same workspace reuses the live cockpit, opens
   const first = serveProcess(repo, rig.bin, ["--interval", "3600", "--open"]);
   const exited = new Promise((res) => first.p.once("exit", res));
   try {
-    const url = await withTimeout(first.url, 20000, "the first cockpit to announce");
+    let url;
+    try {
+      url = await withTimeout(first.url, 20000, "the first cockpit to announce");
+    } catch (e) {
+      // A launch that found something outside this test holding every
+      // candidate in its window exits without announcing, and without binding
+      // it opens no tab either — the holders' doing, not the scan's.
+      if (/^serve exited \([^)]*\) before announcing/.test(e.message) && watch.allHeld()) return t.skip(heldOutside(ports[0]));
+      throw e;
+    }
     const blocker = await watch.blockerBefore(Number(new URL(url).port));
     // The launch that bound still opens its tab, and the stub doing it writes
     // into rig.bin; a skip that removed rig.bin under that write would fail

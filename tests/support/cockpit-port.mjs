@@ -49,6 +49,9 @@ function answers(port, ms = 200) {
 // landing on the first candidate, or outside the window altogether, has no
 // candidate ahead of it to excuse it, so it returns null too. The launch's
 // own listener answers once it binds; it is at the landing, never ahead of it.
+// allHeld() is for a launch that announced nothing: it returns true when
+// something answered on every candidate while the watch was up, so the
+// launch exhausting its window is the holders' doing and not the scan's.
 // A row calls stop() in its `finally` as well, so a row that throws before it
 // reads the landing does not leave the watch polling under the rows after it.
 export async function watchWindow(ports, everyMs = 5) {
@@ -75,6 +78,9 @@ export async function watchWindow(ports, everyMs = 5) {
       if (at <= 0) return null;
       const ahead = ports.slice(0, at);
       return ahead.every((p) => seen.has(p)) ? ahead[0] : null;
+    },
+    allHeld() {
+      return ports.every((p) => seen.has(p));
     },
   };
 }
