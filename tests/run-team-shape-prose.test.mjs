@@ -464,7 +464,7 @@ const CHANGED = [
   ],
   [
     "`~/.fleet/bin/fleet-run closeout.mjs finish --reason \"<reason>\"` — scrapes the run's member facts, checks the tier-outcomes rows, refreshes the metrics, commits the three metrics files and opens their PR, then records `fleet-heartbeat.mjs --stop` last, because every reader takes a recorded stop as the end of the run.",
-    "`~/.fleet/bin/fleet-run closeout.mjs finish --reason \"<reason>\"` — scrapes the run's member facts, checks the tier-outcomes rows, refreshes the metrics, commits the three metrics files and opens their PR, sets the phase-0 receipt aside as `.fleet/phase0.previous.json`, then records `fleet-heartbeat.mjs --stop` last, because every reader takes a recorded stop as the end of the run."
+    "`~/.fleet/bin/fleet-run closeout.mjs finish --reason \"<reason>\"` — scrapes the run's member facts, checks the tier-outcomes rows, refreshes the metrics, commits the three metrics files and opens their PR, sets the phase-0 receipt aside as `.fleet/phase0.previous.json`, records `fleet-heartbeat.mjs --stop`, because every reader takes a recorded stop as the end of the run, and then merges the Close-out PR."
   ],
   [
     "`heartbeat not beating, controller alive (pid N)`, or `(this session's earlier run)` — a controller that stopped beating and kept going.",
@@ -781,7 +781,11 @@ const DELETED = [
   // The hold: fleet-heartbeat.mjs returns at once, so nothing is re-issued.
   ["`… Ns of Ms remain → re-issue this command now, do not end your turn` — no command blocks for a whole interval (omp backgrounds one at 60s, which is why the CI gate holds its wait in one `eval` cell polling `gh run view`).", "nothing: fleet-heartbeat.mjs no longer blocks, so it has no partial line"],
   ["Issue it again.", "nothing: fleet-heartbeat.mjs no longer blocks, so it has no partial line"],
-  ["That is still one blocking call per turn, never an idle turn.", "nothing: the controller ends its turn and the alarm starts the next one"]
+  ["That is still one blocking call per turn, never an idle turn.", "nothing: the controller ends its turn and the alarm starts the next one"],
+  // The Close-out PR's exemption: closeout.mjs finish merges that PR itself.
+  ["**The run's own artifact PR is exempt, and it is exempt because this invariant does not reach it:** what the line forbids is a fleet member signing off its own ticket work, which presupposes an issue, an implementer, a `review-pr` run and a finisher, and the metrics PR you author has none of them.", "nothing: closeout.mjs finish merges the Close-out PR"],
+  ["Label and merge that one yourself instead of re-deriving a blocker from this line and stranding the rows behind it.", "nothing: closeout.mjs finish merges the Close-out PR"],
+  ["The exemption belongs to the run that authors the PR and does not outlive it: one still open when the run ends is a PR a prior run left open, which phase 0 folds into the next run's review queue as ticket work — and a PR is not exempt from being wrong, only from waiting on a reviewer no phase of this run will ever dispatch against it.", "references/close-out.md's End of run step 3: a PR finish leaves open is the next run's"]
 ];
 
 const oldSentences = () => counted(sentencesOf(readFileSync(FIXTURE, "utf8")));
@@ -851,8 +855,13 @@ for (const [rule, file, heading] of MOVED_RATIONALE_POINTERS) {
 
 const fixtureText = () => readFileSync(FIXTURE, "utf8");
 const cut = (text, start, stop) => Pin.of(text, "the fixture").between(start, stop, "the moved block").text;
-// The two lines SKILL.md keeps word for word as its one-liner: already one line.
-const KEPT_VERBATIM = new Set(["A reviewer never reviews a PR it implemented.", "`AT CAP`, `IDLE OK` — nothing to do on that row."]);
+// The lines SKILL.md keeps word for word as its one-liner: already one line, or
+// one line once the rest of its statement was deleted.
+const KEPT_VERBATIM = new Set([
+  "A reviewer never reviews a PR it implemented.",
+  "`AT CAP`, `IDLE OK` — nothing to do on that row.",
+  "`ready-to-merge` is added by a reviewer only — never an implementer, never you.",
+]);
 const MOVED_BLOCKS = [
   ["Shell traps", () => cut(fixtureText(), "## Shell traps\n", "\n## Phase 0 — shortlist")],
   ["the invariants' full statements", () => cut(fixtureText(), "## Invariants\n", "\n## Guards")],
@@ -878,10 +887,9 @@ for (const [what, block] of MOVED_BLOCKS) {
   });
 }
 
-test("SKILL.md's invariant for ready-to-merge keeps the metrics-PR exemption and the duty it licenses on its own line", () => {
+test("SKILL.md's invariant for ready-to-merge carves out no PR the controller labels and merges itself", () => {
   const line = SKILL.split("\n").find((l) => l.startsWith("- `ready-to-merge` is added by a reviewer only"));
-  assert.match(line, Pin.phrase("but for the run's own artifact PR, which this line does not reach"));
-  assert.match(line, Pin.phrase("label and merge that one yourself"));
+  assert.equal(line, "- `ready-to-merge` is added by a reviewer only — never an implementer, never you.");
 });
 
 // A one-line row is the rule's whole meaning for a controller that reads only

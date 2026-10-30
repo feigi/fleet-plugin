@@ -41,12 +41,19 @@
 //   commit-and-pr   `git switch -c <branch>` (`--branch`, default
 //                   `chore/run-artifacts-<UTC date>`, suffixed `b`, `c`… while
 //                   that name exists locally or on origin), commit exactly the
-//                   three `docs/metrics/*.tsv` files, push `-u`, `gh pr create
-//                   --label patch` with a body naming the reason and the rows
-//                   each file gained and lost, `git switch main`. The branch, and
-//                   the PR once it exists, are kept in the receipt: a re-run
-//                   after a failed push or PR resumes on that branch and never
-//                   opens a second PR.
+//                   three `docs/metrics/*.tsv` files, `git fetch origin`, `git
+//                   rebase origin/main`, push `-u --force-with-lease`, `gh pr
+//                   create --label patch` with a body naming the reason and the
+//                   rows each file gained and lost, `git switch main`. The
+//                   rebase is three-way, so rows `main` gained during the run
+//                   stay; one that conflicts or that git refuses is aborted, the
+//                   branch is pushed as it was, and the PR is opened all the
+//                   same, for the merge step to leave open. The lease lets a
+//                   re-run push its rebased branch over the one it pushed
+//                   before, and over nothing else. The branch, the pushed head
+//                   (the merge step's pin) and the PR once it exists are kept
+//                   in the receipt: a re-run after a failed push or PR resumes
+//                   on that branch and never opens a second PR.
 //   phase0-receipt  moves `.fleet/phase0.json` to `.fleet/phase0.previous.json`,
 //                   the name `phase0.mjs` holds a previous run's receipt under,
 //                   so a run that ended here leaves no phase-0 receipt for the
@@ -56,8 +63,38 @@
 //                   before the stop. No `phase0.json` is nothing to move and is
 //                   `ok`; a held receipt already there that is not this one is
 //                   a failed step.
-//   heartbeat-stop  `fleet-heartbeat.mjs --stop "<reason>"`, last, because
-//                   every reader takes a recorded stop as the end of the run.
+//   heartbeat-stop  `fleet-heartbeat.mjs --stop "<reason>"`. Every reader takes
+//                   a recorded stop as the end of the run, and it comes before
+//                   the merge step because a stopped beat starts no alarm
+//                   turn: before the stop, every wake ends in a tick, which
+//                   lists the open Close-out PR as a review to dispatch and
+//                   holds the run open. A `finish` call omp has moved to the
+//                   background still delivers its result as a turn of its own.
+//   merge           merges the Close-out PR the step before opened. A rebase
+//                   that conflicted or was refused leaves it open at once.
+//                   Otherwise `inertVerdict()` (finisher-scope.mjs) at the
+//                   pin; anything but `inert` leaves it open. Then, every 30 s,
+//                   `gh pr view <n> --json state,headRefOid,mergeStateStatus`
+//                   and `ci-state.mjs --pr <n> --declare-no-ci`: green CI, the
+//                   head at the pin and `mergeStateStatus` CLEAN or HAS_HOOKS
+//                   is one `gh pr merge <n> --merge --match-head-commit <pin>`,
+//                   then a read that confirms MERGED: `merged PR #<n> at <sha>`.
+//                   A PR already MERGED is that line too; one CLOSED is
+//                   `closed: PR #<n>`. A failed check (UNSTABLE included), a
+//                   head off the pin, BEHIND, DIRTY, or 30 minutes since the
+//                   step first ran, with gh unreadable or CI still pending, is
+//                   `left open: PR #<n> — <reason>`, ok, with nothing armed or
+//                   retried: the next run's phase 0 folds it in. A `finish`
+//                   call returns within 4 minutes of its start: while CI is
+//                   pending the step is pending, `NEED merge-wait PR #<n>`, and
+//                   the next call resumes from the receipt without pushing,
+//                   opening or merging again. The step runs gh and read-only
+//                   git only, and never moves HEAD, the index or a ref. It
+//                   never arms auto-merge: GitHub keeps auto-merge armed
+//                   across pushes by anyone with write access, and every member
+//                   pushes with the maintainer's credentials. It never passes
+//                   `--delete-branch`, which also deletes the local branch and
+//                   switches the checkout.
 //
 // `reopen` undoes `begin` for a run that must drain again: refused (exit 2)
 // once any `finish` step is ok, since the tick and what follows it have already
@@ -68,15 +105,19 @@
 // THE RECEIPT is `.fleet/closeout.json` (resolved through fleet-dir.mjs, so a
 // worktree and the main checkout name one file), shared by all three commands:
 //
-//   { reason, begun, branch, pr, steps: { <name>: { status, at, output } } }
+//   { reason, begun, branch, pr, pin, rebase, mergeStarted, mergeOutcome,
+//     steps: { <name>: { status, at, output } } }
 //
 // `status` is ok, pending or failed; `at` an ISO time; `output` the step's own
 // words. Every step name of both commands is always present: one not yet run
 // is `pending`. `begun` is the time `begin` finished its steps, ok or pending,
-// null until then; `branch` and `pr` belong to the commit-and-pr step. A re-run
-// skips every `ok` step and runs the rest, stopping at the first that is not
-// `ok`, so the steps after it stay `pending`. `ledger.mjs rotate` archives the
-// receipt beside the ledger as `closeout.<UTC stamp>.json`.
+// null until then; `branch`, `pr`, `pin` (the head pushed) and `rebase` (null,
+// or why the rebase was aborted) belong to the commit-and-pr step;
+// `mergeStarted` (the merge step's first run, an ISO time) and `mergeOutcome`
+// (its final line) to the merge step. A re-run skips every `ok` step and runs
+// the rest, stopping at the first that is not `ok`, so the steps after it stay
+// `pending`. `ledger.mjs rotate` archives the receipt beside the ledger as
+// `closeout.<UTC stamp>.json`.
 //
 // One `closeout: <step>: <status>` line per step on stdout, its output under
 // it, indented, with the `NEED` lines at the left margin. Exit 0 every step
@@ -95,6 +136,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeDie, defineFlags } from "./arg.mjs";
 import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
+import { inertVerdict } from "./finisher-scope.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { CLOSEOUT_RECEIPT, RECEIPT, RECEIPT_HELD, memberTokens, rowPr, isOmpSessionDirName } from "./ledger-grammar.mjs";
@@ -157,7 +199,11 @@ function readReceipt(path, stepNames) {
     if (e.code !== "ENOENT") fatal(`cannot read receipt ${path}: ${e.message}`);
   }
   const steps = Object.fromEntries(stepNames.map((n) => [n, { ...blank(), ...prior?.steps?.[n] }]));
-  return { reason: prior?.reason ?? null, begun: prior?.begun ?? null, branch: prior?.branch ?? null, pr: prior?.pr ?? null, steps };
+  return {
+    reason: prior?.reason ?? null, begun: prior?.begun ?? null, branch: prior?.branch ?? null, pr: prior?.pr ?? null,
+    pin: prior?.pin ?? null, rebase: prior?.rebase ?? null, mergeStarted: prior?.mergeStarted ?? null, mergeOutcome: prior?.mergeOutcome ?? null,
+    steps,
+  };
 }
 
 function writeReceipt(path, receipt) {
@@ -303,6 +349,27 @@ function rowCounts(git) {
   return { lines: r.stdout.split("\n").filter(Boolean).map((l) => l.split("\t")).map(([added, removed, file]) => `- ${file}: +${added} -${removed}`) };
 }
 
+// Replays the branch's commit onto the `origin/main` just fetched, three-way,
+// so rows `main` gained during the run stay. A replay that stops on a
+// conflict, or that git refuses to start, is aborted and the branch stays as
+// it was: `{ leftOpen }` names why, and the step goes on to push and open the
+// PR. `{ error }` is a fetch, or an abort, that failed.
+function rebaseOntoMain(git) {
+  const fetch = git(["fetch", "origin"], NETWORK_TIMEOUT_MS);
+  if (fetch.status !== 0) return { error: `git fetch origin failed: ${detail(fetch)}` };
+  const rebase = git(["rebase", "origin/main"]);
+  if (rebase.status === 0) return { leftOpen: null };
+  const unmerged = git(["diff", "--name-only", "--diff-filter=U"]);
+  const files = unmerged.status === 0 ? unmerged.stdout.split("\n").filter(Boolean) : [];
+  const stopped = git(["rev-parse", "--verify", "--quiet", "REBASE_HEAD"]);
+  if (stopped.status === 0) {
+    const abort = git(["rebase", "--abort"]);
+    if (abort.status !== 0) return { error: `git rebase origin/main stopped and git rebase --abort failed: ${detail(abort)}` };
+  }
+  if (files.length > 0) return { leftOpen: `rebase conflict: ${files.join(", ")}` };
+  return { leftOpen: `rebase refused: ${detail(rebase).split("\n")[0]}` };
+}
+
 // Everything the step does while the checkout is on the metrics branch; the
 // caller switches back to main whatever this returns.
 function onBranch({ git, cwd, reason, receipt, save }) {
@@ -312,14 +379,22 @@ function onBranch({ git, cwd, reason, receipt, save }) {
     const commit = git(["commit", "-m", `Closeout: ${reason}`, "--", ...METRICS]);
     if (commit.status !== 0) return failed(`git commit failed: ${detail(commit)}`);
   }
+  const rebased = rebaseOntoMain(git);
+  if (rebased.error) return failed(rebased.error);
   const ahead = git(["rev-list", "--count", "origin/main..HEAD"]);
   if (ahead.status !== 0) return failed(`git rev-list --count origin/main..HEAD failed: ${detail(ahead)}`);
   if (ahead.stdout === "0") return failed(`nothing to commit: ${METRICS.join(", ")} are unchanged`);
+  const head = git(["rev-parse", "HEAD"]);
+  if (head.status !== 0) return failed(`git rev-parse HEAD failed: ${detail(head)}`);
 
-  const push = git(["push", "-u", "origin", receipt.branch], NETWORK_TIMEOUT_MS);
+  const push = git(["push", "-u", "--force-with-lease", "origin", receipt.branch], NETWORK_TIMEOUT_MS);
   if (push.status !== 0) return failed(`git push failed: ${detail(push)}`);
+  receipt.pin = head.stdout;
+  receipt.rebase = rebased.leftOpen;
+  save();
+  const lines = [`pushed ${receipt.pin}`, ...(rebased.leftOpen === null ? [] : [rebased.leftOpen])];
 
-  if (receipt.pr !== null) return ok(`PR ${receipt.pr} already opened for ${receipt.branch}`);
+  if (receipt.pr !== null) return ok([...lines, `PR ${receipt.pr} already opened for ${receipt.branch}`].join("\n"));
   const counts = rowCounts(git);
   if (counts.error) return failed(counts.error);
   const body = `Closeout: ${reason}\n\nRows changed:\n${counts.lines.join("\n")}\n`;
@@ -327,7 +402,7 @@ function onBranch({ git, cwd, reason, receipt, save }) {
   if (pr.status !== 0) return failed(`gh pr create failed: ${detail(pr)}`);
   receipt.pr = pr.stdout.split("\n").at(-1);
   save();
-  return ok(`PR ${receipt.pr} opened on ${receipt.branch}`);
+  return ok([...lines, `PR ${receipt.pr} opened on ${receipt.branch}`].join("\n"));
 }
 
 function stepCommitAndPR({ reason, branch, receipt, save }) {
@@ -383,6 +458,124 @@ function stepHeartbeatStop({ cwd, reason }) {
   return r.status === 0 ? ok(r.stdout) : failed(`fleet-heartbeat.mjs --stop failed: ${detail(r)}`);
 }
 
+// One read of the PR: `{ state, headRefOid, mergeStateStatus }`, or
+// `{ unreadable }` naming what gh answered instead.
+function readPr(n, cwd, timeoutMs) {
+  const r = run("gh", ["pr", "view", n, "--json", "state,headRefOid,mergeStateStatus"], { cwd, env: { GH_REPO: "" }, timeoutMs });
+  if (r.status !== 0) return { unreadable: `gh pr view failed: ${detail(r)}` };
+  let v = null;
+  try {
+    v = JSON.parse(r.stdout);
+  } catch {
+    // Not JSON: named below with what gh printed.
+  }
+  if (typeof v?.state === "string" && typeof v.headRefOid === "string" && typeof v.mergeStateStatus === "string") return v;
+  return { unreadable: `gh pr view answered ${r.stdout || "nothing"}` };
+}
+
+// CI as the merge gate reads it, `ci-state.mjs --pr <n> --declare-no-ci`, with
+// the payload and the exit status agreeing. A not-green answer whose run has
+// not completed, or that found no run on the head yet, is still pending; one
+// whose run completed is a failed check.
+function readCi(n, cwd, timeoutMs) {
+  const r = node("ci-state.mjs", ["--pr", n, "--declare-no-ci"], { cwd, env: { GH_REPO: "" }, timeoutMs });
+  let ci = null;
+  try {
+    ci = JSON.parse(r.stdout);
+  } catch {
+    // Not JSON: unreadable below.
+  }
+  if (ci === null || typeof ci !== "object") return { unreadable: `ci-state.mjs answered nothing readable: ${detail(r)}` };
+  if (r.status === 0 && (ci.verdict === "green" || ci.verdict === "no-ci")) return { green: true, prHead: ci.prHead };
+  if (r.status === 1 && ci.verdict === "not-green" && Array.isArray(ci.reasons)) {
+    const why = ci.reasons.join("; ") || "not green";
+    return ci.status === "completed" ? { failed: why } : { pending: why };
+  }
+  return { unreadable: `ci-state.mjs ${r.how}, verdict ${ci.verdict ?? "absent"}` };
+}
+
+// The merge step's clocks: a `finish` call returns within CALL_MS of its
+// start, the step reads the PR every POLL_MS, and it stops waiting BOUND_MS
+// after its first run. CLOSEOUT_CALL_MS and CLOSEOUT_POLL_MS can only shorten
+// theirs.
+const shorter = (name, ms) => {
+  const v = Number(process.env[name]);
+  return Number.isInteger(v) && v > 0 && v < ms ? v : ms;
+};
+const CALL_MS = shorter("CLOSEOUT_CALL_MS", 4 * 60_000);
+const POLL_MS = shorter("CLOSEOUT_POLL_MS", 30_000);
+const BOUND_MS = 30 * 60_000;
+const PR_NUMBER = /\/pull\/(\d+)$/;
+const FULL_SHA = /^[0-9a-f]{40}$/;
+const MERGEABLE = new Set(["CLEAN", "HAS_HOOKS"]);
+// Atomics.wait never blocks on a value nothing writes, so it is a plain sleep.
+const IDLE = new Int32Array(new SharedArrayBuffer(4));
+
+function stepMerge({ receipt, save, started }) {
+  const n = PR_NUMBER.exec(receipt.pr ?? "")?.[1];
+  if (n === undefined) return failed(`no PR number in the receipt's pr: ${receipt.pr}`);
+  const done = (line) => {
+    receipt.mergeOutcome = line;
+    save();
+    return ok(line);
+  };
+  const leftOpen = (why) => done(`left open: PR #${n} — ${why}`);
+  if (receipt.rebase !== null) return leftOpen(receipt.rebase);
+  if (!FULL_SHA.test(receipt.pin ?? "")) return failed(`no pushed head in the receipt to pin the merge to: ${receipt.pin}`);
+  const top = run("git", ["rev-parse", "--show-toplevel"], { cwd: process.cwd() });
+  if (top.status !== 0) return failed(`not inside a git work tree: ${detail(top)}`);
+  const cwd = top.stdout;
+  if (receipt.mergeStarted === null) {
+    receipt.mergeStarted = new Date().toISOString();
+    save();
+  }
+
+  const v = inertVerdict({ worktree: cwd, pin: receipt.pin });
+  if (v.verdict !== "inert") {
+    const why = v.reason ?? v.paths.filter((p) => p.class === null).map((p) => `${p.path} (${p.why})`).join(", ");
+    return leftOpen(`verdict ${v.verdict}: ${why}`);
+  }
+
+  const bound = Date.parse(receipt.mergeStarted) + BOUND_MS;
+  const deadline = started + CALL_MS - CALL_MS / 8;
+  const budget = () => Math.min(NETWORK_TIMEOUT_MS, Math.max(1, Math.floor(deadline - Date.now())));
+  const atBound = (last) => leftOpen(last.unreadable ? `gh unreadable until the bound: ${last.why}` : `the 30-min bound: ${last.why}`);
+  let last = { unreadable: false, why: "not read yet" };
+  let asked = false;
+  while (Date.now() < deadline) {
+    const pr = readPr(n, cwd, budget());
+    if (pr.unreadable) last = { unreadable: true, why: pr.unreadable };
+    else if (pr.state === "MERGED") return done(`merged PR #${n} at ${pr.headRefOid}`);
+    else if (pr.state === "CLOSED") return done(`closed: PR #${n}`);
+    else if (pr.headRefOid !== receipt.pin) return leftOpen(`head moved off the pin ${receipt.pin}: ${pr.headRefOid}`);
+    else if (pr.mergeStateStatus === "BEHIND" || pr.mergeStateStatus === "DIRTY") return leftOpen(pr.mergeStateStatus);
+    else {
+      const ci = readCi(n, cwd, budget());
+      if (ci.failed) return leftOpen(`a check failed: ${ci.failed}`);
+      if (ci.unreadable) last = { unreadable: true, why: ci.unreadable };
+      else if (ci.pending) last = { unreadable: false, why: `CI pending: ${ci.pending}` };
+      else if (ci.prHead !== receipt.pin) return leftOpen(`head moved off the pin ${receipt.pin}: ${ci.prHead}`);
+      else if (pr.mergeStateStatus === "UNSTABLE") return leftOpen("a check failed: UNSTABLE");
+      else if (!MERGEABLE.has(pr.mergeStateStatus)) last = { unreadable: false, why: `CI green, mergeStateStatus ${pr.mergeStateStatus}` };
+      else if (asked) last = { unreadable: false, why: "gh pr merge answered and the PR is not MERGED yet" };
+      else {
+        asked = true;
+        const merge = run("gh", ["pr", "merge", n, "--merge", "--match-head-commit", receipt.pin], { cwd, env: { GH_REPO: "" }, timeoutMs: budget() });
+        const after = readPr(n, cwd, budget());
+        if (after.state === "MERGED") return done(`merged PR #${n} at ${after.headRefOid}`);
+        last = merge.status === 0
+          ? { unreadable: false, why: "gh pr merge answered and the PR is not MERGED yet" }
+          : { unreadable: true, why: `gh pr merge failed: ${detail(merge)}` };
+      }
+    }
+    if (Date.now() >= bound) return atBound(last);
+    if (Date.now() + POLL_MS >= deadline) break;
+    Atomics.wait(IDLE, 0, 0, POLL_MS);
+  }
+  if (Date.now() >= bound) return atBound(last);
+  return pending(`NEED merge-wait PR #${n}\n${last.why}`);
+}
+
 // ── the steps, in order ──────────────────────────────────────────────────────
 
 const BEGIN = { drain: stepDrain, release: stepRelease };
@@ -394,6 +587,7 @@ const FINISH = {
   "commit-and-pr": stepCommitAndPR,
   "phase0-receipt": stepPhase0Receipt,
   "heartbeat-stop": stepHeartbeatStop,
+  merge: stepMerge,
 };
 const STEP_NAMES = [...Object.keys(BEGIN), ...Object.keys(FINISH)];
 
@@ -470,7 +664,7 @@ function main() {
   const receiptPath = join(fleetDir, CLOSEOUT_RECEIPT);
   const receipt = readReceipt(receiptPath, STEP_NAMES);
   receipt.reason = reason;
-  const ctx = { cwd: process.cwd(), fleetDir, reason, branch };
+  const ctx = { cwd: process.cwd(), fleetDir, reason, branch, started: performance.timeOrigin };
   if (cmd === "reopen") {
     process.exitCode = reopen(ctx, receipt, receiptPath);
   } else if (cmd === "begin") {

@@ -51,8 +51,11 @@ const BRANCH = `chore/run-artifacts-${TODAY}`;
 
 // What every stub is: log the call, write what the control file says to write,
 // then answer from `<name>.json` in the case's control directory — `{exit, out,
-// err, write}`, or `by[<args>]` for a script whose answer turns on its arguments.
-const DRIVER = `import { appendFileSync, readFileSync } from "node:fs";
+// err, write}`, `by[<args>]` for a script whose answer turns on its arguments,
+// or `seq[<k>]` for its k-th call, the last entry answering every later one.
+// `@HEAD@` in an answer is the head origin holds for the receipt's branch.
+const DRIVER = `import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 
 const dir = process.env.CLOSEOUT_STUBS;
@@ -64,18 +67,31 @@ const control = (name) => {
   }
 };
 
-export function drive(name, args) {
-  appendFileSync(join(dir, "order.log"), name + "\\n");
-  appendFileSync(join(dir, name + ".calls"), JSON.stringify({ args, cwd: process.cwd(), GIT_DIR: process.env.GIT_DIR ?? null }) + "\\n");
+const originHead = () => {
+  const { branch } = JSON.parse(readFileSync(join(process.cwd(), ".fleet", "closeout.json"), "utf8"));
+  const r = spawnSync("git", ["ls-remote", "origin", "refs/heads/" + branch], { encoding: "utf8" });
+  return r.stdout.split("\\t")[0];
+};
+
+// \`order\` false: the caller already logged itself to order.log (gh does).
+export function drive(name, args, order = true) {
+  if (order) appendFileSync(join(dir, "order.log"), name + "\\n");
+  const callsFile = join(dir, name + ".calls");
+  const k = existsSync(callsFile) ? readFileSync(callsFile, "utf8").split("\\n").filter(Boolean).length : 0;
+  appendFileSync(callsFile, JSON.stringify({ args, cwd: process.cwd(), GIT_DIR: process.env.GIT_DIR ?? null }) + "\\n");
   const c = control(name);
-  const spec = (c.by && c.by[args.join(" ")]) || c;
+  const spec = (c.seq && c.seq[Math.min(k, c.seq.length - 1)]) || (c.by && c.by[args.join(" ")]) || c;
   for (const w of spec.write ?? []) appendFileSync(join(process.cwd(), w.file), w.text);
-  process.stdout.write(spec.out ?? "");
+  const out = spec.out ?? "";
+  process.stdout.write(out.includes("@HEAD@") ? out.replaceAll("@HEAD@", originHead()) : out);
   process.stderr.write(spec.err ?? "");
   process.exit(spec.exit ?? 0);
 }
 
-if (process.argv[1].endsWith("stub-driver.mjs")) drive(process.argv[2], process.argv.slice(3));
+if (process.argv[1].endsWith("stub-driver.mjs")) {
+  if (process.argv[2] === "--answer") drive(process.argv[3], process.argv.slice(4), false);
+  else drive(process.argv[2], process.argv.slice(3));
+}
 `;
 
 const MJS_STUBS = ["fleet-tick", "member-outcomes", "metrics-refresh", "fleet-heartbeat"];
@@ -99,6 +115,9 @@ if (isCLI(import.meta.url)) drive(${JSON.stringify(n)}, process.argv.slice(2));
 `);
 }
 writeFileSync(join(SCRIPTS, "release-ticket.sh"), `#!/bin/sh\nexec node "$(dirname "$0")/stub-driver.mjs" release-ticket "$@"\n`);
+// ci-state.mjs runs its query on import and nothing imports it, so its stub is
+// the driver alone.
+writeFileSync(join(SCRIPTS, "ci-state.mjs"), `import { drive } from "./stub-driver.mjs";\ndrive("ci-state", process.argv.slice(2));\n`);
 cpSync(join(SCRIPTS, "ledger.mjs"), join(SCRIPTS, "ledger-real.mjs"));
 writeFileSync(join(SCRIPTS, "ledger.mjs"), `import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -117,8 +136,10 @@ await import("./ledger-real.mjs");
 const SCRIPT = join(SCRIPTS, "closeout.mjs");
 
 // `gh pr view <n> --json closingIssuesReferences,url` answers PR <n>'s url and
-// the references in gh.refs, when the test wrote one; every other call is
-// answered with gh.json.
+// the references in gh.refs, when the test wrote one. The merge step's two
+// calls answer from the driver: `gh pr view <n> --json
+// state,headRefOid,mergeStateStatus` as `gh-view`, `gh pr merge` as
+// `gh-merge`. Every other call is answered with gh.json.
 const GH_STUB = `#!/bin/sh
 printf 'gh\\n' >> "$CLOSEOUT_STUBS/order.log"
 printf '%s GH_REPO=[%s] GIT_DIR=[%s]\\n' "$(printf '%s' "$*" | tr '\\n' '|')" "\${GH_REPO-}" "\${GIT_DIR-}" >> "$CLOSEOUT_STUBS/gh.calls"
@@ -127,9 +148,20 @@ if [ "$1 $2 $4 $5" = "pr view --json closingIssuesReferences,url" ] && [ -f "$CL
   printf '{"closingIssuesReferences":%s,"url":"%s%s"}\\n' "$(cat "$CLOSEOUT_STUBS/gh.refs")" "${prUrl("")}" "$3"
   exit 0
 fi
+if [ "$1 $2 $4 $5" = "pr view --json state,headRefOid,mergeStateStatus" ]; then exec node "${join(SCRIPTS, "stub-driver.mjs")}" --answer gh-view "$@"; fi
+if [ "$1 $2" = "pr merge" ]; then exec node "${join(SCRIPTS, "stub-driver.mjs")}" --answer gh-merge "$@"; fi
 cat "$CLOSEOUT_STUBS/gh.json"
 if [ -f "$CLOSEOUT_STUBS/gh.dirty" ]; then printf 'late\\n' >> docs/metrics/member-outcomes.tsv; fi
 `;
+
+// The merge step's answers. `view` is the PR as `gh pr view` reads it, its
+// head the one origin holds unless `head` names another; `ci` is
+// `ci-state.mjs`'s payload at exit 0 (green), or at exit 1 (not green) with a
+// run that has or has not completed.
+const view = (state, mergeStateStatus, head = "@HEAD@") => ({ out: JSON.stringify({ state, headRefOid: head, mergeStateStatus }) + "\n" });
+const ciGreen = { out: JSON.stringify({ pr: 7, prHead: "@HEAD@", status: "completed", conclusion: "success", verdict: "green", reasons: [] }) + "\n" };
+const ciNotGreen = (status, reason) => ({ exit: 1, out: JSON.stringify({ pr: 7, prHead: "@HEAD@", status, conclusion: status === "completed" ? "failure" : "", verdict: "not-green", reasons: [reason] }) + "\n" });
+const ciPending = ciNotGreen("in_progress", "run status is in_progress, not completed");
 
 const HEADER = `# ${COLUMNS.join("\t")}\n`;
 const tierRow = (pr, ticket) => [new Date().toISOString().slice(0, 10), pr, ticket, "routine", "", "", "", "a note", "", "", "", ""].join("\t");
@@ -138,7 +170,8 @@ const ledgerText = (rows = []) => `# Fleet run ledger\n\n## Rows\n${rows.map((r)
 // A main checkout cloned from a bare origin with the three metrics files
 // committed, a home directory of its own holding one omp session directory for
 // the checkout, and control files that make every stub answer as a run that is
-// over and whose metrics refresh grew all three files.
+// over, whose metrics refresh grew all three files, and whose Close-out PR is
+// CLEAN on green CI and reads MERGED once merged.
 function fixture() {
   const dir = realpathSync(tempDir("closeout-"));
   const origin = join(dir, "origin.git");
@@ -193,11 +226,14 @@ function fixture() {
   f.control("fleet-heartbeat", { out: "stopped\n" });
   f.control("release-ticket", {});
   writeFileSync(join(stubs, "gh.json"), "https://example.test/o/r/pull/7\n");
+  f.control("gh-view", { seq: [view("OPEN", "CLEAN"), view("MERGED", "CLEAN")] });
+  f.control("ci-state", ciGreen);
+  f.control("gh-merge", {});
   return f;
 }
 
 const stepLines = (out) => out.filter((l) => l.startsWith("closeout: "));
-const FINISH_STEPS = ["tick", "scrape", "tier-outcomes", "metrics", "commit-and-pr", "phase0-receipt", "heartbeat-stop"];
+const FINISH_STEPS = ["tick", "scrape", "tier-outcomes", "metrics", "commit-and-pr", "phase0-receipt", "heartbeat-stop", "merge"];
 const BEGIN_STEPS = ["drain", "release"];
 const statusOf = (receipt, names) => Object.fromEntries(names.map((n) => [n, receipt.steps[n].status]));
 const allOk = (names) => Object.fromEntries(names.map((n) => [n, "ok"]));
@@ -351,13 +387,13 @@ test("a finish before any begin leaves begin's steps pending in the receipt, and
 
 // ── finish ───────────────────────────────────────────────────────────────────
 
-test("finish: runs the steps in order, one status line each, heartbeat --stop last, and exits 0", () => {
+test("finish: runs the steps in order, one status line each, heartbeat --stop before the merge, and exits 0", () => {
   const f = fixture();
   const r = f.run("finish", ["--reason", "wrap up"]);
   assert.equal(r.status, 0, r.err + r.stdout);
   assert.deepEqual(stepLines(r.out), FINISH_STEPS.map((n) => `closeout: ${n}: ok`));
   assert.deepEqual(statusOf(f.receipt(), FINISH_STEPS), allOk(FINISH_STEPS));
-  assert.deepEqual(f.order(), ["fleet-tick", "member-outcomes", "metrics-refresh", "gh", "fleet-heartbeat"]);
+  assert.deepEqual(f.order(), ["fleet-tick", "member-outcomes", "metrics-refresh", "gh", "fleet-heartbeat", "gh", "ci-state", "gh", "gh"], "pr create, the stop, then pr view, ci-state, pr merge and the pr view that confirms it");
   assert.deepEqual(f.calls("fleet-heartbeat")[0].args, ["--stop", "wrap up"]);
   assert.equal(git(f.repo, "branch", "--show-current"), "main", "the checkout is back on main");
 });
@@ -393,7 +429,7 @@ test("finish: exits 3 and runs nothing after it unless the tick's last line is `
     assert.equal(r.status, 3, JSON.stringify(out) + r.err + r.stdout);
     assert.match(r.stdout, /^closeout: tick: failed$/m);
     assert.deepEqual(f.order(), ["fleet-tick"]);
-    assert.deepEqual(statusOf(f.receipt(), FINISH_STEPS), { tick: "failed", scrape: "pending", "tier-outcomes": "pending", metrics: "pending", "commit-and-pr": "pending", "phase0-receipt": "pending", "heartbeat-stop": "pending" });
+    assert.deepEqual(statusOf(f.receipt(), FINISH_STEPS), { tick: "failed", scrape: "pending", "tier-outcomes": "pending", metrics: "pending", "commit-and-pr": "pending", "phase0-receipt": "pending", "heartbeat-stop": "pending", merge: "pending" });
   }
   const f = fixture();
   f.control("fleet-tick", { exit: 1, err: "fleet-tick: cannot read the ledger\n" });
@@ -453,7 +489,7 @@ test("finish: exits 4 naming each reviewed= PR without a tier-outcomes row, and 
   assert.match(r.stdout, /^closeout: tier-outcomes: pending$/m);
   assert.deepEqual(f.order().filter((n) => n !== "gh"), ["fleet-tick", "member-outcomes"], "the metrics refresh and everything after it waits");
   assert.deepEqual(f.ghCalls().filter((l) => !l.startsWith("pr view ")), [], "the step only reads PRs; nothing was created or edited");
-  assert.deepEqual(statusOf(f.receipt(), FINISH_STEPS), { tick: "ok", scrape: "ok", "tier-outcomes": "pending", metrics: "pending", "commit-and-pr": "pending", "phase0-receipt": "pending", "heartbeat-stop": "pending" });
+  assert.deepEqual(statusOf(f.receipt(), FINISH_STEPS), { tick: "ok", scrape: "ok", "tier-outcomes": "pending", metrics: "pending", "commit-and-pr": "pending", "phase0-receipt": "pending", "heartbeat-stop": "pending", merge: "pending" });
 
   writeFileSync(join(f.repo, METRICS[2]), HEADER + [tierRow(20, 10), tierRow(23, 13), tierRow(30, 30)].join("\n") + "\n");
   const again = f.run("finish", ["--reason", "wrap up"]);
@@ -476,7 +512,7 @@ test("finish: reviewed= PRs that close no issue and name no implementer need no 
   assert.equal(r.status, 0, r.err + r.stdout);
   assert.deepEqual(r.out.filter((l) => l.startsWith("NEED ")), []);
   assert.deepEqual(statusOf(f.receipt(), FINISH_STEPS), allOk(FINISH_STEPS));
-  assert.deepEqual(f.ghCalls().filter((l) => l.startsWith("pr view ")).map((l) => l.split(" GH_REPO=")[0]), ["pr view 23 --json closingIssuesReferences,url", "pr view 30 --json closingIssuesReferences,url"]);
+  assert.deepEqual(f.ghCalls().filter((l) => l.includes(" --json closingIssuesReferences,url ")).map((l) => l.split(" GH_REPO=")[0]), ["pr view 23 --json closingIssuesReferences,url", "pr view 30 --json closingIssuesReferences,url"]);
 });
 
 // #3664: a reviewed PR that closes several issues and that no settled impl token
@@ -671,6 +707,240 @@ test("finish: a re-run after commit-and-pr succeeded does not open a second PR, 
   assert.equal(f.calls("fleet-heartbeat").length, 2);
 });
 
+// ── the rebase and the merge ─────────────────────────────────────────────────
+
+// What origin holds, read from the bare repository itself.
+const originRev = (f, rev) => git(f.dir, "--git-dir", f.origin, "rev-parse", rev);
+// Another clone appends `text` to `file` and pushes it to origin's main, which
+// leaves the checkout's own main behind. Answers origin's new tip.
+let clones = 0;
+const moveOriginMain = (f, file, text) => {
+  const other = join(f.dir, `other-${++clones}`);
+  git(f.dir, "clone", "-q", f.origin, other);
+  writeFileSync(join(other, file), readFileSync(join(other, file), "utf8") + text);
+  git(other, "commit", "-q", "-am", `main moved: ${file}`);
+  git(other, "push", "-q", "origin", "main");
+  return git(other, "rev-parse", "HEAD");
+};
+// A call bound short enough for a test to wait it out, read every 100 ms.
+const FAST = { env: { CLOSEOUT_CALL_MS: "6000", CLOSEOUT_POLL_MS: "100" } };
+const leftOpenLine = (r) => r.out.map((l) => l.trim()).find((l) => l.startsWith("left open: "));
+const armedOrDeleting = (f) => f.ghCalls().filter((l) => /--auto|--delete-branch/.test(l));
+
+test("finish: the pushed branch's one commit sits on the origin/main tip fetched at push time, also when local main is behind it, and keeps the rows main gained", () => {
+  const f = fixture();
+  f.control("metrics-refresh", { write: [{ file: METRICS[0], text: "a\tb\n" }] });
+  const localMain = git(f.repo, "rev-parse", "main");
+  const tip = moveOriginMain(f, METRICS[2], tierRow(20, 10) + "\n");
+  const r = f.run("finish", ["--reason", "wrap up"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  const pushed = originRev(f, BRANCH);
+  assert.equal(originRev(f, `${BRANCH}^`), tip, "its parent is the tip origin/main had at push time");
+  assert.equal(git(f.dir, "--git-dir", f.origin, "rev-list", "--count", `main..${BRANCH}`), "1");
+  assert.equal(git(f.dir, "--git-dir", f.origin, "show", "--name-only", "--format=", BRANCH), METRICS[0]);
+  assert.ok(git(f.dir, "--git-dir", f.origin, "show", `${BRANCH}:${METRICS[2]}`).includes(tierRow(20, 10).trimEnd()), "the row main gained during the run is on the branch");
+  assert.equal(git(f.repo, "rev-parse", "main"), localMain, "local main did not move");
+  assert.equal(f.receipt().pin, pushed, "the pin is the head pushed");
+  assert.equal(f.receipt().rebase, null);
+  assert.deepEqual(f.calls("gh-merge").map((c) => c.args), [["pr", "merge", "7", "--merge", "--match-head-commit", pushed]]);
+});
+
+test("finish: a rebase that conflicts is aborted, the branch pushed as it was and its PR opened, no merge attempted, and finish exits 0 naming the files", () => {
+  const f = fixture();
+  const root = git(f.repo, "rev-parse", "main");
+  moveOriginMain(f, METRICS[1], "x\ty\n");
+  const r = f.run("finish", ["--reason", "wrap up"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  const line = "left open: PR #7 — rebase conflict: docs/metrics/ticket-features.tsv";
+  assert.equal(leftOpenLine(r), line);
+  assert.equal(f.receipt().mergeOutcome, line);
+  assert.deepEqual(statusOf(f.receipt(), FINISH_STEPS), allOk(FINISH_STEPS));
+  assert.equal(originRev(f, `${BRANCH}^`), root, "pushed on the main it was cut from");
+  assert.equal(originRev(f, BRANCH), git(f.repo, "rev-parse", BRANCH), "pushed unchanged");
+  assert.equal(f.ghCalls().filter((l) => l.startsWith("pr create")).length, 1, "the PR is opened all the same");
+  assert.deepEqual([f.calls("gh-view"), f.calls("ci-state"), f.calls("gh-merge")], [[], [], []], "the merge step asked nothing");
+  assert.equal(git(f.repo, "status", "--porcelain", "--untracked-files=no"), "", "no rebase is left half done");
+  assert.equal(git(f.repo, "branch", "--show-current"), "main");
+});
+
+test("finish: a rebase git refuses leaves the PR open, named, with the change that blocked it untouched", () => {
+  const f = fixture();
+  moveOriginMain(f, "README", "moved on\n");
+  writeFileSync(join(f.repo, "README"), "an edit in progress\n");
+  const r = f.run("finish", ["--reason", "wrap up"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.match(leftOpenLine(r), /^left open: PR #7 — rebase refused: \S/);
+  assert.equal(readFileSync(join(f.repo, "README"), "utf8"), "an edit in progress\n");
+  assert.equal(f.ghCalls().filter((l) => l.startsWith("pr create")).length, 1);
+  assert.deepEqual(f.calls("gh-merge"), []);
+  assert.equal(git(f.repo, "branch", "--show-current"), "main");
+});
+
+test("finish: a re-run whose branch is already on origin rebases onto the new tip and re-pushes it with --force-with-lease", () => {
+  const f = fixture();
+  writeFileSync(join(f.stubs, "gh.fail"), "");
+  assert.equal(f.run("finish", ["--reason", "wrap up"]).status, 3);
+  const first = originRev(f, BRANCH);
+  rmSync(join(f.stubs, "gh.fail"));
+  const tip = moveOriginMain(f, "README", "moved on\n");
+  const again = f.run("finish", ["--reason", "wrap up"]);
+  assert.equal(again.status, 0, again.err + again.stdout);
+  const pushed = originRev(f, BRANCH);
+  assert.notEqual(pushed, first, "the branch on origin was replaced");
+  assert.equal(originRev(f, `${BRANCH}^`), tip);
+  assert.equal(f.receipt().pin, pushed);
+  assert.deepEqual(f.calls("gh-merge").map((c) => c.args.at(-1)), [pushed], "merged at the head re-pushed");
+});
+
+for (const state of ["CLEAN", "HAS_HOOKS"]) {
+  test(`finish: green CI on a ${state} PR at the pin is one gh pr merge --merge --match-head-commit <pin>, confirmed MERGED, at exit 0`, () => {
+    const f = fixture();
+    f.control("gh-view", { seq: [view("OPEN", state), view("MERGED", state)] });
+    const r = f.run("finish", ["--reason", "wrap up"]);
+    assert.equal(r.status, 0, r.err + r.stdout);
+    const pin = originRev(f, BRANCH);
+    assert.equal(f.receipt().pin, pin);
+    assert.deepEqual(f.calls("ci-state").map((c) => c.args), [["--pr", "7", "--declare-no-ci"]]);
+    assert.deepEqual(f.calls("gh-merge").map((c) => c.args), [["pr", "merge", "7", "--merge", "--match-head-commit", pin]]);
+    assert.equal(f.calls("gh-view").length, 2, "a read before the merge and one that confirms it");
+    assert.match(r.stdout, new RegExp(`^ {2}merged PR #7 at ${pin}$`, "m"));
+    assert.equal(f.receipt().mergeOutcome, `merged PR #7 at ${pin}`);
+    assert.deepEqual(armedOrDeleting(f), []);
+    assert.notEqual(git(f.repo, "branch", "--list", BRANCH), "", "the local branch stays");
+    assert.equal(git(f.repo, "branch", "--show-current"), "main");
+  });
+}
+
+test("finish: heartbeat-stop is recorded before the merge step's first gh call", () => {
+  const f = fixture();
+  assert.equal(f.run("finish", ["--reason", "wrap up"]).status, 0);
+  const order = f.order();
+  const stop = order.indexOf("fleet-heartbeat");
+  assert.deepEqual(order.slice(0, stop).filter((n) => n === "gh"), ["gh"], "only pr create comes before the stop");
+  assert.deepEqual(f.ghCalls().slice(0, 1).map((l) => l.split(" ").slice(0, 2).join(" ")), ["pr create"]);
+  const receipt = f.receipt();
+  assert.ok(receipt.steps["heartbeat-stop"].at <= receipt.mergeStarted, "the stop is in the receipt before the merge step first ran");
+});
+
+test("finish: pending CI returns within the call's bound at exit 4 with NEED merge-wait, and the next call resumes with no second push, PR or merge", () => {
+  const f = fixture();
+  f.control("ci-state", ciPending);
+  f.control("gh-view", view("OPEN", "BLOCKED"));
+  const t0 = Date.now();
+  const r = f.run("finish", ["--reason", "wrap up"], FAST);
+  const took = Date.now() - t0;
+  assert.equal(r.status, 4, r.err + r.stdout);
+  assert.ok(took < Number(FAST.env.CLOSEOUT_CALL_MS), `the call took ${took} ms`);
+  assert.deepEqual(r.out.filter((l) => l.startsWith("NEED ")), ["NEED merge-wait PR #7"]);
+  assert.match(r.stdout, /^closeout: merge: pending$/m);
+  assert.ok(f.calls("ci-state").length >= 2, "it read CI again inside the call");
+  const first = f.receipt();
+  assert.equal(first.steps["heartbeat-stop"].status, "ok");
+  assert.equal(first.steps.merge.status, "pending");
+  assert.equal(first.mergeOutcome, null);
+  assert.deepEqual(f.calls("gh-merge"), []);
+  const pin = originRev(f, BRANCH);
+
+  rmSync(join(f.stubs, "gh-view.calls"));
+  f.control("gh-view", { seq: [view("OPEN", "CLEAN"), view("MERGED", "CLEAN")] });
+  f.control("ci-state", ciGreen);
+  const again = f.run("finish", ["--reason", "wrap up"]);
+  assert.equal(again.status, 0, again.err + again.stdout);
+  const second = f.receipt();
+  assert.equal(second.steps["commit-and-pr"].at, first.steps["commit-and-pr"].at, "commit-and-pr did not run again");
+  assert.equal(second.mergeStarted, first.mergeStarted, "the bound still counts from the step's first run");
+  assert.equal(originRev(f, BRANCH), pin, "nothing was pushed again");
+  assert.equal(f.ghCalls().filter((l) => l.startsWith("pr create")).length, 1);
+  assert.deepEqual(f.calls("gh-merge").map((c) => c.args), [["pr", "merge", "7", "--merge", "--match-head-commit", pin]]);
+  assert.equal(f.calls("fleet-heartbeat").length, 1);
+});
+
+// Every outcome but merged: ok, exit 0, one `left open` line, nothing merged.
+const LEFT_OPEN = [
+  ["a failed check", { "ci-state": ciNotGreen("completed", "job check is failure, not success") }, "a check failed: job check is failure, not success"],
+  ["an UNSTABLE PR", { "gh-view": view("OPEN", "UNSTABLE") }, "a check failed: UNSTABLE"],
+  ["a head off the pin", { "gh-view": view("OPEN", "CLEAN", "f".repeat(40)) }, /^head moved off the pin [0-9a-f]{40}: f{40}$/],
+  ["a BEHIND PR", { "gh-view": view("OPEN", "BEHIND") }, "BEHIND"],
+  ["a DIRTY PR", { "gh-view": view("OPEN", "DIRTY") }, "DIRTY"],
+];
+for (const [what, controls, reason] of LEFT_OPEN) {
+  test(`finish: ${what} leaves the PR open, merges nothing, names the reason and exits 0`, () => {
+    const f = fixture();
+    for (const [name, value] of Object.entries(controls)) f.control(name, value);
+    const r = f.run("finish", ["--reason", "wrap up"]);
+    assert.equal(r.status, 0, r.err + r.stdout);
+    const line = leftOpenLine(r);
+    assert.ok(line, r.stdout);
+    const why = line.slice("left open: PR #7 — ".length);
+    if (typeof reason === "string") assert.equal(why, reason);
+    else assert.match(why, reason);
+    assert.equal(f.receipt().mergeOutcome, line);
+    assert.deepEqual(statusOf(f.receipt(), FINISH_STEPS), allOk(FINISH_STEPS));
+    assert.deepEqual(f.calls("gh-merge"), []);
+    assert.deepEqual(armedOrDeleting(f), []);
+  });
+}
+
+test("finish: a PR someone else merged is merged, and one closed unmerged is `closed: PR #<n>`, neither merged again, at exit 0", () => {
+  const f = fixture();
+  f.control("gh-view", view("MERGED", "CLEAN"));
+  const r = f.run("finish", ["--reason", "wrap up"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.match(r.stdout, new RegExp(`^ {2}merged PR #7 at ${originRev(f, BRANCH)}$`, "m"));
+  assert.deepEqual([f.calls("ci-state"), f.calls("gh-merge")], [[], []]);
+
+  const g = fixture();
+  g.control("gh-view", view("CLOSED", "CLEAN"));
+  const closed = g.run("finish", ["--reason", "wrap up"]);
+  assert.equal(closed.status, 0, closed.err + closed.stdout);
+  assert.match(closed.stdout, /^ {2}closed: PR #7$/m);
+  assert.equal(g.receipt().mergeOutcome, "closed: PR #7");
+  assert.deepEqual(g.calls("gh-merge"), []);
+});
+
+test("finish: the 30-min bound leaves the PR open at exit 0, naming CI still pending, or gh unreadable until the bound", () => {
+  const cases = [
+    [{ "ci-state": ciPending, "gh-view": view("OPEN", "BLOCKED") }, "the 30-min bound: CI pending: run status is in_progress, not completed"],
+    [{ "gh-view": { exit: 1, err: "HTTP 502\n" } }, "gh unreadable until the bound: gh pr view failed: HTTP 502"],
+  ];
+  for (const [controls, reason] of cases) {
+    const f = fixture();
+    for (const [name, value] of Object.entries(controls)) f.control(name, value);
+    const r = f.run("finish", ["--reason", "wrap up"], FAST);
+    assert.equal(r.status, 4, r.err + r.stdout);
+    const receipt = f.receipt();
+    receipt.mergeStarted = new Date(Date.now() - 31 * 60_000).toISOString();
+    writeFileSync(f.receiptPath, JSON.stringify(receipt));
+    const again = f.run("finish", ["--reason", "wrap up"], FAST);
+    assert.equal(again.status, 0, again.err + again.stdout);
+    assert.equal(leftOpenLine(again), `left open: PR #7 — ${reason}`);
+    assert.equal(f.receipt().steps.merge.status, "ok");
+    assert.deepEqual(f.calls("gh-merge"), []);
+  }
+});
+
+test("finish: a verdict other than inert at the pin leaves the PR open with no further gh call", () => {
+  const cases = [
+    [(f, root) => git(f.repo, "update-ref", "refs/remotes/origin/main", root), /^left open: PR #7 — verdict not-inert: README \(.+\)$/],
+    [(f) => git(f.repo, "update-ref", "-d", "refs/remotes/origin/main"), /^left open: PR #7 — verdict unknown: no origin\/main to take the merge base against$/],
+  ];
+  for (const [breakIt, line] of cases) {
+    const f = fixture();
+    const root = git(f.repo, "rev-parse", "main");
+    moveOriginMain(f, "README", "moved on\n");
+    f.control("ci-state", ciPending);
+    f.control("gh-view", view("OPEN", "BLOCKED"));
+    assert.equal(f.run("finish", ["--reason", "wrap up"], FAST).status, 4, "inert at first, so the step waits");
+    const asked = f.ghCalls().length;
+    breakIt(f, root);
+    const r = f.run("finish", ["--reason", "wrap up"]);
+    assert.equal(r.status, 0, r.err + r.stdout);
+    assert.match(leftOpenLine(r), line);
+    assert.equal(f.ghCalls().length, asked, "no gh call after the verdict");
+    assert.deepEqual(f.calls("gh-merge"), []);
+  }
+});
+
 // ── the phase-0 receipt is set aside ─────────────────────────────────────────
 
 const PHASE0 = '{"run": 1700000000000, "session": "/s", "caps": {"impl": 3, "review": null}, "inFlight": 6}\n';
@@ -726,9 +996,10 @@ test("finish: a step that fails or waits before the move leaves phase0.json wher
 
 test("finish: a receipt that cannot be parsed is moved all the same, and no phase0.json at all is a step that is ok", () => {
   const f = fixture();
-  // The tick refuses to read it, so the step is reached through a receipt whose earlier steps are already ok.
+  // The tick refuses to read it, so the step is reached through a receipt whose earlier steps are already ok;
+  // the receipt names no PR for the merge step after it to merge, so that step is ok too.
   const at = new Date().toISOString();
-  const done = Object.fromEntries(["drain", "release", "tick", "scrape", "tier-outcomes", "metrics", "commit-and-pr"].map((n) => [n, { status: "ok", at, output: "" }]));
+  const done = Object.fromEntries(["drain", "release", "tick", "scrape", "tier-outcomes", "metrics", "commit-and-pr", "merge"].map((n) => [n, { status: "ok", at, output: "" }]));
   writeFileSync(f.receiptPath, JSON.stringify({ reason: "wrap up", begun: at, steps: done }));
   writeFileSync(join(f.fleet, "phase0.json"), "{not json");
   const r = f.run("finish", ["--reason", "wrap up"]);
@@ -804,10 +1075,11 @@ test("an ambient GIT_DIR or GH_REPO naming another repository does not change wh
   assert.equal(r.status, 0, r.err + r.stdout);
   assert.equal(git(f.repo, "rev-list", "--count", `main..${BRANCH}`), "1", "the branch went on this repository");
   assert.equal(git(elsewhere.repo, "branch", "--list", "chore/*"), "", "and none went on the other");
-  for (const call of ["release-ticket", "fleet-tick", "member-outcomes", "metrics-refresh", "fleet-heartbeat"]) {
+  for (const call of ["release-ticket", "fleet-tick", "member-outcomes", "metrics-refresh", "fleet-heartbeat", "ci-state", "gh-merge"]) {
     assert.equal(f.calls(call)[0].GIT_DIR, null, `${call} inherited GIT_DIR`);
   }
-  assert.match(readFileSync(join(f.stubs, "gh.calls"), "utf8"), /GH_REPO=\[\] GIT_DIR=\[\]/);
+  const gh = readFileSync(join(f.stubs, "gh.calls"), "utf8").trim().split("\n");
+  assert.deepEqual(gh.filter((l) => !l.endsWith(" GH_REPO=[] GIT_DIR=[]")), [], "every gh call ran with GH_REPO blank and no GIT_DIR");
 });
 
 // ── the command line ─────────────────────────────────────────────────────────

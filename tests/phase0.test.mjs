@@ -1038,10 +1038,11 @@ test("a same-session run after `closeout.mjs finish` starts at alarm and rotates
   assert.equal(f.calls("rotate").length, 1);
   assert.equal(f.receipt().run, RUN_AT, "the run the record names is the receipt's, as it still is after the run ends");
 
-  // The end of that run: every closeout step before the receipt's own is done.
+  // The end of that run: every closeout step before the receipt's own is done, and so is the merge step
+  // after the stop, which has no PR to merge here.
   const finished = readFileSync(f.receiptPath, "utf8");
   const at = new Date().toISOString();
-  const done = Object.fromEntries(["drain", "release", "tick", "scrape", "tier-outcomes", "metrics", "commit-and-pr"].map((n) => [n, { status: "ok", at, output: "" }]));
+  const done = Object.fromEntries(["drain", "release", "tick", "scrape", "tier-outcomes", "metrics", "commit-and-pr", "merge"].map((n) => [n, { status: "ok", at, output: "" }]));
   writeFileSync(join(f.repo, ".fleet", "closeout.json"), JSON.stringify({ reason: "wrap up", begun: at, steps: done }));
   const finish = spawnSync(process.execPath, [join(SCRIPTS, "closeout.mjs"), "finish", "--reason", "wrap up"], {
     cwd: f.repo, encoding: "utf8", env: { ...GIT_ENV, HOME: f.home, PATH: `${join(f.dir, "bin")}:${process.env.PATH}`, PH0_STUBS: f.stubs },

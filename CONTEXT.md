@@ -305,6 +305,10 @@ _Avoid_: chore PR, orphan PR, issue-less PR
 An open, non-draft PR whose `author.login` is the login the fleet's `gh` credentials answer to (`gh api user`). Only an Owned PR is folded in at phase 0 or queued for review by the tick; opening a PR as a draft keeps the fleet off it, and another author's, a bot's or a fork's is never owned. `owned-pr.mjs` is the one rule, and each reader reads the login itself; ADR 0034.
 _Avoid_: own PR, fleet PR, our PR
 
+**Close-out PR**:
+The PR `closeout.mjs finish` opens at the end of a run, carrying exactly the run-metrics files. `finish` merges it itself once CI is green on a head rebased onto `main`; one it leaves open is an ordinary Owned Ticketless PR for the next run.
+_Avoid_: artifact PR, metrics PR, run-artifacts PR
+
 ### Triage
 
 **Review deferral**:

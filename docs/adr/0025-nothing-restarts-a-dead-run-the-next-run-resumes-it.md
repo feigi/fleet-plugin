@@ -72,6 +72,7 @@ transcript in the session directory, and now also refuses a malformed line
 there; a ticket an earlier run worked is still not `claimed` by it.
 Amended by #3036: lstart is a start identity, not a printed time: ps lstart on macOS, "<boot_id> <start ticks>" on Linux, where ps lstart drifts with every wall-clock step.
 Amended by #3044: no stall reader reads `prior`. Since #2968, rotate's `acted` shares the record's `at`, so a record rotate writes never has every mark older than it. The only record that does is one written before rotate stamped `acted`, and its stall is that run's own, gone stale on the record's age. `prior` names the run before it. Every stall judges the record. Decision 5's reading of `prior`, along with "controller alive (this session's earlier run)" and "this run resumes", is withdrawn. `prior` still decides rotation's carry (Decision 4).
+Amended by #3670: End of run's finish records --stop before its last step, which merges the run's Close-out PR; a stopped beat starts no alarm turn, so no tick lists that PR as review-due while it waits.
 
 ## Context
 

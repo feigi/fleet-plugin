@@ -24,7 +24,7 @@ These hold in every phase: check each wake against them, and report evidence tha
 - A grandchild surfaces as its own task-notification; an unrecognized task-id is not a member reporting done.
 - A reviewer never reviews a PR it implemented.
 - The merge bot only touches PRs whose implementer reported done; rebasing a worktree someone is working in destroys uncommitted work.
-- `ready-to-merge` is added by a reviewer only — never an implementer, never you — but for the run's own artifact PR, which this line does not reach: label and merge that one yourself.
+- `ready-to-merge` is added by a reviewer only — never an implementer, never you.
 - Every member acts through the maintainer's `gh` credentials, so no write is attributable: when a label moves unexpectedly, ask members directly, rule out automation with `grep -rn '<label>' .github/workflows/`, and do not re-add it.
 - Phase 1 is serial; everything else may run concurrently.
 
@@ -193,9 +193,9 @@ owes beyond its call:
      `ACTION: run over → fleet-heartbeat.mjs --stop "<reason>"`, which it does
      once the run is draining with no open PR and no live implementer.
   3. `~/.fleet/bin/fleet-run closeout.mjs finish --reason "<reason>"`, which
-     then records `fleet-heartbeat.mjs --stop` last, because every reader takes
-     a recorded stop as the end of the run. A `NEED tier-outcomes append <pr>`
-     is a reviewed PR with no verdict row — for an implementer's, one that never
+     records `fleet-heartbeat.mjs --stop` and then merges the Close-out PR. On `NEED merge-wait PR #<n>`,
+     run `finish` again at once. A PR it names `left open` is the next run's: you never label or merge it.
+     A `NEED tier-outcomes append <pr>` is a reviewed PR with no verdict row — for an implementer's, one that never
      reached its finisher: run `append <pr>` (**Guard: accumulate per PR**) and run `finish` again.
      A PR closing none or several: a NEED if a settled `impl-<N>=PR#<pr>` token
      names it, else a note. A step it fails is explained in
