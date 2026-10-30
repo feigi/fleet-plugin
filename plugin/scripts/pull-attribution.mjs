@@ -83,7 +83,6 @@
 // is TRIP_POINTS or more points above the baseline's, compared in integer
 // counts. The guard holds it pooled; the fit holds it per row.
 
-import { isDigits } from "./arg.mjs";
 import { CELL } from "./ledger-grammar.mjs";
 import { parseMemberName } from "./member-record.mjs";
 import { isImplementer } from "./member-outcomes.mjs";
@@ -156,8 +155,12 @@ const METRIC = Object.freeze({ usd: (u) => u.spend, minutes: (u) => u.workS / 60
 // A counted Pull as a bootstrap unit, its `value` the Pull's `metric`.
 export const bootUnit = (u, metric = "usd") => ({ value: METRIC[metric](u), merged: u.merged ? 1 : 0 });
 
+const ISSUE_NUMBER = /^[1-9][0-9]*$/;
+
 // ticket-features.tsv: one bare header line naming the columns, then rows.
 // Read by header name; a row whose width differs from the header's is refused.
+// So is a row whose `ticket` is not an issue number (`[1-9][0-9]*`, no
+// leading zero), or whose `parent` is neither blank nor one.
 export function parseFeatures(text) {
   const lines = String(text ?? "").split("\n").filter((l) => l.trim() && !l.startsWith("#"));
   if (lines.length === 0) throw new Error("ticket-features.tsv has no header line");
@@ -171,8 +174,8 @@ export function parseFeatures(text) {
     }
     const row = Object.fromEntries(header.map((c, j) => [c, cells[j]]));
     for (const c of OPTIONAL_COLUMNS) row[c] ??= "";
-    if (!isDigits(row.ticket)) throw new Error(`ticket-features.tsv row ${i + 1}: ticket ${JSON.stringify(row.ticket)} is not a number`);
-    if (row.parent !== "" && !isDigits(row.parent)) throw new Error(`ticket-features.tsv row ${i + 1}: parent ${JSON.stringify(row.parent)} is not blank or a number`);
+    if (!ISSUE_NUMBER.test(row.ticket)) throw new Error(`ticket-features.tsv row ${i + 1}: ticket ${JSON.stringify(row.ticket)} is not an issue number`);
+    if (row.parent !== "" && !ISSUE_NUMBER.test(row.parent)) throw new Error(`ticket-features.tsv row ${i + 1}: parent ${JSON.stringify(row.parent)} is not blank or an issue number`);
     if (!CELL.test(row.chosen_cell)) throw new Error(`ticket-features.tsv row ${i + 1}: chosen_cell ${JSON.stringify(row.chosen_cell)} is not a cell`);
     return row;
   });
