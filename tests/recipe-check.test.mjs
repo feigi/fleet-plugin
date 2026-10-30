@@ -216,7 +216,7 @@ test("a reports directory that cannot be created is a refusal before anything ru
   const blocker = join(f.root, "afile");
   writeFileSync(blocker, "");
   const r = spawnSync(process.execPath, [RECIPE_CHECK, "--member", "impl-5", "--testCmd", TEST_CMD, "--reports", join(blocker, "sub")], { cwd: f.work, env: f.env, encoding: "utf8" });
-  assert.equal(r.status, 2, r.stderr);
+  assert.equal(r.status, 4, r.stderr);
   assert.match(r.stderr, /recipe-check: could not create .*afile\/sub: ENOTDIR; nothing run, nothing written/);
   assert.deepEqual(f.ran(), []);
 });
@@ -609,8 +609,35 @@ test("a repository with no usable Recipe is a refusal that runs nothing and writ
   rmSync(join(f.work, ".fleet", "recipe.json"));
   f.stage();
   const r = f.record("impl-5");
-  assert.equal(r.status, 2);
+  assert.equal(r.status, 4, r.stderr);
   assert.match(r.stderr, /no usable Recipe/);
+  assert.equal(existsSync(f.recordFile("impl-5")), false);
+  assert.deepEqual(f.ran(), []);
+});
+
+test("a derive-testcmd.sh that does not answer is a refusal the member cannot clear, and runs and writes nothing", () => {
+  const f = fixture();
+  f.stage();
+  // node is unusable on the reader's PATH, so it exits 3: no verdict on the cache.
+  const brokenNode = join(f.root, "broken-node");
+  mkdirSync(brokenNode);
+  writeExecStub(join(brokenNode, "node"), "#!/bin/sh\necho 'node stub: refused' >&2\nexit 1\n");
+  const r = f.record("impl-5", { extraEnv: { PATH: `${brokenNode}:${f.env.PATH}` } });
+  assert.equal(r.status, 4, r.stderr);
+  assert.match(r.stderr, /recipe-check: derive-testcmd\.sh check did not answer \(exit 3\): .*; nothing run, nothing written/);
+  assert.equal(existsSync(f.recordFile("impl-5")), false);
+  assert.deepEqual(f.ran(), []);
+  assert.equal(f.record("impl-5").status, 0, "the same call with a usable temp directory is no refusal");
+});
+
+test("a run from a directory that is no repository is a refusal the member can clear", () => {
+  const f = fixture();
+  f.stage();
+  const bare = join(f.root, "not-a-repo");
+  mkdirSync(bare);
+  const r = f.record("impl-5", { cwd: bare, extraEnv: { GIT_CEILING_DIRECTORIES: f.root } });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /recipe-check: git rev-parse --show-toplevel did not answer/);
   assert.equal(existsSync(f.recordFile("impl-5")), false);
   assert.deepEqual(f.ran(), []);
 });

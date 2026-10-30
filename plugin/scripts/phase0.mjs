@@ -67,8 +67,10 @@
 //                 for the other keys under the scratch parent, which runs
 //                 whatever the first answered. What either receipt's failed[]
 //                 names is listed. Recorded; never fails the run.
-//   recipe        `derive-testcmd.sh . install` and `. test --at origin/main`.
-//                 Either exiting 1 is a cache with nothing valid in it: pending,
+//   recipe        `derive-testcmd.sh . install`, `. check` and `. test --at
+//                 origin/main` (recipe-read.mjs, which the settle wakes of
+//                 fleet-event.mjs read the cache through as well). Any
+//                 exiting 1 is a cache with nothing valid in it: pending,
 //                 `NEED derive-recipe`. Exit 3 (a tool the reader could not run)
 //                 fails the step — deriving would not help.
 //   fold-in       every Owned PR (owned-pr.mjs: open, not a draft, authored by
@@ -170,6 +172,7 @@ import { GH_LOGIN_ARGS, isOwnedPr, loginOf, ownershipReadable } from "./owned-pr
 import { OBJECTIVES, RECEIPT, RECEIPT_HELD, archiveStamp, receiptArchiveName, rowNums } from "./ledger-grammar.mjs";
 import { ancestry, controllerOf, processSource, ProcUnreadable } from "./proc.mjs";
 import { IN_FLIGHT_DEFAULT, OBJECTIVE_DEFAULT } from "./phase0-receipt.mjs";
+import { readRecipe } from "./recipe-read.mjs";
 
 const NAME = "phase0";
 const SCRIPTS = dirname(fileURLToPath(import.meta.url));
@@ -365,16 +368,10 @@ function unreclaimed(what, r) {
 }
 
 function recipe({ cwd }) {
-  const reads = [["install"], ["test", "--at", "origin/main"]].map((a) => ({ a, r: sh("derive-testcmd.sh", [".", ...a], { cwd }) }));
-  const broken = reads.filter(({ r }) => r.status === 3 || (r.status !== 0 && r.status !== 1));
-  if (broken.length > 0) {
-    return failed(broken.map(({ a, r }) => withText(`derive-testcmd.sh . ${a.join(" ")} ${r.how} — the cache's state is unknown, and deriving would not help`, r)).join("\n"));
-  }
-  const refused = reads.filter(({ r }) => r.status === 1);
-  if (refused.length > 0) {
-    return { status: "pending", output: [...refused.map(({ a, r }) => withText(`derive-testcmd.sh . ${a.join(" ")} refused:`, r)), "NEED derive-recipe"].join("\n") };
-  }
-  return ok(`Recipe cache valid: ${reads.map(({ r }) => lines(r.stdout).at(-1) ?? "").join(" ; ")}`);
+  const { state, output } = readRecipe(cwd);
+  if (state === "broken") return failed(output);
+  if (state === "refused") return { status: "pending", output: `${output}\nNEED derive-recipe` };
+  return ok(output);
 }
 
 // The ledger's rows, read through `ledger.mjs read` so the ledger keeps one

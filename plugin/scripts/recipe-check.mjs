@@ -22,7 +22,7 @@
 // Steps, in this order:
 //
 //   1  read the Check step and the Test entrypoint off the Recipe cache. A
-//      worktree with no usable Recipe has no Check step to run: exit 2,
+//      worktree with no usable Recipe has no Check step to run: exit 4,
 //      nothing run, nothing written. Settle reads the same cache from the
 //      ledger's repository, where derive-testcmd.sh's probes of the Test
 //      entrypoint can answer otherwise, so it skips its gate only where its
@@ -31,7 +31,8 @@
 //      the working tree, so it must hold exactly that tree: an unstaged change
 //      to a tracked file, or an untracked file no ignore rule covers, is a
 //      refusal, exit 2 — a green record would otherwise name a tree that never
-//      ran. Then the reports directory is created, before anything runs.
+//      ran. Then the reports directory is created, before anything runs; one
+//      that cannot be created is a refusal, exit 4.
 //   3  the Check step, `sh -c` from the worktree root. A Check step of
 //      `true` is recorded as green without being run.
 //   4  the Test entrypoint, the same way — only when the Check step passed
@@ -78,9 +79,12 @@
 //
 // Exit status: 0 both commands passed and the record is written; 1 a command
 // failed — the record says which, and the script's stderr names it; 2 a
-// refusal that ran nothing and wrote nothing (usage, no usable Recipe, git
-// could not be read, a working tree that is not the staged tree, a reports
-// directory that could not be created); 75 the Test entrypoint printed exit
+// refusal the member can clear, which ran nothing and wrote nothing (usage,
+// including no `--reports` with a scratch root that cannot be resolved; git
+// could not be read; a working tree that is not the staged tree); 4 a refusal
+// the member cannot clear, which ran nothing and wrote nothing (no usable
+// Recipe, derive-testcmd.sh did not answer, a reports directory that could
+// not be created); 75 the Test entrypoint printed exit
 // 75 — the suite wrapper found no slot and launched nothing, which is no test
 // result — so no record is written, and the same command is to be run again;
 // 143, 130 or 129 the script itself received a SIGTERM, a SIGINT or a
@@ -97,7 +101,7 @@ import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { constants as osConstants } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { makeDie, defineFlags } from "./arg.mjs";
+import { makeDie, defineFlags, writeAll } from "./arg.mjs";
 import { FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
@@ -108,6 +112,8 @@ const NAME = "recipe-check";
 const USAGE = "usage: recipe-check.mjs --member <name> --testCmd <command> [--reports <dir>]";
 const DERIVE = join(dirname(fileURLToPath(import.meta.url)), "derive-testcmd.sh");
 const GIT_TIMEOUT_MS = 30_000;
+// The exit of a refusal the member cannot clear.
+const UNCLEARABLE = 4;
 // What the suite wrapper exits with when it found no slot and launched nothing.
 const NO_SLOT = 75;
 // The signals this script forwards to the running command, and treats as a kill.
@@ -159,12 +165,23 @@ async function cli() {
     }
   }
 
+  // A refusal the member cannot clear — no usable Recipe, a Recipe reader that
+  // did not answer, a reports directory that cannot be created — exits 4, where
+  // `die` exits 2 for the ones it can. Same message shape, same write.
+  const cannotClear = (msg) => {
+    try {
+      writeAll(2, `\n${NAME}: ${msg}\n`);
+    } catch {
+      // The message may be lost; the exit code may not.
+    }
+    process.exit(UNCLEARABLE);
+  };
   const env = gitEnv();
   // A reader that did not answer: the refusal names it, its exit status and
   // its own reason.
-  const noAnswer = (what, r) => {
+  const noAnswer = (what, r, refuse = die) => {
     const why = (r.error?.message ?? r.stderr ?? "").trim();
-    die(`${what} did not answer${r.status === null ? "" : ` (exit ${r.status})`}${why ? `: ${why}` : ""}; nothing run, nothing written`);
+    refuse(`${what} did not answer${r.status === null ? "" : ` (exit ${r.status})`}${why ? `: ${why}` : ""}; nothing run, nothing written`);
   };
   const gitOut = (what, args) => {
     const r = spawnSync("git", args, { encoding: "utf8", env, timeout: GIT_TIMEOUT_MS });
@@ -179,9 +196,9 @@ async function cli() {
     const r = spawnSync("sh", [DERIVE, top, name], { encoding: "utf8", env, timeout: GIT_TIMEOUT_MS });
     if (r.status === 0) return r.stdout.replace(/\n$/, "");
     if (r.status === 1) {
-      die(`this worktree has no usable Recipe, so there is no Check step to run; settle reads the Recipe from the ledger's repository and gates the report wherever that read finds one; nothing run, nothing written — ${(r.stderr ?? "").trim()}`);
+      cannotClear(`this worktree has no usable Recipe, so there is no Check step to run; settle reads the Recipe from the ledger's repository and gates the report wherever that read finds one; nothing run, nothing written — ${(r.stderr ?? "").trim()}`);
     }
-    noAnswer(`derive-testcmd.sh ${name}`, r);
+    noAnswer(`derive-testcmd.sh ${name}`, r, cannotClear);
   };
   const checkCmd = field("check");
   field("test");
@@ -199,7 +216,7 @@ async function cli() {
   try {
     mkdirSync(reports, { recursive: true });
   } catch (e) {
-    die(`could not create ${reports}: ${e.code ?? e.message}; nothing run, nothing written`);
+    cannotClear(`could not create ${reports}: ${e.code ?? e.message}; nothing run, nothing written`);
   }
 
   // 3 and 4: the commands. A reader that closes this script's stdout or

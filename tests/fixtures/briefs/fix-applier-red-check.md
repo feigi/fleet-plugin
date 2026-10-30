@@ -55,6 +55,21 @@ result — no slot was free and nothing ran — so run it again. Exit 143, 130 o
 129 is no test result either — it received a SIGTERM, SIGINT or SIGHUP and
 recorded nothing — so run it again with `timeout: 0` on the call.
 
+A refusal that ran nothing is no red. Exit 2 is one you can clear — a working
+tree that is not the staged tree, git that did not answer, a usage error: do
+what its message says, then run `recipe-check.mjs` again, and if it refuses
+again push nothing and end as for exit 4. Exit 4 is one you cannot clear — no
+usable Recipe, a Recipe reader that did not answer, a reports directory it
+cannot create: never derive the Recipe, and never rebase, re-run or edit to get
+around it, save one case. When the refusal names a path your own staged change
+deletes, renames or changes the mode of (`git diff --cached --summary`), undo
+that change unless the PR requires it, and run `recipe-check.mjs` once more.
+Otherwise — the change is required, or the re-run refuses again — push nothing
+and write a `failed` report, a report and not the no-report ending: `head` the
+PR's head on origin, which you pushed nothing past, `applied` and `deferred`
+empty, `dispositionsRecord` and `testRun` null, the refusal verbatim in
+`confirmation`, and `filed` and `unrecorded` as for any outcome.
+
 Your report is a file, `/abs/scratch-red/reports/<your name>.json`, `<your name>` the
 `fix-pr-` name you were dispatched as, in the shape
 `~/.fleet/bin/fleet-run report-schema.mjs print fix-pr` prints. A field with

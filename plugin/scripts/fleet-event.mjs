@@ -50,7 +50,7 @@
 //       opens with no sha, is a NEED and N is left untouched, claim and all.
 //       The PR a `covered` detail names is never written to.
 //       A `PR#M` outcome also sets the claim branch's upstream when it has none: `reap.sh` keeps a branch with no upstream, and only an upstream's `[gone]` state makes it reapable. It writes `branch.<b>.remote` and `branch.<b>.merge` only while the merge key is unset, and prints `NEED upstream <b> — <why>` when a write fails.
-//       A `blocked` outcome takes no action beyond the settle: no label, comment, release or upstream, so the ticket keeps `in-progress`.
+//       A `blocked` outcome takes no action on the ticket beyond the settle: no label, comment, release or upstream, so the ticket keeps `in-progress`. It runs the Recipe read, below.
 //   fix-report <fix-pr-M[-x]>
 //       `settle --from-report`, which records the filings and rulings the
 //       report carries. Settled `applied:`/`no-op`, on a PR whose rows carry
@@ -61,6 +61,8 @@
 //       token on the PR's rows yet: `dispositions-check.mjs --member <member>
 //       --scratch <scratch>`, its stdout printed. That script writes its own
 //       verdict token; its exit 1 is a verdict, its exit 2 a NEED.
+//       A `failed` outcome takes no dispositions check and runs the Recipe read, below.
+//       The Recipe read, after an `impl-report` settled `blocked` or a `fix-report` settled `failed`, whatever the member's cause: `derive-testcmd.sh . install`, `. check` and `. test --at origin/main` from the main checkout, the three reads phase0.mjs's `recipe` step makes (recipe-read.mjs is the one reader of both). All three exit 0: nothing printed, the cache is valid. One refused (exit 1): the refused reads, then `NEED derive-recipe`, which is phase 0's mid-run trigger; a refusal naming `--at` is no cache fault, and the controller fetches and reads again. Exit 3 or any other failure of a read: a `NEED recipe-read …` line carrying the environment fault, since the cache's state is unknown and deriving would not help. A cause local to the member's worktree reads valid from the main checkout and prints nothing. No other outcome runs the reads.
 //   finisher-report <finisher-pr-M[-x]>
 //       `settle --from-report`. Settled `halted:<cause>`: `gh pr comment <M>`
 //       with the report's cause and evidence. A repair finisher (a retry
@@ -204,6 +206,7 @@ import { BRIEFS, REVIEW, REVIEWED, REVIEWER, dispositionsToken, memberTokens, ne
 import { NO_TRANSCRIPT_AFTER_DEFAULT, PARKS, controllerState, foldLedger, parkedToken } from "./fleet-tick.mjs";
 import { phase0Gate, readRunReceipt, tickCaps } from "./phase0-receipt.mjs";
 import { defaultScratch, readReportIn, reportsDir } from "./report-files.mjs";
+import { readRecipe } from "./recipe-read.mjs";
 import { readState, statePath } from "./fleet-state.mjs";
 
 const NAME = "fleet-event";
@@ -568,16 +571,37 @@ function claimUpstream(ev, member) {
   ev.note(`upstream ${b} set`);
 }
 
+// The Recipe read of the two settle wakes that end a member on a refusal it
+// may have met: the one phase 0 makes (recipe-read.mjs), from the main
+// checkout. A cause local to the member's own worktree reads valid from here
+// and prints nothing. A refused read is `NEED derive-recipe`, which is phase
+// 0's mid-run trigger; a read that could not run is a NEED carrying the
+// environment fault, since the cache's state is unknown and deriving would not
+// help.
+function recipeWake(ev, member) {
+  const { state, output } = readRecipe(process.cwd());
+  if (state === "refused") {
+    ev.print(output);
+    ev.need("derive-recipe");
+    ev.note(`Recipe read after ${member}: refused`);
+  } else if (state === "broken") {
+    ev.need(`recipe-read after ${member} — ${output.split("\n").filter((l) => l.trim() !== "").join(" — ")}`);
+    ev.note(`Recipe read after ${member}: could not run`);
+  }
+}
+
 function implReport(ev, member) {
   const outcome = ev.settle(member);
   if (outcome === "bailed") bailed(ev, member);
   else if (outcome?.startsWith("PR#")) claimUpstream(ev, member);
+  else if (outcome === "blocked") recipeWake(ev, member);
 }
 
 function fixReport(ev, member) {
   const outcome = ev.settle(member);
   if (outcome === null) return;
   const pr = parseMember(member).number;
+  if (outcome === "failed") recipeWake(ev, member);
   if (outcome !== "no-op" && !outcome.startsWith("applied:")) {
     ev.note("no dispositions check: it answered nothing");
     return;

@@ -267,7 +267,7 @@ test("a clean run passes every step in order, writes one receipt and exits 0", (
   // The scripts ran in the runbook's order. The cockpit is detached, so its
   // own line in the log lands whenever it starts.
   const order = f.order().filter((n) => n !== "board");
-  assert.deepEqual(order, ["instruments", "main-checkout", "label-map", "preflight", "ruleset", "tier-roles", "metrics-refresh", "rotate", "reclaim-scratch", "reclaim-scratch", "derive-testcmd", "derive-testcmd", "gh", "stranded", "shortlist"]);
+  assert.deepEqual(order, ["instruments", "main-checkout", "label-map", "preflight", "ruleset", "tier-roles", "metrics-refresh", "rotate", "reclaim-scratch", "reclaim-scratch", "derive-testcmd", "derive-testcmd", "derive-testcmd", "gh", "stranded", "shortlist"]);
   assert.deepEqual(f.calls("instruments")[0].args, ["--pin"]);
   assert.deepEqual(f.calls("main-checkout")[0].args, ["--record"]);
   assert.deepEqual(f.calls("label-map")[0].args, ["ensure"]);
@@ -277,7 +277,7 @@ test("a clean run passes every step in order, writes one receipt and exits 0", (
   assert.deepEqual(f.calls("tier-roles")[0].args, ["--check", "--in-flight", "5"]);
   assert.deepEqual(f.calls("reclaim-scratch")[0].args, ["--root", receipt.scratch, "--after-rotate", "--apply"]);
   assert.deepEqual(f.calls("reclaim-scratch")[1].args, ["--siblings", "--root", receipt.scratch, "--apply"]);
-  assert.deepEqual(f.calls("derive-testcmd").map((c) => c.args), [[".", "install"], [".", "test", "--at", "origin/main"]]);
+  assert.deepEqual(f.calls("derive-testcmd").map((c) => c.args), [[".", "install"], [".", "check"], [".", "test", "--at", "origin/main"]]);
   for (let i = 0; i < 40 && f.calls("board").length === 0; i++) wait(100);
   assert.deepEqual(f.calls("board")[0].args, ["serve", "--open"]);
   assert.equal(f.calls("board")[0].cwd, f.repo);
@@ -632,6 +632,23 @@ test("recipe: both reads exit 1 at once is one NEED, not two", () => {
   assert.equal(r.out.filter((l) => l === "NEED derive-recipe").length, 1);
 });
 
+test("recipe: a cache whose Check step does not resolve prints the refused read and NEED derive-recipe, and the Check read is the only one named", () => {
+  const f = fixture();
+  f.control("derive-testcmd", { by: { ". check": { exit: 1, err: "no-such-checker does not resolve" } } });
+  const r = f.run();
+  assert.equal(r.status, 4, r.stdout + r.err);
+  assert.match(r.stdout, /derive-testcmd\.sh \. check refused:\n\s+no-such-checker does not resolve/);
+  assert.doesNotMatch(r.stdout, /derive-testcmd\.sh \. (install|test --at origin\/main) refused/);
+  assert.equal(r.out.at(-1), "NEED derive-recipe");
+  assert.equal(f.receipt().steps.recipe.status, "pending");
+  assert.deepEqual(f.calls("derive-testcmd").map((c) => c.args), [[".", "install"], [".", "check"], [".", "test", "--at", "origin/main"]], "all three reads run, so every refusal is named");
+
+  f.control("derive-testcmd", { by: { ". check": { exit: 3, err: "derive-testcmd: no node" } } });
+  const broken = f.run();
+  assert.equal(broken.status, 3, broken.stdout + broken.err);
+  assert.match(broken.stdout, /derive-testcmd\.sh \. check exit 3 — the cache's state is unknown, and deriving would not help\n\s+derive-testcmd: no node/);
+});
+
 // The question payload `label-map.mjs ensure` prints on exit 3 (D6's shape),
 // pretty-printed here so the step's own compaction to one line is visible.
 const PAYLOAD = {
@@ -939,7 +956,7 @@ test("a receipt whose run and session both match resumes: its ok steps are skipp
   f.setReceipt(receipt);
   const r = f.run();
   assert.equal(r.status, 0, r.stdout + r.err);
-  assert.deepEqual(f.order().filter((n) => n !== "board"), ["derive-testcmd", "derive-testcmd", "gh", "stranded", "shortlist"]);
+  assert.deepEqual(f.order().filter((n) => n !== "board"), ["derive-testcmd", "derive-testcmd", "derive-testcmd", "gh", "stranded", "shortlist"]);
   assert.deepEqual(statuses(f.receipt()), allOk);
   assert.equal(f.asides().length, 0, "a receipt that resumes is not moved aside");
   assert.equal(f.receipt().steps.pin.output, "from the previous run", "a skipped step keeps what it recorded");
