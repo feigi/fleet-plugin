@@ -1347,7 +1347,7 @@ for (const [name, code, leave] of UNREADABLE) {
       if (code === "EACCES" && process.getuid?.() === 0) return t.skip("root reads every file");
       const ws = repo();
       leave(ws);
-      const g = setRig([...LABEL_ROLES]);
+      const g = setRig(LABEL_ROLES);
       const r = verb === "ensure" ? ensureRun(ws, g) : setRun(ws, g, "--accept-suggestions", "--create");
       assert.equal(r.status, 2, r.stdout + r.stderr);
       assert.equal(r.stdout, "");
