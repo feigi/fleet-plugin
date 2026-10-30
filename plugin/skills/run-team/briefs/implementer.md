@@ -48,6 +48,22 @@ head's tree has no green record, and exit 75 from it is no test result — run i
 again. So is exit 143, 130 or 129: it received a SIGTERM, SIGINT or SIGHUP and
 recorded nothing — run it again with `timeout: 0` on the call.
 
+Exit 2 is a refusal you can clear: it ran nothing and wrote nothing, and its
+message names the cause — a working tree that is not the staged tree, git that
+did not answer, a usage error. Do what it says, then run `recipe-check.mjs`
+again; refused again → push nothing and end as for exit 4. Exit 4 is a refusal
+you cannot clear: no usable Recipe, a Recipe reader that did not answer, or a
+reports directory it cannot create or write to. Never derive the Recipe, and
+never rebase, re-run or edit to get around it. One exception: when the refusal
+names a path your own staged change deletes, renames or changes the mode of
+(`git diff --cached --summary`), undo that change unless the ticket requires
+it, and run `recipe-check.mjs` once more. Otherwise — the change is required,
+or the re-run refuses again — push nothing and end as `blocked`: write the
+report with `outcome` `blocked`, `pr`, `head` and `bailCause` null,
+`bailDetail` `recipe-check.mjs`'s stderr verbatim, and leave the worktree as
+it stands. The ticket stays claimed, its label untouched, and waits for the
+maintainer.
+
 Your report is a file, `<scratch>/reports/<your name>.json`, `<your name>` the
 `impl-<N>[-x]` you were dispatched as, in the shape
 `~/.fleet/bin/fleet-run report-schema.mjs print impl` prints. Write it before

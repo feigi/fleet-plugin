@@ -418,12 +418,13 @@ step and bakes its Test entrypoint into the member's runner, and every
 review reads the Test entrypoint, all out of the **Recipe cache**
 (`.fleet/recipe.json` beside the common git dir); no script infers either
 command. Check it first: `~/.fleet/bin/fleet-run derive-testcmd.sh .
-install` and `~/.fleet/bin/fleet-run derive-testcmd.sh . test --at
-origin/main`. **Both exit
+install`, `~/.fleet/bin/fleet-run derive-testcmd.sh . check` and
+`~/.fleet/bin/fleet-run derive-testcmd.sh . test --at
+origin/main`. **All three exit
 0 → the cache is present and valid: use it as it stands and derive
-nothing.** Either exits 1 (a refusal about the cache) → derive it; a refusal
+nothing.** Any exits 1 (a refusal about the cache) → derive it; a refusal
 naming `--at` says `origin/main` does not resolve, which is no cache fault —
-fetch it and check again, since deriving would not help. Either
+fetch it and check again, since deriving would not help. Any
 exits 3 → the reader could not run a tool it needs, so the cache's state is
 unknown: fix that environment fault and check again; deriving would not
 help. This step is yours: one derivation
@@ -444,9 +445,9 @@ a deliberate mutation of a tracked file, and the Test entrypoint must be shown t
 runner's own non-zero count, or a deliberate mutation of one test that
 turns the run red. Only a proof writes the cache, with `derivedAt` (the
 `origin/main` commit it ran against) and the proof itself. **`RECIPE
-PROVEN`** → re-run both reads above (`derive-testcmd.sh . install` and
-`derive-testcmd.sh . test --at origin/main`) and the Check step's read
-below; their output is the Recipe this run uses. **`RECIPE NOT PROVEN`** →
+PROVEN`** → re-run the three reads above (`derive-testcmd.sh . install`,
+`derive-testcmd.sh . check` and `derive-testcmd.sh . test --at origin/main`);
+their output is the Recipe this run uses. **`RECIPE NOT PROVEN`** →
 stall, below.
 
 **Where `checkCmd` comes from:** the repository's Check step, out of the same Recipe cache — `~/.fleet/bin/fleet-run derive-testcmd.sh . check` prints it. Pass it to the fix-applier beside `testCmd`; the review does not run it. Neither member runs the two by hand: `recipe-check.mjs` runs the Check step it reads off that cache, then the `testCmd` it is handed, on the member's staged tree, and writes the record `ledger.mjs settle --from-report` requires of an implementer's and a fix-applier's report.
@@ -454,8 +455,16 @@ stall, below.
 **Mid-run, a cache that stops running is re-derived once, then the run
 stalls.** A claim or a review that refuses because the Recipe cache is
 invalid — a command that no longer runs, or an Install step that changed
-the tree — is the one mid-run trigger: dispatch `derive-recipe` again
-exactly as above, then retry what refused. The Install step's refusals
+the tree — is a mid-run trigger: dispatch `derive-recipe` again
+exactly as above, then retry what refused. So is the `NEED derive-recipe`
+a settle wake prints, `fleet-event.mjs impl-report` for an implementer
+settled `blocked` and `fix-report` for a fix-applier settled `failed`: it is
+counted in the same once per run, a line printed while that derivation runs
+is covered by it, and one printed after its `RECIPE PROVEN` is the second
+refusal that stalls the run. What to retry for a wake's line: a fix-applier's
+PR is fix-due again and the tick re-dispatches it; a blocked implementer's
+ticket is reported to the maintainer and waits for their `replace #<N>`.
+The count is yours to keep; the ledger holds no record of it. The Install step's refusals
 fire after the claim has labelled the ticket and created its worktree, so
 release that claim with `release-ticket.sh` first (SKILL.md's Failure handling
 row for a claim abandoned mid-run). A red suite never triggers it: a failing test is

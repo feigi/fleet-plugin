@@ -203,14 +203,21 @@ function fixture({ rows = [], dispatched = [], retired = [], caps = { impl: 3, r
   writeFileSync(join(repo, ".gitignore"), ".fleet/\n");
   git(repo, "add", "-A");
   git(repo, "commit", "-q", "-m", "root");
+  // origin/main, which the Recipe's `test --at origin/main` read resolves.
+  git(repo, "update-ref", "refs/remotes/origin/main", "HEAD");
   writeExecStub(join(bin, "gh"), GH_STUB);
   const fleet = join(repo, ".fleet");
   mkdirSync(join(fleet, "briefs"), { recursive: true });
   seedLabelMap(repo, { roles: labels });
   writeFileSync(join(fleet, "ledger.md"), ledgerText({ rows, dispatched, retired }));
+  // A valid Recipe cache, so the settle wakes' Recipe read finds nothing to act on.
+  const recipePath = join(fleet, "recipe.json");
+  const recipeBase = { install: "true", check: true, test: "sh ./t.sh", derivedAt: git(repo, "rev-parse", "HEAD"), installClean: true, testCount: 3, uncovered: [] };
+  writeFileSync(recipePath, JSON.stringify(recipeBase));
   writeFileSync(join(fleet, "phase0.json"), JSON.stringify({ run: null, session, steps: {}, scratch, ...(caps === null ? {} : { caps }), ...(inFlight === null ? {} : { inFlight }) }));
   const f = {
-    dir, repo, stubs, scratch, fleet,
+    dir, repo, stubs, scratch, fleet, recipePath,
+    recipe: (over) => writeFileSync(recipePath, JSON.stringify({ ...recipeBase, ...over })),
     control: (name, value) => writeFileSync(join(stubs, `${name}.json`), JSON.stringify(value)),
     report: (value) => writeFileSync(join(scratch, "reports", `${value.member}.json`), JSON.stringify(value)),
     brief: (member, kind) => writeFileSync(join(fleet, "briefs", `${member}.json`), JSON.stringify({ role: "fix-applier", kind, args: {}, sha256: "0".repeat(64) })),
@@ -1788,3 +1795,135 @@ test("--session belongs to member-died: another kind refuses it as a usage error
   assert.deepEqual(writes(r.order), []);
 });
 
+
+// ── the Recipe read of the blocked and failed settle wakes ───────────────────
+
+// A cache the reader refuses: no recipe.json at all.
+const refuseRecipe = (f) => rmSync(f.recipePath);
+// A reader that cannot run: `node` on its PATH exits 1, so derive-testcmd.sh
+// exits 3.
+const brokenNode = (f) => {
+  const dir = join(f.dir, "broken-node");
+  mkdirSync(dir);
+  writeExecStub(join(dir, "node"), "#!/bin/sh\necho 'node stub: refused' >&2\nexit 1\n");
+  return { PATH: `${dir}:${join(f.dir, "bin")}:${process.env.PATH}` };
+};
+
+// The two wakes that read the Recipe, each settled to the outcome that runs it.
+const RECIPE_WAKES = [
+  {
+    name: "impl-report on blocked",
+    argv: ["impl-report", "impl-412"],
+    fixture: () => {
+      const f = fixture({ rows: ["#412 impl-412"] });
+      f.report(implReport("impl-412", { outcome: "blocked", pr: null, head: null, sizing: null, bailCause: null, bailDetail: "recipe-check: no usable Recipe" }));
+      f.control("settle", { "impl-412": { outcome: "blocked" } });
+      return f;
+    },
+  },
+  {
+    name: "fix-report on failed",
+    argv: ["fix-report", "fix-pr-88"],
+    fixture: () => {
+      const f = fixture({ rows: [FIX_ROW] });
+      f.brief("fix-pr-88", "review");
+      f.control("settle", { "fix-pr-88": { outcome: "failed" } });
+      return f;
+    },
+  },
+];
+
+for (const { name, argv, fixture: make } of RECIPE_WAKES) {
+  test(`${name}: a cache whose read refuses prints the refused reads and NEED derive-recipe, and exits 4`, () => {
+    const f = make();
+    refuseRecipe(f);
+    const r = f.run(argv);
+    assert.equal(r.status, 4, r.err + r.stdout);
+    for (const read of ["install", "check", "test --at origin/main"]) {
+      assert.match(r.stdout, new RegExp(`^derive-testcmd\\.sh \\. ${read} refused:$`, "m"));
+    }
+    assert.equal(r.out.filter((l) => l === "NEED derive-recipe").length, 1, r.stdout);
+    assert.ok(r.out.indexOf("NEED derive-recipe") < r.out.indexOf(eventLine(r)), "the NEED comes before the event line, which comes before the tick's rows");
+    assert.equal(r.out.at(-1), "TICK ROWS");
+  });
+
+  test(`${name}: a read that refuses only the Check step is named, and is still one NEED`, () => {
+    const f = make();
+    f.recipe({ check: "no-such-checker --all", checkMutation: "break it" });
+    const r = f.run(argv);
+    assert.equal(r.status, 4, r.err + r.stdout);
+    assert.match(r.stdout, /^derive-testcmd\.sh \. check refused:$/m);
+    assert.doesNotMatch(r.stdout, /derive-testcmd\.sh \. (install|test --at origin\/main) refused/);
+    assert.equal(r.out.filter((l) => l === "NEED derive-recipe").length, 1, r.stdout);
+  });
+
+  test(`${name}: a refusal naming --at is printed as it is, with the NEED`, () => {
+    const f = make();
+    git(f.repo, "update-ref", "-d", "refs/remotes/origin/main");
+    const r = f.run(argv);
+    assert.equal(r.status, 4, r.err + r.stdout);
+    assert.match(r.stdout, /^derive-testcmd\.sh \. test --at origin\/main refused:$/m);
+    assert.match(r.stdout, /--at/);
+    assert.equal(r.out.filter((l) => l === "NEED derive-recipe").length, 1, r.stdout);
+  });
+
+  test(`${name}: a valid cache prints no NEED and exits 0`, () => {
+    const f = make();
+    const r = f.run(argv);
+    assert.equal(r.status, 0, r.err + r.stdout);
+    assert.ok(!r.stdout.includes("NEED"), r.stdout);
+    assert.ok(!r.stdout.includes("derive-testcmd.sh"), r.stdout);
+  });
+
+  test(`${name}: a read that exits 3 prints the environment-fault NEED, never NEED derive-recipe`, () => {
+    const f = make();
+    const r = f.run(argv, { env: brokenNode(f) });
+    assert.equal(r.status, 4, r.err + r.stdout);
+    assert.match(r.stdout, /^NEED recipe-read after \S+ — derive-testcmd\.sh \. install exit 3 — the cache's state is unknown, and deriving would not help — .*node/m);
+    assert.ok(!r.stdout.includes("derive-recipe"), r.stdout);
+  });
+}
+
+test("a settle that refuses runs no Recipe read", () => {
+  const f = RECIPE_WAKES[0].fixture();
+  f.control("settle", { "impl-412": { exit: 2, err: "settle refused\n" } });
+  refuseRecipe(f);
+  const r = f.run(["impl-report", "impl-412"]);
+  assert.equal(r.status, 2, r.err + r.stdout);
+  assert.ok(!r.stdout.includes("derive"), r.stdout);
+});
+
+// Every other outcome reads no Recipe, whatever the cache holds.
+for (const [name, argv, setup] of [
+  ["impl-report on PR#M", ["impl-report", "impl-412"], (f) => {
+    f.report(implReport("impl-412"));
+    f.control("settle", { "impl-412": { outcome: "PR#88" } });
+  }],
+  ["impl-report on bailed", ["impl-report", "impl-412"], (f) => {
+    f.setGh({ issue: { 412: { labels: ["ready-for-agent", "in-progress"], comments: [] } }, pr: {} });
+    f.report(bail("impl-412", "covered", "PR#77 — its diff adds the same guard"));
+    f.control("settle", { "impl-412": { outcome: "bailed" } });
+    f.control("dispatch-prompt", { out: "*Relabelled by the fleet controller.* covered\n" });
+  }],
+  ["fix-report on applied:", ["fix-report", "fix-pr-88"], (f) => {
+    f.brief("fix-pr-88", "conflict");
+    f.control("settle", { "fix-pr-88": { outcome: `applied:${HEAD_B}` } });
+  }],
+  ["fix-report on no-op", ["fix-report", "fix-pr-88"], (f) => {
+    f.brief("fix-pr-88", "conflict");
+    f.control("settle", { "fix-pr-88": { outcome: "no-op" } });
+  }],
+]) {
+  test(`${name} reads no Recipe, even with a broken cache`, () => {
+    const rows = [argv[0] === "impl-report" ? "#412 impl-412" : FIX_ROW];
+    const f = fixture({ rows });
+    setup(f);
+    refuseRecipe(f);
+    const r = f.run(argv);
+    assert.ok(!/derive-recipe|recipe-read|derive-testcmd/.test(r.stdout), r.stdout);
+    const g = fixture({ rows });
+    setup(g);
+    const s = g.run(argv, { env: brokenNode(g) });
+    assert.ok(!/derive-recipe|recipe-read|derive-testcmd/.test(s.stdout), s.stdout);
+  });
+}

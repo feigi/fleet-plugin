@@ -34,7 +34,7 @@ test("phase 0 derives the Recipe before the fold-in and before the first claim",
 
 test("a present, valid cache is used as it stands — derivation is the controller's, once per run start", () => {
   const s = step();
-  assert.match(s, Pin.phrase("Both exit 0 → the cache is present and valid: use it as it stands and derive nothing."));
+  assert.match(s, Pin.phrase("All three exit 0 → the cache is present and valid: use it as it stands and derive nothing."));
   assert.match(s, Pin.phrase("one derivation per run start at most, never one per member, and a member never derives."));
   assert.match(s, Pin.phrase("agent `fleet-recipe-deriver`"));
 });

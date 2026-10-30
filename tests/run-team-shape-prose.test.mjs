@@ -526,7 +526,13 @@ const CHANGED = [
   // the manual settle stays for one that exits with no report.
   [
     "| Implementer blocked or ambiguous *mid-implementation* | Free the slot, `ledger.mjs settle impl-<N> blocked`, leave `in-progress`, report — the ticket is not In flight and waits for a human; the row above is the pre-code bail, not this one |",
-    "Leave `in-progress`, report — the ticket is not In flight and waits for a human; the row above is the pre-code bail |"
+    "Leave `in-progress`, report — the ticket is not In flight and waits for a human; its `NEED derive-recipe` is phase 0's mid-run trigger |"
+  ],
+  // A fix-applier or red-check fixer settled `failed` is read by the settle
+  // wake's Recipe read: a refusal there is phase 0's mid-run trigger.
+  [
+    "| Reviewer, fix-applier or red-check fixer cannot reach green | Report, leave the PR unlabeled, free the slot — a fix-applier or red-check fixer settles `failed` |",
+    "| Reviewer, fix-applier or red-check fixer cannot reach green | Report, leave the PR unlabeled, free the slot — the last two settle `failed`; a wake's `NEED derive-recipe` is phase 0's mid-run trigger |"
   ],
   [
     "Run `~/.fleet/bin/fleet-run phase0.mjs --session <session-dir>` from this main checkout, `<session-dir>` being this run's own session directory.",
