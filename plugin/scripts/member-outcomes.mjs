@@ -14,7 +14,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, basename, dirname } from "node:path";
 
-import { readOmpSession, normalizeModel, parseMemberName } from "./member-record.mjs";
+import { readOmpSession, normalizeModel, parseMemberName, stampMs } from "./member-record.mjs";
 import { isOmpSessionDirName } from "./ledger-grammar.mjs";
 import { stripLevel } from "./tier-roles.mjs";
 import { reportFamily, reportStatus, defaultScratch } from "./report-files.mjs";
@@ -132,10 +132,12 @@ export const HALT_MS = 60 * 60 * 1000;
 
 // The controller transcript's entry instants, in epoch ms, or a string naming
 // why they cannot be had. It is not a member transcript, so a line is read for
-// its timestamp alone. An unparseable LAST line is a write in progress and is
-// skipped, as the member fold skips it; an unparseable line before it is lost
-// data that may have been the entry breaking a stretch, so a halt there could
-// not be told from the run writing, and the instants are unknown.
+// its timestamp alone, under the member fold's own stamp rule (stampMs): a
+// line whose stamp fails it is no instant. An unparseable LAST line is a
+// write in progress and is skipped, as the member fold skips it; an
+// unparseable line before it is lost data that may have been the entry
+// breaking a stretch, so a halt there could not be told from the run
+// writing, and the instants are unknown.
 function controllerStamps(sessionDir) {
   let text;
   try { text = readFileSync(join(dirname(sessionDir), `${basename(sessionDir)}.jsonl`), "utf8"); }
@@ -147,7 +149,7 @@ function controllerStamps(sessionDir) {
     let d;
     try { d = JSON.parse(lines[i]); }
     catch { if (i !== lines.length - 1) return "an unparseable controller transcript line"; continue; }
-    const ms = typeof d?.timestamp === "string" ? Date.parse(d.timestamp) : NaN;
+    const ms = stampMs(d?.timestamp);
     if (Number.isFinite(ms)) stamps.push(ms);
   }
   return stamps;

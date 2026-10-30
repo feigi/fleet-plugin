@@ -368,8 +368,8 @@ export function foldOmpTranscript(jsonlText, filePath) {
   let input = 0, cacheWrite = 0, cacheWrite1h = 0, cacheRead = 0, output = 0, cost = 0, turns = 0;
   let sawCost = false, unsplit = false, unpriced = false;
   let malformedNonLastLines = 0;
-  // Entries that carry a `timestamp` from which no finite instant was read;
-  // an entry with no `timestamp` at all is ordinary and not counted.
+  // Entries that carry a `timestamp` that is no stamp under stampMs; an entry
+  // with no `timestamp` at all is ordinary and not counted.
   let unparseableStamps = 0;
   // What the transcript's END says, read for the `ending` column: the last
   // assistant turn's stopReason, whether a model fell back, whether the
@@ -393,7 +393,7 @@ export function foldOmpTranscript(jsonlText, filePath) {
     try { d = JSON.parse(raw); }
     catch { if (i !== lines.length - 1) malformedNonLastLines++; continue; }
     assertOmpShaped(d, filePath);
-    const ms = typeof d.timestamp === "string" ? Date.parse(d.timestamp) : NaN;
+    const ms = stampMs(d.timestamp);
     if (Number.isFinite(ms)) stamps.push(ms);
     else if (Object.hasOwn(d, "timestamp")) unparseableStamps++;
     if (d.type === "custom" && d.customType === "session_exit") {
@@ -450,10 +450,10 @@ export function foldOmpTranscript(jsonlText, filePath) {
     if (d.type === "message" && m?.role === "user" && messageText(m).trimStart().startsWith("[budget notice]")) budgetNotice = true;
   }
   if (partFirst !== null) workParts.push([partFirst, partLast]);
-  // `wall_s` is the span of the parseable stamps, latest minus earliest, so it
-  // does not depend on file order and cannot go negative; an unparseable
-  // stamp is skipped, and a transcript with none spans 0. `startedAt` is the
-  // same earliest stamp as an ISO string, or null when none parsed.
+  // `wall_s` is the span of the stamps stampMs accepts, latest minus
+  // earliest, so it does not depend on file order and cannot go negative; any
+  // other stamp is skipped, and a transcript with none spans 0. `startedAt` is
+  // the same earliest stamp as an ISO string, or null when none was accepted.
   let earliest = Infinity, latest = -Infinity;
   for (const t of stamps) { if (t < earliest) earliest = t; if (t > latest) latest = t; }
   const span = stamps.length ? (latest - earliest) / 1000 : 0;
@@ -482,6 +482,18 @@ export function foldOmpTranscript(jsonlText, filePath) {
     reportWrites,
     lastStopReason, providerFallback, sessionExit, budgetNotice,
   };
+}
+
+// A transcript entry's `timestamp` as epoch ms, or NaN when it is no stamp.
+// The one stamp rule for every transcript reader: a string in the ECMAScript
+// date-time form with a time of day and an explicit zone —
+// `YYYY-MM-DDTHH:mm`, optional `:ss` and fractional seconds, then `Z` or
+// `±HH:mm` — that Date.parse reads as a finite instant. Date.parse alone
+// also reads strings such as "1" or "2026" as instants, a date-only string
+// has no time of day, and a zone-less one depends on the host's time zone.
+const STAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/;
+export function stampMs(timestamp) {
+  return typeof timestamp === "string" && STAMP_RE.test(timestamp) ? Date.parse(timestamp) : NaN;
 }
 
 // The report files one transcript tool call writes, as { file, content } with
