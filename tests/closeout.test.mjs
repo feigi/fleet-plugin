@@ -776,6 +776,22 @@ test("finish: a rebase git refuses leaves the PR open, named, with the change th
   assert.equal(git(f.repo, "branch", "--show-current"), "main");
 });
 
+test("finish: a rebase git refuses over untracked files names every file it would overwrite, and leaves them untouched", () => {
+  const f = fixture();
+  const other = join(f.dir, `other-${++clones}`);
+  git(f.dir, "clone", "-q", f.origin, other);
+  for (const name of ["NEW-A", "NEW-B"]) writeFileSync(join(other, name), "from main\n");
+  git(other, "add", "NEW-A", "NEW-B");
+  git(other, "commit", "-q", "-m", "main gained two files");
+  git(other, "push", "-q", "origin", "main");
+  for (const name of ["NEW-A", "NEW-B"]) writeFileSync(join(f.repo, name), "untracked here\n");
+  const r = f.run("finish", ["--reason", "wrap up"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.match(leftOpenLine(r), /^left open: PR #7 — rebase refused: .+: NEW-A, NEW-B$/);
+  assert.equal(readFileSync(join(f.repo, "NEW-A"), "utf8"), "untracked here\n");
+  assert.deepEqual(f.calls("gh-merge"), []);
+});
+
 test("finish: a re-run whose branch is already on origin rebases onto the new tip and re-pushes it with --force-with-lease", () => {
   const f = fixture();
   writeFileSync(join(f.stubs, "gh.fail"), "");
@@ -790,6 +806,27 @@ test("finish: a re-run whose branch is already on origin rebases onto the new ti
   assert.equal(originRev(f, `${BRANCH}^`), tip);
   assert.equal(f.receipt().pin, pushed);
   assert.deepEqual(f.calls("gh-merge").map((c) => c.args.at(-1)), [pushed], "merged at the head re-pushed");
+});
+
+test("finish: a re-run whose branch on origin holds a commit it never pushed refuses the push and leaves that commit on origin", () => {
+  const f = fixture();
+  writeFileSync(join(f.stubs, "gh.fail"), "");
+  assert.equal(f.run("finish", ["--reason", "wrap up"]).status, 3);
+  const pushed = f.receipt().pin;
+  const other = join(f.dir, `other-${++clones}`);
+  git(f.dir, "clone", "-q", "-b", BRANCH, f.origin, other);
+  writeFileSync(join(other, "README"), "someone else's\n");
+  git(other, "commit", "-q", "-am", "pushed by someone else");
+  git(other, "push", "-q", "origin", BRANCH);
+  const foreign = originRev(f, BRANCH);
+  rmSync(join(f.stubs, "gh.fail"));
+  const again = f.run("finish", ["--reason", "wrap up"]);
+  assert.equal(again.status, 3, again.err + again.stdout);
+  assert.match(again.stdout, /^closeout: commit-and-pr: failed$/m);
+  assert.match(again.stdout, /git push failed: /);
+  assert.equal(originRev(f, BRANCH), foreign, "the commit someone else pushed is still origin's head");
+  assert.equal(f.receipt().pin, pushed, "the pin stays the head this step pushed");
+  assert.deepEqual(f.calls("gh-merge"), []);
 });
 
 for (const state of ["CLEAN", "HAS_HOOKS"]) {
@@ -855,11 +892,38 @@ test("finish: pending CI returns within the call's bound at exit 4 with NEED mer
   assert.equal(f.calls("fleet-heartbeat").length, 1);
 });
 
+test("finish: a failed gh pr merge is asked once in the call, and its own words stay the NEED line's reason on every later poll", () => {
+  const f = fixture();
+  f.control("gh-view", view("OPEN", "CLEAN"));
+  f.control("gh-merge", { exit: 1, err: "GraphQL: Base branch was modified\n" });
+  const r = f.run("finish", ["--reason", "wrap up"], FAST);
+  assert.equal(r.status, 4, r.err + r.stdout);
+  assert.equal(f.calls("gh-merge").length, 1);
+  assert.ok(f.calls("ci-state").length >= 2, "it polled again after the merge failed");
+  const need = r.out.indexOf("NEED merge-wait PR #7");
+  assert.notEqual(need, -1, r.stdout);
+  assert.equal(r.out[need + 1].trim(), "gh pr merge failed: GraphQL: Base branch was modified");
+});
+
+test("finish: green CI at the pin with mergeStateStatus neither CLEAN nor HAS_HOOKS waits at exit 4 and asks no gh pr merge", () => {
+  for (const state of ["BLOCKED", "UNKNOWN", "DRAFT"]) {
+    const f = fixture();
+    f.control("gh-view", view("OPEN", state));
+    const r = f.run("finish", ["--reason", "wrap up"], FAST);
+    assert.equal(r.status, 4, `${state}: ${r.err}${r.stdout}`);
+    const need = r.out.indexOf("NEED merge-wait PR #7");
+    assert.notEqual(need, -1, r.stdout);
+    assert.equal(r.out[need + 1].trim(), `CI green, mergeStateStatus ${state}`);
+    assert.deepEqual(f.calls("gh-merge"), [], state);
+  }
+});
+
 // Every outcome but merged: ok, exit 0, one `left open` line, nothing merged.
 const LEFT_OPEN = [
   ["a failed check", { "ci-state": ciNotGreen("completed", "job check is failure, not success") }, "a check failed: job check is failure, not success"],
   ["an UNSTABLE PR", { "gh-view": view("OPEN", "UNSTABLE") }, "a check failed: UNSTABLE"],
   ["a head off the pin", { "gh-view": view("OPEN", "CLEAN", "f".repeat(40)) }, /^head moved off the pin [0-9a-f]{40}: f{40}$/],
+  ["a CI head off the pin", { "ci-state": { out: ciGreen.out.replace("@HEAD@", "f".repeat(40)) } }, /^head moved off the pin [0-9a-f]{40}: f{40}$/],
   ["a BEHIND PR", { "gh-view": view("OPEN", "BEHIND") }, "BEHIND"],
   ["a DIRTY PR", { "gh-view": view("OPEN", "DIRTY") }, "DIRTY"],
 ];
@@ -898,12 +962,14 @@ test("finish: a PR someone else merged is merged, and one closed unmerged is `cl
   assert.deepEqual(g.calls("gh-merge"), []);
 });
 
-test("finish: the 30-min bound leaves the PR open at exit 0, naming CI still pending, or gh unreadable until the bound", () => {
+test("finish: the 30-min bound leaves the PR open at exit 0, naming the last state read: CI pending, a failed gh pr merge, or gh or CI unreadable until the bound", () => {
   const cases = [
-    [{ "ci-state": ciPending, "gh-view": view("OPEN", "BLOCKED") }, "the 30-min bound: CI pending: run status is in_progress, not completed"],
-    [{ "gh-view": { exit: 1, err: "HTTP 502\n" } }, "gh unreadable until the bound: gh pr view failed: HTTP 502"],
+    [{ "ci-state": ciPending, "gh-view": view("OPEN", "BLOCKED") }, "the 30-min bound: CI pending: run status is in_progress, not completed", 0],
+    [{ "gh-view": view("OPEN", "CLEAN"), "gh-merge": { exit: 1, err: "GraphQL: Base branch was modified\n" } }, "the 30-min bound: gh pr merge failed: GraphQL: Base branch was modified", 2],
+    [{ "gh-view": { exit: 1, err: "HTTP 502\n" } }, "gh unreadable until the bound: gh pr view failed: HTTP 502", 0],
+    [{ "ci-state": { exit: 2, err: "boom\n" }, "gh-view": view("OPEN", "CLEAN") }, "CI unreadable until the bound: ci-state.mjs answered nothing readable: boom", 0],
   ];
-  for (const [controls, reason] of cases) {
+  for (const [controls, reason, merges] of cases) {
     const f = fixture();
     for (const [name, value] of Object.entries(controls)) f.control(name, value);
     const r = f.run("finish", ["--reason", "wrap up"], FAST);
@@ -915,8 +981,52 @@ test("finish: the 30-min bound leaves the PR open at exit 0, naming CI still pen
     assert.equal(again.status, 0, again.err + again.stdout);
     assert.equal(leftOpenLine(again), `left open: PR #7 — ${reason}`);
     assert.equal(f.receipt().steps.merge.status, "ok");
-    assert.deepEqual(f.calls("gh-merge"), []);
+    assert.equal(f.calls("gh-merge").length, merges, "one gh pr merge per call, and only on a mergeable PR");
   }
+});
+
+test("finish: a receipt whose pin, mergeStarted or rebase the merge step could not have written fails the step at exit 3, merging nothing", () => {
+  const cases = [
+    [{ pin: "abc" }, "no pushed head in the receipt to pin the merge to: abc"],
+    [{ mergeStarted: "garbage" }, 'the receipt\'s mergeStarted is not a past time: "garbage"'],
+    [{ mergeStarted: false }, "the receipt's mergeStarted is not a past time: false"],
+    [{ mergeStarted: new Date(Date.now() + 60 * 60_000).toISOString() }, /^the receipt's mergeStarted is not a past time: "\d{4}-/],
+    [{ rebase: "" }, 'the receipt\'s rebase is neither null nor a reason: ""'],
+    [{ rebase: false }, "the receipt's rebase is neither null nor a reason: false"],
+  ];
+  for (const [fields, message] of cases) {
+    const f = fixture();
+    f.control("gh-view", view("OPEN", "BLOCKED"));
+    f.control("ci-state", ciNotGreen("completed", "job check is failure, not success"));
+    assert.equal(f.run("finish", ["--reason", "wrap up"]).status, 0, "a failed check settles the step at once");
+    const receipt = f.receipt();
+    Object.assign(receipt, fields);
+    receipt.steps.merge = { status: "pending", at: null, output: "" };
+    writeFileSync(f.receiptPath, JSON.stringify(receipt));
+    rmSync(join(f.stubs, "gh-view.calls"));
+    const r = f.run("finish", ["--reason", "wrap up"]);
+    assert.equal(r.status, 3, `${JSON.stringify(fields)}: ${r.err}${r.stdout}`);
+    assert.match(r.stdout, /^closeout: merge: failed$/m);
+    const said = r.out.map((l) => l.trim());
+    assert.ok(typeof message === "string" ? said.includes(message) : said.some((l) => message.test(l)), `${JSON.stringify(fields)}: ${r.stdout}`);
+    assert.deepEqual([f.calls("gh-view"), f.calls("gh-merge")], [[], []], "no gh call after the receipt is refused");
+  }
+});
+
+test("finish: short of the 30-min bound, CI still pending keeps the step pending at exit 4 and leaves nothing open", () => {
+  const f = fixture();
+  f.control("ci-state", ciPending);
+  f.control("gh-view", view("OPEN", "BLOCKED"));
+  assert.equal(f.run("finish", ["--reason", "wrap up"], FAST).status, 4);
+  const receipt = f.receipt();
+  receipt.mergeStarted = new Date(Date.now() - 29 * 60_000).toISOString();
+  writeFileSync(f.receiptPath, JSON.stringify(receipt));
+  const again = f.run("finish", ["--reason", "wrap up"], FAST);
+  assert.equal(again.status, 4, again.err + again.stdout);
+  assert.equal(leftOpenLine(again), undefined, again.stdout);
+  assert.deepEqual(again.out.filter((l) => l.startsWith("NEED ")), ["NEED merge-wait PR #7"]);
+  assert.equal(f.receipt().steps.merge.status, "pending");
+  assert.equal(f.receipt().mergeOutcome, null);
 });
 
 test("finish: a verdict other than inert at the pin leaves the PR open with no further gh call", () => {
