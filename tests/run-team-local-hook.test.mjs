@@ -10,6 +10,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { SEARCH_STUB_SRC } from "./support/gh-pr-search.mjs";
 import { COLUMNS as MEMBER_COLUMNS, formatTsv } from "../plugin/scripts/member-outcomes.mjs";
 import { COLUMNS as TIER_COLUMNS, formatRow } from "../plugin/scripts/tier-outcomes.mjs";
 import { WINDOW_START } from "../plugin/scripts/pr-cost.mjs";
@@ -84,12 +85,15 @@ const agentMd = (cell) => {
   return `---\nname: fleet-implementer-${cell}\ndescription: fixture\nmodel: "@${role}:${level}"\n---\n\nbody\n`;
 };
 
-// Answers `pr list` (pr-cost's merged-state read, or the hook's open-PR read:
-// `openPrs` plus every `prs` entry whose state is OPEN), `issue list` (raw text
-// instead of JSON when the fixture has `issuesRaw`), and the writes, from
-// GH_FIXTURE; `pr create` fails when it has `createFails`. Logs each argv to GH_LOG.
+// Answers `pr list` (pr-cost's merged-state read, which takes `fx.prs` through
+// the search's `created:` window and 1,000-row cap as GitHub does, or the
+// hook's open-PR read: `openPrs` plus every `prs` entry whose state is OPEN),
+// `issue list` (raw text instead of JSON when the fixture has `issuesRaw`), and
+// the writes, from GH_FIXTURE; `pr create` fails when it has `createFails`.
+// Logs each argv to GH_LOG.
 const GH_STUB = `#!/usr/bin/env node
 const fs = require("node:fs");
+${SEARCH_STUB_SRC}
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.GH_LOG, JSON.stringify(args) + "\\n");
 const fx = JSON.parse(fs.readFileSync(process.env.GH_FIXTURE, "utf8"));
@@ -99,7 +103,7 @@ const cmd = args.slice(0, 2).join(" ");
 if (cmd === "pr list" && fx.listFails) { process.stderr.write("gh stub: list refused"); process.exit(1); }
 if (cmd === "pr list") out(json === "number,headRefName"
   ? [...fx.openPrs, ...fx.prs.filter((p) => p.state === "OPEN").map((p) => ({ number: p.number, headRefName: "implementer/" + p.number }))]
-  : fx.prs);
+  : searchPrs(fx.prs, args, FIRST_DAY));
 else if (cmd === "issue list") { if (fx.issuesRaw !== undefined) process.stdout.write(fx.issuesRaw); else out(fx.issues); }
 else if (cmd === "issue create") console.log("https://github.com/o/r/issues/901");
 else if (cmd === "issue edit") console.log("https://github.com/o/r/issues/" + args[2]);

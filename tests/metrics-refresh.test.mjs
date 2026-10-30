@@ -1,7 +1,8 @@
 // metrics-refresh.mjs: the drain of the pending ticket-features rows, the
 // cost-guard refresh and the Preview fit beside it, run as the CLI against a fixture workspace — a git
 // checkout carrying the metrics corpus, and a stub `gh` that answers
-// pr-cost's one `pr list` from a fixture file and logs every call it gets.
+// pr-cost's `pr list` slices from a fixture file as GitHub's search would
+// (tests/support/gh-pr-search.mjs) and logs every call it gets.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -13,6 +14,7 @@ import { writeExecStub } from "./support/exec-stub.mjs";
 import { COLUMNS as MEMBER_COLUMNS, formatTsv } from "../plugin/scripts/member-outcomes.mjs";
 import { COLUMNS as TIER_COLUMNS, formatRow } from "../plugin/scripts/tier-outcomes.mjs";
 import { DAY_ONE_TABLE, dayOneScripts } from "./support/day-one-router-table.mjs";
+import { SEARCH_STUB_SRC } from "./support/gh-pr-search.mjs";
 import { WINDOW_START, MIN_N } from "../plugin/scripts/pr-cost.mjs";
 import { FEATURE_COLUMNS } from "../plugin/scripts/pull-attribution.mjs";
 import { validateTable } from "../plugin/scripts/ticket-router.mjs";
@@ -66,13 +68,14 @@ const featuresTsv = (rows, cols = FEATURE_COLUMNS) => [cols.join("\t"), ...rows.
 const membersTsv = (rows) => `# ${MEMBER_COLUMNS.join("\t")}\n${rows.length ? formatTsv(rows) : ""}`;
 const tiersTsv = (rows) => `# ${TIER_COLUMNS.join("\t")}\n${rows.map((r) => `${formatRow(r)}\n`).join("")}`;
 
-// Answers pr-cost's `pr list` from GH_FIXTURE; logs each argv to GH_LOG.
+// Answers pr-cost's `pr list` from GH_FIXTURE, as the search would (its `created:` window, cut at 1,000); logs each argv to GH_LOG.
 const GH_STUB = `#!/usr/bin/env node
 const fs = require("node:fs");
+${SEARCH_STUB_SRC}
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.GH_LOG, JSON.stringify(args) + "\\n");
 const fx = JSON.parse(fs.readFileSync(process.env.GH_FIXTURE, "utf8"));
-if (args.slice(0, 2).join(" ") === "pr list") process.stdout.write(JSON.stringify(fx.prs));
+if (args.slice(0, 2).join(" ") === "pr list") process.stdout.write(JSON.stringify(searchPrs(fx.prs, args, FIRST_DAY)));
 else { process.stderr.write("gh stub: unexpected " + args.join(" ")); process.exit(9); }
 `;
 
@@ -185,6 +188,40 @@ test("a tripped guard is a verdict and the script exits 0; a guard that cannot b
   const b = broken.run();
   assert.equal(b.status, 1);
   assert.match(b.stderr, /metrics-refresh: cost guard failed: pr-cost\.mjs --guard exited 2/);
+});
+
+// `n` CLOSED filler PRs created one per day, cycling through the 28 days from the window's first.
+const fillerPrs = (n, from = 90000) => Array.from({ length: n }, (_, i) => ({
+  number: from + i, state: "CLOSED", mergedAt: null, createdAt: `2026-10-${String(3 + (i % 28)).padStart(2, "0")}T09:00:00Z`,
+}));
+
+test("more than 1,000 PRs opened in the window is read in slices: the guard is computed, not failed on the search cap", () => {
+  const rows = corpus();
+  const prs = fillerPrs(1500);
+  for (let i = 0; i < MIN_N; i++) {
+    ruled(rows, { ticket: 1000 + i });
+    prs.push({ number: 6000 + i, state: "MERGED", mergedAt: `${DAY}T12:00:00Z`, createdAt: `2026-10-${String(3 + (i % 28)).padStart(2, "0")}T08:00:00Z` });
+  }
+  const f = fixture({ rows, prs });
+  const r = f.run();
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /cost guard: verdict ok, pr-cost\.mjs exit 0/);
+  const guard = JSON.parse(readFileSync(join(f.repo, GUARD), "utf8"));
+  assert.equal(guard.cells.find((c) => c.cell === "slow-high").n, MIN_N, "every merged PR is read, across the slices");
+  const searches = f.ghCalls().map((c) => c[c.indexOf("--search") + 1]);
+  assert.equal(searches[0], `created:>=${WINDOW_START}`);
+  assert.ok(searches.length > 1, "the full first read was split");
+});
+
+test("a day that alone fills the search cap fails the guard and writes none, rather than reading merged state short", () => {
+  const rows = corpus();
+  ruled(rows, { ticket: 1000 });
+  const prs = Array.from({ length: 1000 }, (_, i) => ({ number: 90000 + i, state: "CLOSED", mergedAt: null, createdAt: `${DAY}T09:00:00Z` }));
+  const f = fixture({ rows, prs, guardBefore: null });
+  const r = f.run();
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /metrics-refresh: cost guard failed: pr-cost\.mjs --guard exited 2: .*one day cannot be split further/);
+  assert.equal(existsSync(join(f.repo, GUARD)), false);
 });
 
 test("a workspace with no metrics corpus yet skips the guard with a notice and exits 0, still draining what is pending", () => {

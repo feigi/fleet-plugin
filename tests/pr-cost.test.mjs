@@ -1,6 +1,6 @@
 // pr-cost.mjs: booking, the per-cell figures, and the guard's exit contract,
 // over synthetic member-outcomes / tier-outcomes / ticket-features TSVs and a
-// stub `gh` that answers the one `gh pr list` from a fixture file.
+// stub `gh` that answers the `gh pr list` slices as GitHub's search would (tests/support/gh-pr-search.mjs).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -10,9 +10,10 @@ import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
+import { SEARCH_STUB_SRC } from "./support/gh-pr-search.mjs";
 import { COLUMNS as MEMBER_COLUMNS, formatTsv, parseTsv as parseMemberTsv } from "../plugin/scripts/member-outcomes.mjs";
 import { COLUMNS as TIER_COLUMNS, formatRow, parseTierOutcomes } from "../plugin/scripts/tier-outcomes.mjs";
-import { computeReport, trips, guardFile, formatReport, crossCheck, blobId, WINDOW_START, MIN_N } from "../plugin/scripts/pr-cost.mjs";
+import { computeReport, trips, guardFile, formatReport, crossCheck, blobId, readPrs, PrListIncomplete, WINDOW_START, MIN_N } from "../plugin/scripts/pr-cost.mjs";
 import { FEATURE_COLUMNS, parseFeatures } from "../plugin/scripts/pull-attribution.mjs";
 import { readCostGuard, routerRows } from "../plugin/scripts/fleet-tick.mjs";
 import { readGuard } from "../plugin/scripts/ticket-router.mjs";
@@ -75,7 +76,17 @@ function runCli(w, args = ["--guard"], { features, at } = {}) {
   writeFileSync(join(dir, "docs", "metrics", "tier-outcomes.tsv"), `# ${TIER_COLUMNS.join("\t")}\n${w.tiers.map(formatRow).join("\n")}\n`);
   writeFileSync(join(dir, "docs", "metrics", "ticket-features.tsv"), features ?? featuresText(w));
   writeFileSync(join(dir, "prs.json"), JSON.stringify(w.prs));
-  writeExecStub(join(dir, "bin", "gh"), `#!/bin/sh\n[ "$1 $2" = "pr list" ] || exit 9\nprintf '%s\\n' "$@" > "$FIXTURE_PRS.args"\nprintf '%s' "\${GIT_DIR-unset}" > "$FIXTURE_PRS.gitdir"\ncat "$FIXTURE_PRS"\n`);
+  writeExecStub(join(dir, "bin", "gh"), `#!/usr/bin/env node
+const fs = require("node:fs");
+${SEARCH_STUB_SRC}
+const args = process.argv.slice(2);
+if (args.slice(0, 2).join(" ") !== "pr list") process.exit(9);
+const fx = process.env.FIXTURE_PRS;
+fs.appendFileSync(fx + ".args", JSON.stringify(args) + "\\n");
+fs.writeFileSync(fx + ".gitdir", process.env.GIT_DIR ?? "unset");
+if (process.env.FIXTURE_FAIL_ON && args.join(" ").includes(process.env.FIXTURE_FAIL_ON)) { process.stderr.write("gh stub: refused"); process.exit(1); }
+process.stdout.write(JSON.stringify(searchPrs(JSON.parse(fs.readFileSync(fx, "utf8")), args, FIRST_DAY)));
+`);
   const run = at?.(dir) ?? { cwd: dir, args };
   const r = spawnSync(process.execPath, [SCRIPT, ...run.args], {
     cwd: run.cwd, encoding: "utf8",
@@ -86,7 +97,7 @@ function runCli(w, args = ["--guard"], { features, at } = {}) {
   return {
     ...r,
     guard: existsSync(guardPath) ? JSON.parse(readFileSync(guardPath, "utf8")) : null,
-    ghArgs: existsSync(argsPath) ? readFileSync(argsPath, "utf8").trim().split("\n") : null,
+    ghCalls: existsSync(argsPath) ? readFileSync(argsPath, "utf8").trim().split("\n").map((l) => JSON.parse(l)) : [],
     ghGitDir: existsSync(join(dir, "prs.json.gitdir")) ? readFileSync(join(dir, "prs.json.gitdir"), "utf8") : null,
     guardPath,
     dir,
@@ -202,13 +213,80 @@ test("--guard: a missing ticket-features.tsv is exit 2 naming its producer, and 
   assert.equal(r.guard, null);
 });
 
-test("--guard: a gh pr list page at its cap is refused rather than read as complete", () => {
+// `n` CLOSED filler PRs created one per day, cycling through the 28 days of October from the window's first.
+const fillerPrs = (n, from = 90000) => Array.from({ length: n }, (_, i) => ({
+  number: from + i, state: "CLOSED", mergedAt: null, createdAt: `2026-10-${String(3 + (i % 28)).padStart(2, "0")}T09:00:00Z`,
+}));
+// The `created:` argument of each gh call, in order.
+const searchesOf = (r) => r.ghCalls.map((c) => c[c.indexOf("--search") + 1]);
+
+test("--guard: more than 1,000 PRs created in the window is read in date slices and yields the guard, not exit 2", () => {
+  const w = world();
+  addCell(w, "slow-high", MIN_N, 0, 10);
+  w.prs.forEach((p, i) => { p.createdAt = `2026-10-${String(3 + (i % 28)).padStart(2, "0")}T08:00:00Z`; });
+  w.prs.push(...fillerPrs(2500));
+  const r = runCli(w);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.guard.verdict, "ok");
+  const slow = slowOf(r.guard);
+  assert.equal(slow.n, MIN_N, "every merged PR is counted, whichever slice returned it");
+  assert.equal(slow.pending, 0, "none read as missing");
+  assert.deepEqual(r.guard.pending ?? [], []);
+  const searches = searchesOf(r);
+  assert.equal(searches[0], `created:>=${WINDOW_START}`, "the whole window is read first");
+  assert.ok(searches.length > 1, "the full first read was split");
+  assert.ok(searches.slice(1).every((s) => /^created:(\d{4}-\d\d-\d\d\.\.\d{4}-\d\d-\d\d|>=\d{4}-\d\d-\d\d)$/.test(s)), searches.join(" "));
+  assert.equal(new Set(searches).size, searches.length, "no slice is read twice");
+});
+
+test("--guard: a day that alone returns the search cap is refused rather than read as complete, and writes no guard file", () => {
   const w = world();
   addCell(w, "slow-high", 1, 0, 10);
   for (let i = w.prs.length; i < 1000; i++) w.prs.push({ number: 90000 + i, state: "CLOSED", mergedAt: null });
   const r = runCli(w);
   assert.equal(r.status, 2);
-  assert.match(r.stderr, /returned 1000 PRs, its cap/);
+  assert.match(r.stderr, /gh pr list created:2026-10-03 returned 1000 PRs, its cap, and one day cannot be split further/);
+  assert.equal(r.guard, null);
+  assert.ok(r.ghCalls.length > 1, "it split down to the day before refusing");
+});
+
+test("--guard: a slice that fails is exit 2 with no guard file, never an empty slice", () => {
+  const w = world();
+  addCell(w, "slow-high", 1, 0, 10);
+  w.prs.push(...fillerPrs(1500));
+  const r = runCli(w, null, { at: (dir) => ({ cwd: dir, args: ["--guard"], env: { FIXTURE_FAIL_ON: ".." } }) });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /pr-cost: gh pr list failed: exit 1/);
+  assert.equal(r.guard, null);
+});
+
+test("--guard: a window just under the search cap is one read, not refused (the cap refusal is for a full read only)", () => {
+  const w = world();
+  addCell(w, "slow-high", 1, 0, 10);
+  w.prs.push(...fillerPrs(1000 - w.prs.length - 1));
+  assert.equal(w.prs.length, 999);
+  const r = runCli(w);
+  assert.equal(r.status, 4, r.stderr);
+  assert.equal(r.ghCalls.length, 1);
+});
+
+test("readPrs: a full slice is halved by day until every slice is short, the top one open-ended, and each PR kept once", () => {
+  const rows = [3, 4, 5, 6, 6].map((d, i) => ({ number: 100 + i, state: "MERGED", mergedAt: null, day: `2026-10-0${d}` }));
+  const calls = [];
+  // A search that answers at most `cap` rows, as GitHub's does.
+  const listAt = (cap) => (created) => {
+    calls.push(created);
+    const [lo, hi] = created.startsWith(">=") ? [created.slice(2), "9999"] : created.split("..");
+    return rows.filter((r) => r.day >= lo && r.day <= hi).slice(0, cap);
+  };
+  assert.deepEqual(readPrs(listAt(3), { windowStart: "2026-10-03", today: "2026-10-06", limit: 3 }).map((p) => p.number).sort(), [100, 101, 102, 103, 104]);
+  assert.equal(calls[0], ">=2026-10-03");
+  assert.equal(calls.at(-1), ">=2026-10-06", "the slice that reaches today stays open-ended");
+  assert.equal(new Set(calls).size, calls.length);
+  // A day that is still full at the cap is the one refusal.
+  assert.throws(() => readPrs(listAt(2), { windowStart: "2026-10-03", today: "2026-10-06", limit: 2 }), PrListIncomplete);
+  // A slice that fills the cap on a day after `today` (a clock behind GitHub's) cannot be split either.
+  assert.throws(() => readPrs(() => [{ number: 1, state: "OPEN" }], { windowStart: "2026-10-03", today: "2026-10-01", limit: 1 }), PrListIncomplete);
 });
 
 test("--guard: an explicit --pricing that does not exist is exit 2, while an absent default is simply no cross-check", () => {
@@ -323,8 +401,8 @@ test("without --guard the report prints and exits 0, writing nothing", () => {
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.guard, null);
   // One read, every state, scoped to PRs created since the window opened.
-  assert.deepEqual(r.ghArgs, ["pr", "list", "--state", "all", "--search", `created:>=${WINDOW_START}`,
-    "--limit", "1000", "--json", "number,state,mergedAt"]);
+  assert.deepEqual(r.ghCalls, [["pr", "list", "--state", "all", "--search", `created:>=${WINDOW_START}`,
+    "--limit", "1000", "--json", "number,state,mergedAt"]]);
   assert.match(r.stdout, /^cell\tgeneration\tn_pulls\tn_merged\tn_claims\tn_failed\tfail_rate\tmean_usd\tmedian_usd\trouter_usd\tusd_diff_ci95\texcluded\tleft_out\tunpriced\tuntimed\tguard$/m);
   const json = JSON.parse(runCli(w, ["--json"]).stdout);
   assert.deepEqual(json.tripped, ["task-high"]);

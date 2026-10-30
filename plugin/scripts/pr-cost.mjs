@@ -8,9 +8,15 @@
 // working directory; ticket-features.tsv is written by the router script at
 // dispatch and must exist, else exit 2 — pricing.json and the router-table.json
 // beside this script are optional, though a `--pricing` named but absent is
-// exit 2 too) and ONE `gh pr list --state all`, scoped to PRs created in the
-// window, for merged state, which tier-outcomes.tsv does not record. A PR that
-// list does not return is counted pending. Output: a TSV per cell on stdout
+// exit 2 too) and `gh pr list --state all` over the PRs created in the window,
+// for merged state, which tier-outcomes.tsv does not record. GitHub search
+// returns at most GH_PR_LIMIT results whatever `--limit` says, so the window is
+// read in `created:` date slices (`readPrs`): the whole window first, and any
+// slice that comes back full is halved by day and read again, until every
+// slice is short of the cap. A one-day slice that is still full cannot be
+// split and is exit 2, as is any failed slice: a PR that merged but past a
+// truncated read would be counted pending, silently. A PR the slices do not
+// return is counted pending. Output: a TSV per cell on stdout
 // (`--json` prints the whole report instead). `--guard` also writes the
 // verdict to `.fleet/cost-guard.json` in the main workspace — where fleet-tick
 // reads it, wherever this runs from; `--out` overrides — and exits on it:
@@ -96,6 +102,44 @@ export const STAGE_1 = ["slow-high", "task-high", "smol-high"];
 export const MIN_N = 20;
 export const EXIT = { ok: 0, tripped: 3, none: 4 };
 export const GH_PR_LIMIT = 1000;
+
+// A slice of the window that cannot be proven fully read.
+export class PrListIncomplete extends Error {}
+
+const DAY_MS = 86_400_000;
+const dayNumber = (d) => Math.round(Date.parse(`${d}T00:00:00Z`) / DAY_MS);
+const dayOf = (n) => new Date(n * DAY_MS).toISOString().slice(0, 10);
+
+/**
+ * Every PR created from `windowStart` on, as `listSlice(created)` returns them,
+ * proven complete. GitHub search answers at most `limit` rows however many
+ * match, so a slice that returns `limit` is cut off, not whole: it is halved
+ * by day and both halves read again. The top slice stays open-ended (`>=A`),
+ * so a PR created after `today` by the local clock is still inside it. A
+ * single day that is still full cannot be split further and throws
+ * `PrListIncomplete`; a `listSlice` that fails is its own to refuse, by
+ * throwing or exiting, and is never read as an empty slice. A short slice is
+ * the whole of its days. Slices are disjoint by day; a PR is kept once by number.
+ */
+export function readPrs(listSlice, { windowStart = WINDOW_START, today = new Date().toISOString().slice(0, 10), limit = GH_PR_LIMIT } = {}) {
+  const byNumber = new Map();
+  const todo = [{ from: windowStart, to: null }];
+  while (todo.length) {
+    const { from, to } = todo.pop();
+    const rows = listSlice(to === null ? `>=${from}` : `${from}..${to}`);
+    if (rows.length < limit) {
+      for (const row of rows) byNumber.set(row.number, row);
+      continue;
+    }
+    const last = to ?? (today > from ? today : from);
+    if (from >= last) {
+      throw new PrListIncomplete(`gh pr list created:${to === null ? `>=${from}` : from} returned ${rows.length} PRs, its cap, and one day cannot be split further — merged state may be truncated`);
+    }
+    const mid = dayOf(dayNumber(from) + Math.floor((dayNumber(last) - dayNumber(from)) / 2));
+    todo.push({ from: dayOf(dayNumber(mid) + 1), to }, { from, to: mid });
+  }
+  return [...byNumber.values()];
+}
 
 const routerUsd = (pull) => (pull.router_usd === "" ? 0 : Number(pull.router_usd));
 const round = (x, d = 4) => (x === null || !Number.isFinite(x) ? null : Number(x.toFixed(d)));
@@ -358,22 +402,29 @@ function main() {
   const tablePath = join(SCRIPT_DIR, "router-table.json");
   const routerTable = existsSync(tablePath) ? parse(tablePath, () => JSON.parse(read(tablePath))) : null;
 
-  let out;
-  try {
-    out = execFileSync("gh", ["pr", "list", "--state", "all", "--search", `created:>=${WINDOW_START}`,
-      "--limit", String(GH_PR_LIMIT), "--json", "number,state,mergedAt"], {
-      encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024, env: gitEnv(),
-    });
-  } catch (e) {
-    die(`gh pr list failed: ${e.code ?? (e.signal ? `killed by ${e.signal}` : `exit ${e.status}`)}`);
+  // One slice of the window: `created:` takes `>=A` or `A..B`, whole days, both ends in.
+  const listSlice = (created) => {
+    let out;
+    try {
+      out = execFileSync("gh", ["pr", "list", "--state", "all", "--search", `created:${created}`,
+        "--limit", String(GH_PR_LIMIT), "--json", "number,state,mergedAt"], {
+        encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024, env: gitEnv(),
+      });
+    } catch (e) {
+      die(`gh pr list failed: ${e.code ?? (e.signal ? `killed by ${e.signal}` : `exit ${e.status}`)}`);
+    }
+    const rows = parse("gh pr list", () => JSON.parse(out));
+    if (!Array.isArray(rows) || rows.some((p) => !p || typeof p.number !== "number" || typeof p.state !== "string")) {
+      die("gh pr list did not return {number,state} rows");
+    }
+    return rows;
+  };
+  let prs;
+  try { prs = readPrs(listSlice); }
+  catch (e) {
+    if (e instanceof PrListIncomplete) die(e.message);
+    throw e;
   }
-  const prs = parse("gh pr list", () => JSON.parse(out));
-  if (!Array.isArray(prs) || prs.some((p) => !p || typeof p.number !== "number" || typeof p.state !== "string")) {
-    die("gh pr list did not return {number,state} rows");
-  }
-  // Merged state for a PR past the cap would read as missing — pending —
-  // silently, so a full page is refused rather than trusted.
-  if (prs.length >= GH_PR_LIMIT) die(`gh pr list returned ${prs.length} PRs, its cap — merged state may be truncated`);
 
   let report;
   try { report = computeReport({ members, tiers, features, prs, routerTable, pricing }); }
