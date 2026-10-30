@@ -643,7 +643,7 @@ guard at phase 0 and close-out (`.fleet/router-preview.json`) with the
 installed table as its prior; never routed, never committed. It is what the
 evidence favours, shown beside what routes now. In a consumer it fits the
 consumer's records alone, while the table that routes is fitted on this
-repository's runs. Written once #3896 lands.
+repository's runs.
 _Avoid_: re-fit (that changes the table), shadow table, readout
 
 **Cell evidence**:

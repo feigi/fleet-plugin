@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// The run's three metrics duties that keep the router's inputs current: move the
+// The run's metrics duties that keep the router's inputs current: move the
 // pending ticket-features rows into the tracked corpus, widen a member-outcomes
-// corpus written before its latest columns, then refresh the cost guard over it.
+// corpus written before its latest columns, refresh the cost guard over it, then
+// write the Preview fit beside that guard.
 //
 //   metrics-refresh.mjs [--repo <dir>]
 //
@@ -55,9 +56,26 @@
 // (no verdict yet — the baseline cell has too few merged PRs) are verdicts the
 // router and `fleet-tick.mjs` consume, not failures; any other non-zero exit is.
 //
+// PREVIEW FIT. After the cost guard wrote a guard, and only then, the Router's
+// fit (`ticket-router.mjs`'s fitTable) runs in-process over the working-tree
+// TSVs the guard just read and the guard just written, with the installed
+// router table (`router-table.json` beside the scripts) as its prior and no
+// commit. It writes `.fleet/router-preview.json` through a temp file and a
+// rename: `computed_at`, `guard_computed_at` (the guard's own `computed_at`),
+// `tsv_blobs` (the git blob id of each TSV it read, keyed by path as the guard
+// keys its own), `prior` (the installed table's `fitted_commit`, `stage`,
+// `cells`, `classifier` and `window_start`, and the install's `package.json`
+// `version`) and the fitted `table`. The cockpit lays it out as what the
+// evidence favours; nothing routes by it and nothing commits it. It is called
+// in-process because a fit has no verdict for an exit status to carry, and the
+// `fit` CLI reads the TSVs only as committed. It never fails the run: an error
+// prints `metrics-refresh: preview: failed — <why>`, leaves the old file in
+// place and leaves the exit status as the other duties set it.
+//
 // One `metrics-refresh: <duty>: …` line per duty on stdout. Exit 0 when no
 // duty failed; 1 when one failed — named on stderr, and the duties after
-// it did not run (each is safe to run again); 2 on a usage error.
+// it did not run (each is safe to run again); 2 on a usage error. The
+// Preview fit is not one of those duties: it never sets the exit status.
 
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
@@ -67,17 +85,24 @@ import { makeDie, defineFlags } from "./arg.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { isCLI } from "./is-cli.mjs";
-import { COLUMNS as MEMBER_COLUMNS, ENDINGS, isImplementer } from "./member-outcomes.mjs";
+import { COLUMNS as MEMBER_COLUMNS, ENDINGS, isImplementer, parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
+import { blobId } from "./pr-cost.mjs";
 import { FEATURE_COLUMNS, parseFeatures } from "./pull-attribution.mjs";
 import { REPORT_STATUSES } from "./report-files.mjs";
+import { DEFAULT_TABLE, fitTable, readGuard, validateTable } from "./ticket-router.mjs";
+import { parseTierOutcomes } from "./tier-outcomes.mjs";
 
 const NAME = "metrics-refresh";
 const PR_COST = fileURLToPath(new URL("./pr-cost.mjs", import.meta.url));
 const PENDING = join(".fleet", "ticket-features.pending.tsv");
 const FEATURES = join("docs", "metrics", "ticket-features.tsv");
 const MEMBERS = join("docs", "metrics", "member-outcomes.tsv");
-const CORPUS = [MEMBERS, join("docs", "metrics", "tier-outcomes.tsv"), FEATURES];
+const TIERS = join("docs", "metrics", "tier-outcomes.tsv");
+const CORPUS = [MEMBERS, TIERS, FEATURES];
 const GUARD = join(".fleet", "cost-guard.json");
+const PREVIEW = join(".fleet", "router-preview.json");
+// The install's own package.json, whose `version` names the prior.
+const PACKAGE = fileURLToPath(new URL("../package.json", import.meta.url));
 // pr-cost.mjs --guard: 0 no cell tripped, 3 a cell tripped, 4 no verdict yet —
 // all three are verdicts its readers consume; anything else is a failure.
 const GUARD_VERDICT_EXITS = new Set([0, 3, 4]);
@@ -228,9 +253,13 @@ function drain(repo) {
   say(`drain: ${added.length} row${added.length === 1 ? "" : "s"} from ${PENDING} into ${FEATURES} (${incoming.length - added.length} already there)`);
 }
 
+// The guard file it wrote, parsed, or null when it skipped and wrote none.
 function costGuard(repo) {
   const missing = CORPUS.filter((f) => !existsSync(join(repo, f)));
-  if (missing.length) return say(`cost guard: skipped, ${missing.join(", ")} not found — no corpus to guard yet; ${GUARD} left as it is`);
+  if (missing.length) {
+    say(`cost guard: skipped, ${missing.join(", ")} not found — no corpus to guard yet; ${GUARD} left as it is`);
+    return null;
+  }
   const out = join(repo, GUARD);
   const r = spawnSync(process.execPath, [PR_COST, "--guard", "--out", out], {
     cwd: repo, encoding: "utf8", env: gitEnv(), maxBuffer: MAX_BUFFER,
@@ -241,6 +270,77 @@ function costGuard(repo) {
   const g = JSON.parse(readFileSync(out, "utf8"));
   const tripped = g.tripped.map((t) => (typeof t === "string" ? t : t?.cell));
   say(`cost guard: verdict ${g.verdict}${tripped.length ? ` (tripped: ${tripped.join(", ")})` : ""}, pr-cost.mjs exit ${r.status}; ${GUARD} computed ${g.computed_at}`);
+  return g;
+}
+
+// The install's `package.json` `version`, or null when it names none or cannot be read:
+// the prior is named by it, and the fit does not need it.
+function installVersion(path) {
+  try {
+    const v = JSON.parse(readFileSync(path, "utf8"))?.version;
+    return typeof v === "string" ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+// The Preview fit over `repo`'s working-tree TSVs and `written`, the guard file the
+// guard duty just wrote (parsed), with the router table at `tablePath` as its
+// prior, written to `.fleet/router-preview.json` through a temp file and a
+// rename. Throws on anything it cannot read, fit or write, before the rename, so
+// the old file stays as it was.
+export function writePreview(repo, written, { tablePath = DEFAULT_TABLE, packagePath = PACKAGE, now = new Date() } = {}) {
+  const guard = readGuard(written);
+  if (guard === null) throw new Error(`${GUARD} is not a guard the router reads`);
+  let prior;
+  try {
+    prior = validateTable(JSON.parse(readFileSync(tablePath, "utf8")));
+  } catch (e) {
+    throw new Error(`cannot read the installed router table ${tablePath}: ${e.code ?? e.message}`);
+  }
+  if (prior instanceof Error) throw new Error(`${tablePath}: ${prior.message}`);
+  // Keyed by the path as the guard keys its own (pr-cost.mjs reads these, relative to the workspace).
+  const tsvBlobs = {};
+  const read = (rel, parse) => {
+    const bytes = readFileSync(join(repo, rel));
+    tsvBlobs[rel] = blobId(bytes);
+    try { return parse(bytes.toString("utf8")); } catch (e) { throw new Error(`${rel}: ${e.message}`); }
+  };
+  const members = read(MEMBERS, parseMemberTsv);
+  const verdicts = read(TIERS, parseTierOutcomes);
+  const features = read(FEATURES, parseFeatures);
+  const table = fitTable({ prior, features, members, verdicts, guard, commit: null });
+  const preview = {
+    computed_at: now.toISOString(),
+    guard_computed_at: written.computed_at,
+    tsv_blobs: Object.fromEntries(Object.entries(tsvBlobs).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
+    prior: {
+      fitted_commit: prior.fitted_commit,
+      version: installVersion(packagePath),
+      stage: prior.stage,
+      cells: prior.cells,
+      classifier: prior.classifier,
+      window_start: prior.window_start,
+    },
+    table,
+  };
+  const file = join(repo, PREVIEW);
+  writeFileSync(`${file}.tmp`, `${JSON.stringify(preview, null, 2)}\n`);
+  renameSync(`${file}.tmp`, file);
+  return preview;
+}
+
+// The Preview fit as the run calls it: only beside a guard the guard duty wrote, and
+// never a failure of the run — its error is a line, and the exit stays as it was.
+function preview(repo, written) {
+  if (written === null) return say(`preview: skipped, no guard written — ${PREVIEW} left as it is`);
+  let p;
+  try {
+    p = writePreview(repo, written);
+  } catch (e) {
+    return say(`preview: failed — ${e.message}`);
+  }
+  say(`preview: fitted ${p.table.n_rows} Pull${p.table.n_rows === 1 ? "" : "s"}, stage ${p.table.stage}${p.table.burn_in ? ", in burn-in" : ""}; ${PREVIEW} computed ${p.computed_at}`);
 }
 
 function main() {
@@ -257,15 +357,18 @@ function main() {
       die(`${e.message} — pass --repo <dir>`);
     }
   }
+  let written = null;
   for (const [name, duty] of [["drain", drain], ["member-outcomes", widenMemberOutcomes], ["cost guard", costGuard]]) {
     try {
-      duty(repo);
+      const out = duty(repo);
+      if (duty === costGuard) written = out;
     } catch (e) {
       process.stderr.write(`${NAME}: ${name} failed: ${e.message}\n`);
       process.exitCode = 1;
       return;
     }
   }
+  preview(repo, written);
 }
 
 if (isCLI(import.meta.url)) main();

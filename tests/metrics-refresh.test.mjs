@@ -1,5 +1,5 @@
-// metrics-refresh.mjs: the drain of the pending ticket-features rows and the
-// cost-guard refresh, run as the CLI against a fixture workspace — a git
+// metrics-refresh.mjs: the drain of the pending ticket-features rows, the
+// cost-guard refresh and the Preview fit beside it, run as the CLI against a fixture workspace — a git
 // checkout carrying the metrics corpus, and a stub `gh` that answers
 // pr-cost's one `pr list` from a fixture file and logs every call it gets.
 import { test } from "node:test";
@@ -14,6 +14,8 @@ import { COLUMNS as MEMBER_COLUMNS, formatTsv } from "../plugin/scripts/member-o
 import { COLUMNS as TIER_COLUMNS, formatRow } from "../plugin/scripts/tier-outcomes.mjs";
 import { WINDOW_START, MIN_N } from "../plugin/scripts/pr-cost.mjs";
 import { FEATURE_COLUMNS } from "../plugin/scripts/pull-attribution.mjs";
+import { validateTable } from "../plugin/scripts/ticket-router.mjs";
+import { writePreview } from "../plugin/scripts/metrics-refresh.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/metrics-refresh.mjs", import.meta.url));
 const DAY = WINDOW_START;
@@ -266,6 +268,93 @@ test("a pending file with rows but no header fails the drain naming the pending 
   assert.match(r.stderr, /metrics-refresh: drain failed: \.fleet\/ticket-features\.pending\.tsv: ticket-features\.tsv header lacks run_date/);
   assert.equal(existsSync(join(f.repo, PENDING)), true, "a headerless file is not repaired or removed");
   assert.equal(existsSync(join(f.repo, GUARD)), false);
+});
+
+const PREVIEW = join(".fleet", "router-preview.json");
+const SHIPPED = JSON.parse(readFileSync(new URL("../plugin/scripts/router-table.json", import.meta.url), "utf8"));
+const INSTALLED_VERSION = JSON.parse(readFileSync(new URL("../plugin/package.json", import.meta.url), "utf8")).version;
+
+test("a phase 0 over fixture records writes router-preview.json beside the fresh guard: the guard it read, the records it read, the installed table as prior", () => {
+  const rows = corpus();
+  ruled(rows, { ticket: 1 });
+  ruled(rows, { ticket: 2, cell: "task-high" });
+  const f = fixture({ rows });
+  const started = Date.now();
+  const r = f.run();
+  assert.equal(r.status, 0, r.stderr);
+  const guard = JSON.parse(readFileSync(join(f.repo, GUARD), "utf8"));
+  const preview = JSON.parse(readFileSync(join(f.repo, PREVIEW), "utf8"));
+  assert.deepEqual(Object.keys(preview), ["computed_at", "guard_computed_at", "tsv_blobs", "prior", "table"]);
+  assert.ok(Date.parse(preview.computed_at) >= started - 1000, preview.computed_at);
+  assert.equal(preview.guard_computed_at, guard.computed_at, "fitted beside the guard this run wrote");
+  assert.deepEqual(preview.tsv_blobs, guard.tsv_blobs, "the same working-tree files the guard read, by the same keys");
+  assert.equal(preview.tsv_blobs["docs/metrics/tier-outcomes.tsv"], git(f.repo, ["hash-object", "docs/metrics/tier-outcomes.tsv"]));
+  assert.deepEqual(preview.prior, {
+    fitted_commit: SHIPPED.fitted_commit, version: INSTALLED_VERSION, stage: SHIPPED.stage, cells: SHIPPED.cells,
+    classifier: SHIPPED.classifier, window_start: SHIPPED.window_start,
+  });
+  assert.equal(validateTable(preview.table) instanceof Error, false, "the cockpit reads it through validateTable");
+  assert.equal(preview.table.fitted_commit, null, "never committed: no commit names it");
+  assert.equal(preview.table.n_rows, 2);
+  assert.equal(preview.table.window_start, guard.window_start);
+  assert.match(r.stdout, /metrics-refresh: preview: fitted 2 Pulls, stage 1, in burn-in; \.fleet\/router-preview\.json computed /);
+  assert.equal(existsSync(join(f.repo, `${PREVIEW}.tmp`)), false, "the temp file was renamed into place");
+  assert.equal(git(f.repo, ["status", "--porcelain"]), "", "nothing tracked changed: the preview is never committed");
+});
+
+test("no guard written, no preview: a skipped guard skips it with a line, and a failed guard stops the run before it", () => {
+  const f = fixture();
+  rmSync(join(f.repo, "docs"), { recursive: true });
+  const bare = f.run();
+  assert.equal(bare.status, 0, bare.stderr);
+  assert.match(bare.stdout, /metrics-refresh: preview: skipped, no guard written — \.fleet\/router-preview\.json left as it is/);
+  assert.equal(existsSync(join(f.repo, PREVIEW)), false);
+
+  const broken = fixture();
+  writeFileSync(join(broken.repo, "docs", "metrics", "tier-outcomes.tsv"), "short\trow\n");
+  const b = broken.run();
+  assert.equal(b.status, 1);
+  assert.doesNotMatch(b.stdout, /preview/);
+  assert.equal(existsSync(join(broken.repo, PREVIEW)), false);
+});
+
+test("a preview that cannot be written keeps the old file and leaves the exit as the other duties set it", () => {
+  const f = fixture();
+  write(f.repo, PREVIEW, "old preview\n");
+  mkdirSync(join(f.repo, `${PREVIEW}.tmp`));
+  const r = f.run();
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /metrics-refresh: preview: failed — \S/);
+  assert.match(r.stdout, /cost guard: verdict none/, "the guard ran and stands");
+  assert.equal(readFileSync(join(f.repo, PREVIEW), "utf8"), "old preview\n");
+});
+
+test("a fit that cannot run throws before the rename, so the old file stays", () => {
+  const f = fixture();
+  assert.equal(f.run().status, 0);
+  const before = readFileSync(join(f.repo, PREVIEW), "utf8");
+  const guard = JSON.parse(readFileSync(join(f.repo, GUARD), "utf8"));
+  const bad = join(f.root, "router-table.json");
+  writeFileSync(bad, JSON.stringify({ ...SHIPPED, stage: 0 }));
+  assert.throws(() => writePreview(f.repo, guard, { tablePath: bad }), /router table: `stage` is not a positive integer/);
+  assert.throws(() => writePreview(f.repo, { ...guard, cells: "none" }), /is not a guard the router reads/);
+  rmSync(join(f.repo, "docs", "metrics", "ticket-features.tsv"));
+  assert.throws(() => writePreview(f.repo, guard), /ENOENT/);
+  assert.equal(readFileSync(join(f.repo, PREVIEW), "utf8"), before);
+});
+
+test("the preview records the prior's window_start, the install's version only as a string, and the blob ids in key order", () => {
+  const f = fixture();
+  assert.equal(f.run().status, 0);
+  const guard = JSON.parse(readFileSync(join(f.repo, GUARD), "utf8"));
+  const table = join(f.root, "router-table.json");
+  writeFileSync(table, JSON.stringify({ ...SHIPPED, window_start: "2026-09-01" }));
+  const pkg = join(f.root, "package.json");
+  writeFileSync(pkg, JSON.stringify({ version: 7 }));
+  const p = writePreview(f.repo, guard, { tablePath: table, packagePath: pkg });
+  assert.equal(p.prior.window_start, "2026-09-01");
+  assert.equal(p.prior.version, null, "a version that is not a string is none");
+  assert.deepEqual(Object.keys(p.tsv_blobs), ["docs/metrics/member-outcomes.tsv", "docs/metrics/ticket-features.tsv", "docs/metrics/tier-outcomes.tsv"], "sorted, not in the order the fit read them");
 });
 
 test("usage: only the declared flag and no positional, else exit 2", () => {

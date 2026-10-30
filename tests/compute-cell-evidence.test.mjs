@@ -778,11 +778,191 @@ test("no table read: every row says so, and the heading does not guess", () => {
   assert.equal(sideOf(p).heading, "no router table read: the rows are not known");
   assert.equal(sideOf(p).source.text, "this repository's runs · no router table read · @feigi/fleet-ctl 3.104.0");
   assert.equal(sideOf(p).dispatch, null);
-  for (const o of p.objectives) for (const l of o.lines) assert.deepEqual(l.sides, [{ unread: "router table not read" }]);
+  for (const o of p.objectives) for (const l of o.lines) assert.deepEqual(l.sides[0], { unread: "router table not read" });
 });
 
 test("computeCellEvidence with none of the policy inputs reads as no table, no install, no Objective", () => {
   const ce = build();
   assert.equal(sideOf(ce.policy).heading, "no router table read: the rows are not known");
   assert.equal(ce.policy.objectives.some((o) => o.live), false);
+});
+
+// -- policy rows: what the evidence favours --------------------------------------
+
+const BLOBS = { "docs/metrics/member-outcomes.tsv": "e08ea9cd", "docs/metrics/ticket-features.tsv": "12b5a98e", "docs/metrics/tier-outcomes.tsv": "18b6a980" };
+const PRIOR = { fitted_commit: SHIPPED.fitted_commit, version: "3.104.0", stage: SHIPPED.stage, cells: SHIPPED.cells, classifier: SHIPPED.classifier, window_start: SHIPPED.window_start };
+// A Preview fit the shape today's records fit to: 235 Pulls, stage 2 with the two
+// effort Cells added at 0 merged PRs, task-high on every row it fitted.
+const TASK = (verdict) => ({ cell: "task-high", reason: "sole-qualifier", cells: { "task-high": { verdict, range: [-3.1, -0.4] }, "smol-high": { verdict: "under-floor", range: null } }, pairs: [] });
+const FIT = (o = {}) => ({
+  window_start: "2026-10-03", fitted_commit: null, n_rows: 235, stage: 2, cells: FIVE, burn_in: true,
+  rows: { cost: { "*": "task-high", light: "task-high", heavy: "task-high" }, speed: { "*": "task-high", light: "task-high", heavy: "task-high" } },
+  classifier: { b: null, tau: null },
+  estimates: {
+    "*": { "slow-high": { generation: "claude-opus-5", merged: 69 }, "task-high": { generation: "claude-sonnet-5-5", merged: 69 }, "smol-high": { generation: "claude-haiku-5-5", merged: 32 } },
+    light: { "task-high": { generation: "claude-sonnet-5-5", merged: 40 } },
+    heavy: { "task-high": { generation: "claude-sonnet-5-5", merged: 29 } },
+  },
+  reasons: {
+    cost: { "*": TASK("qualifies"), light: TASK("qualifies"), heavy: TASK("qualifies") },
+    speed: { "*": TASK("qualifies"), light: TASK("qualifies"), heavy: TASK("qualifies") },
+  },
+  guard: { tripped: [], n: { "slow-high": 69, "smol-high": 32, "task-high": 69 } },
+  ...o,
+});
+// The guard these fixtures stand beside: TODAY's, with the blob ids the preview read.
+const BESIDE = (o = {}) => guardOk(TODAY().guard.cells, { tsv_blobs: BLOBS, ...o });
+const PREVIEW = (o = {}) => ({
+  status: "ok",
+  preview: { computed_at: "2026-10-26T19:17:40.000Z", guard_computed_at: "2026-10-26T19:17:33.000Z", tsv_blobs: BLOBS, prior: PRIOR, table: FIT(), ...o },
+});
+const favours = (o = {}) => policy({ guard: BESIDE(), preview: PREVIEW(), ...o });
+const favoursOf = (p) => p.sides[1];
+
+test("evidence favours sits beside routes now, on the right", () => {
+  assert.deepEqual(favours().sides.map((s) => s.title), ["routes now", "evidence favours"]);
+});
+
+test("today's records: the Preview fit reads stage 2 with slow-medium and task-max at 0 of 20, task-high on every fitted row, each marked ≠ routes now", () => {
+  const p = favours();
+  const s = favoursOf(p);
+  assert.equal(s.source.text, "Preview fit · this repository's runs · computed 2026-10-26 19:17Z · 235 Pulls");
+  assert.equal(s.heading, "stage 2: slow-medium and task-max have 0 of the 20 merged PRs each needs", "present tense: the workspace's own counts");
+  assert.deepEqual(s.labels, [], "fitted beside this guard, on its records, against the installed table");
+  for (const o of ["cost", "speed"]) {
+    for (const stratum of ["*", "light", "heavy"]) {
+      const [now, fav] = lineOf(p, o, stratum).sides;
+      assert.equal(fav.cell, "task-high", `${o}/${stratum}`);
+      assert.equal(fav.reason, "sole-qualifier", `${o}/${stratum}`);
+      assert.equal(fav.differs, "≠ routes now", `${o}/${stratum}`);
+      assert.deepEqual(fav.candidates.map((c) => [c.cell, c.verdict]), [["task-high", "qualifies"], ["smol-high", "under-floor"]], `${o}/${stratum}`);
+      if (stratum === "*") assert.equal(now.cell, "slow-high");
+      else assert.deepEqual(now, { follows: "no row of its own: follows *" }, "routes now has no row of its own there, and keeps the line");
+    }
+    assert.equal(lineOf(p, o, "unknown").collapsed, "unknown: no row on either side, follows *");
+  }
+  assert.equal(lineOf(p, "cost", "light").sides[1].candidates[0].n, 40, "each row's candidates carry that row's own n");
+});
+
+test("≠ routes now is marked only where the two Cells differ, the Cell routes now gives a row it has none of its own for included", () => {
+  const slow = { cost: { "*": "slow-high", light: "slow-high" }, speed: { "*": "slow-high", light: "task-high" } };
+  const p = favours({ preview: PREVIEW({ table: FIT({ rows: slow }) }) });
+  assert.equal(lineOf(p, "cost", "*").sides[1].differs, null);
+  assert.equal(lineOf(p, "cost", "light").sides[1].differs, null, "routes now follows * there, which is slow-high too");
+  assert.equal(lineOf(p, "speed", "light").sides[1].differs, "≠ routes now");
+  for (const e of Object.values(lineOf(p, "cost", "*").sides[0])) assert.notEqual(e, "≠ routes now", "routes now carries no mark");
+});
+
+test("a tripped Cell: the Preview fit's row Cell is replaced as route would, and compared after that", () => {
+  const tripped = BESIDE({ verdict: "tripped", tripped: ["task-high"] });
+  const p = favours({ guard: tripped });
+  const fav = lineOf(p, "cost", "*").sides[1];
+  assert.equal(fav.cell, "slow-high");
+  assert.equal(fav.held, "task-high tripped");
+  assert.equal(fav.differs, null, "both sides route slow-high under this guard");
+});
+
+test("evidence favours states: no cost guard, before the first Preview fit, and a Preview fit that cannot be read leave its column empty", () => {
+  const cases = [
+    ["no cost guard", { guard: { status: "missing" } }, "no Preview fit: it is written only beside a cost guard"],
+    ["an unreadable guard", { guard: { status: "unreadable", why: "not JSON" } }, "no Preview fit: it is written only beside a cost guard"],
+    ["before the first Preview fit", { preview: { status: "missing" } }, "no Preview fit yet: the next phase 0 writes one"],
+    ["left out", { preview: undefined }, "no Preview fit yet: the next phase 0 writes one"],
+    ["unreadable", { preview: { status: "unreadable", why: "not JSON" } }, "no Preview fit read: not JSON"],
+  ];
+  for (const [name, o, heading] of cases) {
+    const p = favours(o);
+    const s = favoursOf(p);
+    assert.equal(s.heading, heading, name);
+    assert.equal(s.source.text, "Preview fit", name);
+    assert.deepEqual(s.labels, [], name);
+    assert.deepEqual(s.footnotes, [], name);
+    assert.equal(s.dispatch, null, name);
+    assert.deepEqual(lineOf(p, "cost", "*").sides[1], { empty: true }, name);
+    assert.equal(lineOf(p, "cost", "light").collapsed, "light: no row, follows *", `${name}: an empty column holds no row back from collapsing`);
+  }
+  assert.equal(favoursOf(favours({ guard: { status: "missing" } })).heading, "no Preview fit: it is written only beside a cost guard", "a Preview fit on disk with no guard is not laid out");
+});
+
+test("a Preview fit out of burn-in has no burn-in heading; a single short Cell, or Cells short by different counts, are worded each", () => {
+  assert.equal(favoursOf(favours({ preview: PREVIEW({ table: FIT({ burn_in: false, guard: { tripped: [], n: Object.fromEntries(FIVE.map((c) => [c, 20])) } }) }) })).heading, null);
+  const one = FIT({ guard: { tripped: [], n: { "slow-high": 69, "task-high": 69, "smol-high": 32, "slow-medium": 20 } } });
+  assert.equal(favoursOf(favours({ preview: PREVIEW({ table: one }) })).heading, "stage 2: task-max has 0 of the 20 merged PRs it needs");
+  const two = FIT({ guard: { tripped: [], n: { "slow-high": 69, "task-high": 69, "smol-high": 32, "slow-medium": 3 } } });
+  assert.equal(favoursOf(favours({ preview: PREVIEW({ table: two }) })).heading, "stage 2: slow-medium has 3 and task-max has 0 of the 20 merged PRs each needs");
+});
+
+test("heading label: fitted beside another guard fires only when guard_computed_at differs from the guard's computed_at", () => {
+  assert.deepEqual(favoursOf(favours({ preview: PREVIEW({ guard_computed_at: "2026-10-25T08:00:00.000Z" }) })).labels, ["fitted beside the guard of 2026-10-25 08:00Z, not this one"]);
+  assert.deepEqual(favoursOf(favours()).labels, []);
+});
+
+test("heading label: fitted on other records fires only when the two files' tsv_blobs differ, and reads not checked when the guard has none", () => {
+  const other = { ...BLOBS, "docs/metrics/tier-outcomes.tsv": "d59dc49b" };
+  assert.deepEqual(favoursOf(favours({ preview: PREVIEW({ tsv_blobs: other }) })).labels, ["fitted on other records than the guard's"]);
+  const { tsv_blobs, ...older } = BESIDE().guard;
+  assert.deepEqual(favoursOf(favours({ guard: { status: "ok", guard: older } })).labels, ["fitted on the guard's records: not checked: this guard predates the blob ids it needs"]);
+  assert.deepEqual(favoursOf(favours()).labels, []);
+});
+
+test("heading label: fitted against another prior fires on stage, cells or classifier, and on window_start only when the guard gave none", () => {
+  const label = "fitted against 3.104.0 · never fitted; the next phase 0 refits";
+  for (const [field, value] of [["stage", 2], ["cells", ["slow-high", "task-high"]], ["classifier", { b: "haiku", tau: 0.7 }]]) {
+    assert.deepEqual(favoursOf(favours({ preview: PREVIEW({ prior: { ...PRIOR, [field]: value } }) })).labels, [label], field);
+  }
+  const windowed = PREVIEW({ prior: { ...PRIOR, window_start: "2026-09-01" } });
+  assert.deepEqual(favoursOf(favours({ preview: windowed })).labels, [], "the guard gave a window_start, so the prior's was not read");
+  assert.deepEqual(favoursOf(favours({ preview: windowed, guard: BESIDE({ window_start: null }) })).labels, [label]);
+  const fitted = PREVIEW({ prior: { ...PRIOR, stage: 2, fitted_commit: "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d", version: "0.0.0" } });
+  assert.deepEqual(favoursOf(favours({ preview: fitted })).labels, ["fitted against linked checkout · fitted at 1a2b3c4; the next phase 0 refits"]);
+  const unfitted = PREVIEW({ prior: { ...PRIOR, stage: 2, fitted_commit: "" } });
+  assert.deepEqual(favoursOf(favours({ preview: unfitted })).labels, [label], "an empty fitted_commit was never fitted");
+  const unversioned = PREVIEW({ prior: { ...PRIOR, stage: 2, version: 7 } });
+  assert.deepEqual(favoursOf(favours({ preview: unversioned })).labels, ["fitted against no version · never fitted; the next phase 0 refits"], "a version that is not a string is none");
+  assert.deepEqual(favoursOf(favours({ preview: PREVIEW({ prior: null }) })).labels.length, 1, "a prior the file lacks is not the installed table");
+});
+
+test("heading label: a release changing only fitted_commit and version raises no prior label", () => {
+  const release = PREVIEW({ prior: { ...PRIOR, fitted_commit: "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d", version: "3.105.0" } });
+  assert.deepEqual(favoursOf(favours({ preview: release })).labels, []);
+  assert.deepEqual(favoursOf(favours({ table: { ...SHIPPED, fitted_commit: "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d", n_rows: 198 } })).labels, [], "nor does an installed table that differs only there");
+  assert.deepEqual(favoursOf(favours({ table: null })).labels, ["fitted against the installed table: not checked: no router table read"]);
+});
+
+test("no installed table: no row is marked ≠ routes now, and a Stratum the Preview fit has no row for keeps its line beside routes now's unread", () => {
+  const p = favours({ table: null });
+  for (const o of ["cost", "speed"]) {
+    for (const stratum of ["*", "light", "heavy"]) assert.equal(lineOf(p, o, stratum).sides[1].differs, null, `${o}/${stratum}: nothing to differ from`);
+    const line = lineOf(p, o, "unknown");
+    assert.equal(line.collapsed, undefined, `${o}: routes now's rows are not known, so its unknown row may exist`);
+    assert.deepEqual(line.sides, [{ unread: "router table not read" }, { follows: "no row of its own: follows *" }], o);
+  }
+});
+
+test("the guard-against-fit n footnote shows when both read the same files and a Cell's n differs, its mark on the fit's n", () => {
+  const est = (n, generation = "claude-sonnet-5-5") => ({ ...FIT().estimates, "*": { ...FIT().estimates["*"], "task-high": { generation, merged: n } } });
+  const p = favours({ preview: PREVIEW({ table: FIT({ estimates: est(67) }) }) });
+  const s = favoursOf(p);
+  assert.deepEqual(s.footnotes, [{ mark: "¹", text: "task-high: the guard counts merges by GitHub's state, the fit by Rulings, and the fit admits only drawn or rule-sized Pulls" }]);
+  for (const o of ["cost", "speed"]) {
+    const cands = lineOf(p, o, "*").sides[1].candidates;
+    assert.deepEqual(cands.map((c) => [c.cell, c.n, c.nMark]), [["task-high", 67, "¹"], ["smol-high", 32, null]], o);
+  }
+  assert.equal(lineOf(p, "cost", "light").sides[1].candidates[0].nMark, null, "a Stratum's n is not the guard's Cell-wide count");
+
+  const other = favours({ preview: PREVIEW({ table: FIT({ estimates: est(67) }), tsv_blobs: { ...BLOBS, "docs/metrics/tier-outcomes.tsv": "d59dc49b" } }) });
+  assert.deepEqual(favoursOf(other).footnotes, [], "other files: the counts need not agree");
+  assert.deepEqual(favoursOf(favours()).footnotes, [], "the same n on the same files");
+  const { tsv_blobs, ...older } = BESIDE().guard;
+  assert.deepEqual(favoursOf(favours({ guard: { status: "ok", guard: older }, preview: PREVIEW({ table: FIT({ estimates: est(67) }) }) })).footnotes, [], "no blob ids, nothing to compare");
+  const generation = favours({ preview: PREVIEW({ table: FIT({ estimates: est(67, "claude-sonnet-5") }) }) });
+  assert.deepEqual(favoursOf(generation).footnotes, [], "another generation's n: not the one the guard counts");
+  assert.equal(lineOf(generation, "cost", "*").sides[1].candidates[0].nMark, null);
+  for (const merged of [null, "67", -1]) {
+    assert.deepEqual(favoursOf(favours({ preview: PREVIEW({ table: FIT({ estimates: est(merged) }) }) })).footnotes, [], `a merged of ${JSON.stringify(merged)} is no count to compare`);
+  }
+
+  const consumer = favours({ repoUrl: "https://ghe.example.com/acme/widgets", preview: PREVIEW({ table: FIT({ estimates: est(67) }) }) });
+  assert.equal(consumer.sides[0].footnotes[0].mark, "¹");
+  assert.equal(favoursOf(consumer).footnotes[0].mark, "²", "numbered after routes now's own");
 });

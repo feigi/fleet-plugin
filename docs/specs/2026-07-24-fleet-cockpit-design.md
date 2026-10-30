@@ -271,7 +271,8 @@ them update the shape below.)
   // The Cell evidence tab's model, built by the pure computeCellEvidence()
   // (compute-cell-evidence.mjs) from `.fleet/cost-guard.json` as the tick's
   // reader accepts it, the `metrics` step of `.fleet/phase0.json` and
-  // `.fleet/closeout.json`, the installed `../agents/*.agent.md` and `modelRoles`
+  // `.fleet/closeout.json`, the installed `../agents/*.agent.md`, the Preview
+  // fit `.fleet/router-preview.json` (amended by #3896) and `modelRoles`
   // below. Every word the tab shows is a string in it; the page only lays it out.
   //   guard:    { state: "no-guard" | "holds-nothing-back" | "trips-nothing" | "trips",
   //               heading, source (null with no guard), notes: [string],
@@ -283,13 +284,19 @@ them update the shape below.)
   //                         pulls: [{ issue, href, mark }] }],           // this run's Pulls, booked As-routed
   //               footnotes: [{ mark, text }] }
   //   declared: { heading, members: [{ name, declared, route }] }
-  //   policy:   { sides: [{ title, source: { text, check }, heading, dispatch, modelLine, footnotes }],
+  //   policy:   { sides: [{ title, source: { text, check }, heading, labels, dispatch, modelLine, footnotes }],
   //               objectives: [{ objective, live, lines: [{ stratum, anchor, href,
-  //                 collapsed | sides: [{ cell, held, reason, dispatch, candidates } | { follows } | { unread }] }] }] }
-  //             the policy rows, routes now: each Objective × Stratum row (`*`, light,
+  //                 collapsed | sides: [{ cell, held, reason, dispatch, candidates, differs } | { follows } | { unread } | { empty }] }] }] }
+  //             the policy rows: routes now, each Objective × Stratum row (`*`, light,
   //             heavy, unknown) with the Cell the installed router table plus the
   //             guard route to (ticket-router.mjs's rowDispatch), why, how a Pull on
   //             it is dispatched, and each candidate's n, verdict and 95% interval;
+  //             and evidence favours, the same for the Preview fit's table, its
+  //             Cell's `differs` "≠ routes now" where the two Cells differ, a
+  //             candidate's `nMark` where the guard counts that Cell's merged n
+  //             otherwise on the same files, its `labels` the heading labels of
+  //             another guard, other records or another prior, and `{ empty }`
+  //             cells while there is no Preview fit;
   //             `live` marks the Objective `.fleet/phase0.json` records, none between runs.
   // All five implementer Cells are always in `guard.cells`, in a fixed order.
   "cellEvidence": { "policy": { /* … */ }, "guard": { /* … */ }, "declared": { /* … */ } },

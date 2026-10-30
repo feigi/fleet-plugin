@@ -863,6 +863,7 @@ export function computeBoard(inputs) {
     // computeCellEvidence reads an input left out as nothing read.
     cellEvidence: computeCellEvidence({
       guard: inputs.guard,
+      preview: inputs.preview,
       receipts: inputs.receipts,
       agents: inputs.agents,
       modelRoles: inputs.modelRoles,
