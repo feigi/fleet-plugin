@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { CELLS, computeCellEvidence } from "../plugin/scripts/compute-cell-evidence.mjs";
 import { readCostGuard } from "../plugin/scripts/fleet-tick.mjs";
 import { guardFile } from "../plugin/scripts/pr-cost.mjs";
+import { DAY_ONE_TABLE } from "./support/day-one-router-table.mjs";
 
 // The Cell evidence tab's model, pure: the guard section (what the guard holds
 // each Cell to) and "Declared, not measured". Every word the page shows is built
@@ -483,7 +484,8 @@ test("figures show from the file pr-cost.mjs writes, as the tick's reader accept
 
 const { readFileSync } = await import("node:fs");
 const { policyRowsView, repoIdentity } = await import("../plugin/scripts/compute-cell-evidence.mjs");
-const SHIPPED = JSON.parse(readFileSync(new URL("../plugin/scripts/router-table.json", import.meta.url), "utf8"));
+// The day-one table, not plugin/scripts/router-table.json: a re-fit moves the shipped one.
+const SHIPPED = DAY_ONE_TABLE;
 const INSTALL = { name: "@feigi/fleet-ctl", version: "3.104.0", repository: "git+https://github.com/feigi/fleet-plugin.git", error: null };
 const HERE = "https://github.com/feigi/fleet-plugin";
 const FIVE = ["slow-high", "task-high", "smol-high", "slow-medium", "task-max"];

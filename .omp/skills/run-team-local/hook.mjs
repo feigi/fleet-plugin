@@ -56,9 +56,9 @@ const say = (line) => process.stdout.write(`${NAME}: ${line}\n`);
 const warn = (line) => process.stderr.write(`${NAME}: ${line}\n`);
 const metrics = (repo, file) => readFileSync(join(repo, "docs", "metrics", file), "utf8");
 
-function run(cmd, args, { cwd, what = `${cmd} ${args.slice(0, 2).join(" ")}` } = {}) {
+function run(cmd, args, { cwd, what = `${cmd} ${args.slice(0, 2).join(" ")}`, ok = [0] } = {}) {
   const r = spawnSync(cmd, args, { cwd, encoding: "utf8", env: gitEnv(), maxBuffer: MAX_BUFFER });
-  if (r.status !== 0) {
+  if (!ok.includes(r.status)) {
     throw new Error(`${what} failed (${r.error?.code ?? (r.signal ? `killed by ${r.signal}` : `exit ${r.status}`)}): ${String(r.stderr ?? "").trim()}`);
   }
   return r.stdout;
@@ -202,24 +202,51 @@ function freeBranch(repo) {
   throw new Error(`every ${base}<letter> branch is taken`);
 }
 
+// The PRs a Pull the fit reads has no complete record of, from pr-cost's guard
+// file: each cell's newest generation's `no_ruling_prs` (merged, no Ruling) and
+// `pending_prs` (still open, or missing from pr-cost's list), each once, ascending.
+// Older generations and Rulings given by hand block nothing.
+function incompleteRecord(guard) {
+  const prs = (field) => [...new Set(guard.cells.flatMap((c) => {
+    if (!Array.isArray(c[field])) throw new Error(`the cost guard's ${c.cell} entry has no \`${field}\` list`);
+    return c[field];
+  }))].sort((a, b) => Number(a) - Number(b));
+  return { noRuling: prs("no_ruling_prs"), open: prs("pending_prs") };
+}
+
 // CI's `ticket-router.mjs --check` re-fits from the commit the table records,
 // so the fit reads origin/main's own TSVs, in a throwaway checkout — never the
 // working tree's freshly drained rows, which reach main through the run's
-// artifacts PR and count at the next close-out.
+// artifacts PR and count at the next close-out. The cost guard it reads is
+// pr-cost's own over that checkout, run first: its exits 0, 3 and 4 are guard
+// verdicts, any other exit fails the duty, due or not. A re-fit is not opened
+// while a Pull the fit reads has a merged PR with no Ruling, or a PR still open.
 function routerFit(repo, dryRun) {
   git(repo, ["fetch", "--quiet", "origin", "main"]);
   const tmp = mkdtempSync(join(tmpdir(), "run-team-local-fit-"));
   try {
     git(repo, ["worktree", "add", "--quiet", "--detach", tmp, "origin/main"]);
+    const guardPath = join(tmp, GUARD);
+    run(process.execPath, [join(SCRIPTS, "pr-cost.mjs"), "--json", "--guard", "--out", guardPath], { cwd: tmp, what: "pr-cost.mjs --json", ok: [0, 3, 4] });
+    const guard = JSON.parse(readFileSync(guardPath, "utf8"));
     const table = join(tmp, TABLE);
     const corpus = (f) => join(tmp, "docs", "metrics", f);
     const args = ["--table", table, "--features", corpus("ticket-features.tsv"), "--members", corpus("member-outcomes.tsv"),
-      "--verdicts", corpus("tier-outcomes.tsv"), "--guard", join(repo, GUARD), "--commit", "origin/main"];
+      "--verdicts", corpus("tier-outcomes.tsv"), "--guard", guardPath, "--commit", "origin/main"];
     const due = script("ticket-router.mjs", ["fit", ...args, "--due"], tmp).trim();
     if (!due.startsWith("DUE=yes ")) return say(`router fit: ${due} — not due`);
     const open = ghJson(repo, ["pr", "list", "--state", "open", "--json", "number,headRefName", "--limit", "1000"])
       .find((p) => String(p.headRefName).startsWith(FIT_BRANCH));
     if (open) return say(`router fit: ${due} — re-fit PR #${open.number} (${open.headRefName}) is still open`);
+    const incomplete = incompleteRecord(guard);
+    if (incomplete.noRuling.length || incomplete.open.length) {
+      const list = (prs) => `PR ${prs.map((p) => `#${p}`).join(", ")}`;
+      const parts = [
+        incomplete.noRuling.length ? `merged with no Ruling ${list(incomplete.noRuling)} — run \`tier-outcomes.mjs append <pr>\` for each` : null,
+        incomplete.open.length ? `still open ${list(incomplete.open)}` : null,
+      ].filter(Boolean);
+      return say(`router fit: ${due} — record incomplete, no re-fit: ${parts.join("; ")}`);
+    }
     // The fit prints its summary line, then one line per row: its cell and the
     // reason, then each candidate's verdict and range.
     const out = script("ticket-router.mjs", ["fit", ...args], tmp).trim();

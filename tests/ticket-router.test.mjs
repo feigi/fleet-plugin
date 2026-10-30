@@ -16,6 +16,7 @@ import { COLUMNS as VERDICT_COLUMNS } from "../plugin/scripts/tier-outcomes.mjs"
 import { rendering } from "./support/rendered-brief.mjs";
 import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { DAY_ONE_TABLE } from "./support/day-one-router-table.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/ticket-router.mjs", import.meta.url));
 const SESSION = "2026-10-01T10-00-00-000Z_01a0b344-33f6-7640-96a8-05f45bf847a9";
@@ -398,17 +399,31 @@ test("route: no --objective is the one the phase-0 receipt records; a receipt th
   }
 });
 
-test("route: the checked-in table is valid and is the day-one table", () => {
-  const table = JSON.parse(readFileSync(DEFAULT_TABLE, "utf8"));
+// What every shipped table must satisfy, whatever a re-fit made of it. It pins no `rows`, `burn_in`, `stage` or
+// `cells`: the day-one table's contents are tests/support/day-one-router-table.mjs's.
+function assertShippable(table) {
   assert.equal(validateTable(table), table);
-  assert.equal(table.burn_in, true);
-  assert.equal(table.stage, 1);
-  assert.deepEqual(table.cells, STAGE1);
-  assert.deepEqual(table.rows.cost, { "*": "slow-high" });
-  for (const c of table.cells) {
+  const rowCells = Object.values(table.rows).flatMap((set) => Object.values(set));
+  for (const c of new Set([...table.cells, ...rowCells])) {
     assert.ok(CELL.test(c));
     assert.ok(existsSync(fileURLToPath(new URL(`../plugin/agents/fleet-implementer-${c}.agent.md`, import.meta.url))), `${c} has no definition`);
   }
+}
+
+test("route: the checked-in table is valid and names only cells with a definition", () => {
+  assertShippable(JSON.parse(readFileSync(DEFAULT_TABLE, "utf8")));
+});
+
+test("route: the shipped-table check passes a fitted table and fails a table validateTable refuses or one naming a cell with no definition", () => {
+  const fitted = baseTable({
+    fitted_commit: "a".repeat(40), n_rows: 12, burn_in: false, stage: 2, cells: [...STAGE1, "slow-medium", "task-max"],
+    rows: both({ "*": "smol-high", heavy: "task-max" }, { "*": "task-high" }),
+  });
+  assertShippable(fitted);
+  assert.throws(() => assertShippable({ ...fitted, burn_in: "no" }), /router table: `burn_in` is not a boolean/);
+  assert.throws(() => assertShippable({ ...fitted, rows: both({ heavy: "slow-high" }) }), /router table: `rows.cost` has no `\*` row/);
+  assert.throws(() => assertShippable({ ...fitted, cells: [...STAGE1, "smol-minimal"] }), /smol-minimal has no definition/);
+  assert.throws(() => assertShippable({ ...fitted, rows: both({ "*": "slow-high", light: "smol-minimal" }) }), /smol-minimal has no definition/);
 });
 
 test("route: pure — the same inputs give the same line, and the line names every field", () => {
@@ -1115,7 +1130,7 @@ test("a features file outside any repository, or a git that fails, is reported a
 });
 
 test("--check passes on a day-one table over a header-only features file", (t) => {
-  const p = fitWorld(t, { features: [], members: [], verdicts: [], table: JSON.parse(readFileSync(DEFAULT_TABLE, "utf8")) });
+  const p = fitWorld(t, { features: [], members: [], verdicts: [], table: structuredClone(DAY_ONE_TABLE) });
   const r = cli(["--check", ...p.fitArgs]);
   assert.equal(r.status, 0, r.stderr);
 });
@@ -1700,6 +1715,17 @@ test("fit: stage 2 adds no effort cell on a role whose stage-1 cell is tripped",
   const slowTripped = fitDirect(input, { n: stage1AtN, tripped: ["slow-high"] });
   assert.equal(slowTripped.stage, 2);
   assert.deepEqual(slowTripped.cells, [...STAGE1, "task-max"]);
+});
+
+test("fit: a table that moves to stage 2 judges its rows over the stage-2 cells too, so re-fitting it with itself as the prior reproduces it", () => {
+  const input = cellInput([["slow-high", 10], ["smol-high", 2], ["task-high", 10]]);
+  const T = fitDirect(input, { n: stage1AtN });
+  assert.equal(T.stage, 2);
+  assert.deepEqual(T.cells, [...STAGE1, "slow-medium", "task-max"]);
+  assert.deepEqual(Object.keys(T.reasons.cost["*"].cells).sort(), ["slow-medium", "smol-high", "task-high", "task-max"], "the `cost` record judges every cell but its base");
+  assert.deepEqual(T.reasons.cost["*"].cells["slow-medium"].verdict, "too-few");
+  const again = fitTable({ prior: T, ...direct(input), guard: { ...T.guard, window_start: T.window_start } });
+  assert.deepEqual(again, T);
 });
 
 test("fit: stage 2 does not add an effort cell the table already holds", () => {

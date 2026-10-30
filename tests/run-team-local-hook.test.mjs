@@ -96,6 +96,7 @@ const fx = JSON.parse(fs.readFileSync(process.env.GH_FIXTURE, "utf8"));
 const json = args[args.indexOf("--json") + 1];
 const out = (v) => process.stdout.write(JSON.stringify(v));
 const cmd = args.slice(0, 2).join(" ");
+if (cmd === "pr list" && fx.listFails) { process.stderr.write("gh stub: list refused"); process.exit(1); }
 if (cmd === "pr list") out(json === "number,headRefName" ? fx.openPrs : fx.prs);
 else if (cmd === "issue list") { if (fx.issuesRaw !== undefined) process.stdout.write(fx.issuesRaw); else out(fx.issues); }
 else if (cmd === "issue create") console.log("https://github.com/o/r/issues/901");
@@ -147,14 +148,15 @@ function fixture({ rows = corpus(), table = routerTable(), cells = STAGE1, readd
   git(seed, ["push", "--quiet", origin, "main"]);
   const repo = join(root, "repo");
   git(root, ["clone", "--quiet", origin, repo]);
-  // The file the run's own close-out leaves; the re-fit reads it as `--guard`.
-  write(repo, GUARD, JSON.stringify({ computed_at: "2026-10-03T12:00:00.000Z", verdict: "none", tripped: [], cells: [] }));
+  // No `.fleet/cost-guard.json`: the re-fit reads pr-cost's own guard over origin/main's TSVs.
   mkdirSync(join(root, "bin"));
   writeExecStub(join(root, "bin", "gh"), GH_STUB);
   // An `omp` that fails at once, so no spawn with this `bin` first reads the
   // host's omp config: a run without `--model-roles`/`--catalog` skips the drift notice.
   writeExecStub(join(root, "bin", "omp"), "#!/bin/sh\nexit 1\n");
-  writeFileSync(join(root, "gh.json"), JSON.stringify({ prs: [], openPrs: [], issues: [], ...gh }));
+  // Every PR a Ruling names is merged, and `gh.prs` adds to or overrides these.
+  const rulingPrs = rows.tiers.map((t) => ({ number: Number(t.pr), state: "MERGED", mergedAt: `${DAY}T12:00:00Z` }));
+  writeFileSync(join(root, "gh.json"), JSON.stringify({ openPrs: [], issues: [], ...gh, prs: [...rulingPrs, ...(gh.prs ?? [])] }));
   writeFileSync(join(root, "model-roles.json"), JSON.stringify(MODEL_ROLES));
   writeFileSync(join(root, "catalog.json"), JSON.stringify(CATALOG));
   const log = join(root, "gh.log");
@@ -463,12 +465,111 @@ test("router fit: a relative --repo reaches the re-fit as the absolute one does"
   assert.match(r.stdout, /router fit: DUE=yes MERGED=50\/50 — .*; would open a chore PR from chore\/router-fit-/);
 });
 
-test("router fit: without the cost guard the run's close-out leaves, the duty fails naming it and nothing is opened", () => {
-  const f = fixture({ rows: merged(FIT_EVERY_MERGED) });
-  rmSync(join(f.repo, GUARD));
+// A Pull whose implementer opened `pr`, with no Ruling for it: what `gh.prs` says of the PR is all the record holds.
+// `session` and `dispatchModel` place it in the cell's newest generation or an older one.
+function unruled(rows, { ticket, pr, session = SESSION, dispatchModel = "claude-opus-5" }) {
+  rows.features.push(pull({ ticket: String(ticket), agent: `impl-${ticket}`, run_date: "2026-10-05", session }));
+  rows.members.push(member({ agent: `impl-${ticket}`, ticket: String(ticket), pr: String(pr), run_date: "2026-10-05", session, dispatchModel, subagentType: "fleet-implementer-slow-high" }));
+}
+const prState = (number, state) => ({ number, state });
+const REFUSAL = /^run-team-local: router fit: DUE=yes MERGED=50\/50 — record incomplete, no re-fit: (.*)$/m;
+// Nothing fitted, pushed or opened: no re-fit branch on origin, no `pr create`, no `ticket-router: fitted` line.
+function assertNoRefit(f, r) {
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(git(f.origin, ["branch", "--list", "chore/*"]), "");
+  assert.deepEqual(calls(f, "pr create"), []);
+  assert.doesNotMatch(r.stdout, /ticket-router: fitted|would open|; opened /);
+  assert.equal(worktrees(f.repo), 1, "the throwaway checkout is gone");
+}
+
+test("router fit: a newest-generation Pull whose PR merged with no Ruling stops the re-fit, naming the PR and how to rule it; --dry-run says the same and no `would open`", () => {
+  const rows = merged(FIT_EVERY_MERGED);
+  unruled(rows, { ticket: 900, pr: 1400 });
+  for (const extra of [[], ["--dry-run"]]) {
+    const f = fixture({ rows, gh: { prs: [prState(1400, "MERGED")] } });
+    const r = f.run(extra);
+    assertNoRefit(f, r);
+    assert.match(r.stdout, /^run-team-local: router fit: DUE=yes MERGED=50\/50 — record incomplete, no re-fit: merged with no Ruling PR #1400 — run `tier-outcomes\.mjs append <pr>` for each$/m);
+    assert.equal(existsSync(join(f.repo, GUARD)), false, "the checkout's own cost-guard.json is neither needed nor written");
+  }
+});
+
+test("router fit: a newest-generation Pull whose PR is still open stops the re-fit, naming it under `still open`", () => {
+  const rows = merged(FIT_EVERY_MERGED);
+  unruled(rows, { ticket: 900, pr: 1400 });
+  for (const extra of [[], ["--dry-run"]]) {
+    const f = fixture({ rows, gh: { prs: [prState(1400, "OPEN")] } });
+    const r = f.run(extra);
+    assertNoRefit(f, r);
+    assert.equal(REFUSAL.exec(r.stdout)?.[1], "still open PR #1400");
+  }
+  // A ruled PR that has not merged is as open as an unruled one.
+  const ruledOpen = fixture({ rows: merged(FIT_EVERY_MERGED), gh: { prs: [prState(501, "OPEN")] } });
+  const o = ruledOpen.run();
+  assertNoRefit(ruledOpen, o);
+  assert.equal(REFUSAL.exec(o.stdout)?.[1], "still open PR #501");
+});
+
+test("router fit: both kinds are listed, each in ascending order of PR number, merged-with-no-Ruling first", () => {
+  const rows = merged(FIT_EVERY_MERGED);
+  for (const [ticket, pr] of [[901, 1500], [902, 999], [903, 1400], [904, 2000], [905, 1000]]) unruled(rows, { ticket, pr });
+  const f = fixture({ rows, gh: { prs: [prState(1500, "MERGED"), prState(999, "MERGED"), prState(1400, "OPEN"), prState(2000, "OPEN"), prState(1000, "MERGED")] } });
   const r = f.run(["--dry-run"]);
-  assert.equal(r.status, 1);
-  assert.match(r.stderr, /run-team-local: router fit failed: .*cost-guard\.json/);
+  assertNoRefit(f, r);
+  assert.equal(REFUSAL.exec(r.stdout)?.[1], "merged with no Ruling PR #999, #1000, #1500 — run `tier-outcomes.mjs append <pr>` for each; still open PR #1400, #2000");
+});
+
+test("router fit: with every PR of the newest generation ruled the re-fit opens as ever, and the checkout holds no cost-guard.json", () => {
+  const rows = merged(FIT_EVERY_MERGED);
+  unruled(rows, { ticket: 900, pr: 1400 });
+  rows.tiers.push(tier({ ticket: "900", pr: "1400", run_date: "2026-10-05" }));
+  const f = fixture({ rows });
+  assert.equal(existsSync(join(f.repo, GUARD)), false);
+  const r = f.run();
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /router fit: DUE=yes MERGED=51\/50 — .*; opened https:\/\/github\.com\/o\/r\/pull\/902 from chore\/router-fit-\S+$/m);
+  assert.doesNotMatch(r.stdout, /record incomplete/);
+  assert.equal(calls(f, "pr create").length, 1);
+});
+
+test("router fit: an older generation's unruled or open PR, a closed PR and a Ruling given by hand do not stop the re-fit", () => {
+  const rows = merged(FIT_EVERY_MERGED);
+  // model-old is the cell's older generation: its Pulls' session opens earlier than the newest generation's.
+  const older = "2026-10-03T09-00-00-000Z_01a00000-0000-7000-8000-000000000000";
+  unruled(rows, { ticket: 901, pr: 1401, session: older, dispatchModel: "model-old" });
+  unruled(rows, { ticket: 902, pr: 1402, session: older, dispatchModel: "model-old" });
+  unruled(rows, { ticket: 903, pr: 1403 });
+  rows.tiers.push(tier({ ticket: "904", pr: "1404", note: "ruled by hand" }));
+  unruled(rows, { ticket: 904, pr: 1404 });
+  const f = fixture({ rows, gh: { prs: [prState(1401, "MERGED"), prState(1402, "OPEN"), prState(1403, "CLOSED")] } });
+  const r = f.run(["--dry-run"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stdout, /record incomplete/);
+  assert.match(r.stdout, /router fit: DUE=yes MERGED=\d+\/50 — .*; would open a chore PR from chore\/router-fit-/);
+});
+
+test("router fit: a tripped cell (pr-cost exit 3) or a baseline under n=20 (exit 4) is a guard verdict, not a failure", () => {
+  const rows = merged(FIT_EVERY_MERGED);
+  for (let i = 1; i <= 20; i++) ruled(rows, { ticket: 100 + i, cell: "task-high", fail: true });
+  const tripped = fixture({ rows });
+  const t = tripped.run(["--dry-run"]);
+  assert.equal(t.status, 0, t.stderr);
+  assert.match(t.stdout, /router fit: DUE=yes MERGED=\d+\/50 — .*; would open a chore PR from chore\/router-fit-/);
+  const none = fixture({ rows: corpus() }).run(["--dry-run"]);
+  assert.equal(none.status, 0, none.stderr);
+  assert.match(none.stdout, /router fit: DUE=no MERGED=0\/50 — not due/);
+});
+
+test("router fit: when `gh pr list` fails the duty fails — due or not — naming the duty, and nothing is pushed or opened", () => {
+  for (const rows of [merged(FIT_EVERY_MERGED), corpus()]) {
+    const f = fixture({ rows, gh: { listFails: true } });
+    const r = f.run();
+    assert.equal(r.status, 1, r.stdout);
+    assert.match(r.stderr, /^run-team-local: router fit failed: pr-cost\.mjs --json failed \(exit 2\): pr-cost: gh pr list failed: exit 1$/m);
+    assert.equal(git(f.origin, ["branch", "--list", "chore/*"]), "");
+    assert.deepEqual(calls(f, "pr create"), []);
+    assert.equal(worktrees(f.repo), 1);
+  }
 });
 
 test("router fit: a due re-fit is pushed to its own chore branch and opened as a PR labelled patch, never onto main — and not while an earlier re-fit PR is open", () => {

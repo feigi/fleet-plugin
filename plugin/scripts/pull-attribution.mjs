@@ -283,8 +283,10 @@ function numberOf(row, field, column = field) {
 /**
  * One unit per ticket-features row dated on or after `windowStart` (every dated
  * row when null), in file order: `{ pull, cell, stratum, generation, status,
- * merged, pr, ruling, pendingPr, noRuling, claims, falseClaims, rows, spend, workS }`,
- * `generation` null exactly when the Pull is excluded. `spend` is null when a
+ * merged, pr, ruling, pendingPr, noRuling, noRulingPrs, claims, falseClaims, rows, spend, workS }`,
+ * `generation` null exactly when the Pull is excluded. `noRulingPrs` are the
+ * implementer PRs merged with no Ruling held by any Pull, which is what makes
+ * the Pull `noRuling`. `spend` is null when a
  * booked `cost` is blank, and `workS`, its work time in seconds, when a booked
  * `work_s` of a row naming no parent is. `prs` is `gh pr list`'s
  * `{ number, state }` rows, or null when PR state is unknown (the fit). `stratum`
@@ -358,7 +360,7 @@ export function attribute({ features, members, tiers, prs = null, windowStart = 
     const r = ruled.get(pull) ?? null;
     let merged = r !== null;
     let pendingPr = null;
-    let noRuling = false;
+    let noRulingPrs = [];
     if (state) {
       if (r) {
         const s = state.get(r.pr);
@@ -366,7 +368,7 @@ export function attribute({ features, members, tiers, prs = null, windowStart = 
         merged = s === "MERGED";
       } else {
         pendingPr = own.find((m) => m.pr && state.get(m.pr) === "OPEN")?.pr ?? null;
-        noRuling = own.some((m) => m.pr && state.get(m.pr) === "MERGED" && !held.has(m.pr));
+        noRulingPrs = own.filter((m) => m.pr && state.get(m.pr) === "MERGED" && !held.has(m.pr)).map((m) => m.pr);
       }
     }
     let claims = 0, falseClaims = 0;
@@ -396,8 +398,8 @@ export function attribute({ features, members, tiers, prs = null, windowStart = 
     else if (blank || (r && !r.carried)) status = "unpriced";
     else if (untimed) status = "untimed";
     return {
-      pull, cell: pull.chosen_cell, stratum: stratum(pull), generation, status, merged, pr: r?.pr ?? null, ruling: r?.ruling ?? null, noRuling,
-      pendingPr, claims, falseClaims, rows: booked, spend: blank ? null : spend, workS: untimed ? null : workS,
+      pull, cell: pull.chosen_cell, stratum: stratum(pull), generation, status, merged, pr: r?.pr ?? null, ruling: r?.ruling ?? null,
+      noRuling: noRulingPrs.length > 0, noRulingPrs, pendingPr, claims, falseClaims, rows: booked, spend: blank ? null : spend, workS: untimed ? null : workS,
     };
   });
 }

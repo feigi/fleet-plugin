@@ -6,6 +6,7 @@ import { computeCellEvidence } from "../plugin/scripts/compute-cell-evidence.mjs
 import { computeBoard } from "../plugin/scripts/compute-board.mjs";
 import { formatRouting } from "../plugin/scripts/ledger-grammar.mjs";
 import { identityRoles } from "./support/label-map-seed.mjs";
+import { DAY_ONE_TABLE } from "./support/day-one-router-table.mjs";
 
 // The cockpit page's tab strip and hash router. `board.html` is one
 // self-contained file, so the decision is lifted out of its source text and
@@ -804,7 +805,8 @@ test("a guard entry lists this run's Pulls booked to it, each with its mark", ()
 
 // -- the policy rows: routes now, row by row ------------------------------------------------------
 
-const SHIPPED_TABLE = JSON.parse(readFileSync(join(import.meta.dirname, "..", "plugin", "scripts", "router-table.json"), "utf8"));
+// The day-one table, not plugin/scripts/router-table.json: a re-fit moves the shipped one.
+const SHIPPED_TABLE = DAY_ONE_TABLE;
 const rowsInstall = { name: "@feigi/fleet-ctl", version: "3.104.0", repository: "git+https://github.com/feigi/fleet-plugin.git", error: null };
 const policyEvidence = (o = {}) => evidence({ table: SHIPPED_TABLE, install: rowsInstall, repoUrl: "https://github.com/feigi/fleet-plugin", ...o });
 const FITTED_ROWS = {
