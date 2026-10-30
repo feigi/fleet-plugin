@@ -285,8 +285,9 @@ function numberOf(row, field, column = field) {
  * row when null), in file order: `{ pull, cell, stratum, generation, status,
  * merged, pr, ruling, pendingPr, noRuling, noRulingPrs, claims, falseClaims, rows, spend, workS }`,
  * `generation` null exactly when the Pull is excluded. `noRulingPrs` are the
- * implementer PRs merged with no Ruling held by any Pull, which is what makes
- * the Pull `noRuling`. `spend` is null when a
+ * Pull's own implementer PRs that are merged and that no Pull holds a Ruling
+ * for, which is what makes the Pull `noRuling`; [] when the Pull itself has a
+ * Ruling, or when PR state is unknown. `spend` is null when a
  * booked `cost` is blank, and `workS`, its work time in seconds, when a booked
  * `work_s` of a row naming no parent is. `prs` is `gh pr list`'s
  * `{ number, state }` rows, or null when PR state is unknown (the fit). `stratum`

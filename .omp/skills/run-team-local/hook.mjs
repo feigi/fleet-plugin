@@ -204,23 +204,32 @@ function freeBranch(repo) {
 
 // The PRs a Pull the fit reads has no complete record of, from pr-cost's guard
 // file: each cell's newest generation's `no_ruling_prs` (merged, no Ruling) and
-// `pending_prs` (still open, or missing from pr-cost's list), each once, ascending.
+// `pending_prs` (still open, or missing from pr-cost's list), each once,
+// ascending. `openPrs`, the numbers `gh` lists open, splits the pending ones:
+// letting a PR merge or close clears only one that is still open.
 // Older generations and Rulings given by hand block nothing.
-function incompleteRecord(guard) {
+function incompleteRecord(guard, openPrs) {
   const prs = (field) => [...new Set(guard.cells.flatMap((c) => {
     if (!Array.isArray(c[field])) throw new Error(`the cost guard's ${c.cell} entry has no \`${field}\` list`);
     return c[field];
   }))].sort((a, b) => Number(a) - Number(b));
-  return { noRuling: prs("no_ruling_prs"), open: prs("pending_prs") };
+  const pending = prs("pending_prs");
+  return {
+    noRuling: prs("no_ruling_prs"),
+    open: pending.filter((p) => openPrs.has(String(p))),
+    unlisted: pending.filter((p) => !openPrs.has(String(p))),
+  };
 }
 
 // CI's `ticket-router.mjs --check` re-fits from the commit the table records,
 // so the fit reads origin/main's own TSVs, in a throwaway checkout — never the
 // working tree's freshly drained rows, which reach main through the run's
-// artifacts PR and count at the next close-out. The cost guard it reads is
-// pr-cost's own over that checkout, run first: its exits 0, 3 and 4 are guard
-// verdicts, any other exit fails the duty, due or not. A re-fit is not opened
-// while a Pull the fit reads has a merged PR with no Ruling, or a PR still open.
+// artifacts PR and count at the next close-out. The cost guard it reads is the
+// hook's own pr-cost.mjs run first over the throwaway checkout's TSVs — so its
+// `retire` reads the hook's table, which nothing here uses: its exits 0, 3
+// and 4 are guard verdicts, any other exit fails the duty, due or not. A re-fit
+// is not opened while a Pull the fit reads has a merged PR with no Ruling, or a
+// PR still open or missing from pr-cost's list.
 function routerFit(repo, dryRun) {
   git(repo, ["fetch", "--quiet", "origin", "main"]);
   const tmp = mkdtempSync(join(tmpdir(), "run-team-local-fit-"));
@@ -235,18 +244,17 @@ function routerFit(repo, dryRun) {
       "--verdicts", corpus("tier-outcomes.tsv"), "--guard", guardPath, "--commit", "origin/main"];
     const due = script("ticket-router.mjs", ["fit", ...args, "--due"], tmp).trim();
     if (!due.startsWith("DUE=yes ")) return say(`router fit: ${due} — not due`);
-    const open = ghJson(repo, ["pr", "list", "--state", "open", "--json", "number,headRefName", "--limit", "1000"])
-      .find((p) => String(p.headRefName).startsWith(FIT_BRANCH));
+    const openPrs = ghJson(repo, ["pr", "list", "--state", "open", "--json", "number,headRefName", "--limit", "1000"]);
+    const open = openPrs.find((p) => String(p.headRefName).startsWith(FIT_BRANCH));
     if (open) return say(`router fit: ${due} — re-fit PR #${open.number} (${open.headRefName}) is still open`);
-    const incomplete = incompleteRecord(guard);
-    if (incomplete.noRuling.length || incomplete.open.length) {
-      const list = (prs) => `PR ${prs.map((p) => `#${p}`).join(", ")}`;
-      const parts = [
-        incomplete.noRuling.length ? `merged with no Ruling ${list(incomplete.noRuling)} — run \`tier-outcomes.mjs append <pr>\` for each` : null,
-        incomplete.open.length ? `still open ${list(incomplete.open)}` : null,
-      ].filter(Boolean);
-      return say(`router fit: ${due} — record incomplete, no re-fit: ${parts.join("; ")}`);
-    }
+    const { noRuling, open: stillOpen, unlisted } = incompleteRecord(guard, new Set(openPrs.map((p) => String(p.number))));
+    const list = (prs) => `PR ${prs.map((p) => `#${p}`).join(", ")}`;
+    const parts = [
+      noRuling.length ? `merged with no Ruling ${list(noRuling)} — run \`tier-outcomes.mjs append <pr>\` for each` : null,
+      stillOpen.length ? `still open ${list(stillOpen)}` : null,
+      unlisted.length ? `missing from pr-cost's list ${list(unlisted)}` : null,
+    ].filter(Boolean);
+    if (parts.length) return say(`router fit: ${due} — record incomplete, no re-fit: ${parts.join("; ")}`);
     // The fit prints its summary line, then one line per row: its cell and the
     // reason, then each candidate's verdict and range.
     const out = script("ticket-router.mjs", ["fit", ...args], tmp).trim();

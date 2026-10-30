@@ -133,27 +133,30 @@ export function computeReport({ members, tiers, features, prs, routerTable = nul
   const prList = (set = []) => [...set].sort((x, y) => Number(x) - Number(y));
   // One generation's figures. The interval is the newest generation's against
   // the baseline's newest; an older generation is printed, never compared.
-  const figuresOf = (cell, g, newest) => ({
-    cell,
-    generation: g.generation,
-    n_pulls: g.n,
-    n_merged: g.merged,
-    n_claims: g.claims,
-    n_failed: g.failed,
-    fail_rate: g.claims ? round(g.failed / g.claims) : null,
-    mean_usd: round(meanUsd(g), 2),
-    median_usd: round(median(g.pulls.filter((u) => u.merged).map((u) => u.spend)), 2),
-    by_hand: g.by_hand,
-    no_ruling: g.no_ruling,
-    no_ruling_prs: prList(behind.get(`${cell}\0${g.generation}`)?.no_ruling_prs),
-    pending: g.pending,
-    pending_prs: prList(behind.get(`${cell}\0${g.generation}`)?.pending_prs),
-    router_usd: round(g.pulls.reduce((s, u) => s + routerUsd(u.pull), 0), 4),
-    usd_diff_ci95: !newest || cell === BASELINE_CELL || !base ? null : bootstrapDiffCI(bootUnits(g), bootUnits(base)),
-    left_out: g.left_out,
-    unpriced: g.unpriced,
-    untimed: g.untimed,
-  });
+  const figuresOf = (cell, g, newest) => {
+    const held = behind.get(`${cell}\0${g.generation}`);
+    return {
+      cell,
+      generation: g.generation,
+      n_pulls: g.n,
+      n_merged: g.merged,
+      n_claims: g.claims,
+      n_failed: g.failed,
+      fail_rate: g.claims ? round(g.failed / g.claims) : null,
+      mean_usd: round(meanUsd(g), 2),
+      median_usd: round(median(g.pulls.filter((u) => u.merged).map((u) => u.spend)), 2),
+      by_hand: g.by_hand,
+      no_ruling: g.no_ruling,
+      no_ruling_prs: prList(held?.no_ruling_prs),
+      pending: g.pending,
+      pending_prs: prList(held?.pending_prs),
+      router_usd: round(g.pulls.reduce((s, u) => s + routerUsd(u.pull), 0), 4),
+      usd_diff_ci95: !newest || cell === BASELINE_CELL || !base ? null : bootstrapDiffCI(bootUnits(g), bootUnits(base)),
+      left_out: g.left_out,
+      unpriced: g.unpriced,
+      untimed: g.untimed,
+    };
+  };
   const figures = [...tallies.values()].map((t) => ({
     ...figuresOf(t.cell, t, true),
     excluded: t.excluded,

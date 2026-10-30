@@ -19,7 +19,7 @@ import { validateTable } from "../plugin/scripts/ticket-router.mjs";
 import { writePreview } from "../plugin/scripts/metrics-refresh.mjs";
 
 // A copy of the scripts holding the day-one table, so the installed table the run reads as its prior does not move with a re-fit.
-const SCRIPT = join(dayOneScripts().scripts, "metrics-refresh.mjs");
+const SCRIPT = join(dayOneScripts(), "metrics-refresh.mjs");
 const DAY = WINDOW_START;
 const SESSION = "2026-10-03T10-00-00-000Z_01a00000-0000-7000-8000-000000000000";
 const PENDING = join(".fleet", "ticket-features.pending.tsv");

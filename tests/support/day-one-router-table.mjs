@@ -41,21 +41,22 @@ export const DAY_ONE_TABLE = deepFreeze({
 let copy = null;
 
 /**
- * A copy of plugin/scripts and plugin/package.json under a temp directory, with
- * the day-one table installed as its router-table.json — a scripts directory
- * whose installed table does not move when a re-fit changes the shipped one.
- * Made once per process, removed when it exits; `scripts` is the directory a
- * script run from it reads its table beside, `root` its `plugin` directory's parent.
- * @returns {{ root: string, scripts: string }}
+ * A copy of plugin/scripts, plugin/agents and plugin/package.json under a temp
+ * directory, with the day-one table installed as its router-table.json — a
+ * scripts directory whose installed table does not move when a re-fit changes
+ * the shipped one, and which reads the shipped definitions from `../agents`.
+ * Made once per process, removed when it exits.
+ * @returns {string} the scripts directory, which a script run from it reads its table beside
  */
 export function dayOneScripts() {
   if (copy === null) {
     const plugin = fileURLToPath(new URL("../../plugin/", import.meta.url));
     const root = tempDir("day-one-scripts-");
     cpSync(join(plugin, "scripts"), join(root, "plugin", "scripts"), { recursive: true });
+    cpSync(join(plugin, "agents"), join(root, "plugin", "agents"), { recursive: true });
     cpSync(join(plugin, "package.json"), join(root, "plugin", "package.json"));
     writeFileSync(join(root, "plugin", "scripts", "router-table.json"), `${JSON.stringify(DAY_ONE_TABLE, null, 2)}\n`);
-    copy = { root, scripts: join(root, "plugin", "scripts") };
+    copy = join(root, "plugin", "scripts");
   }
   return copy;
 }
