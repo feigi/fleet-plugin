@@ -1147,6 +1147,7 @@ test("a rotate whose receipt is absent, unreadable or names no session directory
     ["absent", () => {}, (f) => `no ${receipt(f)} to read its session from`],
     ["unreadable", (f) => writeFileSync(receipt(f), "{ nope"), (f) => `${receipt(f)} unreadable: not JSON`],
     ["not a session", (f) => writeReceipt(f, PROJECT), (f) => `${receipt(f)} records ${PROJECT}, which is not an omp <ISO>_<uuid> session directory`],
+    ["no session", (f) => writeReceipt(f, ""), (f) => `${receipt(f)} records no session`],
   ]) {
     const f = fixture(t, { ledger: STAMPABLE, controller: ANCESTOR });
     write(f);

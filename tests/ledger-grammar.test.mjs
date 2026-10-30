@@ -557,6 +557,8 @@ test("an entry that is not a member token plus one well-formed brief= word, then
     `impl-7 brief=0123abcd agent=a session=/home/u/.omp/${SESSION_DIR}`, `impl-7 brief=0123abcd agent=a session=../${SESSION_DIR}`,
     "impl-7 brief=0123abcd agent=a session=-Users-u-dev-repo", `impl-7 brief=0123abcd session=${SESSION_DIR} agent=a`,
     `impl-7 brief=0123abcd agent=a session=${SESSION_DIR} session=${SESSION_DIR}`, `impl-7 session=${SESSION_DIR}`,
+    `impl-7 brief=0123abcd agent=a session=${SESSION_DIR}.jsonl`, `impl-7 brief=0123abcd agent=a session=${SESSION_DIR}x/..`,
+    `impl-7 brief=0123abcd agent=a session=${SESSION_DIR}_`,
   ]) {
     assert.deepEqual(parseDispatchedEntry(entry), { token: entry, brief: null, queued: null, agent: null, session: null }, entry);
     assert.equal(parseToken(entry), null, `${entry}: kept whole, it parses as no member token`);

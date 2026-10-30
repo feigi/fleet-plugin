@@ -130,9 +130,9 @@ export function memberRole(family) {
 // dir in the real shape.
 const OMP_SESSION_DIR_RE = /^\d{4}-\d{2}-\d{2}T[\d-]+Z_[0-9a-f-]+$/i;
 
-// Exposed for callers that already hold one EXPLICIT directory rather than a
-// tree to search — member-outcomes.mjs's CLI, so the pattern is defined once.
-// The `## Dispatched` grammar's `session=` word is held to it too.
+// The one definition of the session-directory name rule, shared by the
+// `## Dispatched` grammar's `session=` word, the readers that walk or resolve
+// session directories, and the CLIs that take one explicit directory.
 export function isOmpSessionDirName(name) {
   return OMP_SESSION_DIR_RE.test(name);
 }

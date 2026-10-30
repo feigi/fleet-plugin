@@ -441,20 +441,33 @@ test("gather: a member found both in the stamped session and in the session a re
   assert.equal(cellLine2(r), CELL_LINE_3862);
 });
 
-test("gather: a stamped session that no longer exists, or cannot be listed, adds nothing and the tick still answers", async (t) => {
+test("gather: a stamped session that no longer exists, or cannot be listed, adds nothing and the tick still answers; only the one that cannot be listed says why", async (t) => {
   const gone = cardsWorkspace(t, { entry: STAMPED_ENTRY });
   rmSync(gone.session, { recursive: true });
   nextRun(gone);
-  const r = await quiet(() => gather({ ...gone.opts, spendDir: receiptSpendDir(gone.stateDir) }));
-  assert.deepEqual(r.implementers, []);
-  assert.equal(cellLine2(r).startsWith("not on record"), true);
+  const r = await stderrOfAsync(() => gather({ ...gone.opts, spendDir: receiptSpendDir(gone.stateDir) }));
+  assert.deepEqual(r.value.implementers, []);
+  assert.equal(cellLine2(r.value).startsWith("not on record"), true);
+  assert.doesNotMatch(r.err, /no card reads/, "a stamped session that is gone is the ordinary end of one, and says nothing");
 
   const locked = cardsWorkspace(t, { entry: STAMPED_ENTRY });
   nextRun(locked);
   chmodSync(locked.session, 0o000);
   t.after(() => chmodSync(locked.session, 0o755));
-  const l = await quiet(() => gather({ ...locked.opts, spendDir: receiptSpendDir(locked.stateDir) }));
-  assert.deepEqual(l.implementers, []);
+  const l = await stderrOfAsync(() => gather({ ...locked.opts, spendDir: receiptSpendDir(locked.stateDir) }));
+  assert.deepEqual(l.value.implementers, []);
+  assert.match(l.err, /no card reads .*: EACCES/);
+});
+
+test("gather: with both receipts naming a session, a stamped session resolves under the current receipt's root, not the held receipt's", async (t) => {
+  const w = cardsWorkspace(t, { entry: STAMPED_ENTRY });
+  nextRun(w);
+  // A held receipt whose session sits under another root, where the stamped session is not.
+  const elsewhere = join(tempDir("cell-line-elsewhere-"), NEW_SESSION);
+  mkdirSync(elsewhere);
+  writeFileSync(join(w.stateDir, RECEIPT_HELD), JSON.stringify({ ...receipt({}), session: elsewhere }));
+  const r = await quiet(() => gather({ ...w.opts, spendDir: receiptSpendDir(w.stateDir) }));
+  assert.deepEqual(r.implementers, [IMPL_3862]);
 });
 
 test("gather: with --spend-dir named, a stamped session is not read either: the operator's directory is the one session read", async (t) => {
@@ -470,6 +483,14 @@ function stderrOf(fn) {
   let err = "";
   process.stderr.write = (chunk, ...rest) => { err += chunk; rest.find((a) => typeof a === "function")?.(); return true; };
   try { return { value: fn(), err }; } finally { process.stderr.write = write; }
+}
+
+// The same, for an `fn` that returns a promise.
+async function stderrOfAsync(fn) {
+  const write = process.stderr.write;
+  let err = "";
+  process.stderr.write = (chunk, ...rest) => { err += chunk; rest.find((a) => typeof a === "function")?.(); return true; };
+  try { const value = await fn(); return { value, err }; } finally { process.stderr.write = write; }
 }
 
 test("readHeldImplementers: a held receipt that is absent, unreadable or names no session directory adds nothing, and an unreadable one says why", () => {

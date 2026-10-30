@@ -735,7 +735,7 @@ export function readHeldImplementers(stateDir, implementers) {
 // directory, and a stamped directory not there, add nothing; one that cannot
 // be listed adds nothing and says why on stderr. A transcript that will not
 // read is skipped as readHeldImplementers skips it.
-export function readStampedImplementers(stateDir, sessions, implementers) {
+function readStampedImplementers(stateDir, sessions, implementers) {
   const stamped = new Map();
   for (const [member, session] of Object.entries(sessions ?? {})) {
     if (!isImplementer(member) || !isOmpSessionDirName(session)) continue;

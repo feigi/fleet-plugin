@@ -1797,6 +1797,7 @@ function stampSessions(carry, receiptPath) {
   let why = null;
   if (read.state === "missing") why = `no ${receiptPath} to read its session from`;
   else if (read.state === "unreadable") why = `${receiptPath} unreadable: ${read.why}`;
+  else if (read.receipt.session === "") why = `${receiptPath} records no session`;
   else if (!isOmpSessionDirName(basename(read.receipt.session))) why = `${receiptPath} records ${read.receipt.session}, which is not an omp <ISO>_<uuid> session directory`;
   else session = basename(read.receipt.session);
   for (const token of carry.dispatched) {
