@@ -862,14 +862,17 @@ export function computeBoard(inputs) {
     // gather() answered, and this run's Pulls: each card's
     // Cell line, booked As-routed to its Cell. A caller that read none of them
     // (every hand-built input in this suite) gets the tab's no-guard state:
-    // computeCellEvidence reads an input left out as nothing read.
+    // computeCellEvidence reads an input left out as nothing read. The open PRs
+    // are null where gather() says the read failed (`prsOk` false), so the tab
+    // reads them as not read rather than as none open; `prsOk` defaults to true
+    // absent a signal, as `poolOk` does above.
     cellEvidence: computeCellEvidence({
       guard: inputs.guard,
       guardJson: inputs.guardJson,
       preview: inputs.preview,
       receipts: inputs.receipts,
       closeoutPr: inputs.closeoutPr,
-      openPrs: { numbers: (inputs.prs ?? []).map((p) => p.number), capped: inputs.prsCapped === true },
+      openPrs: inputs.prsOk === false ? null : { numbers: (inputs.prs ?? []).map((p) => p.number), capped: inputs.prsCapped === true },
       agents: inputs.agents,
       modelRoles: inputs.modelRoles,
       mainMetrics: inputs.mainMetrics,

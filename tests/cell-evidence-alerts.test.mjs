@@ -100,12 +100,19 @@ test("the Preview fit's ids are compared too: the fit alone behind main raises t
   assert.match(both.alerts[0].sentence, /^main's records changed after /);
 });
 
+test("the fit alone behind main: the fit's own computed_at, not the guard's, decides counts or lacks", () => {
+  const fit = (computed_at) => ({ status: "ok", preview: { computed_at, guard_computed_at: COMPUTED, tsv_blobs: { [MEMBERS]: MEMBERS_ID, [TIER]: "0123456789abcdef0123456789abcdef01234567" }, prior: {}, table: SHIPPED } });
+  const at = (preview) => build({ preview, mainMetrics: read({ [MEMBERS]: MEMBERS_ID, [TIER]: GUARD_TIER }), closeoutPr: { number: 9, at: "2026-10-26T19:17:36.000Z" }, openPrs: { numbers: [9], capped: false } });
+  assert.equal(at(fit("2026-10-26T19:17:40.000Z")).alerts[0].sentence, "the Preview fit lacks the rows of open PR #9");
+  assert.equal(at(fit("2026-10-26T19:17:30.000Z")).alerts[0].sentence, "the Preview fit counts the rows of open PR #9, not on main yet");
+});
+
 test("a file main lacks is a difference: main holds none", () => {
   const ce = build({ mainMetrics: read({ [MEMBERS]: MEMBERS_ID }) });
   assert.deepEqual(ce.alerts[0].lines, [`${TIER}: the guard read 9df10b12; main holds none`]);
 });
 
-test("an offline cockpit raises no alert: a failed read is 'not checked' in the guard section's heading, with why and when it last succeeded", () => {
+test("an offline cockpit raises no alert: a failed read is a 'not checked' note under the guard section's heading, with why and when it last succeeded", () => {
   const failed = build({ mainMetrics: read({ [MEMBERS]: MEMBERS_ID, [TIER]: MAIN_TIER }, { error: { at: Date.UTC(2026, 9, 30, 9, 0), message: "gh api --hostname github.com repos/feigi/fleet-plugin/contents/docs/metrics failed (exit 1)" } }) });
   assert.deepEqual(ids(failed), [], "the carried value does not stand in for the read that failed");
   assert.deepEqual(failed.guard.notes, ["records against main: not checked: gh api --hostname github.com repos/feigi/fleet-plugin/contents/docs/metrics failed (exit 1); last succeeded 2026-10-30 08:00Z"]);
@@ -114,6 +121,10 @@ test("an offline cockpit raises no alert: a failed read is 'not checked' in the 
   assert.deepEqual(never.guard.notes, ["records against main: not checked: boom; last succeeded never"]);
   const unread = build({ mainMetrics: { value: null, readAt: null, error: null } });
   assert.deepEqual([ids(unread), unread.guard.notes], [[], ["records against main: not checked: main's docs/metrics not read yet"]]);
+  for (const blobs of [undefined, [MEMBERS_ID], "9df10b12"]) {
+    const malformed = build({ mainMetrics: { value: { blobs }, readAt: Date.UTC(2026, 9, 30, 8, 0), error: null } });
+    assert.deepEqual([ids(malformed), malformed.guard.notes], [[], ["records against main: not checked: main's docs/metrics not read yet"]], `blobs ${JSON.stringify(blobs)}: not a record, not trusted`);
+  }
 });
 
 test("a 404 from the named host reads 'main holds no metrics yet', and is no alert", () => {
@@ -122,7 +133,7 @@ test("a 404 from the named host reads 'main holds no metrics yet', and is no ale
   assert.deepEqual(ce.guard.notes, ["records against main: main holds no metrics yet"]);
 });
 
-test("the receipt's PR cannot be told open from a cut-short list: not checked, no alert", () => {
+test("the receipt's PR cannot be told open, or the guard's time placed against it: not checked, no alert", () => {
   const ce = build({ closeoutPr: { number: 4021, at: COMPUTED }, openPrs: { numbers: [7], capped: true } });
   assert.deepEqual(ids(ce), []);
   assert.match(ce.guard.notes[0], /^records against main: not checked: the close-out's PR #4021 is not among the open PRs read/);
@@ -131,6 +142,10 @@ test("the receipt's PR cannot be told open from a cut-short list: not checked, n
   const timeless = build({ closeoutPr: { number: 4021, at: null }, openPrs: { numbers: [4021], capped: false } });
   assert.deepEqual(ids(timeless), []);
   assert.match(timeless.guard.notes[0], /records no time for PR #4021's commit step/);
+  const unreadPrs = build({ closeoutPr: { number: 4021, at: COMPUTED }, openPrs: null });
+  assert.deepEqual([ids(unreadPrs), unreadPrs.guard.notes], [[], ["records against main: not checked: the open PRs were not read, so whether the close-out's PR #4021 is open is unknown"]]);
+  const undated = build({ guardJson: guardJson({ computed_at: "not a date" }), closeoutPr: { number: 4021, at: COMPUTED }, openPrs: { numbers: [4021], capped: false } });
+  assert.deepEqual([ids(undated), undated.guard.notes], [[], ["records against main: not checked: the guard records no time it was computed"]]);
 });
 
 test("a guard that predates the blob ids has nothing to compare: 'not checked', no alert; a cockpit that read nothing says nothing", () => {
@@ -185,7 +200,7 @@ test("the tick's reader accepts and the Router's refuses: the reverse", () => {
   const ce = build({ guardJson: odd, mainMetrics: null });
   assert.equal(ce.alerts[0].sentence, "the tick's reader (readCostGuard) accepts the guard and the Router's (readGuard) refuses it: `tripped` names \"weird\", which is not a Cell");
   const nan = guardJson({ cells: [entry("slow-high", { n: 1.5 })] });
-  assert.equal(parseGuard(nan).why, undefined, "a fractional n is finite: the Router's reader takes it");
+  assert.equal(parseGuard(nan).ok, true, "a fractional n is finite: the Router's reader takes it");
   assert.notEqual(costGuardFault(nan), null, "and the tick's reader does not");
 });
 
@@ -214,10 +229,10 @@ test("each reader's reason for refusing is the reader's own rule: every fault it
     assert.ok(typeof why === "string" ? fault === why : why.test(fault), `${fault}`);
   }
   assert.equal(costGuardFault(guardJson()), null);
-  assert.deepEqual(parseGuard(null), { why: "not a JSON object" });
-  assert.deepEqual(parseGuard({ tripped: [], cells: "x" }), { why: "`cells` is not a list" });
-  assert.deepEqual(parseGuard({ tripped: "x", cells: [] }), { why: "`tripped` is not a list" });
-  assert.deepEqual(parseGuard({ tripped: [], cells: [{ cell: "slow-high" }] }), { why: "a `cells` entry has no string `cell` or no finite `n`" });
+  assert.deepEqual(parseGuard(null), { ok: false, why: "not a JSON object" });
+  assert.deepEqual(parseGuard({ tripped: [], cells: "x" }), { ok: false, why: "`cells` is not a list" });
+  assert.deepEqual(parseGuard({ tripped: "x", cells: [] }), { ok: false, why: "`tripped` is not a list" });
+  assert.deepEqual(parseGuard({ tripped: [], cells: [{ cell: "slow-high" }] }), { ok: false, why: "a `cells` entry has no string `cell` or no finite `n`" });
   assert.deepEqual(parseGuard({ tripped: [{ cell: "slow-high" }, "slow-high"], cells: [{ cell: "slow-high", n: 1 }] }).guard, { tripped: ["slow-high"], n: { "slow-high": 1 }, window_start: null });
 });
 

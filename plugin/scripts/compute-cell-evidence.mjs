@@ -563,10 +563,12 @@ function behindMain(source, table, checkout) {
   if (checkout.status !== "ok") return { label: null, check: `not checked: this checkout's router table was not read: ${checkout.why}` };
   const main = checkout.table;
   const commit = (t) => (t.fitted_commit ? String(t.fitted_commit) : null);
-  if (commit(main) === commit(table) && main.n_rows === table.n_rows) return none;
+  const mainAt = commit(main);
+  const installedAt = commit(table);
+  if (mainAt === installedAt && main.n_rows === table.n_rows) return none;
   const on = Number.isInteger(main.n_rows) ? `on ${plural(main.n_rows, "Pull")}` : "on a number of Pulls not checked";
-  const fitted = commit(main) === null ? "never fitted" : `fitted at ${commit(main).slice(0, 7)} ${on}`;
-  const routes = commit(table) === null ? "a table never fitted" : commit(table).slice(0, 7);
+  const fitted = mainAt === null ? "never fitted" : `fitted at ${mainAt.slice(0, 7)} ${on}`;
+  const routes = installedAt === null ? "a table never fitted" : installedAt.slice(0, 7);
   return { label: `main's table is ${fitted}; this install routes by ${routes} until the plugin is updated`, check: null };
 }
 
@@ -774,17 +776,19 @@ function declaredSection(agents, modelRoles) {
 const blob8 = (id) => (typeof id === "string" ? id.slice(0, 8) : String(id));
 
 // Whether the close-out receipt's PR is among the open ones: null where that
-// cannot be told, a list cut short that does not name it.
+// cannot be told — the open PRs not read (`openPrs` null), or a list cut short
+// that does not name it.
 function prIsOpen(pr, openPrs) {
-  if (pr === null || !isRecord(openPrs) || !Array.isArray(openPrs.numbers)) return pr === null ? false : null;
+  if (pr === null) return false;
+  if (!isRecord(openPrs) || !Array.isArray(openPrs.numbers)) return null;
   if (openPrs.numbers.includes(pr)) return true;
   return openPrs.capped === true ? null : false;
 }
 
 // The guard's and the Preview fit's TSV blob ids against main's. `alert` is the
-// alert while the records are not on main, else null; `note` is what the guard
-// section's heading says in its place: a check that could not run is never an
-// alert, so an offline cockpit raises none. `main` is the carried read of
+// alert while the records are not on main, else null; `note`, in its place, is
+// a note under the guard section's heading: a check that could not run is never
+// an alert, so an offline cockpit raises none. `main` is the carried read of
 // `docs/metrics`, `{ value: { blobs }, readAt, error }`, `blobs` null for a 404.
 // A guard that names no blob ids has nothing to compare, and neither has one
 // whose cockpit read nothing (`main` null).
@@ -792,14 +796,14 @@ function recordsAgainstMain({ read, preview, main, closeoutPr, openPrs }) {
   const none = { alert: null, note: null };
   if (main == null || read?.status !== "ok") return none;
   const g = read.guard;
-  if (!isRecord(g.tsv_blobs)) return { alert: null, note: "records against main: not checked: this guard predates the blob ids it needs" };
   const unchecked = (why) => ({ alert: null, note: `records against main: not checked: ${why}` });
+  if (!isRecord(g.tsv_blobs)) return unchecked("this guard predates the blob ids it needs");
   if (main.error != null) {
     return unchecked(`${main.error.message}; last succeeded ${main.readAt == null ? "never" : when(main.readAt)}`);
   }
-  if (!isRecord(main.value)) return unchecked("main's docs/metrics not read yet");
-  if (main.value.blobs === null) return { alert: null, note: "records against main: main holds no metrics yet" };
-  if (!isRecord(main.value.blobs)) return unchecked("main's docs/metrics not read yet");
+  const blobs = isRecord(main.value) ? main.value.blobs : undefined;
+  if (blobs === null) return { alert: null, note: "records against main: main holds no metrics yet" };
+  if (!isRecord(blobs)) return unchecked("main's docs/metrics not read yet");
 
   const mine = preview?.status === "ok" ? preview.preview : null;
   const held = (ids, path) => (isRecord(ids) && Object.hasOwn(ids, path) ? ids[path] : undefined);
@@ -808,7 +812,7 @@ function recordsAgainstMain({ read, preview, main, closeoutPr, openPrs }) {
   let guardDiffers = false;
   let fitDiffers = false;
   for (const path of paths) {
-    const onMain = main.value.blobs[path];
+    const onMain = held(blobs, path);
     const guardId = held(g.tsv_blobs, path);
     const fitId = mine === null ? undefined : held(mine.tsv_blobs, path);
     const gd = guardId !== undefined && guardId !== onMain;
@@ -822,18 +826,25 @@ function recordsAgainstMain({ read, preview, main, closeoutPr, openPrs }) {
   }
   if (lines.length === 0) return none;
 
-  const who = guardDiffers && fitDiffers ? ["the guard and the Preview fit", true] : guardDiffers ? ["the guard", false] : ["the Preview fit", false];
+  const both = guardDiffers && fitDiffers;
+  const subject = both ? "the guard and the Preview fit" : guardDiffers ? "the guard" : "the Preview fit";
   const pr = Number.isInteger(closeoutPr?.number) ? closeoutPr.number : null;
   const open = prIsOpen(pr, openPrs);
   const computed = guardDiffers ? g.computed_at : mine.computed_at;
   let sentence;
-  if (open === null) return unchecked(`the close-out's PR #${pr} is not among the open PRs read, and that list was cut short`);
+  if (open === null) {
+    return unchecked(isRecord(openPrs)
+      ? `the close-out's PR #${pr} is not among the open PRs read, and that list was cut short`
+      : `the open PRs were not read, so whether the close-out's PR #${pr} is open is unknown`);
+  }
   if (open) {
     const committed = Date.parse(closeoutPr.at);
     if (!Number.isFinite(committed)) return unchecked(`the close-out receipt records no time for PR #${pr}'s commit step`);
-    sentence = Date.parse(computed) <= committed
-      ? `${who[0]} ${who[1] ? "count" : "counts"} the rows of open PR #${pr}, not on main yet`
-      : `${who[0]} ${who[1] ? "lack" : "lacks"} the rows of open PR #${pr}`;
+    const built = Date.parse(computed);
+    if (!Number.isFinite(built)) return unchecked(`the ${guardDiffers ? "guard" : "Preview fit"} records no time it was computed`);
+    sentence = built <= committed
+      ? `${subject} ${both ? "count" : "counts"} the rows of open PR #${pr}, not on main yet`
+      : `${subject} ${both ? "lack" : "lacks"} the rows of open PR #${pr}`;
   } else {
     sentence = `main's records changed after ${when(computed)}; the next phase 0 recomputes`;
   }
@@ -856,12 +867,12 @@ function noRulingAlert(read) {
 // The Router's reader and the tick's reading the same guard file differently:
 // the one that accepts it, and why the other refuses. `json` is the file as
 // parsed, null when missing or unparseable, which both refuse alike.
-function readersAlert(read, json) {
+function readersAlert(json) {
   if (json == null) return null;
   const router = parseGuard(json);
   const tickWhy = costGuardFault(json);
   const tickAccepts = tickWhy === null;
-  if (tickAccepts === (router.guard !== undefined)) return null;
+  if (tickAccepts === router.ok) return null;
   return {
     id: "guard-readers-disagree",
     headline: "Guard readers disagree",
@@ -896,7 +907,7 @@ export function computeCellEvidence({ guard, receipts, agents, modelRoles = null
   const favours = evidenceFavours({ preview, guard, routed, table, modelRoles, mark: superscript(routes.footnotes.length + 1) });
   const records = recordsAgainstMain({ read: guard, preview, main: mainMetrics, closeoutPr, openPrs });
   return {
-    alerts: [records.alert, noRulingAlert(guard), readersAlert(guard, guardJson)].filter((a) => a !== null),
+    alerts: [records.alert, noRulingAlert(guard), readersAlert(guardJson)].filter((a) => a !== null),
     policy: policyRowsView({ sides: [routes, favours], objective }),
     guard: guardSection(guard, receipts, modelRoles, pulls, records.note),
     declared: declaredSection(agents, modelRoles),

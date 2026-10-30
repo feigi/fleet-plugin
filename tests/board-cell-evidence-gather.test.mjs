@@ -710,11 +710,29 @@ test("gather: the alert clears when main holds the guard's ids, and an open rece
   writeFileSync(join(open.stateDir, CLOSEOUT_RECEIPT), JSON.stringify({ reason: "x", branch: "b", pr: "https://github.com/feigi/fleet-plugin/pull/4021",
     steps: { "commit-and-pr": { status: "ok", at: "2026-10-26T19:18:00.000Z", output: "" } } }));
   const r = await quiet(() => gather(open.opts));
-  r.prs = [{ number: 4021, state: "OPEN", title: "chore: run artifacts", labels: [] }];
+  // The stub's `gh pr list` fails; this is the list an answering read would give.
+  Object.assign(r, { prsOk: true, prs: [{ number: 4021, state: "OPEN", title: "chore: run artifacts", labels: [] }] });
   assert.equal(computeBoard(r).cellEvidence.alerts[0].sentence, "the guard counts the rows of open PR #4021, not on main yet");
 });
 
-test("gather: an offline cockpit raises no alert and the guard heading says 'not checked'; an enterprise host's 404 reads 'main holds no metrics yet'", async (t) => {
+test("gather: a failed open-PR read leaves an open receipt PR not checked, never the alert's 'changed after' cause", async (t) => {
+  const w = workspace(t, { guard: { ...GUARD, tsv_blobs: TODAY_BLOBS } });
+  repoGh(w, { api: `echo '${MAIN_LISTING}'` });
+  writeFileSync(join(w.stateDir, CLOSEOUT_RECEIPT), JSON.stringify({ reason: "x", branch: "b", pr: "https://github.com/feigi/fleet-plugin/pull/4021",
+    steps: { "commit-and-pr": { status: "ok", at: "2026-10-26T19:18:00.000Z", output: "" } } }));
+  const r = await quiet(() => gather(w.opts));
+  assert.equal(r.prsOk, false, "this stub's `gh pr list` fails");
+  const board = computeBoard(r);
+  assert.deepEqual(board.cellEvidence.alerts, []);
+  assert.ok(board.cellEvidence.guard.notes.includes("records against main: not checked: the open PRs were not read, so whether the close-out's PR #4021 is open is unknown"),
+    JSON.stringify(board.cellEvidence.guard.notes));
+
+  // The same records with an open-PR read that answered and lists no PR #4021: the PR is not open.
+  const read = computeBoard({ ...r, prsOk: true, prs: [] });
+  assert.match(read.cellEvidence.alerts[0].sentence, /^main's records changed after 2026-10-26 19:17Z; the next phase 0 recomputes$/);
+});
+
+test("gather: an offline cockpit raises no alert and a note under the guard heading says 'not checked'; an enterprise host's 404 reads 'main holds no metrics yet'", async (t) => {
   const offline = workspace(t, { guard: { ...GUARD, tsv_blobs: TODAY_BLOBS } });
   repoGh(offline, { api: `echo "error connecting to api.github.com" >&2; exit 1` });
   const down = computeBoard(await quiet(() => gather(offline.opts)));

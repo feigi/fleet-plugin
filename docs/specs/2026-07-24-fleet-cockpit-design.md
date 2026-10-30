@@ -325,8 +325,8 @@ them update the shape below.)
   // again at most once a minute: `value` is `{ blobs }`, main's blob id by path,
   // `blobs` null for a 404 ("main holds no metrics yet"); `readAt` and `error` as
   // above. Null for a caller that named no state directory. A failed read raises
-  // no alert: the guard section's heading says "not checked", with why and when
-  // the read last succeeded.
+  // no alert: a note under the guard section's heading says "not checked", with
+  // why and when the read last succeeded.
   "mainMetrics": { "value": { "blobs": { "docs/metrics/tier-outcomes.tsv": "84123e74…" } }, "readAt": 1690000000000, "error": null },
 
   // Side-car telemetry, read from ~/.claude/projects, never from ledger or gh.

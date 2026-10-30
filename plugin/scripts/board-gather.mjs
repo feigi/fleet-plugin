@@ -104,9 +104,9 @@ async function tryRun(cmd, args) {
 // for the `gh ... list` reads, gather()'s `--prev` read demands
 // an object, and gather()'s ledger branch takes any shape ledger.mjs emits,
 // deliberately, for the reason stated there. A shape policy could not be written
-// in here anyway: `fallback` is `[]` where the open-PR read calls this and null where the
-// ledger read does, so the helper is never told what its caller wanted — only
-// that null is not it.
+// in here anyway: `fallback` says only what a caller takes for no answer, so
+// the helper is never told what shape its caller wanted — only that null is
+// not it.
 //
 // Reported, and never as "parse failed": the parse succeeded, and keeping the
 // state a read reached apart from the state it failed at is what the ledger states are for.
@@ -1206,8 +1206,7 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, stateDir 
   // but unable to describe itself reads as its number rather than literal
   // `undefined` on the operator's page.
   //
-  // Its null fallback, not the open-PR read's `[]` below, is deliberate:
-  // this read is the pool's ONLY source, and
+  // Its null fallback is deliberate: this read is the pool's ONLY source, and
   // compute-board.mjs's stall() needs to tell a genuinely empty pool from a
   // `gh` outage the same way it already tells an empty ledger from an unread
   // one — a `[]` fallback collapses both to the identical shape before a
@@ -1233,9 +1232,15 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, stateDir 
   // only consumer is `pr.state === "OPEN"` (compute-board.mjs), already false
   // for `undefined` exactly as it was for the old "UNKNOWN" sentinel, so the
   // default was inert — pure indirection with no behaviour to show for it.
-  const prsParsed = tryParse(prsJson, [], "gh pr list");
+  // A null fallback for the same reason as the pool read's: the Cell evidence
+  // tab must tell a failed read from no open PRs, or a close-out receipt's open
+  // PR reads as not open and the records-not-on-main alert states a cause it
+  // never checked (`prsOk`). Everything else here takes a failed read as no
+  // open PRs, as before.
+  const prsParsed = tryParse(prsJson, null, "gh pr list");
+  const prsOk = prsParsed !== null;
   const prsCapped = hitLimit(prsParsed, OPEN_PR_LIMIT);
-  const prs = withNumber(prsParsed, "gh pr list").map((p) => ({
+  const prs = withNumber(prsOk ? prsParsed : [], "gh pr list").map((p) => ({
     number: p.number,
     state: p.state,
     title: p.title,
@@ -1346,10 +1351,13 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, stateDir 
   const agents = readAgents(scriptDir);
   const install = readInstall(scriptDir);
   const objective = stateDir === null ? null : readObjective(stateDir);
-  const modelRoles = stateDir === null ? heldRead(prev?.modelRoles) : await carryModelRoles(prev?.modelRoles, now);
-  const mainMetrics = stateDir === null ? null : await carryMainMetrics(prev?.mainMetrics, now, repoUrl);
+  // Read side by side: each has its own 10 s timeout, and one after the other a
+  // tick on which both hang would stall twice as long.
+  const [modelRoles, mainMetrics] = stateDir === null
+    ? [heldRead(prev?.modelRoles), null]
+    : await Promise.all([carryModelRoles(prev?.modelRoles, now), carryMainMetrics(prev?.mainMetrics, now, repoUrl)]);
   return { ledger, issues, prs, merged, closed, closedIssues, ci, prev, repo, repoUrl, workspace, port, spend, beat, ticked, acted, controller, stallOwner: stallOwnerOf, poolOk,
     roles, labelMapError,
-    poolCapped, prsCapped, guard, guardJson, preview, receipts, closeoutPr, agents, modelRoles, mainMetrics, install, objective, implementers: [...implementers.values()], routerTable, checkoutTable,
+    poolCapped, prsOk, prsCapped, guard, guardJson, preview, receipts, closeoutPr, agents, modelRoles, mainMetrics, install, objective, implementers: [...implementers.values()], routerTable, checkoutTable,
     now, interval };
 }
