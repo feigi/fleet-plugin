@@ -663,3 +663,88 @@ test("gather: a caller that names no state directory reads no Objective", async 
   const r = await quiet(() => gather({ ...w.opts, stateDir: null }));
   assert.equal(r.objective, null);
 });
+
+// -- records not on main: the contents call, through the whole read --------------------------------
+
+// A `gh` that answers `repo view` with the workspace's repository and counts and answers its `api` calls.
+function repoGh(w, { api }) {
+  const calls = join(w.root, "gh-api-calls");
+  writeExecStub(join(w.root, "bin", "gh"), `#!/bin/sh
+case "$1" in
+  repo) echo '{"nameWithOwner":"feigi/fleet-plugin","url":"https://github.com/feigi/fleet-plugin"}' ;;
+  api) echo "$*" >> "${calls}"; ${api} ;;
+  *) exit 1 ;;
+esac
+`);
+  return () => (existsSync(calls) ? readFileSync(calls, "utf8").split("\n").filter(Boolean) : []);
+}
+const TODAY_BLOBS = { "docs/metrics/tier-outcomes.tsv": "9df10b12aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" };
+const MAIN_LISTING = JSON.stringify([{ path: "docs/metrics/tier-outcomes.tsv", sha: "84123e74bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", type: "file" }]);
+
+test("gather: on today's records the board carries the alert, its two blob ids and ⚠1's list; the contents call is read once a minute", async (t) => {
+  const w = workspace(t, { guard: { ...GUARD, tsv_blobs: TODAY_BLOBS } });
+  const calls = repoGh(w, { api: `echo '${MAIN_LISTING}'` });
+  const first = await quiet(() => gather(w.opts));
+  assert.deepEqual(calls(), ["api --hostname github.com repos/feigi/fleet-plugin/contents/docs/metrics"], "the repository's own host and name, never the {owner}/{repo} placeholder");
+  assert.equal(first.mainMetrics.error, null);
+  const board = computeBoard(first);
+  assert.deepEqual(board.mainMetrics, first.mainMetrics, "the carried read rides board.json");
+  assert.deepEqual(board.cellEvidence.alerts.map((a) => a.id), ["records-not-on-main"]);
+  assert.match(board.cellEvidence.alerts[0].sentence, /^main's records changed after 2026-10-26 19:17Z; the next phase 0 recomputes$/);
+  assert.deepEqual(board.cellEvidence.alerts[0].lines, ["docs/metrics/tier-outcomes.tsv: the guard read 9df10b12; main holds 84123e74"]);
+
+  // The next tick, carried from board.json, makes no second call inside the minute.
+  writeFileSync(w.opts.prevFile, JSON.stringify(board));
+  const second = await quiet(() => gather(w.opts));
+  assert.equal(calls().length, 1);
+  assert.deepEqual(second.mainMetrics, first.mainMetrics);
+});
+
+test("gather: the alert clears when main holds the guard's ids, and an open receipt PR changes its words", async (t) => {
+  const w = workspace(t, { guard: { ...GUARD, tsv_blobs: TODAY_BLOBS } });
+  repoGh(w, { api: `echo '${MAIN_LISTING.replace("84123e74bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", TODAY_BLOBS["docs/metrics/tier-outcomes.tsv"])}'` });
+  assert.deepEqual(computeBoard(await quiet(() => gather(w.opts))).cellEvidence.alerts, []);
+
+  const open = workspace(t, { guard: { ...GUARD, tsv_blobs: TODAY_BLOBS } });
+  repoGh(open, { api: `echo '${MAIN_LISTING}'` });
+  writeFileSync(join(open.stateDir, CLOSEOUT_RECEIPT), JSON.stringify({ reason: "x", branch: "b", pr: "https://github.com/feigi/fleet-plugin/pull/4021",
+    steps: { "commit-and-pr": { status: "ok", at: "2026-10-26T19:18:00.000Z", output: "" } } }));
+  const r = await quiet(() => gather(open.opts));
+  r.prs = [{ number: 4021, state: "OPEN", title: "chore: run artifacts", labels: [] }];
+  assert.equal(computeBoard(r).cellEvidence.alerts[0].sentence, "the guard counts the rows of open PR #4021, not on main yet");
+});
+
+test("gather: an offline cockpit raises no alert and the guard heading says 'not checked'; an enterprise host's 404 reads 'main holds no metrics yet'", async (t) => {
+  const offline = workspace(t, { guard: { ...GUARD, tsv_blobs: TODAY_BLOBS } });
+  repoGh(offline, { api: `echo "error connecting to api.github.com" >&2; exit 1` });
+  const down = computeBoard(await quiet(() => gather(offline.opts)));
+  assert.deepEqual(down.cellEvidence.alerts, []);
+  assert.match(down.cellEvidence.guard.notes.find((n) => /^records against main/.test(n)), /^records against main: not checked: gh api --hostname github\.com .* failed \(exit 1: error connecting to api\.github\.com\); last succeeded never$/);
+
+  const w = workspace(t, { guard: { ...GUARD, tsv_blobs: TODAY_BLOBS } });
+  repoGh(w, { api: `echo '{"message":"Not Found","status":"404"}'; echo "gh: Not Found (HTTP 404)" >&2; exit 1` });
+  const board = computeBoard(await quiet(() => gather(w.opts)));
+  assert.deepEqual(board.cellEvidence.alerts, []);
+  assert.ok(board.cellEvidence.guard.notes.includes("records against main: main holds no metrics yet"), JSON.stringify(board.cellEvidence.guard.notes));
+});
+
+test("gather: a workspace whose repository `gh` cannot name makes no contents call at all", async (t) => {
+  const w = workspace(t, { guard: { ...GUARD, tsv_blobs: TODAY_BLOBS } });
+  const calls = repoGh(w, { api: "exit 1" });
+  writeExecStub(join(w.root, "bin", "gh"), `#!/bin/sh\necho "$*" >> "${join(w.root, "gh-api-calls")}"\nexit 1\n`);
+  const board = computeBoard(await quiet(() => gather(w.opts)));
+  assert.ok(!calls().some((c) => c.startsWith("api")), calls().join("\n"));
+  assert.deepEqual(board.cellEvidence.alerts, []);
+  assert.ok(board.cellEvidence.guard.notes.some((n) => n.includes("this workspace's repository is not known")));
+});
+
+test("gather: a caller that names no state directory reads nothing of main's and says nothing about it", async (t) => {
+  const w = workspace(t);
+  const calls = repoGh(w, { api: `echo '${MAIN_LISTING}'` });
+  const r = await quiet(() => gather({ ...w.opts, stateDir: null }));
+  assert.equal(r.mainMetrics, null);
+  assert.equal(r.closeoutPr, null);
+  assert.deepEqual(r.checkoutTable, { status: "missing" });
+  assert.ok(!calls().some((c) => c.startsWith("api")));
+  assert.deepEqual(computeBoard(r).cellEvidence.alerts, []);
+});

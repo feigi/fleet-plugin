@@ -86,6 +86,8 @@
   #cells { padding:14px; flex:1 1 0; min-height:200px; overflow-y:auto; }
   .ce-links { color:var(--dim); margin-bottom:10px; font-size:12px; }
   .ce-links a { color:var(--blue); text-decoration:none; }
+  .ce-alert { border:1px solid var(--amber); border-radius:8px; padding:8px 12px; margin-bottom:12px; background:var(--panel); }
+  .ce-alert .ce-verdict { color:var(--amber); }
   .ce-sec { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-bottom:12px; }
   .ce-sec h2 { font-size:11px; letter-spacing:.06em; color:var(--dim); margin:0 0 6px; text-transform:uppercase; }
   .ce-verdict { font-weight:600; }
@@ -526,11 +528,28 @@ function cePolicy(p) {
   return sec;
 }
 
+// One alert at the top of the Cell evidence tab: its headline, its sentence and
+// any lines under them, such as the two blob ids. The words are the model's.
+function ceAlert(a) {
+  const box = ceBox("div", "ce-alert", "cells-alert-" + a.id);
+  box.append(el("div", "ce-verdict", "⚠ " + a.headline), el("div", "ce-note", a.sentence));
+  for (const line of a.lines || []) box.append(el("div", "ce-source", line));
+  return box;
+}
+
+// The tab's label, which carries `⚠n` while any alert holds, counted from the
+// same list the tab draws, so an alert shows from Board too.
+function cellsTabLabel(ce) {
+  const n = ce && Array.isArray(ce.alerts) ? ce.alerts.length : 0;
+  return n > 0 ? `Cell evidence ⚠${n}` : "Cell evidence";
+}
+
 // The Cell evidence tab. The model is `m.cellEvidence`; this only lays it out.
 // Every Cell and every generation the model names is drawn, so each hash link
 // the page draws has its target.
 function renderCells(ce) {
   const host = document.getElementById("cells");
+  document.getElementById("tab-cells").textContent = cellsTabLabel(ce);
   if (!ce) { host.replaceChildren(el("div", "spend-wrap", "no Cell evidence in this board yet")); return; }
   const g = ce.guard;
 
@@ -560,7 +579,7 @@ function renderCells(ce) {
     dec.append(row);
   }
 
-  host.replaceChildren(links, ...(ce.policy ? [cePolicy(ce.policy)] : []), sec, dec);
+  host.replaceChildren(links, ...(ce.alerts || []).map(ceAlert), ...(ce.policy ? [cePolicy(ce.policy)] : []), sec, dec);
 }
 
 function render(m) {

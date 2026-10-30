@@ -855,19 +855,26 @@ export function computeBoard(inputs) {
     }, now),
     attention,
     // The Cell evidence tab's model (compute-cell-evidence.mjs), built from the
-    // guard, the receipts' metrics steps, the definitions, the installed router
-    // table and package, the live run's Objective and the carried `modelRoles`
-    // read gather() answered, and this run's Pulls: each card's
+    // guard (through the tick's reader, and as parsed, for the readers alert),
+    // the receipts' metrics steps and the close-out's PR beside the open PRs, the
+    // definitions, the installed router table and package and the checkout's, the
+    // live run's Objective and the carried `modelRoles` and `docs/metrics` reads
+    // gather() answered, and this run's Pulls: each card's
     // Cell line, booked As-routed to its Cell. A caller that read none of them
     // (every hand-built input in this suite) gets the tab's no-guard state:
     // computeCellEvidence reads an input left out as nothing read.
     cellEvidence: computeCellEvidence({
       guard: inputs.guard,
+      guardJson: inputs.guardJson,
       preview: inputs.preview,
       receipts: inputs.receipts,
+      closeoutPr: inputs.closeoutPr,
+      openPrs: { numbers: (inputs.prs ?? []).map((p) => p.number), capped: inputs.prsCapped === true },
       agents: inputs.agents,
       modelRoles: inputs.modelRoles,
+      mainMetrics: inputs.mainMetrics,
       table: inputs.routerTable,
+      checkoutTable: inputs.checkoutTable,
       install: inputs.install,
       repoUrl: inputs.repoUrl,
       objective: inputs.objective,
@@ -876,5 +883,8 @@ export function computeBoard(inputs) {
     // The `omp config get modelRoles` read, carried tick to tick the way `ci`
     // and `repo` are: `{ value, readAt, error }`, read at most once a minute.
     modelRoles: inputs.modelRoles ?? null,
+    // The `docs/metrics` contents call, carried the same way: `{ value: { blobs },
+    // readAt, error }`, main's blob id by path, read at most once a minute.
+    mainMetrics: inputs.mainMetrics ?? null,
   };
 }

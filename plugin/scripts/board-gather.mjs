@@ -36,6 +36,7 @@ import { RECEIPT, RECEIPT_HELD, CLOSEOUT_RECEIPT, OBJECTIVES, isOmpSessionDirNam
 import { lastSegment } from "./pull-attribution.mjs";
 import { NAME, warnOnce, execRead } from "./board-common.mjs";
 import { mergedReadPrs, issuesOfPrs } from "./compute-board.mjs";
+import { repoIdentity } from "./compute-cell-evidence.mjs";
 import { readCostGuard } from "./fleet-tick.mjs";
 import { parseFrontmatter } from "./tier-roles.mjs";
 import { isImplementer } from "./member-outcomes.mjs";
@@ -819,6 +820,44 @@ export function readGuardFile(stateDir) {
   return readCostGuard(join(stateDir, "cost-guard.json"));
 }
 
+// The guard file as parsed, for the one alert that compares what the router's
+// reader and the tick's make of the same bytes (`parseGuard`, `costGuardFault`):
+// null when it is missing or will not parse, which both readers refuse alike.
+export function readGuardJson(stateDir) {
+  try { return JSON.parse(readFileSync(join(stateDir, "cost-guard.json"), "utf8")); } catch { return null; }
+}
+
+// The last close-out's metrics PR, off `.fleet/closeout.json`: `{ number, at }`,
+// `at` the time its `commit-and-pr` step finished (null when the step has none),
+// or null for no receipt, one that will not read or one with no PR. The receipt
+// keeps the PR as `gh pr create` printed it, its url.
+export function readCloseoutPr(stateDir) {
+  let receipt;
+  try { receipt = JSON.parse(readFileSync(join(stateDir, CLOSEOUT_RECEIPT), "utf8")); } catch { return null; }
+  if (!isJsonObject(receipt) || typeof receipt.pr !== "string") return null;
+  const number = /(?:\/pull\/|^#?)(\d+)\s*$/.exec(receipt.pr.trim())?.[1];
+  if (number === undefined) return null;
+  const at = isJsonObject(receipt.steps) && isJsonObject(receipt.steps["commit-and-pr"]) ? receipt.steps["commit-and-pr"].at : null;
+  return { number: Number(number), at: typeof at === "string" ? at : null };
+}
+
+// The checkout's own router table, `plugin/scripts/router-table.json` under the
+// workspace (the directory `stateDir` is in), as the installed one is read:
+// `{ status: "ok", table }`, `{ status: "missing" }` (no such file: a consumer's
+// checkout) or `{ status: "unreadable", why }`. Never warns: the installed
+// table's read does, and a consumer is not at fault for lacking this file.
+export function readCheckoutTable(stateDir) {
+  let text;
+  try {
+    text = readFileSync(join(dirname(stateDir), "plugin", "scripts", "router-table.json"), "utf8");
+  } catch (e) {
+    return e.code === "ENOENT" ? { status: "missing" } : { status: "unreadable", why: e.code ?? e.message };
+  }
+  let table;
+  try { table = validateTable(JSON.parse(text)); } catch { return { status: "unreadable", why: "not JSON" }; }
+  return table instanceof Error ? { status: "unreadable", why: table.message } : { status: "ok", table };
+}
+
 // The Preview fit metrics-refresh.mjs writes beside the guard,
 // `.fleet/router-preview.json`: `{ status: "ok", preview }`, `{ status: "missing" }`
 // or `{ status: "unreadable", why }`. Its `table` is read through `validateTable`,
@@ -915,6 +954,42 @@ export function readObjective(stateDir) {
   return read.state === "ok" && OBJECTIVES.includes(read.receipt.objective) ? read.receipt.objective : null;
 }
 
+// The `docs/metrics` contents call is read at most once in this many
+// milliseconds, as `modelRoles` is: it is one more child spawn and a network
+// round trip per read.
+export const MAIN_METRICS_EVERY_MS = 60_000;
+
+// A contents call that has not answered in this many milliseconds is killed and
+// reported as a failed read, for `MODEL_ROLES_TIMEOUT_MS`'s reason.
+export const MAIN_METRICS_TIMEOUT_MS = 10_000;
+
+// The blob id of each file main holds under `docs/metrics`:
+// `gh api --hostname <host> repos/<owner>/<name>/contents/docs/metrics`, with
+// `id` the workspace's `{ host, name }` (repoIdentity of `repoUrl`). Never the
+// `repos/{owner}/{repo}` placeholder: in a checkout whose remote is on a
+// GitHub Enterprise host `gh api` sends that to api.github.com, which answers
+// 404. `{ ok: true, value: { blobs } }`, `blobs` null when the host answers 404
+// (main holds no metrics yet), or `{ ok: false, why }`.
+export async function readMainMetrics(id, timeout = MAIN_METRICS_TIMEOUT_MS) {
+  const argv = ["api", "--hostname", id.host, `repos/${id.name}/contents/docs/metrics`];
+  const r = await execRead("gh", argv, { timeout });
+  if (r.error) {
+    const message = String(r.error.message ?? "");
+    if (/\(HTTP 404\)/.test(message)) return { ok: true, value: { blobs: null } };
+    const how = r.code ?? (r.signal ? `killed by ${r.signal}` : `exit ${r.status}`);
+    const said = message.split("\n").slice(1).find((l) => l.trim() !== "");
+    return { ok: false, why: `gh ${argv.join(" ")} failed (${how}${said ? `: ${said.trim()}` : ""})` };
+  }
+  let listing;
+  try { listing = JSON.parse(r.stdout); } catch { return { ok: false, why: `gh ${argv.join(" ")} printed non-JSON` }; }
+  if (!Array.isArray(listing)) return { ok: false, why: `gh ${argv.join(" ")} printed no directory listing` };
+  const blobs = {};
+  for (const f of listing) {
+    if (isJsonObject(f) && f.type === "file" && typeof f.path === "string" && typeof f.sha === "string") blobs[f.path] = f.sha;
+  }
+  return { ok: true, value: { blobs } };
+}
+
 // `modelRoles` is read at most once in this many milliseconds: it is one more
 // child spawn per read, and a role changes rarely.
 export const MODEL_ROLES_EVERY_MS = 60_000;
@@ -952,16 +1027,37 @@ function heldRead(c) {
   return okValue && okAt && okError ? { value: c.value, readAt: c.readAt, error: c.error } : null;
 }
 
-// The carried `modelRoles` read, read again only when its last attempt, a
-// success or a failure, is a minute old or more. A failed read keeps the value
+// A carried read, read again only when its last attempt, a success or a
+// failure, is `every` milliseconds old or more. A failed read keeps the value
 // carried, with the failure beside it: `readAt` stays the time the value was read.
-export async function carryModelRoles(carried, now, read = readModelRoles) {
-  const held = heldRead(carried) ?? { value: null, readAt: null, error: null };
+async function carry(held, now, read, every) {
   const lastTried = Math.max(held.readAt ?? -Infinity, held.error?.at ?? -Infinity);
   const age = now - lastTried;
-  if (age >= 0 && age < MODEL_ROLES_EVERY_MS) return held;
+  if (age >= 0 && age < every) return held;
   const r = await read();
   return r.ok ? { value: r.value, readAt: now, error: null } : { ...held, error: { at: now, message: r.why } };
+}
+
+const NO_READ = Object.freeze({ value: null, readAt: null, error: null });
+
+// The carried `modelRoles` read, read again only when its last attempt, a
+// success or a failure, is a minute old or more.
+export async function carryModelRoles(carried, now, read = readModelRoles) {
+  return carry(heldRead(carried) ?? NO_READ, now, read, MODEL_ROLES_EVERY_MS);
+}
+
+// The carried `docs/metrics` contents call, the same way: `value` is `{ blobs }`,
+// `blobs` null for a 404 and otherwise main's blob id by path. A workspace whose
+// repository the cockpit cannot name has nothing to ask `gh api` about, and says
+// so as a failed read, with no call.
+export async function carryMainMetrics(carried, now, repoUrl, read = readMainMetrics) {
+  let held = heldRead(carried);
+  const blobs = held?.value?.blobs;
+  if (held !== null && held.value !== null && !(blobs === null || (isJsonObject(blobs) && Object.values(blobs).every((s) => typeof s === "string")))) held = null;
+  held ??= NO_READ;
+  const id = repoIdentity(repoUrl);
+  if (id === null) return { ...held, error: { at: now, message: "this workspace's repository is not known" } };
+  return carry(held, now, () => read(id), MAIN_METRICS_EVERY_MS);
 }
 
 // `workspace`/`port` are the caller's answers, never read in here:
@@ -1240,7 +1336,10 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, stateDir 
   // no workspace, so it reads none of the workspace's records and spawns no `omp`
   // either (a guard that reads as missing, no receipts, the read carried as it was).
   const guard = stateDir === null ? { status: "missing" } : readGuardFile(stateDir);
+  const guardJson = stateDir === null ? null : readGuardJson(stateDir);
   const preview = stateDir === null ? { status: "missing" } : readPreviewFile(stateDir);
+  const closeoutPr = stateDir === null ? null : readCloseoutPr(stateDir);
+  const checkoutTable = stateDir === null ? { status: "missing" } : readCheckoutTable(stateDir);
   const receipts = stateDir === null
     ? { phase0: null, closeout: null }
     : { phase0: readMetricsStep(join(stateDir, RECEIPT)), closeout: readMetricsStep(join(stateDir, CLOSEOUT_RECEIPT)) };
@@ -1248,8 +1347,9 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, stateDir 
   const install = readInstall(scriptDir);
   const objective = stateDir === null ? null : readObjective(stateDir);
   const modelRoles = stateDir === null ? heldRead(prev?.modelRoles) : await carryModelRoles(prev?.modelRoles, now);
+  const mainMetrics = stateDir === null ? null : await carryMainMetrics(prev?.mainMetrics, now, repoUrl);
   return { ledger, issues, prs, merged, closed, closedIssues, ci, prev, repo, repoUrl, workspace, port, spend, beat, ticked, acted, controller, stallOwner: stallOwnerOf, poolOk,
     roles, labelMapError,
-    poolCapped, prsCapped, guard, preview, receipts, agents, modelRoles, install, objective, implementers: [...implementers.values()], routerTable,
+    poolCapped, prsCapped, guard, guardJson, preview, receipts, closeoutPr, agents, modelRoles, mainMetrics, install, objective, implementers: [...implementers.values()], routerTable, checkoutTable,
     now, interval };
 }
