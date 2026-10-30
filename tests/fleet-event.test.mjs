@@ -1915,12 +1915,13 @@ for (const [name, argv, setup] of [
   }],
 ]) {
   test(`${name} reads no Recipe, even with a broken cache`, () => {
-    const f = fixture({ rows: [argv[0] === "impl-report" ? "#412 impl-412" : FIX_ROW] });
+    const rows = [argv[0] === "impl-report" ? "#412 impl-412" : FIX_ROW];
+    const f = fixture({ rows });
     setup(f);
     refuseRecipe(f);
     const r = f.run(argv);
     assert.ok(!/derive-recipe|recipe-read|derive-testcmd/.test(r.stdout), r.stdout);
-    const g = fixture({ rows: [argv[0] === "impl-report" ? "#412 impl-412" : FIX_ROW] });
+    const g = fixture({ rows });
     setup(g);
     const s = g.run(argv, { env: brokenNode(g) });
     assert.ok(!/derive-recipe|recipe-read|derive-testcmd/.test(s.stdout), s.stdout);

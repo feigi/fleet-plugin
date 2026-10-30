@@ -649,6 +649,18 @@ test("recipe: a cache whose Check step does not resolve prints the refused read 
   assert.match(broken.stdout, /derive-testcmd\.sh \. check exit 3 — the cache's state is unknown, and deriving would not help\n\s+derive-testcmd: no node/);
 });
 
+test("recipe: a valid cache records each read's last line, in read order", () => {
+  const f = fixture();
+  f.control("derive-testcmd", { by: {
+    ". install": { out: "reading .fleet/recipe.json\nnpm ci\n" },
+    ". check": { out: "reading .fleet/recipe.json\nnpm run lint\n" },
+    ". test --at origin/main": { out: "reading .fleet/recipe.json\n./agent-test\n" },
+  } });
+  const r = f.run();
+  assert.equal(r.status, 0, r.stdout + r.err);
+  assert.equal(f.receipt().steps.recipe.output, "Recipe cache valid: npm ci ; npm run lint ; ./agent-test");
+});
+
 // The question payload `label-map.mjs ensure` prints on exit 3 (D6's shape),
 // pretty-printed here so the step's own compaction to one line is visible.
 const PAYLOAD = {

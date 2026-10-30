@@ -12,7 +12,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
@@ -219,6 +219,24 @@ test("a reports directory that cannot be created is a refusal before anything ru
   assert.equal(r.status, 4, r.stderr);
   assert.match(r.stderr, /recipe-check: could not create .*afile\/sub: ENOTDIR; nothing run, nothing written/);
   assert.deepEqual(f.ran(), []);
+});
+
+test("a record that cannot be written once the commands ran is a refusal the member cannot clear", () => {
+  const f = fixture();
+  f.stage();
+  // The reports directory exists, so nothing refuses before the run: only the
+  // record's write does.
+  chmodSync(f.reports, 0o555);
+  let r;
+  try {
+    r = f.record("impl-5");
+  } finally {
+    chmodSync(f.reports, 0o755);
+  }
+  assert.equal(r.status, 4, r.stderr);
+  assert.match(r.stderr, /recipe-check: could not write .*impl-5\.check\.json: EACCES\n/);
+  assert.deepEqual(f.ran(), ["check", "test"]);
+  assert.deepEqual(readdirSync(f.reports), [], "neither the record nor its temporary file is left");
 });
 
 test("an ambient GIT_DIR naming another repository does not change the tree the record names", () => {
@@ -627,7 +645,7 @@ test("a derive-testcmd.sh that does not answer is a refusal the member cannot cl
   assert.match(r.stderr, /recipe-check: derive-testcmd\.sh check did not answer \(exit 3\): .*; nothing run, nothing written/);
   assert.equal(existsSync(f.recordFile("impl-5")), false);
   assert.deepEqual(f.ran(), []);
-  assert.equal(f.record("impl-5").status, 0, "the same call with a usable temp directory is no refusal");
+  assert.equal(f.record("impl-5").status, 0, "the same call with a usable node on PATH is no refusal");
 });
 
 test("a run from a directory that is no repository is a refusal the member can clear", () => {

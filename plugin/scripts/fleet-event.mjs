@@ -575,11 +575,11 @@ function claimUpstream(ev, member) {
 // may have met: the one phase 0 makes (recipe-read.mjs), from the main
 // checkout. A cause local to the member's own worktree reads valid from here
 // and prints nothing. A refused read is `NEED derive-recipe`, which is phase
-// 0's mid-run trigger; a read that could not run is a NEED carrying the
-// environment fault, since the cache's state is unknown and deriving would not
-// help.
+// 0's mid-run trigger; a read that could not run, or outlived
+// CHILD_TIMEOUT_MS, is a NEED carrying the environment fault, since the
+// cache's state is unknown and deriving would not help.
 function recipeWake(ev, member) {
-  const { state, output } = readRecipe(process.cwd());
+  const { state, output } = readRecipe(process.cwd(), { timeoutMs: CHILD_TIMEOUT_MS });
   if (state === "refused") {
     ev.print(output);
     ev.need("derive-recipe");

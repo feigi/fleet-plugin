@@ -40,15 +40,16 @@ message names the cause — a working tree that is not the staged tree, git that
 did not answer, a usage error. Do what it says, then run `recipe-check.mjs`
 again; refused again → push nothing and end as for exit 4. Exit 4 is a refusal
 you cannot clear: no usable Recipe, a Recipe reader that did not answer, or a
-reports directory it cannot create. Never derive the Recipe, and never rebase,
-re-run or edit to get around it. One exception: when the refusal names a path
-your own staged change deletes, renames or changes the mode of
+reports directory it cannot create or write to. Never derive the Recipe, and
+never rebase, re-run or edit to get around it. One exception: when the refusal
+names a path your own staged change deletes, renames or changes the mode of
 (`git diff --cached --summary`), undo that change unless the ticket requires
 it, and run `recipe-check.mjs` once more. Otherwise — the change is required,
 or the re-run refuses again — push nothing and end as `blocked`: write the
-report with `outcome` `blocked`, `pr`, `head` and `bailCause` null, `bailDetail`
-`recipe-check.mjs`'s stderr verbatim, and leave the worktree as it stands. The
-ticket stays claimed, its label untouched, and waits for the maintainer.
+report with `outcome` `blocked`, `pr`, `head` and `bailCause` null,
+`bailDetail` `recipe-check.mjs`'s stderr verbatim, and leave the worktree as
+it stands. The ticket stays claimed, its label untouched, and waits for the
+maintainer.
 
 Your report is a file, `/abs/scratch-impl/reports/<your name>.json`, `<your name>` the
 `impl-4120[-x]` you were dispatched as, in the shape

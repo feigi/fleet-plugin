@@ -35,7 +35,7 @@ test("the rendered implementer brief ends exit 2 by clearing it once and exit 4 
   const p = endings(renderBrief("implementer"), "Exit 2 is a refusal you can clear:", "the implementer brief's recipe-check refusal paragraph");
   assert.match(p, Pin.phrase("Exit 2 is a refusal you can clear: it ran nothing and wrote nothing, and its message names the cause — a working tree that is not the staged tree, git that did not answer, a usage error."));
   assert.match(p, Pin.phrase("Do what it says, then run `recipe-check.mjs` again; refused again → push nothing and end as for exit 4."));
-  assert.match(p, Pin.phrase("Exit 4 is a refusal you cannot clear: no usable Recipe, a Recipe reader that did not answer, or a reports directory it cannot create."));
+  assert.match(p, Pin.phrase("Exit 4 is a refusal you cannot clear: no usable Recipe, a Recipe reader that did not answer, or a reports directory it cannot create or write to."));
   assert.match(p, Pin.phrase("Never derive the Recipe, and never rebase, re-run or edit to get around it."));
   assert.match(p, Pin.phrase("One exception: when the refusal names a path your own staged change deletes, renames or changes the mode of (`git diff --cached --summary`), undo that change unless the ticket requires it, and run `recipe-check.mjs` once more."));
   assert.match(p, Pin.phrase("Otherwise — the change is required, or the re-run refuses again — push nothing and end as `blocked`: write the report with `outcome` `blocked`, `pr`, `head` and `bailCause` null, `bailDetail` `recipe-check.mjs`'s stderr verbatim, and leave the worktree as it stands."));
@@ -44,20 +44,20 @@ test("the rendered implementer brief ends exit 2 by clearing it once and exit 4 
 
 for (const kind of CASES.filter((c) => c.role === "fix-applier").map((c) => c.kind)) {
   test(`the rendered fix-applier ${kind} brief ends exit 2 by clearing it once and exit 4 in a failed report, not the no-report ending`, () => {
-    const p = endings(renderBrief("fix-applier", kind), "A refusal that ran nothing is no red.", `the fix-applier ${kind} brief's recipe-check refusal paragraph`);
+    const p = endings(renderBrief("fix-applier", kind), "A refusal that recorded nothing is no red.", `the fix-applier ${kind} brief's recipe-check refusal paragraph`);
     assert.match(p, Pin.phrase("Exit 2 is one you can clear — a working tree that is not the staged tree, git that did not answer, a usage error:"));
     assert.match(p, Pin.phrase(CLEARABLE));
-    assert.match(p, Pin.phrase("Exit 4 is one you cannot clear — no usable Recipe, a Recipe reader that did not answer, a reports directory it cannot create:"));
+    assert.match(p, Pin.phrase("Exit 4 is one you cannot clear — no usable Recipe, a Recipe reader that did not answer, a reports directory it cannot create or write to:"));
     assert.match(p, Pin.phrase(NEVER_DERIVE));
     assert.match(p, Pin.phrase("When the refusal names a path your own staged change deletes, renames or changes the mode of (`git diff --cached --summary`), undo that change unless the PR requires it, and run `recipe-check.mjs` once more."));
     assert.match(p, Pin.phrase("Otherwise — the change is required, or the re-run refuses again — push nothing and write a `failed` report, a report and not the no-report ending: `head` the PR's head on origin, which you pushed nothing past, `applied` and `deferred` empty, `dispositionsRecord` and `testRun` null, the refusal verbatim in `confirmation`, and `filed` and `unrecorded` as for any outcome."));
   });
 }
 
-test("review-and-fix step 3 calls neither exit 2 nor exit 4 red: each is a refusal that ran nothing, and the brief says how it ends", () => {
+test("review-and-fix step 3 calls neither exit 2 nor exit 4 red: each is a refusal that records nothing, and the brief says how it ends", () => {
   const step = Pin.of(read("commands", "review-and-fix.md"), "review-and-fix.md")
     .between("**Under the fleet, run the two through `recipe-check.mjs`, not one by one:**", "4. **Under the fleet, do not hold this wait.**", "review-and-fix step 3's recipe-check paragraph").text;
-  assert.match(step, Pin.phrase("Exit 1 is red; exit 2 and 4 are refusals that ran nothing, and your brief says how each ends;"));
+  assert.match(step, Pin.phrase("Exit 1 is red; exit 2 and 4 are refusals that record nothing: your brief says how each ends;"));
   assert.doesNotMatch(step, /A non-zero exit is red/);
 });
 

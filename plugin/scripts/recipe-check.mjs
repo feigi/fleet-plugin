@@ -60,7 +60,8 @@
 //
 // A record is written whenever a command ran and failed, so a red run
 // replaces an older record rather than leaving it standing; it records the
-// failure, and settle refuses on it. A run that is killed is the exception: a
+// failure, and settle refuses on it. One that cannot be written is exit 4,
+// though the commands already ran. A run that is killed is the exception: a
 // SIGTERM, SIGINT or SIGHUP this script itself receives during step 3 or 4 is
 // forwarded to the running command, no further command starts, and nothing
 // is written, so an older record stays where it is — settle compares the
@@ -82,9 +83,11 @@
 // refusal the member can clear, which ran nothing and wrote nothing (usage,
 // including no `--reports` with a scratch root that cannot be resolved; git
 // could not be read; a working tree that is not the staged tree); 4 a refusal
-// the member cannot clear, which ran nothing and wrote nothing (no usable
-// Recipe, derive-testcmd.sh did not answer, a reports directory that could
-// not be created); 75 the Test entrypoint printed exit
+// the member cannot clear: no usable Recipe, derive-testcmd.sh did not
+// answer, or a reports directory that could not be created, each before
+// anything ran, so nothing was run or written — or a record that could not be
+// written once the commands had run, so the run recorded nothing; 75
+// the Test entrypoint printed exit
 // 75 — the suite wrapper found no slot and launched nothing, which is no test
 // result — so no record is written, and the same command is to be run again;
 // 143, 130 or 129 the script itself received a SIGTERM, a SIGINT or a
@@ -166,8 +169,9 @@ async function cli() {
   }
 
   // A refusal the member cannot clear — no usable Recipe, a Recipe reader that
-  // did not answer, a reports directory that cannot be created — exits 4, where
-  // `die` exits 2 for the ones it can. Same message shape, same write.
+  // did not answer, a reports directory that cannot be created, a record that
+  // cannot be written — exits 4, where `die` exits 2 for the ones it can. Same
+  // message shape, same write.
   const cannotClear = (msg) => {
     try {
       writeAll(2, `\n${NAME}: ${msg}\n`);
@@ -281,7 +285,7 @@ async function cli() {
     renameSync(tmp, path);
   } catch (e) {
     rmSync(tmp, { force: true });
-    die(`could not write ${path}: ${e.code ?? e.message}`);
+    cannotClear(`could not write ${path}: ${e.code ?? e.message}`);
   }
   run.decided = true;
 

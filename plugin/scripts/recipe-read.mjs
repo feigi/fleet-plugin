@@ -2,11 +2,13 @@
 // step and the settle wakes of fleet-event.mjs, so the two never read it
 // differently.
 //
-//   readRecipe(cwd) -> { state, output }
+//   readRecipe(cwd, { timeoutMs }) -> { state, output }
 //
 // `derive-testcmd.sh . install`, `. check` and `. test --at origin/main`, each
 // run from `cwd`, the main checkout — the one place the cache is read from —
-// and all three always run, so every refused read is named. `state` is:
+// and all three always run, so every refused read is named. `timeoutMs`, when
+// given, bounds each read; one that outlives it is killed and reads `broken`.
+// `state` is:
 //
 //   valid    all three exited 0; `output` is `Recipe cache valid:` and each
 //            read's last line.
@@ -31,7 +33,7 @@ const DERIVE = join(dirname(fileURLToPath(import.meta.url)), "derive-testcmd.sh"
 const MAX_BUFFER = 64 * 1024 * 1024;
 
 /** The reads, as arguments after the repository `.`. */
-export const RECIPE_READS = [["install"], ["check"], ["test", "--at", "origin/main"]];
+const RECIPE_READS = [["install"], ["check"], ["test", "--at", "origin/main"]];
 
 const trimmed = (s) => String(s ?? "").trim();
 const lines = (s) => trimmed(s).split("\n").filter((l) => l.trim() !== "");
@@ -48,9 +50,9 @@ function withText(head, stdout, stderr) {
   return text ? `${head}\n${text}` : head;
 }
 
-export function readRecipe(cwd) {
+export function readRecipe(cwd, { timeoutMs } = {}) {
   const reads = RECIPE_READS.map((a) => {
-    const r = spawnSync("sh", [DERIVE, ".", ...a], { cwd, encoding: "utf8", maxBuffer: MAX_BUFFER, env: gitEnv() });
+    const r = spawnSync("sh", [DERIVE, ".", ...a], { cwd, encoding: "utf8", maxBuffer: MAX_BUFFER, env: gitEnv(), timeout: timeoutMs });
     return { a, r, status: r.error ? null : r.status };
   });
   const broken = reads.filter(({ status }) => status !== 0 && status !== 1);
