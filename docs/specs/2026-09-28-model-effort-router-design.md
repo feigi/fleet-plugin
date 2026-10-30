@@ -402,9 +402,13 @@ reassigned.
 ruled PRs (53%), `closed_own_ticket=no` on 17/283; floor passes 122/283. At
 n=20 the failure-rate SE is ≈11 points, so the guard cannot separate a
 ≤10-point rise from noise — the spec records this rather than hiding it.
-Merged state is read from one `gh pr list --state all --limit 1000 --json
-number,state,mergedAt` per run (`tier-outcomes.tsv` has no `merged`
-column).
+Merged state is read per run from `gh pr list --state all --json
+number,state,mergedAt` over the PRs created in the window
+(`tier-outcomes.tsv` has no `merged` column). GitHub search returns at most
+1,000 results, so the window is read in `created:` date slices: one read
+while it is short of that cap, a full slice halved by day and read again,
+and a one-day slice still full, or any failed slice, is exit 2.
+*Amended (#4034): `created:` date slices replace the single capped list.*
 
 **Per-cell figures,** in the order `pr-cost.mjs` prints them (`TSV_COLUMNS`):
 `cell`, `generation` (the dispatch model; a cell's figures are over one
@@ -433,7 +437,7 @@ instead.
 for the full, amended rule (baseline, trip margin, retire condition). New
 `plugin/scripts/pr-cost.mjs` (CLI) computes it; `compute-spend.mjs` is a
 pure per-role library with no PR concept and stays untouched. Inputs: the
-three TSVs + the one `gh pr list`. Output: stdout TSV per cell (`--json`
+three TSVs + the `created:`-sliced `gh pr list` reads. Output: stdout TSV per cell (`--json`
 optional); `.fleet/cost-guard.json` (gitignored — `computed_at`,
 `window_start`, `baseline{cell,generation,n,mean_usd,fail_rate}`, `cells[]`,
 `tripped[]`, `verdict: ok|tripped|none`, `retire` (true when every
