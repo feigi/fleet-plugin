@@ -234,6 +234,10 @@ test("a tooling defect is reported, never fixed by the controller", () => {
   // fix look like tampering. It sits in the reference the pointer names.
   const why = INSTRUMENTS_MD.section("## Reporting a tooling defect", "references/instruments.md reporting").text;
   assert.match(why, Pin.phrase("every later gate refuses"));
+  // The prohibitions themselves: flipped to their opposite, the consequence
+  // above still reads true, so it alone cannot hold them.
+  assert.match(why, Pin.phrase("**Edit nothing.**"));
+  assert.match(why, Pin.phrase("Open no branch or worktree for it, and never re-pin."));
 });
 
 test("the path the prose tells the controller to run is a real executable", () => {
