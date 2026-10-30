@@ -773,7 +773,18 @@ tickets (§ 8, T5) create it, since this repo dogfoods its own plugin.
 repo-local skill.** The two usage-metrics duties — draining the pending TSV and
 refreshing the cost guard — stay in the plugin as
 `plugin/scripts/metrics-refresh.mjs`, which `/fleet-ctl:run-team` runs at
-phase 0 and at close-out. The repo-local skill keeps only this repository's
+phase 0 and at close-out. **Amended by #3896:** another duty follows the cost
+guard there, the Preview fit: `fitTable` run in-process over the working-tree
+TSVs the guard just read and the guard just written, with the installed
+`router-table.json` as prior and no commit, written to
+`.fleet/router-preview.json` (`computed_at`, `guard_computed_at`, `tsv_blobs`,
+`prior`: the installed table's `fitted_commit`, `stage`, `cells`, `classifier`
+and `window_start` with the install's `version`, and the `table`) through a
+temp file and a rename. It runs only when the guard duty wrote a guard, is
+never routed and never committed — the cockpit's Cell evidence tab lays it out
+as what the evidence favours — and never fails the run: an error prints
+`metrics-refresh: preview: failed — <why>` and leaves the old file and the
+exit status as they were. The repo-local skill keeps only this repository's
 self-maintenance and is run by a rule in `AGENTS.md`, not called by run-team.
 Its duties, all drawn from this spec:
 

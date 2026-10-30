@@ -867,6 +867,59 @@ test("a model name label is drawn where a candidate's judged generation differs 
   assert.ok(text.includes("judged on claude-sonnet-5-5; task-high runs anthropic/claude-sonnet-5-6 here"));
 });
 
+// -- the policy rows: what the evidence favours ----------------------------------------------------
+
+const fitReason = { cell: "task-high", reason: "sole-qualifier", cells: { "task-high": { verdict: "qualifies", range: [-3.1, -0.4] } }, pairs: [] };
+const previewFit = (o = {}) => ({
+  status: "ok",
+  preview: {
+    computed_at: "2026-10-26T19:17:40.000Z", guard_computed_at: "2026-10-26T19:17:33.000Z", tsv_blobs: { "docs/metrics/tier-outcomes.tsv": "18b6a980" },
+    prior: { fitted_commit: null, version: "3.104.0", stage: 1, cells: SHIPPED_TABLE.cells, classifier: SHIPPED_TABLE.classifier, window_start: null },
+    table: {
+      ...SHIPPED_TABLE, n_rows: 235, stage: 2, cells: ["slow-high", "task-high", "smol-high", "slow-medium", "task-max"], burn_in: true,
+      rows: { cost: { "*": "task-high" }, speed: { "*": "task-high" } },
+      reasons: { cost: { "*": fitReason }, speed: { "*": fitReason } },
+      estimates: { "*": { "task-high": { generation: "claude-sonnet-5-5", merged: 67 } } },
+      guard: { tripped: [], n: { "slow-high": 69, "task-high": 69, "smol-high": 32 } },
+    },
+    ...o,
+  },
+});
+const besideGuard = () => ({ ...ceGuard(), guard: { ...ceGuard().guard, tsv_blobs: { "docs/metrics/tier-outcomes.tsv": "18b6a980" } } });
+
+test("evidence favours is drawn beside routes now: its source, its burn-in heading, each row's Cell marked ≠ routes now, and the n footnote", () => {
+  const { document, render, model } = harness();
+  render(model({ cellEvidence: policyEvidence({ guard: besideGuard(), preview: previewFit() }) }));
+  const rows = document.getElementById("cells-rows");
+  const text = textOf(rows).replace(/\s+/g, " ");
+  for (const words of ["evidence favours", "Preview fit · this repository's runs · computed 2026-10-26 19:17Z · 235 Pulls",
+    "stage 2: slow-medium and task-max have 0 of the 20 merged PRs each needs", "task-high ≠ routes now", "task-high · n 67¹ · qualifies · 95% interval [−$3.10, −$0.40]"]) {
+    assert.ok(text.includes(words), `the rows do not draw ${JSON.stringify(words)}`);
+  }
+  const row = document.getElementById("cells-row-cost-*");
+  assert.equal(row.children.length, 3, "the Stratum, then routes now, then evidence favours");
+  assert.ok(textOf(row.children[1]).includes("slow-high"));
+  assert.ok(textOf(row.children[2]).includes("≠ routes now"));
+  assert.equal(textOf(row.children[1]).includes("≠"), false, "routes now carries no mark");
+  assert.equal(rows.children.at(-1).textContent, "¹ task-high: the guard counts merges by GitHub's state, the fit by Rulings, and the fit admits only drawn or rule-sized Pulls");
+});
+
+test("evidence favours' heading labels are drawn in its heading, and with no Preview fit its column is empty", () => {
+  const labelled = harness();
+  labelled.render(labelled.model({ cellEvidence: policyEvidence({ guard: besideGuard(), preview: previewFit({ guard_computed_at: "2026-10-25T08:00:00.000Z" }) }) }));
+  const side = labelled.document.getElementById("cells-rows").children.find((c) => c.className === "ce-sides").children[1];
+  assert.ok(textOf(side).includes("fitted beside the guard of 2026-10-25 08:00Z, not this one"), textOf(side));
+
+  const none = harness();
+  none.render(none.model({ cellEvidence: policyEvidence() }));
+  const rows = none.document.getElementById("cells-rows");
+  assert.ok(textOf(rows).includes("no Preview fit yet: the next phase 0 writes one"));
+  const row = none.document.getElementById("cells-row-cost-*");
+  assert.equal(row.children.length, 3);
+  assert.deepEqual(row.children[2].children, [], "nothing is unknown there: the column is empty");
+  assert.equal(textOf(none.document.getElementById("cells-row-cost-light")).trim(), "light: no row, follows *");
+});
+
 test("a board.json from before the policy rows draws the tab without them, and no link to them", () => {
   const { document, render, model } = harness();
   const { policy, ...old } = policyEvidence();

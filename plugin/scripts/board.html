@@ -455,25 +455,29 @@ function ceEntry(e) {
 }
 
 // One side's heading on the policy rows: its title, source line, the check it
-// could not make, its burn-in or no-guard heading, its shared dispatch and its
-// model-name line, where each is set.
+// could not make, its burn-in or no-guard heading, its trust labels, its shared
+// dispatch and its model-name line, where each is set.
 function cePolicySide(s) {
   const box = el("div", "ce-side");
   box.append(el("div", "ce-verdict", s.title), el("div", "ce-source", s.source.text));
   if (s.source.check) box.append(el("div", "ce-note", s.source.check));
   if (s.heading) box.append(el("div", "ce-note", s.heading));
+  for (const label of s.labels || []) box.append(el("div", "ce-note ce-amber", label));
   if (s.dispatch) box.append(el("div", "ce-note", "dispatch: " + s.dispatch));
   if (s.modelLine) box.append(el("div", "ce-note ce-amber", s.modelLine));
   return box;
 }
 
-// One side's cell of a row: the Cell it routes to and why, its own dispatch where
-// it differs from the side's, and each candidate's n, verdict and interval.
+// One side's cell of a row: the Cell it routes to and why, where it differs
+// from routes now, its own dispatch where it differs from the side's, and each
+// candidate's n, verdict and interval. A side with nothing to show leaves it empty.
 function cePolicyCell(s, href) {
   const box = el("div", "ce-polcell");
+  if (s.empty) return box;
   if (s.unread || s.follows) { box.append(el("span", "ce-dim", s.unread || s.follows)); return box; }
   const hd = el("div", "ce-hd");
   hd.append(el("span", "ce-cell", s.cell));
+  if (s.differs) hd.append(el("span", "ce-amber", s.differs));
   const reason = el("a", "ce-dim", s.reason);
   reason.href = href;
   hd.append(reason);
@@ -481,7 +485,7 @@ function cePolicyCell(s, href) {
   box.append(hd);
   if (s.dispatch) box.append(el("div", "ce-note", "dispatch: " + s.dispatch));
   for (const c of s.candidates) {
-    const line = el("div", "ce-cand", `${c.cell} · n ${c.n ?? "not checked"} · ${c.verdict} · ${c.interval}`);
+    const line = el("div", "ce-cand", `${c.cell} · n ${c.n ?? "not checked"}${c.nMark || ""} · ${c.verdict} · ${c.interval}`);
     if (c.model && c.model.text) line.append(el("span", "ce-amber", " · " + c.model.text));
     box.append(line);
   }

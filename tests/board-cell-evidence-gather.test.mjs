@@ -6,15 +6,19 @@ import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import {
   MODEL_ROLES_EVERY_MS, MODEL_ROLES_TIMEOUT_MS, carryModelRoles, gather, readAgents, readGuardFile, readMetricsStep, readModelRoles,
-  readHeldImplementers, readInstall, readObjective, readRouterTable, receiptSpendDir,
+  readHeldImplementers, readInstall, readObjective, readPreviewFile, readRouterTable, receiptSpendDir,
 } from "../plugin/scripts/board-gather.mjs";
+import { writePreview } from "../plugin/scripts/metrics-refresh.mjs";
+import { FEATURE_COLUMNS } from "../plugin/scripts/pull-attribution.mjs";
+import { COLUMNS as MEMBER_COLUMNS } from "../plugin/scripts/member-outcomes.mjs";
+import { COLUMNS as TIER_COLUMNS } from "../plugin/scripts/tier-outcomes.mjs";
 import { CLOSEOUT_RECEIPT, RECEIPT, RECEIPT_HELD, formatRouting } from "../plugin/scripts/ledger-grammar.mjs";
 import { computeBoard } from "../plugin/scripts/compute-board.mjs";
 import { identityRoles, seededRepo } from "./support/label-map-seed.mjs";
 
 // What gather() reads for the Cell evidence tab: the guard through the tick's
-// reader, the receipts' `metrics` steps, the installed definitions and `modelRoles`,
-// which is read at most once a minute and carried in board.json.
+// reader, the Preview fit beside it, the receipts' `metrics` steps, the installed
+// definitions and `modelRoles`, which is read at most once a minute and carried in board.json.
 
 const ROLES = { slow: "anthropic/claude-opus-5:high", task: "anthropic/claude-sonnet-5-5:high", smol: "anthropic/claude-haiku-5-5:auto" };
 
@@ -180,6 +184,36 @@ test("readAgents: every definition's own `model:`, and a directory that cannot b
   assert.deepEqual(readAgents(scripts), { list: [{ file: "fleet-a.agent.md", model: '"@task:high"' }, { file: "fleet-b.agent.md", model: null }].sort(() => 0), error: null });
 });
 
+// What metrics-refresh.mjs writes, from an empty corpus beside a guard: the producer's own file.
+function writtenPreview(dir) {
+  mkdirSync(join(dir, "docs", "metrics"), { recursive: true });
+  mkdirSync(join(dir, ".fleet"), { recursive: true });
+  writeFileSync(join(dir, "docs", "metrics", "ticket-features.tsv"), `${FEATURE_COLUMNS.join("\t")}\n`);
+  writeFileSync(join(dir, "docs", "metrics", "member-outcomes.tsv"), `# ${MEMBER_COLUMNS.join("\t")}\n`);
+  writeFileSync(join(dir, "docs", "metrics", "tier-outcomes.tsv"), `# ${TIER_COLUMNS.join("\t")}\n`);
+  return writePreview(dir, { computed_at: "2026-10-28T07:59:00.000Z", window_start: "2026-10-03", cells: [], tripped: [] }, { now: new Date("2026-10-28T08:00:30.000Z") });
+}
+
+test("readPreviewFile: reads what metrics-refresh writes; a missing file is missing; one it cannot use says why", () => {
+  const dir = tempDir("cell-evidence-preview-");
+  const stateDir = join(dir, ".fleet");
+  assert.deepEqual(readPreviewFile(stateDir), { status: "missing" });
+  const written = writtenPreview(dir);
+  assert.deepEqual(readPreviewFile(stateDir), { status: "ok", preview: written });
+  const path = join(stateDir, "router-preview.json");
+  for (const [text, why] of [
+    ["{ nope", "not JSON"],
+    ["[]", "not a JSON object"],
+    [JSON.stringify({ ...written, guard_computed_at: null }), "`guard_computed_at` is not a string"],
+    [JSON.stringify({ ...written, tsv_blobs: [] }), "`tsv_blobs` is not an object"],
+    [JSON.stringify({ ...written, prior: null }), "`prior` is not an object"],
+    [JSON.stringify({ ...written, table: { ...written.table, stage: 0 } }), "router table: `stage` is not a positive integer"],
+  ]) {
+    writeFileSync(path, text);
+    assert.deepEqual(readPreviewFile(stateDir), { status: "unreadable", why }, text);
+  }
+});
+
 // -- gather(): the whole read, and the board it makes --------------------------------------------
 
 // A cockpit workspace in a temp repository seeded with the identity Label map:
@@ -227,6 +261,22 @@ test("gather: reads the guard, the receipts, the definitions and modelRoles, and
   assert.equal(board.cellEvidence.guard.cells[0].route.text, "Tier route: anthropic/claude-opus-5 · high");
   assert.equal(board.cellEvidence.declared.heading, "Declared, not measured: 1 other member");
   JSON.stringify(board);
+});
+
+test("gather: reads the Preview fit in the state directory every tick, and the board lays it out as what the evidence favours", async (t) => {
+  const w = workspace(t);
+  const before = await quiet(() => gather(w.opts));
+  assert.deepEqual(before.preview, { status: "missing" });
+  assert.equal(computeBoard(before).cellEvidence.policy.sides[1].heading, "no Preview fit yet: the next phase 0 writes one");
+  writtenPreview(w.root);
+  const r = await quiet(() => gather(w.opts));
+  assert.equal(r.preview.status, "ok");
+  const s = computeBoard(r).cellEvidence.policy.sides[1];
+  assert.equal(s.title, "evidence favours");
+  assert.equal(s.source.text, "Preview fit · this repository's runs · computed 2026-10-28 08:00Z · 0 Pulls");
+  assert.equal(s.heading, "stage 1: slow-high, task-high and smol-high have 0 of the 20 merged PRs each needs");
+  const { stateDir, ...rest } = w.opts;
+  assert.deepEqual((await quiet(() => gather(rest))).preview, { status: "missing" }, "no state directory, no workspace's records read");
 });
 
 test("gather: modelRoles is read once, then carried tick to tick through board.json, not read again within the minute", async (t) => {

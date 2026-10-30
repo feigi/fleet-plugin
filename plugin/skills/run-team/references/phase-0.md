@@ -235,6 +235,10 @@ and the guard the script also widens a `docs/metrics/member-outcomes.tsv`
 written before the newest columns: each row gains them, `ending` reads
 `unknown` on an implementer's row, and nothing else changes. Without that,
 phase 0, the close-out scrape and `tier-outcomes.mjs append` refuse the file.
+After a guard it wrote, the script writes the Preview fit,
+`.fleet/router-preview.json`, which only the cockpit reads: nothing routes by
+it and nothing commits it, and a `metrics-refresh: preview: failed — <why>`
+line leaves the exit at 0, so it never stops the run.
 
 ## Launch the cockpit
 

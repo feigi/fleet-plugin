@@ -819,6 +819,32 @@ export function readGuardFile(stateDir) {
   return readCostGuard(join(stateDir, "cost-guard.json"));
 }
 
+// The Preview fit metrics-refresh.mjs writes beside the guard,
+// `.fleet/router-preview.json`: `{ status: "ok", preview }`, `{ status: "missing" }`
+// or `{ status: "unreadable", why }`. Its `table` is read through `validateTable`,
+// as the installed one is; the fields the tab compares it by must be there, each
+// of the type the file writes it as.
+export function readPreviewFile(stateDir) {
+  let text;
+  try {
+    text = readFileSync(join(stateDir, "router-preview.json"), "utf8");
+  } catch (e) {
+    return e.code === "ENOENT" ? { status: "missing" } : { status: "unreadable", why: e.code ?? e.message };
+  }
+  let p;
+  try { p = JSON.parse(text); } catch { return { status: "unreadable", why: "not JSON" }; }
+  if (!isJsonObject(p)) return { status: "unreadable", why: "not a JSON object" };
+  for (const key of ["computed_at", "guard_computed_at"]) {
+    if (typeof p[key] !== "string") return { status: "unreadable", why: `\`${key}\` is not a string` };
+  }
+  for (const key of ["tsv_blobs", "prior"]) {
+    if (!isJsonObject(p[key])) return { status: "unreadable", why: `\`${key}\` is not an object` };
+  }
+  const table = validateTable(p.table);
+  if (table instanceof Error) return { status: "unreadable", why: table.message };
+  return { status: "ok", preview: { computed_at: p.computed_at, guard_computed_at: p.guard_computed_at, tsv_blobs: p.tsv_blobs, prior: p.prior, table } };
+}
+
 // A receipt's `metrics` step, `{ status, at, output }`, or null: no receipt, one
 // that will not read, or one with no such step. Both receipts, `phase0.json` and
 // `closeout.json`, carry `steps: { <name>: { status, at, output } }` and nothing
@@ -1211,6 +1237,7 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, stateDir 
   // no workspace, so it reads none of the workspace's records and spawns no `omp`
   // either (a guard that reads as missing, no receipts, the read carried as it was).
   const guard = stateDir === null ? { status: "missing" } : readGuardFile(stateDir);
+  const preview = stateDir === null ? { status: "missing" } : readPreviewFile(stateDir);
   const receipts = stateDir === null
     ? { phase0: null, closeout: null }
     : { phase0: readMetricsStep(join(stateDir, RECEIPT)), closeout: readMetricsStep(join(stateDir, CLOSEOUT_RECEIPT)) };
@@ -1220,6 +1247,6 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, stateDir 
   const modelRoles = stateDir === null ? heldRead(prev?.modelRoles) : await carryModelRoles(prev?.modelRoles, now);
   return { ledger, issues, prs, merged, closed, closedIssues, ci, prev, repo, repoUrl, workspace, port, spend, beat, ticked, acted, controller, stallOwner: stallOwnerOf, poolOk,
     roles, labelMapError,
-    poolCapped, prsCapped, guard, receipts, agents, modelRoles, install, objective, implementers: [...implementers.values()], routerTable,
+    poolCapped, prsCapped, guard, preview, receipts, agents, modelRoles, install, objective, implementers: [...implementers.values()], routerTable,
     now, interval };
 }

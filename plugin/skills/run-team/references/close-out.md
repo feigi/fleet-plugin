@@ -109,7 +109,10 @@ committed; that file is a run artifact too and is committed with the other
 two. It then widens a `docs/metrics/member-outcomes.tsv` written before the
 newest columns, as at phase 0 — a file already at the current width is left
 as it is — and then runs `pr-cost.mjs --guard`, which rewrites
-`.fleet/cost-guard.json` from all three files. Exit 0: every duty ran. The guard's
+`.fleet/cost-guard.json` from all three files. After a guard it wrote it writes
+the Preview fit, `.fleet/router-preview.json`, for the cockpit alone: it is not
+a metrics file and is never committed, and its `preview: failed — <why>` line
+leaves the exit as it was. Exit 0: every duty ran. The guard's
 own exit 3 (a cell tripped) and 4 (no verdict yet, baseline too thin) are
 verdicts the router and `fleet-tick.mjs` read, never failures; the script
 absorbs them. Exit 1 names the duty that failed on stderr and the duties after it
