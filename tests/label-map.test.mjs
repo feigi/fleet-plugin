@@ -177,6 +177,10 @@ const unreadableRefusal = (code) => new RegExp(
   + "or remove what is in the way, then run `label-map\\.mjs ensure`, the Label map derivation step",
 );
 
+// `ensure`'s and `set`'s refusal of that cache: the reader's own message, then
+// `nothing written`.
+const unreadableDerivation = (code) => new RegExp(`${unreadableRefusal(code).source}; nothing written\\n`);
+
 for (const [name, code, leave] of UNREADABLE) {
   test(`the reader throws LabelMapUnreadable for ${name}, naming ${code} as a filesystem fault, its repair, then ensure`, (t) => {
     if (code === "EACCES" && process.getuid?.() === 0) return t.skip("root reads every file");
@@ -873,7 +877,7 @@ test("ensure: a cache that exists and cannot be read is exit 2 and never written
   }
   assert.equal(r.status, 2, r.stdout + r.stderr);
   assert.equal(r.stdout, "");
-  assert.match(r.stderr, /cannot read the Label map at .*labels\.json \(EACCES\); nothing written/);
+  assert.match(r.stderr, unreadableDerivation("EACCES"));
   assert.equal(readFileSync(file, "utf8"), before);
 });
 
@@ -1330,9 +1334,31 @@ test("set: gh failing, no repository or an unreadable cache is exit 2, nothing w
     chmodSync(file, 0o600);
   }
   assert.equal(unreadable.status, 2, unreadable.stdout + unreadable.stderr);
-  assert.match(unreadable.stderr, /cannot read the Label map at .*labels\.json \(EACCES\); nothing written/);
+  assert.match(unreadable.stderr, unreadableDerivation("EACCES"));
   assert.equal(readFileSync(file, "utf8"), bytes);
 });
+
+// `ensure` and `set` refuse every cache that exists and cannot be read with
+// the reader's own refusal — the resolved path, the errno, the filesystem
+// fault and its repair — then `nothing written`, before any label is created.
+for (const [name, code, leave] of UNREADABLE) {
+  for (const verb of ["ensure", "set"]) {
+    test(`${verb} refuses ${name}: exit 2, naming the cache path, ${code} as a filesystem fault and its repair; nothing written`, (t) => {
+      if (code === "EACCES" && process.getuid?.() === 0) return t.skip("root reads every file");
+      const ws = repo();
+      leave(ws);
+      const g = setRig([...LABEL_ROLES]);
+      const r = verb === "ensure" ? ensureRun(ws, g) : setRun(ws, g, "--accept-suggestions", "--create");
+      assert.equal(r.status, 2, r.stdout + r.stderr);
+      assert.equal(r.stdout, "");
+      assert.match(r.stderr, unreadableDerivation(code));
+      assert.ok(r.stderr.includes(join(ws, ".fleet", LABEL_MAP_FILE)), r.stderr);
+      assert.doesNotMatch(r.stderr, /undefined/);
+      assert.deepEqual(g.calls(), [LIST]);
+      if (code === "EISDIR") assert.deepEqual(readdirSync(join(ws, ".fleet", LABEL_MAP_FILE)), []);
+    });
+  }
+}
 
 test("set: a pair naming the string another role's cached answer holds drops that answer, and the role is asked again like a table row claiming it", () => {
   const ws = repo();
