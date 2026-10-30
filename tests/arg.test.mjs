@@ -7,6 +7,7 @@ import { tempDir } from "./support/temp-dir.mjs";
 import { join } from "node:path";
 import { stripComments } from "./support/strip-comments.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { seededRepo } from "./support/label-map-seed.mjs";
 
 const ARG_MODULE = fileURLToPath(new URL("../plugin/scripts/arg.mjs", import.meta.url));
 
@@ -692,8 +693,8 @@ test("writeAll() delivers the full payload across more confirmed EAGAIN stalls t
 // rather than refusing, so it has no exit 2 to invert in the first place.
 // fleet-tick is here because it does forward and does refuse (fleet-tick.mjs's
 // `openPrs`) — measured at 65,613 B forwarded and exit 2 — and since #1803 it
-// reaches gh with no argv at all,
-// the gh read being the first thing it does that can refuse.
+// reaches gh with no argv at all, the gh read being the first thing it does
+// that can refuse once its Label map has been read.
 // A consumer added later belongs here deliberately.
 const GH_FLOOD = [
   { script: "ci-state", argv: ["--pr", "42"] },
@@ -706,7 +707,9 @@ const GH_FLOOD = [
 // under test takes its execFileSync catch. The payload is a file the stub
 // `cat`s rather than shell-generated, to keep the byte count exact.
 function runWithFloodingGh(script, argv, bytes) {
-  const dir = tempDir("arg-die-flood-");
+  // The tick reads the Label map before any gh call, so it runs in a repo that
+  // has one; the other scripts need no workspace.
+  const dir = script === "fleet-tick" ? seededRepo("arg-die-flood-") : tempDir("arg-die-flood-");
   writeFileSync(join(dir, "flood"), "z".repeat(bytes));
   writeExecStub(join(dir, "gh"), `#!/bin/sh\ncat "${join(dir, "flood")}" >&2\nexit 1\n`);
   return spawnSync(

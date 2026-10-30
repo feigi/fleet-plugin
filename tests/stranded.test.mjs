@@ -79,7 +79,7 @@ const commitIn = (f, name) => git(wt(f, name), "-c", "user.name=t", "-c", "user.
 // A main checkout with one commit, a worktree per claim it names under
 // `.worktrees/`, and the heartbeat file holding `controller` (omitted when
 // null, the raw `heartbeat` text when given).
-function fixture(t, { controller = null, heartbeat, worktrees = [] } = {}) {
+function fixture(t, { controller = null, heartbeat, worktrees = [], labelMap } = {}) {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "stranded-")));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const repo = join(dir, "repo");
@@ -93,8 +93,9 @@ function fixture(t, { controller = null, heartbeat, worktrees = [] } = {}) {
   git(repo, "push", "-q", "origin", "main");
   for (const name of worktrees) git(repo, "worktree", "add", "-q", "-b", `implementer/${name}`, join(repo, ".worktrees", name));
   mkdirSync(join(repo, ".fleet"), { recursive: true });
-  // release-ticket.sh reads the in-progress string from the Label map.
-  seedLabelMap(repo);
+  // stranded.mjs and release-ticket.sh read the in-progress string from the
+  // Label map: the identity map unless the case remaps it, none for `null`.
+  if (labelMap !== null) seedLabelMap(repo, labelMap);
   const beatFile = join(repo, ".fleet", "heartbeat.json");
   if (heartbeat !== undefined) writeFileSync(beatFile, heartbeat);
   else if (controller !== null) writeFileSync(beatFile, JSON.stringify({ quiet: 0, digest: "", controller }));
@@ -579,6 +580,42 @@ test("a claim whose issue still carries in-progress is not listed here, whicheve
   const r = f.run({ views: { 12: view(12, { labels: ["ready-for-agent", "in-progress"] }) } });
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.out.claims, []);
+});
+
+test("the in-progress role's mapped string is what the list asks for and what a claim's labels are compared against", (t) => {
+  const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12", "13-impl-13"], labelMap: { roles: { "in-progress": "wip" } } });
+  commitIn(f, "12-impl-12");
+  commitIn(f, "13-impl-13");
+  // #12 holds the mapped string; #13 holds only the role's own name, which is
+  // not this repository's claim label, so it is an unlabelled claim.
+  const r = f.run({ views: { 12: view(12, { labels: ["wip"] }), 13: view(13, { labels: ["in-progress"] }) } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.gh[0], /^issue list --label wip --state open /);
+  assert.ok(r.gh.every((l) => !/--label in-progress/.test(l)), r.gh.join("\n"));
+  assert.deepEqual(r.out.claims.map((c) => c.n), [13]);
+  assert.equal(r.out.claims[0].action, "report");
+});
+
+test("the identity map asks the list for in-progress", (t) => {
+  const f = fixture(t, { controller: RECORD("dead") });
+  const r = f.run({});
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.gh[0], /^issue list --label in-progress --state open /);
+});
+
+test("no valid Label map → exit 2 with the reader's message naming ensure, nothing listed and nothing asked of gh", (t) => {
+  const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12"], labelMap: null });
+  const r = f.run({ issues: [issue(12)] });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /label-map\.mjs ensure/);
+  assert.equal(r.stdout, "");
+  assert.deepEqual(r.gh, []);
+  // An ancestor lists no claim from the in-progress list, but a map-less run
+  // is as unanswered: it is not read as "nothing stranded".
+  const ancestor = fixture(t, { controller: RECORD("ancestor"), labelMap: null });
+  const a = ancestor.run({});
+  assert.equal(a.status, 2, a.stderr);
+  assert.match(a.stderr, /label-map\.mjs ensure/);
 });
 
 test("what is not an open, unlabelled implementer claim is never listed: a closed issue, and names that are not claim-ticket.sh's shape", (t) => {

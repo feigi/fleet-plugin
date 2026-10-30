@@ -437,7 +437,7 @@ const HEAD_FIXED = "def5678";
 const PR = (head) => [{ number: 724, labels: [], closingIssuesReferences: [{ number: 658 }], headRefOid: `${head}${"0".repeat(33)}`, mergeable: "MERGEABLE", owned: true }];
 const tick = (read, head = HEAD_FIXED) => {
   const l = read();
-  return deriveRun({ rows: l.rows, dispatched: l.dispatched, drain: null }, PR(head));
+  return deriveRun({ rows: l.rows, dispatched: l.dispatched, drain: null }, PR(head), "ready-to-merge");
 };
 
 // dispatch → settle impl → review launch → review result with survivors →

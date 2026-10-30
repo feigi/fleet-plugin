@@ -1053,10 +1053,10 @@ const withSeverity = (f, severity) => f.writeReview({ ...f.review, survived: [{ 
 // The same review row with no fix-applier landed on it is fix-due: the control
 // that shows fixDueFor can see a PR become fix-due at all.
 const dueUntilFixed = (f) => deriveRun({ rows: [`#10 impl-10=PR#40 → PR#40 · reviewed=${f.head}:2/1/1:${f.run}`], dispatched: [], drain: null },
-  [{ number: 40, labels: [], closingIssuesReferences: [{ number: 10 }] }]).fixDue;
+  [{ number: 40, labels: [], closingIssuesReferences: [{ number: 10 }] }], "ready-to-merge").fixDue;
 const fixDueFor = (f) => {
   const l = f.okLedger("read");
-  return deriveRun({ rows: l.rows, dispatched: l.dispatched, drain: null }, [{ number: 40, labels: [], closingIssuesReferences: [{ number: 10 }] }]).fixDue;
+  return deriveRun({ rows: l.rows, dispatched: l.dispatched, drain: null }, [{ number: 40, labels: [], closingIssuesReferences: [{ number: 10 }] }], "ready-to-merge").fixDue;
 };
 
 test("a suggestion deferred remedy-outside-diff, its remedy in a file the diff lacks, passes as ok and lets the finisher dispatch", (t) => {

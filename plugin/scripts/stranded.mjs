@@ -67,8 +67,13 @@
 // so each is one rotate carried.
 // Exit 0 answered; 2 a list that did not answer — a gh or git failure, a
 // list at its cap, which may hold more than it showed, a worktree path
-// whose presence cannot be told, or a ledger that cannot be read. Never read
-// 2 as nothing stranded.
+// whose presence cannot be told, or a ledger that cannot be read — and no
+// valid Label map (the reader's message names label-map.mjs `ensure`). Never
+// read 2 as nothing stranded.
+//
+// `in-progress` above is a Label role (label-map.mjs): the Label map's string
+// for it is the one the issue list is filtered by and the one a claim's
+// labels are compared against. The map is read once, at the start of main().
 
 import { spawnSync } from "node:child_process";
 import { realpathSync, statSync } from "node:fs";
@@ -77,12 +82,13 @@ import { fileURLToPath } from "node:url";
 import { makeDie, writeAll } from "./arg.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
+import { LABEL_MAP_FILE, LabelMapUnreadable, readLabelMap } from "./label-map.mjs";
 import { readState, stateFileIn } from "./fleet-state.mjs";
 import { liveOnLedger } from "./ledger-grammar.mjs";
 
 const NAME = "stranded";
 const die = makeDie(NAME);
-const LABEL = "in-progress";
+const ROLE = "in-progress";
 const LIMIT = 1000;
 const GH_TIMEOUT_MS = 20_000;
 const GIT_TIMEOUT_MS = 20_000;
@@ -287,6 +293,15 @@ function main() {
     if (!(e instanceof FleetDirUnresolvable)) throw e;
     die(e.message);
   }
+  // The tracker's string for the in-progress role. A map that cannot be read
+  // is exit 2 like every list that did not answer — never an empty claim list.
+  let label;
+  try {
+    label = readLabelMap({ file: join(fleetDir, LABEL_MAP_FILE) })[ROLE];
+  } catch (e) {
+    if (!(e instanceof LabelMapUnreadable)) throw e;
+    die(e.message);
+  }
   const checkout = dirname(fleetDir);
 
   // readState() announces a file it could not use on stderr and returns no
@@ -298,8 +313,8 @@ function main() {
 
   // An ancestor's in-progress claims are not listed, so neither list is asked
   // for them: the open PR list waits for the first claim that needs it.
-  const issues = ancestor ? [] : ghList(`list of open ${LABEL} issues`, [
-    "issue", "list", "--label", LABEL, "--state", "open", "--json", "number,title,url,closedByPullRequestsReferences",
+  const issues = ancestor ? [] : ghList(`list of open ${ROLE} issues`, [
+    "issue", "list", "--label", label, "--state", "open", "--json", "number,title,url,closedByPullRequestsReferences",
   ]);
   let openPrs = null;
   const open = () => {
@@ -391,7 +406,7 @@ function main() {
       if (ancestor) why += `, and so is whether ${c.slug} is the earlier run's live member — check it against carried`;
     } else {
       if (issue.state !== "OPEN") continue;
-      if (issue.labels.some((l) => l.name === LABEL)) continue;
+      if (issue.labels.some((l) => l.name === label)) continue;
       const found = prsFor(issue, segment(c.n));
       if (found.held.length > 0) {
         heldLog(c.n, found.held);
