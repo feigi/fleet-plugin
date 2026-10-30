@@ -232,7 +232,8 @@ test("foldOmpTranscript: a torn LAST line stays uncounted — the tear a live wr
 const wallTurn = (ts) => assistantEvt("claude-opus-5", { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 }, ts);
 const wallAt = (s) => new Date(Date.parse("2026-09-08T15:00:00.000Z") + s * 1000).toISOString();
 const wallLines = (...stamps) => stamps.map(wallTurn).join("\n") + "\n";
-const wallOf = (...stamps) => foldOmpTranscript(wallLines(...stamps), "/fake/path.jsonl").wallS;
+const foldWall = (...stamps) => foldOmpTranscript(wallLines(...stamps), "/fake/path.jsonl");
+const wallOf = (...stamps) => foldWall(...stamps).wallS;
 
 test("foldOmpTranscript: wall_s is the span of the stamps, 50 and not -50, when the last line is stamped before the first (#3948)", () => {
   const lines = wallLines(wallAt(100), wallAt(50));
@@ -266,8 +267,6 @@ test("foldOmpTranscript: an unparseable first or last stamp is skipped; with no 
 
 // `startedAt` is the earliest parseable stamp as an ISO string, and
 // `unparseableStamps` counts the entries whose `timestamp` yielded no instant (#3970).
-const foldWall = (...stamps) => foldOmpTranscript(wallLines(...stamps), "/fake/path.jsonl");
-
 test("foldOmpTranscript: startedAt is the earliest parseable stamp and a junk stamp is counted, not dropped (#3970)", () => {
   const f = foldWall("x", wallAt(50), wallAt(0));
   assert.equal(f.startedAt, "2026-09-08T15:00:00.000Z");

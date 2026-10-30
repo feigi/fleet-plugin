@@ -392,8 +392,7 @@ export function foldOmpTranscript(jsonlText, filePath) {
     try { d = JSON.parse(raw); }
     catch { if (i !== lines.length - 1) malformedNonLastLines++; continue; }
     assertOmpShaped(d, filePath);
-    let ms = NaN;
-    if (typeof d.timestamp === "string") ms = Date.parse(d.timestamp);
+    const ms = typeof d.timestamp === "string" ? Date.parse(d.timestamp) : NaN;
     if (Number.isFinite(ms)) stamps.push(ms);
     else if (Object.hasOwn(d, "timestamp")) unparseableStamps++;
     if (d.type === "custom" && d.customType === "session_exit") {
