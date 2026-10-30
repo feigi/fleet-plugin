@@ -793,6 +793,21 @@ test("attribute: a Pull whose merged PR another Pull took the Ruling of by date,
   assert.equal(tally(us)[0].no_ruling, 0, "1251's one merge is held by a Ruling, so no Pull counts it as merged with none");
 });
 
+test("parseFeatures refuses a ticket, or a non-blank parent, that is not an issue number, naming the row and the value", () => {
+  const head = FEATURE_COLUMNS.join("\t");
+  const row = (ticket, parent) => FEATURE_COLUMNS.map((c) => ({ ticket, parent, chosen_cell: "slow-high" })[c] ?? "").join("\t");
+  for (const t of ["007", "0", "00"]) {
+    assert.throws(() => parseFeatures(`${head}\n${row("7", "")}\n${row(t, "")}\n`),
+      { message: `ticket-features.tsv row 2: ticket ${JSON.stringify(t)} is not an issue number` });
+  }
+  for (const p of ["05", "0"]) {
+    assert.throws(() => parseFeatures(`${head}\n${row("7", "")}\n${row("7", p)}\n`),
+      { message: `ticket-features.tsv row 2: parent ${JSON.stringify(p)} is not blank or an issue number` });
+  }
+  const rows = parseFeatures(`${head}\n${row("7", "")}\n${row("10", "")}\n${row("7", "3177")}\n${row("10", "10")}\n`);
+  assert.deepEqual(rows.map((r) => [r.ticket, r.parent]), [["7", ""], ["10", ""], ["7", "3177"], ["10", "10"]]);
+});
+
 test("admissibleRow: the cell's own definition at its level with a dispatch model on record, and nothing short of all three", () => {
   const row = { subagentType: "fleet-implementer-task-high", effort: "high", model: "m", dispatchModel: "m" };
   assert.equal(admissibleRow(row, "task-high"), true);
