@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 import { slowTransport, SSH_URL } from "./support/slow-transport.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { hasAttribute } from "./support/worktree-porcelain.mjs";
+import { argvRecords, recordArgv } from "./support/argv-log.mjs";
 import { seedLabelMap } from "./support/label-map-seed.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/release-ticket.sh", import.meta.url));
@@ -146,10 +147,14 @@ function repo(t, dir = "w", labelMap = {}) {
   const bin = join(root, "bin");
   execFileSync("mkdir", ["-p", bin]);
   const log = join(root, "gh.log");
+  // `calls()` flattens argv into one line; `edits()` keeps each `issue edit`
+  // call's argv whole, through argv-log.mjs.
+  const editLog = join(root, "gh-edit.log");
   writeExecStub(
     join(bin, "gh"),
     `#!/bin/sh
 printf '%s\\n' "$*" >> "${log}"
+case "$1 $2" in "issue edit") ${recordArgv(editLog)} ;; esac
 [ "\${GH_RC:-0}" = 0 ] || { echo "gh: simulated failure" >&2; exit "\$GH_RC"; }
 # GH_RC fails the label READ, which aborts before any delete. This one fails only
 # the write, the single call that lands after both artefacts are already gone.
@@ -184,12 +189,14 @@ exit 0
 `,
   );
   writeFileSync(log, "");
+  writeFileSync(editLog, "");
 
   return {
     w,
     log,
     env: (extra = {}) => ({ ...ENV, PATH: `${bin}:${ENV.PATH ?? process.env.PATH}`, ...extra }),
     calls: () => readFileSync(log, "utf8").trim().split("\n").filter(Boolean),
+    edits: () => argvRecords(editLog),
   };
 }
 
@@ -445,6 +452,34 @@ test("a mapped in-progress string with a `.` in it matches only itself in the la
   assert.equal(code, 0, stderr);
   assert.equal(json.label, true);
   assert.deepEqual(r.calls().filter((l) => l.startsWith("issue edit")), ["issue edit 9 --remove-label in.progress"]);
+});
+
+// A mapped string that starts with `-` is the scan's pattern, never a grep
+// option, and reaches `gh issue edit` as the `--remove-label` value.
+test("a mapped in-progress string starting with `-` is found by the label scan and removed", (t) => {
+  const r = repo(t, "w", { roles: { "in-progress": "-wip" } });
+  const c = claim(r.w, 9, "release-ticket");
+  const env = { GH_LABELS: "bug\n-wip" };
+
+  const dry = release(r, c, { apply: false, env });
+  assert.equal(dry.code, 0, dry.stderr);
+  assert.equal(dry.json.label, true);
+
+  const { code, json, stderr } = release(r, c, { env });
+  assert.equal(code, 0, stderr);
+  assert.equal(json.label, true);
+  assert.deepEqual(r.edits(), [["issue", "edit", "9", "--remove-label", "-wip"]]);
+});
+
+// A mapped string with a space in it reaches `gh issue edit` as one argument.
+test("a mapped in-progress string with a space in it is removed as one argument", (t) => {
+  const r = repo(t, "w", { roles: { "in-progress": "in progress" } });
+  const c = claim(r.w, 9, "release-ticket");
+
+  const { code, json, stderr } = release(r, c, { env: { GH_LABELS: "bug\nin progress" } });
+  assert.equal(code, 0, stderr);
+  assert.equal(json.label, true);
+  assert.deepEqual(r.edits(), [["issue", "edit", "9", "--remove-label", "in progress"]]);
 });
 
 test("no Label map refuses the release before anything is released, naming ensure", (t) => {
