@@ -199,6 +199,22 @@ test("a controller line without a usable timestamp, or a torn last line, is skip
   assert.equal(workOf(noisy, "impl-29"), 60);
 });
 
+test("a controller line whose stamp is not a zoned date-time yields no instant; its other lines find the same halts (#3971)", () => {
+  // impl-35 writes 10 h before T0 and at T0, the run silent between: one halt
+  // over the whole part. "2026-08-25" alone parses to midnight UTC, 9 h
+  // before T0, so read as an instant it would split that halt and leave a
+  // 1 h stretch that is no halt.
+  const members = { "impl-35": writes(-36000, 0) };
+  const clean = session(members, controllerAt(-36000, 0));
+  const junk = session(members, [
+    evt({ type: "message", timestamp: "1", message: { role: "user", content: [] } }),
+    evt({ type: "message", timestamp: "2026-08-25", message: { role: "user", content: [] } }),
+    ...controllerAt(-36000, 0),
+  ]);
+  assert.equal(workOf(clean, "impl-35"), 0);
+  assert.equal(workOf(junk, "impl-35"), 0);
+});
+
 test("a controller line torn before its last leaves every row's work_s unknown", () => {
   // The torn line may have been the entry that broke the stretch from 2000 to
   // 5700, so that stretch cannot be read as a halt or as the run writing.
