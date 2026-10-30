@@ -60,6 +60,9 @@ const INVALID = [
   ["a role not a string", (ws) => seedLabelMap(ws, { roles: { onhold: 7 } })],
   ["a string containing a double quote", (ws) => seedLabelMap(ws, { roles: { onhold: 'on"hold' } })],
   ["a string containing a backslash", (ws) => seedLabelMap(ws, { roles: { onhold: "on\\hold" } })],
+  ["a string containing a dollar sign", (ws) => seedLabelMap(ws, { roles: { onhold: "cost $5" } }), /onhold.*contains `\$`/],
+  ["a string containing a backtick", (ws) => seedLabelMap(ws, { roles: { onhold: "a`id`b" } }), /onhold.*contains a backtick/],
+  ["a string containing a comma", (ws) => seedLabelMap(ws, { roles: { onhold: "a,b" } }), /onhold.*contains `,`/],
   ["a string over 50 characters", (ws) => seedLabelMap(ws, { roles: { onhold: long } })],
   ["a string of 51 astral emoji", (ws) => seedLabelMap(ws, { roles: { onhold: "\u{1F41B}".repeat(51) } }), /longer than 50 code points \(51\)/],
   ["an empty string", (ws) => seedLabelMap(ws, { roles: { onhold: "" } })],
@@ -283,6 +286,14 @@ test("labelStringFaults names the role and the rule for each D8 break, and nothi
   assert.match(byRole.wontfix, /empty/);
   // `wontfix` is empty, so `onhold`'s WONTFIX shares no string with it.
   assert.equal(byRole.onhold, undefined);
+  for (const [bad, rule] of [["cost $5", /contains `\$`/], ["a`id`b", /contains a backtick/], ["a,b", /contains `,`/]]) {
+    const found = labelStringFaults({ ...identity(), onhold: bad });
+    assert.equal(found.length, 1, bad);
+    assert.equal(found[0].role, "onhold");
+    assert.match(found[0].rule, rule);
+  }
+  // `'` stays valid: trackers spell wontfix `won't fix`.
+  assert.deepEqual(labelStringFaults({ ...identity(), wontfix: "won't fix", onhold: "it's on hold" }), []);
   const dup = labelStringFaults({ ...identity(), onhold: "WONTFIX" });
   assert.equal(dup.length, 1);
   assert.equal(dup[0].role, "onhold");
@@ -750,8 +761,8 @@ test("ensure D8: the same row is no break when the claimed role has a carried ma
   assert.equal(cacheOf(ws).origin["needs-triage"], "maintainer");
 });
 
-test("ensure D8: a table string containing a double quote, live or not, or longer than 50 characters is exit 1; so is a backslash", () => {
-  for (const [bad, live] of [['a"b', []], ['a"b', ['a"b']], ["x".repeat(51), []], ["a\\b", ["a\\b"]]]) {
+test("ensure D8: a table string containing a double quote, live or not, or longer than 50 characters is exit 1; so is a backslash, a dollar sign, a backtick or a comma", () => {
+  for (const [bad, live] of [['a"b', []], ['a"b', ['a"b']], ["x".repeat(51), []], ["a\\b", ["a\\b"]], ["a$b", []], ["a$b", ["a$b"]], ["a`b", []], ["a`b", ["a`b"]], ["a,b", []], ["a,b", ["a,b"]]]) {
     const ws = repo();
     writeTable(ws, [["wontfix", bad]]);
     const r = ensure(ws, [...LABEL_ROLES, ...live]);
@@ -761,10 +772,22 @@ test("ensure D8: a table string containing a double quote, live or not, or longe
   }
 });
 
+test("ensure D5: a live `won't fix` with no `wontfix` is a near-match suggestion for wontfix: the apostrophe stays valid", () => {
+  const ws = repo();
+  const payload = asked(ensure(ws, [...without(LABEL_ROLES, "wontfix"), "won't fix"]));
+  assert.deepEqual(payload.uncertain, [{ role: "wontfix", suggestion: "won't fix", origin: "near-match", candidates: ["won't fix"], exists: true }]);
+  noCache(ws);
+});
+
 test("ensure D8: a live near match containing a double quote is neither suggestion nor candidate; one a table row names is neither either", () => {
   const ws = repo();
   const payload = asked(ensure(ws, [...without(LABEL_ROLES, "onhold"), 'on"hold']));
   assert.deepEqual(payload.uncertain, [{ role: "onhold", suggestion: "onhold", origin: "default", candidates: [], exists: false }]);
+  for (const bad of ["on$hold", "on`hold", "on,hold"]) {
+    const wsBad = repo();
+    const dropped = asked(ensure(wsBad, [...without(LABEL_ROLES, "onhold"), bad]));
+    assert.deepEqual(dropped.uncertain, [{ role: "onhold", suggestion: "onhold", origin: "default", candidates: [], exists: false }], bad);
+  }
 
   const ws2 = repo();
   writeTable(ws2, [["wontfix", "on-hold"]]);
@@ -997,6 +1020,9 @@ test("set refuses a string D8 rejects, exit 1 naming the role and the rule, with
   const cases = [
     [["onhold=on\"hold"], /onhold: its answer names "on\\"hold".*contains `"`\)\. Fix: change the onhold=<label> pair\n/],
     [["onhold=on\\hold"], /onhold: its answer names .*contains `\\`/],
+    [["onhold=cost $5"], /onhold: its answer names "cost \$5".*contains `\$`/],
+    [["onhold=a`id`b"], /onhold: its answer names .*contains a backtick/],
+    [["onhold=a,b"], /onhold: its answer names "a,b".*contains `,`/],
     [[`onhold=${long}`], /onhold: its answer names .*longer than 50 code points \(51\)/],
     [["onhold="], /onhold: its answer names "".*empty after trimming/],
     [["onhold=   "], /onhold: its answer names "   ".*empty after trimming/],
@@ -1297,6 +1323,15 @@ test("set accepts what D8 allows: exactly 50 characters, spaces and punctuation,
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.deepEqual(JSON.parse(r.stdout), { ...identity(), "needs-info": "Needs Info: waiting", "ready-for-agent": fifty, onhold: "-paused" });
   assert.deepEqual(g.calls(), [LIST, "label create Needs Info: waiting", `label create ${fifty}`, "label create -- -paused", LIST]);
+});
+
+test("set --create accepts a wontfix answer holding an apostrophe", () => {
+  const ws = repo();
+  const g = setRig(LABEL_ROLES);
+  const r = setRun(ws, g, "--create", "wontfix=Won't Fix");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(JSON.parse(r.stdout).wontfix, "Won't Fix");
+  assert.deepEqual(g.calls(), [LIST, "label create Won't Fix", LIST]);
 });
 
 test("set: an ambient GH_REPO does not move the label create; gh is run with GH_REPO empty", () => {

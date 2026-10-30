@@ -93,7 +93,7 @@ Infer branch/worktree convention from `git worktree list` / `git branch -r` — 
 
 **Run the Install step with `CI` removed**, from the new worktree's root: `env -u CI sh -c "<install>"`, `<install>` the output of `derive-testcmd.sh . install`. A setup script that skips under `CI` installs no git hooks there, and you would then commit with the repository's commit-time checks silently absent. Only the Install step loses `CI`; the Check step and the Test entrypoint baseline run in your shell's own environment.
 
-Abandoned before PR opens → remove the `<in-progress string>` label.
+Abandoned before PR opens → `gh issue edit <N> --remove-label "<in-progress string>"`.
 
 ## 6. Size the ticket, then pick a path
 
