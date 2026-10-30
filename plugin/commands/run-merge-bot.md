@@ -80,8 +80,8 @@ Nothing else names that head. A commit's dates are when it was made, not when it
 **No record — a hand-added label, or one applied before its labeller recorded a head — falls back to the timeline, which can refuse a moved head but never name the labelled one.** Read it before `gh pr update-branch` too: your own rebase lands commits after the label by construction, so once you have rebased this read can no longer tell your commits from someone else's:
 
 ```bash
-gh api "repos/{owner}/{repo}/issues/<pr>/timeline?per_page=100" --paginate \
-  -q '.[] | select((.event == "labeled" and .label.name == "<ready-to-merge string>")
+label="<ready-to-merge string>" gh api "repos/{owner}/{repo}/issues/<pr>/timeline?per_page=100" --paginate \
+  -q '.[] | select((.event == "labeled" and .label.name == env.label)
         or .event == "committed" or .event == "head_ref_force_pushed")
       | .event + " " + (.sha // .label.name // "")'
 ```

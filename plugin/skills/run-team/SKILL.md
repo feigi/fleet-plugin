@@ -623,9 +623,7 @@ again.
 
 **It refuses a finisher, too, while the PR sits on a conflict hold no
 fix-applier has cleared** — the same per-PR fold the tick prints `DISPATCH
-fix-pr` off, ahead of the dispositions verdict. A PR known to conflict cannot
-merge, and a finisher on it would race the conflict fix-applier rebasing it.
-Dispatch that fix-applier, let it settle `applied:`/`no-op`, then dispatch the
+fix-pr` off, ahead of the dispositions verdict. Dispatch that fix-applier, let it settle `applied:`/`no-op`, then dispatch the
 finisher again.
 
 **An unanswered question from the member is an outbox item, and it blocks dispatch with the same weight as a reply you have already decided on.** See references/finisher.md.
@@ -636,7 +634,7 @@ in the fix-applier body, not in per-event messages.**
 **Once the label is on, take it off before you approve any push.** Write `label-off=<latest finisher attempt>` onto the PR's row first
 (`ledger.mjs token <PR number> label-off=<latest finisher attempt>`, which keeps
 every token the row already has, see references/ledger.md), then
-remove `ready-to-merge`, then approve. Then
+remove the label (`gh pr edit <pr> --remove-label "<ready-to-merge string>"`, the string `show ready-to-merge` prints), then approve. Then
 dispatch a **fresh** finisher against the new head; the first audit does not
 transfer, since it verified a different tree. See references/finisher.md.
 

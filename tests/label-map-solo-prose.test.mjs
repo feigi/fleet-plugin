@@ -87,7 +87,7 @@ test("every gh command review-and-fix types with a role types the string show pr
   const s = REVIEW_AND_FIX.text;
   assert.match(s, Pin.phrase("`<needs-triage string>`, `<wontfix string>` and `<ready-to-merge string>` below"));
   assert.match(s, Pin.phrase('`gh issue create --label "<needs-triage string>"`'), "the deferral filing types the role");
-  assert.match(s, Pin.phrase("labelled `<wontfix string>`, and CLOSED"), "the suggestion-band record types the role");
+  assert.match(s, Pin.phrase("filed with `gh issue create --label \"<wontfix string>\"` and then CLOSED"), "the suggestion-band record types the role");
   assert.match(s, Pin.phrase('`gh pr edit <pr> --add-label "<ready-to-merge string>"`'), "the standalone label types the role");
   assert.doesNotMatch(s, /gh issue create --label needs-triage/);
   assert.doesNotMatch(s, /--add-label ready-to-merge/);

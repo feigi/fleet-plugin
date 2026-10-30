@@ -18,8 +18,8 @@
 //   origin     every Label role -> "table" | "default" | "maintainer"
 //
 // VALID STRINGS (labelStringFaults): non-empty after trimming, at most 50
-// code points, no `"` and no `\`, and no two roles mapping to one string,
-// compared ignoring case.
+// code points, none of `"`, `\`, `$`, a backtick and `,`, and no two roles
+// mapping to one string, compared ignoring case.
 //
 // THE READER (readLabelMap) returns `roles` when the cache parses, holds every
 // Label role and passes the string rules; anything else throws
@@ -137,6 +137,9 @@ function stringFault(value) {
   if (length > MAX_LENGTH) return `longer than ${MAX_LENGTH} code points (${length})`;
   if (value.includes('"')) return 'contains `"`';
   if (value.includes("\\")) return "contains `\\`";
+  if (value.includes("$")) return "contains `$`";
+  if (value.includes("`")) return "contains a backtick";
+  if (value.includes(",")) return "contains `,`";
   return null;
 }
 

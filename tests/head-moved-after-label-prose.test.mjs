@@ -167,8 +167,36 @@ test("without a record the timeline is the fallback, keyed on the three events t
   const s = labelledHead();
   assert.match(s, Pin.phrase("**No record — a hand-added label, or one applied before its labeller recorded a head — falls back to the timeline, which can refuse a moved head but never name the labelled one.**"));
   assert.match(s, /issues\/<pr>\/timeline\?per_page=100/);
-  assert.match(s, /\.event == "labeled" and \.label\.name == "<ready-to-merge string>"/);
+  assert.match(s, /\.event == "labeled" and \.label\.name == env\.label/);
   assert.match(s, /\.event == "committed" or \.event == "head_ref_force_pushed"/);
+});
+
+// The timeline fallback's own `-q` program, run. The string reaches it through
+// the environment (`env.label`), so a string holding `'` cannot end the
+// single-quoted program; the fixture label below holds one.
+const timelineProgram = () => {
+  const block = /```bash\n(label="<ready-to-merge string>" gh api [\s\S]*?)```/.exec(labelledHead());
+  assert.ok(block, "no fenced block reads the timeline with the string in the environment");
+  const q = /-q '([\s\S]*?)'\n/.exec(block[1]);
+  assert.ok(q, "the timeline block carries no single-quoted -q program");
+  return q[1];
+};
+const readTimeline = (label, events) =>
+  execFileSync("jq", ["-r", timelineProgram()], { input: JSON.stringify(events), encoding: "utf8", env: { ...process.env, label } })
+    .trimEnd()
+    .split("\n")
+    .filter(Boolean);
+const TIMELINE = [
+  { event: "labeled", label: { name: "won't fix" } },
+  { event: "labeled", label: { name: "other" } },
+  { event: "committed", sha: A },
+  { event: "head_ref_force_pushed", sha: B },
+  { event: "commented" },
+];
+
+test("the timeline program prints the labeled line for a string holding an apostrophe, none for another label, and the commit and force-push lines", () => {
+  assert.deepEqual(readTimeline("won't fix", TIMELINE), ["labeled won't fix", `committed ${A}`, `head_ref_force_pushed ${B}`]);
+  assert.deepEqual(readTimeline("never-applied", TIMELINE), [`committed ${A}`, `head_ref_force_pushed ${B}`]);
 });
 
 // The research note's row 43 cites the two reads by line range. Moving the
@@ -375,7 +403,8 @@ const labelRecoveryWhy = () =>
 
 test("the recovery removes the label before approving, and says why messaging the bot is not the stop", () => {
   const s = labelRecovery();
-  assert.match(s, Pin.phrase("then remove `ready-to-merge`, then approve"));
+  assert.match(s, Pin.phrase("then remove the label (`gh pr edit <pr> --remove-label \"<ready-to-merge string>\"`"));
+  assert.match(s, Pin.phrase("the string `show ready-to-merge` prints), then approve"));
   assert.match(s, Pin.phrase("dispatch a **fresh** finisher against the new head"));
   assert.match(s, Pin.phrase("See references/finisher.md."));
   const why = labelRecoveryWhy();
