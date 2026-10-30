@@ -21,6 +21,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { argvRecords, recordArgv } from "./support/argv-log.mjs";
 import { seedLabelMap, seededRepo } from "./support/label-map-seed.mjs";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import { ref, prUrl } from "./support/queue-gh.mjs";
@@ -43,6 +44,10 @@ try {
  * as release-ticket.test.mjs's fixture. env()'s CLOSES is the PR's closing
  * references as issue numbers in its own repository, whitespace-separated;
  * CLOSES_JSON, given instead, is the references array as gh answers it.
+ * LABELS_<n> is issue n's labels, whitespace-separated; LABEL_LINES_<n> is
+ * printed as given, one label per line, for a label with a space in it.
+ * `calls()` flattens each call's argv into one line; `edits()` keeps each
+ * `issue edit` call's argv whole, through argv-log.mjs.
  */
 function stub(t) {
   const root = mktemp(t);
@@ -50,6 +55,8 @@ function stub(t) {
   mkdirSync(bin);
   const log = join(root, "gh.log");
   writeFileSync(log, "");
+  const editLog = join(root, "gh-edit.log");
+  writeFileSync(editLog, "");
   writeExecStub(
     join(bin, "gh"),
     `#!/bin/sh
@@ -82,9 +89,12 @@ case "$1 $2" in
     case ",\${ISSUE_VIEW_FAIL:-}," in *",\$n,"*) echo "gh: simulated failure" >&2; exit 1;; esac
     eval "labels=\\\${LABELS_\$n:-}"
     [ -z "\$labels" ] || printf '%s\\n' \$labels
+    eval "lines=\\\${LABEL_LINES_\$n:-}"
+    [ -z "\$lines" ] || printf '%s\\n' "\$lines"
     ;;
   "issue edit")
     n=\$3
+    ${recordArgv(editLog)}
     case ",\${EDIT_FAIL:-}," in *",\$n,"*) echo "gh: simulated failure" >&2; exit 1;; esac
     ;;
   *) echo "gh: unstubbed call: $*" >&2; exit 1 ;;
@@ -95,6 +105,7 @@ exit 0
   return {
     log,
     calls: () => readFileSync(log, "utf8").trim().split("\n").filter(Boolean),
+    edits: () => argvRecords(editLog),
     env: ({ CLOSES, ...extra } = {}) => ({
       ...process.env,
       PATH: `${bin}:${process.env.PATH}`,
@@ -288,6 +299,35 @@ test("a mapped in-progress string with a `.` in it matches only itself in the sc
   assert.equal(code, 0, stderr);
   assert.deepEqual(json.issues, [{ issue: 41, hadLabel: false, removed: false }, { issue: 42, hadLabel: true, removed: true }]);
   assert.deepEqual(s.calls().filter((c) => c.startsWith("issue edit")), ["issue edit 42 --remove-label in.progress"]);
+});
+
+// A mapped string that starts with `-` is the scan's pattern, never a grep
+// option, and reaches `gh issue edit` as the `--remove-label` value.
+test("a mapped in-progress string starting with `-` is found by the scan and dropped", (t) => {
+  const cwd = seededRepo("drop-merged-label-dash-", { roles: { "in-progress": "-wip" } });
+  const s = stub(t);
+  const env = s.env({ CLOSES: "41 42", LABELS_41: "bug -wip", LABELS_42: "in-progress" });
+
+  const dry = run(9, { cwd, env });
+  assert.equal(dry.code, 0, dry.stderr);
+  assert.deepEqual(dry.json.issues, [{ issue: 41, hadLabel: true, removed: false }, { issue: 42, hadLabel: false, removed: false }]);
+
+  const { code, json, stderr } = run(9, { apply: true, cwd, env });
+  assert.equal(code, 0, stderr);
+  assert.deepEqual(json.issues, [{ issue: 41, hadLabel: true, removed: true }, { issue: 42, hadLabel: false, removed: false }]);
+  assert.deepEqual(s.edits(), [["issue", "edit", "41", "--remove-label", "-wip"]]);
+});
+
+// A mapped string with a space in it reaches `gh issue edit` as one argument.
+test("a mapped in-progress string with a space in it is dropped as one argument", (t) => {
+  const cwd = seededRepo("drop-merged-label-space-", { roles: { "in-progress": "in progress" } });
+  const s = stub(t);
+  const env = s.env({ CLOSES: "41 42", LABEL_LINES_41: "bug\nin progress", LABELS_42: "in-progress" });
+
+  const { code, json, stderr } = run(9, { apply: true, cwd, env });
+  assert.equal(code, 0, stderr);
+  assert.deepEqual(json.issues, [{ issue: 41, hadLabel: true, removed: true }, { issue: 42, hadLabel: false, removed: false }]);
+  assert.deepEqual(s.edits(), [["issue", "edit", "41", "--remove-label", "in progress"]]);
 });
 
 test("no Label map refuses at exit 2 naming ensure, scanning and dropping nothing", (t) => {

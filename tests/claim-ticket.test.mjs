@@ -441,6 +441,20 @@ test("the claim labels the issue with the in-progress string the Label map holds
   assert.deepEqual(readFileSync(ghLog, "utf8").split("\n").filter(Boolean), ["issue", "edit", "42", "--add-label", "wip"]);
 });
 
+// A mapped string with a space in it reaches `gh issue edit` as one argument:
+// the stub logs one argument per line, so a word-split string is two lines.
+test("the claim labels the issue with a mapped in-progress string with a space in it as one argument", () => {
+  const dir = repo({ [TESTS]: "" }, {}, {}, { roles: { "in-progress": "in progress" } });
+  const bin = tempDir("claim-bin-");
+  const ghLog = join(bin, "gh.log");
+  writeExecStub(join(bin, "gh"), '#!/bin/sh\nfor a do printf "%s\\n" "$a"; done >> "$GH_LOG"\nexit 0\n');
+  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], {
+    cwd: dir, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GH_LOG: ghLog },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(readFileSync(ghLog, "utf8").split("\n").filter(Boolean), ["issue", "edit", "42", "--add-label", "in progress"]);
+});
+
 // No Label map is a refusal in both modes, naming the derivation step, before
 // anything is claimed: no label, no worktree, no branch, no receipt.
 test("no Label map refuses the claim before anything is claimed, naming ensure", () => {
