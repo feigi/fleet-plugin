@@ -317,24 +317,18 @@ test("foldOmpTranscript: a transcript of valid stamps plus a stampless title lin
 
 // A stamp counts only in the ECMAScript date-time form with a time and an
 // explicit zone; anything else is skipped and counted like an unparseable one (#3971).
-test("foldOmpTranscript: a junk stamp such as \"1\" is skipped in either order, so wall_s stays 0 (#3971)", () => {
-  const t = Date.parse("2026-09-08T15:00:00Z");
-  for (const order of [["1", "2026-09-08T15:00:00Z"], ["2026-09-08T15:00:00Z", "1"]]) {
-    const f = foldWall(...order);
-    assert.equal(f.wallS, 0, order.join(" "));
-    assert.deepEqual(f.stamps, [t], order.join(" "));
-    assert.deepEqual(f.workParts, [[t, t]], order.join(" "));
-    assert.equal(f.unparseableStamps, 1, order.join(" "));
-  }
-});
-
-test("stampMs: a stamp without a time, without a zone, or out of range is rejected, and the fold skips it (#3971)", () => {
-  const t = Date.parse("2026-09-08T15:00:00Z");
-  for (const junk of ["1", "12", "2026", "Tuesday 1", "2026-09-08", "2026-09-08T15:00:00", "2026-13-40T15:00:00Z"]) {
+test("stampMs: a stamp outside the zoned date-time form, or out of range, is rejected, and the fold skips it in either order, so wall_s stays 0 (#3971)", () => {
+  const ok = "2026-09-08T15:00:00Z", t = Date.parse(ok);
+  for (const junk of ["1", "12", "2026", "Tuesday 1", "2026-09-08", "2026-09-08T15:00:00", "2026-13-40T15:00:00Z",
+    "2026-09-08T15:00:00+0200", "2026-09-08 15:00:00Z", "2026-09-08 15:00:00+02:00"]) {
     assert.ok(Number.isNaN(stampMs(junk)), junk);
-    const f = foldWall(junk, "2026-09-08T15:00:00Z");
-    assert.deepEqual(f.stamps, [t], junk);
-    assert.equal(f.unparseableStamps, 1, junk);
+    for (const order of [[junk, ok], [ok, junk]]) {
+      const f = foldWall(...order);
+      assert.equal(f.wallS, 0, order.join(" "));
+      assert.deepEqual(f.stamps, [t], order.join(" "));
+      assert.deepEqual(f.workParts, [[t, t]], order.join(" "));
+      assert.equal(f.unparseableStamps, 1, order.join(" "));
+    }
   }
   assert.ok(Number.isNaN(stampMs(1789000000000)), "a non-string is no stamp");
 });
