@@ -1457,6 +1457,28 @@ test("remapped, a home labelled triage is accepted for a needs-triage row, and t
     /: it belongs in the closed "PR #40 review: the suggestion band, checked" issue, labelled wont-fix, and #9 is closed, titled .*, labelled wontfix$/);
 });
 
+test("remapped, an applied suggestion its refuter refuted, or decided nothing about, names its home in the mapped strings", () => {
+  assert.deepEqual(tableCore(deferred("unverified", 1, { disposition: "apply", verdictPath: REFUTED_V }), {}, REMAP), [
+    `unverified[1]: filing row 4 (${FILING_ROWS[4].finding}): applied, though its verdict is refuted: true — it belongs in the closed "PR #40 review: the suggestion band, checked" issue, labelled wont-fix`,
+  ]);
+  assert.deepEqual(tableCore(deferred("unverified", 2, { scope: "out", disposition: "apply", verdictPath: OUT_UNDECIDED_V }), {}, REMAP), [
+    `unverified[2]: filing row 6b (${FILING_ROWS["6b"].finding}): applied, though its refuter decided nothing — verdictPath "${OUT_UNDECIDED_V}" names no file that exists; it belongs in an open issue labelled triage or agent-ready`,
+  ]);
+  // Applied, a suggestion its refuter let survive is no violation under the map either.
+  assert.deepEqual(tableCore(deferred("unverified", 1, { disposition: "apply", verdictPath: STOOD_V }), {}, REMAP), []);
+});
+
+test("remapped, a deferral that names no issue names its home in the mapped strings", () => {
+  const { issue: _open, ...open } = deferred("unverified", 2, { scope: "out", verdictPath: OUT_STOOD_V });
+  assert.deepEqual(tableCore(open, {}, REMAP), [
+    `unverified[2]: filing row 6b (${FILING_ROWS["6b"].finding}): a deferral names the issue it was filed to, and this entry names none — it belongs in an open issue labelled triage or agent-ready`,
+  ]);
+  const { issue: _record, ...record } = deferred("survived", 0, { reason: "false-rationale" });
+  assert.deepEqual(tableCore(record, {}, REMAP), [
+    `survived[0]: filing row 2 (${FILING_ROWS[2].finding}): a deferral names the issue it was filed to, and this entry names none — it belongs in the closed "PR #40 review: the suggestion band, checked" issue, labelled wont-fix`,
+  ]);
+});
+
 test("run as a CLI with a remapped Label map, a home labelled with the mapped strings is judged ok and the role names are not", (t) => {
   const f = fixture(t, { labelMap: { roles: REMAP } });
   const log = join(f.dir, "gh.log");
