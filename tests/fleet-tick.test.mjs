@@ -639,7 +639,7 @@ const pr = (number, labels = [], closes = [number + 1000], headRefOid = HEAD_B, 
   headRefOid, mergeable, body, url: prUrl(number),
   author: { login: RUN_LOGIN }, isDraft: false, owned: true, ...over,
 });
-const run = (ledger, prs = [], closed, prStates) => deriveRun({ rows: [], dispatched: [], drain: null, ...ledger }, prs, closed, prStates, "ready-to-merge");
+const run = (ledger, prs = [], closed, prStates) => deriveRun({ rows: [], dispatched: [], drain: null, ...ledger }, prs, "ready-to-merge", closed, prStates);
 
 test("deriveRun: live implementers are the unsettled impl- tokens — the #1692 shape, read rather than recited", () => {
   // #1692 was two sources disagreeing about the same fleet. There is one
@@ -3422,6 +3422,20 @@ test("CLI: --apply's reread after a tier verdict asks the same bounded count aga
   assert.deepEqual(r.prViews, []);
 });
 
+test("CLI: --apply's reread after a tier verdict keeps the mapped ready-to-merge string", () => {
+  const ledger = keyedOff(KEYED_101);
+  ledger.rows.push("#412 impl-412");
+  ledger.dispatched.push("impl-412");
+  const r = runCli(["--apply"], {
+    shortlist: shortlistText([420]), refresh: shortlistText([420]), ledger, prStates: mergedStates(KEYED_101),
+    prs: [pr(60, ["queue-ok"])], labelMap: { roles: { "ready-to-merge": "queue-ok" } },
+    beforeRun: (repo) => writeFileSync(join(repo, "..", "bin", "tier-check.mjs"), TIER_STUB),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^APPLIED tier-check impl-412: tier-ok$/m, "the verdict landed, so the run was read again");
+  assert.match(r.stdout, /^merge-bot {4}0\/1 → DISPATCH merge-bot {3}\(merge-queue=1 held=0\)/m);
+});
+
 test("CLI: one batch that answers some PRs and errors another reads each as it was answered", () => {
   const body = {
     data: { repository: { n101: { state: "CLOSED" }, n102: null, n103: { state: "MERGED" } } },
@@ -4236,15 +4250,13 @@ test("CLI: the stall is announced even when the reconcile then refuses", (t) => 
 
 // The Label map: the tick compares and queries the tracker's strings, not the
 // role names (docs/specs/2026-10-15-label-map.md D9).
-const REMAP = (roles) => ({ roles });
-
 test("CLI: the claimed-count query carries the in-progress role's mapped string", (t) => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-label-claimed-")));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const path = join(dir, "heartbeat.json");
   const log = join(dir, "issue-list.log");
   writeFileSync(path, beat(90 * 60_000, 1200));
-  const r = runCli(["--state", path], { ...IDLE, claimed: [{ number: 41 }], labelMap: REMAP({ "in-progress": "wip" }), env: { ISSUE_LIST_LOG: log } });
+  const r = runCli(["--state", path], { ...IDLE, claimed: [{ number: 41 }], labelMap: { roles: { "in-progress": "wip" } }, env: { ISSUE_LIST_LOG: log } });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /1 ticket\(s\) claimed and in flight/);
   const argv = readFileSync(log, "utf8").trim().split("\n");
@@ -4265,10 +4277,10 @@ test("CLI: the claimed-count query under the identity map carries in-progress", 
 });
 
 test("CLI: a PR carrying the ready-to-merge role's mapped string is in the queued set, and one carrying the role's own name is not", () => {
-  const mapped = runCli([], { ...IDLE, prs: [pr(60, ["queue-ok"])], labelMap: REMAP({ "ready-to-merge": "queue-ok" }) });
+  const mapped = runCli([], { ...IDLE, prs: [pr(60, ["queue-ok"])], labelMap: { roles: { "ready-to-merge": "queue-ok" } } });
   assert.equal(mapped.status, 0, mapped.stderr);
   assert.match(mapped.stdout, /^merge-bot {4}0\/1 → DISPATCH merge-bot {3}\(merge-queue=1 held=0\)/m);
-  const named = runCli([], { ...IDLE, prs: [pr(60, ["ready-to-merge"])], labelMap: REMAP({ "ready-to-merge": "queue-ok" }) });
+  const named = runCli([], { ...IDLE, prs: [pr(60, ["ready-to-merge"])], labelMap: { roles: { "ready-to-merge": "queue-ok" } } });
   assert.equal(named.status, 0, named.stderr);
   assert.doesNotMatch(named.stdout, /DISPATCH merge-bot/);
   assert.match(named.stdout, /merge-queue=0 /);
@@ -4299,8 +4311,8 @@ test("CLI: a stalled prior beat with no Label map is still announced, its claime
 
 test("deriveRun: the queued set is the PRs carrying the passed string; once there are open PRs, no string is a refusal", () => {
   const prs = [pr(5, ["queue-ok"]), pr(6, ["ready-to-merge"]), pr(7)];
-  assert.equal(deriveRun({ rows: [], dispatched: [], drain: null }, prs, undefined, undefined, "queue-ok").mergeQueue, 1);
-  assert.equal(deriveRun({ rows: [], dispatched: [], drain: null }, prs, undefined, undefined, "ready-to-merge").mergeQueue, 1);
+  assert.equal(deriveRun({ rows: [], dispatched: [], drain: null }, prs, "queue-ok").mergeQueue, 1);
+  assert.equal(deriveRun({ rows: [], dispatched: [], drain: null }, prs, "ready-to-merge").mergeQueue, 1);
   assert.throws(() => deriveRun({ rows: [], dispatched: [], drain: null }, prs), /queuedLabel/);
   assert.equal(deriveRun({ rows: [], dispatched: [], drain: null }, []).mergeQueue, 0);
 });
@@ -5407,7 +5419,7 @@ test("deriveRun: reporters are every unsettled member token — never a settled 
     ],
     dispatched: ["impl-3=PR#5", "impl-4=PR#6", "impl-8=PR#7", "impl-9=PR#10", "impl-11=PR#12", "impl-13", "fix-pr-5", "merge-bot-1"],
     drain: null,
-  }, [pr(5), pr(6), pr(7), pr(10), pr(12)], undefined, undefined, "ready-to-merge");
+  }, [pr(5), pr(6), pr(7), pr(10), pr(12)], "ready-to-merge");
   assert.deepEqual([...run.reporters].sort(), ["fix-pr-5", "impl-13", "merge-bot-1"]);
 });
 
@@ -5433,8 +5445,8 @@ test("unrecordedLines: a member-named stem the ledger records nowhere prints UNR
 test("deriveRun: recorded is every member name on a row, in ## Dispatched and in ## Retired, settled or live; a ledger with no ## Retired records the rest", () => {
   const ledger = { rows: ["#3 impl-3=PR#5 → PR#5 · fix-pr-5=applied:abc1234"], dispatched: ["impl-3=PR#5", "merge-bot-1"], drain: null };
   const prs = [pr(5)];
-  assert.deepEqual([...deriveRun({ ...ledger, retired: ["impl-2", "review-pr-4"] }, prs, undefined, undefined, "ready-to-merge").recorded].sort(), ["fix-pr-5", "impl-2", "impl-3", "merge-bot-1", "review-pr-4"]);
-  assert.deepEqual([...deriveRun(ledger, prs, undefined, undefined, "ready-to-merge").recorded].sort(), ["fix-pr-5", "impl-3", "merge-bot-1"]);
+  assert.deepEqual([...deriveRun({ ...ledger, retired: ["impl-2", "review-pr-4"] }, prs, "ready-to-merge").recorded].sort(), ["fix-pr-5", "impl-2", "impl-3", "merge-bot-1", "review-pr-4"]);
+  assert.deepEqual([...deriveRun(ledger, prs, "ready-to-merge").recorded].sort(), ["fix-pr-5", "impl-3", "merge-bot-1"]);
 });
 
 test("deriveRun: a ## Retired line with an outcome records its name, the text before the first `=`", () => {

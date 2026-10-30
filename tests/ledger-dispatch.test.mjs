@@ -752,7 +752,7 @@ test("settle impl-N=PR#M folds the PR-keyed row a pre-settle dispatch created in
   assert.equal(cards[0].agent, "review-pr-1301");
   assert.equal(board.queue.reviewBacklog, 0, "the PR is under review, not owed one");
   const run = deriveRun({ rows: l.rows, dispatched: l.dispatched, drain: null },
-    [{ number: 1301, labels: [], closingIssuesReferences: [{ number: 1300 }] }], undefined, undefined, "ready-to-merge");
+    [{ number: 1301, labels: [], closingIssuesReferences: [{ number: 1300 }] }], "ready-to-merge");
   assert.equal(run.reviewsLive, 1);
   assert.deepEqual(run.reviewDue, []);
 
@@ -781,7 +781,7 @@ test("settle impl-N=PR#M refuses a PR another row already maps to, writing nothi
   const l = read();
   assert.deepEqual(l.rows.filter((r) => rowPr(r) === 724), ["#658 Pull · impl-658=PR#724"]);
   const run = deriveRun({ rows: l.rows, dispatched: l.dispatched, drain: null },
-    [{ number: 724, labels: [], closingIssuesReferences: [{ number: 658 }, { number: 659 }] }], undefined, undefined, "ready-to-merge");
+    [{ number: 724, labels: [], closingIssuesReferences: [{ number: 658 }, { number: 659 }] }], "ready-to-merge");
   assert.equal(run.implLive, 0);
 });
 
@@ -831,7 +831,7 @@ test("a conflict hold written by row is cleared by a later dispatch + settle, in
   const tick = () => {
     const l = read();
     return deriveRun({ rows: l.rows, dispatched: l.dispatched, drain: null },
-      [{ number: 40, labels: [{ name: "ready-to-merge" }], closingIssuesReferences: [{ number: 10 }] }], undefined, undefined, "ready-to-merge");
+      [{ number: 40, labels: [{ name: "ready-to-merge" }], closingIssuesReferences: [{ number: 10 }] }], "ready-to-merge");
   };
   assert.deepEqual([tick().fixDue, tick().mergeHeld], [[40], 1], "the earlier settle cannot clear the newer hold");
 
@@ -851,7 +851,7 @@ test("a review's survivors outlive a conflict fix-applier's settle: the next fix
   const tick = () => {
     const l = read();
     return deriveRun({ rows: l.rows, dispatched: l.dispatched, drain: null },
-      [{ number: 21, labels: [], closingIssuesReferences: [{ number: 20 }] }], undefined, undefined, "ready-to-merge");
+      [{ number: 21, labels: [], closingIssuesReferences: [{ number: 20 }] }], "ready-to-merge");
   };
   assert.deepEqual([tick().fixDue, tick().conflictHeld], [[21], [21]]);
   assert.equal(ok("dispatch", "21", "fix-pr-21").agent, "fleet-fix-applier");
@@ -980,7 +980,7 @@ test("a ticket row retried under a second PR is one board card on the latest PR,
   assert.equal(board.queue.reviewBacklog, 1, "PR 724 has no review of its own, and PR 800's reviewed= is not it");
   assert.equal(cards.filter((c) => c.flags.includes("finisher:failed")).length, 1);
   const run = deriveRun({ rows: ledger.rows, dispatched: ledger.dispatched, drain: null },
-    [{ number: 724, labels: [], closingIssuesReferences: [{ number: 659 }], headRefOid: "def5678", owned: true }], undefined, undefined, "ready-to-merge");
+    [{ number: 724, labels: [], closingIssuesReferences: [{ number: 659 }], headRefOid: "def5678", owned: true }], "ready-to-merge");
   assert.deepEqual(run.reviewDue, [724], "the tick agrees");
 });
 
@@ -1033,7 +1033,7 @@ test("a malformed reviewed= token on a PR's row still yields a board, flags that
   assert.ok(board.tickets.find((c) => c.issue === 910).flags.includes("ledger-error"));
   assert.ok(!board.tickets.find((c) => c.issue === 920).flags.includes("ledger-error"), "a well-formed row is not flagged");
   assert.throws(() => deriveRun({ rows: ledger.rows, dispatched: ledger.dispatched, drain: null },
-    prs.map((p) => ({ ...p, labels: [], closingIssuesReferences: [] })), undefined, undefined, "ready-to-merge"), LedgerError);
+    prs.map((p) => ({ ...p, labels: [], closingIssuesReferences: [] })), "ready-to-merge"), LedgerError);
 });
 
 test("every token the tick refuses is skipped and flagged by the board, none thrown", (t) => {
@@ -1045,7 +1045,7 @@ test("every token the tick refuses is skipped and flagged by the board, none thr
   const board = boardOf(ledger, prs);
   bad.forEach((tok, i) => assert.ok(board.tickets.find((c) => c.issue === 930 + i).flags.includes("ledger-error"), tok));
   bad.forEach((tok, i) => assert.throws(() => deriveRun({ rows: [ledger.rows[i]], dispatched: [], drain: null },
-    prs.map((p) => ({ ...p, closingIssuesReferences: [] })), undefined, undefined, "ready-to-merge"), LedgerError, tok));
+    prs.map((p) => ({ ...p, closingIssuesReferences: [] })), "ready-to-merge"), LedgerError, tok));
 });
 
 // #2288: a row keyed `#M` that no implementer claims is folded whatever it
@@ -1353,7 +1353,7 @@ test("a finisher is refused on a dispositions escalate, naming it, and nothing r
   assert.deepEqual(read().dispatched, []);
   const l = read();
   const run = deriveRun({ rows: l.rows, dispatched: l.dispatched, drain: null },
-    [{ number: 40, labels: [], closingIssuesReferences: [{ number: 10 }] }], undefined, undefined, "ready-to-merge");
+    [{ number: 40, labels: [], closingIssuesReferences: [{ number: 10 }] }], "ready-to-merge");
   assert.deepEqual(run.fixDue, [], "an escalation never returns the PR to fixDue");
   assert.deepEqual(run.reviewed.find((r) => r.pr === 40).dispositions, { verdict: "escalate", member: "fix-pr-40" });
 });
@@ -1830,7 +1830,7 @@ test("a finisher settled halted:human is accepted on the ledger, and the tick di
   const ledger = f.read();
   assert.match(ledger.rows[0], /finisher-pr-3631=halted:human/);
   const run = deriveRun({ rows: ledger.rows, dispatched: ledger.dispatched, drain: null },
-    [{ number: 3631, labels: [{ name: "patch" }], closingIssuesReferences: [], headRefOid: GATE_HEAD, owned: true }], undefined, undefined, "ready-to-merge");
+    [{ number: 3631, labels: [{ name: "patch" }], closingIssuesReferences: [], headRefOid: GATE_HEAD, owned: true }], "ready-to-merge");
   assert.deepEqual([run.reviewDue, run.fixDue, run.unlabelled], [[], [], []], "a halt for a human is neither a re-review nor a repair");
   f.refused(["settle", "finisher-pr-3631", "halted:bogus"], /halted:<cause>/);
 });

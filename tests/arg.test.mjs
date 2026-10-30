@@ -693,8 +693,8 @@ test("writeAll() delivers the full payload across more confirmed EAGAIN stalls t
 // rather than refusing, so it has no exit 2 to invert in the first place.
 // fleet-tick is here because it does forward and does refuse (fleet-tick.mjs's
 // `openPrs`) — measured at 65,613 B forwarded and exit 2 — and since #1803 it
-// reaches gh with no argv at all,
-// the gh read being the first thing it does that can refuse.
+// reaches gh with no argv at all, the gh read being the first thing it does
+// that can refuse once its Label map has been read.
 // A consumer added later belongs here deliberately.
 const GH_FLOOD = [
   { script: "ci-state", argv: ["--pr", "42"] },

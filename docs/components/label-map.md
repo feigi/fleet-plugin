@@ -60,7 +60,7 @@ for the scripts still to move.
    table as it was when derived, the string per role and the origin of each
    (`table`, `default` or `maintainer`). It is gitignored, never committed and
    never written by hand; deleting it forces a fresh derivation.
-5. **Read** (target; #3870 and #3872 still to land). Every script that reads
+5. **Read** (target; #3872 still to land). Every script that reads
    or writes a label is to resolve its role through the one reader in
    `label-map.mjs`, or `label-map.mjs show <role>` from shell. The reader never
    reads the tracker and has no defaults: an absent or broken map is a refusal

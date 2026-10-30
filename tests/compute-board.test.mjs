@@ -788,7 +788,7 @@ test("#2331: the cockpit reads `## Dispatched` as the tick does — a settled fi
     [["#941 impl-941=PR#931 → PR#931 · reviewed=abc1234:0/0/0:run-abc1234r"], ["unlabelled"]],
     [["#941 impl-941=PR#931 → PR#931 · reviewed=abc1234:0/0/0:run-abc1234r label-off=finisher-pr-931"], []],
   ]) {
-    const tick = deriveRun({ rows, dispatched, drain: null }, open, undefined, undefined, "ready-to-merge").unlabelled;
+    const tick = deriveRun({ rows, dispatched, drain: null }, open, "ready-to-merge").unlabelled;
     assert.deepEqual(tick.map((u) => u.pr), flags.length ? [931] : [], rows[0]);
     const b = computeBoard(reproInputs({ rows, ledger: { rows, dispatched, filed: [], ruled: [] }, prev: { tickets: [] } }));
     assert.equal(card(b, 941).column, "REVIEW", rows[0]);
@@ -1170,7 +1170,7 @@ test("#1820: a bare `review-pr-<n>` token (no `review=` prefix) names nobody —
 // an omitted-by-accident fixture would silently exercise past-pin's
 // redispatch path instead of refusing the way production's openPrs() does.
 const tickReviewDue = (rows, prs, headRefOid = "abc1234abc1234abc1234abc1234abc1234abcd") => deriveRun({ rows, dispatched: [], drain: null },
-  prs.map((number) => ({ number, labels: [], closingIssuesReferences: [{ number }], headRefOid, owned: true })), undefined, undefined, "ready-to-merge").reviewDue;
+  prs.map((number) => ({ number, labels: [], closingIssuesReferences: [{ number }], headRefOid, owned: true })), "ready-to-merge").reviewDue;
 
 test("#1820 amendment 5a: a settled `review=...=failed` with no redispatch is owed a review — reviewBacklog agrees with fleet-tick.mjs's reviewDue", () => {
   const row = "#961 impl-961=PR#961 · review=member:review-pr-961=failed";
@@ -1344,7 +1344,7 @@ test("#1820 amendment 2a: a row carrying any impl token is untouched, a malforme
 const tickKeysTo = (row, n) => deriveRun({ rows: [`${row} held-behind:#1`], dispatched: [], drain: null }, [
   { number: n, labels: [{ name: "ready-to-merge" }], closingIssuesReferences: [] },
   { number: 1, labels: [], closingIssuesReferences: [] },
-], undefined, undefined, "ready-to-merge").mergeHeld === 1;
+], "ready-to-merge").mergeHeld === 1;
 
 test("#1820 amendment 2a: on the same PR-signaled row text, the cockpit's PR is fleet-tick.mjs's", () => {
   const rows = [INHERITED, "#1237 fix-pr-1237", "#1237 finisher-pr-1237=labelled", "#1237 reviewed=abc1234:1/0/0:run-abc1234r", "#1300 PR#1301 · fix-pr-1301"];

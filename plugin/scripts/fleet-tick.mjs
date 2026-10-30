@@ -49,6 +49,12 @@
 //             nothing. Missing or unparsable is depth 0 and a
 //             refresh, never a refusal: the depth only ever bounds PULLs
 //             downward. A file with no `dropped` names no drops.
+//   labels    `.fleet/labels.json` beside the shortlist, read once through
+//             label-map.mjs's reader: the ready-to-merge role's string picks
+//             the queued set out of the open PRs, and the in-progress role's
+//             string is the label the claimed count queries. A map that
+//             cannot be read refuses the tick once the stall report has
+//             printed, that report reading the claimed count unknown.
 //   gh        The open PRs, by label, by owner (author and draft flag), by
 //             whether they close an issue, by GitHub's `mergeable`, and by
 //             head and body — the merge queue, which PRs are owed a review,
@@ -993,7 +999,7 @@ export const pastPinDue = (st, head) => st !== undefined && st.pastPinHalt && !s
 // The states a PR-state probe answers: anything else is no answer.
 const PR_STATES = ["OPEN", "MERGED", "CLOSED"];
 
-export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, closed = new Set(), prStates = new Map(), queuedLabel) {
+export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, queuedLabel, closed = new Set(), prStates = new Map()) {
   // `queuedLabel` is the tracker's string for the `ready-to-merge` role, from
   // the Label map the caller read (label-map.mjs) — this fold reads no cache.
   // A caller with no open PRs to fold has no queue to read and passes none.
@@ -1773,18 +1779,20 @@ function readLedger() {
 }
 
 // `.fleet/shortlist.json` beside the run's ledger, through fleet-dir.mjs's
-// fleetFile(). null when unresolvable — read as a missing shortlist, and the
-// refresh then says why it could not run. Announced here first: a missing
+// fleetFile(), as `{ path, fault }`. `path` is null when unresolvable — read as
+// a missing shortlist, and the refresh then says why it could not run — and
+// `fault` is then the probe's message, so the Label map beside it is refused
+// off this probe rather than a second one. Announced here first: a missing
 // shortlist is also what an empty queue looks like, and "outside a
 // repository" is not "no candidates yet". main() calls this once per tick,
 // so a workspace that stays unresolvable warns once per tick.
 function shortlistPath() {
   try {
-    return fleetFile("shortlist.json");
+    return { path: fleetFile("shortlist.json"), fault: null };
   } catch (e) {
     if (!(e instanceof FleetDirUnresolvable)) throw e;
     console.error(`${NAME}: WARNING ${e.message}; reading the shortlist as missing`);
-    return null;
+    return { path: null, fault: e.message };
   }
 }
 
@@ -2064,13 +2072,14 @@ function claimed(label) {
 
 // The claimed count the stall report prints: the in-progress string's query
 // when the Label map was read, else unknown (null) with the map's own message
-// on stderr — never 0.
-function claimedCount(labels, fault) {
-  if (labels === null) {
-    console.error(`${NAME}: ${fault} — claimed ticket count unknown`);
+// on stderr — never 0. `map` is main()'s `{ ok: true, labels }` or
+// `{ ok: false, fault }`.
+function claimedCount(map) {
+  if (!map.ok) {
+    console.error(`${NAME}: ${map.fault} — claimed ticket count unknown`);
     return null;
   }
-  return claimed(labels["in-progress"]);
+  return claimed(map.labels["in-progress"]);
 }
 
 // What the controller record's process is now, for the phase-0 gate: `none`
@@ -2099,11 +2108,11 @@ export function controllerState(controller, name = NAME) {
 function readRun(prs, queuedLabel) {
   try {
     const ledger = readLedger();
-    const run = deriveRun(ledger, prs, new Set(), new Map(), queuedLabel);
+    const run = deriveRun(ledger, prs, queuedLabel);
     const states = prStates(run.reviewsOffList, run.prKeyed);
     const surfacing = run.prKeyed.filter((k) => states.get(k.pr) !== "OPEN" && states.get(k.pr) !== "MERGED").map((k) => k.n);
     const closed = closedTickets(run.tierMismatch, run.owedReplacement, surfacing);
-    return deriveRun(ledger, prs, closed, states, queuedLabel);
+    return deriveRun(ledger, prs, queuedLabel, closed, states);
   } catch (e) {
     if (e instanceof LedgerError) die(e.message);
     throw e;
@@ -2192,9 +2201,24 @@ function readPulls(scratch, heads, { session, now, staleMinutes }) {
   return out;
 }
 
+// The Label map beside the shortlist, as `{ ok: true, labels }` or
+// `{ ok: false, fault }`: an unresolvable workspace is refused off
+// shortlistPath()'s own probe, and a map that cannot be read with the
+// reader's message, which names `label-map.mjs ensure`.
+function labelMapBeside({ path, fault }) {
+  if (path === null) return { ok: false, fault };
+  try {
+    return { ok: true, labels: readLabelMap({ file: join(dirname(path), LABEL_MAP_FILE) }) };
+  } catch (e) {
+    if (!(e instanceof LabelMapUnreadable)) throw e;
+    return { ok: false, fault: e.message };
+  }
+}
+
 function main() {
   const { fold, apply, state: path, liveness, scratch: scratchFlag, session: sessionFlag, noTranscriptAfter, pullStaleMinutes, ...caps } = options();
-  const listPath = shortlistPath();
+  const shortlist = shortlistPath();
+  const listPath = shortlist.path;
   // The tracker's strings for the two roles the tick reads: `ready-to-merge`
   // (the queued set) and `in-progress` (the claimed count), read once here from
   // the Label map beside the shortlist. A map that cannot be read is held
@@ -2202,14 +2226,7 @@ function main() {
   // but the claimed count, which it then reports unknown — and refuses the
   // tick after it: with no strings the queue is unknown, never empty, and the
   // claimed count is unknown, never 0.
-  let labels = null;
-  let labelsFault = null;
-  try {
-    labels = readLabelMap(listPath === null ? {} : { file: join(dirname(listPath), LABEL_MAP_FILE) });
-  } catch (e) {
-    if (!(e instanceof LabelMapUnreadable || e instanceof FleetDirUnresolvable)) throw e;
-    labelsFault = e.message;
-  }
+  const map = labelMapBeside(shortlist);
   const current = readShortlist(listPath);
   // Beside the shortlist, off the same git probe rather than a second one.
   const router = readCostGuard(listPath === null ? null : join(dirname(listPath), "cost-guard.json"));
@@ -2237,10 +2254,11 @@ function main() {
   if (!priorState.degraded) writeState(path, NAME, priorState, { ticked: { at: tickedAt } });
   if (isReported(verdict)) {
     console.log(stallReport(verdict, isStalled(verdict)
-      ? { claimed: claimedCount(labels, labelsFault), supply: current.scanned, owner: stallOwner(priorState.controller, NAME) }
+      ? { claimed: claimedCount(map), supply: current.scanned, owner: stallOwner(priorState.controller, NAME) }
       : {}));
   }
-  if (labels === null) die(`${labelsFault} — the queued set and the claimed count cannot be read, so the run cannot be reconciled`);
+  if (!map.ok) die(`${map.fault} — the queued set and the claimed count cannot be read, so the run cannot be reconciled`);
+  const { labels } = map;
 
   // This run's phase 0, off its receipt: unfinished holds the same rows the
   // main checkout does, and never refuses the tick either. Judged against

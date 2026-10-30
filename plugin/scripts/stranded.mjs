@@ -82,7 +82,7 @@ import { fileURLToPath } from "node:url";
 import { makeDie, writeAll } from "./arg.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
-import { LABEL_MAP_FILE, readLabelMap } from "./label-map.mjs";
+import { LABEL_MAP_FILE, LabelMapUnreadable, readLabelMap } from "./label-map.mjs";
 import { readState, stateFileIn } from "./fleet-state.mjs";
 import { liveOnLedger } from "./ledger-grammar.mjs";
 
@@ -299,6 +299,7 @@ function main() {
   try {
     label = readLabelMap({ file: join(fleetDir, LABEL_MAP_FILE) })[ROLE];
   } catch (e) {
+    if (!(e instanceof LabelMapUnreadable)) throw e;
     die(e.message);
   }
   const checkout = dirname(fleetDir);
