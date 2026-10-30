@@ -32,7 +32,7 @@ import { fileURLToPath } from "node:url";
 import { resolveCockpitInstance, cockpitPorts, probeCockpitWorkspace } from "../plugin/scripts/board-server.mjs";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
-import { heldOutside, watchWindow } from "./support/cockpit-port.mjs";
+import { heldOutside, heldWindowExit, watchWindow } from "./support/cockpit-port.mjs";
 import { seedLabelMap } from "./support/label-map-seed.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/board.mjs", import.meta.url));
@@ -152,7 +152,7 @@ test("CLI: a relaunch that lands mid-gather() is answered within 1s and reuses t
       // A launch that found something outside this test holding every
       // candidate in its window exits without announcing — the holders'
       // doing, which leaves nothing below to measure.
-      if (/^serve exited \([^)]*\) before announcing/.test(e.message) && watch.allHeld()) return t.skip(heldOutside(ports[0]));
+      if (heldWindowExit(e, watch)) return t.skip(heldOutside(ports[0]));
       throw e;
     }
     // A landing past a candidate something outside this test was seen

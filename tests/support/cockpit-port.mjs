@@ -84,3 +84,11 @@ export async function watchWindow(ports, everyMs = 5) {
     },
   };
 }
+
+// The skip test for a row whose first launch rejected before it announced:
+// true when the rejection is the launch exiting before announcing and the
+// watch saw every candidate held (allHeld() above), so the row skips with
+// heldOutside(); false for anything else, which the row rethrows.
+export function heldWindowExit(error, watch) {
+  return /^serve exited \([^)]*\) before announcing/.test(error.message) && watch.allHeld();
+}

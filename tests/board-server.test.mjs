@@ -15,7 +15,7 @@ import { createBoardServer, renderRefusedHost, resolveCockpitInstance, cockpitPo
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { withStderr, serveArgs, serveOpts, withTimeout } from "./support/board-rig.mjs";
-import { heldOutside, watchWindow } from "./support/cockpit-port.mjs";
+import { heldOutside, heldWindowExit, watchWindow } from "./support/cockpit-port.mjs";
 import { seedLabelMap } from "./support/label-map-seed.mjs";
 
 test("createBoardServer serves board.json and the page", async () => {
@@ -905,6 +905,31 @@ test("watchWindow: allHeld() is true only when every candidate was seen held", a
   }
 });
 
+// The skip the two CLI rows take when their first launch announces nothing:
+// only a launch that exited before announcing, against a window whose every
+// candidate was seen held. A window with a candidate free, or a rejection that
+// is not that exit (the row's own announce timeout), is the row's failure.
+test("heldWindowExit: skips only an exit before announcing against a window seen wholly held", async (t) => {
+  const [held, free] = [await unheldPort(), await unheldPort()];
+  const holder = createServer();
+  const failure = await new Promise((res) => { holder.once("error", res); holder.listen(held, "127.0.0.1", () => res(null)); });
+  if (failure?.code === "EADDRINUSE") return t.skip(heldOutside(held));
+  if (failure) throw failure;
+  const partial = await watchWindow([held, free]);
+  const whole = await watchWindow([held]);
+  const exitedEarly = new Error("serve exited (2) before announcing: board: no free port for this workspace");
+  const timedOut = new Error("timed out waiting for the cockpit to announce");
+  try {
+    assert.equal(heldWindowExit(exitedEarly, whole), true, "an exit before announcing against a wholly held window was not skipped");
+    assert.equal(heldWindowExit(exitedEarly, partial), false, "an exit before announcing against a window with a free candidate was skipped");
+    assert.equal(heldWindowExit(timedOut, whole), false, "a rejection other than an exit before announcing was skipped");
+  } finally {
+    await partial.stop();
+    await whole.stop();
+    await new Promise((res) => holder.close(res));
+  }
+});
+
 // The reuse path end to end, and the claim no unit row can make: a second
 // launch against a LIVE cockpit for the same workspace starts no server,
 // says where the board already is, and exits 0. The exit code is the whole
@@ -940,7 +965,7 @@ test("CLI: a second launch for the same workspace reuses the live cockpit, opens
       // A launch that found something outside this test holding every
       // candidate in its window exits without announcing, and without binding
       // it opens no tab either — the holders' doing, not the scan's.
-      if (/^serve exited \([^)]*\) before announcing/.test(e.message) && watch.allHeld()) return t.skip(heldOutside(ports[0]));
+      if (heldWindowExit(e, watch)) return t.skip(heldOutside(ports[0]));
       throw e;
     }
     const blocker = await watch.blockerBefore(Number(new URL(url).port));
