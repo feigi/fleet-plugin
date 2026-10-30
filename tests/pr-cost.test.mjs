@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
-import { SEARCH_STUB_SRC } from "./support/gh-pr-search.mjs";
+import { SEARCH_STUB_SRC, fillerPrs, searchesOf } from "./support/gh-pr-search.mjs";
 import { COLUMNS as MEMBER_COLUMNS, formatTsv, parseTsv as parseMemberTsv } from "../plugin/scripts/member-outcomes.mjs";
 import { COLUMNS as TIER_COLUMNS, formatRow, parseTierOutcomes } from "../plugin/scripts/tier-outcomes.mjs";
 import { computeReport, trips, guardFile, formatReport, crossCheck, blobId, readPrs, PrListIncomplete, WINDOW_START, MIN_N } from "../plugin/scripts/pr-cost.mjs";
@@ -213,13 +213,6 @@ test("--guard: a missing ticket-features.tsv is exit 2 naming its producer, and 
   assert.equal(r.guard, null);
 });
 
-// `n` CLOSED filler PRs created one per day, cycling through the 28 days of October from the window's first.
-const fillerPrs = (n, from = 90000) => Array.from({ length: n }, (_, i) => ({
-  number: from + i, state: "CLOSED", mergedAt: null, createdAt: `2026-10-${String(3 + (i % 28)).padStart(2, "0")}T09:00:00Z`,
-}));
-// The `created:` argument of each gh call, in order.
-const searchesOf = (r) => r.ghCalls.map((c) => c[c.indexOf("--search") + 1]);
-
 test("--guard: more than 1,000 PRs created in the window is read in date slices and yields the guard, not exit 2", () => {
   const w = world();
   addCell(w, "slow-high", MIN_N, 0, 10);
@@ -232,7 +225,7 @@ test("--guard: more than 1,000 PRs created in the window is read in date slices 
   assert.equal(slow.n, MIN_N, "every merged PR is counted, whichever slice returned it");
   assert.equal(slow.pending, 0, "none read as missing");
   assert.deepEqual(r.guard.pending ?? [], []);
-  const searches = searchesOf(r);
+  const searches = searchesOf(r.ghCalls);
   assert.equal(searches[0], `created:>=${WINDOW_START}`, "the whole window is read first");
   assert.ok(searches.length > 1, "the full first read was split");
   assert.ok(searches.slice(1).every((s) => /^created:(\d{4}-\d\d-\d\d\.\.\d{4}-\d\d-\d\d|>=\d{4}-\d\d-\d\d)$/.test(s)), searches.join(" "));
@@ -272,6 +265,8 @@ test("--guard: a window just under the search cap is one read, not refused (the 
 
 test("readPrs: a full slice is halved by day until every slice is short, the top one open-ended, and each PR kept once", () => {
   const rows = [3, 4, 5, 6, 6].map((d, i) => ({ number: 100 + i, state: "MERGED", mergedAt: null, day: `2026-10-0${d}` }));
+  // #100 again on a later day, so two slices both list it: it is kept once.
+  rows.push({ ...rows[0], day: "2026-10-05" });
   const calls = [];
   // A search that answers at most `cap` rows, as GitHub's does.
   const listAt = (cap) => (created) => {
@@ -287,6 +282,24 @@ test("readPrs: a full slice is halved by day until every slice is short, the top
   assert.throws(() => readPrs(listAt(2), { windowStart: "2026-10-03", today: "2026-10-06", limit: 2 }), PrListIncomplete);
   // A slice that fills the cap on a day after `today` (a clock behind GitHub's) cannot be split either.
   assert.throws(() => readPrs(() => [{ number: 1, state: "OPEN" }], { windowStart: "2026-10-03", today: "2026-10-01", limit: 1 }), PrListIncomplete);
+});
+
+test("readPrs: when a bounded slice is itself full, the short slices tile the window by day with no overlap", () => {
+  const rows = [3, 3, 4, 4, 5, 6].map((d, i) => ({ number: 200 + i, state: "MERGED", mergedAt: null, day: `2026-10-0${d}` }));
+  const leaves = [];
+  const list = (created) => {
+    const [lo, hi] = created.startsWith(">=") ? [created.slice(2), "9999-12-31"] : created.split("..");
+    const hit = rows.filter((r) => r.day >= lo && r.day <= hi);
+    if (hit.length < 3) leaves.push([lo, hi]);
+    return hit.slice(0, 3);
+  };
+  assert.deepEqual(readPrs(list, { windowStart: "2026-10-03", today: "2026-10-06", limit: 3 }).map((p) => p.number).sort(), [200, 201, 202, 203, 204, 205]);
+  leaves.sort((a, b) => (a[0] < b[0] ? -1 : 1));
+  assert.equal(leaves[0][0], "2026-10-03");
+  assert.equal(leaves.at(-1)[1], "9999-12-31", "the top slice stays open-ended");
+  for (let i = 1; i < leaves.length; i++) {
+    assert.equal(leaves[i][0], new Date(Date.parse(leaves[i - 1][1]) + 86_400_000).toISOString().slice(0, 10), `${leaves[i - 1]} and ${leaves[i]} are not adjacent and disjoint`);
+  }
 });
 
 test("--guard: an explicit --pricing that does not exist is exit 2, while an absent default is simply no cross-check", () => {

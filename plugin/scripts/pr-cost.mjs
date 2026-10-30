@@ -131,12 +131,12 @@ export function readPrs(listSlice, { windowStart = WINDOW_START, today = new Dat
       for (const row of rows) byNumber.set(row.number, row);
       continue;
     }
-    const last = to ?? (today > from ? today : from);
+    const last = to ?? today;
     if (from >= last) {
       throw new PrListIncomplete(`gh pr list created:${to === null ? `>=${from}` : from} returned ${rows.length} PRs, its cap, and one day cannot be split further — merged state may be truncated`);
     }
-    const mid = dayOf(dayNumber(from) + Math.floor((dayNumber(last) - dayNumber(from)) / 2));
-    todo.push({ from: dayOf(dayNumber(mid) + 1), to }, { from, to: mid });
+    const midN = Math.floor((dayNumber(from) + dayNumber(last)) / 2);
+    todo.push({ from: dayOf(midN + 1), to }, { from, to: dayOf(midN) });
   }
   return [...byNumber.values()];
 }

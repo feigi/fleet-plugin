@@ -1,5 +1,6 @@
 // What GitHub's search does to `gh pr list --search created:… --limit N`, for
-// the `gh` stubs of the suites that run pr-cost.mjs.
+// the `gh` stubs of the suites that run pr-cost.mjs, and the fixture helpers
+// those suites share.
 //
 // Two things a stub that `cat`s its fixture cannot say: the `created:` window
 // selects only the PRs created in it (`>=A`, or `A..B` with both days in), and
@@ -23,7 +24,7 @@ export function searchPrs(prs, args, firstDay) {
   const flag = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
   const search = flag("--search");
   const created = /(?:^|\s)created:(\S+)/.exec(search ?? "")?.[1];
-  let [lo, hi] = [undefined, undefined];
+  let lo, hi;
   if (created?.startsWith(">=")) lo = created.slice(2);
   else if (created) [lo, hi] = created.split("..");
   const dayOf = (p) => String(p.createdAt ?? firstDay).slice(0, 10);
@@ -34,3 +35,11 @@ export function searchPrs(prs, args, firstDay) {
 
 /** Source for the top of a node stub: `searchPrs` and the window's first day. */
 export const SEARCH_STUB_SRC = `${searchPrs}\nconst FIRST_DAY = ${JSON.stringify(WINDOW_START)};\n`;
+
+/** `n` CLOSED filler PRs created one per day, cycling through the 28 days of October from the window's first. */
+export const fillerPrs = (n, from = 90000) => Array.from({ length: n }, (_, i) => ({
+  number: from + i, state: "CLOSED", mergedAt: null, createdAt: `2026-10-${String(3 + (i % 28)).padStart(2, "0")}T09:00:00Z`,
+}));
+
+/** The `--search` argument of each recorded `gh` argv, in order. */
+export const searchesOf = (calls) => calls.map((c) => c[c.indexOf("--search") + 1]);

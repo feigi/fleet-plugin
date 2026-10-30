@@ -14,7 +14,7 @@ import { writeExecStub } from "./support/exec-stub.mjs";
 import { COLUMNS as MEMBER_COLUMNS, formatTsv } from "../plugin/scripts/member-outcomes.mjs";
 import { COLUMNS as TIER_COLUMNS, formatRow } from "../plugin/scripts/tier-outcomes.mjs";
 import { DAY_ONE_TABLE, dayOneScripts } from "./support/day-one-router-table.mjs";
-import { SEARCH_STUB_SRC } from "./support/gh-pr-search.mjs";
+import { SEARCH_STUB_SRC, fillerPrs, searchesOf } from "./support/gh-pr-search.mjs";
 import { WINDOW_START, MIN_N } from "../plugin/scripts/pr-cost.mjs";
 import { FEATURE_COLUMNS } from "../plugin/scripts/pull-attribution.mjs";
 import { validateTable } from "../plugin/scripts/ticket-router.mjs";
@@ -190,11 +190,6 @@ test("a tripped guard is a verdict and the script exits 0; a guard that cannot b
   assert.match(b.stderr, /metrics-refresh: cost guard failed: pr-cost\.mjs --guard exited 2/);
 });
 
-// `n` CLOSED filler PRs created one per day, cycling through the 28 days from the window's first.
-const fillerPrs = (n, from = 90000) => Array.from({ length: n }, (_, i) => ({
-  number: from + i, state: "CLOSED", mergedAt: null, createdAt: `2026-10-${String(3 + (i % 28)).padStart(2, "0")}T09:00:00Z`,
-}));
-
 test("more than 1,000 PRs opened in the window is read in slices: the guard is computed, not failed on the search cap", () => {
   const rows = corpus();
   const prs = fillerPrs(1500);
@@ -208,7 +203,7 @@ test("more than 1,000 PRs opened in the window is read in slices: the guard is c
   assert.match(r.stdout, /cost guard: verdict ok, pr-cost\.mjs exit 0/);
   const guard = JSON.parse(readFileSync(join(f.repo, GUARD), "utf8"));
   assert.equal(guard.cells.find((c) => c.cell === "slow-high").n, MIN_N, "every merged PR is read, across the slices");
-  const searches = f.ghCalls().map((c) => c[c.indexOf("--search") + 1]);
+  const searches = searchesOf(f.ghCalls());
   assert.equal(searches[0], `created:>=${WINDOW_START}`);
   assert.ok(searches.length > 1, "the full first read was split");
 });
