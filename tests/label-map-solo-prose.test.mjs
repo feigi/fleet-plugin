@@ -74,6 +74,10 @@ test("/review-and-fix runs ensure standalone before step 1 and says a dispatched
   assert.match(preamble, Pin.phrase("**Standalone, before step 1, run the Label map derivation step:** `~/.fleet/bin/fleet-run label-map.mjs ensure`."));
   assert.match(preamble, Pin.phrase("wait for the answer, run `~/.fleet/bin/fleet-run label-map.mjs set --create` with it"));
   assert.match(preamble, Pin.phrase("then `ensure` again, which now exits 0. Exit 1 or 2 → show what it printed and stop."));
+  // The payload's table file, named for the question and for making the answer permanent; the maintainer edits that table, the agent never does.
+  assert.match(preamble, Pin.phrase("it printed the question payload, whose `tableFile` is the path of the repository's triage-label table"));
+  assert.match(preamble, Pin.phrase("(a role declared in the table but not in the tracker names `tableFile`)"));
+  assert.match(preamble, Pin.phrase("After that second `ensure`, tell the maintainer to add or edit the role's row in the file `tableFile` names; never write that table yourself."));
   assert.match(preamble, Pin.phrase("**Dispatched as a fix-applier, you never run `ensure` and never ask:**"));
   // The derivation step is not a numbered step: the fix-applier's brief cites steps 2, 3 and 5 by number.
   assert.doesNotMatch(preamble, /^\d+\. /m, "the derivation step took a step number, which renumbers the steps the fix-applier brief cites");
