@@ -45,9 +45,12 @@
 //                                 the string rules, the message naming each
 //                                 role, the rule and the fix. Exit 2: no
 //                                 repository, the table not readable, the
-//                                 cache present but not readable or not
-//                                 writable, `gh` could not answer, the label
-//                                 list filled its limit, or a usage refusal.
+//                                 cache present but not readable (the
+//                                 message naming the errno as a filesystem
+//                                 fault and its repair, nothing written) or
+//                                 not writable, `gh` could not answer, the
+//                                 label list filled its limit, or a usage
+//                                 refusal.
 //   label-map.mjs set [--accept-suggestions] [--create] [<role>=<label> …]
 //                                 writes the map from a fresh derivation (as
 //                                 `ensure` runs it) plus the answer: each
@@ -73,7 +76,9 @@
 //                                 unknown role, a malformed pair, a role
 //                                 answered twice or an unknown flag; no
 //                                 repository, `gh` could not answer, or the
-//                                 cache not readable or writable.
+//                                 cache not readable (the message naming the
+//                                 errno as a filesystem fault and its
+//                                 repair, nothing written) or not writable.
 //   label-map.mjs show [<role>]   the mapped string for <role>, or the whole
 //                                 `roles` object as JSON with no role.
 //                                 `show` exits 0 printed; 1 no cache or an
@@ -587,8 +592,9 @@ function readDerivationInputs(cwd) {
   } catch (e) {
     if (!(e instanceof LabelMapUnreadable)) throw e;
     // Absent or not parsing is derived again; a cache that exists and cannot
-    // be read may hold maintainer answers, so it is never written over.
-    if (e.cause) throw new LabelMapUnavailable(`cannot read the Label map at ${e.cause.path} (${e.cause.code ?? e.cause.message}); nothing written`);
+    // be read may hold maintainer answers, so it is never written over: the
+    // refusal is the reader's own, naming the errno and the repair.
+    if (e.cause) throw new LabelMapUnavailable(`${e.message}; nothing written`);
   }
   return { top, table, live, cache };
 }
