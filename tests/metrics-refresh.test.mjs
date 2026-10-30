@@ -343,6 +343,20 @@ test("a fit that cannot run throws before the rename, so the old file stays", ()
   assert.equal(readFileSync(join(f.repo, PREVIEW), "utf8"), before);
 });
 
+test("the preview records the prior's window_start, the install's version only as a string, and the blob ids in key order", () => {
+  const f = fixture();
+  assert.equal(f.run().status, 0);
+  const guard = JSON.parse(readFileSync(join(f.repo, GUARD), "utf8"));
+  const table = join(f.root, "router-table.json");
+  writeFileSync(table, JSON.stringify({ ...SHIPPED, window_start: "2026-09-01" }));
+  const pkg = join(f.root, "package.json");
+  writeFileSync(pkg, JSON.stringify({ version: 7 }));
+  const p = writePreview(f.repo, guard, { tablePath: table, packagePath: pkg });
+  assert.equal(p.prior.window_start, "2026-09-01");
+  assert.equal(p.prior.version, null, "a version that is not a string is none");
+  assert.deepEqual(Object.keys(p.tsv_blobs), ["docs/metrics/member-outcomes.tsv", "docs/metrics/ticket-features.tsv", "docs/metrics/tier-outcomes.tsv"], "sorted, not in the order the fit read them");
+});
+
 test("usage: only the declared flag and no positional, else exit 2", () => {
   const f = fixture();
   for (const args of [["--bogus"], ["phase-0"], ["--repo"]]) {

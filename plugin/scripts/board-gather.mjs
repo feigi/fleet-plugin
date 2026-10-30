@@ -822,8 +822,10 @@ export function readGuardFile(stateDir) {
 // The Preview fit metrics-refresh.mjs writes beside the guard,
 // `.fleet/router-preview.json`: `{ status: "ok", preview }`, `{ status: "missing" }`
 // or `{ status: "unreadable", why }`. Its `table` is read through `validateTable`,
-// as the installed one is; the fields the tab compares it by must be there, each
-// of the type the file writes it as.
+// as the installed one is, and its `n_rows`, which `validateTable` does not check
+// and the tab prints, must be a count; `computed_at` and `guard_computed_at` must
+// be strings, and `tsv_blobs` and `prior` objects, their values checked where the
+// tab reads them.
 export function readPreviewFile(stateDir) {
   let text;
   try {
@@ -842,6 +844,7 @@ export function readPreviewFile(stateDir) {
   }
   const table = validateTable(p.table);
   if (table instanceof Error) return { status: "unreadable", why: table.message };
+  if (!Number.isInteger(table.n_rows) || table.n_rows < 0) return { status: "unreadable", why: "router table: `n_rows` is not a count" };
   return { status: "ok", preview: { computed_at: p.computed_at, guard_computed_at: p.guard_computed_at, tsv_blobs: p.tsv_blobs, prior: p.prior, table } };
 }
 

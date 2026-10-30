@@ -579,17 +579,18 @@ const noFit = (heading) => ({
 });
 
 // The Preview fit's heading labels, against `raw`, the guard on disk, `routed`,
-// readGuard's answer for it, and `table`, the installed one: fitted beside
-// another guard, on other records, or against another prior. The prior is
+// readGuard's answer for it, `table`, the installed one, and `records`, whether
+// the fit read the guard's files: fitted beside another guard, on other records,
+// or against another prior. The prior is
 // compared only on what the fit takes from it — `stage`, `cells`, `classifier`,
 // and `window_start` when the guard gives none — so a release that changes only
 // what the fit recomputes, or `fitted_commit` and `version`, raises nothing: the
 // next phase 0's refit would come out the same.
-function previewLabels(p, raw, routed, table) {
+function previewLabels(p, raw, routed, table, records) {
   const labels = [];
   if (p.guard_computed_at !== raw.computed_at) labels.push(`fitted beside the guard of ${when(p.guard_computed_at)}, not this one`);
-  if (!isRecord(raw.tsv_blobs)) labels.push("fitted on the guard's records: not checked: this guard predates the blob ids it needs");
-  else if (!isDeepStrictEqual(p.tsv_blobs, raw.tsv_blobs)) labels.push("fitted on other records than the guard's");
+  if (records === null) labels.push("fitted on the guard's records: not checked: this guard predates the blob ids it needs");
+  else if (!records) labels.push("fitted on other records than the guard's");
   if (table === null) {
     labels.push("fitted against the installed table: not checked: no router table read");
     return labels;
@@ -605,11 +606,11 @@ function previewLabels(p, raw, routed, table) {
 }
 
 // The Cells whose newest generation's merged n the guard and the fit count
-// differently although both read the same files: the guard counts merges by
-// GitHub's state, the fit by Rulings. Files the guard names no blob ids for, or
-// other files, compare nothing.
-function nDiffers(p, raw) {
-  if (!isRecord(raw.tsv_blobs) || !isDeepStrictEqual(p.tsv_blobs, raw.tsv_blobs)) return [];
+// differently although both read the same files, `records` true: the guard
+// counts merges by GitHub's state, the fit by Rulings. Files the guard names no
+// blob ids for, or other files, compare nothing.
+function nDiffers(p, raw, records) {
+  if (records !== true) return [];
   const fit = isRecord(p.table.estimates?.["*"]) ? p.table.estimates["*"] : {};
   return raw.cells.filter((e) => {
     const f = fit[e.cell];
@@ -631,7 +632,10 @@ function evidenceFavours({ preview, guard, routed, table, modelRoles, mark }) {
   const p = preview.preview;
   const fit = p.table;
   const raw = guard.guard;
-  const differ = nDiffers(p, raw);
+  // Whether the fit read the guard's files: null when the guard names no blob
+  // ids to compare, else whether the two name the same ones.
+  const records = isRecord(raw.tsv_blobs) ? isDeepStrictEqual(p.tsv_blobs, raw.tsv_blobs) : null;
+  const differ = nDiffers(p, raw, records);
   const entry = (o, s) => {
     const e = rowEntry(fit, routed, modelRoles, o, s);
     const now = table === null ? null : rowDispatch({ table, guard: routed, objective: o, stratum: s }).policy;
@@ -645,7 +649,7 @@ function evidenceFavours({ preview, guard, routed, table, modelRoles, mark }) {
     title: FAVOURS,
     source: { text: ["Preview fit", "this repository's runs", `computed ${when(p.computed_at)}`, plural(fit.n_rows, "Pull")].join(" · "), check: null },
     heading: fit.burn_in ? `stage ${fit.stage}: ${shortWords(fit, "present") ?? "every Cell has its merged PRs"}` : null,
-    labels: previewLabels(p, raw, routed, table),
+    labels: previewLabels(p, raw, routed, table, records),
     footnotes: differ.length === 0 ? [] : [{ mark, text: `${list(differ)}: the guard counts merges by GitHub's state, the fit by Rulings, and the fit admits only drawn or rule-sized Pulls` }],
     rows: Object.fromEntries(OBJECTIVES.map((o) => [o,
       Object.fromEntries(["*", ...STRATA].filter((s) => Object.hasOwn(fit.rows[o], s)).map((s) => [s, entry(o, s)])),
@@ -679,6 +683,15 @@ export function policyRowsView({ sides, objective = null }) {
     dispatch: e.dispatch === shared[i] ? null : e.dispatch,
     candidates: e.candidates.map((c) => (c.model !== null && modelLine[i] !== null ? { ...c, model: { ...c.model, text: null } } : c)),
   });
+  // How many sides have rows, and whether a Stratum none of them has a row for
+  // may collapse: never while a side's rows are unknown.
+  const read = sides.filter((s) => s.rows !== null).length;
+  const collapsible = read > 0 && sides.every((s) => s.rows !== null || !s.unread);
+  const cellOf = (s, e, i) => {
+    if (s.rows === null) return s.unread ? { unread: s.unread } : { empty: true };
+    if (e === null) return { follows: "no row of its own: follows *" };
+    return show(e, i);
+  };
   return {
     sides: sides.map((s, i) => ({ title: s.title, source: s.source, heading: s.heading, labels: s.labels ?? [], dispatch: shared[i], modelLine: modelLine[i], footnotes: s.footnotes })),
     objectives: OBJECTIVES.map((o) => ({
@@ -687,15 +700,10 @@ export function policyRowsView({ sides, objective = null }) {
       lines: ["*", ...STRATA].map((stratum) => {
         const line = { stratum, anchor: `cells-row-${o}-${stratum}`, href: `#cells/row/${o}/${stratum}` };
         const own = sides.map((s) => s.rows?.[o]?.[stratum] ?? null);
-        const read = sides.filter((s) => s.rows !== null);
-        if (stratum !== "*" && read.length > 0 && sides.every((s) => s.rows !== null || !s.unread) && own.every((e) => e === null)) {
-          return { ...line, collapsed: `${stratum}: ${read.length > 1 ? "no row on either side" : "no row"}, follows *` };
+        if (stratum !== "*" && collapsible && own.every((e) => e === null)) {
+          return { ...line, collapsed: `${stratum}: ${read > 1 ? "no row on either side" : "no row"}, follows *` };
         }
-        return {
-          ...line,
-          sides: sides.map((s, i) => (s.rows === null ? (s.unread ? { unread: s.unread } : { empty: true })
-            : own[i] === null ? { follows: "no row of its own: follows *" } : show(own[i], i))),
-        };
+        return { ...line, sides: sides.map((s, i) => cellOf(s, own[i], i)) };
       }),
     })),
   };

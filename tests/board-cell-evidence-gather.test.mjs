@@ -208,10 +208,15 @@ test("readPreviewFile: reads what metrics-refresh writes; a missing file is miss
     [JSON.stringify({ ...written, tsv_blobs: [] }), "`tsv_blobs` is not an object"],
     [JSON.stringify({ ...written, prior: null }), "`prior` is not an object"],
     [JSON.stringify({ ...written, table: { ...written.table, stage: 0 } }), "router table: `stage` is not a positive integer"],
+    [JSON.stringify({ ...written, table: { ...written.table, n_rows: undefined } }), "router table: `n_rows` is not a count"],
+    [JSON.stringify({ ...written, table: { ...written.table, n_rows: "235" } }), "router table: `n_rows` is not a count"],
   ]) {
     writeFileSync(path, text);
     assert.deepEqual(readPreviewFile(stateDir), { status: "unreadable", why }, text);
   }
+  const dirState = join(tempDir("cell-evidence-preview-dir-"), ".fleet");
+  mkdirSync(join(dirState, "router-preview.json"), { recursive: true });
+  assert.deepEqual(readPreviewFile(dirState), { status: "unreadable", why: "EISDIR" }, "a read error is named by its code");
 });
 
 // -- gather(): the whole read, and the board it makes --------------------------------------------
