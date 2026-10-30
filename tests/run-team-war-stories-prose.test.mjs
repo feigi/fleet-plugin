@@ -197,7 +197,6 @@ const MOVED = [
   ["isolation.md", "A pattern kill reaches siblings", "**A pattern kill reaches siblings — the implementer, fix-applier and finisher briefs forbid it.**", "Measured: an implementer chasing its own stalled run issued a `pkill -f` on its test file's name"],
   ["isolation.md", "What a killed run's output looks like depends on the signal", "**What the victim's output looks like depends on the signal — and one of the cases is a clean green.**", "Each measured on node v26.8.1/darwin against a purpose-spawned fixture killed by its own PID."],
   ["isolation.md", "The command line is no partition either", "**The command line is no partition either — not reliably.**", "Measured with `ps -Ao pid,ppid,args -ww`"],
-  ["merge-bot.md", "A mid-run tooling fix lands through a PR", "Plan it as a PR the run's own merge queue lands, never as an edit-and-continue.", "measured 2026-08-10 by a controller that tried exactly that at the end of a 7-PR run."],
   ["failure-handling.md", "A frozen transcript does not establish that a member is dead", "**A frozen transcript does not establish that a member is dead — the discriminator is its scratch dir.**", "Measured once: a refuter wedged forever on `until grep -q` for a marker `node --test` never writes,"],
   // The Run ledger section left SKILL.md (#3542): these three rules are stated
   // in references/ledger.md alone, and SKILL.md keeps no clause of them, only

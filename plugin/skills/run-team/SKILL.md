@@ -698,9 +698,9 @@ you cannot confirm was received, re-check the artifacts it governed. See referen
   lets a gate proceed. Exit 1 (the set changed) and exit 2 (the check could not
   answer) both refuse: report what it printed and do NOT re-read the
   instrument** — a guard that fails open on "could not look" protects nothing.
-- **Re-pin only after a change you made deliberately.** **A mid-run tooling fix**
-  is the one legitimate writer. Re-pinning to clear a refusal you cannot
-  explain discards the check.
+- **Re-pin only on the maintainer's adopt.** Nothing you change yourself is a
+  reason: a tooling defect is reported, never fixed by you. Re-pinning to clear
+  a refusal you cannot explain discards the check.
 - **A pinned tree whose HEAD moved is the maintainer's to settle, whoever moved
   it — and so is an installed plugin that changed.** When a refusal — your check
   or a finisher's halt — reads HEAD advanced, rewound or diverged from the pin
@@ -887,18 +887,15 @@ failures arrive as *wrong findings*, not errors:
 - **Never relay a diagnostic without reproducing it in that member's specific worktree**
   (re-run the check that raised it from there). See references/isolation.md.
 
-### A mid-run tooling fix
+### A tooling defect found mid-run
 
-**When to fix, its scope, triggers and shape.** See references/instruments.md.
+**When to report one, its scope, triggers and shape.** See references/instruments.md.
 
 Why the agent body carries what it does — read this before editing any `fleet-implementer-<cell>` file, and keep every cell's body byte-identical. See references/pull.md.
 
 Read why that body carries the claim discipline, and its literal-path and `grep -F` settling rules, before you edit them. See references/correction-tickets.md.
 
-**Then.** **Re-pin first** — `~/.fleet/bin/fleet-run instruments.sh
---pin`. See references/instruments.md.
-
-Plan it as a PR the run's own merge queue lands, never as an edit-and-continue. See references/merge-bot.md.
+**Then. Report it, and never fix it yourself: the defect stays live for the rest of this run.** See references/instruments.md.
 
 ## Red flags
 

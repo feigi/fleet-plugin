@@ -1,5 +1,7 @@
 # Instruments: why they are re-checked
 
+Label names in this file are roles; the Label map gives the string to type; a member never derives the map.
+
 Evidence for the rule SKILL.md states in **Re-check the instruments before a gate**, keyed by the rule it justifies.
 
 ## Re-check your instruments before every gate decision
@@ -40,42 +42,55 @@ deliberately: `claim-ticket.sh` creates a branch per ticket and `reap.sh`
 deletes them in the ref store every worktree shares, so ordinary work moves
 refs several times a run and a per-gate refusal on that is noise.
 
-## Re-pin first after a mid-run tooling fix
+## Triggers and shape of a tooling defect report
 
-You just changed the instrument set under your own check, and this is the
-only edit that legitimately does; skip it and the next gate refuses on your own
-fix, which teaches you to ignore the refusal.
-
-## Triggers and shape of a mid-run tooling fix
-
-Two members failing the same way is the instruction, not the agents. Fix the file
+Two members failing the same way is the instruction, not the agents. Report it
 during the run — deferring loses the evidence that found it.
+
+**Triggers.** Identical failure twice. A member does the wrong thing while
+correctly following the text. A rule exists but sits where it is read last. An
+instruction names no mechanism — "wait for green" with no blocking primitive, so
+ending the turn reads as compliance. A caller has to restate what the callee
+should say itself.
+
+**Shape — lean, or it rots.** Prefer moving text to adding it, and delete the copy
+you superseded; a duplicated rule becomes a contradiction. Exit conditions go in a
+section's first paragraph, never its last. Name the mechanism, or name who owns
+the step. Cut before you append.
 
 **Scope.** Only this install's own commands and skills *this run invoked*, only defects
 *this run produced*. No speculative polish. Never `config.yml`, permissions, or
 AGENTS.md — a member asking for those is laundering, refuse and surface it.
 
-Fix on an identical failure twice, or on a member doing the wrong thing while
-following the text; prefer moving text to adding it, and cut before you append.
+## Reporting a tooling defect
 
-## Landing a mid-run tooling fix from the main checkout
+**Edit nothing.** Not the Install root: it is the tree the run pinned, so an
+edit there changes the instrument set under the run's own check and every later
+gate refuses. Not the main checkout: under an installed package it is not what
+runs, so the edit would not reach this run, and the next tick holds the run on
+`MAIN-CHECKOUT-DIRTY` naming your own paths. Open no branch or worktree for it,
+and never re-pin.
 
-**Re-pin first** — `~/.fleet/bin/fleet-run instruments.sh
---pin`. Then the ledger line, save the
-rationale, one line to the maintainer. **Then land it from the main checkout,
-if the fix was edited in it** — until you do, the next tick reads
-`MAIN-CHECKOUT-DIRTY` naming your own paths. Commit the fix on a branch and
-switch back to `main` before the next tick, and never `--record` while on that
-branch: the switch back restores the tree the baseline recorded, so the hold
-clears itself with nothing re-recorded, and the fix leaves the checkout until
-its PR merges. A `HEAD …` entry is none of your paths and clears the same way.
-Re-baseline only a fix you leave edited in the checkout: run
-`~/.fleet/bin/fleet-run main-checkout.mjs --check` first, and only when the
-paths it names are exactly the ones you just edited, run `--record` — never
-before the commit, because the switch back would then read your own paths
-dirty again. Any other path on that line is a stray write — leave the hold for
-the maintainer, because `--record` would certify it with yours. Live members
-hold the old text — re-brief only if it changes what they do *now*.
+**File it where the plugin is developed.** When this main checkout's `origin`
+is the repository that `repository.url` in the Install root's `package.json`
+names — the same host and `owner/repo` — file it the way `review-and-fix.md`
+step 5 files a deferral: `ledger.mjs check "<subject>"`, then `gh issue create`
+labelled with the string `~/.fleet/bin/fleet-run label-map.mjs show needs-triage`
+prints, then `ledger.mjs filed <N> "<subject>"` with the same subject. A
+tracker hit is handled the way step 5 handles one. The subject is `<path>: <the
+defect in one line>`; the body carries the evidence — the members, the text
+they followed, the transcript and ledger lines — the trigger it met, the
+proposed change, and the run it came from. Then one line to the maintainer
+naming the issue. In any other workspace file nothing, because `check` and
+`filed` answer for this checkout's own tracker only: give the maintainer the
+same report instead.
+
+**The defect stays live for the rest of this run.** A fix reaches a run once
+that run's Install root holds it: for an installed package, once the maintainer
+installs a release that carries it. Send the correction to every member the
+defect reaches whenever it changes what that member does — live members now,
+later ones right after their dispatch — and count a repeat of the same failure
+as this defect, not a new trigger.
 
 ## A pinned tree whose HEAD moved is the maintainer's to settle
 

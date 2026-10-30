@@ -829,7 +829,7 @@ const MOVED_RATIONALE_POINTERS = [
   ["After any ruling you cannot confirm was received, re-check the artifacts it governed.", "member-lifecycle.md", "## Never read a member's silence as assent"],
   ["A member whose prompt names no path asks you by name and never makes one up.", "isolation.md", "## The scratch root is computed, never invented and never recorded"],
   ["**The controller's own cwd stays the main checkout, unchanged.**", "isolation.md", "## The controller's own cwd stays the main checkout"],
-  ["**Re-pin first** — `~/.fleet/bin/fleet-run instruments.sh --pin`.", "instruments.md", "## Re-pin first after a mid-run tooling fix"],
+  ["**Then. Report it, and never fix it yourself: the defect stays live for the rest of this run.**", "instruments.md", "## Reporting a tooling defect"],
   ["and its literal-path and `grep -F` settling rules, before you edit them.", "correction-tickets.md", "## Every implementer body carries the claim discipline"],
 ];
 for (const [rule, file, heading] of MOVED_RATIONALE_POINTERS) {
