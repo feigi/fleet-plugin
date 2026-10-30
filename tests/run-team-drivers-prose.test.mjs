@@ -233,18 +233,19 @@ test("the Label map section words the question as the derivation step's payload 
   assert.match(s, Pin.phrase("show the maintainer what the step printed and stop. Neither is a question."));
   assert.match(s, Pin.phrase("Put it to the maintainer as one question listing each uncertain role, its suggestion, why, and the alternatives"));
   for (const why of [
-    "`declared in the triage-label table but not in the tracker`",
+    "`declared in <tableFile> but not in the tracker`",
     "`near match in the tracker`",
     "`the default and a near match are both in the tracker`",
     "`nothing found — the default, to be created`",
     "`was <was> when cached; gone from the tracker (renamed or deleted?) — name the label to use`",
     "`was <was> when cached, now gone from the tracker; `",
-    "`your earlier answer <string> is now <role>'s in the triage-label table; `",
+    "`your earlier answer <string> is now <role>'s in <tableFile>; `",
     "`your earlier answer <string> is now <role>'s label (its default); `",
   ]) assert.match(s, Pin.phrase(why));
   assert.match(s, Pin.phrase("reply `defaults` to accept every suggestion, or name `<role>=<label>` for any you want otherwise — a role with no suggestion must be named; labels that do not exist are created on your confirmation."));
   assert.match(s, Pin.phrase("`~/.fleet/bin/fleet-run label-map.mjs set --create` with the reply: `--accept-suggestions` for `defaults`, and each `<role>=<label>` the maintainer named."));
-  assert.match(s, Pin.phrase("In the same reply, tell the maintainer how to make the answer permanent: add or edit the role's row in the repository's triage-label table, the role in the first cell and the string in the second."));
+  assert.match(s, Pin.phrase("and `tableFile`, the path of the repository's triage-label table, the file the reasons below name. It is the payload's string, read from the echoed payload, never a path you spell yourself."));
+  assert.match(s, Pin.phrase("In the same reply, tell the maintainer how to make the answer permanent: add or edit the role's row in the file the payload's `tableFile` names, the role in the first cell and the string in the second."));
   assert.match(s, Pin.phrase("The plugin never writes that table, so neither do you."));
   assert.match(s, Pin.phrase("Exit 2 of `set` is no question"));
   assert.match(s, Pin.phrase("Show the maintainer what it printed and stop, as for a failed `labels` step."));

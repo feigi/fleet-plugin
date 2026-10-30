@@ -37,7 +37,10 @@
 //                                 every call), and prints the map as JSON
 //                                 (exit 0, writing the cache only when it
 //                                 derived one), or the question payload as
-//                                 JSON (exit 3, nothing written). It never
+//                                 JSON (exit 3, nothing written): `certain`,
+//                                 `uncertain` and `tableFile`, the table's
+//                                 path under the checkout's top level, for
+//                                 the question to name. It never
 //                                 creates a label. Exit 1: the table breaks
 //                                 the string rules, the message naming each
 //                                 role, the rule and the fix. Exit 2: no
@@ -385,8 +388,9 @@ const squash = (text) => lc(text).replace(/[^\p{L}\p{N}]/gu, "");
  * to it as it would to a table row. Pure: no file, no `gh`. One of
  *   { kind: "certain", roles, origin }        every role certain, the map valid
  *   { kind: "break", faults: [{ role, rule, fix }] }   the table or an answer breaks the string rules
- *   { kind: "uncertain", payload: { certain, uncertain }, roles, origin }   the maintainer decides;
- *     `roles` and `origin` are the certain roles' and what settled them
+ *   { kind: "uncertain", payload: { certain, uncertain, tableFile }, roles, origin }   the maintainer decides;
+ *     `roles` and `origin` are the certain roles' and what settled them;
+ *     `tableFile` is TRIAGE_TABLE_FILE, so the question can name the file
  */
 export function deriveLabelMap({ table, live, cache, answers = new Map() }) {
   const exact = new Set(live);
@@ -563,7 +567,7 @@ export function deriveLabelMap({ table, live, cache, answers = new Map() }) {
     if (dropped.has(role)) entry.claimedBy = dropped.get(role);
     uncertain.push(entry);
   }
-  if (uncertain.length) return { kind: "uncertain", payload: { certain, uncertain }, roles: certain, origin };
+  if (uncertain.length) return { kind: "uncertain", payload: { certain, uncertain, tableFile: TRIAGE_TABLE_FILE }, roles: certain, origin };
   // Nothing above lets two certain roles share a string; this is the belt to
   // that suspenders, the same rules the reader and the writer's caller hold.
   const broken = labelStringFaults(certain);
