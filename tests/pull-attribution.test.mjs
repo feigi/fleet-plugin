@@ -796,11 +796,11 @@ test("attribute: a Pull whose merged PR another Pull took the Ruling of by date,
 test("parseFeatures refuses a ticket, or a non-blank parent, that is not an issue number, naming the row and the value", () => {
   const head = FEATURE_COLUMNS.join("\t");
   const row = (ticket, parent) => FEATURE_COLUMNS.map((c) => ({ ticket, parent, chosen_cell: "slow-high" })[c] ?? "").join("\t");
-  for (const t of ["007", "0", "00"]) {
+  for (const t of ["007", "0", "00", "7x"]) {
     assert.throws(() => parseFeatures(`${head}\n${row("7", "")}\n${row(t, "")}\n`),
       { message: `ticket-features.tsv row 2: ticket ${JSON.stringify(t)} is not an issue number` });
   }
-  for (const p of ["05", "0"]) {
+  for (const p of ["05", "0", "7x"]) {
     assert.throws(() => parseFeatures(`${head}\n${row("7", "")}\n${row("7", p)}\n`),
       { message: `ticket-features.tsv row 2: parent ${JSON.stringify(p)} is not blank or an issue number` });
   }
