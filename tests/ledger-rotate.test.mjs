@@ -33,7 +33,7 @@ const LEDGER = [
 ].join("\n");
 
 const STAMPED = /^ledger\.\d{4}-\d{2}-\d{2}T\d{6}Z\.md$/;
-const NOTHING_CARRIED = { carried: { rows: [], dispatched: [], routed: [] }, retired: [], skipped: [] };
+const NOTHING_CARRIED = { carried: { rows: [], dispatched: [], routed: [] }, retired: [], skipped: [], stamped: {}, unstamped: {} };
 const stamp = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z").replaceAll(":", "");
 
 // Pids no real process is likely to hold. Only the table names them, and the
@@ -121,7 +121,7 @@ test("rotate with no heartbeat mark moves the ledger byte-identical to ledger.<U
 
   const w = f.cli(["row", "12", "impl-12"]);
   assert.equal(w.status, 0, w.stderr);
-  assert.deepEqual(JSON.parse(f.cli(["read"]).stdout), { rows: ["#12 impl-12"], filed: [], ruled: [], dispatched: [], briefs: {}, queued: {}, agents: {}, routed: [], drain: null, retired: [] });
+  assert.deepEqual(JSON.parse(f.cli(["read"]).stdout), { rows: ["#12 impl-12"], filed: [], ruled: [], dispatched: [], briefs: {}, queued: {}, agents: {}, sessions: {}, routed: [], drain: null, retired: [] });
   assert.equal(readFileSync(join(f.dir, archive), "utf8"), LEDGER, "a later write must not land in the archive");
 });
 
@@ -585,12 +585,15 @@ test("an ancestor rotate archives the ledger as-is, carries every live row whole
   assert.equal(r.status, 0, r.stderr);
   const [archive] = f.archives();
   assert.equal(readFileSync(join(f.dir, archive), "utf8"), LIVE, "the archive must be the ledger's own bytes");
-  assert.deepEqual(JSON.parse(r.stdout), { rotated: true, archive: join(f.dir, archive), carried: CARRIED, retired: RETIRED, skipped: [] });
+  // No entry here carries a brief=, so no implementer's has a word to stamp.
+  const noBrief = "its entry has no brief=, which a session= word follows";
+  assert.deepEqual(JSON.parse(r.stdout), { rotated: true, archive: join(f.dir, archive), carried: CARRIED, retired: RETIRED, skipped: [],
+    stamped: {}, unstamped: { "impl-3": noBrief, "impl-4": noBrief, "impl-7": noBrief, "impl-12": noBrief } });
   assert.match(r.stderr, /retired 4 name\(s\) from /);
   assert.deepEqual(f.ctl(), { ...OURS, prior: "ancestor" });
   // The tokens riding on a carried row come with it: tier verdicts,
   // `reviewed=`, dispositions, conflict and merge holds.
-  assert.deepEqual(read(f), { rows: LIVE_ROWS, dispatched: CARRIED.dispatched, briefs: {}, queued: {}, agents: {}, routed: [], filed: [], ruled: [], drain: null, retired: RETIRED });
+  assert.deepEqual(read(f), { rows: LIVE_ROWS, dispatched: CARRIED.dispatched, briefs: {}, queued: {}, agents: {}, sessions: {}, routed: [], filed: [], ruled: [], drain: null, retired: RETIRED });
 });
 
 // A Pull's Routing rides with its row: an ancestor rotate carries each
@@ -896,7 +899,7 @@ test("two ancestor rotates in a row carry a still-live token twice, and retired 
   const rows = LIVE_ROWS.filter((r) => !r.startsWith("#12 "));
   const dispatched = CARRIED.dispatched.filter((e) => e !== "impl-12");
   assert.deepEqual(JSON.parse(again.stdout).carried, { rows, dispatched, routed: [] });
-  assert.deepEqual(read(f), { rows, dispatched, briefs: {}, queued: {}, agents: {}, routed: [], filed: [], ruled: [], drain: null, retired: [...RETIRED, "impl-12", "merge-bot-2"] });
+  assert.deepEqual(read(f), { rows, dispatched, briefs: {}, queued: {}, agents: {}, sessions: {}, routed: [], filed: [], ruled: [], drain: null, retired: [...RETIRED, "impl-12", "merge-bot-2"] });
   const next = f.cli(["dispatch", "merge-bot"]);
   assert.equal(next.status, 0, next.stderr);
   assert.equal(JSON.parse(next.stdout).member, "merge-bot-3");
@@ -924,8 +927,8 @@ test("an ancestor rotate of a ledger with nothing live leaves only ## Retired be
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(f.ctl(), { ...OURS, prior: "ancestor" });
   const retired = [...SETTLED_DISPATCHED.map((e) => e.split("=")[0]), "review-pr-15"];
-  assert.deepEqual(JSON.parse(r.stdout), { rotated: true, archive: join(f.dir, f.archives()[0]), carried: { rows: [], dispatched: [], routed: [] }, retired, skipped: [] });
-  assert.deepEqual(read(f), { rows: [], dispatched: [], briefs: {}, queued: {}, agents: {}, routed: [], filed: [], ruled: [], drain: null, retired });
+  assert.deepEqual(JSON.parse(r.stdout), { rotated: true, archive: join(f.dir, f.archives()[0]), carried: { rows: [], dispatched: [], routed: [] }, retired, skipped: [], stamped: {}, unstamped: {} });
+  assert.deepEqual(read(f), { rows: [], dispatched: [], briefs: {}, queued: {}, agents: {}, sessions: {}, routed: [], filed: [], ruled: [], drain: null, retired });
   assert.match(readFileSync(f.file, "utf8"), /\n## Retired\n\n- impl-3\n/);
 });
 
@@ -1067,6 +1070,116 @@ test("an ancestor rotate carries an implementer's agent= with its entry, live or
   // A carried implementer's late settle keeps its record.
   assert.equal(f.cli(["settle", "impl-12", "PR#30"]).status, 0);
   assert.match(readFileSync(f.file, "utf8"), /\n- impl-12=PR#30 brief=12121212 agent=fleet-implementer-task-high\n/);
+});
+
+// ── the session a carried implementer ran in ─────────────────────────────────
+
+const SESSION = "2026-10-28T08-00-00-000Z_01a08126-ee04-7095-a695-14e3249f1127";
+const SESSION_2 = "2026-10-29T09-00-00-000Z_02b19237-ff15-7106-b7a6-25f435a02238";
+const PROJECT = "/home/u/.omp/agent/sessions/-dev-repo";
+const writeReceipt = (f, session) => writeFileSync(join(f.dir, "phase0.json"), JSON.stringify({ run: "run-1", session, steps: {} }));
+// `ledger.mjs read` over any file, the archive included.
+const readFile = (path) => {
+  const r = spawnSync(process.execPath, [SCRIPT, "--file", path, "read"], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  return JSON.parse(r.stdout);
+};
+const STAMPABLE = ledgerOf({
+  rows: [LIVE_ROWS[1], LIVE_ROWS[3]],
+  dispatched: [
+    "impl-4=PR#6 brief=44444444 agent=fleet-implementer-smol-high", "fix-pr-6 brief=66666666",
+    "impl-12 brief=12121212 agent=fleet-implementer-task-high", "merge-bot-1 brief=bbbbbbbb queued=5,9",
+  ],
+});
+
+test("an ancestor rotate stamps each carried implementer entry, live or settled, with the session of the phase-0 receipt it archives, never a merge bot's, and settle keeps it", (t) => {
+  const f = fixture(t, { ledger: STAMPABLE, controller: ANCESTOR });
+  writeReceipt(f, join(PROJECT, SESSION));
+  const r = f.cli(["rotate"]);
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.deepEqual(out.stamped, { "impl-4": SESSION, "impl-12": SESSION });
+  assert.deepEqual(out.unstamped, {});
+  assert.match(r.stderr, new RegExp(`stamped impl-12 session=${SESSION} from .*phase0\\.json`));
+  assert.match(readFileSync(f.file, "utf8"), new RegExp([
+    "\\n## Dispatched\\n", `- impl-4=PR#6 brief=44444444 agent=fleet-implementer-smol-high session=${SESSION}`, "- fix-pr-6 brief=66666666",
+    `- impl-12 brief=12121212 agent=fleet-implementer-task-high session=${SESSION}`, "- merge-bot-1 brief=bbbbbbbb queued=5,9\\n",
+  ].join("\\n")));
+  const l = read(f);
+  assert.deepEqual(l.sessions, { "impl-4": SESSION, "impl-12": SESSION }, "read exposes it by member name, beside agents");
+  assert.deepEqual(l.agents, { "impl-4": "fleet-implementer-smol-high", "impl-12": "fleet-implementer-task-high" });
+  const [archive] = f.archives();
+  assert.equal(readFileSync(join(f.dir, archive), "utf8"), STAMPABLE, "the archive is the ledger's own bytes");
+  assert.deepEqual(readFile(join(f.dir, archive)).sessions, {});
+  // The carried member's late settle keeps the word beside its token.
+  assert.equal(f.cli(["settle", "impl-12", "PR#30"]).status, 0);
+  assert.match(readFileSync(f.file, "utf8"), new RegExp(`\\n- impl-12=PR#30 brief=12121212 agent=fleet-implementer-task-high session=${SESSION}\\n`));
+  assert.deepEqual(read(f).sessions, { "impl-4": SESSION, "impl-12": SESSION });
+});
+
+test("rotating twice carries the first stamp unchanged: the next run's own session never replaces it", (t) => {
+  const f = fixture(t, { ledger: STAMPABLE, controller: ANCESTOR });
+  writeReceipt(f, join(PROJECT, SESSION));
+  assert.equal(f.cli(["rotate"]).status, 0);
+  // The next run of the same session, as in the two-rotate test above: the
+  // first run's archives are moved off their stamped names so two rotates
+  // inside one second cannot collide on them.
+  const [first] = f.archives();
+  const firstStamp = first.slice("ledger.".length, -".md".length);
+  renameSync(join(f.dir, first), join(f.dir, "ledger.first.md"));
+  renameSync(join(f.dir, `phase0.${firstStamp}.json`), join(f.dir, "phase0.first.json"));
+  writeFileSync(join(f.dir, "heartbeat.json"), JSON.stringify({ quiet: 0, digest: "", controller: ANCESTOR }));
+  writeReceipt(f, join(PROJECT, SESSION_2));
+  const again = f.cli(["rotate"]);
+  assert.equal(again.status, 0, again.stderr);
+  const out = JSON.parse(again.stdout);
+  assert.deepEqual(out.stamped, {}, "an entry that already names a session is not stamped again");
+  assert.deepEqual(out.unstamped, {});
+  assert.deepEqual(read(f).sessions, { "impl-4": SESSION, "impl-12": SESSION });
+  // The second archive holds the stamped entries, and parses.
+  const [second] = f.archives();
+  assert.deepEqual(readFile(join(f.dir, second)).sessions, { "impl-4": SESSION, "impl-12": SESSION });
+});
+
+test("a rotate whose receipt is absent, unreadable or names no session directory still rotates, and carries each implementer entry unstamped, saying why", (t) => {
+  const receipt = (f) => join(f.dir, "phase0.json");
+  for (const [label, write, why] of [
+    ["absent", () => {}, (f) => `no ${receipt(f)} to read its session from`],
+    ["unreadable", (f) => writeFileSync(receipt(f), "{ nope"), (f) => `${receipt(f)} unreadable: not JSON`],
+    ["not a session", (f) => writeReceipt(f, PROJECT), (f) => `${receipt(f)} records ${PROJECT}, which is not an omp <ISO>_<uuid> session directory`],
+    ["no session", (f) => writeReceipt(f, ""), (f) => `${receipt(f)} records no session`],
+  ]) {
+    const f = fixture(t, { ledger: STAMPABLE, controller: ANCESTOR });
+    write(f);
+    const r = f.cli(["rotate"]);
+    assert.equal(r.status, 0, `${label}: ${r.stderr}`);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.rotated, true, label);
+    assert.deepEqual(out.stamped, {}, label);
+    assert.deepEqual(Object.keys(out.unstamped), ["impl-4", "impl-12"], label);
+    for (const member of ["impl-4", "impl-12"]) {
+      assert.ok(out.unstamped[member].startsWith(why(f)), `${label}: ${out.unstamped[member]}`);
+      assert.ok(r.stderr.includes(`carried ${member} unstamped: ${why(f)}`), `${label}: ${r.stderr}`);
+    }
+    assert.deepEqual(read(f).sessions, {}, label);
+    assert.deepEqual(read(f).dispatched, ["impl-4=PR#6", "fix-pr-6", "impl-12", "merge-bot-1"], `${label}: every entry is still carried`);
+  }
+});
+
+test("a rotate carries an implementer entry with no brief= unstamped, saying why, and skips one whose session= is malformed", (t) => {
+  const ledger = ledgerOf({
+    rows: [LIVE_ROWS[1], LIVE_ROWS[3]],
+    dispatched: ["impl-4=PR#6", "fix-pr-6", "impl-12 brief=12121212 agent=fleet-implementer-task-high session=../elsewhere", "impl-12 brief=12121212"],
+  });
+  const f = fixture(t, { ledger, controller: ANCESTOR });
+  writeReceipt(f, join(PROJECT, SESSION));
+  const r = f.cli(["rotate"]);
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.deepEqual(out.skipped, ["impl-12 brief=12121212 agent=fleet-implementer-task-high session=../elsewhere"], "a malformed session= is refused as any malformed entry is");
+  assert.deepEqual(out.stamped, { "impl-12": SESSION });
+  assert.deepEqual(out.unstamped, { "impl-4": "its entry has no brief=, which a session= word follows" });
+  assert.match(r.stderr, /carried impl-4 unstamped: its entry has no brief=/);
 });
 
 test("a rotate that carries nothing archives briefs/ too, and refuses before anything moves when its archive name is taken", (t) => {

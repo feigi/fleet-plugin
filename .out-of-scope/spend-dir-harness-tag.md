@@ -31,7 +31,7 @@ step feeds it a glob over `"$HOME/.claude/projects/$PROJECT_DIR"/*/subagents`. T
 step also says, in bold, not to narrow the scrape with `findSubagentsDir`. A tag
 returned in-process cannot cross a process boundary. Carrying it there would take a
 `--harness` flag that a human typing the path would have to get right, which is worse
-than reading the directory's own name. `member-record.mjs` exports
+than reading the directory's own name. `ledger-grammar.mjs` exports
 `isOmpSessionDirName` for exactly this kind of caller, one "that already hold[s] one
 EXPLICIT directory", "so the pattern is defined once". Of the two call sites the
 proposal counts, one never sees the value the tag would be attached to.

@@ -30,11 +30,10 @@
 
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { computeSpend, attributeTools, mergeTools } from "./compute-spend.mjs";
-import {
-  isOmpSessionDirName, ompSessionTranscripts, foldOmpTranscript, ompMemberRecord,
-} from "./member-record.mjs";
+import { ompSessionTranscripts, foldOmpTranscript, ompMemberRecord } from "./member-record.mjs";
 import { readReceipt } from "./phase0-receipt.mjs";
-import { RECEIPT, RECEIPT_HELD, CLOSEOUT_RECEIPT, OBJECTIVES } from "./ledger-grammar.mjs";
+import { RECEIPT, RECEIPT_HELD, CLOSEOUT_RECEIPT, OBJECTIVES, isOmpSessionDirName } from "./ledger-grammar.mjs";
+import { lastSegment } from "./pull-attribution.mjs";
 import { NAME, warnOnce, execRead } from "./board-common.mjs";
 import { mergedReadPrs, issuesOfPrs } from "./compute-board.mjs";
 import { readCostGuard } from "./fleet-tick.mjs";
@@ -467,7 +466,7 @@ export function receiptSpendDir(stateDir) {
 
 // Scope is the SESSION directory, which is the closest thing to a run
 // boundary that actually exists on disk — one session, one folder,
-// identified by its own NAME: `<ISO>_<uuid>` (member-record.mjs's
+// identified by its own NAME: `<ISO>_<uuid>` (ledger-grammar.mjs's
 // isOmpSessionDirName, the rule its own readers dispatch on).
 //
 // `sinceMs` is opt-in and defaults to no filter. An earlier attempt defaulted it
@@ -721,6 +720,64 @@ export function readHeldImplementers(stateDir, implementers) {
       warnOnce("skips", file, `skipping ${file}: ${e.message}`);
     }
   }
+}
+
+// A carried row's implementer: when `ledger.mjs rotate` carries an
+// implementer's `## Dispatched` entry into the next run's ledger it stamps it
+// `session=<name>`, the omp session the implementer ran in, which no receipt
+// beside the ledger names any more. `sessions` is `ledger.mjs read`'s map of
+// those names by member. Each name is resolved under the directory the
+// current receipt's session sits in, else the held receipt's — this
+// checkout's project under the omp session root — so the ledger holds a name
+// and never a path. From a stamped session the cards take the stamped
+// members' own records and no other implementer's, and each replaces any
+// record a receipt's session gave the same member. No receipt naming a session
+// directory, and a stamped directory not there, add nothing; one that cannot
+// be listed adds nothing and says why on stderr. A transcript that will not
+// read is skipped as readHeldImplementers skips it.
+function readStampedImplementers(stateDir, sessions, implementers) {
+  const stamped = new Map();
+  for (const [member, session] of Object.entries(sessions ?? {})) {
+    if (!isImplementer(member) || !isOmpSessionDirName(session)) continue;
+    if (!stamped.has(session)) stamped.set(session, new Set());
+    stamped.get(session).add(member);
+  }
+  if (stamped.size === 0) return;
+  const root = sessionRoot(stateDir);
+  if (root === null) return;
+  for (const [session, members] of stamped) {
+    const dir = join(root, session);
+    let transcripts;
+    try { transcripts = ompSessionTranscripts(dir); } catch (e) {
+      if (e.code !== "ENOENT") warnOnce("stamped-session", `${dir}\0${e.code ?? e.message}`, `no card reads ${dir}: ${e.code ?? e.message}`);
+      continue;
+    }
+    for (const { file, agent, spawnDepth } of transcripts) {
+      if (!isImplementer(agent) || !members.has(lastSegment(agent))) continue;
+      try {
+        const folded = foldOmpTranscript(readFileSync(file, "utf8"), file);
+        damagedRecord(file, folded);
+        const m = ompMemberRecord(folded, agent, spawnDepth);
+        if (!m) continue;
+        const leaf = lastSegment(m.member);
+        for (const key of [...implementers.keys()]) if (key !== m.member && lastSegment(key) === leaf) implementers.delete(key);
+        implementers.set(m.member, implementerRecord(m));
+      } catch (e) {
+        warnOnce("skips", file, `skipping ${file}: ${e.message}`);
+      }
+    }
+  }
+}
+
+// The directory this checkout's omp sessions sit in: the parent of the
+// session the current receipt names, else of the held receipt's, or null when
+// neither names an omp session directory.
+function sessionRoot(stateDir) {
+  for (const name of [RECEIPT, RECEIPT_HELD]) {
+    const read = readReceipt(join(stateDir, name));
+    if (read.state === "ok" && isOmpSessionDirName(basename(read.receipt.session))) return dirname(read.receipt.session);
+  }
+  return null;
 }
 
 // An implementer transcript read for the cards alone, where no spend panel
@@ -1109,10 +1166,16 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, stateDir 
   // whose main() runs it and hands the answer in as `spendSince`.
   // Each implementer's dispatch record, for the cards' Cell lines: off the
   // same transcripts the spend is read from, or — with no `phase0.json`, the
-  // state between runs — off the session `phase0.previous.json` names.
+  // state between runs — off the session `phase0.previous.json` names; and,
+  // either way, a carried row's implementer off the session its
+  // `## Dispatched` entry's `session=` names. A named --spend-dir is the one
+  // session read.
   const implementers = new Map();
   const spend = gatherSpend({ dir: spendDir, sinceMs: spendSince, explicit: spendDirExplicit, implementers });
-  if (stateDir !== null && !spendDirExplicit && !existsSync(join(stateDir, RECEIPT))) readHeldImplementers(stateDir, implementers);
+  if (stateDir !== null && !spendDirExplicit) {
+    if (!existsSync(join(stateDir, RECEIPT))) readHeldImplementers(stateDir, implementers);
+    readStampedImplementers(stateDir, ledger.sessions, implementers);
+  }
   const routerTable = readRouterTable(scriptDir);
   // The heartbeat's mark, raw. readState() never throws — an absent
   // file is the ordinary state of a run whose heartbeat has not beaten yet,

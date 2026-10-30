@@ -532,6 +532,17 @@ still holds that run until the next rotation. When `phase0.json` is absent,
 the gather reads the transcripts of the session `phase0.previous.json` names,
 for the cards only. The Tokens panel is unchanged by this.
 
+A rotation that carries an implementer's `## Dispatched` entry into the next
+run's ledger stamps it `session=<name>`: the omp session directory name of
+the receipt it archives, only on an entry that has none yet, so an entry
+carried twice keeps the session of the run that dispatched it. The gather
+resolves each stamped name under the directory the current or held receipt's
+session sits in, and reads that session's transcripts for the stamped
+implementers' cards only, whether or not `phase0.json` exists. A member found
+both there and in a receipt's session takes the stamped session's record. A
+stamped directory that no longer exists or cannot be listed adds nothing. A
+named `--spend-dir` is still the one session read.
+
 ## 8. Links
 
 Links are hash routes, a pure function of the hash:

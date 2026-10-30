@@ -116,46 +116,76 @@ export function memberRole(family) {
   return FAMILIES[family].role;
 }
 
+// An omp session directory is identified STRICTLY by name — `<ISO>_<uuid>`,
+// e.g. `2026-09-08T13-13-27-300Z_01a08126-…` — never by holding `.jsonl`
+// files directly. That second test used to be a shortcut, and it fired one
+// level too high on the real tree: `~/.omp/agent/sessions/-dev-fleet-plugin/`
+// holds the project's MAIN-session transcripts as plain files SIBLING to the
+// per-session directories, so a reader recursing from the encoded-cwd dir
+// hit the `.jsonl` test there first, returned the whole project as "one
+// session", stamped every row `session=-dev-fleet-plugin` instead of the
+// `<ISO>_<uuid>` name the row key is built on, and booked the controller's
+// own top-level transcripts as members. Name-only matching costs nothing a
+// real fixture needs: every fixture in this repo already names its session
+// dir in the real shape.
+const OMP_SESSION_DIR_RE = /^\d{4}-\d{2}-\d{2}T[\d-]+Z_[0-9a-f-]+$/i;
+
+// The one definition of the session-directory name rule, shared by the
+// `## Dispatched` grammar's `session=` word, the readers that walk or resolve
+// session directories, and the CLIs that take one explicit directory.
+export function isOmpSessionDirName(name) {
+  return OMP_SESSION_DIR_RE.test(name);
+}
+
 // A `## Dispatched` entry is a member token, followed by `brief=<hash>` when
 // `ledger.mjs dispatch` recorded the brief the member was dispatched with:
 // the first 8 hex of the sha256 the brief's sidecar carries. A merge bot's
 // entry then carries `queued=<pr>,<pr>…` — `queued=none` for an empty queue —
 // the open `ready-to-merge` PRs `dispatch` read when it dispatched the bot,
 // which its report is judged against at `settle --from-report`. An
-// implementer's entry ends with `agent=<definition>`, the definition
+// implementer's entry then carries `agent=<definition>`, the definition
 // `dispatch` printed for it, which tier-check judges it against. The value
 // becomes a file name under `agents/`, so it is held to `[a-z0-9]` words
-// joined by `-`, the shape of a `tier=` value. `settle` rewrites the token
-// and keeps the words beside it.
-const DISPATCHED_ENTRY = /^([^ ]*) brief=([0-9a-f]{8})(?: queued=(none|[1-9][0-9]*(?:,[1-9][0-9]*)*))?(?: agent=([a-z0-9]+(?:-[a-z0-9]+)*))?$/;
+// joined by `-`, the shape of a `tier=` value. An implementer's entry a
+// rotation carried ends with `session=<name>`, the omp session directory the
+// implementer ran in — its name alone, never a path, held to
+// isOmpSessionDirName() — which the cockpit reads its transcript from once
+// the next run's receipt names a session of its own. `settle` rewrites the
+// token and keeps the words beside it.
+const DISPATCHED_ENTRY = /^([^ ]*) brief=([0-9a-f]{8})(?: queued=(none|[1-9][0-9]*(?:,[1-9][0-9]*)*))?(?: agent=([a-z0-9]+(?:-[a-z0-9]+)*))?(?: session=([^ ]+))?$/;
 
 /**
- * `{token, brief, queued, agent}` for one `## Dispatched` entry: the member
- * token, the brief's hash or null, the PR numbers of its `queued=` word or
- * null for an entry without one, and the definition of its `agent=` word or
- * null for an entry without one. An entry that is not a member token plus a
- * well-formed `brief=` word, optionally followed by a well-formed `queued=`
- * word and a well-formed `agent=` word, is returned whole as `token`, so a
- * reader parsing it with parseToken() refuses it exactly as it refuses any
- * other entry this grammar cannot parse.
+ * `{token, brief, queued, agent, session}` for one `## Dispatched` entry: the
+ * member token, the brief's hash or null, the PR numbers of its `queued=`
+ * word or null for an entry without one, the definition of its `agent=` word
+ * or null for an entry without one, and the session directory name of its
+ * `session=` word or null for an entry without one. An entry that is not a
+ * member token plus a well-formed `brief=` word, optionally followed by a
+ * well-formed `queued=` word, a well-formed `agent=` word and a well-formed
+ * `session=` word, is returned whole as `token`, so a reader parsing it with
+ * parseToken() refuses it exactly as it refuses any other entry this grammar
+ * cannot parse.
  */
 export function parseDispatchedEntry(entry) {
   const m = DISPATCHED_ENTRY.exec(entry);
-  if (m === null || parseToken(m[1]) === null) return { token: entry, brief: null, queued: null, agent: null };
+  if (m === null || parseToken(m[1]) === null || (m[5] !== undefined && !isOmpSessionDirName(m[5]))) {
+    return { token: entry, brief: null, queued: null, agent: null, session: null };
+  }
   const queued = m[3] === undefined ? null : m[3] === "none" ? [] : m[3].split(",").map(Number);
-  return { token: m[1], brief: m[2], queued, agent: m[4] ?? null };
+  return { token: m[1], brief: m[2], queued, agent: m[4] ?? null, session: m[5] ?? null };
 }
 
 /**
  * The `## Dispatched` entry for `token`, with `brief=<brief>` unless brief is
- * null and, after it, `queued=…` unless queued is null and `agent=<agent>`
- * unless agent is null.
+ * null and, after it, `queued=…` unless queued is null, `agent=<agent>`
+ * unless agent is null and `session=<session>` unless session is null.
  */
-export function dispatchedEntry(token, brief, queued = null, agent = null) {
+export function dispatchedEntry(token, brief, queued = null, agent = null, session = null) {
   if (brief === null) return token;
   let entry = `${token} brief=${brief}`;
   if (queued !== null) entry += ` queued=${queued.join(",") || "none"}`;
   if (agent !== null) entry += ` agent=${agent}`;
+  if (session !== null) entry += ` session=${session}`;
   return entry;
 }
 

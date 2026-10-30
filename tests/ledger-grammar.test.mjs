@@ -492,10 +492,10 @@ test("token accepts every non-member, non-review token family a row carries, eac
 
 test("a ## Dispatched entry's brief= word is parsed off its member token, live or settled, and written back beside it", () => {
   for (const token of ["impl-412", "impl-412-b=PR#420", "fix-pr-346=applied:73b356de", "finisher-pr-346=halted:past-pin", "merge-bot-2=done"]) {
-    assert.deepEqual(parseDispatchedEntry(`${token} brief=0123abcd`), { token, brief: "0123abcd", queued: null, agent: null });
+    assert.deepEqual(parseDispatchedEntry(`${token} brief=0123abcd`), { token, brief: "0123abcd", queued: null, agent: null, session: null });
     assert.equal(dispatchedEntry(token, "0123abcd"), `${token} brief=0123abcd`);
     // An entry from before the brief was recorded is its token alone.
-    assert.deepEqual(parseDispatchedEntry(token), { token, brief: null, queued: null, agent: null });
+    assert.deepEqual(parseDispatchedEntry(token), { token, brief: null, queued: null, agent: null, session: null });
     assert.equal(dispatchedEntry(token, null), token);
   }
 });
@@ -503,7 +503,7 @@ test("a ## Dispatched entry's brief= word is parsed off its member token, live o
 test("a merge bot's queued= word follows its brief= word, a list of PR numbers or none, and is written back the same way", () => {
   for (const token of ["merge-bot-2", "merge-bot-2=done"]) {
     for (const [word, queued] of [["queued=12,30", [12, 30]], ["queued=7", [7]], ["queued=none", []]]) {
-      assert.deepEqual(parseDispatchedEntry(`${token} brief=0123abcd ${word}`), { token, brief: "0123abcd", queued, agent: null });
+      assert.deepEqual(parseDispatchedEntry(`${token} brief=0123abcd ${word}`), { token, brief: "0123abcd", queued, agent: null, session: null });
       assert.equal(dispatchedEntry(token, "0123abcd", queued), `${token} brief=0123abcd ${word}`);
     }
   }
@@ -513,17 +513,32 @@ test("an implementer's agent= word ends its entry, live or settled, and is writt
   for (const token of ["impl-7", "impl-7=bailed", "impl-7-b=PR#420"]) {
     for (const agent of ["fleet-implementer-smol-high", "fleet-implementer-slow-high", "x", "a1-b2"]) {
       const entry = `${token} brief=0123abcd agent=${agent}`;
-      assert.deepEqual(parseDispatchedEntry(entry), { token, brief: "0123abcd", queued: null, agent });
+      assert.deepEqual(parseDispatchedEntry(entry), { token, brief: "0123abcd", queued: null, agent, session: null });
       assert.equal(dispatchedEntry(token, "0123abcd", null, agent), entry);
     }
   }
   // A bot's queued= word still precedes it; an entry without one is unchanged.
-  assert.deepEqual(parseDispatchedEntry("merge-bot-2 brief=0123abcd queued=7 agent=fleet-merge-bot"), { token: "merge-bot-2", brief: "0123abcd", queued: [7], agent: "fleet-merge-bot" });
+  assert.deepEqual(parseDispatchedEntry("merge-bot-2 brief=0123abcd queued=7 agent=fleet-merge-bot"), { token: "merge-bot-2", brief: "0123abcd", queued: [7], agent: "fleet-merge-bot", session: null });
   assert.equal(dispatchedEntry("merge-bot-2", "0123abcd", [7], "fleet-merge-bot"), "merge-bot-2 brief=0123abcd queued=7 agent=fleet-merge-bot");
   assert.equal(dispatchedEntry("impl-7", "0123abcd", null, null), "impl-7 brief=0123abcd");
 });
 
-test("an entry that is not a member token plus one well-formed brief= word, then at most one well-formed queued= word and one agent= word, is kept whole, for parseToken to refuse", () => {
+const SESSION_DIR = "2026-10-28T08-00-00-000Z_01a08126-ee04-7095-a695-14e3249f1127";
+
+test("an implementer's session= word follows its agent= word, live or settled, names an omp session directory, and is written back the same way", () => {
+  for (const token of ["impl-7", "impl-7=bailed", "impl-7-b=PR#420"]) {
+    const entry = `${token} brief=0123abcd agent=fleet-implementer-slow-high session=${SESSION_DIR}`;
+    assert.deepEqual(parseDispatchedEntry(entry), { token, brief: "0123abcd", queued: null, agent: "fleet-implementer-slow-high", session: SESSION_DIR });
+    assert.equal(dispatchedEntry(token, "0123abcd", null, "fleet-implementer-slow-high", SESSION_DIR), entry);
+  }
+  // An entry recorded before agent= existed still takes one.
+  assert.deepEqual(parseDispatchedEntry(`impl-7 brief=0123abcd session=${SESSION_DIR}`), { token: "impl-7", brief: "0123abcd", queued: null, agent: null, session: SESSION_DIR });
+  assert.equal(dispatchedEntry("impl-7", "0123abcd", null, null, SESSION_DIR), `impl-7 brief=0123abcd session=${SESSION_DIR}`);
+  // No brief=, no words: the token alone, as before.
+  assert.equal(dispatchedEntry("impl-7", null, null, null, SESSION_DIR), "impl-7");
+});
+
+test("an entry that is not a member token plus one well-formed brief= word, then at most one well-formed queued= word, one agent= word and one session= word, is kept whole, for parseToken to refuse", () => {
   for (const entry of [
     "impl-412 brief=0123abc", "impl-412 brief=0123abcde", "impl-412 brief=0123ABCD", "impl-412 brief=",
     "impl-412 brief=0123abcd brief=0123abcd", "impl-412  brief=0123abcd", "impl-412 sha=0123abcd",
@@ -537,12 +552,19 @@ test("an entry that is not a member token plus one well-formed brief= word, then
     "impl-7 brief=0123abcd agent=Fleet-Implementer", "impl-7 brief=0123abcd agent=-a", "impl-7 brief=0123abcd agent=a-",
     "impl-7 brief=0123abcd agent=a--b", "impl-7 brief=0123abcd agent=a_b", "impl-7 brief=0123abcd agent=a.b",
     "impl-7 brief=0123abcd agent=a agent=a", "impl-7 brief=0123abcd agent=a ", "impl-7 brief=0123abcd  agent=a",
+    // session= names an omp `<ISO>_<uuid>` directory, by name only, after agent=.
+    "impl-7 brief=0123abcd agent=a session=", "impl-7 brief=0123abcd agent=a session=sessions",
+    `impl-7 brief=0123abcd agent=a session=/home/u/.omp/${SESSION_DIR}`, `impl-7 brief=0123abcd agent=a session=../${SESSION_DIR}`,
+    "impl-7 brief=0123abcd agent=a session=-Users-u-dev-repo", `impl-7 brief=0123abcd session=${SESSION_DIR} agent=a`,
+    `impl-7 brief=0123abcd agent=a session=${SESSION_DIR} session=${SESSION_DIR}`, `impl-7 session=${SESSION_DIR}`,
+    `impl-7 brief=0123abcd agent=a session=${SESSION_DIR}.jsonl`, `impl-7 brief=0123abcd agent=a session=${SESSION_DIR}x/..`,
+    `impl-7 brief=0123abcd agent=a session=${SESSION_DIR}_`,
   ]) {
-    assert.deepEqual(parseDispatchedEntry(entry), { token: entry, brief: null, queued: null, agent: null }, entry);
+    assert.deepEqual(parseDispatchedEntry(entry), { token: entry, brief: null, queued: null, agent: null, session: null }, entry);
     assert.equal(parseToken(entry), null, `${entry}: kept whole, it parses as no member token`);
   }
   // An outcome outside the family's vocabulary is the token's own error, not the brief's.
-  assert.deepEqual(parseDispatchedEntry("impl-412=bogus brief=0123abcd"), { token: "impl-412=bogus", brief: "0123abcd", queued: null, agent: null });
+  assert.deepEqual(parseDispatchedEntry("impl-412=bogus brief=0123abcd"), { token: "impl-412=bogus", brief: "0123abcd", queued: null, agent: null, session: null });
 });
 
 test("each ledger family renders from its own dispatch-prompt.mjs role", () => {

@@ -2664,7 +2664,7 @@ test("read hands a pipe the whole ledger — a truncated payload must never read
   // object is unterminated. Comparing the whole object also catches a key the
   // payload should not carry, which the per-key assertions let through.
   // The fixture predates `## Dispatched`, `## Routed`, `## Drain` and `## Retired`, so all four read empty.
-  assert.deepEqual(payload, { rows, filed, ruled, dispatched: [], briefs: {}, queued: {}, agents: {}, routed: [], drain: null, retired: [] });
+  assert.deepEqual(payload, { rows, filed, ruled, dispatched: [], briefs: {}, queued: {}, agents: {}, sessions: {}, routed: [], drain: null, retired: [] });
 });
 
 // The same mechanism in the three siblings. Their payloads echo the free-text
@@ -2738,6 +2738,7 @@ test("an ordinary ledger still round-trips through a pipe, and an unknown subcom
     briefs: {},
     queued: {},
     agents: {},
+    sessions: {},
     routed: [],
     drain: null,
     retired: [],
@@ -2948,7 +2949,7 @@ test("check hands a pipe its whole not-filed payload, and still reaches the trac
 // same flag. `check` is the fourth and was already correct; the tests above
 // pin it, and hoisting the guard leaves its message and its exit code alone.
 
-const READ_EMPTY = { rows: [], filed: [], ruled: [], dispatched: [], briefs: {}, queued: {}, agents: {}, routed: [], drain: null, retired: [] };
+const READ_EMPTY = { rows: [], filed: [], ruled: [], dispatched: [], briefs: {}, queued: {}, agents: {}, sessions: {}, routed: [], drain: null, retired: [] };
 
 test("read --require-file refuses an absent ledger, naming the path, with no payload (#816)", (t) => {
   const { dir, cli } = cliFixture(t);
