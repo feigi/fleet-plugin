@@ -14,7 +14,9 @@ import { LABEL_ROLES } from "../plugin/scripts/label-map.mjs";
 
 const PLUGIN = join(import.meta.dirname, "..", "plugin");
 const STRING = "won't fix";
-const ROLE_PLACEHOLDER = new RegExp(`<(?:${LABEL_ROLES.join("|")}) string>`, "g");
+const ROLE_PLACEHOLDER = new RegExp(`<(?:${LABEL_ROLES.join("|")}|label) string>`, "g");
+const HAS_PLACEHOLDER = new RegExp(ROLE_PLACEHOLDER.source);
+const ONLY_PLACEHOLDER = new RegExp(`^${ROLE_PLACEHOLDER.source}$`);
 
 const markdownUnder = (dir) =>
   readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -44,9 +46,9 @@ function sites() {
   const out = [];
   for (const file of markdownUnder(PLUGIN)) {
     for (const { text, kind } of codeOf(readFileSync(file, "utf8"))) {
-      if (!new RegExp(ROLE_PLACEHOLDER.source).test(text)) continue;
+      if (!HAS_PLACEHOLDER.test(text)) continue;
       // A span that is only the placeholder is a mention, not a command.
-      if (kind === "span" && new RegExp(`^${ROLE_PLACEHOLDER.source}$`).test(text.trim())) continue;
+      if (kind === "span" && ONLY_PLACEHOLDER.test(text.trim())) continue;
       out.push({ file: relative(PLUGIN, file), text });
     }
   }
@@ -63,6 +65,7 @@ test("every command in shipped prose that takes a role string parses with an apo
 test("negative control: a role placeholder inside single quotes, or bare, does not parse once the string holds an apostrophe", () => {
   assert.equal(parses(spliced("gh api x -q '.name == \"<ready-to-merge string>\"'")), false);
   assert.equal(parses(spliced("gh pr edit <pr> --remove-label '<ready-to-merge string>'")), false);
+  assert.equal(parses(spliced("gh pr edit <pr> --remove-label <ready-to-merge string>")), false);
   assert.equal(parses(spliced('gh pr edit <pr> --remove-label "<ready-to-merge string>"')), true);
   assert.equal(parses(spliced('label="<ready-to-merge string>" gh api x -q \'.[] | env.label\'')), true);
 });
