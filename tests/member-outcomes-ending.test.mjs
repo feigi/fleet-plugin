@@ -414,20 +414,24 @@ test("a report naming a PR an earlier same-ticket implementer opened reads pr, a
     turn({ stopReason: "toolUse", blocks: [call("g2", "bash", { command: "gh pr create --title y" })] }),
     result("g2", "https://github.com/chris/fleet-plugin/pull/5151"),
   ]);
-  const continuer = [modelChange(false, T1), reportWrite("impl-50-b", { outcome: "pr", pr: 5151, bailCause: null, bailDetail: null }), exitEvt()];
+  const continuer = claimsPr("impl-50-b", 5151);
   const dir = session({ "impl-50": opener, "impl-50-b": continuer });
   const rows = Object.fromEntries(rowsForSession(dir, {}, { verifyMain: () => 0 }).map((r) => [r.member, r]));
   assert.equal(rows["impl-50-b"].ending, "pr");
   assert.equal(rows["impl-50-b"].pr, "");
 });
 
+// `startedAt` is a member's earliest stamp over the whole transcript, so a
+// fixture that starts at `at` carries `at` on every line.
+const stampedAt = (lines, at) => lines.map((l) => l.replaceAll(`"timestamp":"${T0}"`, `"timestamp":"${at}"`));
+
 // A member that opens PR `n`, starting at `at`; and one that starts at `at`
 // and whose last report claims PR `n` as its own outcome.
-const opensPr = (n, at = T0) => [modelChange(false, at),
+const opensPr = (n, at = T0) => stampedAt([modelChange(),
   turn({ stopReason: "toolUse", blocks: [call("g9", "bash", { command: "gh pr create --title z" })] }),
-  result("g9", `https://github.com/chris/fleet-plugin/pull/${n}`), turn(), exitEvt()];
-const claimsPr = (member, n, at = T1) => [modelChange(false, at),
-  reportWrite(member, { outcome: "pr", pr: n, bailCause: null, bailDetail: null }), exitEvt()];
+  result("g9", `https://github.com/chris/fleet-plugin/pull/${n}`), turn(), exitEvt()], at);
+const claimsPr = (member, n, at = T1) => stampedAt([modelChange(),
+  reportWrite(member, { outcome: "pr", pr: n, bailCause: null, bailDetail: null }), exitEvt()], at);
 const joined = (members, member) => endingOfMember(session(members), member);
 
 test("a PR an implementer of another ticket opened is no predecessor's PR", () => {
@@ -440,6 +444,20 @@ test("a PR a same-ticket member that is not an implementer opened is no predeces
 
 test("a same-ticket implementer that started at the same moment is not an earlier one", () => {
   assert.equal(joined({ "impl-54": opensPr(5163, T1), "impl-54-b": claimsPr("impl-54-b", 5163, T1) }, "impl-54-b"), "hollow");
+});
+
+test("a same-ticket implementer whose first line is stamped later than its earliest stamp starts at the earliest (#3970)", () => {
+  // impl-57 opens its PR: its first line carries 11:00 but the rest carry T0, so
+  // it started at T0, before impl-57-b, whose every line carries T1.
+  const opener = [modelChange(false, "2026-08-25T11:00:00.000Z"), ...opensPr(5165, T0)];
+  const claimant = claimsPr("impl-57-b", 5165, T1);
+  assert.equal(joined({ "impl-57": opener, "impl-57-b": claimant }, "impl-57-b"), "pr");
+});
+
+test("a same-ticket implementer with no parseable stamp is no earlier one (#3970)", () => {
+  const stampless = opensPr(5166, "not-a-date");
+  assert.ok(stampless.every((l) => l.includes("not-a-date")), "every line's stamp is junk");
+  assert.equal(joined({ "impl-58": stampless, "impl-58-b": claimsPr("impl-58-b", 5166) }, "impl-58-b"), "hollow");
 });
 
 test("an implementer whose name carries no ticket joins no predecessor", () => {

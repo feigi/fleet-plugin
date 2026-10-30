@@ -232,7 +232,8 @@ test("foldOmpTranscript: a torn LAST line stays uncounted — the tear a live wr
 const wallTurn = (ts) => assistantEvt("claude-opus-5", { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 }, ts);
 const wallAt = (s) => new Date(Date.parse("2026-09-08T15:00:00.000Z") + s * 1000).toISOString();
 const wallLines = (...stamps) => stamps.map(wallTurn).join("\n") + "\n";
-const wallOf = (...stamps) => foldOmpTranscript(wallLines(...stamps), "/fake/path.jsonl").wallS;
+const foldWall = (...stamps) => foldOmpTranscript(wallLines(...stamps), "/fake/path.jsonl");
+const wallOf = (...stamps) => foldWall(...stamps).wallS;
 
 test("foldOmpTranscript: wall_s is the span of the stamps, 50 and not -50, when the last line is stamped before the first (#3948)", () => {
   const lines = wallLines(wallAt(100), wallAt(50));
@@ -262,6 +263,68 @@ test("foldOmpTranscript: an unparseable first or last stamp is skipped; with no 
   assert.equal(wallOf(wallAt(10), wallAt(40), "not-a-date"), 30);
   assert.equal(wallOf("not-a-date", "also-not"), 0);
   assert.equal(foldOmpTranscript("", "/fake/path.jsonl").wallS, 0);
+});
+
+// `startedAt` is the earliest parseable stamp as an ISO string, and
+// `unparseableStamps` counts the entries whose `timestamp` yielded no instant (#3970).
+test("foldOmpTranscript: startedAt is the earliest parseable stamp and a junk stamp is counted, not dropped (#3970)", () => {
+  const f = foldWall("x", wallAt(50), wallAt(0));
+  assert.equal(f.startedAt, "2026-09-08T15:00:00.000Z");
+  assert.equal(f.unparseableStamps, 1);
+  assert.equal(f.wallS, 50);
+});
+
+test("foldOmpTranscript: startedAt is the earlier instant, not the first line's, when the first line is stamped later (#3970)", () => {
+  assert.equal(foldWall(wallAt(50), wallAt(0)).startedAt, "2026-09-08T15:00:00.000Z");
+});
+
+test("foldOmpTranscript: every ordering of the same stamps gives the same startedAt (#3970)", () => {
+  const [a, b, c] = [wallAt(10), wallAt(70), wallAt(40)];
+  for (const order of [[a, b, c], [a, c, b], [b, a, c], [b, c, a], [c, a, b], [c, b, a]]) {
+    assert.equal(foldWall(...order).startedAt, a, order.join(" "));
+  }
+});
+
+test("foldOmpTranscript: startedAt is the ISO form of the instant, whatever format the stamp parsed from (#3970)", () => {
+  assert.equal(foldWall("2026-09-08T17:00:00+02:00", wallAt(3600)).startedAt, "2026-09-08T15:00:00.000Z");
+});
+
+test("foldOmpTranscript: only unparseable stamps, or none, leave startedAt null, with the count of each (#3970)", () => {
+  const junk = foldWall("not-a-date", "also-not");
+  assert.equal(junk.startedAt, null);
+  assert.equal(junk.unparseableStamps, 2);
+  const none = foldOmpTranscript("", "/fake/path.jsonl");
+  assert.equal(none.startedAt, null);
+  assert.equal(none.unparseableStamps, 0);
+});
+
+test("foldOmpTranscript: a non-string timestamp is counted, and a stampless entry is not (#3970)", () => {
+  const lines = [
+    evt({ type: "title", title: "t", updatedAt: "2026-09-08T15:00:00.000Z" }),
+    evt({ type: "custom", customType: "x", timestamp: null }),
+    evt({ type: "custom", customType: "x", timestamp: 1789000000000 }),
+    wallTurn(wallAt(0)),
+  ].join("\n") + "\n";
+  const f = foldOmpTranscript(lines, "/fake/path.jsonl");
+  assert.equal(f.unparseableStamps, 2);
+  assert.equal(f.startedAt, wallAt(0));
+});
+
+test("foldOmpTranscript: a transcript of valid stamps plus a stampless title line counts no unparseable stamp (#3970)", () => {
+  const lines = [evt({ type: "title", title: "t", updatedAt: wallAt(5) }), wallTurn(wallAt(0)), wallTurn(wallAt(9))].join("\n") + "\n";
+  assert.equal(foldOmpTranscript(lines, "/fake/path.jsonl").unparseableStamps, 0);
+});
+
+test("readOmpSession: each row's transcript carries the unparseable-stamp count beside malformedNonLastLines (#3970)", () => {
+  const dir = ompSessionFixture("2026-09-08T13-13-27-300Z_01a08126-ee04-7095-a695-14e3249f1127", {
+    Clean1: [sessionEvt("/x"), thinkingEvt("high"), assistantEvt("claude-sonnet-5", { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 })],
+    Junk1: [sessionEvt("/x"), thinkingEvt("high"), assistantEvt("claude-sonnet-5", { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 }, "x")],
+  });
+  const by = Object.fromEntries(readOmpSession(dir).map((r) => [r.agent, r.transcript]));
+  assert.equal(by.Clean1.unparseableStamps, 0);
+  assert.equal(by.Junk1.unparseableStamps, 1);
+  assert.equal(by.Junk1.startedAt, "2026-09-08T15:11:49.444Z");
+  assert.equal(by.Junk1.malformedNonLastLines, 0);
 });
 
 test("readOmpMember: resolvedModelIdentity rides alongside `model` as an additive field, never replacing it", () => {
