@@ -213,7 +213,7 @@ test("no cost guard: every Cell reads 'no figures yet for <the Tier route model>
   assert.equal(cellOf(ce, "slow-high").none.text, "no figures yet for claude-opus-5");
   assert.equal(cellOf(ce, "smol-high").none.text, "no figures yet for claude-haiku-5-5");
   assert.equal(cellOf(ce, "slow-high").baseline, true, "slow-high is the baseline with no guard too");
-  assert.equal(ce.alerts, undefined, "this part draws no alert at all");
+  assert.deepEqual(ce.alerts, [], "no cost guard is a state of the guard section's heading, never an alert");
 });
 
 test("a guard on disk that the newest refresh did not write: the failure and the figures' age are both said", () => {

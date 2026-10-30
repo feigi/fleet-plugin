@@ -554,6 +554,50 @@ test("Cell evidence: the pane draws the model's words, the guard section first a
   assert.deepEqual(order, ["cell-slow-high", "cell-task-high", "cell-smol-high", "cell-slow-medium", "cell-task-max"]);
 });
 
+test("Cell evidence: an alert is drawn first, in the model's words, and the tab's label carries ⚠n from the same list whichever tab is open", () => {
+  const { document, render, model, open } = harness();
+  open("#board");
+  const guard = ceGuard([cellEntry("slow-high"), cellEntry("task-high", { generation: "claude-sonnet-5-5", no_ruling: 2 })]);
+  const ce = evidence({ guard });
+  assert.equal(ce.alerts.length, 1);
+  render(model({ cellEvidence: ce }));
+  assert.equal(document.getElementById("tab-cells").textContent, "Cell evidence ⚠1");
+  const host = document.getElementById("cells");
+  const [links, alert, rows, guardSec] = host.children;
+  assert.equal(links.className, "ce-links");
+  assert.match(alert.className, /ce-alert/);
+  assert.equal(alert.id, "cells-alert-" + ce.alerts[0].id);
+  const words = textOf(alert);
+  for (const w of [ce.alerts[0].headline, ce.alerts[0].sentence, "task-high 2"]) assert.ok(words.includes(w), `the alert does not draw ${JSON.stringify(w)}`);
+  assert.equal(rows.id, "cells-rows");
+  assert.equal(guardSec.id, "cells-guard");
+
+  // Two alerts count two; the state stopping holding clears both the box and the mark.
+  const odd = { ...guard.guard, verdict: "tripped", tripped: ["weird"], cells: [...guard.guard.cells, cellEntry("weird")] };
+  const two = evidence({ guard: { status: "ok", guard: odd }, guardJson: odd });
+  assert.equal(two.alerts.length, 2);
+  render(model({ cellEvidence: two }));
+  assert.equal(document.getElementById("tab-cells").textContent, "Cell evidence ⚠2");
+  assert.equal(host.children.filter((c) => /ce-alert/.test(c.className)).length, 2);
+  render(model({ cellEvidence: evidence() }));
+  assert.equal(document.getElementById("tab-cells").textContent, "Cell evidence");
+  assert.equal(host.children.filter((c) => /ce-alert/.test(c.className)).length, 0);
+  render(model({ cellEvidence: null }));
+  assert.equal(document.getElementById("tab-cells").textContent, "Cell evidence");
+});
+
+test("Cell evidence: a records-not-on-main alert draws each of its lines, the blob ids, under its sentence", () => {
+  const { document, render, model } = harness();
+  const guard = { ...ceGuard(), guard: { ...ceGuard().guard, tsv_blobs: { "docs/metrics/tier-outcomes.tsv": "9df10b12aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } } };
+  const mainMetrics = { value: { blobs: { "docs/metrics/tier-outcomes.tsv": "84123e74bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" } }, readAt: Date.UTC(2026, 9, 30, 8, 0), error: null };
+  const ce = evidence({ guard, mainMetrics, openPrs: { numbers: [], capped: false } });
+  assert.deepEqual(ce.alerts.map((a) => a.id), ["records-not-on-main"]);
+  render(model({ cellEvidence: ce }));
+  const box = document.getElementById("cells-alert-records-not-on-main");
+  assert.ok(box, "the alert box is drawn under its id");
+  assert.deepEqual(box.children.filter((c) => c.className === "ce-source").map((c) => c.textContent), ["docs/metrics/tier-outcomes.tsv: the guard read 9df10b12; main holds 84123e74"]);
+});
+
 test("Cell evidence: every anchor the model names is an element the page draws, in every state", () => {
   const states = {
     "today's guard": evidence(),

@@ -270,10 +270,18 @@ them update the shape below.)
 
   // The Cell evidence tab's model, built by the pure computeCellEvidence()
   // (compute-cell-evidence.mjs) from `.fleet/cost-guard.json` as the tick's
-  // reader accepts it, the `metrics` step of `.fleet/phase0.json` and
-  // `.fleet/closeout.json`, the installed `../agents/*.agent.md`, the Preview
-  // fit `.fleet/router-preview.json` (amended by #3896) and `modelRoles`
+  // reader accepts it (and as parsed, for the readers alert), the `metrics` step
+  // of `.fleet/phase0.json` and `.fleet/closeout.json` and the PR that receipt
+  // names (against the open PRs), the installed `../agents/*.agent.md`, the Preview
+  // fit `.fleet/router-preview.json` (amended by #3896), the checkout's
+  // `plugin/scripts/router-table.json`, and `modelRoles` and `mainMetrics`
   // below. Every word the tab shows is a string in it; the page only lays it out.
+  //   alerts:   [{ id, headline, sentence, lines: [string] }]   (amended by #3897)
+  //             the alerts, in order: records not on main (its `lines` the guard's and
+  //             the Preview fit's TSV blob ids against main's), merged with no Ruling,
+  //             guard readers disagree. Only while the state holds; the page counts
+  //             them into the tab label's `⚠n`. A check that cannot run is a
+  //             `guard.notes` line, never an alert.
   //   guard:    { state: "no-guard" | "holds-nothing-back" | "trips-nothing" | "trips",
   //               heading, source (null with no guard), notes: [string],
   //               cells: [{ cell, anchor, baseline, judged, route: { model, text, label, flag },
@@ -299,7 +307,7 @@ them update the shape below.)
   //             cells while there is no Preview fit;
   //             `live` marks the Objective `.fleet/phase0.json` records, none between runs.
   // All five implementer Cells are always in `guard.cells`, in a fixed order.
-  "cellEvidence": { "policy": { /* … */ }, "guard": { /* … */ }, "declared": { /* … */ } },
+  "cellEvidence": { "alerts": [ /* … */ ], "policy": { /* … */ }, "guard": { /* … */ }, "declared": { /* … */ } },
 
   // `omp config get modelRoles --json` as the cockpit's own environment answers it,
   // carried tick to tick like `ci` and `repo` and read again at most once a
@@ -310,6 +318,16 @@ them update the shape below.)
   // Null until a first read has been attempted: a caller that named no state
   // directory reads none, and the tab says "not checked: modelRoles not read yet".
   "modelRoles": { "value": { "slow": "anthropic/claude-opus-5:high" }, "readAt": 1690000000000, "error": null },
+
+  // The `docs/metrics` contents call, `gh api --hostname <host>
+  // repos/<owner>/<name>/contents/docs/metrics` with host and name from `repoUrl`
+  // (never the `{owner}/{repo}` placeholder), carried like `modelRoles` and read
+  // again at most once a minute: `value` is `{ blobs }`, main's blob id by path,
+  // `blobs` null for a 404 ("main holds no metrics yet"); `readAt` and `error` as
+  // above. Null for a caller that named no state directory. A failed read raises
+  // no alert: a note under the guard section's heading says "not checked", with
+  // why and when the read last succeeded.
+  "mainMetrics": { "value": { "blobs": { "docs/metrics/tier-outcomes.tsv": "84123e74…" } }, "readAt": 1690000000000, "error": null },
 
   // Side-car telemetry, read from ~/.claude/projects, never from ledger or gh.
   // Tri-state, discriminated by the explicit `ok` TAG and by nothing else:

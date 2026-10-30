@@ -234,17 +234,30 @@ function readJson(path) {
   try { return JSON.parse(readFileSync(path, "utf8")); } catch { return null; }
 }
 
-/** `cost-guard.json` reduced to what the router reads, or null when missing or unparseable. */
-export function readGuard(raw) {
-  if (raw === null || typeof raw !== "object" || !Array.isArray(raw.tripped) || !Array.isArray(raw.cells)) return null;
+/**
+ * `cost-guard.json` as the router reads it: `{ ok: true, guard }`, reduced to
+ * what the router reads, or `{ ok: false, why }` when it refuses the file. `raw` is the parsed
+ * file, `null` for one that is missing or will not parse.
+ */
+export function parseGuard(raw) {
+  if (raw === null || typeof raw !== "object") return { ok: false, why: "not a JSON object" };
+  if (!Array.isArray(raw.tripped)) return { ok: false, why: "`tripped` is not a list" };
+  if (!Array.isArray(raw.cells)) return { ok: false, why: "`cells` is not a list" };
   const tripped = raw.tripped.map((t) => (typeof t === "string" ? t : t?.cell));
-  if (tripped.some((t) => typeof t !== "string" || !CELL.test(t))) return null;
+  const bad = tripped.findIndex((t) => typeof t !== "string" || !CELL.test(t));
+  if (bad !== -1) return { ok: false, why: `\`tripped\` names ${JSON.stringify(raw.tripped[bad])}, which is not a Cell` };
   const n = {};
   for (const c of raw.cells) {
-    if (typeof c?.cell !== "string" || !Number.isFinite(c?.n)) return null;
+    if (typeof c?.cell !== "string" || !Number.isFinite(c?.n)) return { ok: false, why: "a `cells` entry has no string `cell` or no finite `n`" };
     n[c.cell] = c.n;
   }
-  return { tripped: [...new Set(tripped)].sort(), n, window_start: typeof raw.window_start === "string" ? raw.window_start : null };
+  return { ok: true, guard: { tripped: [...new Set(tripped)].sort(), n, window_start: typeof raw.window_start === "string" ? raw.window_start : null } };
+}
+
+/** `cost-guard.json` reduced to what the router reads, or null when missing or unparseable. */
+export function readGuard(raw) {
+  const r = parseGuard(raw);
+  return r.ok ? r.guard : null;
 }
 
 /** The sizing verdict on a live B Pull: `{ stratum, src, label, usd }`, or null when it is unusable. */
