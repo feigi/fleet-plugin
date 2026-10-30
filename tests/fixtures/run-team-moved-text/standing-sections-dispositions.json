@@ -18,7 +18,7 @@
     ],
     [
       "The mid-run tooling fix below is the one legitimate writer.",
-      "**A mid-run tooling fix** is the one legitimate writer."
+      "Nothing you change yourself is a reason: a tooling defect is reported, never fixed by you."
     ],
     [
       "You run `~/.fleet/bin/fleet-run scratch-root.mjs`: it prints one absolute path, `~/.fleet/scratch/<repo-key>/`, the same from the main checkout and from every linked worktree, and the same again when a compacted or re-invoked controller runs it, so nothing writes it down.",
@@ -34,7 +34,7 @@
     ],
     [
       "The changes of yours that trip it are a mid-run tooling fix edited in this checkout and the close-out commit's round trip through a branch; **Fix the tooling mid-run** and the commit section of references/close-out.md say how each is cleared.",
-      "The changes of yours that trip it are a mid-run tooling fix edited in this checkout and the close-out commit's round trip through a branch; SKILL.md's **A mid-run tooling fix** and the commit section of references/close-out.md say how each is cleared."
+      "The change of yours that trips it is the close-out commit's round trip through a branch; the commit section of references/close-out.md says how it is cleared."
     ]
   ],
   "deleted": [
@@ -69,6 +69,62 @@
     [
       "See references/correction-tickets.md.",
       "the pointer beside the grep -F rule: references/correction-tickets.md's A settling command over literal text uses grep -F states it alone"
+    ],
+    [
+      "**Re-pin only after a change you made deliberately.**",
+      "SKILL.md's **Re-pin only on the maintainer's adopt.**"
+    ],
+    [
+      "Fix the file during the run — deferring loses the evidence that found it.",
+      "references/instruments.md's Triggers and shape of a tooling defect report, which says Report it during the run"
+    ],
+    [
+      "**Then.**",
+      "SKILL.md's **Then. Report it, and never fix it yourself: the defect stays live for the rest of this run.**"
+    ],
+    [
+      "**Re-pin first** — `~/.fleet/bin/fleet-run instruments.sh --pin`.",
+      "nothing: a tooling defect is reported, never fixed, so the controller re-pins for none; references/instruments.md's Reporting a tooling defect, which edits nothing, opens no branch and never re-pins"
+    ],
+    [
+      "You just changed the instrument set under your own check, and this is the only edit that legitimately does; skip it and the next gate refuses on your own fix, which teaches you to ignore the refusal.",
+      "nothing: the controller changes no instrument set; references/instruments.md's Reporting a tooling defect, which edits nothing, opens no branch and never re-pins, because an edit under the pinned tree makes every later gate refuse"
+    ],
+    [
+      "Then the ledger line, save the rationale, one line to the maintainer.",
+      "references/instruments.md's Reporting a tooling defect, which files the report and sends the maintainer one line naming the issue"
+    ],
+    [
+      "**Then land it from the main checkout, if the fix was edited in it** — until you do, the next tick reads `MAIN-CHECKOUT-DIRTY` naming your own paths.",
+      "nothing: references/instruments.md's Reporting a tooling defect, which edits nothing, opens no branch and never re-pins, so the main checkout is never edited for a defect"
+    ],
+    [
+      "Commit the fix on a branch and switch back to `main` before the next tick, and never `--record` while on that branch: the switch back restores the tree the baseline recorded, so the hold clears itself with nothing re-recorded, and the fix leaves the checkout until its PR merges.",
+      "nothing: there is no fix to commit; the commit section of references/close-out.md says how the close-out commit's round trip through a branch is cleared"
+    ],
+    [
+      "A `HEAD …` entry is none of your paths and clears the same way.",
+      "references/tick-rows.md's MAIN-CHECKOUT-DIRTY row, which says a `HEAD …` entry clears itself once HEAD reads clean again"
+    ],
+    [
+      "Re-baseline only a fix you leave edited in the checkout: run `~/.fleet/bin/fleet-run main-checkout.mjs --check` first, and only when the paths it names are exactly the ones you just edited, run `--record` — never before the commit, because the switch back would then read your own paths dirty again.",
+      "nothing: no tooling edit is left in the checkout; references/tick-rows.md's MAIN-CHECKOUT-DIRTY row says the maintainer re-baselines"
+    ],
+    [
+      "Any other path on that line is a stray write — leave the hold for the maintainer, because `--record` would certify it with yours.",
+      "references/tick-rows.md's MAIN-CHECKOUT-DIRTY row, which leaves every stray path to the maintainer and never re-baselines over one"
+    ],
+    [
+      "Live members hold the old text — re-brief only if it changes what they do *now*.",
+      "references/instruments.md's Reporting a tooling defect, which sends the correction to every member the defect reaches whenever it changes what that member does"
+    ],
+    [
+      "Plan it as a PR the run's own merge queue lands, never as an edit-and-continue.",
+      "nothing: the controller opens no PR for a tooling defect; references/instruments.md's Reporting a tooling defect files an issue instead"
+    ],
+    [
+      "See references/merge-bot.md.",
+      "the pointer beside the **Then.** sentence, which names references/instruments.md alone"
     ]
   ]
 }

@@ -5,9 +5,10 @@
 //   - the RULE (both refusing exit codes, no re-read after a refusal, and the
 //     one condition under which re-pinning is legitimate),
 //   - the PIN at phase 0 step 0, which must sit after the fast-forward,
-//   - the RE-PIN in the mid-run tooling fix, the one legitimate writer to the
-//     set. Lose that clause and the first tooling fix of a run makes every
-//     later gate refuse, which is how a guard gets discarded rather than fixed.
+//   - the REPORT in a tooling defect found mid-run: the controller edits
+//     nothing and never re-pins. Lose that clause and the controller's own fix
+//     makes every later gate refuse, which is how a guard gets discarded rather
+//     than fixed.
 //
 // The refusal half is the one worth pinning hardest. "Exit 0 is the only code
 // that lets a gate proceed" is the acceptance criterion; a later edit that
@@ -72,7 +73,7 @@ const GATES = () =>
   ).text;
 
 const TOOLING_FIX = () =>
-  RUN_TEAM.section("### A mid-run tooling fix", "run-team tooling fix").text;
+  RUN_TEAM.section("### A tooling defect found mid-run", "run-team tooling defect").text;
 
 test("the rule states that BOTH non-zero codes refuse, not just the changed one", () => {
   const rule = RULE();
@@ -100,14 +101,14 @@ test("the rule names the gates it runs before, not just 'a gate'", () => {
   }
 });
 
-test("the rule limits re-pinning to a change the controller made deliberately", () => {
+test("the rule limits re-pinning to the maintainer's adopt", () => {
   // The baseline IS the mechanism, and `--pin` overwrites it with whatever is in
   // the tree, never comparing first. Nothing in the script can tell a re-pin
   // after a deliberate fix from one used to clear a refusal under time pressure,
   // so this clause is the only thing between the two — and losing it discards
   // the guard while every other pin here stays green.
   const rule = RULE();
-  assert.match(rule, Pin.phrase("Re-pin only after a change you made deliberately"));
+  assert.match(rule, Pin.phrase("Re-pin only on the maintainer's adopt"));
   assert.match(rule, Pin.phrase("Re-pinning to clear a refusal you cannot explain discards the check"));
 });
 
@@ -224,16 +225,15 @@ test("a neighbouring sentence cannot lend the declarative its marker, and a peri
   assert.equal(wrongOrderFault("Pinning before that fast-forward (e.g. from a stale tree) would instead pin the superseded text."), null);
 });
 
-test("the mid-run tooling fix re-pins — the one legitimate writer to the set", () => {
+test("a tooling defect is reported, never fixed by the controller", () => {
   const fix = TOOLING_FIX();
-  assert.match(fix, Pin.phrase("Re-pin first"));
-  assert.match(fix, Pin.phrase("instruments.sh"));
-  assert.match(fix, Pin.phrase("--pin`. See references/instruments.md."));
-  // The consequence, spelled out, is what stops the step being dropped as
-  // ceremony: skipping it makes the controller's own fix look like tampering.
-  // It sits in the reference the step's pointer names.
-  const why = INSTRUMENTS_MD.section("## Re-pin first after a mid-run tooling fix", "references/instruments.md re-pin").text;
-  assert.match(why, Pin.phrase("the next gate refuses on your own fix"));
+  assert.match(fix, Pin.phrase("never fix it yourself"));
+  assert.match(fix, Pin.phrase("the defect stays live for the rest of this run.** See references/instruments.md."));
+  // The consequence, spelled out, is what stops the edit being made as a
+  // helpful shortcut: an edit under the pinned tree makes the controller's own
+  // fix look like tampering. It sits in the reference the pointer names.
+  const why = INSTRUMENTS_MD.section("## Reporting a tooling defect", "references/instruments.md reporting").text;
+  assert.match(why, Pin.phrase("every later gate refuses"));
 });
 
 test("the path the prose tells the controller to run is a real executable", () => {
