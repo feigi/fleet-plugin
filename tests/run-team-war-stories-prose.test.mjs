@@ -351,3 +351,33 @@ test("the headings the duplication record cites exist verbatim where it says the
   const triggers = Pin.file(join(REFERENCES, "instruments.md")).section(TOOLING_DEFECT_REFERENCE, "references/instruments.md tooling-defect triggers and shape").text;
   assert.match(triggers, Pin.phrase("**Scope.** Only this install's own commands and skills"), `references/instruments.md's ${TOOLING_DEFECT_REFERENCE} lost the Scope paragraph the record cites`);
 });
+
+// #4057: the record's paragraph on the Triggers list and the Shape paragraph
+// placed both in SKILL.md and called the Trigger one to go fix the
+// instruction. Both sit in instruments.md's tooling-defect section, which
+// SKILL.md's tooling-defect section points to, and the rule now reports.
+const TRIGGER_QUOTE = "A caller has to restate what the callee should say itself";
+const SHAPE_QUOTE = "Prefer moving text to adding it, and delete the copy you superseded; a duplicated rule becomes a contradiction.";
+
+test("the duplication record places the Triggers list and the Shape paragraph in instruments.md and calls the Trigger a report", () => {
+  const p = Pin.unemphasized(Pin.file(OUT_OF_SCOPE).paragraph("Two further lines in", ".out-of-scope/fleet-prompt-doc-duplication.md Triggers and Shape paragraph", "Neither reaches this case on a literal reading.").text);
+  assert.match(
+    p,
+    Pin.phrase("Two further lines in run-team's `references/instruments.md` § Triggers and shape of a tooling defect report, the section `SKILL.md`'s A tooling defect found mid-run points to, are the ones a re-derivation will actually reach"),
+    "the record no longer places the Triggers list and the Shape paragraph in the instruments.md section SKILL.md points to",
+  );
+  assert.match(p, Pin.phrase("listed as a trigger to report the instruction"), "the record no longer calls the Trigger one to report the instruction");
+  assert.doesNotMatch(p, /go fix/, "the record still calls the Trigger one to go fix the instruction");
+  assert.match(p, Pin.phrase(`"${TRIGGER_QUOTE}"`), "the record no longer quotes the Trigger");
+  assert.match(p, Pin.phrase(`"${SHAPE_QUOTE}"`), "the record no longer quotes the Shape rule");
+});
+
+test("the Trigger and Shape text the duplication record quotes is in instruments.md's tooling-defect section, not in SKILL.md", () => {
+  const section = Pin.unemphasized(Pin.file(join(REFERENCES, "instruments.md")).section(TOOLING_DEFECT_REFERENCE, "references/instruments.md tooling-defect triggers and shape").text);
+  assert.match(section, Pin.phrase(`Triggers. Identical failure twice.`), `references/instruments.md's ${TOOLING_DEFECT_REFERENCE} lost the Triggers list`);
+  assert.match(section, Pin.phrase(TRIGGER_QUOTE), `references/instruments.md's ${TOOLING_DEFECT_REFERENCE} lost the Trigger the record quotes`);
+  assert.match(section, Pin.phrase(`Shape — lean, or it rots. ${SHAPE_QUOTE}`), `references/instruments.md's ${TOOLING_DEFECT_REFERENCE} lost the Shape paragraph the record quotes`);
+  const skill = Pin.unemphasized(SKILL);
+  assert.doesNotMatch(skill, Pin.phrase(TRIGGER_QUOTE), "SKILL.md carries the Trigger again — the record places it in instruments.md");
+  assert.doesNotMatch(skill, Pin.phrase(SHAPE_QUOTE), "SKILL.md carries the Shape rule again — the record places it in instruments.md");
+});

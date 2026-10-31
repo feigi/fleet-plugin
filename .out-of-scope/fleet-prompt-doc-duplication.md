@@ -38,10 +38,12 @@ apply/commit rules. If they read as absolute to someone re-deriving this finding
 narrowing that wording is a fine change on its own. Deleting the duplicated blocks is
 not.
 
-Two further lines in `SKILL.md` are the ones a re-derivation will actually reach, and
-neither is scoped the way those two are. Its self-correction **Triggers** list names "A
-caller has to restate what the callee should say itself" — this duplication, listed as a
-trigger to go fix the instruction. And its **Shape — lean, or it rots** paragraph states
+Two further lines in run-team's `references/instruments.md` § **Triggers and shape of a
+tooling defect report**, the section `SKILL.md`'s **A tooling defect found mid-run**
+points to, are the ones a re-derivation will actually reach, and neither is scoped the
+way those two are. Its **Triggers** list names "A caller has to restate what the callee
+should say itself" — this duplication, listed as a trigger to report the instruction.
+And its **Shape — lean, or it rots** paragraph states
 the rule flatly: "Prefer moving text to adding it, and delete the copy you superseded; a
 duplicated rule becomes a contradiction."
 
