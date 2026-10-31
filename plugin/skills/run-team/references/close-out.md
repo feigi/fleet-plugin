@@ -20,9 +20,11 @@
   3. `~/.fleet/bin/fleet-run closeout.mjs finish --reason "<reason>"` — scrapes
      the run's member facts, checks the tier-outcomes rows, refreshes the
      metrics, commits the three metrics files and opens their PR, sets the
-     phase-0 receipt aside as `.fleet/phase0.previous.json`, then records
-     `fleet-heartbeat.mjs --stop` last, because every reader takes a recorded
-     stop as the end of the run. A `NEED tier-outcomes append <pr>` is a
+     phase-0 receipt aside as `.fleet/phase0.previous.json`, records
+     `fleet-heartbeat.mjs --stop`, because every reader takes a recorded stop
+     as the end of the run, and then merges the Close-out PR. On `NEED
+     merge-wait PR #<n>`, run `finish` again at once. A PR it names `left open`
+     is the next run's: you never label or merge it. A `NEED tier-outcomes append <pr>` is a
      reviewed PR with no verdict row — for an implementer's PR, one that never
      reached its finisher, since `ledger.mjs dispatch` refuses that finisher
      until the row exists: run `append <pr>` (**Guard: accumulate per PR**) and run `finish` again. A reviewed

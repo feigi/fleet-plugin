@@ -41,7 +41,7 @@ skill (`read skill://run-team-local`): the plugin never calls it, so this rule
 is what triggers it. It is repeatable, so a missed run strands nothing.
 
 Run artifacts follow this repo's own convention, which the plugin does not
-mandate: the metrics PR goes on `chore/run-artifacts-<date>` (a letter suffix
+mandate: the Close-out PR goes on `chore/run-artifacts-<date>` (a letter suffix
 when that date already has one, `chore/run-artifacts-2026-08-23b`), and data
 rows and rule-doc prose never share a PR — one branch each. The halves have
 opposite cost profiles: a stranded data row is lost (the member-outcomes

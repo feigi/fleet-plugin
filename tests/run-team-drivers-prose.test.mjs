@@ -197,7 +197,7 @@ test("every NEED kind phase0.mjs prints has its paragraph in phase 0 step 0", ()
 
 test("every NEED kind closeout.mjs prints has its place in End of run", () => {
   const kinds = needKinds("closeout.mjs");
-  assert.deepEqual(kinds, ["hand-release", "tier-outcomes"], "closeout.mjs prints a NEED kind this test does not list — give it a place");
+  assert.deepEqual(kinds, ["hand-release", "merge-wait", "tier-outcomes"], "closeout.mjs prints a NEED kind this test does not list — give it a place");
   const s = endOfRun();
   for (const kind of kinds) assert.ok(s.includes(`NEED ${kind}`), `End of run has no place for \`NEED ${kind}\``);
 });
