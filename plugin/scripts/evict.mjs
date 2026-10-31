@@ -75,6 +75,10 @@
 // there is nothing to restore. Without `--apply` it runs nothing and prints
 // the command it would run. Prints
 // `{"applied","worktree","install"}`; exit 0 restored (or would), 2 refused.
+//
+// That install sequence is `installIn()`, exported: finisher-tree.mjs runs the
+// same read, the same checks and the same words in the tree it builds for the
+// acceptance mutation, so there is one copy of it.
 
 import { spawnSync } from "node:child_process";
 import { readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
@@ -380,6 +384,51 @@ function sweep({ afterRotate, apply }) {
   writeAll(1, `${JSON.stringify({ applied: apply, ledger: found.file, evicted, kept, failed })}\n`);
 }
 
+/**
+ * The Install step in `tree`, read and, with `apply`, run as claim-ticket.sh
+ * runs it: the one sequence a restore and the finisher's tree share. `{install}`
+ * when it ran and left the tree clean (or, without `apply`, would run); else
+ * `{refusal: {kind, message, install, exit}}`, `message` the claim's own words
+ * and `exit` the Install step's exit status, null when it never produced one.
+ * `kind` is one of:
+ *   derive         derive-testcmd.sh would not name the Install step
+ *   status-before  the tree state could not be read before the Install step
+ *   dirty-before   the tree was not clean before it: nothing ran
+ *   not-run        the Install step could not be started, or exited 126 or 127
+ *   failed         it was killed by a signal, or exited non-zero
+ *   status-after   the tree state could not be read after it
+ *   dirtied        it left the tree changed
+ * `verb` names the operation in the dirty-before refusal. Nothing here writes a
+ * mark or a restore time, and it never exits the process.
+ */
+export function installIn(tree, apply, verb = "restore") {
+  const refuse = (kind, message, install = "", exit = null) => ({ refusal: { kind, message, install, exit } });
+  const derived = run("sh", [join(SCRIPT_DIR, "derive-testcmd.sh"), tree, "install", "--at", "origin/main"]);
+  const install = String(derived.stdout ?? "").replace(/\n$/, "");
+  if (derived.error || derived.status !== 0 || install === "") {
+    return refuse("derive", `${String(derived.stderr ?? "").trim() || `derive-testcmd.sh ${tree} install failed (${how(derived)})`}`);
+  }
+  // Dirty before anything runs is no Install step's doing: said in its own
+  // words, so the dirty-after refusal below never blames the Recipe for it.
+  const before = git(tree, ["status", "--porcelain", "-uall"]);
+  if (before.error || before.status !== 0) return refuse("status-before", `could not read the tree state in ${tree} before the Install step (${how(before)})`, install);
+  if (before.stdout !== "") return refuse("dirty-before", `${tree} is not clean before the ${verb} (first: ${before.stdout.split("\n")[0]}) — the Install step did not run; clear that change, then ${verb} again`, install);
+  if (!apply) return { install };
+  // Through `sh -c` with `CI` unset and the output dropped, as claim-ticket.sh
+  // runs it; no timeout, as there.
+  const r = run("sh", ["-c", install], { cwd: tree, drop: ["CI"], stdio: "ignore", timeout: 0 });
+  if (r.error) return refuse("not-run", `the Install step '${install}' did not run in ${tree} (${how(r)}) — ${REDERIVE}`, install);
+  if (r.signal) return refuse("failed", `install failed in ${tree} (${how(r)})`, install);
+  if (r.status === 126 || r.status === 127) {
+    return refuse("not-run", `the Install step '${install}' did not run in ${tree} (exit ${r.status}: not executable or not found) — ${REDERIVE}`, install, r.status);
+  }
+  if (r.status !== 0) return refuse("failed", `install failed in ${tree} (exit ${r.status})`, install, r.status);
+  const status = git(tree, ["status", "--porcelain", "-uall"]);
+  if (status.error || status.status !== 0) return refuse("status-after", `could not verify the tree state in ${tree} after the Install step`, install, 0);
+  if (status.stdout !== "") return refuse("dirtied", `the Install step '${install}' changed the tree in ${tree} (first: ${status.stdout.split("\n")[0]}) — ${REDERIVE}`, install, 0);
+  return { install };
+}
+
 function restore(tree, apply) {
   try {
     if (!statSync(tree).isDirectory()) die(`--restore ${tree} is not a directory`);
@@ -389,29 +438,10 @@ function restore(tree, apply) {
   const mark = evictionMark(tree);
   if (mark.unknown !== undefined) die(`cannot tell whether ${tree} is evicted: ${mark.unknown}`);
   if (!mark.marked) die(`${tree} is not evicted (no ${join(mark.dir, EVICTED)}) — nothing to restore`);
-  const derived = run("sh", [join(SCRIPT_DIR, "derive-testcmd.sh"), tree, "install", "--at", "origin/main"]);
-  const install = String(derived.stdout ?? "").replace(/\n$/, "");
-  if (derived.error || derived.status !== 0 || install === "") {
-    die(`${String(derived.stderr ?? "").trim() || `derive-testcmd.sh ${tree} install failed (${how(derived)})`}`);
-  }
-  // Dirty before anything runs is no Install step's doing: said in its own
-  // words, so the dirty-after refusal below never blames the Recipe for it.
-  const before = git(tree, ["status", "--porcelain", "-uall"]);
-  if (before.error || before.status !== 0) die(`could not read the tree state in ${tree} before the Install step (${how(before)})`);
-  if (before.stdout !== "") die(`${tree} is not clean before the restore (first: ${before.stdout.split("\n")[0]}) — the Install step did not run; clear that change, then restore again`);
+  const done = installIn(tree, apply);
+  if (done.refusal) die(done.refusal.message);
+  const { install } = done;
   if (apply) {
-    // Through `sh -c` with `CI` unset and the output dropped, as claim-ticket.sh
-    // runs it; no timeout, as there.
-    const r = run("sh", ["-c", install], { cwd: tree, drop: ["CI"], stdio: "ignore", timeout: 0 });
-    if (r.error) die(`the Install step '${install}' did not run in ${tree} (${how(r)}) — ${REDERIVE}`);
-    if (r.signal) die(`install failed in ${tree} (${how(r)})`);
-    if (r.status === 126 || r.status === 127) {
-      die(`the Install step '${install}' did not run in ${tree} (exit ${r.status}: not executable or not found) — ${REDERIVE}`);
-    }
-    if (r.status !== 0) die(`install failed in ${tree} (exit ${r.status})`);
-    const status = git(tree, ["status", "--porcelain", "-uall"]);
-    if (status.error || status.status !== 0) die(`could not verify the tree state in ${tree} after the Install step`);
-    if (status.stdout !== "") die(`the Install step '${install}' changed the tree in ${tree} (first: ${status.stdout.split("\n")[0]}) — ${REDERIVE}`);
     // The restore time first: a mark removed with no time beside it would read
     // the tree idle by its HEAD alone and evict it again at once.
     const restored = join(mark.dir, RESTORED);
