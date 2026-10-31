@@ -3673,7 +3673,7 @@ const procEnv = (t, extra = {}) => {
   return { FLEET_PROC_TABLE: procTable(d, extra) };
 };
 for (const [what, fixture, named] of [
-  ["no receipt", { phase0: false }, /^PHASE0-INCOMPLETE no receipt at \S+\/\.fleet\/phase0\.json — dispatch held: run ~\/\.fleet\/bin\/fleet-run phase0\.mjs --session <session> and act on what it prints$/],
+  ["no receipt", { phase0: false }, /^PHASE0-INCOMPLETE no receipt at \S+\/\.fleet\/phase0\.json — dispatch held: run phase0\.mjs from a Python eval cell in the main checkout, without --session \(run-team SKILL\.md phase 0 step 0\) and act on what it prints$/],
   ["a receipt of another run", {
     beforeRun: withController,
     phase0: (r) => ({ ...r, run: CONTROLLER_AT - 1 }),
@@ -3713,7 +3713,7 @@ test("CLI: a finished receipt whose run's controller has exited holds every disp
   const gone = runCli([], { ...PHASE0_LIVE, beforeRun: controllerRecord({ pid: deadPid() }), env: procEnv(t) });
   assert.equal(gone.status, 0, gone.stderr);
   const line = gone.stdout.trim().split("\n").find((l) => l.startsWith("PHASE0-"));
-  assert.match(line ?? "", new RegExp(`^PHASE0-INCOMPLETE receipt \\S+/\\.fleet/phase0\\.json is run ${CONTROLLER_AT}'s and its controller has exited: not this session's finished phase 0 — dispatch held: run \\S+ phase0\\.mjs --session <session> `), gone.stdout);
+  assert.match(line ?? "", new RegExp(`^PHASE0-INCOMPLETE receipt \\S+/\\.fleet/phase0\\.json is run ${CONTROLLER_AT}'s and its controller has exited: not this session's finished phase 0 — dispatch held: run phase0\\.mjs from a Python eval cell in the main checkout, without --session `), gone.stdout);
   assert.match(gone.stdout, /^implementers 2\/3 → HOLD \(phase 0 incomplete\)/m);
   assert.match(gone.stdout, /^reviewers +0\/3 → HOLD \(phase 0 incomplete\)/m);
   assert.match(gone.stdout, /^merge-bot +0\/1 → HOLD \(phase 0 incomplete\)/m);
