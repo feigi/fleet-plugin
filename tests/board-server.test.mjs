@@ -15,7 +15,7 @@ import { createBoardServer, renderRefusedHost, resolveCockpitInstance, cockpitPo
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { withStderr, serveArgs, serveOpts, withTimeout } from "./support/board-rig.mjs";
-import { heldOutside, heldWindowExit, watchWindow } from "./support/cockpit-port.mjs";
+import { heldOutside, heldWindowExit, holdWindow, watchWindow } from "./support/cockpit-port.mjs";
 import { seedLabelMap } from "./support/label-map-seed.mjs";
 
 test("createBoardServer serves board.json and the page", async () => {
@@ -950,8 +950,12 @@ test("heldWindowExit: skips only an exit before announcing against a window seen
 // the port, so it opens exactly one tab; the second found that cockpit
 // already running (the held-port arm), so it opens none — before #1714 it
 // opened the existing board again, one more tab per pass.
-test("CLI: a second launch for the same workspace reuses the live cockpit, opens nothing, and exits 0", async (t) => {
-  const rig = launcherBin(ALL_LAUNCHERS), repo = gitRepo("board-ws-reuse-");
+//
+// A function the row calls rather than the row itself, so the reuse row's
+// held-window row runs this very body — its skip included — against a `repo`
+// whose window it holds. The body removes `repo` when it is done.
+async function reuseLiveCockpit(t, repo = gitRepo("board-ws-reuse-")) {
+  const rig = launcherBin(ALL_LAUNCHERS);
   const instance = resolveCockpitInstance({ cwd: repo, workspace: realpathSync(repo) });
   const ports = cockpitPorts(instance);
   const watch = await watchWindow(ports);
@@ -997,12 +1001,39 @@ test("CLI: a second launch for the same workspace reuses the live cockpit, opens
     await exited;
     for (const d of [rig.bin, repo]) rmSync(d, { recursive: true, force: true });
   }
+}
+
+test("CLI: a second launch for the same workspace reuses the live cockpit, opens nothing, and exits 0", (t) => reuseLiveCockpit(t));
+
+// The reuse row's skip, end to end: with every candidate in the workspace's
+// window held, the first launch exits without announcing, and the row has to
+// skip with heldOutside() rather than fail. The holders 404 at once, so the
+// launch gives up on its window in well under the row's 20s announce budget.
+// The row is handed a stand-in for `t` that records the skip, so the skip is
+// what this asserts on, and a row that rethrew instead fails here.
+test("CLI: a reuse row whose first launch finds its whole window held skips with heldOutside()", async (t) => {
+  const repo = gitRepo("board-ws-held-");
+  const ports = cockpitPorts(resolveCockpitInstance({ cwd: repo, workspace: realpathSync(repo) }));
+  const { outside, release } = await holdWindow(ports);
+  try {
+    if (outside !== null) {
+      rmSync(repo, { recursive: true, force: true });
+      return t.skip(heldOutside(outside));
+    }
+    let skipped = null;
+    await reuseLiveCockpit({ skip: (why) => { skipped = why; } }, repo);
+    assert.equal(skipped, heldOutside(ports[0]),
+      "a first launch that exhausted a window held whole did not skip the row with heldOutside()");
+  } finally {
+    await release();
+  }
 });
 
-// #1714: the reuse arm the row above cannot reach. That one's cockpit holds
-// the derived port, so the second launch's bind fails and it handshakes the
-// holder; here the derived port is FREE and this workspace's cockpit sits
-// one candidate further along — the shape a departed squatter leaves — so
+// #1714: the reuse arm the row running reuseLiveCockpit() cannot reach.
+// That one's cockpit holds the derived port, so the second launch's bind
+// fails and it handshakes the holder; here the derived port is FREE and this
+// workspace's cockpit sits one candidate further along — the shape a
+// departed squatter leaves — so
 // the launch binds first and finds the match in its post-bind scan. That arm
 // had its own copy of the open, and has to open nothing just the same. The
 // stand-in cockpit answers from THIS process, so the launch is spawned

@@ -32,7 +32,7 @@ import { fileURLToPath } from "node:url";
 import { resolveCockpitInstance, cockpitPorts, probeCockpitWorkspace } from "../plugin/scripts/board-server.mjs";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
-import { heldOutside, heldWindowExit, watchWindow } from "./support/cockpit-port.mjs";
+import { heldOutside, heldWindowExit, holdWindow, watchWindow } from "./support/cockpit-port.mjs";
 import { seedLabelMap } from "./support/label-map-seed.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/board.mjs", import.meta.url));
@@ -134,8 +134,11 @@ const boardJson = async (port) => {
 // after ~2s rather than the workspace in milliseconds, and the second launch
 // reads the port as foreign, announces a cockpit of its own on the next
 // candidate and never exits, so spawnSync reports the timeout instead of 0.
-test("CLI: a relaunch that lands mid-gather() is answered within 1s and reuses the live cockpit", async (t) => {
-  const repo = gitRepo("tick-block-");
+//
+// A function the row calls rather than the row itself, so the relaunch row's
+// held-window row runs this very body — its skip included — against a `repo`
+// whose window it holds. The body removes `repo` when it is done.
+async function relaunchMidGather(t, repo = gitRepo("tick-block-")) {
   const mark = join(tempDir("tick-mark-"), "gathering");
   const bin = shimPath(mark);
   const home = tempDir("tick-home-");
@@ -213,5 +216,31 @@ test("CLI: a relaunch that lands mid-gather() is answered within 1s and reuses t
     first.p.kill("SIGKILL");
     await exited;
     for (const d of [bin, repo, home]) rmSync(d, { recursive: true, force: true });
+  }
+}
+
+test("CLI: a relaunch that lands mid-gather() is answered within 1s and reuses the live cockpit", (t) => relaunchMidGather(t));
+
+// The row's skip, end to end: with every candidate in the workspace's window
+// held, the first launch exits without announcing, and the row has to skip
+// with heldOutside() rather than fail. The holders 404 at once, so the launch
+// gives up on its window in well under the row's 20s announce budget. The row
+// is handed a stand-in for `t` that records the skip, so the skip is what this
+// asserts on, and a row that rethrew instead fails here.
+test("CLI: a relaunch row whose first launch finds its whole window held skips with heldOutside()", async (t) => {
+  const repo = gitRepo("tick-held-");
+  const ports = cockpitPorts(resolveCockpitInstance({ cwd: repo, workspace: repo }));
+  const { outside, release } = await holdWindow(ports);
+  try {
+    if (outside !== null) {
+      rmSync(repo, { recursive: true, force: true });
+      return t.skip(heldOutside(outside));
+    }
+    let skipped = null;
+    await relaunchMidGather({ skip: (why) => { skipped = why; } }, repo);
+    assert.equal(skipped, heldOutside(ports[0]),
+      "a first launch that exhausted a window held whole did not skip the row with heldOutside()");
+  } finally {
+    await release();
   }
 });

@@ -1,6 +1,7 @@
 // What the derived-port rows share for telling an outside holder apart from
-// a launch that scanned wrong: the skip reason, and a watch over the port
-// window while a spawned launch picks its port.
+// a launch that scanned wrong: the skip reason, a watch over the port window
+// while a spawned launch picks its port, and a holder that takes a whole
+// window, so the skip a row takes on it can itself be pinned.
 //
 // A row cannot hold the derived port open for a launch — the launch has to
 // bind it — so whatever else on the machine holds a cockpit-range port can
@@ -13,6 +14,7 @@
 //
 // Deliberately not a `.test.mjs`, so `node --test` never loads it as a suite.
 
+import { createServer } from "node:http";
 import { connect } from "node:net";
 
 // The skip reason for a row that could not bind its fixed port itself
@@ -91,4 +93,28 @@ export async function watchWindow(ports, everyMs = 5) {
 // heldOutside(); false for anything else, which the row rethrows.
 export function heldWindowExit(error, watch) {
   return /^serve exited \([^)]*\) before announcing/.test(error.message) && watch.allHeld();
+}
+
+// The other side of heldWindowExit(), for the rows that pin it end to end:
+// takes every one of `ports` with a listener that 404s whatever it is asked,
+// a foreign holder's shape that a launch's probe settles at once, so a launch
+// on this window steps over each candidate and exits without announcing.
+// Resolves `{ outside, release }`: `outside` is a port something outside the
+// test already held — the caller skips with heldOutside(outside), since that
+// holder can let go and the launch then binds it — and null when every
+// candidate is the caller's own; release() closes whatever this took.
+export async function holdWindow(ports) {
+  const servers = [];
+  const release = () => Promise.all(servers.map((s) => new Promise((res) => s.close(res))));
+  for (const port of ports) {
+    const server = createServer((req, res) => { res.statusCode = 404; res.end(); });
+    const failure = await new Promise((res) => {
+      server.once("error", res);
+      server.listen(port, "127.0.0.1", () => res(null));
+    });
+    if (failure?.code === "EADDRINUSE") return { outside: port, release };
+    if (failure) { await release(); throw failure; }
+    servers.push(server);
+  }
+  return { outside: null, release };
 }
