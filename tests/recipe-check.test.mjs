@@ -24,6 +24,7 @@ import { parseCounts } from "../plugin/scripts/recipe-check.mjs";
 
 const RECIPE_CHECK = fileURLToPath(new URL("../plugin/scripts/recipe-check.mjs", import.meta.url));
 const LEDGER = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
+const DERIVE = fileURLToPath(new URL("../plugin/scripts/derive-testcmd.sh", import.meta.url));
 
 const GIT_ENV = {
   GIT_AUTHOR_NAME: "t",
@@ -800,6 +801,24 @@ test("settle: a Check step of `true` with a passing Test entrypoint passes", () 
 test("settle: a repository with no usable Recipe applies no gate", () => {
   const f = fixture();
   rmSync(join(f.work, ".fleet", "recipe.json"));
+  f.stage();
+  f.head = f.commitAndPush();
+  settledImpl(f);
+  const receipt = f.settled("impl-5");
+  assert.equal(receipt.outcome, "PR#6");
+  assert.deepEqual(receipt.checks.map((c) => c.name), [`verify-sha.sh feat ${f.head} exits 0`, "PR #6 reads OPEN", "PR #6 closes #5"]);
+});
+
+// The gate reads the cache against origin/main, the tree members' worktrees
+// are cut from (#4048): a Check step whose script only the main checkout holds
+// is a Recipe the reader refuses there, so no gate applies, exactly as for a
+// cache that is gone — though the main checkout alone would read it valid.
+test("settle: a Recipe whose Check step names a path origin/main does not hold applies no gate", () => {
+  const f = fixture({ check: "./local-check.sh" });
+  writeFileSync(join(f.work, "local-check.sh"), "#!/bin/sh\n");
+  chmodSync(join(f.work, "local-check.sh"), 0o755);
+  const control = spawnSync("sh", [DERIVE, f.work, "check"], { env: f.env, encoding: "utf8" });
+  assert.equal(control.status, 0, `fixture: the main checkout alone reads it valid: ${control.stderr}`);
   f.stage();
   f.head = f.commitAndPush();
   settledImpl(f);

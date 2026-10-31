@@ -424,8 +424,8 @@ step and bakes its Test entrypoint into the member's runner, and every
 review reads the Test entrypoint, all out of the **Recipe cache**
 (`.fleet/recipe.json` beside the common git dir); no script infers either
 command. Check it first: `~/.fleet/bin/fleet-run derive-testcmd.sh .
-install`, `~/.fleet/bin/fleet-run derive-testcmd.sh . check` and
-`~/.fleet/bin/fleet-run derive-testcmd.sh . test --at
+install --at origin/main`, `~/.fleet/bin/fleet-run derive-testcmd.sh . check
+--at origin/main` and `~/.fleet/bin/fleet-run derive-testcmd.sh . test --at
 origin/main`. **All three exit
 0 → the cache is present and valid: use it as it stands and derive
 nothing.** Any exits 1 (a refusal about the cache) → derive it; a refusal
@@ -451,8 +451,8 @@ a deliberate mutation of a tracked file, and the Test entrypoint must be shown t
 runner's own non-zero count, or a deliberate mutation of one test that
 turns the run red. Only a proof writes the cache, with `derivedAt` (the
 `origin/main` commit it ran against) and the proof itself. **`RECIPE
-PROVEN`** → re-run the three reads above (`derive-testcmd.sh . install`,
-`derive-testcmd.sh . check` and `derive-testcmd.sh . test --at origin/main`);
+PROVEN`** → re-run the three reads above (`derive-testcmd.sh . install --at origin/main`,
+`derive-testcmd.sh . check --at origin/main` and `derive-testcmd.sh . test --at origin/main`);
 their output is the Recipe this run uses. **`RECIPE NOT PROVEN`** →
 stall, below.
 
