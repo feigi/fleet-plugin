@@ -578,6 +578,57 @@ test("a Test entrypoint whose glob matches nothing at origin/main is not proven,
   assert.equal(existsSync(cachePath(dir)), false);
 });
 
+// A re-derivation whose commands name scripts only origin/main holds: the main
+// checkout predates them. The preflight and the read-back judge every command
+// field against the tree the proof runs in, so the checkout's lag cannot
+// refuse a Recipe that holds where it runs (#4048).
+function gainedScripts() {
+  const { dir } = repo({ "a.txt": "1\n" });
+  write(dir, {
+    "bin/install.sh": "#!/bin/sh\nexit 0\n",
+    "bin/check.sh": "#!/bin/sh\ngrep -q clean status.txt\n",
+    "bin/run.sh": "#!/bin/sh\necho 'Tests run: 1, Failures: 0'\n",
+    "status.txt": "clean\n",
+  });
+  for (const s of ["install.sh", "check.sh", "run.sh"]) chmodSync(join(dir, "bin", s), 0o755);
+  git(dir, "add", "-A");
+  git(dir, "commit", "-q", "-m", "the scripts");
+  git(dir, "update-ref", "refs/remotes/origin/main", "HEAD");
+  git(dir, "reset", "-q", "--hard", "HEAD~1");
+  assert.equal(existsSync(join(dir, "bin")), false, "fixture: the checkout predates the scripts");
+  return dir;
+}
+const GAINED_PROOF = [
+  "--install", "./bin/install.sh",
+  "--check", "./bin/check.sh",
+  "--check-mutate", "printf 'dirty\\n' > status.txt",
+  "--check-mutation", "the lint step fails on a dirty status",
+  "--test", "./bin/run.sh", "--count-line", "Tests run: 1,", "--test-count", "1",
+];
+
+test("a re-derivation whose commands only origin/main holds passes the preflight and the read-back, for every command field", () => {
+  const dir = gainedScripts();
+  const r = prove(dir, GAINED_PROOF);
+  assert.equal(r.status, 0, r.err);
+  const cache = JSON.parse(readFileSync(cachePath(dir), "utf8"));
+  assert.deepEqual([cache.install, cache.check, cache.test], ["./bin/install.sh", "./bin/check.sh", "./bin/run.sh"]);
+  for (const field of ["install", "check", "test"]) {
+    const at = spawnSync("sh", [READER, dir, field, "--at", "origin/main"], { encoding: "utf8", env: FIXTURE_ENV });
+    assert.equal(at.status, 0, `${field}: ${at.stderr}`);
+    assert.equal(read(dir, field).status, 1, `fixture: ${field} read against the checkout alone refuses`);
+  }
+});
+
+test("a proposal whose path origin/main does not hold is refused before any command runs, though the main checkout holds it", () => {
+  const { dir } = repo({ "a.txt": "1\n" });
+  writeFileSync(join(dir, "local.sh"), "#!/bin/sh\nexit 0\n");
+  chmodSync(join(dir, "local.sh"), 0o755);
+  const r = prove(dir, ["--install", "./local.sh", "--test", "sh -c \"echo 'Tests run: 1, Failures: 0'\"", "--count-line", "Tests run: 1,", "--test-count", "1"]);
+  assert.equal(r.status, 1, r.err);
+  assert.match(r.err, /NOT PROVEN — derive-testcmd: the proposed install command '\.\/local\.sh' is not found or not executable from .* at [0-9a-f]{40} — /);
+  assert.equal(existsSync(cachePath(dir)), false);
+});
+
 test("from a linked worktree the cache lands beside the common git dir — the main checkout the reader reads", () => {
   const { dir, head } = repo(MAVEN_FILES);
   const wt = join(tempDir("recipe-prove-wt-"), "wt");

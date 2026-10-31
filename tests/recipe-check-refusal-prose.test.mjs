@@ -70,12 +70,12 @@ test("phase 0's mid-run rule counts a settle wake's NEED derive-recipe in its on
   assert.match(p, Pin.phrase("The count is yours to keep; the ledger holds no record of it."));
 });
 
-test("phase 0's Recipe read names the Check step beside install and test", () => {
+test("phase 0's Recipe read names the Check step beside install and test, each at origin/main", () => {
   const p = Pin.of(read("skills", "run-team", "references", "phase-0.md"), "phase-0.md")
     .between("**Derive the Recipe — the Recipe derivation step — before the fold-in below", "**Where `checkCmd` comes from:**", "the Recipe derivation step").text;
-  assert.match(p, Pin.phrase("`~/.fleet/bin/fleet-run derive-testcmd.sh . check`"));
+  assert.match(p, Pin.phrase("`~/.fleet/bin/fleet-run derive-testcmd.sh . install --at origin/main`, `~/.fleet/bin/fleet-run derive-testcmd.sh . check --at origin/main` and `~/.fleet/bin/fleet-run derive-testcmd.sh . test --at origin/main`."));
   assert.match(p, Pin.phrase("**All three exit 0 → the cache is present and valid: use it as it stands and derive nothing.**"));
-  assert.match(p, Pin.phrase("**`RECIPE PROVEN`** → re-run the three reads above (`derive-testcmd.sh . install`, `derive-testcmd.sh . check` and `derive-testcmd.sh . test --at origin/main`);"));
+  assert.match(p, Pin.phrase("**`RECIPE PROVEN`** → re-run the three reads above (`derive-testcmd.sh . install --at origin/main`, `derive-testcmd.sh . check --at origin/main` and `derive-testcmd.sh . test --at origin/main`);"));
 });
 
 test("run-team's Failure handling rows for a blocked implementer and a fix-applier that cannot reach green name the wake's NEED as phase 0's mid-run trigger", () => {

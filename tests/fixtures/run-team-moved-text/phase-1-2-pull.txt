@@ -288,7 +288,7 @@ read them off `git branch -r` or `git worktree list`: human branches on origin
 free text, so a pair copied from one claims under that shape at exit 0.
 
 **The Install step comes from the Recipe cache — never pass or infer one.** The
-claim reads it through `derive-testcmd.sh . install`, and the Test entrypoint
+claim reads it through `derive-testcmd.sh . install --at origin/main`, and the Test entrypoint
 through `derive-testcmd.sh . test --at origin/main`, runs the
 Install step in the fresh worktree and refuses if it left any file changed: an
 install that rewrites the tree in a throwaway worktree corrupts it for everyone.
