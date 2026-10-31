@@ -4,7 +4,7 @@
 grilling session against fresh measurements on omp 18.4.4. Amended by #1381:
 run-team-help deleted — on omp 18.8.5 the picker hides skill:run-team through a
 name tie with plugin commands, not through disable-model-invocation; /team and
-/skill:run surface it. Amended by #3845: Decision 4 — `instruments.sh` also resolves the Install root, the same path the same way, to certify the tree the Resolver executes; it records the root only as evidence a check compares against the live root, never as a path anything follows. Amended by #4037: Decision 1 — the link remains the dev loop for interactive sessions, but a fleet run refuses a linked Install root (`instruments.sh` pin and check exit 2); Decision 4's linked-checkout git mode and the kind NOTICE's "every answer comes from the dev tree" case no longer occur in a run. The Provenance check still reports `kind: linked-checkout`.
+/skill:run surface it. Amended by #3845: Decision 4 — `instruments.sh` also resolves the Install root, the same path the same way, to certify the tree the Resolver executes; it records the root only as evidence a check compares against the live root, never as a path anything follows. Amended by #4037: Decision 1 — the link remains the dev loop for interactive sessions, but a fleet run refuses a linked Install root (`instruments.sh` pin and check exit 2); the linked-checkout git mode #3845 gave `instruments.sh` and Decision 4's kind NOTICE's "every answer comes from the dev tree" case no longer occur in a run. The Provenance check still reports `kind: linked-checkout`.
 
 ## Context
 

@@ -866,7 +866,7 @@ test("under a package install the workspace checkout's own plugin/ is not the se
   assert.equal(after.stdout, `${digest}\n`);
 });
 
-test("files mode: an added file under skills/ and a changed dotfile are exit 1; a changed package.json is exit 0", (t) => {
+test("an added file under skills/ and a changed dotfile are exit 1; a changed package.json is exit 0", (t) => {
   const { home, pkg } = npmHome(t);
   const ws = wsRepo(t);
   writeFileSync(join(pkg, "scripts", ".env"), "A=1\n");
@@ -886,7 +886,7 @@ test("files mode: an added file under skills/ and a changed dotfile are exit 1; 
   assert.equal(runAt(ws, home).status, 1, "an added file under skills/ is in the set — nothing in a package is untracked");
 });
 
-test("files mode: a package with none of the five directories, or only empty ones, refuses to pin, exit 2", (t) => {
+test("a package with none of the five directories, or only empty ones, refuses to pin, exit 2", (t) => {
   const home = fakeHome(t);
   const pkg = entryOf(home);
   mkdirSync(pkg);
@@ -904,7 +904,7 @@ test("files mode: a package with none of the five directories, or only empty one
   assert.deepEqual(findFleetDirs(ws), [], "a refused pin writes no baseline");
 });
 
-test("files mode: a symlink is hashed by its target's bytes; a dangling one, or one to a directory, refuses exit 2", (t) => {
+test("a symlink is hashed by its target's bytes; a dangling one, or one to a directory, refuses exit 2", (t) => {
   const { home, pkg } = npmHome(t);
   const ws = wsRepo(t);
   writeFileSync(join(pkg, "lib.mjs"), "export const x = 1;\n");
@@ -938,7 +938,7 @@ test("files mode: a symlink is hashed by its target's bytes; a dangling one, or 
   assert.equal(baselineOf(ws).split("\n")[0], digest, "a refused re-pin leaves the baseline it could not replace");
 });
 
-test("a link into $HOME/.omp/plugins/cache/ is a marketplace install, pinned in files mode", (t) => {
+test("a link into $HOME/.omp/plugins/cache/ is a marketplace install, pinned like any package", (t) => {
   const home = fakeHome(t);
   const cache = join(home, ".omp", "plugins", "cache", "fleet-ctl", "3.102.7");
   writePackage(cache, "3.102.7");
@@ -949,12 +949,12 @@ test("a link into $HOME/.omp/plugins/cache/ is a marketplace install, pinned in 
   const digest = r.stdout.trim();
   assert.equal(baselineOf(ws), `${digest}\nroot=${cache}\nversion=3.102.7\n`);
   assert.equal(r.stderr, `instruments: pinned ${digest} over marketplace-install ${cache} (version 3.102.7)\n`);
-  // Files mode digests the payload, not where it is installed.
+  // The digest is of the payload, not of where it is installed.
   const npm = npmHome(t, "3.102.7");
   assert.equal(runAt(wsRepo(t), npm.home, ["--pin"]).stdout.trim(), digest);
 });
 
-test("a package's pin is its files-mode digest byte for byte: every file under the five directories, in byte order, then the digest of those lines", (t) => {
+test("a package's pin is its digest byte for byte: every file under the five directories, in byte order, then the digest of those lines", (t) => {
   const { home, pkg } = npmHome(t, "3.102.7");
   // `B.mjs` sorts before `a.mjs` in byte order and after it in a locale
   // collation, and the list as a whole reads differently backwards, so only
@@ -996,7 +996,7 @@ const linkedRefusal = (to) =>
 
 test("a linked checkout refuses exit 2 at pin and at check, naming the link and the install instruction, with nothing on stdout — whatever the link points at", (t) => {
   const root = repo(t);
-  pin(root); // a good baseline, so the check reaches the resolution
+  pin(root); // a good baseline, so a refusal that rewrote it would show
   const before = baselineOf(root);
   for (const [what, to] of linkTargets(t)) {
     const home = linkHome(t, to);
@@ -1011,14 +1011,18 @@ test("a linked checkout refuses exit 2 at pin and at check, naming the link and 
   }
 });
 
-test("a linked checkout refuses a pin from a workspace with no baseline yet, and writes none", (t) => {
+test("a linked checkout refuses a pin and a check from a workspace with no baseline yet, naming the link, and writes none", (t) => {
   const ws = wsRepo(t);
-  const [, [, to]] = linkTargets(t);
-  const r = runAt(ws, linkHome(t, to), ["--pin"]);
-  assert.equal(r.status, 2, r.stdout + r.stderr);
-  assert.equal(r.stderr, linkedRefusal(to));
-  assert.equal(r.stdout, "");
-  assert.deepEqual(findFleetDirs(ws), [], "a refused pin writes no baseline");
+  const to = repo(t);
+  const home = linkHome(t, to);
+  for (const args of [["--pin"], []]) {
+    const r = runAt(ws, home, args);
+    const where = args.join(" ") || "check";
+    assert.equal(r.status, 2, `${where}: ${r.stdout}${r.stderr}`);
+    assert.equal(r.stderr, linkedRefusal(to), where);
+    assert.equal(r.stdout, "", `${where}: nothing on stdout`);
+    assert.deepEqual(findFleetDirs(ws), [], `${where}: a refusal writes no baseline`);
+  }
 });
 
 test("an Install root that changed under the run — a package reinstalled elsewhere, a package moved into omp's cache — refuses exit 2 naming both, and hashes nothing", (t) => {

@@ -1176,13 +1176,12 @@ test("an Install root that resolves elsewhere than the pin reaches the gate as 2
   assert.equal(r.json.instruments, null);
 });
 
-test("a linked Install root reaches the gate as 2 instruments-unanswerable, whatever the pin said", (t) => {
+test("a linked Install root reaches the gate as 2 instruments-unanswerable, even linked to the very package the pin certified", (t) => {
+  // The link points at the pinned package itself, so the root and the digest
+  // both match the pin: only the linked-checkout refusal can close the gate.
   const pinned = installedPackage(t);
-  const linked = mktemp(t, "merge-gate-linked-");
-  mkdirSync(join(linked, "scripts"), { recursive: true });
-  writeFileSync(join(linked, "scripts", "probe.sh"), "echo probe\n");
   const home = emptyHome(t);
-  symlinkSync(linked, join(home, ".omp", "plugins", "node_modules", "@feigi", "fleet-ctl"));
+  symlinkSync(pinned.pkg, join(home, ".omp", "plugins", "node_modules", "@feigi", "fleet-ctl"));
   const r = gate(t, {
     realInstruments: true,
     env: { HOME: home },
