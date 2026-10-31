@@ -151,7 +151,7 @@ invoked, never injected.
 | Path | Owner | Shape | Where |
 |---|---|---|---|
 | `.fleet/ledger.md` | `ledger.mjs` only (`row/filed/ruled/check/read/dispatch/settle/drain/rotate`) | five `##` sections `Rows/Dispatched/Filed/Ruled/Drain`; row grammar `impl-<N> · class=… · excluded · behind-pr:#M · review=<agent>:<runId>:<status>`; member tokens `(impl|fix-pr|finisher-pr|merge-bot)-<N>(-[a-z])?`; four historical finisher spellings still parsed; lives one run — phase 0's `rotate` moves it whole to `.fleet/ledger.<UTC YYYY-MM-DDTHHMMSSZ>.md` beside it, never rewritten after | harness#64–70, tracker#64, prose#138–139 |
-| `.fleet/heartbeat.json` | `fleet-heartbeat.mjs` (`elapsed`,`beat`) + `fleet-tick.mjs` (`quiet`,`digest`) | one writer per key, no lock, patch-merge; absent file = fresh run; stale = `interval × 2` | tracker#57–59, prose#140 |
+| `.fleet/heartbeat.json` | `fleet-heartbeat.mjs` (`beat`) + `fleet-tick.mjs` (`quiet`,`digest`,`ticked`,`seen`,`applied`) + `ledger.mjs` (`controller`,`acted`) | one writer per key, no lock, patch-merge; absent file = fresh run; stale = `interval × 2` | tracker#57–59, prose#140 |
 | `.fleet/shortlist.json` | `shortlist.mjs` | `{scanned, shortlist:[{n,t}], dropped:[{n,reason}]}`, temp+rename | tracker#56 |
 | `.fleet/board.json` / `board.html` | `board.mjs serve` | atomic write; page fetches relative `/board.json` every 15 s — `file://` never works; port `8123 + fnv1a(workspace) % 512` | harness#92–100 |
 | `.fleet/instruments.sha` | `instruments.sh` | line 1: 64-hex digest of file *contents* (modes excluded) of every file under the five component directories of the live Install root (an npm or marketplace install — a linked checkout is refused at pin and at check, exit 2); line 2: `root=` — the package's realpath — compared with the live Install root at every check, never followed; line 3: `version=<package.json version>`, absent when unreadable, so a refusal can name what moved; state lives in the main checkout, never a worktree | shell#91–92, tracker#62 |
@@ -180,7 +180,7 @@ about *which* divergence exists (shell#67–92, tracker#41–48):
 ## 8. Time, concurrency, network
 
 - Clock is `Date.now()` epoch-ms everywhere; no timezone handling; GitHub `createdAt` whole-second. — tracker#65–66
-- Heartbeat: base 300 s, ×2 backoff, ceiling 1200 s, never above 30 min because arriving supply emits no event; `--hold` 240 s per call because omp lets no call block 20 min (auto-background at 60 s, 300 s command deadline). — tracker#41, prose#151–153
+- Heartbeat: base 300 s, ×2 backoff, ceiling 1200 s, never above 30 min because arriving supply emits no event. — prose#152–153
 - Merge bot grace: fixed 15 min after the last actionable label, polling 60 s. — prose#154
 - Rate limits: `gh api rate_limit` is free; secondary-limit outages are seconds long, so retry-and-re-probe, never backoff-and-wait; all pacing lives in the tick tail, never per PR. — prose#155–157
 - Concurrency ceilings: `IN_FLIGHT = 4` network probes per tick; `ci-state.mjs` spawned serially per PR; one watcher per PR, armed by the controller not a member. — tracker#69, harness#102, prose#159–160
@@ -191,7 +191,7 @@ about *which* divergence exists (shell#67–92, tracker#41–48):
 
 Explicit (an ADR or `docs/agents/*` names it): labels (`triage-labels.md`),
 tracker operations (`issue-tracker.md`), merge gate (ADR 0007), platforms (ADR
-0009), node pin (ADR 0010), tiers (ADR 0005/0011), turn-holding (ADR 0008),
+0009), node pin (ADR 0010), tiers (ADR 0005/0011), controller wake (ADR 0008 as amended by ADR 0033),
 relabel-by-cause (ADR 0013), install path (ADR 0003).
 
 Implied only (lives in code/prose, no doc names it as a requirement):
