@@ -660,7 +660,8 @@ wt_reg_state() {
 # with no worktree is exactly as unclearable as the tampered one. Both run on
 # the listing each branch's own lookup reads — re-read per branch, as the
 # comment at the lookup below records — so a standing fault keeps every [gone]
-# branch in the pass, and a transient one keeps only the branches whose
+# branch, and every selected one with no upstream, in the pass, and a
+# transient one keeps only the branches whose
 # listing it touched (a transient-fault fixture pins that granularity for the
 # listing failure; this guard follows it rather than latching).
 null_head_why() {
@@ -790,8 +791,9 @@ pr_identity() {
   return 0
 }
 
-# Settled once, before any branch is looked at: a branch with no upstream asks
-# it before pr_load runs, to tell "nobody to ask" from a lookup to join.
+# Settled once, before any branch is looked at, and asked before pr_load runs:
+# a branch with no upstream asks it to tell "nobody to ask" from a lookup to
+# join, and a `+` branch to keep its bare reason without loading.
 if [ -z "$pr_base" ] || ! pr_identity; then pr_off=true; fi
 
 # `gh "$@"`, neither prompting nor outliving <budget> seconds: the bounded-call
@@ -829,7 +831,6 @@ gh_bounded() {
 pr_chunk=500
 pr_load() {
   pr_loaded=true
-  [ "$pr_off" = false ] || return 0
   if ! command -v gh >/dev/null 2>&1; then
     pr_all_why="gh is not installed, so GitHub's record of this tip could not be read"
     return 0
@@ -959,14 +960,10 @@ EOF
     return 1
   fi
   # The recorded heads: the head the PR ended on, then every force-pushed-over
-  # one. Equality first, against all of them.
+  # one. Equality first, against all of them — a membership test on the
+  # comma-joined list, the tip quoted so it matches only itself.
   pt_heads="$poid,$pbef"
-  pt_rest=$pt_heads
-  while [ -n "$pt_rest" ]; do
-    pt_h=${pt_rest%%,*}
-    case "$pt_rest" in *,*) pt_rest=${pt_rest#*,} ;; *) pt_rest= ;; esac
-    if [ "$pt_h" = "$pt_tip" ]; then return 0; fi
-  done
+  case ",$pt_heads," in *,"$pt_tip",*) return 0 ;; esac
   # A tip already on $base ties by equality only; ancestry counts only for a
   # tip with commits of its own. A claim is cut from whatever origin/main this
   # clone last fetched, so a fresh claim that reuses a merged PR's branch name
@@ -1077,10 +1074,15 @@ fi
 # name — asked of refs/remotes/origin/<b>, which the `fetch --prune` above has
 # just brought up to date, so no further network call — and the second merge
 # proof ties its tip, read once in the loop below, to a head its merged PR
-# recorded. `git cherry` is not consulted for it, neither to authorize nor to
-# veto, and there is no name filter. Where there is no GitHub repository to
-# ask, it is never selected. Everything after the selection — the worktree
-# guards, the holder re-check, the compare-and-swap on the tip and
+# recorded. Under a fetch refspec that does not map origin's branches into
+# refs/remotes/origin/, the fetch neither writes nor prunes that ref, so it
+# says nothing about origin: an absent one passes the first check silently,
+# whatever origin holds, and the tie alone decides — a branch origin still
+# holds is then deleted locally only when the tie accounts for its tip, so
+# nothing on it is local-only. `git cherry` is not consulted for it, neither to
+# authorize nor to veto, and there is no name filter. Where there is no GitHub
+# repository to ask, it is never selected. Everything after the selection —
+# the worktree guards, the holder re-check, the compare-and-swap on the tip and
 # `wt_recheck_delete` — runs as it does for a [gone] branch; a branch
 # `wt_recheck_delete` restores still has no upstream, and is weighed again next
 # pass.
@@ -1227,11 +1229,12 @@ for b in $gone_branches $nu_branches; do
     # after this block — the worktree guards, the holder re-check, the
     # compare-and-swap on `$tip` — runs exactly as it does for a branch the
     # cherry cleared.
-    [ "$pr_loaded" = true ] || pr_load
     if [ "$pr_off" = true ]; then
       keep "$b" "unmerged commits"
       continue
-    elif [ -n "$pr_all_why" ]; then
+    fi
+    [ "$pr_loaded" = true ] || pr_load
+    if [ -n "$pr_all_why" ]; then
       keep "$b" "unmerged commits — $pr_all_why"
       continue
     elif ! pr_tie "$b" "$tip"; then
@@ -1254,8 +1257,9 @@ for b in $gone_branches $nu_branches; do
   # check at the delete re-reads the listing and keeps on a failed read too, but
   # it answers one question — does a worktree hold this branch — and every guard
   # under `[ -n "$wt" ]` asks others, so this lookup still fails closed on its
-  # own. Keeping it strands every [gone] branch in this pass on one repo-level
-  # failure, since the listing is re-read per branch (header: every
+  # own. Keeping it strands every [gone] branch, and every selected one with no
+  # upstream, in this pass on one repo-level failure, since the listing is
+  # re-read per branch (header: every
   # precondition is recomputed); reap runs after every merge pass, so each waits
   # one pass with the cause named. A listing that READ is not yet one that can
   # be trusted — see the registry cross-check above — so a disagreeing registry
@@ -1275,13 +1279,13 @@ for b in $gone_branches $nu_branches; do
         keep "$b" "worktree lookup failed — cannot tell whether $b has a worktree; kept until a pass that can read the registry: $wt_why"
         ;;
       *)
-        keep "$b" "worktree registry inconsistent — $wt_why; every [gone] branch is kept until a pass that reads a consistent registry"
+        keep "$b" "worktree registry inconsistent — $wt_why; every [gone] branch, and every selected one with no upstream, is kept until a pass that reads a consistent registry"
         ;;
     esac
     continue
   fi
   if ! null_head_why; then
-    keep "$b" "worktree registry inconsistent — $reg_why; every [gone] branch is kept until a pass that reads a consistent registry"
+    keep "$b" "worktree registry inconsistent — $reg_why; every [gone] branch, and every selected one with no upstream, is kept until a pass that reads a consistent registry"
     continue
   fi
   if ! wt_find_branch "$b"; then
@@ -1626,7 +1630,8 @@ for b in $gone_branches $nu_branches; do
     # predict `-D`'s": `-D`'s blind spot here was only ever this
     # branch's own paired worktree. A registry read that fails closed for an
     # UNRELATED worktree elsewhere in the listing (reaping.md) keeps every
-    # `[gone]` branch in the pass, a repo-wide case `-D` had no equivalent of
+    # `[gone]` branch, and every selected one with no upstream, in the pass, a
+    # repo-wide case `-D` had no equivalent of
     # — it needed no registry answer at all and failed OPEN on one it could
     # not read. The dry run — printing `would reap` unconditionally
     # here — cannot predict any of those keeps either.

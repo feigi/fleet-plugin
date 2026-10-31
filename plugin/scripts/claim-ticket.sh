@@ -305,9 +305,11 @@ else
   # `git push --force-with-lease -u origin HEAD` (skills/next-ticket/SKILL.md
   # step 7; its no-lease fallback carries `-u` too), or else when the controller
   # settles the implementer's report, which writes it. Only then can the branch
-  # be `[gone]`. Until then reap.sh weighs it as a branch with no upstream: a
-  # fresh claim stays kept because its tip is on the base and equals no head a
-  # merged PR recorded.
+  # be `[gone]`. Until then reap.sh weighs it as a branch with no upstream, and
+  # a fresh claim stays kept: no merged PR has its head branch — or, when a
+  # merged PR reused its name, its tip is already on the base and equals no
+  # head that PR recorded. Where there is no GitHub repository to ask, it is
+  # never selected at all.
   #
   # `--no-track` is also why no branch delete uses `-d`: `-d` measures an
   # upstream-less branch against local HEAD, refusing a pristine claim behind

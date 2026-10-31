@@ -5699,3 +5699,80 @@ test("a [gone] branch and branches with no upstream share the one lookup, each r
   assert.deepEqual(json.kept, []);
   assert.equal(gh.calls().length, 1, "one batched lookup for both kinds");
 });
+
+test("in one pass a [gone] branch is weighed by its cherry and a branch with no upstream by its merged PR alone", (t) => {
+  // Neither has a merged PR on record, and both have a clean cherry, so the two
+  // routes disagree on each: a sweep that took either for the other kind would
+  // reap the branch with no upstream and keep the [gone] one.
+  const { w, gh } = githubRepo(t);
+  mergedGoneBranch(w, "feature/plain", "ordinary merged work");
+  const b = "implementer/9-cherry";
+  noUpstreamMergedClaim(w, b);
+
+  const { code, json, stderr } = runReap(w, ["--apply"], gh.env({}));
+  assert.equal(code, 0, stderr);
+  assert.deepEqual(json.reaped, ["feature/plain"], "a clean cherry reaps the [gone] branch with no PR asked about");
+  assert.deepEqual(json.kept, [{ branch: b, reason: `no upstream — no merged PR has the head branch ${b}` }], "a clean cherry selects no branch with no upstream");
+  assert.equal(branchExists(w, b), true);
+});
+
+test("a branch with no upstream whose origin/<b> cannot be probed is kept with git's words, never selected", (t) => {
+  const { w, gh } = githubRepo(t);
+  const b = "implementer/9-unprobed";
+  const tip = noUpstreamMergedClaim(w, b);
+  const bin = failOnlyShim(t, `[ "$1" = show-ref ] && [ "$4" = refs/remotes/origin/${b} ]`, ["fatal: bad object refs/remotes/origin/" + b], 128);
+  const env = gh.env({ [b]: [prNode({ oid: tip })] });
+  env.PATH = `${bin}:${env.PATH}`;
+
+  const { code, json, stderr } = runReap(w, ["--apply"], env);
+  assert.equal(code, 0, stderr);
+  assertShimFired(bin, "the origin/<b> probe must have been the one that failed", new RegExp(`^show-ref --verify --quiet refs/remotes/origin/${b}$`, "m"));
+  assert.deepEqual(json.reaped, []);
+  assert.deepEqual(json.kept, [{ branch: b, reason: `no upstream — cannot tell whether origin/${b} exists: fatal: bad object refs/remotes/origin/${b}` }]);
+  assert.equal(branchExists(w, b), true);
+  assert.equal(gh.calls().length, 0, "an unselected branch joins no lookup");
+});
+
+test("a no-upstream tip whose place on the base cannot be probed is kept with git's words, its worktree untouched", (t) => {
+  // The stale re-claim shape: the tip is a strict ancestor of the recorded
+  // head, so were the failed probe read as "not on the base", ancestry would
+  // tie it and the reap would take the live claim's worktree.
+  const { w, gh } = githubRepo(t);
+  const b = "implementer/9-unsure";
+  const stale = git(w, "rev-parse", "main");
+  const head = noUpstreamMergedClaim(w, b);
+  git(w, "branch", "-D", b);
+  const wt = join(w, ".worktrees", "unsure");
+  git(w, "worktree", "add", "-q", wt, "-b", b, stale);
+  const bin = failOnlyShim(t, `[ "$1" = merge-base ] && [ "$3" = ${stale} ] && [ "$4" = refs/remotes/origin/main ]`, ["error: unable to read tree"], 128);
+  const env = gh.env({ [b]: [prNode({ oid: head })] });
+  env.PATH = `${bin}:${env.PATH}`;
+
+  const { code, json, stderr } = runReap(w, ["--apply"], env);
+  assert.equal(code, 0, stderr);
+  assertShimFired(bin, "the tip-on-the-base probe must have been the one that failed", new RegExp(`^merge-base --is-ancestor ${stale} refs/remotes/origin/main$`, "m"));
+  assert.deepEqual(json.reaped, []);
+  assert.deepEqual(json.worktreesRemoved, []);
+  assert.deepEqual(json.kept, [{ branch: b, reason: "no upstream — cannot tell whether the tip is already on origin/main: error: unable to read tree" }]);
+  assert.equal(existsSync(wt), true, "the live claim's worktree is untouched");
+  assert.equal(git(w, "rev-parse", `refs/heads/${b}`), stale);
+});
+
+test("a reaped no-upstream branch whose config section holds a key and cannot be removed still reports the section left", (t) => {
+  // A branch with no upstream usually has no section, so a failed removal is
+  // silent for it — but only while no key of the section is set.
+  const { w, gh } = githubRepo(t);
+  const b = "implementer/9-kept-key";
+  const tip = noUpstreamMergedClaim(w, b);
+  git(w, "config", `branch.${b}.description`, "notes on the claim");
+  writeFileSync(join(w, ".git", "config.lock"), "");
+
+  const { code, json, stderr } = runReap(w, ["--apply"], gh.env({ [b]: [prNode({ oid: tip })] }));
+  assert.equal(code, 0, stderr);
+  assert.deepEqual(json.reaped, [b]);
+  assert.deepEqual(json.kept, []);
+  assert.equal(json.warnings.length, 1, JSON.stringify(json.warnings));
+  assert.equal(json.warnings[0].branch, b);
+  assert.match(json.warnings[0].note, /^branch config section was left: .*could not lock config file/);
+  assert.equal(branchExists(w, b), false);
+});
