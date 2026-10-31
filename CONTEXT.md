@@ -48,7 +48,9 @@ deleted, the label dropped.
 _Avoid_: unclaim, close, clean up
 
 **Reap**:
-Deleting branches whose upstream is gone, and their worktrees, after each merge pass.
+Deleting the branches a merged PR accounts for, and their worktrees, after each merge
+pass. That is a branch whose upstream reads `[gone]`, or one with no upstream whose
+remote branch is gone and whose tip its merged PR recorded.
 Distinct from Release: a reap follows a merged PR, a release follows a claim that never
 became one. Scratch is not reaped; see **Reclaim**.
 _Avoid_: prune, cleanup
@@ -64,9 +66,10 @@ _Avoid_: reap, prune, cleanup
 
 **Upstream**:
 The remote-tracking ref a claim's branch tracks. There is none at claim time
-(`--no-track`); the member's first `git push -u` sets it. It decides liveness only:
-Reap selects a branch whose upstream reads `[gone]`. It is never a delete-safety input;
-every branch-delete guard measures against the fully qualified base (ADR 0018).
+(`--no-track`); it is set by the member's first `git push -u` or by the controller's
+settle of the implementer's report. Reap selects through `[gone]`, or, for a branch
+with none, through the merged PR's recorded heads. It is still never a delete-safety
+input; every branch-delete guard measures against the fully qualified base (ADR 0018).
 
 **Registration**:
 Git's record that a directory is a worktree of this repo. Independent of whether the

@@ -18,9 +18,9 @@ const DOC = Pin.file(join(REPO, "docs", "components", "reaping-and-liveness.md")
 // its cherry scan: the two blocks that justify why the cherry check fails
 // closed.
 const probeComment = () =>
-  SCRIPT.runAbove('if ! cherry=$(git cherry "$base_rev" "$tip"', "reap.sh cherry probe", "#").stripGutter("#").text;
+  SCRIPT.runAbove('elif ! cherry=$(git cherry "$base_rev" "$tip"', "reap.sh cherry probe", "#").stripGutter("#").text;
 const scanComment = () =>
-  SCRIPT.runAbove(`if ! grep_probe "$cherry" '^+'; then keep "$b"`, "reap.sh cherry scan", "#").stripGutter("#").text;
+  SCRIPT.runAbove(`elif ! grep_probe "$cherry" '^+'; then keep "$b"`, "reap.sh cherry scan", "#").stripGutter("#").text;
 
 const NOTHING_ELSE = Pin.phrase("authorized by this check and by nothing else");
 

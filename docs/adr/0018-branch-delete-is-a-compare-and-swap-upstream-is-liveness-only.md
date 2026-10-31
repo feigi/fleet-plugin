@@ -23,6 +23,11 @@ clone has, was pushed and then replaced, so nothing on it is local-only. It
 runs only for a branch `git cherry` keeps, on the same `$tip`, fails closed
 per branch, and leaves the compare-and-swap, the holder check and
 `wt_recheck_delete` as they are.
+Amended by #3993: point 5's "a branch pushed without `-u` is never selected" no
+longer holds — reap.sh selects a branch with no upstream when origin has no
+branch of its name and the merged-PR tie accounts for its tip, by equality when
+the tip is already on the base; no delete guard reads upstream config, and
+"nothing is lost" still holds.
 
 ## Context
 

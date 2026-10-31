@@ -4,7 +4,7 @@
 # Until this script nothing did — the fleet leaned on the repo setting "Automatically
 # delete head branches", which nothing here enforced or checked, so a repo with
 # it off accumulated every merged branch, and reap.sh (which reaps only a local
-# branch whose upstream is `[gone]`) never saw one to reap.
+# branch whose remote branch is gone) never saw one to reap.
 #
 # REMOTE ONLY, on purpose — never `gh pr merge --delete-branch`. That flag's
 # post-merge LOCAL cleanup dies with `fatal: 'main' is already used by worktree
