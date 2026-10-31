@@ -163,14 +163,18 @@ test("the reader throws LabelMapUnreadable naming ensure and the error code when
 });
 
 // A cache that exists and cannot be read, as a function that leaves it in `ws`,
-// and the error code the read fails with. Nothing reads a fixture again after
-// its refusal, so none is restored: tempDir's own cleanup removes it.
+// the error code the read fails with, and whether `.fleet/` is left a directory
+// the test can list. Nothing reads a fixture again after its refusal, so none
+// is restored: tempDir's own cleanup removes it.
 const UNREADABLE = [
-  ["a directory at labels.json", "EISDIR", (ws) => mkdirSync(join(ws, ".fleet", LABEL_MAP_FILE), { recursive: true })],
-  ["a labels.json chmod 000", "EACCES", (ws) => chmodSync(seedLabelMap(ws), 0o000)],
-  ["a .fleet/ chmod 000", "EACCES", (ws) => { seedLabelMap(ws); chmodSync(join(ws, ".fleet"), 0o000); }],
-  ["a regular file at .fleet", "ENOTDIR", (ws) => writeFileSync(join(ws, ".fleet"), "x")],
+  ["a directory at labels.json", "EISDIR", (ws) => mkdirSync(join(ws, ".fleet", LABEL_MAP_FILE), { recursive: true }), true],
+  ["a labels.json chmod 000", "EACCES", (ws) => chmodSync(seedLabelMap(ws), 0o000), true],
+  ["a .fleet/ chmod 000", "EACCES", (ws) => { seedLabelMap(ws); chmodSync(join(ws, ".fleet"), 0o000); }, false],
+  ["a regular file at .fleet", "ENOTDIR", (ws) => writeFileSync(join(ws, ".fleet"), "x"), false],
 ];
+
+// Every path under `.fleet/`, so a refusal that writes anything there shows.
+const fleetEntries = (ws) => readdirSync(join(ws, ".fleet"), { recursive: true }).sort();
 
 // The refusal for a cache that cannot be read: a filesystem fault, its repair,
 // then `ensure` as the following step.
@@ -892,6 +896,7 @@ test("ensure: a cache that exists and cannot be read is exit 2 and never written
   const file = seedLabelMap(ws, { roles: { "in-progress": "mine" }, origin: { "in-progress": "maintainer" } });
   const before = readFileSync(file, "utf8");
   chmodSync(file, 0o000);
+  const entries = fleetEntries(ws);
   let r;
   try {
     r = ensure(ws, [...LABEL_ROLES, "mine"]);
@@ -902,6 +907,7 @@ test("ensure: a cache that exists and cannot be read is exit 2 and never written
   assert.equal(r.stdout, "");
   assert.match(r.stderr, unreadableDerivation("EACCES"));
   assert.equal(readFileSync(file, "utf8"), before);
+  assert.deepEqual(fleetEntries(ws), entries);
 });
 
 test("ensure outside a repository is exit 2 and never calls gh; a triage-label path that is not a file is exit 2", () => {
@@ -1362,6 +1368,7 @@ test("set: gh failing, no repository or an unreadable cache is exit 2, nothing w
   const file = seedLabelMap(ws3, { roles: { "in-progress": "mine" }, origin: { "in-progress": "maintainer" } });
   const bytes = readFileSync(file, "utf8");
   chmodSync(file, 0o000);
+  const entries = fleetEntries(ws3);
   let unreadable;
   try {
     unreadable = setRun(ws3, setRig([...LABEL_ROLES, "mine"]), "--accept-suggestions");
@@ -1371,17 +1378,19 @@ test("set: gh failing, no repository or an unreadable cache is exit 2, nothing w
   assert.equal(unreadable.status, 2, unreadable.stdout + unreadable.stderr);
   assert.match(unreadable.stderr, unreadableDerivation("EACCES"));
   assert.equal(readFileSync(file, "utf8"), bytes);
+  assert.deepEqual(fleetEntries(ws3), entries);
 });
 
 // `ensure` and `set` refuse every cache that exists and cannot be read with
 // the reader's own refusal — the resolved path, the errno, the filesystem
 // fault and its repair — then `nothing written`, before any label is created.
-for (const [name, code, leave] of UNREADABLE) {
+for (const [name, code, leave, listable] of UNREADABLE) {
   for (const verb of ["ensure", "set"]) {
     test(`${verb} refuses ${name}: exit 2, naming the cache path, ${code} as a filesystem fault and its repair; nothing written`, (t) => {
       if (code === "EACCES" && process.getuid?.() === 0) return t.skip("root reads every file");
       const ws = repo();
       leave(ws);
+      const entries = listable ? fleetEntries(ws) : null;
       const g = setRig(LABEL_ROLES);
       const r = verb === "ensure" ? ensureRun(ws, g) : setRun(ws, g, "--accept-suggestions", "--create");
       assert.equal(r.status, 2, r.stdout + r.stderr);
@@ -1390,7 +1399,7 @@ for (const [name, code, leave] of UNREADABLE) {
       assert.ok(r.stderr.includes(join(ws, ".fleet", LABEL_MAP_FILE)), r.stderr);
       assert.doesNotMatch(r.stderr, /undefined/);
       assert.deepEqual(g.calls(), [LIST]);
-      if (code === "EISDIR") assert.deepEqual(readdirSync(join(ws, ".fleet", LABEL_MAP_FILE)), []);
+      if (listable) assert.deepEqual(fleetEntries(ws), entries);
     });
   }
 }
