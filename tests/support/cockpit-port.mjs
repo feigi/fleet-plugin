@@ -1,6 +1,7 @@
 // What the derived-port rows share for telling an outside holder apart from
-// a launch that scanned wrong: the skip reason, and a watch over the port
-// window while a spawned launch picks its port.
+// a launch that scanned wrong: the skip reason, a watch over the port window
+// while a spawned launch picks its port, and a holder that takes a whole
+// window, so the skip a row takes on it can itself be pinned.
 //
 // A row cannot hold the derived port open for a launch — the launch has to
 // bind it — so whatever else on the machine holds a cockpit-range port can
@@ -13,6 +14,7 @@
 //
 // Deliberately not a `.test.mjs`, so `node --test` never loads it as a suite.
 
+import { createServer } from "node:http";
 import { connect } from "node:net";
 
 // The skip reason for a row that could not bind its fixed port itself
@@ -49,6 +51,9 @@ function answers(port, ms = 200) {
 // landing on the first candidate, or outside the window altogether, has no
 // candidate ahead of it to excuse it, so it returns null too. The launch's
 // own listener answers once it binds; it is at the landing, never ahead of it.
+// allHeld() is for a launch that announced nothing: it returns true when
+// something answered on every candidate while the watch was up, so the
+// launch exhausting its window is the holders' doing and not the scan's.
 // A row calls stop() in its `finally` as well, so a row that throws before it
 // reads the landing does not leave the watch polling under the rows after it.
 export async function watchWindow(ports, everyMs = 5) {
@@ -76,5 +81,40 @@ export async function watchWindow(ports, everyMs = 5) {
       const ahead = ports.slice(0, at);
       return ahead.every((p) => seen.has(p)) ? ahead[0] : null;
     },
+    allHeld() {
+      return ports.every((p) => seen.has(p));
+    },
   };
+}
+
+// The skip test for a row whose first launch rejected before it announced:
+// true when the rejection is the launch exiting before announcing and the
+// watch saw every candidate held (allHeld() above), so the row skips with
+// heldOutside(); false for anything else, which the row rethrows.
+export function heldWindowExit(error, watch) {
+  return /^serve exited \([^)]*\) before announcing/.test(error.message) && watch.allHeld();
+}
+
+// The other side of heldWindowExit(), for the rows that pin it end to end:
+// takes every one of `ports` with a listener that 404s whatever it is asked,
+// a foreign holder's shape that a launch's probe settles at once, so a launch
+// on this window steps over each candidate and exits without announcing.
+// Resolves `{ outside, release }`: `outside` is a port something outside the
+// test already held — the caller skips with heldOutside(outside), since that
+// holder can let go and the launch then binds it — and null when every
+// candidate is the caller's own; release() closes whatever this took.
+export async function holdWindow(ports) {
+  const servers = [];
+  const release = () => Promise.all(servers.map((s) => new Promise((res) => s.close(res))));
+  for (const port of ports) {
+    const server = createServer((req, res) => { res.statusCode = 404; res.end(); });
+    const failure = await new Promise((res) => {
+      server.once("error", res);
+      server.listen(port, "127.0.0.1", () => res(null));
+    });
+    if (failure?.code === "EADDRINUSE") return { outside: port, release };
+    if (failure) { await release(); throw failure; }
+    servers.push(server);
+  }
+  return { outside: null, release };
 }
