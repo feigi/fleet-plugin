@@ -49,8 +49,10 @@ days without a commit, the third time a disk filled.
    as `claim-ticket.sh` does after `worktree add` and refuses as the claim
    does: exit 126/127 as a Recipe that no longer runs, any other non-zero as a
    failed install, a dirty tree after it as an Install step that changed the
-   tree. Only once the tree is clean does it record the restore time
-   (`fleet-restored`) and remove the mark; every refusal leaves the mark.
+   tree. A tree already dirty before it refuses in words of its own, before
+   the Install step runs: that change is no Recipe's. Only once the tree is
+   clean does it record the restore time (`fleet-restored`) and remove the
+   mark; every refusal leaves the mark.
 7. **Refusal at dispatch.** `dispatch-prompt.mjs render implementer` and
    `render fix-applier`, every kind, refuse a marked worktree and print the
    restore command; the controller runs it, then renders again. `render

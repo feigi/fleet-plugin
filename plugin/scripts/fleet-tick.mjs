@@ -1174,7 +1174,7 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, queued
     fixLive: live("fix-pr"),
     mergeBotLive,
     // The number of every merge bot settled `done`: each is a merge pass
-    // `--apply` reaps and reclaims after, once (reapDue).
+    // `--apply` reaps, reclaims and evicts after, once (reapDue).
     mergeBotDone: all.filter((m) => m.family === "merge-bot" && m.outcome === "done").map((m) => m.number).sort(asc),
     reviewsLive: liveReviews.length,
     // The in-flight reviews of PRs the open list does not carry: the ones
@@ -1504,7 +1504,7 @@ export function reapedAfter(applied, controllerAt) {
   return applied !== null && controllerAt != null && applied.run === controllerAt ? applied.reapAfter : [];
 }
 
-// The merge passes owed their reap and reclaim: every merge bot settled
+// The merge passes owed their reap, reclaim and evict: every merge bot settled
 // `done` that reapedAfter() does not name.
 export function reapDue(done, applied, controllerAt) {
   const ran = new Set(reapedAfter(applied, controllerAt));

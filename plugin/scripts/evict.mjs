@@ -25,8 +25,8 @@
 //   - `git status --porcelain -uall` in it is non-empty;
 //   - HEAD moved or a restore ran in it within IDLE_MS: the newer of the
 //     newest entry of the tree's own HEAD reflog (`logs/HEAD` in its admin
-//     dir; HEAD's commit date when that reflog is empty) and the time
-//     RESTORED records;
+//     dir, or git's answer in a reftable repository; HEAD's commit date when
+//     that reflog is empty) and the time RESTORED records;
 //   - it ignores nothing but the runner;
 //   - anything about it cannot be read — its `.git`, its admin dir, a status,
 //     a reflog. A worktree listing that cannot be read keeps the whole
@@ -68,10 +68,12 @@
 // or 127 refuses as a Recipe that no longer runs, any other non-zero as a
 // failed install, and a `git status --porcelain -uall` that is not empty
 // after it as an Install step that changed the tree — each with the claim's
-// own words. Only once that status is empty does it write the restore time
-// (RESTORED) and then remove the mark; every refusal leaves the mark. A tree
-// with no mark refuses: there is nothing to restore. Without `--apply` it runs
-// nothing and prints the command it would run. Prints
+// own words. A status that is not empty BEFORE it refuses in words of its
+// own, before anything runs: that change is no Install step's. Only once the
+// status after it is empty does it write the restore time (RESTORED) and then
+// remove the mark; every refusal leaves the mark. A tree with no mark refuses:
+// there is nothing to restore. Without `--apply` it runs nothing and prints
+// the command it would run. Prints
 // `{"applied","worktree","install"}`; exit 0 restored (or would), 2 refused.
 
 import { spawnSync } from "node:child_process";
@@ -79,7 +81,7 @@ import { readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from 
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineFlags, isDigits, makeDie, writeAll } from "./arg.mjs";
-import { adminDir, EVICTED, evictionMark, RESTORED } from "./evict-mark.mjs";
+import { adminDir, EVICTED, evictionMark, how, RESTORED } from "./evict-mark.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { liveOnLedger, parseMember, REVIEWER } from "./ledger-grammar.mjs";
@@ -93,6 +95,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // How long a claim tree sits with neither a HEAD move nor a restore before it
 // is evicted.
 export const IDLE_MS = 7 * DAY_MS;
+/** Whether a tree whose HEAD last moved, or which was last restored, at `last` is idle at `now`. */
+export const isIdle = (now, last) => now - last >= IDLE_MS;
 const RUNNER = "agent-test";
 const GIT_TIMEOUT_MS = 30_000;
 const MAX_BUFFER = 64 * 1024 * 1024;
@@ -102,13 +106,6 @@ export const REDERIVE = "the Recipe cache is invalid; run the Recipe derivation 
 // worktree.sh's `wt_op_state`, sourced: `$wt_op` names the operation in
 // progress, empty for none; a non-zero exit is an admin dir it cannot read.
 const OP_STATE = '. "$1" || exit 3; wt_op_state "$2" || exit 1; printf "%s" "$wt_op"';
-
-const how = (r) => {
-  if (r.error) return r.error.code ?? r.error.message;
-  if (r.signal) return `killed by ${r.signal}`;
-  const said = String(r.stderr ?? "").trim().split("\n").at(-1);
-  return said ? `exit ${r.status}: ${said}` : `exit ${r.status}`;
-};
 
 // Every child this script starts, with GIT_DIR and GIT_WORK_TREE scrubbed so
 // an ambient pair cannot answer for another repository; `drop` names more
@@ -122,12 +119,6 @@ function run(cmd, args, { cwd, drop = [], stdio, timeout = GIT_TIMEOUT_MS } = {}
 const git = (tree, args) => run("git", ["-C", tree, ...args]);
 
 // --- live tokens ------------------------------------------------------------
-
-// The members that run in a claim tree, or review or finish its PR.
-const worksATree = (name) => {
-  const m = parseMember(name);
-  return (m !== null && m.family !== "merge-bot") || REVIEWER.test(name);
-};
 
 const FOLD_IN = /· inherited \(closes ([^)]*)\)/;
 
@@ -152,8 +143,9 @@ export function liveHolds(rows, dispatched, here) {
     if (!byTicket.has(n)) byTicket.set(n, why);
   };
   for (const t of liveOnLedger(rows, dispatched).tokens) {
-    if (!worksATree(t.name)) continue;
     const member = parseMember(t.name);
+    // The members that run in a claim tree, or review or finish its PR.
+    if ((member === null || member.family === "merge-bot") && !REVIEWER.test(t.name)) continue;
     if (member?.family === "impl") {
       hold(member.number, `held by the live ${t.name}`);
       continue;
@@ -183,7 +175,7 @@ function listing(checkout) {
   try {
     real = realpathSync(home);
   } catch (e) {
-    if (e.code === "ENOENT") return { home, trees: [] };
+    if (e.code === "ENOENT") return { trees: [] };
     return { unknown: `cannot resolve ${home} (${e.code ?? e.message})` };
   }
   const all = [];
@@ -202,12 +194,27 @@ function listing(checkout) {
       if (e.code !== "ENOENT") return { unknown: `cannot resolve ${dirname(w.path)} (${e.code ?? e.message})` };
     }
   }
-  return { home, trees };
+  return { trees };
 }
 
 // The newest entry of the tree's own HEAD reflog, in ms, or null when that
-// reflog holds none; throws what cannot be read.
-function reflogNewest(dir) {
+// reflog holds none; throws what cannot be read. The files ref backend keeps
+// it as `logs/HEAD` in the admin dir, read here directly. A reftable
+// repository keeps no such file, so there git answers: `reflog exists HEAD`,
+// then the newest entry's time. Never `git log -g` alone: for a HEAD whose
+// reflog holds nothing it walks the branch's reflog instead.
+function reflogNewest(tree, dir) {
+  const format = git(tree, ["rev-parse", "--show-ref-format"]);
+  if (format.error || format.status !== 0) throw new Error(`cannot tell how its refs are stored (${how(format)})`);
+  if (format.stdout.trim() === "reftable") {
+    const exists = git(tree, ["reflog", "exists", "HEAD"]);
+    if (!exists.error && exists.signal === null && exists.status === 1) return null;
+    if (exists.error || exists.status !== 0) throw new Error(`cannot read its HEAD reflog (${how(exists)})`);
+    const r = git(tree, ["log", "-g", "-1", "--date=unix", "--format=%gd", "HEAD"]);
+    const at = /^HEAD@\{([0-9]+)\}$/.exec(String(r.stdout ?? "").trim());
+    if (r.error || r.status !== 0 || !at) throw new Error(`cannot read its HEAD reflog's newest entry (${how(r)})`);
+    return Number(at[1]) * 1000;
+  }
   let text;
   try {
     text = readFileSync(join(dir, "logs", "HEAD"), "utf8");
@@ -225,7 +232,7 @@ function reflogNewest(dir) {
 // When HEAD last moved in the tree, in ms: its reflog's newest entry, else
 // HEAD's commit date.
 function headMoved(tree, dir) {
-  const logged = reflogNewest(dir);
+  const logged = reflogNewest(tree, dir);
   if (logged !== null) return logged;
   const r = git(tree, ["log", "-1", "--format=%ct", "HEAD"]);
   const s = String(r.stdout ?? "").trim();
@@ -291,7 +298,7 @@ function judge(w, ctx) {
   if (ctx.cwd !== null && within(ctx.cwd, real)) return { kept: "this script's own cwd is inside it" };
   const n = Number(name[1]);
   const held = ctx.holds.byTicket.get(n) ?? ctx.holds.all;
-  if (held !== null && held !== undefined) return { kept: held };
+  if (held !== null) return { kept: held };
   const mark = evictionMark(w.path);
   if (mark.unknown !== undefined) return { kept: mark.unknown };
   if (mark.marked) return { kept: `already evicted: ${join(mark.dir, EVICTED)} is there` };
@@ -308,7 +315,7 @@ function judge(w, ctx) {
   }
   const last = Math.max(moved, restored ?? 0);
   const what = restored !== null && restored >= moved ? "restored" : "HEAD last moved";
-  if (ctx.now - last < IDLE_MS) return { kept: `${what} ${new Date(last).toISOString()}, within ${IDLE_MS / DAY_MS} days` };
+  if (!isIdle(ctx.now, last)) return { kept: `${what} ${new Date(last).toISOString()}, within ${IDLE_MS / DAY_MS} days` };
   let ignored;
   try {
     ignored = ignoredPaths(w.path);
@@ -357,24 +364,16 @@ function sweep({ afterRotate, apply }) {
     const here = new Set(list.trees.map((w) => CLAIM_WORKTREE.exec(basename(w.path))).filter(Boolean).map((m) => Number(m[1])));
     const ctx = { cwd, holds: liveHolds(ledger.rows, ledger.dispatched, here), now };
     for (const w of [...list.trees].sort((a, b) => a.path.localeCompare(b.path))) {
-      const v = judge(w, ctx);
+      let v = judge(w, ctx);
+      // Judged again just before anything is touched: the dry verdict is a
+      // moment old, and a member may have moved HEAD or dirtied it since.
+      if (apply && v.kept === undefined) v = judge(w, ctx);
       if (v.kept !== undefined) {
         kept.push({ path: w.path, reason: v.kept });
         continue;
       }
-      if (!apply) {
-        evicted.push({ path: w.path, reason: v.evict.reason, ignored: v.evict.ignored });
-        continue;
-      }
-      // Judged again just before anything is touched: the dry verdict is a
-      // moment old, and a member may have moved HEAD or dirtied it since.
-      const again = judge(w, ctx);
-      if (again.kept !== undefined) {
-        kept.push({ path: w.path, reason: again.kept });
-        continue;
-      }
-      const error = evictTree(w.path, again.evict, now);
-      if (error === null) evicted.push({ path: w.path, reason: again.evict.reason, ignored: again.evict.ignored });
+      const error = apply ? evictTree(w.path, v.evict, now) : null;
+      if (error === null) evicted.push({ path: w.path, reason: v.evict.reason, ignored: v.evict.ignored });
       else failed.push({ path: w.path, error });
     }
   }
@@ -395,6 +394,11 @@ function restore(tree, apply) {
   if (derived.error || derived.status !== 0 || install === "") {
     die(`${String(derived.stderr ?? "").trim() || `derive-testcmd.sh ${tree} install failed (${how(derived)})`}`);
   }
+  // Dirty before anything runs is no Install step's doing: said in its own
+  // words, so the dirty-after refusal below never blames the Recipe for it.
+  const before = git(tree, ["status", "--porcelain", "-uall"]);
+  if (before.error || before.status !== 0) die(`could not read the tree state in ${tree} before the Install step (${how(before)})`);
+  if (before.stdout !== "") die(`${tree} is not clean before the restore (first: ${before.stdout.split("\n")[0]}) — the Install step did not run; clear that change, then restore again`);
   if (apply) {
     // Through `sh -c` with `CI` unset and the output dropped, as claim-ticket.sh
     // runs it; no timeout, as there.
@@ -410,11 +414,16 @@ function restore(tree, apply) {
     if (status.stdout !== "") die(`the Install step '${install}' changed the tree in ${tree} (first: ${status.stdout.split("\n")[0]}) — ${REDERIVE}`);
     // The restore time first: a mark removed with no time beside it would read
     // the tree idle by its HEAD alone and evict it again at once.
+    const restored = join(mark.dir, RESTORED);
     try {
-      writeFileSync(join(mark.dir, RESTORED), `${new Date().toISOString()}\n`);
+      writeFileSync(restored, `${new Date().toISOString()}\n`);
+    } catch (e) {
+      die(`installed in ${tree}, but could not record the restore in ${restored} (${e.code ?? e.message}) — the mark stays`);
+    }
+    try {
       unlinkSync(join(mark.dir, EVICTED));
     } catch (e) {
-      die(`installed in ${tree}, but could not record the restore in ${mark.dir} (${e.code ?? e.message}) — the mark stays`);
+      die(`installed in ${tree} and recorded the restore in ${restored}, but could not remove the mark ${join(mark.dir, EVICTED)} (${e.code ?? e.message}) — the mark stays`);
     }
   }
   writeAll(1, `${JSON.stringify({ applied: apply, worktree: tree, install })}\n`);

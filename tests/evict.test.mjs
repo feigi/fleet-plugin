@@ -15,8 +15,8 @@ import {
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { IDLE_MS, REDERIVE, liveHolds, rowTickets } from "../plugin/scripts/evict.mjs";
-import { EVICTED, RESTORED } from "../plugin/scripts/evict-mark.mjs";
+import { IDLE_MS, REDERIVE, isIdle, liveHolds, rowTickets } from "../plugin/scripts/evict.mjs";
+import { EVICTED, RESTORED, restoreCommand } from "../plugin/scripts/evict-mark.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/evict.mjs", import.meta.url));
 const CLAIM = fileURLToPath(new URL("../plugin/scripts/claim-ticket.sh", import.meta.url));
@@ -49,14 +49,16 @@ function unlock(dir) {
   spawnSync("sh", ["-c", 'chmod -R u+rwx "$1" 2>/dev/null; :', "sh", dir]);
 }
 
-function fixture(t) {
+// `reftable` makes the repository keep its refs, reflogs included, in git's
+// reftable backend rather than in files.
+function fixture(t, { reftable = false } = {}) {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "evict-")));
   t.after(() => {
     unlock(dir);
     rmSync(dir, { recursive: true, force: true });
   });
   const repo = join(dir, "repo");
-  git(dir, ["-c", "init.defaultBranch=main", "init", "-q", repo]);
+  git(dir, ["-c", "init.defaultBranch=main", "init", "-q", ...(reftable ? ["--ref-format=reftable"] : []), repo]);
   writeFileSync(join(repo, ".gitignore"), "node_modules/\ndist/\n*.log\n.fleet/\n");
   writeFileSync(join(repo, "tracked.txt"), "t\n");
   writeFileSync(join(repo, "install.sh"), INSTALL);
@@ -399,9 +401,49 @@ test("a restore whose install fails, does not run, or dirties the tree refuses w
   }
 });
 
+test("a restore of a tree already dirty before it refuses before the Install step runs, blaming no Recipe", (t) => {
+  const { f, wt, log } = evicted(t);
+  writeFileSync(join(wt, "tracked.txt"), "changed\n");
+
+  for (const args of [["--restore", wt, "--apply"], ["--restore", wt]]) {
+    const r = f.run(args, { env: { INSTALL_LOG: log } });
+
+    assert.equal(r.status, 2, args.join(" "));
+    assert.equal(r.stdout, "");
+    assert.equal(r.stderr, `\nevict: ${wt} is not clean before the restore (first:  M tracked.txt) — the Install step did not run; clear that change, then restore again\n`);
+    assert.equal(existsSync(log), false, "the Install step ran");
+    assert.ok(existsSync(f.mark(wt)), `${args.join(" ")} took the mark`);
+    assert.equal(existsSync(join(f.admin(wt), RESTORED)), false);
+  }
+});
+
+test("a restore whose mark cannot be removed says the restore time was recorded and the mark stays", (t) => {
+  const { f, wt } = evicted(t);
+  rmSync(f.mark(wt));
+  mkdirSync(f.mark(wt));
+
+  const r = f.run(["--restore", wt, "--apply"]);
+
+  assert.equal(r.status, 2, r.stderr);
+  assert.equal(r.stdout, "");
+  const restored = join(f.admin(wt), RESTORED);
+  assert.ok(r.stderr.startsWith(`\nevict: installed in ${wt} and recorded the restore in ${restored}, but could not remove the mark ${f.mark(wt)} (`), r.stderr);
+  assert.match(r.stderr, /\) — the mark stays\n$/);
+  assert.ok(existsSync(restored), "no restore time");
+  assert.ok(existsSync(f.mark(wt)));
+});
+
 test("REDERIVE is claim-ticket.sh's own refusal, word for word", () => {
   const line = readFileSync(CLAIM, "utf8").split("\n").find((l) => l.startsWith("rederive="));
   assert.equal(line, `rederive="${REDERIVE}"`);
+});
+
+test("the restore command keeps a tree path with a space or a quote in it one word", () => {
+  for (const tree of ["/Users/x/My Projects/repo/.worktrees/7-impl-7", "/tmp/it's/.worktrees/8-impl-8", "/tmp/plain/.worktrees/9-impl-9"]) {
+    const cmd = restoreCommand(tree).replace("~/.fleet/bin/fleet-run", "printf '[%s]\\n'");
+    assert.equal(execFileSync("sh", ["-c", cmd], { encoding: "utf8" }), `[evict.mjs]\n[--restore]\n[${tree}]\n[--apply]\n`, cmd);
+  }
+  assert.equal(restoreCommand("/tmp/plain/.worktrees/9-impl-9"), "~/.fleet/bin/fleet-run evict.mjs --restore /tmp/plain/.worktrees/9-impl-9 --apply");
 });
 
 test("--restore refuses a tree that is not evicted, a relative path, and --after-rotate", (t) => {
@@ -441,6 +483,49 @@ test("a tree whose HEAD reflog is empty is judged by HEAD's commit date", (t) =>
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(paths(r.json.evicted), [old], "the root commit is 30 days old");
   assert.match(reasonOf(r.json.kept, young), /^HEAD last moved .*, within 7 days$/);
+});
+
+test("in a reftable repository a tree is judged by its HEAD reflog too, not by HEAD's commit date", (t) => {
+  const probe = mkdtempSync(join(tmpdir(), "evict-reftable-"));
+  t.after(() => rmSync(probe, { recursive: true, force: true }));
+  const can = spawnSync("git", ["init", "-q", "--ref-format=reftable", probe], { env: ENV });
+  if (can.status !== 0) {
+    t.skip(`this git makes no reftable repository: ${String(can.stderr).trim()}`);
+    return;
+  }
+  const f = fixture(t, { reftable: true });
+  const fresh = f.claim(65, { days: 1 });
+  const idle = f.claim(66, { days: 8 });
+  f.ledger([]);
+  assert.equal(existsSync(join(f.admin(fresh), "logs", "HEAD")), false, "the fixture keeps a files reflog");
+
+  const r = f.run([]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(reasonOf(r.json.kept, fresh), /^HEAD last moved .*, within 7 days$/, "the root commit is 30 days old");
+  assert.deepEqual(paths(r.json.evicted), [idle]);
+  const at = Date.parse(/^HEAD last moved (\S+), over 7 days ago$/.exec(r.json.evicted[0].reason)[1]);
+  assert.ok(Math.abs(at - (Date.now() - 8 * DAY)) < 60 * 60 * 1000, `judged by ${new Date(at).toISOString()}, not by the reflog's 8 days`);
+});
+
+test("a restore at the very second HEAD last moved is named a restore", (t) => {
+  const f = fixture(t);
+  const wt = f.claim(67);
+  f.ledger([]);
+  const newest = readFileSync(join(f.admin(wt), "logs", "HEAD"), "utf8").trim().split("\n").at(-1);
+  const sec = Number(/ ([0-9]+) [+-][0-9]{4}\t/.exec(newest)[1]);
+  writeFileSync(join(f.admin(wt), RESTORED), `${new Date(sec * 1000).toISOString()}\n`);
+
+  const r = f.run([]);
+
+  assert.deepEqual(paths(r.json.evicted), [wt], r.stderr);
+  assert.equal(r.json.evicted[0].reason, `restored ${new Date(sec * 1000).toISOString()}, over 7 days ago`);
+});
+
+test("a tree is idle once exactly IDLE_MS have passed, and not a millisecond before", () => {
+  const now = Date.now();
+  assert.equal(isIdle(now, now - IDLE_MS), true);
+  assert.equal(isIdle(now, now - IDLE_MS + 1), false);
 });
 
 test("a restore time that cannot be read keeps the tree", (t) => {

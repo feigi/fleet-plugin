@@ -17,10 +17,15 @@ export const EVICTED = "fleet-evicted";
 export const RESTORED = "fleet-restored";
 const GIT_TIMEOUT_MS = 30_000;
 
-/** The command that restores an evicted tree, as the controller runs it. */
-export const restoreCommand = (tree) => `~/.fleet/bin/fleet-run evict.mjs --restore ${tree} --apply`;
+// A path outside the plain charset is single-quoted, its own quotes closed,
+// escaped and reopened, so a tree with a space in its path stays one word.
+const shellWord = (s) => (/^[\w/.@%+=:,-]+$/.test(s) ? s : `'${s.replaceAll("'", "'\\''")}'`);
 
-const how = (r) => {
+/** The command that restores an evicted tree, as the controller runs it. */
+export const restoreCommand = (tree) => `~/.fleet/bin/fleet-run evict.mjs --restore ${shellWord(tree)} --apply`;
+
+/** Why a spawnSync result failed, in one phrase: its error, its signal, or its exit and last stderr line. */
+export const how = (r) => {
   if (r.error) return r.error.code ?? r.error.message;
   if (r.signal) return `killed by ${r.signal}`;
   const said = String(r.stderr ?? "").trim().split("\n").at(-1);
