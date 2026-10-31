@@ -827,6 +827,19 @@ test("settle: a Recipe whose Check step names a path origin/main does not hold a
   assert.deepEqual(receipt.checks.map((c) => c.name), [`verify-sha.sh feat ${f.head} exits 0`, "PR #6 reads OPEN", "PR #6 closes #5"]);
 });
 
+// derive-testcmd.sh refuses an `--at` that does not resolve with the same exit
+// 1 as a cache it refuses, so an origin/main that is gone must not read as a
+// repository with no gate: here no Check-step record exists, which the gate
+// would refuse, and the settle could not look instead of passing without it.
+test("settle: an origin/main that does not resolve could not look, never no gate", () => {
+  const f = fixture();
+  f.stage();
+  f.head = f.commitAndPush();
+  f.git(f.work, "update-ref", "-d", "refs/remotes/origin/main");
+  settledImpl(f);
+  f.refused("impl-5", 2, /could not look — git rev-parse --verify origin\/main\^\{commit\} exited 1/);
+});
+
 test("settle: a bailed report is not gated", () => {
   const f = fixture();
   f.dispatch("5", "impl-5");

@@ -493,6 +493,23 @@ test("a repo with no origin/main refuses before anything is claimed", () => {
   assert.match(err, /claim-ticket: origin\/main does not resolve to a commit/);
 });
 
+// `--apply` on `dir` refuses at the point its dry run did: exit 2, no receipt,
+// no label, no worktree, no branch.
+function assertApplyClaimsNothing(dir) {
+  const bin = tempDir("claim-bin-");
+  const ghLog = join(bin, "gh.log");
+  writeExecStub(join(bin, "gh"), `#!/bin/sh\necho "$@" >> '${ghLog}'\nexit 0\n`);
+  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], {
+    cwd: dir, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.equal(r.stdout, "", "no receipt");
+  assert.equal(existsSync(ghLog), false, "the issue must not be labelled");
+  assert.equal(existsSync(join(dir, ".worktrees", "42-slug")), false, "no worktree");
+  const branch = spawnSync("git", ["rev-parse", "--verify", "--quiet", "refs/heads/fix/42-slug"], { cwd: dir, env: FIXTURE_ENV });
+  assert.equal(branch.status, 1, "no branch");
+}
+
 // The suite moved on origin/main and the main checkout was not updated: the
 // checkout's index lists plugin/scripts/a.test.mjs, origin/main (where the
 // worktree is cut from) holds tests/a.test.mjs. Nothing in claim-ticket.sh
@@ -516,19 +533,7 @@ test("a Test entrypoint whose glob matches nothing at origin/main refuses before
   const dry = claim(dir);
   assert.match(dry.err ?? "", /^claim-ticket: derive-testcmd: the Recipe cache at .* is invalid: its test command's pattern 'plugin\/scripts\/\*\.test\.mjs' matches no file tracked in .* at origin\/main/m);
   assert.match(dry.err, /run the Recipe derivation step/);
-  // --apply refuses at the same point: no label, no worktree, no branch.
-  const bin = tempDir("claim-bin-");
-  const ghLog = join(bin, "gh.log");
-  writeExecStub(join(bin, "gh"), `#!/bin/sh\necho "$@" >> '${ghLog}'\nexit 0\n`);
-  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], {
-    cwd: dir, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
-  });
-  assert.equal(r.status, 2, r.stdout + r.stderr);
-  assert.equal(r.stdout, "", "no receipt");
-  assert.equal(existsSync(ghLog), false, "the issue must not be labelled");
-  assert.equal(existsSync(join(dir, ".worktrees", "42-slug")), false, "no worktree");
-  const branch = spawnSync("git", ["rev-parse", "--verify", "--quiet", "refs/heads/fix/42-slug"], { cwd: dir, env: FIXTURE_ENV });
-  assert.equal(branch.status, 1, "no branch");
+  assertApplyClaimsNothing(dir);
 });
 
 test("a Test entrypoint whose glob matches at origin/main claims, though the checkout's index lists no match", () => {
@@ -642,18 +647,7 @@ for (const field of ["install", "test"]) {
     assert.match(dry.err ?? "", /^claim-ticket: derive-testcmd: the Recipe cache at .* is invalid: /m);
     assert.ok(dry.err.includes(`its ${field} command './setup.sh' is not found or not executable from . at origin/main — `), dry.err);
     assert.match(dry.err, /run the Recipe derivation step/);
-    const bin = tempDir("claim-bin-");
-    const ghLog = join(bin, "gh.log");
-    writeExecStub(join(bin, "gh"), `#!/bin/sh\necho "$@" >> '${ghLog}'\nexit 0\n`);
-    const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], {
-      cwd: dir, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
-    });
-    assert.equal(r.status, 2, r.stdout + r.stderr);
-    assert.equal(r.stdout, "", "no receipt");
-    assert.equal(existsSync(ghLog), false, "the issue must not be labelled");
-    assert.equal(existsSync(join(dir, ".worktrees", "42-slug")), false, "no worktree");
-    const branch = spawnSync("git", ["rev-parse", "--verify", "--quiet", "refs/heads/fix/42-slug"], { cwd: dir, env: FIXTURE_ENV });
-    assert.equal(branch.status, 1, "no branch");
+    assertApplyClaimsNothing(dir);
   });
 }
 

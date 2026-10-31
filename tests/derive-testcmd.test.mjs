@@ -1608,6 +1608,8 @@ test("--at judges a path by what <rev> records there: an executable, a symlink o
     ["./bin", false],
     ["./nowhere/x.sh", false],
     ["./bin/gained.sh/x", false],
+    ["./bin/gained.sh/", false],
+    ["./bin/gained.sh/.", false],
   ]) {
     for (const field of FIELDS) {
       cache(dir, recipeFor(head, field, cmd));
@@ -1621,6 +1623,23 @@ test("--at judges a path by what <rev> records there: an executable, a symlink o
         assert.ok(r.err.includes(`its ${field} command '${cmd}' is not found or not executable from ${dir} at ${gained} — `), r.err);
       }
     }
+  }
+});
+
+// The ignore rules are asked with the checkout's index set aside: the index is
+// the checkout's, not <rev>'s, and a path it tracks reads as not ignored to a
+// plain `git check-ignore`. So a path the checkout tracks under an ignored
+// directory, which <rev> does not hold, is still ignored output there.
+test("--at accepts a path <rev> lacks that the checkout's ignore rules match, even when the checkout's index tracks it", () => {
+  const { dir, head, gained } = revFixture();
+  mkdirSync(join(dir, "dist"));
+  writeFileSync(join(dir, "dist", "tracked.js"), "#!/bin/sh\n");
+  execFileSync("git", ["add", "-f", "dist/tracked.js"], { cwd: dir, stdio: "pipe", env: FIXTURE_ENV });
+  for (const field of FIELDS) {
+    cache(dir, recipeFor(head, field, "./dist/tracked.js"));
+    const r = run([dir, field, "--at", gained]);
+    assert.equal(r.status, 0, `${field} ./dist/tracked.js must be accepted: ${r.err}`);
+    assert.equal(r.out, "./dist/tracked.js");
   }
 });
 

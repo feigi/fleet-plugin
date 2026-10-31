@@ -519,6 +519,11 @@ revmode() {
 # path git does not ignore — is refused.
 atrev() {
   refusal="$subj $field command '$2' is not found or not executable from $repo at $rev — $stale; $tail"
+  # A word ending in `/` or `/.` asks for a directory, and the shell runs no
+  # directory — measured: with bin/run.sh an executable file, `sh -c
+  # './bin/run.sh/'` and `sh -c './bin/run.sh/.'` each exit 126 — though
+  # inside() folds it to the path of the entry it ends in.
+  case $2 in */|*/.) die "$refusal" ;; esac
   revmode "$1"
   case $mode in
     100755|120000|160000) return 0 ;;

@@ -2823,9 +2823,13 @@ async function runSettleFromReport() {
   // (exit 1: absent, unproven, invalid) has no Check step to have run, so no
   // gate applies; any other answer from it could not look. Both reads judge
   // the cache against origin/main's tree, the one members' worktrees are cut
-  // from. `head`'s commit object must be local when the tree is read:
-  // `fetchHead`, when given, puts it there, and runs only once a gate applies.
+  // from. The reader refuses an `--at` that does not resolve with the same
+  // exit 1 as a cache it refuses, so origin/main is resolved first: one that
+  // does not resolve could not look, never a repository with no gate.
+  // `head`'s commit object must be local when the tree is read: `fetchHead`,
+  // when given, puts it there, and runs only once a gate applies.
   const recipeGate = (head, fetchHead) => {
+    look("git rev-parse --verify origin/main^{commit}", "git", ["rev-parse", "--verify", "--quiet", "origin/main^{commit}"]);
     for (const field of ["check", "test"]) {
       if (look(`derive-testcmd.sh . ${field} --at origin/main`, "sh", [deriveTestcmd, repoDir(), field, "--at", "origin/main"], [0, 1]).status === 1) return;
     }

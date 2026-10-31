@@ -35,7 +35,7 @@ const DERIVE = join(dirname(fileURLToPath(import.meta.url)), "derive-testcmd.sh"
 const MAX_BUFFER = 64 * 1024 * 1024;
 
 /** The reads, as arguments after the repository `.`. */
-const RECIPE_READS = [["install", "--at", "origin/main"], ["check", "--at", "origin/main"], ["test", "--at", "origin/main"]];
+const RECIPE_READS = ["install", "check", "test"].map((field) => [field, "--at", "origin/main"]);
 
 const trimmed = (s) => String(s ?? "").trim();
 const lines = (s) => trimmed(s).split("\n").filter((l) => l.trim() !== "");
