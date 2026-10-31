@@ -1,8 +1,10 @@
 # Fleet Prompt / Command-Doc Duplication
 
-`run-team/SKILL.md`'s dispatched prompt restates rules that `review-and-fix.md` also
-states — the apply/verify split and the commit gate among them — while the same
-`SKILL.md` tells the reader elsewhere to use the pointer form and "do not restate it".
+The fix-applier's prompt restates rules that `review-and-fix.md` also states — the
+apply/verify split and the commit gate among them. That prompt is its agent body,
+`plugin/agents/fleet-fix-applier.agent.md`, and the brief `dispatch-prompt.mjs` renders for
+it; elsewhere run-team's `references/finisher.md` uses the pointer form, and its `SKILL.md`
+says "do not restate it".
 Proposals to collapse the restated blocks into pointers are refused. The duplication is
 deliberate and stays.
 
@@ -31,12 +33,12 @@ copies pinned rather than for deleting one.
 prompt sent once per reviewed PR. Against that, a skimmed read that misses the apply
 policy or the commit gate costs a whole review cycle.
 
-The convention lines that appear to contradict this — the pointer-form wording
-(`review-and-fix.md` states them; the prompt only has to say they apply) and the "do not
-restate it" bullet — are scoped to CI facts and specialist tree isolation, not to the
-apply/commit rules. If they read as absolute to someone re-deriving this finding,
-narrowing that wording is a fine change on its own. Deleting the duplicated blocks is
-not.
+The convention lines that appear to contradict this — the pointer-form wording in
+run-team's `references/finisher.md` (`review-and-fix.md` states them; the body says they
+apply) and the "do not restate it" bullet in its `SKILL.md` — are scoped to CI facts and
+specialist tree isolation, not to the apply/commit rules. If they read as absolute to
+someone re-deriving this finding, narrowing that wording is a fine change on its own.
+Deleting the duplicated blocks is not.
 
 Two further lines in run-team's `references/instruments.md` § **Triggers and shape of a
 tooling defect report**, the section `SKILL.md`'s **A tooling defect found mid-run**
@@ -68,14 +70,13 @@ this finding from.
 Keep regardless of any future edit here: the `<testCmd>` substitution lead-in, which is
 genuinely fleet-only and has no counterpart in `review-and-fix.md`.
 
-The "read your refuter's report yourself" block is a keep for the opposite reason. It is
-not fleet-only — it restates `review-and-fix.md`'s **Specialists** rule near-verbatim,
-down to the `tail -1 <output-file>` command, "Never read the whole file" and the "~15
-pinged in one run, 0 retrieved" measurement. `SKILL.md` says so itself, immediately
-after the block: "This is `review-and-fix.md`'s **Specialists** rule; it reaches you
-here because the steps that point at it are the ones you skip." The fleet copy narrows
-it to the refuters the fix-applier itself dispatches. So it belongs with the deliberate
-duplication above, not against it — and editing either copy means editing both.
+The "Retrieve that report yourself" block in the fix-applier's agent body is a keep for
+the opposite reason. It is not fleet-only — it restates `review-and-fix.md`'s
+**Specialists** rule, and the body says so itself, closing the block: "This is
+`review-and-fix.md`'s **Specialists** rule; it reaches you here because the steps that
+point at it are the ones you skip." The fleet copy narrows it to the refuters the
+fix-applier itself dispatches. So it belongs with the deliberate duplication above, not
+against it — and editing either copy means editing both.
 
 ## When to reconsider
 
