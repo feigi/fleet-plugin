@@ -3395,65 +3395,6 @@ test("an attached worktree is never touched by the branchless sweep (#381)", (t)
   assert.equal(branchExists(w, "feature/live"), true);
 });
 
-test("a merged claim branch with no upstream is kept and reported, never omitted, until its upstream is written", (t) => {
-  const w = repo(t);
-  const b = "implementer/9-x";
-  git(w, "checkout", "-q", "-b", b, "main");
-  commit(w, "claim work");
-  git(w, "push", "-q", "origin", b);
-  git(w, "checkout", "-q", "main");
-  git(w, "merge", "-q", "--no-ff", "-m", "merge claim", b);
-  git(w, "push", "-q", "origin", "main");
-  git(w, "push", "-q", "origin", "--delete", b);
-  git(w, "fetch", "-q", "--prune", "origin");
-
-  const dry = runReap(w, []);
-  assert.equal(dry.code, 0);
-  assert.deepEqual(dry.json.kept, [{ branch: b, reason: "no upstream — never selected" }]);
-
-  const kept = runReap(w, ["--apply"]);
-  assert.equal(kept.code, 0);
-  assert.deepEqual(kept.json.kept, [{ branch: b, reason: "no upstream — never selected" }]);
-  assert.deepEqual(kept.json.reaped, []);
-  assert.equal(branchExists(w, b), true);
-
-  git(w, "config", `branch.${b}.remote`, "origin");
-  git(w, "config", `branch.${b}.merge`, `refs/heads/${b}`);
-  const reaped = runReap(w, ["--apply"]);
-  assert.equal(reaped.code, 0);
-  assert.deepEqual(reaped.json.reaped, [b]);
-  assert.equal(branchExists(w, b), false);
-});
-
-test("a merged claim branch with no upstream held by a worktree is kept once, and the worktree is left alone until its upstream is written", (t) => {
-  const w = repo(t);
-  const b = "implementer/9-y";
-  const wt = join(w, ".worktrees", "claim");
-  git(w, "worktree", "add", "-q", wt, "-b", b, "main");
-  commit(wt, "claim work");
-  git(wt, "push", "-q", "origin", b);
-  git(w, "merge", "-q", "--no-ff", "-m", "merge claim", b);
-  git(w, "push", "-q", "origin", "main");
-  git(w, "push", "-q", "origin", "--delete", b);
-  git(w, "fetch", "-q", "--prune", "origin");
-
-  const { code, json } = runReap(w, ["--apply"]);
-  assert.equal(code, 0);
-  assert.deepEqual(json.kept.filter((k) => k.branch === b), [{ branch: b, reason: "no upstream — never selected" }]);
-  assert.deepEqual(json.worktreesRemoved, []);
-  assert.equal(existsSync(wt), true);
-  assert.equal(branchExists(w, b), true);
-
-  git(w, "config", `branch.${b}.remote`, "origin");
-  git(w, "config", `branch.${b}.merge`, `refs/heads/${b}`);
-  const reaped = runReap(w, ["--apply"]);
-  assert.equal(reaped.code, 0);
-  assert.deepEqual(reaped.json.reaped, [b]);
-  assert.deepEqual(reaped.json.worktreesRemoved, [wt]);
-  assert.equal(existsSync(wt), false);
-  assert.equal(branchExists(w, b), false);
-});
-
 test("a locked detached worktree is kept, its registration reported intact and its path named (#381)", (t) => {
   // The branch sweep's refusal handling has this coverage; its structurally
   // duplicated copy in this sweep had NONE — swapping the two state strings, or
@@ -5598,4 +5539,163 @@ test("a branch name carrying a double quote reaches GitHub as a variable, never 
   assert.match(queryText, /\$h0/, "fixture: the query does declare the variable");
   assert.doesNotMatch(queryText, /quoted/, "the name is not in the query text");
   assert.match(gh.calls()[0], /-f h0=fix\/3438-"quoted"/);
+});
+
+// ---------------------------------------------------------------------------
+// A branch with no upstream: selected only when origin has no branch of its
+// name and the second proof ties its tip — by equality when that tip is
+// already on the base.
+// ---------------------------------------------------------------------------
+
+/**
+ * A claim pushed without `-u`, so it has no upstream, then merged into `main`
+ * by a merge commit and its remote branch deleted and pruned — unless
+ * `keepRemote`. `wt` puts the claim in a worktree. Returns its tip, which is
+ * also the head the PR ended on, and sits on the base.
+ */
+function noUpstreamMergedClaim(w, name, { wt = null, keepRemote = false } = {}) {
+  const at = wt ?? w;
+  if (wt) git(w, "worktree", "add", "-q", wt, "-b", name, "main");
+  else git(w, "checkout", "-q", "-b", name, "main");
+  const tip = commit(at, `${name} work`);
+  git(at, "push", "-q", "origin", name);
+  if (!wt) git(w, "checkout", "-q", "main");
+  git(w, "merge", "-q", "--no-ff", "-m", `merge ${name}`, name);
+  git(w, "push", "-q", "origin", "main");
+  if (!keepRemote) git(w, "push", "-q", "origin", "--delete", name);
+  git(w, "fetch", "-q", "--prune", "origin");
+  assert.equal(git(w, "for-each-ref", "--format=%(upstream)", `refs/heads/${name}`), "", "fixture: the claim has no upstream");
+  return tip;
+}
+
+test("a merged claim branch with no upstream is kept where origin is a local path, and reaped on its PR's recorded head once origin is GitHub's", (t) => {
+  const w = repo(t);
+  const b = "implementer/9-x";
+  const tip = noUpstreamMergedClaim(w, b);
+
+  const local = runReap(w, ["--apply"]);
+  assert.equal(local.code, 0, local.stderr);
+  assert.deepEqual(local.json.kept, [{ branch: b, reason: "no upstream — never selected" }], "no GitHub repository to ask");
+  assert.equal(branchExists(w, b), true);
+
+  githubOrigin(w);
+  const gh = ghStub(t);
+  const env = gh.env({ [b]: [prNode({ oid: tip })] });
+  const dry = runReap(w, [], env);
+  assert.equal(dry.code, 0, dry.stderr);
+  assert.deepEqual(dry.json.reaped, [b], "the tip is on the base and equals the PR's head");
+  assert.deepEqual(dry.json.kept, []);
+  assert.equal(branchExists(w, b), true, "a dry run deletes nothing");
+
+  const reaped = runReap(w, ["--apply"], env);
+  assert.equal(reaped.code, 0, reaped.stderr);
+  assert.deepEqual(reaped.json.reaped, [b]);
+  assert.deepEqual(reaped.json.kept, []);
+  assert.deepEqual(reaped.json.warnings, [], "a branch with no upstream has no config section left behind to warn about");
+  assert.equal(branchExists(w, b), false);
+});
+
+test("a merged claim branch with no upstream held by a clean worktree is reaped with its worktree", (t) => {
+  const { w, gh } = githubRepo(t);
+  const b = "implementer/9-y";
+  const wt = join(w, ".worktrees", "claim");
+  const tip = noUpstreamMergedClaim(w, b, { wt });
+
+  const { code, json, stderr } = runReap(w, ["--apply"], gh.env({ [b]: [prNode({ oid: tip })] }));
+  assert.equal(code, 0, stderr);
+  assert.deepEqual(json.reaped, [b]);
+  assert.deepEqual(json.worktreesRemoved, [wt]);
+  assert.deepEqual(json.kept, []);
+  assert.deepEqual(json.warnings, []);
+  assert.equal(existsSync(wt), false);
+  assert.equal(branchExists(w, b), false);
+});
+
+test("a no-upstream tip a force-push replaced, off the base, is reaped on that recorded head, worktree and all", (t) => {
+  const { w, gh } = githubRepo(t);
+  const c = serverRebasedClaim(w, "fix/3993-replaced");
+  git(w, "branch", "--unset-upstream", c.name);
+  assert.equal(c.tip, c.before, "fixture: the tip is the force-pushed-over head");
+  assert.notEqual(spawnSync("git", ["merge-base", "--is-ancestor", c.tip, "origin/main"], { cwd: w, env: ENV }).status, 0, "fixture: the tip is off the base");
+
+  const { code, json, stderr } = runReap(w, ["--apply"], gh.env({ [c.name]: [prNode({ oid: c.head, before: [c.before] })] }));
+  assert.equal(code, 0, stderr);
+  assert.deepEqual(json.reaped, [c.name]);
+  assert.deepEqual(json.worktreesRemoved, [c.wt]);
+  assert.deepEqual(json.kept, []);
+  assert.equal(branchExists(w, c.name), false);
+  assert.equal(worktreeStands(w, c.name), false);
+});
+
+test("a fresh claim on a stale base that reuses a merged PR's branch name is kept: a tip on the base ties by equality only", (t) => {
+  const { w, gh } = githubRepo(t);
+  const b = "implementer/9-reclaim";
+  const stale = git(w, "rev-parse", "main");
+  const head = noUpstreamMergedClaim(w, b);
+  git(w, "branch", "-D", b);
+  // The re-claim: cut from the origin/main a clone had before that merge.
+  const wt = join(w, ".worktrees", "reclaim");
+  git(w, "worktree", "add", "-q", wt, "-b", b, stale);
+  assert.equal(spawnSync("git", ["merge-base", "--is-ancestor", stale, head], { cwd: w, env: ENV }).status, 0, "fixture: the tip is a strict ancestor of the recorded head, so ancestry alone would tie it");
+
+  const { code, json, stderr } = runReap(w, ["--apply"], gh.env({ [b]: [prNode({ oid: head })] }));
+  assert.equal(code, 0, stderr);
+  assert.deepEqual(json.reaped, []);
+  assert.deepEqual(json.worktreesRemoved, []);
+  assert.deepEqual(json.kept, [{ branch: b, reason: "no upstream — the tip is already on the base and equals no head the PR recorded" }]);
+  assert.equal(existsSync(wt), true, "the live claim's worktree is untouched");
+  assert.equal(git(w, "rev-parse", `refs/heads/${b}`), stale);
+});
+
+test("a no-upstream tip with commits of its own that is a strict ancestor of a recorded head is reaped", (t) => {
+  const { w, gh } = githubRepo(t);
+  const c = serverRebasedClaim(w, "fix/3993-ancestor", { commits: 2, tipAt: 0 });
+  git(w, "branch", "--unset-upstream", c.name);
+  assert.notEqual(c.tip, c.before, "fixture: the tip is not itself a recorded head");
+
+  const { code, json, stderr } = runReap(w, ["--apply"], gh.env({ [c.name]: [prNode({ oid: c.head, before: [c.before] })] }));
+  assert.equal(code, 0, stderr);
+  assert.deepEqual(json.reaped, [c.name]);
+  assert.deepEqual(json.kept, []);
+  assert.equal(branchExists(w, c.name), false);
+});
+
+test("a no-upstream branch that would tie is kept while origin still has a branch of its name, and joins no lookup", (t) => {
+  const { w, gh } = githubRepo(t);
+  const b = "implementer/9-live";
+  const tip = noUpstreamMergedClaim(w, b, { keepRemote: true });
+
+  const { code, json, stderr } = runReap(w, ["--apply"], gh.env({ [b]: [prNode({ oid: tip })] }));
+  assert.equal(code, 0, stderr);
+  assert.deepEqual(json.kept, [{ branch: b, reason: `no upstream — origin/${b} still exists` }]);
+  assert.equal(branchExists(w, b), true);
+  assert.equal(gh.calls().length, 0, "no branch needed GitHub's record");
+});
+
+test("a no-upstream branch the second proof does not tie is kept with the proof's own reason", (t) => {
+  const { w, gh } = githubRepo(t);
+  const b = "implementer/9-nopr";
+  noUpstreamMergedClaim(w, b);
+
+  const { code, json, stderr } = runReap(w, ["--apply"], gh.env({}));
+  assert.equal(code, 0, stderr);
+  assert.deepEqual(json.kept, [{ branch: b, reason: `no upstream — no merged PR has the head branch ${b}` }]);
+  assert.equal(branchExists(w, b), true);
+});
+
+test("a [gone] branch and branches with no upstream share the one lookup, each read under its own alias", (t) => {
+  const { w, gh } = githubRepo(t);
+  const c = serverRebasedClaim(w, "fix/3993-gone");
+  // Two with no upstream: each must read its own row, not a neighbour's.
+  const b = "implementer/9-v";
+  const tipB = noUpstreamMergedClaim(w, b);
+  const d = "implementer/9-z";
+  const tipD = noUpstreamMergedClaim(w, d);
+
+  const prs = { [c.name]: [prNode({ oid: c.head, before: [c.before] })], [b]: [prNode({ number: 8, oid: tipB })], [d]: [prNode({ number: 9, oid: tipD })] };
+  const { code, json, stderr } = runReap(w, ["--apply"], gh.env(prs));
+  assert.equal(code, 0, stderr);
+  assert.deepEqual([...json.reaped].sort(), [c.name, b, d].sort());
+  assert.deepEqual(json.kept, []);
+  assert.equal(gh.calls().length, 1, "one batched lookup for both kinds");
 });

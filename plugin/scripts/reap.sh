@@ -1,5 +1,5 @@
 #!/bin/sh
-# Delete local branches whose upstream is gone, and their worktrees. A branch with no upstream is reported as kept and never deleted.
+# Delete the local branches a merged PR accounts for, and their worktrees: a branch whose upstream is gone, or one with no upstream whose remote branch is gone and whose tip its merged PR recorded.
 #
 # Dry-run by default; --apply mutates. Every precondition is recomputed inside
 # this invocation, because a branch list from an earlier call is already false:
@@ -701,11 +701,13 @@ null_head_why() {
 # stranded tips (every branch has a `!` pair, context drift again) and which,
 # if it accepted `!`, would also reap a local amend that was never pushed.
 #
-# It is additive. It runs only for a branch `git cherry` already keeps, after
-# that verdict, and only ever turns that keep into a reap: the cherry proof,
-# the worktree guards, the holder re-check, the compare-and-swap on the tip
-# read once and `wt_recheck_delete` are all unchanged, and the tie is computed
-# on that same frozen tip. There is no name filter.
+# It is additive. For a branch with an upstream it runs only for one `git
+# cherry` already keeps, after that verdict, and only ever turns that keep
+# into a reap. For a branch with no upstream whose remote branch is gone it is
+# the selection itself, and `git cherry` is not consulted. Either way the
+# worktree guards, the holder re-check, the compare-and-swap on the tip read
+# once and `wt_recheck_delete` are all unchanged, and the tie is computed on
+# that same frozen tip. There is no name filter.
 #
 # One lookup per branch, by head name, MERGED PRs only, and a KEEP with its
 # reason unless ALL of: exactly one PR matches (a reused name can match
@@ -715,12 +717,15 @@ null_head_why() {
 # here and an ancestor of $base_rev — the ancestry is asked of git, not
 # trusted from the API; and the tip equals one of the PR's recorded heads or
 # is an ancestor of one present here. A squash merge's head is not on $base,
-# so it stays kept.
+# so it stays kept. A tip already on $base ties by equality only: ancestry
+# counts only for a tip with commits of its own (why is at the check, in
+# pr_tie).
 #
 # One aliased `gh api graphql` lookup per run, one call per $pr_chunk branches
-# and issued the first time a branch needs it, covers every [gone] branch (a
-# superset of the ones waiting: which will need it is only known branch by
-# branch). Branch names go in as GraphQL VARIABLES, never spliced into the
+# and issued the first time a branch needs it, covers every [gone] branch and
+# every branch with no upstream whose remote branch is gone (a superset of the
+# ones waiting: which will need it is only known branch by branch).
+# Branch names go in as GraphQL VARIABLES, never spliced into the
 # query text — `"` is legal in a refname.
 # Output is captured, never piped, and the call runs under a watchdog. Each of
 # these keeps every affected branch with its own reason and the run carries on:
@@ -731,8 +736,9 @@ null_head_why() {
 # script's own `--jq` produces, and a timeline with a next page. Nothing is
 # cached between runs, so an untied branch is asked about again on every pass.
 #
-# It does not apply — and the reason stays the bare `unmerged commits` — where
-# the repository has no GitHub identity to ask about: $base is not a
+# It does not apply — and the reason stays the bare `unmerged commits`, or
+# `no upstream — never selected` for a branch with no upstream — where the
+# repository has no GitHub identity to ask about: $base is not a
 # remote-tracking ref of `origin`, or `remote.origin.url` is not a
 # `host/owner/repo` URL (a local path, say). That is not a failure of the
 # proof, there is simply nobody to put the question to. `git config`, never
@@ -784,6 +790,10 @@ pr_identity() {
   return 0
 }
 
+# Settled once, before any branch is looked at: a branch with no upstream asks
+# it before pr_load runs, to tell "nobody to ask" from a lookup to join.
+if [ -z "$pr_base" ] || ! pr_identity; then pr_off=true; fi
+
 # `gh "$@"`, neither prompting nor outliving <budget> seconds: the bounded-call
 # shape net_git has for git, over the same kill walk. It lives here and not in
 # net.sh because this is the one gh call in the fleet that is bounded; net.sh
@@ -807,8 +817,8 @@ gh_bounded() {
   )
 }
 
-# One run's lookup. Sets $pr_off (the proof does not apply here), $pr_all_why
-# (it could not be read, for every branch) or $pr_rows (the answer).
+# One run's lookup, for every branch in $pr_branches. Sets $pr_all_why (it
+# could not be read, for every branch) or $pr_rows (the answer).
 #
 # At most $pr_chunk aliases per call: GitHub refuses the whole query with
 # `Resource limits for this query exceeded` somewhere between 850 aliases
@@ -819,8 +829,7 @@ gh_bounded() {
 pr_chunk=500
 pr_load() {
   pr_loaded=true
-  [ -n "$pr_base" ] || { pr_off=true; return 0; }
-  pr_identity || { pr_off=true; return 0; }
+  [ "$pr_off" = false ] || return 0
   if ! command -v gh >/dev/null 2>&1; then
     pr_all_why="gh is not installed, so GitHub's record of this tip could not be read"
     return 0
@@ -835,7 +844,7 @@ pr_load() {
        "."] | join("\u001f")'
   pl_budget=$(net_budget 60 "${FLEET_NET_TIMEOUT:-}")
   pl_n=0
-  for pl_b in $gone_branches; do pl_n=$((pl_n + 1)); done
+  for pl_b in $pr_branches; do pl_n=$((pl_n + 1)); done
   pl_lo=0
   while [ "$pl_lo" -lt "$pl_n" ]; do
     pl_hi=$((pl_lo + pr_chunk))
@@ -843,7 +852,7 @@ pr_load() {
     pl_sel=
     set -- -f "owner=$pr_owner" -f "name=$pr_name"
     pl_i=0
-    for pl_b in $gone_branches; do
+    for pl_b in $pr_branches; do
       if [ "$pl_i" -ge "$pl_lo" ] && [ "$pl_i" -lt "$pl_hi" ]; then
         pl_decl="$pl_decl,\$h$pl_i:String!"
         pl_sel="${pl_sel}b$pl_i:pullRequests(headRefName:\$h$pl_i,states:MERGED,first:2){nodes{number baseRefName isCrossRepository headRefOid timelineItems(itemTypes:[HEAD_REF_FORCE_PUSHED_EVENT],first:100){pageInfo{hasNextPage} nodes{... on HeadRefForcePushedEvent{beforeCommit{oid}}}}}} "
@@ -857,7 +866,7 @@ pr_load() {
     set -- api graphql --hostname "$pr_host" -f "query=$pl_query" "$@" --jq "$pl_jq"
     pl_to=$pl_hi
     [ "$pl_to" -le "$pl_n" ] || pl_to=$pl_n
-    echo "\$ gh api graphql (merged PRs by head branch, [gone] branches $((pl_lo + 1))-$pl_to of $pl_n)" >&2
+    echo "\$ gh api graphql (merged PRs by head branch, branches $((pl_lo + 1))-$pl_to of $pl_n)" >&2
     if probe gh_bounded "$pl_budget" "$@"; then pl_rc=0; else pl_rc=$?; fi
     pl_o=$gp_out
     pl_err=$gp_err
@@ -899,7 +908,7 @@ pr_tie() {
   pt_b=$1
   pt_tip=$2
   pt_i=0
-  for pt_x in $gone_branches; do
+  for pt_x in $pr_branches; do
     [ "$pt_x" != "$pt_b" ] || break
     pt_i=$((pt_i + 1))
   done
@@ -949,15 +958,37 @@ EOF
     fi
     return 1
   fi
-  # The recorded heads: the head the PR ended on, then every force-pushed-over one.
+  # The recorded heads: the head the PR ended on, then every force-pushed-over
+  # one. Equality first, against all of them.
+  pt_heads="$poid,$pbef"
+  pt_rest=$pt_heads
+  while [ -n "$pt_rest" ]; do
+    pt_h=${pt_rest%%,*}
+    case "$pt_rest" in *,*) pt_rest=${pt_rest#*,} ;; *) pt_rest= ;; esac
+    if [ "$pt_h" = "$pt_tip" ]; then return 0; fi
+  done
+  # A tip already on $base ties by equality only; ancestry counts only for a
+  # tip with commits of its own. A claim is cut from whatever origin/main this
+  # clone last fetched, so a fresh claim that reuses a merged PR's branch name
+  # on a clone that has not fetched that merge has no commits, and its tip is
+  # an ancestor of that PR's heads: ancestry would tie it, and the reap would
+  # remove the live member's clean worktree and branch. A tip that `git
+  # cherry` kept has a commit no patch on $base matches, so it is never on
+  # $base and this never keeps it.
+  if git_probe merge-base --is-ancestor "$pt_tip" "$base_rev"; then
+    pr_why="the tip is already on the base and equals no head the PR recorded"
+    return 1
+  elif [ "$gp_rc" -ne 1 ]; then
+    pr_why="cannot tell whether the tip is already on $base$(gp_why)"
+    return 1
+  fi
   pt_unsure=false
   pt_unsure_why=
-  pt_rest="$poid,$pbef"
+  pt_rest=$pt_heads
   while [ -n "$pt_rest" ]; do
     pt_h=${pt_rest%%,*}
     case "$pt_rest" in *,*) pt_rest=${pt_rest#*,} ;; *) pt_rest= ;; esac
     case "$pt_h" in '' | *[!0123456789abcdef]*) continue ;; esac
-    if [ "$pt_h" = "$pt_tip" ]; then return 0; fi
     git_probe cat-file -e "$pt_h^{commit}" || continue
     if git_probe merge-base --is-ancestor "$pt_tip" "$pt_h"; then return 0; else pt_rc=$?; fi
     if [ "$pt_rc" -ne 1 ]; then pt_unsure=true; pt_unsure_why=$(gp_why); fi
@@ -1041,12 +1072,59 @@ else
     no_upstream=""
   fi
 fi
-# A branch with no upstream has no [gone] state to act on. It is reported and
-# never selected for deletion, and no other guard runs on it.
+# A branch with no upstream has no [gone] state to act on, so it is selected on
+# other evidence, and only when all of it holds: origin has no branch of its
+# name — asked of refs/remotes/origin/<b>, which the `fetch --prune` above has
+# just brought up to date, so no further network call — and the second merge
+# proof ties its tip, read once in the loop below, to a head its merged PR
+# recorded. `git cherry` is not consulted for it, neither to authorize nor to
+# veto, and there is no name filter. Where there is no GitHub repository to
+# ask, it is never selected. Everything after the selection — the worktree
+# guards, the holder re-check, the compare-and-swap on the tip and
+# `wt_recheck_delete` — runs as it does for a [gone] branch; a branch
+# `wt_recheck_delete` restores still has no upstream, and is weighed again next
+# pass.
+nu_branches=
 for b in $no_upstream; do
-  keep "$b" "no upstream — never selected"
+  if [ "$pr_off" = true ]; then
+    keep "$b" "no upstream — never selected"
+  elif git_probe show-ref --verify --quiet "refs/remotes/origin/$b"; then
+    keep "$b" "no upstream — origin/$b still exists"
+  elif [ "$gp_rc" -ne 1 ]; then
+    keep "$b" "no upstream — cannot tell whether origin/$b exists$(gp_why)"
+  else
+    nu_branches=${nu_branches:+$nu_branches
+}$b
+  fi
 done
-for b in $gone_branches; do
+# One lookup asks about both kinds; pr_tie finds a branch by its place in it.
+pr_branches=${gone_branches:+$gone_branches
+}$nu_branches
+# Returns 1 when no key of branch $1's section is set in the repository's own
+# config, the one `--remove-section` edits; 0 when one is, or when that config
+# cannot be read. `--name-only` prints `branch.<name>.<key>`, and a key holds
+# no `.`, so dropping the last field leaves the section and subsection whole,
+# whatever `.` the name holds.
+branch_keys_left() {
+  if git_probe config --local --name-only --get-regexp '^branch\.'; then :
+  elif [ "$gp_rc" -eq 1 ]; then return 1
+  else return 0
+  fi
+  while IFS= read -r bk_k; do
+    [ "${bk_k%.*}" != "branch.$1" ] || return 0
+  done <<EOF
+$gp_out
+EOF
+  return 1
+}
+# The sweep takes the [gone] branches first: the first $nu_from of it have an
+# upstream, and every one after has none.
+nu_from=0
+for b in $gone_branches; do nu_from=$((nu_from + 1)); done
+sweep_i=0
+for b in $gone_branches $nu_branches; do
+  if [ "$sweep_i" -ge "$nu_from" ]; then nu=true; else nu=false; fi
+  sweep_i=$((sweep_i + 1))
 
   # The tip is read ONCE, here, and everything after it measures that frozen
   # SHA rather than the live ref: the cherry below runs against `$tip`, and
@@ -1066,6 +1144,18 @@ for b in $gone_branches; do
     continue
   fi
   tip=$gp_out
+
+  if [ "$nu" = true ]; then
+    # No upstream: the second proof, on this `$tip`, is the selection itself
+    # (both rules are above the loop), and `git cherry` is not run.
+    [ "$pr_loaded" = true ] || pr_load
+    if [ -n "$pr_all_why" ]; then
+      keep "$b" "no upstream — $pr_all_why"
+      continue
+    elif ! pr_tie "$b" "$tip"; then
+      keep "$b" "no upstream — $pr_why"
+      continue
+    fi
 
   # git cherry against origin/main, not a local main: a local main never
   # fast-forwarded reads every merged branch as unmerged. A + line is a commit
@@ -1109,10 +1199,9 @@ for b in $gone_branches; do
   # the only merge check bounds what ELSE could catch an unmerged branch, not
   # whether this check itself can be wrong — which is why BOTH revs it
   # consumes are qualified.
-  if ! cherry=$(git cherry "$base_rev" "$tip" 2>&1); then
+  elif ! cherry=$(git cherry "$base_rev" "$tip" 2>&1); then
     keep "$b" "cherry probe failed — cannot tell if merged: $(printf '%s' "$cherry" | tr '\n' ' ')"
     continue
-  fi
   # A `+` only at line start is a commit. $cherry holds stderr too — 2>&1 above,
   # so the failure reason can carry git's own words — and an unanchored match
   # reads a `+` anywhere in a diagnostic as a commit line, keeping a branch that
@@ -1129,7 +1218,7 @@ for b in $gone_branches; do
   # questions; the answers are ruled on here, in the order that makes the
   # unanswerable case fail CLOSED like every other could-not-check in this
   # file: scan first, verdict second.
-  if ! grep_probe "$cherry" '^+'; then
+  elif ! grep_probe "$cherry" '^+'; then
     keep "$b" "cherry scan failed — cannot tell if merged$(gp_why "$gq_err")"
     continue
   elif [ "$gq_rc" -eq 0 ]; then
@@ -1605,7 +1694,13 @@ for b in $gone_branches; do
     # already deleted, so a failure here is never a keep — but it is not
     # stderr-only either: an unattended caller reading only stdout JSON must
     # still learn the stale upstream was left, so it lands in `warnings` too.
-    if ! err=$(git config --remove-section "branch.$b" 2>&1); then
+    #
+    # A branch with no upstream usually has no section at all, and removing
+    # one that is not there fails; a failure that leaves no key of the branch
+    # set left nothing behind, so there is nothing to report.
+    if err=$(git config --remove-section "branch.$b" 2>&1); then :
+    elif [ "$nu" = true ] && ! branch_keys_left "$b"; then :
+    else
       errflat=$(printf '%s' "$err" | tr '\n' ' ')
       printf '    note: %s deleted, but its branch config section was left: %s\n' "$b" "$errflat" >&2
       warnings="${warnings}{\"branch\":$(jfield "$b"),\"note\":$(jfield "branch config section was left: $errflat")},"

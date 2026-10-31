@@ -49,7 +49,7 @@
 //       not on origin/main, and releases; any other answer, or a detail that
 //       opens with no sha, is a NEED and N is left untouched, claim and all.
 //       The PR a `covered` detail names is never written to.
-//       A `PR#M` outcome also sets the claim branch's upstream when it has none: `reap.sh` keeps a branch with no upstream, and only an upstream's `[gone]` state makes it reapable. It writes `branch.<b>.remote` and `branch.<b>.merge` only while the merge key is unset, and prints `NEED upstream <b> — <why>` when a write fails.
+//       A `PR#M` outcome also sets the claim branch's upstream when it has none: `reap.sh` selects a branch with no upstream only when origin has no branch of its name and its merged PR recorded its tip, while an upstream's `[gone]` state also lets `git cherry`'s proof make it reapable. It writes `branch.<b>.remote` and `branch.<b>.merge` only while the merge key is unset, and prints `NEED upstream <b> — <why>` when a write fails.
 //       A `blocked` outcome takes no action on the ticket beyond the settle: no label, comment, release or upstream, so the ticket keeps `in-progress`. It runs the Recipe read, below.
 //   fix-report <fix-pr-M[-x]>
 //       `settle --from-report`, which records the filings and rulings the
