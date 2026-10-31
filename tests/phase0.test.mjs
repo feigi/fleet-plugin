@@ -91,7 +91,7 @@ export function rotate() {
 if (process.argv[1].endsWith("stub-driver.mjs")) drive(process.argv[2], process.argv.slice(3));
 `;
 
-const MJS_STUBS = ["main-checkout", "label-map", "preflight", "tier-roles", "metrics-refresh", "board", "reclaim-scratch", "stranded", "shortlist", "fleet-heartbeat"];
+const MJS_STUBS = ["main-checkout", "label-map", "preflight", "tier-roles", "metrics-refresh", "board", "reclaim-scratch", "evict", "stranded", "shortlist", "fleet-heartbeat"];
 const SH_STUBS = ["instruments", "derive-testcmd"];
 
 // The plugin's scripts directory, copied once, with the external steps
@@ -156,7 +156,7 @@ const STEPS = [
   ["branch", []], ["fast-forward", []], ["pin", ["instruments"]], ["baseline", ["main-checkout"]], ["labels", ["label-map"]],
   ["preflight", ["preflight"]], ["ruleset", ["ruleset"]], ["tier-roles", ["tier-roles"]],
   ["metrics", ["metrics-refresh"]], ["cockpit", ["board"]], ["rotate", ["rotate"]],
-  ["reclaim", ["reclaim-scratch"]], ["recipe", ["derive-testcmd"]], ["fold-in", ["gh"]],
+  ["reclaim", ["reclaim-scratch"]], ["evict", ["evict"]], ["recipe", ["derive-testcmd"]], ["fold-in", ["gh"]],
   ["stranded", ["stranded"]], ["shortlist", ["shortlist"]],
 ];
 const NAMES = STEPS.map(([n]) => n);
@@ -267,7 +267,7 @@ test("a clean run passes every step in order, writes one receipt and exits 0", (
   // The scripts ran in the runbook's order. The cockpit is detached, so its
   // own line in the log lands whenever it starts.
   const order = f.order().filter((n) => n !== "board");
-  assert.deepEqual(order, ["instruments", "main-checkout", "label-map", "preflight", "ruleset", "tier-roles", "metrics-refresh", "rotate", "reclaim-scratch", "reclaim-scratch", "derive-testcmd", "derive-testcmd", "derive-testcmd", "gh", "stranded", "shortlist"]);
+  assert.deepEqual(order, ["instruments", "main-checkout", "label-map", "preflight", "ruleset", "tier-roles", "metrics-refresh", "rotate", "reclaim-scratch", "reclaim-scratch", "evict", "derive-testcmd", "derive-testcmd", "derive-testcmd", "gh", "stranded", "shortlist"]);
   assert.deepEqual(f.calls("instruments")[0].args, ["--pin"]);
   assert.deepEqual(f.calls("main-checkout")[0].args, ["--record"]);
   assert.deepEqual(f.calls("label-map")[0].args, ["ensure"]);
@@ -277,6 +277,7 @@ test("a clean run passes every step in order, writes one receipt and exits 0", (
   assert.deepEqual(f.calls("tier-roles")[0].args, ["--check", "--in-flight", "5"]);
   assert.deepEqual(f.calls("reclaim-scratch")[0].args, ["--root", receipt.scratch, "--after-rotate", "--apply"]);
   assert.deepEqual(f.calls("reclaim-scratch")[1].args, ["--siblings", "--root", receipt.scratch, "--apply"]);
+  assert.deepEqual(f.calls("evict")[0].args, ["--after-rotate", "--apply"]);
   assert.deepEqual(f.calls("derive-testcmd").map((c) => c.args), [[".", "install", "--at", "origin/main"], [".", "check", "--at", "origin/main"], [".", "test", "--at", "origin/main"]]);
   for (let i = 0; i < 40 && f.calls("board").length === 0; i++) wait(100);
   assert.deepEqual(f.calls("board")[0].args, ["serve", "--open"]);
@@ -601,6 +602,25 @@ test("reclaim: what either pass's receipt lists in failed[] at exit 0 is named, 
   g.control("reclaim-scratch", { by: { "--root": receiptOf([]), "--siblings": { out: "not json" } } });
   assert.equal(g.run().status, 0);
   assert.match(g.receipt().steps.reclaim.output, /^sibling keys: could not read reclaim-scratch\.mjs's receipt: /m);
+});
+
+test("evict is recorded and never stops the run: a refusal and each tree its receipt's failed[] names are listed", () => {
+  const f = fixture();
+  f.control("evict", { exit: 2, err: "evict: refuses" });
+  const r = f.run();
+  assert.equal(r.status, 0, r.stdout + r.err);
+  const receipt = f.receipt();
+  assert.deepEqual(statuses(receipt), allOk);
+  assert.deepEqual(receipt.steps.evict.output.split("\n"), ["evict.mjs exit 2, not enforced", "evict: refuses"]);
+
+  const g = fixture();
+  g.control("evict", { out: JSON.stringify({ applied: true, ledger: null, evicted: [], kept: [], failed: [{ path: "/r/.worktrees/7-impl-7", error: "could not remove node_modules/: exit 1" }] }) });
+  assert.equal(g.run().status, 0);
+  assert.deepEqual(statuses(g.receipt()), allOk);
+  assert.deepEqual(g.receipt().steps.evict.output.split("\n"), [
+    "idle claim trees evicted",
+    "claim trees: could not evict /r/.worktrees/7-impl-7 (could not remove node_modules/: exit 1)",
+  ]);
 });
 
 test("recipe: a cache that refuses is a pending NEED with exit 4, and a re-run after it is met continues from there", () => {

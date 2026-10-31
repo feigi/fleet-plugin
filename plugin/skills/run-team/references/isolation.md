@@ -110,6 +110,14 @@ above — so it is a second
 chance to notice a stale snapshot on the one path it covers, never a reason
 to skip the ref compare here.
 
+**An evicted claim tree lacks its dependencies.** `evict.mjs` empties a claim
+tree with neither a HEAD move nor a restore in 7 days of every path git ignores
+but its runner, and leaves the tree, its branch and its commits. The renderer
+refuses to brief an implementer
+or a fix-applier into one; before you run code in one by hand, restore it with
+`~/.fleet/bin/fleet-run evict.mjs --restore <tree> --apply`, which runs the
+Install step there as a claim does.
+
 ## Filesystem isolation is not stack isolation
 
 Private copy and test command solve different problems; conflating them is how second gets skipped: compose project name comes from environment, not working directory, so three agents on three snapshots still collide on one postgres. Symlinking installed dependencies in does not help. "I'm on my own copy" is exactly the intuition that skips command — say both, every time. Which command depends on audience: member in worktree uses `./agent-test`; specialist on snapshot does not, takes one `review-and-fix.md` hands out. Which runner the worktree holds decides why: the runner a claim writes is untracked, so a `git archive` snapshot never carries it; one the repository tracks does ride along, but no claim exported ports into it — its isolation is whatever that repository built, not one triple per snapshot.

@@ -1550,6 +1550,15 @@ export function reclaimSummary(stdout) {
   return `removed ${r.removed.length}, kept ${r.kept.length}, failed ${r.failed.length}`;
 }
 
+// evict.mjs's receipt as `evicted <k>, kept <m>, failed <f>`, or null. A tree
+// whose removal failed is in the receipt and exits 0: it is reported here, and
+// the pass still counts as evicted after.
+export function evictSummary(stdout) {
+  const r = receiptOf(stdout);
+  if (r === null || ![r.evicted, r.kept, r.failed].every(Array.isArray)) return null;
+  return `evicted ${r.evicted.length}, kept ${r.kept.length}, failed ${r.failed.length}`;
+}
+
 // --------------------------------------------------------------------------
 // I/O. Everything below runs only as a CLI — importing this file must never
 // parse argv or touch the network, or the pure half stops being unit-testable.
@@ -1634,8 +1643,8 @@ const OPTIONS = {
   // a controller that just acted needs the full rows.
   "fold-unchanged": { type: "boolean", default: false },
   // `--apply` runs the idempotent follow-ups whose trigger the ledger and the
-  // state file show, before the rows: reap.sh and reclaim-scratch.mjs after
-  // every merge pass settled `done`, and tier-check.mjs on every implementer
+  // state file show, before the rows: reap.sh, reclaim-scratch.mjs and
+  // evict.mjs after every merge pass settled `done`, and tier-check.mjs on every implementer
   // the tick would hold as unchecked. It never dispatches, never settles a
   // member and writes no ledger row but through those scripts. Without it the
   // tick is read-only.
@@ -1990,25 +1999,30 @@ function reportDuty(r, { label, duty, what, summarise }) {
   return summary !== null;
 }
 
-// Reap, then reclaim, after the merge passes in `due` — once however many
-// there are, since both sweep the whole repository and scratch root rather
-// than one pass's share. Reclaim runs whether or not reap did: neither reads
-// the other's result. True only when both applied, the one case `due` is
-// recorded as reaped after; otherwise the next --apply tick runs both again.
+// Reap, then reclaim, then evict, after the merge passes in `due` — once
+// however many there are, since each sweeps the whole repository, scratch
+// root or set of claim trees rather than one pass's share. Each runs whether
+// or not the one before it did: none reads another's result. True only when
+// all three applied, the one case `due` is recorded as reaped after; otherwise
+// the next --apply tick runs them again.
 function applyReap(due) {
   const label = `reap after ${due.map((n) => `merge-bot-${n}`).join(" ")}`;
   const reaped = reportDuty(runSibling("reap.sh", ["--apply"]), { label, duty: "reap", what: "reap.sh", summarise: reapSummary });
-  let root;
+  let reclaimed = false;
+  let root = null;
   try {
     root = scratchRoot();
   } catch (e) {
     if (!(e instanceof FleetDirUnresolvable)) throw e;
     console.log(`APPLY FAILED reclaim: ${e.message}`);
-    return false;
   }
-  const reclaimed = reportDuty(runSibling("reclaim-scratch.mjs", ["--root", root, "--apply"]),
-    { label: "reclaim", duty: "reclaim", what: "reclaim-scratch.mjs", summarise: reclaimSummary });
-  return reaped && reclaimed;
+  if (root !== null) {
+    reclaimed = reportDuty(runSibling("reclaim-scratch.mjs", ["--root", root, "--apply"]),
+      { label: "reclaim", duty: "reclaim", what: "reclaim-scratch.mjs", summarise: reclaimSummary });
+  }
+  const evicted = reportDuty(runSibling("evict.mjs", ["--apply"]),
+    { label: "evict", duty: "evict", what: "evict.mjs", summarise: evictSummary });
+  return reaped && reclaimed && evicted;
 }
 
 // tier-check.mjs's verdict by its exit status, each one a token the check
@@ -2304,8 +2318,8 @@ function main() {
   const mainCheckout = checkMainCheckout();
 
   if (apply) {
-    // Reap and reclaim after every merge pass settled `done` since the last
-    // time they ran. Recorded only once both applied, on a fresh read of the
+    // Reap, reclaim and evict after every merge pass settled `done` since the
+    // last time they ran. Recorded only once all three applied, on a fresh read of the
     // state file so nothing the heartbeat wrote meanwhile is reverted, never
     // onto a file that could not be read, and never with no controller
     // record: nothing could tell a list recorded then from the next run's.

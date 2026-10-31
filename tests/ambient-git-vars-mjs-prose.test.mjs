@@ -317,6 +317,19 @@ const COVERED_MJS = {
   // and in fleet-tick.test.mjs, "an inherited GIT_DIR or GH_REPO cannot
   // retarget the merged-PR review probe".
   "reclaim-scratch.mjs": 1,
+  // ONE scrubbed env, in `run()`, behind every child the script starts: its
+  // git reads (the worktree listing, each tree's status, its ignored paths,
+  // HEAD's commit date), the `wt_op_state` shell, `derive-testcmd.sh` and the
+  // Install step. An ambient GIT_DIR would list, judge and empty another
+  // repository's trees. Measured in evict.test.mjs, "an ambient GIT_DIR and
+  // GIT_WORK_TREE naming another repository do not change what is judged or
+  // removed".
+  "evict.mjs": 1,
+  // ONE scrubbed env, for `adminDir()`'s `rev-parse --absolute-git-dir`, the
+  // admin dir the mark is written into and read out of; an ambient GIT_DIR
+  // would name another repository's. Measured through evict.mjs in the same
+  // evict.test.mjs case, which finds the mark in the tree's own admin dir.
+  "evict-mark.mjs": 1,
   // ONE spawn primitive, `gitBeside(path, args)`, behind both of the fit's git
   // reads — `rev-parse --verify` of the commit and `show <sha>:./<file>`. An
   // ambient GIT_DIR would answer both for another repository, and an ambient

@@ -261,6 +261,65 @@ test("a value is inserted verbatim, whatever replacement syntax it holds", () =>
   assert.ok(r.out.includes('--testCmd "echo $& $1 $$ $`" --reports'), r.out);
 });
 
+// --- an evicted worktree ---------------------------------------------------
+
+// A real claim tree in a repository of its own, and the path of the mark
+// evict.mjs would write into its git admin dir.
+function claimTree() {
+  const repo = fresh("evict-repo");
+  git(repo, "init", "-q");
+  git(repo, "-c", "user.name=f", "-c", "user.email=f@example.invalid", "commit", "-q", "--allow-empty", "-m", "base");
+  const wt = join(repo, ".worktrees", "70-impl-70");
+  git(repo, "worktree", "add", "-q", "-b", "implementer/70-impl-70", wt);
+  return { wt, mark: join(git(wt, "rev-parse", "--absolute-git-dir").trim(), "fleet-evicted") };
+}
+
+const TREE_ROLES = CASES.filter((c) => c.args.worktree !== undefined);
+const RUNS_CODE = (c) => c.role === "implementer" || c.role === "fix-applier";
+
+test("the cases below reach every kind of the roles that take a worktree", () => {
+  assert.deepEqual(TREE_ROLES.map(label), ["implementer", "fix-applier review", "fix-applier conflict", "fix-applier dispositions-retry",
+    "fix-applier red-check", "finisher fresh", "finisher repair", "review-runner"]);
+});
+
+test("render implementer and every fix-applier kind refuse an evicted worktree, naming the restore command; finisher and review-runner render it", () => {
+  const { wt, mark } = claimTree();
+  writeFileSync(mark, "2026-10-31T00:00:00.000Z\n");
+  for (const c of TREE_ROLES) {
+    const r = render(argvOf({ ...c, args: { ...c.args, worktree: wt } }));
+    if (RUNS_CODE(c)) {
+      assert.equal(r.status, 2, label(c));
+      assert.equal(r.out, "");
+      assert.ok(r.err.includes(`${wt} is evicted`), `${label(c)}: ${r.err}`);
+      assert.ok(r.err.includes(`run \`~/.fleet/bin/fleet-run evict.mjs --restore ${wt} --apply\`, then render again`), `${label(c)}: ${r.err}`);
+    } else {
+      assert.equal(r.status, 0, `${label(c)}: ${r.err}`);
+      assert.ok(r.out.includes(wt), label(c));
+    }
+  }
+});
+
+test("a claim tree with no mark renders for every role that takes a worktree", () => {
+  const { wt } = claimTree();
+  for (const c of TREE_ROLES) {
+    const r = render(argvOf({ ...c, args: { ...c.args, worktree: wt } }));
+    assert.equal(r.status, 0, `${label(c)}: ${r.err}`);
+  }
+});
+
+test("a worktree whose mark cannot be looked for refuses the roles that run code in it", () => {
+  const dir = fresh("no-git");
+  for (const c of TREE_ROLES) {
+    const r = render(argvOf({ ...c, args: { ...c.args, worktree: dir } }));
+    if (RUNS_CODE(c)) {
+      assert.equal(r.status, 2, label(c));
+      assert.ok(r.err.includes(`cannot tell whether ${dir} is evicted`), `${label(c)}: ${r.err}`);
+    } else {
+      assert.equal(r.status, 0, `${label(c)}: ${r.err}`);
+    }
+  }
+});
+
 // --- the golden briefs -----------------------------------------------------
 
 // Each rendered brief, of every role, is compared byte for byte with a golden

@@ -70,6 +70,11 @@
 //                 for the other keys under the scratch parent, which runs
 //                 whatever the first answered. What either receipt's failed[]
 //                 names is listed. Recorded; never fails the run.
+//   evict         `evict.mjs --after-rotate --apply`, straight after the
+//                 reclaim: the claim trees idle past evict.mjs's bound lose
+//                 their installed dependencies. A non-zero exit, and each
+//                 tree its receipt's failed[] names, is listed. Recorded;
+//                 never fails the run.
 //   recipe        `derive-testcmd.sh . install`, `. check` and `. test`, each
 //                 `--at origin/main` (recipe-read.mjs, which the settle wakes of
 //                 fleet-event.mjs read the cache through as well). Any
@@ -356,18 +361,26 @@ function reclaim({ cwd, scratch }) {
   ].join("\n"));
 }
 
+function evict({ cwd }) {
+  const r = node("evict.mjs", ["--after-rotate", "--apply"], { cwd });
+  return ok([
+    r.status === 0 ? "idle claim trees evicted" : withText(`evict.mjs ${r.how}, not enforced`, r),
+    ...unreclaimed("claim trees", r, { script: "evict.mjs", verb: "evict" }),
+  ].join("\n"));
+}
+
 // A pass that exited 0 still lists in its receipt's `failed[]` what it could
 // not judge or remove: each is named here, and none fails the step.
-function unreclaimed(what, r) {
+function unreclaimed(what, r, { script = "reclaim-scratch.mjs", verb = "reclaim" } = {}) {
   if (r.status !== 0) return [];
   let entries;
   try {
     ({ failed: entries } = JSON.parse(r.stdout));
   } catch (e) {
-    return [`${what}: could not read reclaim-scratch.mjs's receipt: ${e.message}`];
+    return [`${what}: could not read ${script}'s receipt: ${e.message}`];
   }
-  if (!Array.isArray(entries)) return [`${what}: reclaim-scratch.mjs's receipt holds no failed[]`];
-  return entries.map((x) => `${what}: could not reclaim ${x?.path} (${x?.error})`);
+  if (!Array.isArray(entries)) return [`${what}: ${script}'s receipt holds no failed[]`];
+  return entries.map((x) => `${what}: could not ${verb} ${x?.path} (${x?.error})`);
 }
 
 function recipe({ cwd }) {
@@ -534,7 +547,7 @@ function alarm({ fleetDir }) {
 const STEPS = {
   "alarm": alarm, "branch": branch, "fast-forward": fastForward, "pin": pin, "baseline": baseline, "labels": labels,
   "preflight": preflight, "ruleset": ruleset, "tier-roles": tierRoles, "metrics": metrics, "cockpit": cockpit, "rotate": rotate,
-  "reclaim": reclaim, "recipe": recipe, "fold-in": foldIn, "stranded": stranded, "shortlist": shortlist,
+  "reclaim": reclaim, "evict": evict, "recipe": recipe, "fold-in": foldIn, "stranded": stranded, "shortlist": shortlist,
 };
 
 const STEP_NAMES = Object.keys(STEPS);

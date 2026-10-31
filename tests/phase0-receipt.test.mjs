@@ -9,7 +9,7 @@ import { OBJECTIVES } from "../plugin/scripts/ledger-grammar.mjs";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 
 const STEPS = ["alarm", "branch", "fast-forward", "pin", "baseline", "labels", "preflight", "ruleset", "tier-roles", "metrics",
-  "cockpit", "rotate", "reclaim", "recipe", "fold-in", "stranded", "shortlist"];
+  "cockpit", "rotate", "reclaim", "evict", "recipe", "fold-in", "stranded", "shortlist"];
 const receipt = ({ run = 5, session = "/s/run", steps = {}, ...rest } = {}) => ({
   run, session, scratch: "/scratch", ...rest,
   steps: Object.fromEntries(STEPS.map((n) => [n, { status: "ok", at: "t", output: "", ...steps[n] }])),

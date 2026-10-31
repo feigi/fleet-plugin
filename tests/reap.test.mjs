@@ -920,6 +920,26 @@ test("a healthy clean worktree on a merged [gone] branch is reaped, directory an
   assert.equal(existsSync(wt), false, "the worktree directory itself must be removed");
 });
 
+// An evicted claim tree is what evict.mjs leaves: its dependencies gone, the
+// runner kept (excluded from status the way claim-ticket.sh excludes it), and
+// the `fleet-evicted` mark in its git admin dir. Reap reads none of that.
+test("an evicted claim tree on a merged [gone] branch is reaped like any other", (t) => {
+  const w = repo(t);
+  const name = "implementer/12-impl-12";
+  const wt = mergedGoneBranchWithWorktree(w, name, "merged work", join(w, ".worktrees", "12-impl-12"));
+  writeFileSync(join(w, ".git", "info", "exclude"), "agent-test\n");
+  writeFileSync(join(wt, "agent-test"), "#!/bin/sh\n");
+  writeFileSync(join(adminEntry(w, wt), "fleet-evicted"), "2026-10-31T00:00:00.000Z\n");
+
+  const { code, json, stderr } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0, stderr);
+  assert.deepEqual(json.reaped, [name]);
+  assert.deepEqual(json.kept, []);
+  assert.equal(branchExists(w, name), false);
+  assert.equal(existsSync(wt), false, "the evicted tree's directory must be removed");
+});
+
 test("a dirty worktree on an otherwise-mergeable [gone] branch is kept, not reaped", (t) => {
   const w = repo(t);
   const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");

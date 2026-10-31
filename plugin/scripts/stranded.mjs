@@ -84,6 +84,7 @@ import { gitEnv } from "./git-env.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { LABEL_MAP_FILE, LabelMapUnreadable, readLabelMap } from "./label-map.mjs";
 import { readState, stateFileIn } from "./fleet-state.mjs";
+import { isCLI } from "./is-cli.mjs";
 import { liveOnLedger } from "./ledger-grammar.mjs";
 
 const NAME = "stranded";
@@ -201,9 +202,10 @@ const real = (p) => {
 // A claim's names, off claim-ticket.sh's shapes for an implementer:
 // `.worktrees/<N>-impl-<N>[-x]` and `implementer/<N>-impl-<N>[-x]`, `-x` a
 // replacement's single retry letter. Each captures the number and the member
-// name `impl-<N>[-x]`, the slug release-ticket.sh takes.
-const CLAIM_WORKTREE = /^([1-9][0-9]*)-(impl-\1(?:-[a-z])?)$/;
-const CLAIM_BRANCH = /^implementer\/([1-9][0-9]*)-(impl-\1(?:-[a-z])?)$/;
+// name `impl-<N>[-x]`, the slug release-ticket.sh takes. evict.mjs judges its
+// candidates by the same two.
+export const CLAIM_WORKTREE = /^([1-9][0-9]*)-(impl-\1(?:-[a-z])?)$/;
+export const CLAIM_BRANCH = /^implementer\/([1-9][0-9]*)-(impl-\1(?:-[a-z])?)$/;
 const WAYS_OUT = "push the branch and open a PR, or release the claim by hand";
 
 // Every local branch under `implementer/`.
@@ -445,4 +447,4 @@ function carriedTokens(file) {
   return liveOnLedger(d.rows, d.dispatched).tokens;
 }
 
-main();
+if (isCLI(import.meta.url)) main();

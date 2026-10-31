@@ -20,7 +20,7 @@ const isRecord = (x) => x !== null && typeof x === "object" && !Array.isArray(x)
 // by a finished phase 0.
 export const STEP_NAMES = Object.freeze([
   "alarm", "branch", "fast-forward", "pin", "baseline", "labels", "preflight", "ruleset", "tier-roles", "metrics",
-  "cockpit", "rotate", "reclaim", "recipe", "fold-in", "stranded", "shortlist",
+  "cockpit", "rotate", "reclaim", "evict", "recipe", "fold-in", "stranded", "shortlist",
 ]);
 
 // The statuses a step can end in that let the run go on: `ok`, and the two

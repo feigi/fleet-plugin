@@ -293,6 +293,7 @@ test("phase-0.md has one heading per moved step, in the order phase0.mjs runs th
     "## Launch the cockpit",
     "## Rotate the ledger",
     "## Reclaim scratch",
+    "## Evict idle claim trees",
     "## Derive the Recipe",
     "## Fold in every Owned PR a prior run left open",
     "## Resume the claims a dead run left without a PR",

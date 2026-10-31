@@ -64,6 +64,13 @@ key (another key-shaped directory beside this run's, under the scratch parent) i
 on git evidence, which is Reap's.
 _Avoid_: reap, prune, cleanup
 
+**Evict**:
+Removing a claim tree's installed dependencies — every path git ignores in it except the
+`agent-test` runner — once 7 days pass with neither a HEAD move nor a restore in it. The
+claim, its tree, branch and commits stay; the Install step runs again before a member runs
+code there. Not Reap, Release or Reclaim, which remove things.
+_Avoid_: prune, cleanup, reap, dehydrate
+
 **Upstream**:
 The remote-tracking ref a claim's branch tracks. There is none at claim time
 (`--no-track`); it is set by the member's first `git push -u` or by the controller's
