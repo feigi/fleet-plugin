@@ -32,7 +32,7 @@ into one free implementer slot, the moment it frees (phase 1).
 
 `phase0.mjs` runs the start sequence in
 its fixed order — alarm, branch, fast-forward, pin, baseline, labels, preflight, ruleset,
-tier-roles, metrics, cockpit, rotate, reclaim, recipe, fold-in, stranded,
+tier-roles, metrics, cockpit, rotate, reclaim, evict, recipe, fold-in, stranded,
 shortlist — prints one `phase0: <step>: <status>` line per step with the
 `NEED` lines last, and records each step in `.fleet/phase0.json`, which the
 tick reads: it prints `PHASE0-INCOMPLETE` and holds every dispatching row
@@ -415,6 +415,31 @@ goes whole when nothing under it has changed in 7 days, and stays whole otherwis
 call runs whatever the root sweep answered, and records nothing on the ledger. A non-zero
 exit, and each path its receipt's `failed[]` names, is listed in the step's output; neither
 stops the run.
+
+## Evict idle claim trees
+
+**Evict straight after the reclaim — every run.**
+`~/.fleet/bin/fleet-run evict.mjs --after-rotate --apply` is phase 0's own
+`evict` step. A claim tree with neither a HEAD move nor a restore in 7 days loses
+every path git ignores in it but its `agent-test` runner; the claim, its tree,
+its branch and its commits stay (`evict.mjs`'s header says what keeps a tree).
+`--after-rotate` reads an absent ledger as "no live token", as it does for the
+reclaim. A non-zero exit, and each tree its receipt's `failed[]` names, is listed
+in the step's output; neither stops the run. Record nothing on the ledger.
+
+The tick's `--apply` runs `evict.mjs --apply` after every settled merge pass,
+straight after its reclaim, and reports it on an `APPLIED evict:` or
+`APPLY FAILED evict:` line.
+
+**An evicted tree is restored before a member runs code there.**
+`dispatch-prompt.mjs render implementer` and `render fix-applier` refuse a
+worktree evict.mjs marked, naming
+`~/.fleet/bin/fleet-run evict.mjs --restore <tree> --apply`: run it, then render
+again. It runs the Install step in the tree as a claim does and refuses as a
+claim does. A refused restore leaves the tree evicted: dispatch nothing into
+it, report the restore's message, and the row comes up again on the next wake.
+`render review-runner` and `render finisher` do not refuse: neither member runs
+code in the claim tree.
 
 ## Derive the Recipe
 

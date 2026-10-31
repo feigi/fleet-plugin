@@ -23,8 +23,16 @@
 // stdout: a missing, unknown or relative argument, a template that carries a
 // placeholder it never declared or no text at all for the kind, a leftover
 // declared placeholder in the output, a ticket the ledger names whose saved
-// issue file is missing or unreadable, or instruments.sh answering anything
-// but 0.
+// issue file is missing or unreadable, an evicted worktree (below), or
+// instruments.sh answering anything but 0.
+//
+// AN EVICTED WORKTREE. `render implementer` and `render fix-applier`, every
+// kind, refuse a `--worktree` that carries evict.mjs's mark, naming the
+// restore command: those members run code in the tree, and an evicted one has
+// no installed dependencies. A worktree whose mark cannot be looked for
+// refuses too; one that does not exist carries none. `render review-runner`
+// and `render finisher` read no mark: the review works in its own snapshot,
+// the finisher in its own detached tree.
 //
 // INSTRUMENTS. After the command line has parsed and before anything is
 // validated or rendered, instruments.sh runs from the main checkout — the
@@ -82,10 +90,11 @@
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeDie, defineFlags, writeAll } from "./arg.mjs";
+import { evictionMark, restoreCommand } from "./evict-mark.mjs";
 import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { ROWS, ledgerSection, memberTokens } from "./ledger-grammar.mjs";
@@ -241,6 +250,25 @@ function runInstruments() {
   die(`instruments.sh refused: ${verdict}${said ? ` — ${said}` : ""}`);
 }
 
+// --- the evicted worktree ----------------------------------------------------
+
+// The roles whose member runs code in its `--worktree`.
+const RUNS_IN_TREE = ["implementer", "fix-applier"];
+
+// Why a brief for `tree` is refused (AN EVICTED WORKTREE above), or null.
+function evictedRefusal(tree) {
+  try {
+    statSync(tree);
+  } catch (e) {
+    if (e.code === "ENOENT") return null;
+    return `cannot tell whether ${tree} is evicted (${e.code ?? e.message})`;
+  }
+  const mark = evictionMark(tree);
+  if (mark.unknown !== undefined) return `cannot tell whether ${tree} is evicted: ${mark.unknown}`;
+  if (!mark.marked) return null;
+  return `${tree} is evicted — its installed dependencies are gone, so no member runs code there until it is restored: run \`${restoreCommand(tree)}\`, then render again`;
+}
+
 // --- main --------------------------------------------------------------------
 
 const argv = process.argv.slice(2);
@@ -295,6 +323,12 @@ for (const a of required) {
     if (refusal !== null) die(refusal);
   }
   values.set(a.placeholder, value);
+}
+
+const tree = required.find((a) => a.flag === "worktree");
+if (RUNS_IN_TREE.includes(role) && tree !== undefined) {
+  const refusal = evictedRefusal(values.get(tree.placeholder));
+  if (refusal !== null) die(refusal);
 }
 
 // THE TICKET, once every argument has passed: only for a kind whose text

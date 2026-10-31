@@ -191,13 +191,15 @@ export function removeEntry(path) {
   return r.error || r.status !== 0 ? how(r) : null;
 }
 
-// The live tokens the ledger holds, by name, read through `ledger.mjs read`
-// so the ledger keeps one parser. `--file` names it outright, so the read
-// resolves no workspace and runs no git.
-function liveNames(file) {
+// The ledger's rows and `## Dispatched` entries, read through `ledger.mjs
+// read` so the ledger keeps one parser. `--file` names it outright, so the read
+// resolves no workspace and runs no git. `die` is the caller's, and `undone`
+// names what a refusal leaves undone ("reclaimed", "evicted"): evict.mjs reads
+// the ledger this same way.
+export function readLedger(file, die, undone) {
   const script = join(dirname(fileURLToPath(import.meta.url)), "ledger.mjs");
   const r = spawnSync(process.execPath, [script, "--file", file, "read"], { encoding: "utf8", maxBuffer: MAX_BUFFER });
-  if (r.error || r.status !== 0) die(`ledger.mjs read ${file} failed (${how(r)}) — which members are live is unknown, so nothing is reclaimed`);
+  if (r.error || r.status !== 0) die(`ledger.mjs read ${file} failed (${how(r)}) — which members are live is unknown, so nothing is ${undone}`);
   let d;
   try {
     d = JSON.parse(r.stdout);
@@ -206,14 +208,20 @@ function liveNames(file) {
   }
   const strings = (xs) => Array.isArray(xs) && xs.every((x) => typeof x === "string");
   if (!d || !strings(d.rows) || !strings(d.dispatched)) die("ledger.mjs read returned no {rows, dispatched}");
-  return liveOnLedger(d.rows, d.dispatched).tokens.map((t) => t.name);
+  return { rows: d.rows, dispatched: d.dispatched };
+}
+
+// The live tokens the ledger holds, by name.
+function liveNames(file) {
+  const { rows, dispatched } = readLedger(file, die, "reclaimed");
+  return liveOnLedger(rows, dispatched).tokens.map((t) => t.name);
 }
 
 // The checkout the fleet dir sits in, and its ledger file — `file` null when it
 // is absent. Only ENOENT is absence; a workspace that cannot be resolved, or a
-// path that cannot be looked up, refuses. `lstat`, so a dangling symlink is a
-// ledger that cannot be read.
-function ledgerFile() {
+// path that cannot be looked up, refuses through the caller's `die`. `lstat`,
+// so a dangling symlink is a ledger that cannot be read.
+export function ledgerFile(die) {
   let dir;
   try {
     dir = fleetFile(null);
@@ -566,7 +574,7 @@ function main() {
       failed.push({ path: dirname(root), error: e.message });
     }
   } else {
-    const found = ledgerFile();
+    const found = ledgerFile(die);
     ledger = found.file;
     if (ledger === null && !afterRotate) die("no .fleet/ledger.md — without it no live member can hold its scratch, so nothing is reclaimed; pass --after-rotate only straight after `ledger.mjs rotate`");
     const live = ledger === null ? [] : liveNames(ledger);

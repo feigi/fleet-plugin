@@ -175,6 +175,9 @@ owes beyond its call:
   pass. Read `worktreesRemoved` alongside `reaped`: a pass that
   reaps branches and removes no worktrees is a finding, not a quiet success.
   Update the reaped tickets' ledger rows in the same step.
+  The same `--apply` then runs `evict.mjs --apply`, which empties idle claim
+  trees of their dependencies; a render that refuses an evicted tree names the
+  restore command to run first (references/phase-0.md).
   **Do not invoke `commit-commands:clean_gone`**: do the reap yourself. **Never
   reap a branch a live member is on** — cross-check `.fleet/ledger.md` first
   for a row without a terminal state.

@@ -8,7 +8,7 @@
 // settled member live, has to go red here.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { reconcile, formatLines, actionable, deriveRun, LedgerError, parseShortlist, unclaimed, refreshWhy, currentDispositions, reapDue, reapedAfter, reapSummary, reclaimSummary, parkedToken, bodyDigest, PARKED } from "../plugin/scripts/fleet-tick.mjs";
+import { reconcile, formatLines, actionable, deriveRun, LedgerError, parseShortlist, unclaimed, refreshWhy, currentDispositions, reapDue, reapedAfter, reapSummary, reclaimSummary, evictSummary, parkedToken, bodyDigest, PARKED } from "../plugin/scripts/fleet-tick.mjs";
 import { dispositionsToken } from "../plugin/scripts/ledger-grammar.mjs";
 import { ref, prUrl } from "./support/queue-gh.mjs";
 
@@ -2109,7 +2109,7 @@ printf '{"issue":%s,"taken":false,"hits":[],"unknown":[]}\\n' "$1"
 
 // phase0.mjs's steps, every one present as its receipt always carries them.
 const PHASE0_STEPS = ["alarm", "branch", "fast-forward", "pin", "baseline", "labels", "preflight", "ruleset", "tier-roles", "metrics",
-  "cockpit", "rotate", "reclaim", "recipe", "fold-in", "stranded", "shortlist"];
+  "cockpit", "rotate", "reclaim", "evict", "recipe", "fold-in", "stranded", "shortlist"];
 // A receipt in phase0.mjs's shape with every step `ok`; `steps` overrides
 // individual steps.
 const receiptOf = ({ run = null, session = "/s", steps = {} } = {}) => ({
@@ -3837,7 +3837,7 @@ test("CLI: the tier hold's step names no <session> when this run's receipt recor
 });
 
 // ---------------------------------------------------------------------------
-// --apply. reap.sh, reclaim-scratch.mjs and tier-check.mjs are stubs beside the
+// --apply. reap.sh, reclaim-scratch.mjs, evict.mjs and tier-check.mjs are stubs beside the
 // script — the directory it runs its siblings from, and on PATH — each logging
 // one line per call to `apply.log` in the fixture dir.
 const REAP_STUB = `#!/bin/sh
@@ -3851,6 +3851,12 @@ import { dirname, join } from "node:path";
 appendFileSync(join(dirname(process.argv[1]), "..", "apply.log"), "reclaim-scratch.mjs " + process.argv.slice(2).join(" ") + "\\n");
 if (process.env.RECLAIM_FAIL) { console.error("reclaim-scratch: simulated refusal"); process.exit(2); }
 console.log(JSON.stringify({ applied: true, ledger: null, removed: [{ path: "a", reason: "r" }], kept: [], failed: [{ path: "b", error: "e" }] }));
+`;
+const EVICT_STUB = `import { appendFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+appendFileSync(join(dirname(process.argv[1]), "..", "apply.log"), "evict.mjs " + process.argv.slice(2).join(" ") + "\\n");
+if (process.env.EVICT_FAIL) { console.error("evict: simulated refusal"); process.exit(2); }
+console.log(JSON.stringify({ applied: true, ledger: "/l", evicted: [{ path: "t", reason: "r", ignored: ["node_modules/"] }], kept: [{ path: "k", reason: "r" }], failed: [] }));
 `;
 // The batch file's content is the logged line. A verdict lands as the token
 // the real check writes on the member's row; exit 2 writes nothing, and
@@ -3880,6 +3886,7 @@ function applyTicks(fixture, ticks) {
       const bin = join(repo, "..", "bin");
       writeExecStub(join(bin, "reap.sh"), REAP_STUB);
       writeFileSync(join(bin, "reclaim-scratch.mjs"), RECLAIM_STUB);
+      writeFileSync(join(bin, "evict.mjs"), EVICT_STUB);
       writeFileSync(join(bin, "tier-check.mjs"), TIER_STUB);
       (fixture.beforeRun ?? (() => {}))(repo);
     },
@@ -3937,6 +3944,7 @@ const withApplied = (applied) => (repo) => {
 };
 const REAP_CALL = "reap.sh --apply";
 const isReclaim = (line) => /^reclaim-scratch\.mjs --root \/\S+ --apply$/.test(line);
+const EVICT_CALL = "evict.mjs --apply";
 
 test("CLI --apply: one `done` merge bot reaps and reclaims once across two ticks, and a second one applies again", () => {
   const { ticks: [one, two, three] } = applyTicks(MERGED(["merge-bot-1=done"]), [APPLY, APPLY, {
@@ -3944,35 +3952,41 @@ test("CLI --apply: one `done` merge bot reaps and reclaims once across two ticks
     before: (repo) => writeFileSync(join(repo, ".fleet", "ledger.md"), ledgerText({ dispatched: ["merge-bot-1=done", "merge-bot-2=done"] })),
   }]);
   for (const t of [one, two, three]) assert.equal(t.status, 0, t.stderr);
-  assert.equal(one.calls.length, 2, JSON.stringify(one.calls));
+  assert.equal(one.calls.length, 3, JSON.stringify(one.calls));
   assert.equal(one.calls[0], REAP_CALL);
   assert.ok(isReclaim(one.calls[1]), one.calls[1]);
+  assert.equal(one.calls[2], EVICT_CALL);
   assert.match(one.stdout, /^APPLIED reap after merge-bot-1: reaped 2, kept 1, worktreesRemoved 1$/m);
   assert.match(one.stdout, /^APPLIED reclaim: removed 1, kept 0, failed 1$/m);
+  assert.match(one.stdout, /^APPLIED evict: evicted 1, kept 1, failed 0$/m);
   assert.deepEqual(one.applied, { run: CONTROLLER_AT, reapAfter: [1] });
 
   assert.deepEqual(two.calls, [], "the second tick reaped again after a pass already reaped after");
   assert.doesNotMatch(two.stdout, /APPLIED/);
   assert.deepEqual(two.applied, { run: CONTROLLER_AT, reapAfter: [1] });
 
-  assert.equal(three.calls.length, 2, JSON.stringify(three.calls));
+  assert.equal(three.calls.length, 3, JSON.stringify(three.calls));
   assert.match(three.stdout, /^APPLIED reap after merge-bot-2: /m);
   assert.deepEqual(three.applied, { run: CONTROLLER_AT, reapAfter: [1, 2] });
 });
 
-test("CLI --apply: a failing reap or reclaim retries on the next tick and records nothing until both apply", () => {
-  const { ticks: [one, two, three] } = applyTicks(MERGED(["merge-bot-1=done"]), [
-    { ...APPLY, env: { REAP_FAIL: "1" } }, { ...APPLY, env: { RECLAIM_FAIL: "1" } }, APPLY,
+test("CLI --apply: a failing reap, reclaim or evict retries on the next tick and records nothing until all three apply", () => {
+  const { ticks: [one, two, three, four] } = applyTicks(MERGED(["merge-bot-1=done"]), [
+    { ...APPLY, env: { REAP_FAIL: "1" } }, { ...APPLY, env: { RECLAIM_FAIL: "1" } }, { ...APPLY, env: { EVICT_FAIL: "1" } }, APPLY,
   ]);
-  for (const t of [one, two, three]) assert.equal(t.status, 0, t.stderr);
+  for (const t of [one, two, three, four]) assert.equal(t.status, 0, t.stderr);
   assert.match(one.stdout, /^APPLY FAILED reap: reap\.sh exited 2: reap\.sh: git worktree prune failed: simulated$/m);
   assert.match(one.stdout, /^APPLIED reclaim: /m, "reclaim runs whether or not reap did");
   assert.equal(one.applied, undefined, "a failed reap recorded merge-bot-1");
   assert.equal(two.calls[0], REAP_CALL, "the next tick did not retry the reap");
   assert.match(two.stdout, /^APPLY FAILED reclaim: reclaim-scratch\.mjs exited 2: reclaim-scratch: simulated refusal$/m);
+  assert.match(two.stdout, /^APPLIED evict: /m, "evict runs whether or not reclaim did");
   assert.equal(two.applied, undefined, "a failed reclaim recorded merge-bot-1");
-  assert.equal(three.calls.length, 2, JSON.stringify(three.calls));
-  assert.deepEqual(three.applied, { run: CONTROLLER_AT, reapAfter: [1] });
+  assert.match(three.stdout, /^APPLY FAILED evict: evict\.mjs exited 2: evict: simulated refusal$/m);
+  assert.equal(three.applied, undefined, "a failed evict recorded merge-bot-1");
+  assert.equal(four.calls.length, 3, JSON.stringify(four.calls));
+  assert.equal(four.calls[2], EVICT_CALL);
+  assert.deepEqual(four.applied, { run: CONTROLLER_AT, reapAfter: [1] });
 });
 
 test("CLI --apply: a list recorded against this run's controller record is read, another run's names nothing", () => {
@@ -3995,7 +4009,7 @@ test("CLI --apply: with no controller record nothing is recorded and every tick 
   const { ticks: [one, two] } = applyTicks(MERGED(["merge-bot-1=done"], { beforeRun: () => {} }), [APPLY, APPLY]);
   for (const t of [one, two]) {
     assert.equal(t.status, 0, t.stderr);
-    assert.equal(t.calls.length, 2, JSON.stringify(t.calls));
+    assert.equal(t.calls.length, 3, JSON.stringify(t.calls));
     assert.equal(t.calls[0], REAP_CALL);
     assert.equal(t.applied, undefined, "a list was recorded with no controller record to read it against");
   }
@@ -4015,7 +4029,7 @@ test("CLI --apply: only a merge bot settled `done` is a merge pass to reap after
 test("CLI --apply: a state file the reap left unreadable is not written over", () => {
   const { ticks: [one] } = applyTicks(MERGED(["merge-bot-1=done"]), [{ ...APPLY, env: { REAP_CORRUPT: "1" } }]);
   assert.equal(one.status, 0, one.stderr);
-  assert.equal(one.calls.length, 2, "the reap and the reclaim both ran, so the record was owed");
+  assert.equal(one.calls.length, 3, "the reap, the reclaim and the evict all ran, so the record was owed");
   assert.equal(one.stateText, "{ not json\n", "the tick wrote a list onto a file it could not read");
 });
 
@@ -4028,16 +4042,18 @@ test("reapDue: a list counts only against the controller record it was written u
   assert.deepEqual(reapedAfter({ run: 5, reapAfter: [1] }, 6), []);
 });
 
-test("reapSummary / reclaimSummary: a receipt's counts, null for a stdout carrying none", () => {
+test("reapSummary / reclaimSummary / evictSummary: a receipt's counts, null for a stdout carrying none", () => {
   assert.equal(reapSummary('warning first\n{"applied":true,"reaped":[1],"worktreesRemoved":[],"kept":[1,2],"warnings":[]}\n'),
     "reaped 1, kept 2, worktreesRemoved 0");
   const warned = JSON.stringify({ applied: true, reaped: [1], worktreesRemoved: [], kept: [], warnings: [{ branch: "b", note: "branch config section was left: boom" }, { branch: "c", note: "x" }] });
   assert.equal(reapSummary(warned), "reaped 1, kept 0, worktreesRemoved 0, warnings 2: branch config section was left: boom");
   assert.equal(reapSummary(warned.replace(/"warnings":.*\}$/, '"warnings":[{"branch":"b"}]}')), "reaped 1, kept 0, worktreesRemoved 0, warnings 1");
   assert.equal(reclaimSummary('{"applied":true,"ledger":null,"removed":[],"kept":[1],"failed":[1,2,3]}'), "removed 0, kept 1, failed 3");
+  assert.equal(evictSummary('{"applied":true,"ledger":null,"evicted":[1,2],"kept":[1],"failed":[]}'), "evicted 2, kept 1, failed 0");
   for (const junk of ["", "not json", "null", '{"reaped":[]}', '{"removed":[],"kept":[],"failed":"x"}']) {
     assert.equal(reapSummary(junk), null, junk);
     assert.equal(reclaimSummary(junk), null, junk);
+    assert.equal(evictSummary(junk), null, junk);
   }
 });
 

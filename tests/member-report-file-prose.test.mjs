@@ -24,7 +24,7 @@ const PIN = "0123456789abcdef0123456789abcdef01234567";
 // baseline when it is a fresh clone.
 const TMP = realpathSync(mkdtempSync(join(tmpdir(), "member-report-file-")));
 after(() => rmSync(TMP, { recursive: true, force: true }));
-const MODULES = ["dispatch-prompt.mjs", "arg.mjs", "git-env.mjs", "fleet-dir.mjs", "ledger-grammar.mjs", "review-core.mjs", "ticket-text.mjs"];
+const MODULES = ["dispatch-prompt.mjs", "arg.mjs", "evict-mark.mjs", "git-env.mjs", "fleet-dir.mjs", "ledger-grammar.mjs", "review-core.mjs", "ticket-text.mjs"];
 const scripts = join(TMP, "install", "scripts");
 mkdirSync(scripts, { recursive: true });
 for (const m of MODULES) writeFileSync(join(scripts, m), readFileSync(join(PLUGIN, "scripts", m)));

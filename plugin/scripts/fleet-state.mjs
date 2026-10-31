@@ -46,11 +46,11 @@
 //            the heartbeat and by ledger.mjs.
 //   applied  fleet-tick only, and only under --apply. {run, reapAfter}: the
 //            merge-bot numbers whose `merge-bot-<n>=done` the tick has already
-//            run reap.sh and reclaim-scratch.mjs after, and the controller
-//            record's `at` they belong to. Written only under a record: with
-//            none, nothing tells one run from the next. Merge-bot numbering
-//            restarts at 1 in a run that carries no bot forward, and this
-//            file outlives the rotation, so a list whose `run` is not the
+//            run reap.sh, reclaim-scratch.mjs and evict.mjs after, and the
+//            controller record's `at` they belong to. Written only under a
+//            record: with none, nothing tells one run from the next. Merge-bot
+//            numbering restarts at 1 in a run that carries no bot forward, and
+//            this file outlives the rotation, so a list whose `run` is not the
 //            current record's `at` is the previous run's and names nothing in
 //            this one. Carried, never written, by the heartbeat and by
 //            ledger.mjs.
