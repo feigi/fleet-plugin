@@ -1536,27 +1536,23 @@ test("arg.mjs: the script binds defineFlags and refuses an unknown flag in the s
   assert.match(r.stderr, /^fleet-event: unknown flag --bogus/m);
 });
 
-test("the instruments pin covers fleet-event.mjs: a rewrite of it is a changed instrument set, and an untracked file beside it is not", () => {
+test("the instruments pin covers fleet-event.mjs: a rewrite of it is a changed instrument set", () => {
   const dir = realpathSync(tempDir("fleet-event-pin-"));
-  mkdirSync(join(dir, "plugin", "scripts"), { recursive: true });
-  cpSync(join(REAL_SCRIPTS, "fleet-event.mjs"), join(dir, "plugin", "scripts", "fleet-event.mjs"));
   git(dir, "init", "-q", "-b", "main");
-  git(dir, "add", "-A");
-  git(dir, "commit", "-q", "-m", "i");
-  // The pin certifies the Install root: a fixture HOME whose package entry
-  // links to this checkout's plugin/, so the real install is never read.
+  // The pin certifies the Install root: a fixture HOME whose package entry is
+  // a real directory, so the real install is never read.
   const home = realpathSync(tempDir("fleet-event-home-"));
-  mkdirSync(join(home, ".omp", "plugins", "node_modules", "@feigi"), { recursive: true });
-  symlinkSync(join(dir, "plugin"), join(home, ".omp", "plugins", "node_modules", "@feigi", "fleet-ctl"));
+  const pkg = join(home, ".omp", "plugins", "node_modules", "@feigi", "fleet-ctl");
+  mkdirSync(join(pkg, "scripts"), { recursive: true });
+  cpSync(join(REAL_SCRIPTS, "fleet-event.mjs"), join(pkg, "scripts", "fleet-event.mjs"));
   const pin = (...a) => spawnSync("sh", [join(REAL_SCRIPTS, "instruments.sh"), ...a], { cwd: dir, encoding: "utf8", env: { ...GIT_ENV, HOME: home } });
-  assert.equal(pin("--pin").status, 0);
+  const pinned = pin("--pin");
+  assert.equal(pinned.status, 0, pinned.stderr);
   assert.equal(pin().status, 0, "unchanged");
-  writeFileSync(join(dir, "plugin", "scripts", "scratch.txt"), "untracked\n");
-  assert.equal(pin().status, 0, "an untracked file is no instrument");
-  writeFileSync(join(dir, "plugin", "scripts", "fleet-event.mjs"), `${readFileSync(join(dir, "plugin", "scripts", "fleet-event.mjs"), "utf8")}\n// edited\n`);
+  writeFileSync(join(pkg, "scripts", "fleet-event.mjs"), `${readFileSync(join(pkg, "scripts", "fleet-event.mjs"), "utf8")}\n// edited\n`);
   const changed = pin();
   assert.equal(changed.status, 1);
-  assert.match(changed.stdout + changed.stderr, /fleet-event\.mjs/);
+  assert.notEqual(changed.stdout, pinned.stdout);
 });
 
 // ── member-died ──────────────────────────────────────────────────────────────

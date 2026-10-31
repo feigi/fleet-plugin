@@ -60,6 +60,10 @@ const INSTRUMENTS_MD = Pin.file(join(REPO, "skills", "run-team", "references", "
 // removes, not a style choice.
 const PIN_STEP = () => PHASE0.paragraph("**Pin the instruments,", "phase-0 pin", "## Record the main-checkout baseline").text;
 
+// The fast-forward step, bounded by its own paragraph. It holds the
+// counterfactual: what recording the baseline in the wrong order costs.
+const FF_STEP = () => PHASE0.paragraph("**Fast-forward the checkout before", "phase-0 fast-forward", "## Pin the instruments").text;
+
 // The gate list is one bullet, and this slice is bounded to it. Read out of the
 // whole RULE slice, `phrase("reap")` is satisfied by the unrelated `reap.sh`
 // mention further down it, so the loop below stayed green with the gate name
@@ -112,16 +116,16 @@ test("the rule limits re-pinning to the maintainer's adopt", () => {
   assert.match(rule, Pin.phrase("Re-pinning to clear a refusal you cannot explain discards the check"));
 });
 
-test("the rule escalates a pinned tree whose HEAD moved and gives the maintainer restore or adopt", () => {
-  // A refusal cannot tell a move the maintainer would adopt from one they
+test("the rule escalates a changed installed plugin and gives the maintainer restore or adopt", () => {
+  // A refusal cannot tell a change the maintainer would adopt from one they
   // would not, so the controller's own reading of "only this run's merged PRs"
-  // is exactly what must not decide. Lose the first clause and a fast-forward
-  // is re-pinned over again; lose the second and the reset runs on a switched
-  // branch, where it moves a branch that is not `main`.
+  // is exactly what must not decide. Lose the first clause and an upgrade is
+  // re-pinned over again; lose the second and the controller runs `omp plugin`
+  // itself, swapping the files every live member is running.
   const rule = RULE();
-  assert.match(rule, Pin.phrase("A pinned tree whose HEAD moved is the maintainer's to settle, whoever moved it"));
-  assert.match(rule, Pin.phrase("never re-pin over it: not for a fast-forward to `origin/main`, and not when the commits between are only this run's own merged PRs"));
-  assert.match(rule, Pin.phrase("On their **restore**, run `git reset --keep <pin commit>` — only when the pinned tree is the main checkout and the tick prints no `MAIN-CHECKOUT` line"));
+  assert.match(rule, Pin.phrase("A changed installed plugin is the maintainer's to settle, whoever changed it"));
+  assert.match(rule, Pin.phrase("never re-pin over it, even for an upgrade to a release of this run's own PRs"));
+  assert.match(rule, Pin.phrase("On their **restore** they reinstall the pinned version by hand: never run `omp plugin` yourself"));
   assert.match(rule, Pin.phrase("On their **adopt**, re-pin"));
 });
 
@@ -138,9 +142,8 @@ test("the rule records that refs are out of the digest, and why", () => {
 test("phase 0 step 0 pins the set, and only after the fast-forward", () => {
   const step = PIN_STEP();
   assert.match(step, Pin.phrase("instruments.sh --pin"));
-  // The ordering is the load-bearing half. Phase 0 step 0 fast-forwards the
-  // checkout because the runbook is read out of it; pinning first certifies the
-  // superseded text for the whole run, and every later gate then passes.
+  // The ordering is the load-bearing half: the baseline is recorded after the
+  // fast-forward, and the pin sits between them.
   assert.match(step, Pin.phrase("after that fast-forward and before anything reads them"));
   // Both anchors present, in this order. The hand-rolled `indexOf(ff) <
   // indexOf(pin)` this replaces was vacuous to the rewording it exists to catch:
@@ -157,9 +160,9 @@ test("phase 0 step 0 pins the set, and only after the fast-forward", () => {
  */
 export function wrongOrderFault(step) {
   // #1061. This sentence states what happens in the order the instruction
-  // above it forbids, so its MOOD is the whole content. Unmarked ("Pinning
-  // ahead of the fast-forward pins the superseded text and certifies it for
-  // the rest of the run.") it parses as a declarative describing what the
+  // above it forbids, so its MOOD is the whole content. Unmarked ("Recording
+  // the baseline ahead of the fast-forward records a HEAD behind origin/main
+  // as the run's own.") it parses as a declarative describing what the
   // instruction achieves, and the reader — usually an agent — is then told by
   // the runbook to do the one thing the instruction exists to prevent.
   //
@@ -180,7 +183,7 @@ export function wrongOrderFault(step) {
   // Newlines are whitespace to the splitter, so a rewrap moves neither end;
   // the count is `anchorAt`'s exactly-once guarantee, held inline because this
   // bound is a sentence rather than an anchor.
-  const hits = Pin.sentences(step).filter((s) => /superseded\s+text/.test(s));
+  const hits = Pin.sentences(step).filter((s) => /HEAD\s+behind/.test(s));
   if (hits.length !== 1) {
     return `the sentence naming what pinning in the wrong order costs occurs ${hits.length} times — re-anchor this test, never widen it to the paragraph`;
   }
@@ -201,8 +204,8 @@ export function wrongOrderFault(step) {
   return null;
 }
 
-test("phase 0 step 0 states the WRONG pin order as a counterfactual, not as a fact", () => {
-  assert.equal(wrongOrderFault(PIN_STEP()), null);
+test("phase 0 step 0 states the WRONG baseline order as a counterfactual, not as a fact", () => {
+  assert.equal(wrongOrderFault(FF_STEP()), null);
 });
 
 // #1940. The other half, fed shapes the step does not hold today. The
@@ -211,18 +214,18 @@ test("phase 0 step 0 states the WRONG pin order as a counterfactual, not as a fa
 // rule exists to kill — and refused a conditional with a filename or an
 // abbreviation ahead of its `if`.
 test("a neighbouring sentence cannot lend the declarative its marker, and a period inside the sentence cannot strip it (#1940)", () => {
-  const declarative = "Pinning ahead of the fast-forward pins the superseded text and certifies it for the rest of the run.";
+  const declarative = "Recording the baseline ahead of the fast-forward records a HEAD behind origin/main as the run's own.";
   for (const neighbour of [
     `What if one refuses? ${declarative}`,
     `It would be too late afterwards! ${declarative}`,
-    `**If in doubt, pin after the fast-forward.** ${declarative}`,
-    "Pinning ahead of the fast-forward pins the superseded text! If in doubt, re-pin.",
+    `**If in doubt, record after the fast-forward.** ${declarative}`,
+    "Recording the baseline ahead of the fast-forward records a HEAD behind origin/main! If in doubt, re-record.",
   ]) {
     assert.match(wrongOrderFault(neighbour), /counterfactual marker/, neighbour);
   }
 
-  assert.equal(wrongOrderFault("If you run instruments.sh --pin before that fast-forward, it pins the superseded text."), null);
-  assert.equal(wrongOrderFault("Pinning before that fast-forward (e.g. from a stale tree) would instead pin the superseded text."), null);
+  assert.equal(wrongOrderFault("If you record the baseline before that fast-forward, it records a HEAD behind origin/main."), null);
+  assert.equal(wrongOrderFault("Recording before that fast-forward (e.g. from a stale tree) would instead record a HEAD behind origin/main."), null);
 });
 
 test("a tooling defect is reported, never fixed by the controller", () => {

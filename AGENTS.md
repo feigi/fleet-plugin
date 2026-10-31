@@ -32,6 +32,10 @@ one — no `merge`, `pull`, `rebase`, `reset`, `switch`, `checkout`, `restore`,
 `commit` or `stash`. Read current `origin/main` with `git fetch` then
 `git show origin/main:<path>`, or `git worktree add --detach <dir> origin/main`;
 do branch work in a worktree.
+The rule stands without a refused gate to point at: a fast-forward does not
+change the installed package the instruments pin certifies, but a branch switch
+or an edit there trips the tick's main-checkout guard, and any move of `HEAD`
+rewrites tracked files the run edits.
 A beat that looks dead stays live until the maintainer says otherwise.
 
 ## Runs on this repo

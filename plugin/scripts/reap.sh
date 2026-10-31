@@ -1299,17 +1299,12 @@ for b in $gone_branches; do
       # `git_probe`'s stderr capture reach it: the config yields rc 0, empty
       # stdout AND empty stderr, so there is nothing for `gp_cut_short` to
       # match. Pinning the mode on the command line is the only fix: a probe
-      # whose EMPTY answer licenses an action pins an explicit mode; a probe
-      # that only reports after a gate has already refused need not (see
-      # below). `git worktree remove`'s own refusal is no backstop, being the
+      # whose EMPTY answer licenses an action pins an explicit mode.
+      # `git worktree remove`'s own refusal is no backstop, being the
       # same machinery the same config silences (measured at the --apply call
       # below).
       #
-      # The one bare `--porcelain` left in a SCRIPT is deliberate:
-      # instruments.sh prints one to stderr to say WHAT changed, after a digest
-      # over `git ls-files` has already refused. That digest covers TRACKED
-      # files only, so no untracked file can trigger it and the silenced mode
-      # cannot hide the thing being reported. A report, not a gate. (Prose
+      # No script carries a bare `--porcelain`. (Prose
       # instructions to an agent are a separate inventory — see SKILL.md,
       # pinned alongside the scripts.)
       #

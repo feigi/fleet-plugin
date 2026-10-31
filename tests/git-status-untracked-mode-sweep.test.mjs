@@ -13,12 +13,7 @@
 // the fix that ships without closing its own gap. It is the property: no
 // fleet shell script runs `git status --porcelain` (directly, or through
 // reap.sh's `git_probe` wrapper, which only forwards to `git`) without an
-// explicit untracked-files mode, except the one named, deliberate exception.
-//
-// instruments.sh's bare `--porcelain` is the sole allowed exception: it
-// prints to stderr to say WHAT changed, after a digest over `git ls-files`
-// (tracked files only) has already refused — a report, not a gate, so the
-// silenced mode cannot hide the thing being reported.
+// explicit untracked-files mode, with no exception.
 //
 // Zero deps: `node --test tests/git-status-untracked-mode-sweep.test.mjs`.
 
@@ -142,22 +137,6 @@ function invocations(src) {
 /** An explicit untracked-files mode, short or long form. Absence is the defect. */
 const HAS_MODE = /(?:^|\s)(?:-u(?:no|normal|all)?|--untracked-files(?:=|\s))/;
 
-/**
- * The one deliberate exception, named exactly rather than by file: a report
- * line run AFTER a digest over tracked files (`git ls-files`) has already
- * refused, so the silenced mode cannot hide what it prints (reap.sh's
- * comment states this in full). Matched on file AND a fragment of the actual
- * command, not the file alone — a second, real gate added later to
- * instruments.sh must not inherit this exemption for free.
- */
-const ALLOWED = [
-  { file: "plugin/scripts/instruments.sh", fragment: 'status --porcelain -- $set' },
-];
-
-function isAllowed(file, line) {
-  return ALLOWED.some((a) => a.file === file && line.includes(a.fragment));
-}
-
 // A guard on the guard: a bad glob, a moved directory, or a `git ls-files`
 // that answers nothing turns the sweep below into a vacuous pass over an
 // empty list — green, and blind. Named sites, because those are exactly the
@@ -169,7 +148,6 @@ test("the sweep sees the scripts it is supposed to police", { skip: SKIP_WITHOUT
     "plugin/scripts/worktree-audit.sh",
     "plugin/scripts/no-undo-audit.sh",
     "plugin/scripts/claim-ticket.sh",
-    "plugin/scripts/instruments.sh",
   ]) {
     assert.ok(
       SHELL_SCRIPTS.includes(f),
@@ -181,7 +159,7 @@ test("the sweep sees the scripts it is supposed to police", { skip: SKIP_WITHOUT
 test("every git status --porcelain invocation pins an explicit untracked-files mode", { skip: SKIP_WITHOUT_REPO }, () => {
   const offenders = SHELL_SCRIPTS
     .flatMap((f) => invocations(readFileSync(join(ROOT, f), "utf8")).map(([n, l]) => [f, n, l]))
-    .filter(([f, , l]) => !HAS_MODE.test(l) && !isAllowed(f, l))
+    .filter(([, , l]) => !HAS_MODE.test(l))
     .map(([f, n, l]) => `${f}:${n}: ${l.trim()}`);
   assert.deepEqual(
     offenders,
@@ -199,18 +177,4 @@ test("every git status --porcelain invocation pins an explicit untracked-files m
 test("the sweep really is seeing status --porcelain invocations, not matching nothing", { skip: SKIP_WITHOUT_REPO }, () => {
   const total = SHELL_SCRIPTS.flatMap((f) => invocations(readFileSync(join(ROOT, f), "utf8")));
   assert.ok(total.length >= 7, `expected at least the seven #730 sites, found ${total.length}`);
-});
-
-// The allowlist itself has to still name a real, current exception — an
-// `instruments.sh` rewrite that drops the report line would leave `ALLOWED`
-// pointing at nothing, and the sweep above would read as "nothing to
-// exempt" rather than "the exemption stopped applying".
-test("the allowed exception is a real line in the file it names", { skip: SKIP_WITHOUT_REPO }, () => {
-  for (const { file, fragment } of ALLOWED) {
-    const src = readFileSync(join(ROOT, file), "utf8");
-    assert.ok(
-      src.includes(fragment),
-      `${file} no longer contains ${JSON.stringify(fragment)} — update or drop the allowlist entry`,
-    );
-  }
 });

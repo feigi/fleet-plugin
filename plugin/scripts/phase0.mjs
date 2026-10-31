@@ -17,8 +17,8 @@
 // Reached through the Resolver and run from the MAIN checkout (a linked
 // worktree refuses: the checks below judge the checkout the controller reads
 // its rules from). The steps, each a named entry in the receipt, run in
-// this order because the order is the point — the pin certifies the tree the
-// fast-forward left, the rotation comes before the fold-in, the scratch
+// this order because the order is the point — the pin is recorded after the
+// fast-forward, the rotation comes before the fold-in, the scratch
 // reclaim straight after the rotation, the metrics refresh before the first
 // Pull is routed:
 //
@@ -29,12 +29,15 @@
 //                 on a branch whose PR has merged would fast-forward that branch
 //                 and the baseline would record it as the run's ref.
 //   fast-forward  `git fetch origin`, `rev-list --count main..origin/main`,
-//                 `merge --ff-only origin/main`. HEAD moving means the rules this
-//                 script came from are superseded: prints `SUPERSEDED <n>
-//                 commits; re-run phase0.mjs` and fails, so the re-run executes
-//                 from the new tree.
+//                 `merge --ff-only origin/main`. HEAD moving is ok, the count
+//                 in the output. It still runs because the workspace's own
+//                 tracked files (`docs/metrics/*`, its docs and CI-facing
+//                 files) must be at origin/main and the baseline is recorded
+//                 after it; the rules come from the installed package, which
+//                 a fast-forward does not touch.
 //   pin           `instruments.sh --pin`, which certifies the Install root; the
-//                 ok line names its kind, root, and version or commit.
+//                 ok line names its kind, root and version. A linked
+//                 checkout refuses: a fleet run executes an installed package.
 //   baseline      `main-checkout.mjs --record`; its refusals fail the step.
 //   labels        `label-map.mjs ensure`, the Label map derivation step. Exit 0
 //                 is ok, its output the map ensure printed. Exit 3 is pending,
@@ -236,13 +239,13 @@ function fastForward({ cwd }) {
   if (behind === 0) return ok("main is level with origin/main");
   const merge = run("git", ["merge", "--ff-only", "origin/main"], { cwd });
   if (merge.status !== 0) return refusal("git merge --ff-only origin/main failed:", merge);
-  return failed(`SUPERSEDED ${behind} commits; re-run phase0.mjs`);
+  return ok(`fast-forwarded ${behind} commits to origin/main`);
 }
 
 function pin({ cwd }) {
   const r = sh("instruments.sh", ["--pin"], { cwd });
   if (r.status !== 0) return refusal("instruments.sh --pin failed:", r);
-  // `instruments: pinned <digest> over <kind> <root> (version <v>|commit <sha>)`
+  // `instruments: pinned <digest> over <kind> <root> (version <v>)`
   const m = /^instruments: pinned [0-9a-f]+ over (.+)$/m.exec(r.stderr);
   return ok(`instruments pinned: ${m ? m[1] : r.stderr || "?"}`);
 }

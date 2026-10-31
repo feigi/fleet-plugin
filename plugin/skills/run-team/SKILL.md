@@ -699,22 +699,16 @@ you cannot confirm was received, re-check the artifacts it governed. See referen
 - **Re-pin only on the maintainer's adopt.** Nothing you change yourself is a
   reason: a tooling defect is reported, never fixed by you. Re-pinning to clear
   a refusal you cannot explain discards the check.
-- **A pinned tree whose HEAD moved is the maintainer's to settle, whoever moved
-  it — and so is an installed plugin that changed.** When a refusal — your check
-  or a finisher's halt — reads HEAD advanced, rewound or diverged from the pin
-  commit, never re-pin over it: not for a fast-forward to `origin/main`, and not
-  when the commits between are only this run's own merged PRs. The same holds
-  when it names a changed package or an Install root that now resolves
-  elsewhere, even an upgrade to a release of this run's own PRs. Act on no
-  `DISPATCH` or `PULL` row, and tell the maintainer what the refusal printed:
-  the pin commit, HEAD and the commits between, or the pinned and current
-  Install root and version. On their **restore**, run `git reset --keep <pin commit>` —
-  only when the pinned tree is the main checkout and the tick prints no
-  `MAIN-CHECKOUT` line; otherwise they restore it by hand, and an installed
-  package always: never run `omp plugin` yourself, because a reinstall swaps the
-  files every live member is running. On their **adopt**, re-pin. Once the
-  check exits 0, resume, and apply the finisher gate to each PR whose finisher
-  halted on that refusal. See references/instruments.md.
+- **A changed installed plugin is the maintainer's to settle, whoever changed
+  it.** When a refusal — your check or a finisher's halt — names a changed
+  package or an Install root that now resolves elsewhere, never re-pin over it,
+  even for an upgrade to a release of this run's own PRs. Act on no `DISPATCH` or
+  `PULL` row, and tell the maintainer what the refusal printed: the pinned and
+  current Install root and version. On their **restore** they reinstall the
+  pinned version by hand: never run `omp plugin` yourself, because a reinstall
+  swaps the files every live member is running. On their **adopt**, re-pin.
+  Once the check exits 0, resume, and apply the finisher gate to each PR whose
+  finisher halted on that refusal. See references/instruments.md.
 
 ### Relabel causes
 

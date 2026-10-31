@@ -40,8 +40,9 @@
 //     fleet-run executes scripts from and omp loads the runbooks from — the
 //     root itself included. No gitignore exemption: nothing under it is a
 //     member's to write. It holds whichever repository the session runs in,
-//     or none, and for every install kind; under a linked checkout the
-//     Install root is that checkout's `plugin/`.
+//     or none, and for every install kind. A fleet run refuses a linked
+//     Install root (instruments.sh), but an interactive session may still
+//     link a checkout, whose Install root is then that checkout's `plugin/`.
 //   - `bash` cwd, for every `fleet-implementer-<cell>` (ledger-grammar.mjs's
 //     `CELL_DEF`), and for a fix-applier's own id (`fix-pr-<n>`) directly,
 //     since its definition, `fleet-fix-applier`, is no implementer cell and

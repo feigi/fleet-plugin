@@ -100,7 +100,7 @@ test("the fixtures are the text the move removed: phase 0 step 0's paragraphs an
   // Anchors on the first and last sentence of each, so a fixture trimmed to
   // make the test pass is caught here rather than by a shorter claim.
   const p0 = flat(fixture("phase-0-step-0.txt"));
-  assert.ok(p0.startsWith("**Fast-forward the checkout before you trust these rules"), "the step-0 fixture lost its first paragraph");
+  assert.ok(p0.startsWith("**Fast-forward the checkout before the run starts"), "the step-0 fixture lost its first paragraph");
   assert.ok(p0.endsWith("and is never nothing stranded."), "the step-0 fixture lost its last paragraph");
   const co = flat(fixture("close-out-metrics.txt"));
   assert.ok(co.startsWith("**Then record the run's member facts"), "the metrics fixture lost its first paragraph");

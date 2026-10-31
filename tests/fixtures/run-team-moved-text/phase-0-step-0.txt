@@ -1,27 +1,33 @@
-   **Fast-forward the checkout before you trust these rules — you are reading
-   them from it.** First, `git symbolic-ref -q HEAD` must print
+   **Fast-forward the checkout before the run starts — its own tracked files
+   must be at `origin/main`.** First, `git symbolic-ref -q HEAD` must print
    `refs/heads/main`; anything else, stop and tell the maintainer — a checkout
    left on a branch whose PR has merged would fast-forward that branch, and the
    baseline below would record it as the run's ref. Then
    `git fetch origin && git rev-list --count main..origin/main`;
-   non-zero means the SKILL.md you are executing is superseded, so
-   `git merge --ff-only origin/main` and re-read what changed under
-   `commands/`, `scripts/` and `skills/`. The usual cause is the PREVIOUS run's own close-out PR: it
-   lands the rules THIS run needs and nothing pulls them. Measured twice — 57
-   commits stale in one run, 20 in another, the second shipping every dispatch
-   prompt without two rules that had merged the day before. Silent by
-   construction: stale text reads as authoritative.
+   non-zero means the checkout is behind, so `git merge --ff-only origin/main`.
+   `phase0.mjs` does this itself and records the move as `ok`, naming the
+   count. It still runs because the workspace's own tracked files —
+   `docs/metrics/*`, the repo's own docs and CI-facing files — are what this run
+   reads and appends to, and the baseline below is recorded after it: recording
+   the baseline before that fast-forward would record a HEAD behind `origin/main`
+   as the run's own. The rules
+   come from the installed package, which a fast-forward does not touch, so
+   nothing you read is stale after it and no re-run follows. The usual cause of
+   a stale checkout is the PREVIOUS run's own close-out PR, which lands the
+   metrics and docs THIS run builds on and nothing pulls them.
 
    **Pin the instruments, after that fast-forward and before anything reads
    them, from this main checkout.** `~/.fleet/bin/fleet-run instruments.sh --pin`
    records what the scripts and runbooks of the Install root — the tree the
    fleet executes — say right now, which is what every later gate compares
    against; SKILL.md's **Re-check before you act on any instrument reading** says
-   what its exit codes mean. When this main checkout is the linked install,
-   pinning before that fast-forward would instead pin the superseded text and
-   certify it for the rest of the run. The pin certifies the Install root and
+   what its exit codes mean. The pin certifies the Install root and
    keeps its baseline in this checkout's `.fleet/`, so a workspace that tracks no
-   `plugin/…` of its own pins with no flag. The baseline records the root it
+   `plugin/…` of its own pins with no flag. A linked Install root (`omp plugin
+   link`) refuses the pin at exit 2: a fleet run executes an installed package,
+   so tell the maintainer to `omp plugin uninstall @feigi/fleet-ctl` and
+   `omp plugin install @feigi/fleet-ctl`, then restart; never run `omp plugin`
+   yourself. The baseline records the root it
    certified beside the digest, and every later check — yours, a finisher's, the
    merge gate's own leg — compares it with the live root and refuses when they
    differ. Never dispatch a member into a run whose phase-0 pin refused.

@@ -35,20 +35,23 @@
 #
 # WHAT IS IN THE SET: the plugin's own component directories — `commands/
 # scripts/ skills/ agents/ workflows/` — of the Install root, the tree the
-# fleet executes, never the checkout this script happens to run in. How the
-# package entry is installed decides how the set is read, in one of two modes:
+# fleet executes, never the checkout this script happens to run in, and never
+# the workspace's own. Every regular file and every symlink under those five
+# directories of the realpath is hashed, dotfiles included: nothing in an
+# installed package is untracked and anything in it executes.
 #
-#   linked-checkout      any other link — GIT mode: every TRACKED file under
-#                        `plugin/commands plugin/scripts plugin/skills
-#                        plugin/agents plugin/workflows` of the checkout the
-#                        link points into, which must be that checkout's
-#                        `plugin/` directory exactly.
-#   npm-install          a real directory — FILES mode: every regular file
-#   marketplace-install  a link into `.omp/plugins/cache/` — and every symlink
-#                        under the five directories of the realpath.
-#
-# The kinds are named the way fleet-provenance names them, and told apart the
+# THE KINDS are named the way fleet-provenance names them, and told apart the
 # same way: the entry's own link-ness, then where the link resolves.
+#
+#   npm-install          a real directory.
+#   marketplace-install  a link into `.omp/plugins/cache/`.
+#   linked-checkout      any other link — `omp plugin link`. REFUSED, at pin
+#                        and at check, exit 2 and nothing on stdout: a fleet
+#                        run executes an installed package, and a linked
+#                        checkout is a working tree that every checkout,
+#                        merge and edit in it moves under the run. The link
+#                        remains the dev loop for interactive sessions; the
+#                        run needs it replaced by the package.
 #
 # Not a written list of instrument names — the
 # ticket named six and the class is larger (the supply scan, the liveness
@@ -58,65 +61,38 @@
 # already knows can be stale). A list rots on the next commit that adds a
 # script; a directory does not.
 #
-# NOT THE WHOLE TREE, deliberately, in either mode. A checkout's root also
-# carries `docs/`, `.github/` and `.out-of-scope/`, and `docs/metrics/` is
-# APPENDED BY THE CONTROLLER MID-RUN, so a whole-repo set would fire the gate
-# on the run's own bookkeeping every single time — a guard the controller
-# learns to ignore, which is the failure the paragraph below names. A
-# package's `package.json`, and everything else at its top level, stays out
-# the same way: the set is the five directories in both modes.
+# NOT THE WHOLE TREE, deliberately. A package's `package.json`, and everything
+# else at its top level, stays out: the set is the five directories. The
+# state home's `docs/metrics/` is APPENDED BY THE CONTROLLER MID-RUN and is
+# not under the Install root at all, so the run's own bookkeeping cannot fire
+# the gate — a guard the controller learns to ignore is worse than none.
 #
-# TRACKED in a checkout, EVERY FILE in a package, deliberately. A checkout
-# counts tracked files only, because an untracked file appearing under those
-# dirs — a `.DS_Store`, an editor swap file, a member's scratch output —
-# changes no reading the controller takes, and refusing on it would fire the
-# guard on ordinary runs. A guard the controller learns to ignore is worse
-# than none. A package counts every file, dotfiles included, because nothing
-# in it is untracked and anything in it executes.
-#
-# CONTENT, not `git status`: status answers off the stat cache, so a content
-# change that lands on the same size and mtime does not reach it, and a bare
-# `touch` does. This hashes bytes, so it accepts a touch and refuses a rewrite.
-# A symlink is hashed by its target's bytes in both modes — `shasum` reads
-# through it — so a dangling link, or a link to a directory, cannot be hashed
-# and refuses at exit 2.
+# CONTENT, not a stat cache: this hashes bytes, so it accepts a bare `touch`
+# and refuses a rewrite. A symlink is hashed by its target's bytes —
+# `shasum` reads through it — so a dangling link, or a link to a directory,
+# cannot be hashed and refuses at exit 2.
 #
 # MODES ARE NOT IN THE DIGEST, and that one is a GAP rather than a trade: a
-# mode-only change to a tracked instrument is ACCEPTED. Measured — `chmod +x`
-# on a tracked `100644` instrument leaves `git status` printing ` M` for it,
-# and `git update-index --chmod=+x` moves the index entry to `100755` with the
-# blob untouched; both exit 0 here. A mode change that costs the hash its READ
-# is caught instead: `chmod 000` on a tracked instrument refuses at exit 2
-# through `could not hash every tracked file` — as root that never fires,
+# mode-only change to an instrument is ACCEPTED. Measured — `chmod +x` on a
+# mode-644 file under the set exits 0 here. A mode change that costs the
+# hash its READ is caught instead: `chmod 000` on an instrument refuses at
+# exit 2 through `could not hash every file` — as root that never fires,
 # since root reads a mode-000 file regardless (the suite skips
 # this case there for the same reason). So the exposure is the bits that
 # still permit reading, the exec bit above all — and that bit is not how a
 # fleet probe runs: fleet-run hands `.sh` to `sh` and `.mjs` to `node`, so a
 # stripped `+x` is invisible through the Resolver, while invoking one by path
 # instead is EACCES at exec (126), loud rather than a wrong verdict. Folding
-# modes in — digesting `git ls-files -s` alongside the contents, or a per-file
-# `[ -x "$f" ]` — is a behaviour change to the gate on a channel with no
+# modes in is a behaviour change to the gate on a channel with no
 # silently wrong reading to its name, and whether a mode-only edit is worth
 # refusing on is a decision rather than a fix, so this paragraph names the gap and
-# leaves the behaviour alone. The suite pins the accepted pair,
+# leaves the behaviour alone. The suite pins the accepted case,
 # so closing the gap later goes red there rather than leaving this
 # paragraph stale.
 #
-# REFS ARE DELIBERATELY NOT IN THE DIGEST, and the reason is not that they do
-# not matter. The corroborating evidence is a stray `fix/42-slug` branch
-# left in the main checkout by something running this repo's own fixtures — a
-# ref write, which no hash of files can see. But `claim-ticket.sh` creates a
-# branch per ticket and `reap.sh` deletes them, in the ref store every worktree
-# shares, so a ref digest changes several times per pass as ORDINARY WORK. Per
-# gate that is noise, and noise is the one failure this check cannot afford.
-# Sweeping for unexpected refs is a drain-cadence question, not a gate one.
-#
-# COST: one `git rev-parse` to locate the state home, one listing of the set
-# (`git ls-files` in git mode, `find` in files mode), a second `git rev-parse`
-# in git mode to find the linked checkout, and one pass of `shasum` over those
-# files; a pin in git mode also reads HEAD, a git-mode check that finds a
-# change runs git again to report it, and a files-mode pin or changed check
-# runs `awk` once to read the package's version. No network, no `gh`, no
+# COST: one `git rev-parse` to locate the state home, one `find` over the set
+# and one pass of `shasum` over those files; a pin or a changed check runs
+# `awk` once to read the package's version. No network, no `gh`, no
 # fetch, no subprocess per file. It is meant to be run
 # before every gate decision and it has to be cheap enough that nobody is
 # tempted to skip it.
@@ -129,26 +105,23 @@ set -eu
 # Here the only constraint left is the real one: above the first git call.
 #
 # GIT_WORK_TREE is the wrong-tree defect reached through the environment. The
-# contract here is that the state home is the WORKING DIRECTORY's checkout and
-# a linked install's tree is the checkout its link points into — and
-# `git rev-parse --show-toplevel` answers with the ambient work tree instead
-# the moment one is set, `--repo` or not. Measured:
-# standing in a checkout whose instruments have been TAMPERED, with
-# `GIT_WORK_TREE` naming a clean twin that carries its own pinned baseline,
-# this script exits 0 and prints the twin's digest. The gate passes. That is
+# contract here is that the state home is the WORKING DIRECTORY's checkout —
+# and `git rev-parse --show-toplevel` answers with the ambient work tree
+# instead the moment one is set, `--repo` or not. Measured:
+# standing in a checkout whose baseline is honest, with
+# `GIT_WORK_TREE` naming a twin whose own pinned baseline matches the
+# tampered Install root, this script exits 0 and prints the tampered digest.
+# The gate passes. That is
 # the same wrong-tree write `--repo ""` produced before this script refused it, one
 # door further out, and a gate that certifies a tree nobody looked at is
 # worse than no gate.
 #
-# GIT_DIR is unset alongside it and is measured INERT here: `ls-files` names
-# paths and the digest is taken over the FILES ON DISK under the tree, so
-# pointing the object database elsewhere changes nothing — measured against a
-# clean twin holding the exact pre-tamper content, the tampered digest came
-# back unchanged and the gate still refused. It stays on the line because the
+# GIT_DIR is unset alongside it and is measured INERT here: the only git call
+# is `rev-parse --show-toplevel`, and the digest is taken over the FILES ON
+# DISK under the Install root, so pointing the object database elsewhere
+# changes nothing. It stays on the line because the
 # pair is one hazard with one remedy, and because "inert today" is a
-# measurement of the current call set: a digest taken from `git show` or
-# `cat-file` rather than from disk would reintroduce the half nothing here
-# can see. The suite pins the line itself, which is
+# measurement of the current call set. The suite pins the line itself, which is
 # what keeps that half from being quietly dropped.
 unset GIT_DIR GIT_WORK_TREE
 
@@ -209,6 +182,42 @@ else
 fi
 base="$root/.fleet/instruments.sha"
 
+# The Install root, resolved inline on every pin and every check: the same
+# path fleet-run, fleet-provenance and fleet-bootstrap resolve, the same way —
+# the package entry's own link-ness for the kind, its realpath for the tree.
+# Mirrored rather than called. The placed `~/.fleet/bin/fleet-run` can drift
+# from the package, and an environment override or a `node` call would be a
+# second way to name a tree the fleet does not execute.
+#
+# HOME is checked by hand because `set -u` does not answer for it: measured,
+# macOS `/bin/sh` exits 1 on an unset HOME under `set -eu`, and exit 1 is the
+# one code that means the set changed.
+[ -n "${HOME:-}" ] || die "HOME is unset — cannot resolve the Install root"
+entry="$HOME/.omp/plugins/node_modules/@feigi/fleet-ctl"
+if [ -L "$entry" ]; then
+  [ -e "$entry" ] || die "omp plugin \"@feigi/fleet-ctl\" link $entry is dangling"
+  live=$(CDPATH='' cd -P "$entry" && pwd -P) \
+    || die "cannot resolve omp plugin \"@feigi/fleet-ctl\" at $entry"
+  case $live in
+    */.omp/plugins/cache/*) kind=marketplace-install ;;
+    *) kind=linked-checkout ;;
+  esac
+else
+  [ -e "$entry" ] || die "no omp plugin \"@feigi/fleet-ctl\" at $entry"
+  live=$(CDPATH='' cd -P "$entry" && pwd -P) \
+    || die "cannot resolve omp plugin \"@feigi/fleet-ctl\" at $entry"
+  kind=npm-install
+fi
+
+# A linked checkout is refused, at pin and at check, before anything is read
+# from or written to the state home and before anything is hashed. A fleet run
+# executes an installed package: a link's tree moves under the run with every
+# checkout, merge and edit in it, which no digest can tell from tampering. The
+# controller never runs `omp plugin`; the message is for the maintainer.
+if [ "$kind" = linked-checkout ]; then
+  die "Install root $live is a linked checkout (omp plugin link) — a fleet run executes an installed package; omp plugin uninstall @feigi/fleet-ctl, then omp plugin install @feigi/fleet-ctl, and restart."
+fi
+
 if [ "$pin" != true ]; then
   # No baseline is not "nothing has changed" — it is a run that never pinned,
   # and the check has nothing to compare against. Refusing is the whole
@@ -241,51 +250,9 @@ if [ "$pin" != true ]; then
   [ -n "$want" ] || die "$base is empty — re-pin, do not guess"
 fi
 
-# The Install root, resolved inline on every pin and every check: the same
-# path fleet-run, fleet-provenance and fleet-bootstrap resolve, the same way —
-# the package entry's own link-ness for the kind, its realpath for the tree.
-# Mirrored rather than called. The placed `~/.fleet/bin/fleet-run` can drift
-# from the package, and an environment override or a `node` call would be a
-# second way to name a tree the fleet does not execute.
-#
-# HOME is checked by hand because `set -u` does not answer for it: measured,
-# macOS `/bin/sh` exits 1 on an unset HOME under `set -eu`, and exit 1 is the
-# one code that means the set changed.
-[ -n "${HOME:-}" ] || die "HOME is unset — cannot resolve the Install root"
-entry="$HOME/.omp/plugins/node_modules/@feigi/fleet-ctl"
-if [ -L "$entry" ]; then
-  [ -e "$entry" ] || die "omp plugin \"@feigi/fleet-ctl\" link $entry is dangling"
-  live=$(CDPATH='' cd -P "$entry" && pwd -P) \
-    || die "cannot resolve omp plugin \"@feigi/fleet-ctl\" at $entry"
-  case $live in
-    */.omp/plugins/cache/*) kind=marketplace-install ;;
-    *) kind=linked-checkout ;;
-  esac
-else
-  [ -e "$entry" ] || die "no omp plugin \"@feigi/fleet-ctl\" at $entry"
-  live=$(CDPATH='' cd -P "$entry" && pwd -P) \
-    || die "cannot resolve omp plugin \"@feigi/fleet-ctl\" at $entry"
-  kind=npm-install
-fi
-
-# A linked checkout is certified as the checkout it is — git mode, over the
-# toplevel, the tree and the shape a checkout's pin has always been made over
-# — and only when the link points at that checkout's `plugin/` directory
-# exactly. A link to the checkout's root, to a nested copy of `plugin/`, or to
-# a directory outside any checkout names a tree whose tracked set is not the
-# one the fleet executes, so it refuses rather than guess which it meant.
+# The five component directories, as the digest lists them.
 dirs='commands scripts skills agents workflows'
-set=
-for d in $dirs; do set="${set:+$set }plugin/$d"; done
-if [ "$kind" = linked-checkout ]; then
-  mode=git
-  badlink="Install root $live is not the plugin/ directory of a git checkout — a linked install must point at <checkout>/plugin"
-  target=$(git -C "$live" rev-parse --show-toplevel 2>/dev/null) || die "$badlink"
-  [ "$live" = "$target/plugin" ] || die "$badlink"
-else
-  mode=files
-  target=$live
-fi
+target=$live
 
 # The top-level "version" of the package's `package.json`, or nothing. It is
 # evidence for a refusal to name, never part of a verdict, so a file that is
@@ -354,37 +321,27 @@ files=$(mktemp) || die "cannot create a temp file"
 trap 'rm -f "$files"' EXIT
 trap 'rm -f "$files"; exit 2' INT HUP TERM
 
-if [ "$mode" = git ]; then
-  # shellcheck disable=SC2086 # $set is a deliberate list of pathspecs, not one path
-  git -C "$target" ls-files -z -- $set > "$files" \
-    || die "git ls-files failed under $target for: $set"
-  # An empty listing is the shape a wrong tree produces — a symlinked skills
-  # dir resolving to a different repository, most plausibly. Certifying it
-  # would hand back "unchanged" for a set that was never read.
-  [ -s "$files" ] || die "no tracked file under $target for: $set — refusing to certify an empty instrument set"
-else
-  # Absent directories are skipped, but a name that is present in any form
-  # — a file, a dangling link — is listed, so it reaches `shasum` and refuses
-  # there rather than vanishing from the set. With none present there is
-  # nothing to certify, and `find` given no path would list `.` instead.
-  present=
-  for d in $dirs; do
-    if [ -e "$target/$d" ] || [ -L "$target/$d" ]; then
-      present="$present $d"
-    fi
-  done
-  [ -n "$present" ] || die "no file under $target for: $dirs — refusing to certify an empty instrument set"
-  # Paths relative to the realpath, NUL-separated, in byte order: `find`
-  # lists in directory order, which is the filesystem's to choose, so the
-  # sort is what makes the digest a function of the tree alone. Two steps
-  # with a status check each, for the reason the hashing below spells out.
-  # shellcheck disable=SC2086 # $present is a list of fixed directory names
-  (cd "$target" && find $present \( -type f -o -type l \) -print0) > "$files" \
-    || die "could not list every file under $target for: $dirs"
-  LC_ALL=C sort -z -o "$files" "$files" \
-    || die "could not sort the instrument set under $target"
-  [ -s "$files" ] || die "no file under $target for: $dirs — refusing to certify an empty instrument set"
-fi
+# Absent directories are skipped, but a name that is present in any form
+# — a file, a dangling link — is listed, so it reaches `shasum` and refuses
+# there rather than vanishing from the set. With none present there is
+# nothing to certify, and `find` given no path would list `.` instead.
+present=
+for d in $dirs; do
+  if [ -e "$target/$d" ] || [ -L "$target/$d" ]; then
+    present="$present $d"
+  fi
+done
+[ -n "$present" ] || die "no file under $target for: $dirs — refusing to certify an empty instrument set"
+# Paths relative to the realpath, NUL-separated, in byte order: `find`
+# lists in directory order, which is the filesystem's to choose, so the
+# sort is what makes the digest a function of the tree alone. Two steps
+# with a status check each, for the reason the hashing below spells out.
+# shellcheck disable=SC2086 # $present is a list of fixed directory names
+(cd "$target" && find $present \( -type f -o -type l \) -print0) > "$files" \
+  || die "could not list every file under $target for: $dirs"
+LC_ALL=C sort -z -o "$files" "$files" \
+  || die "could not sort the instrument set under $target"
+[ -s "$files" ] || die "no file under $target for: $dirs — refusing to certify an empty instrument set"
 
 # Two steps, each with its own status check, because a pipeline reports only its
 # LAST command: with `xargs … | shasum` as one pipeline, a `shasum` that cannot
@@ -393,45 +350,37 @@ fi
 # — a verdict about the tree — off a failure to look. reap.sh shipped this exact
 # bug against `git cherry` and it deleted branches.
 #
-# `xargs` exits 123 when `shasum` failed on any file, which is how a tracked
-# file deleted from the worktree arrives — and a dangling link, or a link to a
-# directory: as exit 2 naming it, not as a digest quietly missing a line. Both
+# `xargs` exits 123 when `shasum` failed on any file — a dangling link, or a
+# link to a directory, or a file that cannot be read — as exit 2 naming it,
+# not as a digest quietly missing a line. Both
 # refuse; only one of them is honest about why.
 per_file=$(cd "$target" && xargs -0 shasum -a 256 < "$files") \
-  || die "could not hash every tracked file under $target — see the errors above"
+  || die "could not hash every file under $target — see the errors above"
 digest=$(printf '%s\n' "$per_file" | shasum -a 256 | cut -d' ' -f1) \
   || die "could not digest the instrument set"
 [ -n "$digest" ] || die "empty digest for $target"
 
 if [ "$pin" = true ]; then
   mkdir -p "$root/.fleet" || die "cannot create $root/.fleet"
-  # Three lines, order fixed: the digest first, the certified tree second, and
-  # third what says which state of it was pinned — the checkout's HEAD commit
-  # in git mode, the package's version in files mode. A reader that only
+  # Three lines at most, order fixed: the digest first, the certified tree
+  # second, and third the package's version. A reader that only
   # knows the old one-line shape — merge-gate.mjs's `readInstruments`, which
   # takes the FIRST stdout line as the digest — keeps working, and a check
   # from this script reads the rest. The root rides in the same write as the
   # digest so a check can tell the Install root moved; the check compares it
   # and never follows it.
   #
-  # Neither third line is trusted for any verdict: each exists only so a
-  # refusal can say what moved. HEAD unborn or unreadable writes no `commit=`
-  # line, a package with no readable version writes no `version=` line, and
-  # the refusal says so.
-  if [ "$mode" = git ]; then
-    key=commit
-    val=$(git -C "$target" rev-parse --verify --quiet HEAD 2>/dev/null) || val=
-  else
-    key=version
-    val=$(pkg_version)
-  fi
+  # The version line is not trusted for any verdict: it exists only so a
+  # refusal can say what moved. A package with no readable version writes no
+  # `version=` line, and the refusal says so.
+  val=$(pkg_version)
   {
     printf '%s\n' "$digest"
     printf 'root=%s\n' "$target"
-    [ -z "$val" ] || printf '%s=%s\n' "$key" "$val"
+    [ -z "$val" ] || printf 'version=%s\n' "$val"
   } > "$base" || die "cannot write $base"
   printf '%s\n' "$digest"
-  printf '%s: pinned %s over %s %s (%s %s)\n' "$NAME" "$digest" "$kind" "$target" "$key" "${val:-?}" >&2
+  printf '%s: pinned %s over %s %s (version %s)\n' "$NAME" "$digest" "$kind" "$target" "${val:-?}" >&2
   exit 0
 fi
 
@@ -449,73 +398,8 @@ printf '%s: refuse the gate and report. Do NOT re-read the instrument.\n' "$NAME
 # changed: the versions are what the maintainer rules on — adopt what is
 # installed, or put the pinned version back. Never the controller: a
 # reinstall swaps the files every live member is running.
-if [ "$mode" = files ]; then
-  pinv=$(baseline_field version) || pinv=
-  nowv=$(pkg_version)
-  printf '%s: %s %s: version %s pinned, %s now\n' "$NAME" "$kind" "$target" "${pinv:-?}" "${nowv:-?}" >&2
-  printf '%s: the installed package changed or was reinstalled — the maintainer adopts it (re-pin) or restores version %s\n' "$NAME" "${pinv:-?}" >&2
-  exit 1
-fi
-
-# A checkout: `git status` names the uncommitted half, which is the shape
-# this header's measured near-miss took; a checked-out branch that moved
-# shows as nothing here and the HEAD line is what names it.
-headc=$(git -C "$target" rev-parse --verify --quiet HEAD 2>/dev/null) || headc=
-printf '%s: HEAD %s\n' "$NAME" "${headc:-?}" >&2
-# shellcheck disable=SC2086 # $set is a deliberate list of pathspecs, not one path
-git -C "$target" status --porcelain -- $set >&2 || true
-
-# Then what moved, relative to the commit the pin recorded. Only the commit
-# graph can say whether HEAD advanced, rewound or diverged, and the maintainer
-# decides what to do about each, so this names the relation and stops: the
-# verdict above is already refusal. Anything but a full hex id is treated as
-# absent from the repository, so a baseline line cannot reach git as an option.
-pinc=$(baseline_field commit)
-present=false
-case $pinc in
-  *[!0-9a-f]*) ;;
-  *) if { [ "${#pinc}" -eq 40 ] || [ "${#pinc}" -eq 64 ]; } \
-       && git -C "$target" cat-file -e "$pinc^{commit}" 2>/dev/null; then
-       present=true
-     fi ;;
-esac
-if [ -z "$pinc" ]; then
-  printf '%s: pin commit not recorded — the baseline has no commit= line\n' "$NAME" >&2
-elif [ "$present" != true ]; then
-  printf '%s: pin commit %s is not in the repository\n' "$NAME" "$pinc" >&2
-elif [ -z "$headc" ]; then
-  printf '%s: pin commit %s; HEAD cannot be read\n' "$NAME" "$pinc" >&2
-else
-  printf '%s: pin commit %s\n' "$NAME" "$pinc" >&2
-  if [ "$headc" = "$pinc" ]; then
-    printf '%s: HEAD unmoved — HEAD is the pin commit\n' "$NAME" >&2
-  else
-    # `--is-ancestor` answers with its exit code: 0 is yes and 1 is no. Any
-    # other code is git failing to compare — an unreadable object, a corrupt
-    # history — and a relation read off that failure would hand the
-    # maintainer a false fact to rule on, so it says unknown and lets git's
-    # own error through.
-    fwd=0
-    git -C "$target" merge-base --is-ancestor "$pinc" "$headc" || fwd=$?
-    back=1
-    if [ "$fwd" -eq 1 ]; then
-      back=0
-      git -C "$target" merge-base --is-ancestor "$headc" "$pinc" || back=$?
-    fi
-    if [ "$fwd" -eq 0 ]; then
-      printf '%s: HEAD advanced — the pin commit is an ancestor of HEAD\n' "$NAME" >&2
-      git --no-pager -C "$target" log --no-decorate --no-color --oneline -n 20 "$pinc..$headc" >&2 || true
-      between=$(git -C "$target" rev-list --count "$pinc..$headc" 2>/dev/null || printf 0)
-      if [ "$between" -gt 20 ]; then
-        printf '… %s more\n' "$((between - 20))" >&2
-      fi
-    elif [ "$fwd" -eq 1 ] && [ "$back" -eq 0 ]; then
-      printf '%s: HEAD rewound — HEAD is an ancestor of the pin commit\n' "$NAME" >&2
-    elif [ "$fwd" -eq 1 ] && [ "$back" -eq 1 ]; then
-      printf '%s: HEAD diverged — neither is an ancestor of the other\n' "$NAME" >&2
-    else
-      printf '%s: HEAD relation unknown — git could not compare the pin commit with HEAD\n' "$NAME" >&2
-    fi
-  fi
-fi
+pinv=$(baseline_field version) || pinv=
+nowv=$(pkg_version)
+printf '%s: %s %s: version %s pinned, %s now\n' "$NAME" "$kind" "$target" "${pinv:-?}" "${nowv:-?}" >&2
+printf '%s: the installed package changed or was reinstalled — the maintainer adopts it (re-pin) or restores version %s\n' "$NAME" "${pinv:-?}" >&2
 exit 1
