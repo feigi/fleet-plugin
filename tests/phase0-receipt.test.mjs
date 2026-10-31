@@ -16,6 +16,7 @@ const receipt = ({ run = 5, session = "/s/run", steps = {}, ...rest } = {}) => (
 });
 const ok = (r) => ({ state: "ok", receipt: r });
 const PATH = "/w/.fleet/phase0.json";
+const EVAL_CELL = "phase0.mjs from a Python eval cell in the main checkout, without --session (run-team SKILL.md phase 0 step 0)";
 
 function dir(t) {
   const d = realpathSync(mkdtempSync(join(tmpdir(), "phase0-receipt-")));
@@ -44,7 +45,7 @@ test("phase0Gate: every step ok on this run's receipt holds nothing and says not
 });
 
 test("phase0Gate: missing, unreadable and another run's receipt hold, naming why", () => {
-  const cmd = "dispatch held: run ~/.fleet/bin/fleet-run phase0.mjs --session <session> and act on what it prints";
+  const cmd = `dispatch held: run ${EVAL_CELL} and act on what it prints`;
   assert.deepEqual(phase0Gate({ state: "missing" }, { path: PATH, controllerAt: 5 }),
     { held: true, line: `PHASE0-INCOMPLETE no receipt at ${PATH} — ${cmd}`, session: null });
   assert.deepEqual(phase0Gate({ state: "unreadable", why: "EACCES" }, { path: PATH, controllerAt: 5 }),
@@ -65,11 +66,11 @@ test("phase0Gate: failed, pending and unknown statuses hold, every one named in 
   });
 });
 
-test("phase0Gate: a receipt that records no session holds with the <session> placeholder and hands out none", () => {
+test("phase0Gate: a receipt that records no session holds naming the eval-cell run, no --session placeholder, and hands out none", () => {
   const g = phase0Gate(ok(receipt({ session: "", steps: { recipe: { status: "failed" } } })), { path: PATH, controllerAt: 5 });
   assert.deepEqual(g, {
     held: true,
-    line: "PHASE0-INCOMPLETE recipe — dispatch held: run ~/.fleet/bin/fleet-run phase0.mjs --session <session> and act on what it prints",
+    line: `PHASE0-INCOMPLETE recipe — dispatch held: run ${EVAL_CELL} and act on what it prints`,
     session: null,
   });
   assert.deepEqual(phase0Gate(ok(receipt({ session: "" })), { path: PATH, controllerAt: 5 }), { held: false, line: null, session: null });
@@ -91,7 +92,7 @@ test("phase0Gate: a step the receipt does not carry holds, named after the steps
 });
 
 test("phase0Gate: a finished receipt whose controller has exited or cannot be judged is the run before's and holds", () => {
-  const cmd = "dispatch held: run ~/.fleet/bin/fleet-run phase0.mjs --session <session> and act on what it prints";
+  const cmd = `dispatch held: run ${EVAL_CELL} and act on what it prints`;
   assert.deepEqual(phase0Gate(ok(receipt()), { path: PATH, controllerAt: 5, controller: "dead" }), {
     held: true,
     line: `PHASE0-INCOMPLETE receipt ${PATH} is run 5's and its controller has exited: not this session's finished phase 0 — ${cmd}`,
@@ -129,7 +130,7 @@ test("sessionFromReceipt: the receipt's session, or a refusal naming the receipt
   assert.equal(spawnSync("git", ["init", "-q", d], { env: gitEnv() }).status, 0);
   mkdirSync(join(d, ".fleet"));
   const file = join(d, ".fleet", "phase0.json");
-  assert.throws(() => sessionFromReceipt({ cwd: d }), (e) => e.message.includes(`phase-0 receipt ${file} (no receipt)`));
+  assert.throws(() => sessionFromReceipt({ cwd: d }), (e) => e.message.includes(`phase-0 receipt ${file} (no receipt) — give one, or run ${EVAL_CELL} first`));
   writeFileSync(file, JSON.stringify(receipt({ session: "" })));
   assert.throws(() => sessionFromReceipt({ cwd: d }), /\(it records no session\)/);
   writeFileSync(file, "{");
@@ -144,7 +145,7 @@ test("objectiveFromReceipt: the receipt's objective, or a refusal naming the rec
   assert.equal(spawnSync("git", ["init", "-q", d], { env: gitEnv() }).status, 0);
   mkdirSync(join(d, ".fleet"));
   const file = join(d, ".fleet", "phase0.json");
-  assert.throws(() => objectiveFromReceipt({ cwd: d }), (e) => e.message.includes(`no objective given and none in the phase-0 receipt ${file} (no receipt)`));
+  assert.throws(() => objectiveFromReceipt({ cwd: d }), (e) => e.message.includes(`no objective given and none in the phase-0 receipt ${file} (no receipt) — give one (cost or speed), or run ${EVAL_CELL} first`));
   writeFileSync(file, JSON.stringify(receipt({ session: "/sessions/run-1" })));
   assert.throws(() => objectiveFromReceipt({ cwd: d }), /\(it records no objective\)/);
   writeFileSync(file, JSON.stringify(receipt({ session: "/sessions/run-1", objective: "fast" })));
