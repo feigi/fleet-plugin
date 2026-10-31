@@ -34,7 +34,8 @@ Working on the plugin itself (this checkout): link the package instead, so
 agent and command edits take effect without a reinstall —
 `omp plugin link <checkout>/plugin`. A linked root outranks every installed
 copy of the same names until you `omp plugin uninstall @feigi/fleet-ctl`, so keep
-it to the box you develop on.
+it to the box you develop on. A fleet run refuses a linked root, so uninstall
+the link and install the package before running the fleet.
 
 `@feigi/fleet-ctl` is the npm package the fleet publishes on every release —
 the `@feigi` scope is the collision guard (only its owner can publish under

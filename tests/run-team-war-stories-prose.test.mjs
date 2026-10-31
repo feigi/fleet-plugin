@@ -92,11 +92,11 @@ const CORRECTIONS = [
     "with the same weight as a ruling you have already made.**",
     "with the same weight as a reply you have already decided on.**",
   ],
-  // The instrument check certifies the Install root, which is the main
-  // checkout only when that checkout is the linked install (#3845).
+  // The instrument check certifies the Install root, an installed package
+  // (#3845, #4037).
   [
     "neither protects the main checkout, which you run every gate probe out of and which any member can edit — except through a `write`/`edit`/`ast_edit` the `member-write-guard` extension refuses; a `bash` or `eval` write still lands.",
-    "neither protects the Install root, the tree you run every gate probe out of and read these runbooks from. It is the main checkout only when that checkout is linked as the install. The `member-write-guard` extension refuses a `write`/`edit`/`ast_edit` into the Install root, as it does into the main checkout, but a `bash` or `eval` write into the Install root still lands, and this re-check is what catches one.",
+    "neither protects the Install root, the tree you run every gate probe out of and read these runbooks from. The `member-write-guard` extension refuses a `write`/`edit`/`ast_edit` into the Install root, as it does into the main checkout, but a `bash` or `eval` write into the Install root still lands, and this re-check is what catches one.",
   ],
   // The guard also refuses a path writer's target inside the Install root (#3853).
   ["into the main checkout's non-ignored tree and an implementer's", "into the main checkout's non-ignored tree or into the Install root, and an implementer's"],

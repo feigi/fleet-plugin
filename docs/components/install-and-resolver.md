@@ -30,7 +30,8 @@ through an install, never a source path.
    the **Install root** — the directory omp actually loaded the plugin
    from, never a path any script may write to — with its install
    `kind` and a NOTICE when that root is a linked checkout, since then
-   every answer came from the dev tree.
+   every answer comes from the dev tree — which is why a fleet run
+   refuses such a root ([Instruments](instruments.md)).
 
 ## Opinionated choices
 

@@ -18,7 +18,7 @@ import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -419,24 +419,22 @@ test("the real instruments.sh pin covers the renderer and the templates", () => 
   // Positive control: the repository itself tracks both paths.
   const tracked = git(join(PLUGIN, ".."), "ls-files", "--", ...files).trim().split("\n");
   assert.deepEqual(tracked.sort(), [...files].sort());
-  for (const f of files) {
-    mkdirSync(join(repo, f, ".."), { recursive: true });
-    writeFileSync(join(repo, f), "original\n");
-  }
-  git(repo, "add", "-A");
-  git(repo, "-c", "user.name=f", "-c", "user.email=f@example.invalid", "commit", "-q", "-m", "fixture");
-  // The pin certifies the Install root: a fixture HOME whose package entry
-  // links to this repo's plugin/, so the real install is never read.
+  // The pin certifies the Install root: a fixture HOME whose package entry is
+  // a real directory holding the same files, so the real install is never read.
   const home = fresh("home-pin");
-  mkdirSync(join(home, ".omp", "plugins", "node_modules", "@feigi"), { recursive: true });
-  symlinkSync(join(repo, "plugin"), join(home, ".omp", "plugins", "node_modules", "@feigi", "fleet-ctl"));
+  const pkg = join(home, ".omp", "plugins", "node_modules", "@feigi", "fleet-ctl");
+  const installed = files.map((f) => join(pkg, f.replace(/^plugin\//, "")));
+  for (const f of installed) {
+    mkdirSync(join(f, ".."), { recursive: true });
+    writeFileSync(f, "original\n");
+  }
   const sh = (...args) => spawnSync("sh", [join(PLUGIN, "scripts", "instruments.sh"), ...args], { cwd: repo, encoding: "utf8", env: { ...cleanEnv(), HOME: home } });
   assert.equal(sh("--pin").status, 0);
   assert.equal(sh().status, 0);
-  for (const f of files) {
-    writeFileSync(join(repo, f), "tampered\n");
+  for (const f of installed) {
+    writeFileSync(f, "tampered\n");
     assert.equal(sh().status, 1, `${f} changed and the pin stayed silent`);
-    writeFileSync(join(repo, f), "original\n");
+    writeFileSync(f, "original\n");
     assert.equal(sh().status, 0);
   }
 });

@@ -650,7 +650,7 @@ const CHANGED = [
   // `--plugin-checkout` flag with the `--audit` it passed through (#3845).
   [
     "It covers every tracked file under this repo's own plugin component directories — `plugin/commands/`, `plugin/scripts/`, `plugin/skills/`, `plugin/agents/`, `plugin/workflows/` — the probes, the libraries they source, and these runbooks, which you also read from that tree.",
-    "It covers the Install root's plugin component directories — `commands/`, `scripts/`, `skills/`, `agents/`, `workflows/` — the probes, the libraries they source, and these runbooks, which you also read from that tree: the tracked files of a linked checkout's `plugin/…`, or every file of an installed package.",
+    "It covers the Install root's plugin component directories — `commands/`, `scripts/`, `skills/`, `agents/`, `workflows/` — the probes, the libraries they source, and these runbooks, which you also read from that tree: every file of the installed package.",
   ],
   // A routed-but-undrawn row names its cell with `cell=`, so the policy cell is
   // what a row with neither token runs.

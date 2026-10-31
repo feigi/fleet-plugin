@@ -9,8 +9,7 @@ Evidence for the rule SKILL.md states in **Re-check the instruments before a gat
 **You read your instruments out of a tree every member can write to — re-check
 them before every gate decision.** Per-member worktrees and `./agent-test`'s port
 derivation protect members from each other; neither protects the Install root,
-the tree you run every gate probe out of and read these runbooks from. It is
-the main checkout only when that checkout is linked as the install. The
+the tree you run every gate probe out of and read these runbooks from. The
 `member-write-guard` extension refuses a `write`/`edit`/`ast_edit` into the
 Install root, as it does into the main checkout, but a `bash` or `eval` write
 into the Install root still lands, and this re-check is what catches one.
@@ -34,8 +33,11 @@ in the instrument re-check block of `agents/fleet-finisher.agent.md`, the merge 
 
 It covers the Install root's plugin component directories — `commands/`,
 `scripts/`, `skills/`, `agents/`, `workflows/` — the probes, the libraries they
-source, and these runbooks, which you also read from that tree: the tracked
-files of a linked checkout's `plugin/…`, or every file of an installed package.
+source, and these runbooks, which you also read from that tree: every file of
+the installed package. A linked Install root (`omp plugin link`) is not covered
+but refused, at the pin and at every check: a fleet run executes an installed
+package, so the maintainer uninstalls the link and installs the package, and you
+never run `omp plugin`.
 Not the whole repo: `docs/metrics/` is appended by THIS run, so covering it
 would refuse on the run's own bookkeeping every time. It does not cover refs,
 deliberately: `claim-ticket.sh` creates a branch per ticket and `reap.sh`
@@ -92,58 +94,20 @@ defect reaches whenever it changes what that member does — live members now,
 later ones right after their dispatch — and count a repeat of the same failure
 as this defect, not a new trigger.
 
-## A pinned tree whose HEAD moved is the maintainer's to settle
+## A changed installed plugin is the maintainer's to settle
 
-Pinned from a linked checkout, `instruments.sh --pin` records the checkout's
-HEAD as `commit=<sha>` after the digest and `root=`, and an exit-1 refusal
-prints that pin commit and how
-HEAD relates to it: `advanced` (the pin commit is an ancestor of HEAD, with the
-commits between, at most 20 and then `… N more`), `rewound`, `diverged`, or
-`unmoved` (HEAD is the pin commit, so the porcelain lines name the edits). When
-git cannot compare the two — an unreadable object, a corrupt history — it says
-the relation is `unknown`, with git's own error, rather than guess one; HEAD is
-not the pin commit there either, so never re-pin over it. A baseline with no
-`commit=` line, or one whose commit is gone from the repository, prints one
-line saying so and no relation.
+**An installed package has no HEAD.** `instruments.sh --pin` records the
+package's `version=` after the digest and `root=`, and an exit-1 refusal names
+the pinned version and the current one, with no git output. An Install root
+that now resolves elsewhere than the pinned one — a reinstall that moved it, a
+move into omp's cache, a baseline from an older plugin that recorded a checkout
+— refuses at exit 2, naming the pinned root and the current one. A linked
+Install root refuses at exit 2 at the pin and at every check, naming the link.
+Restore is the maintainer reinstalling the pinned version by hand, never the
+controller: a reinstall swaps the files under every live member.
 
-**An installed package has no HEAD.** Pinned from an npm or marketplace
-install, the baseline records the package's `version=` in place of a commit,
-and an exit-1 refusal names the pinned version and the current one, with no
-git output. An Install root that now resolves elsewhere than the pinned one —
-a reinstall that moved it, a switch between a package and a linked checkout,
-a link pointed elsewhere — refuses at exit 2, naming the pinned root and the
-current one. Restore is the maintainer reinstalling the pinned version by
-hand, never the controller: a reinstall swaps the files under every live
-member.
-
-**The measured case.** Another session fast-forwarded the main checkout to
-`origin/main` mid-run. The commits that brought in were only this run's own
-merged PRs, the controller counted them as its own, re-pinned without asking and
-dispatched the next finishers. The tick could not see the move: its
-main-checkout guard reads a fast-forward to `origin/main` as clean, and the tick
-never runs the instrument check. Only the gate re-checks saw it — a finisher
-halting with cause `other`, the merge gate refusing with
-`instrument-set-changed`. A refusal cannot tell a move the maintainer would
-adopt from one they would not, because only they know whether a session of
-theirs is working in that checkout, so the pin stays frozen and the move stays
-a refusal even when the commits between are only the run's own.
-
-**Why the reset is the controller's only on a clean tick.** A clean
-main-checkout reading means HEAD is still on `main` and every commit since the
-baseline is on `origin/main`. So `git reset --keep <pin commit>` moves no other
-branch and drops nothing that exists only locally, and `--keep` refuses rather
-than overwrite an uncommitted edit that conflicts with the move. On a switched
-branch the guard prints `MAIN-CHECKOUT-DIRTY HEAD …`, and a reset there would
-move that other branch, so the maintainer restores such a tree by hand.
-
-Measured in a temp clone with the real `main-checkout.mjs` and
-`instruments.sh`, the pin 3 commits behind `origin/main` and 4 set paths
-different:
-
-| Checkout state | Main-checkout guard | Instrument check |
-|---|---|---|
-| at the pin commit | clean | 0 |
-| fast-forwarded to `origin/main` | clean | 1 |
-| after `git reset --keep <pin commit>` | clean | 0 |
-| on another branch | `MAIN-CHECKOUT-DIRTY HEAD refs/heads/main@… → refs/heads/other@…` | 1 |
+A fast-forward of the main checkout is no refusal: the pin certifies the
+installed package, not the checkout, so moving the checkout changes no
+instrument. The tick's main-checkout guard reads a fast-forward to
+`origin/main` as clean and holds the run on a branch switch or an edit.
 

@@ -343,7 +343,7 @@ _Avoid_: shim, wrapper, launcher
 **Provenance check**:
 The assertion naming the live Install root, its install kind and recorded version,
 and the Resolver's own drift against the installed copy — with a NOTICE when the
-root is a linked checkout, since then every answer came from the dev tree.
+root is a linked checkout, since then every answer comes from the dev tree.
 Refuses loudly; writes nothing.
 _Avoid_: doctor, healthcheck
 
@@ -360,7 +360,8 @@ _Avoid_: doctor, healthcheck
 `omp plugin link <checkout>/plugin` — the working checkout registered as the
 box's live plugin, so pre-merge iteration edits reach a fresh session with no
 reinstall. It outranks every installed copy of the same names until
-uninstalled, so it belongs on the dev box only.
+uninstalled, so it belongs on the dev box only. A fleet run refuses a linked
+root, so uninstall the link and install the package before running the fleet.
 _Avoid_: dev catalog, local marketplace, dev source
 
 **Install-time precondition**:

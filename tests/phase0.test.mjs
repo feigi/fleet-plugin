@@ -12,7 +12,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
@@ -309,8 +309,8 @@ test("--plugin-checkout is gone: phase 0 refuses it as an unknown flag", () => {
   assert.equal(f.calls("instruments").length, 0);
 });
 
-test("the pin step's ok line names the kind, the root, and the version or commit, from --pin's stderr line", () => {
-  for (const tail of ["npm-install /home/u/.omp/plugins/node_modules/@feigi/fleet-ctl (version 3.102.7)", "linked-checkout /home/u/dev/fleet-plugin (commit 0123456789abcdef0123456789abcdef01234567)"]) {
+test("the pin step's ok line names the kind, the root and the version, from --pin's stderr line", () => {
+  for (const tail of ["npm-install /home/u/.omp/plugins/node_modules/@feigi/fleet-ctl (version 3.102.7)", "marketplace-install /home/u/.omp/plugins/cache/fleet-ctl/3.102.7 (version 3.102.7)"]) {
     const f = fixture();
     f.control("instruments", { out: `${"a".repeat(64)}\n`, err: `instruments: pinned ${"a".repeat(64)} over ${tail}\n` });
     const r = f.run(["--session", f.session]);
@@ -414,6 +414,7 @@ const REFUSALS = [
   ["branch", (f) => git(f.repo, "switch", "-q", "-c", "other"), /HEAD is refs\/heads\/other, not refs\/heads\/main/],
   ["fast-forward", (f) => git(f.repo, "remote", "set-url", "origin", join(f.dir, "no-such-origin.git")), /git fetch origin failed/],
   ["pin", (f) => f.control("instruments", { exit: 1, err: "instruments: nothing to certify" }), /instruments: nothing to certify/],
+  ["pin", (f) => f.control("instruments", { exit: 2, err: "instruments: Install root /home/u/dev/fleet-plugin/plugin is a linked checkout (omp plugin link) — a fleet run executes an installed package; omp plugin uninstall @feigi/fleet-ctl, then omp plugin install @feigi/fleet-ctl, and restart." }), /is a linked checkout \(omp plugin link\)[^]*omp plugin uninstall @feigi\/fleet-ctl, then omp plugin install @feigi\/fleet-ctl/],
   ["baseline", (f) => f.control("main-checkout", { exit: 1, err: "MAIN-CHECKOUT-DIRTY: README" }), /MAIN-CHECKOUT-DIRTY: README/],
   ["labels", (f) => f.control("label-map", { exit: 1, err: "\nlabel-map: docs/agents/triage-labels.md gives a Label map that breaks the string rules; nothing written, nothing created:\n  in-progress: longer than 50 characters" }), /mjs ensure exit 1\n[^]*breaks the string rules[^]*in-progress: longer than 50 characters/],
   ["labels", (f) => f.control("label-map", { exit: 2, err: "label-map: gh label list could not answer" }), /mjs ensure exit 2\nlabel-map: gh label list could not answer/],
@@ -510,7 +511,7 @@ test("a preflight that exits 1 without a FAIL line reports what it printed", () 
   assert.match(r.stdout, /some diagnostic that is not FAIL-prefixed/);
 });
 
-test("a fast-forward that moves HEAD prints SUPERSEDED, fails, and a re-run starts from the new tree", () => {
+test("a fast-forward that moves HEAD is ok, and the same run goes on to pin — the rules come from the installed package", () => {
   const f = fixture();
   const other = join(f.dir, "other");
   git(f.dir, "clone", "-q", f.origin, other);
@@ -522,13 +523,12 @@ test("a fast-forward that moves HEAD prints SUPERSEDED, fails, and a re-run star
   git(other, "push", "-q", "origin", "main");
   const before = git(f.repo, "rev-parse", "HEAD");
   const r = f.run();
-  assert.equal(r.status, 3, r.stdout + r.err);
-  assert.match(r.stdout, /^phase0: fast-forward: failed — SUPERSEDED 2 commits; re-run phase0\.mjs$/m);
-  assert.equal(f.receipt().steps["fast-forward"].output, "SUPERSEDED 2 commits; re-run phase0.mjs");
+  assert.equal(r.status, 0, r.stdout + r.err);
+  assert.equal(f.receipt().steps["fast-forward"].status, "ok");
+  assert.equal(f.receipt().steps["fast-forward"].output, "fast-forwarded 2 commits to origin/main");
+  assert.doesNotMatch(r.stdout + r.err, /SUPERSEDED/);
   assert.notEqual(git(f.repo, "rev-parse", "HEAD"), before, "the checkout did fast-forward");
-  assert.deepEqual(f.order(), [], "nothing past the fast-forward ran, the pin least of all");
-  const again = f.run();
-  assert.equal(again.status, 0, again.stdout + again.err);
+  assert.equal(f.calls("instruments").length, 1, "the pin ran in the same run, after the fast-forward");
   assert.deepEqual(statuses(f.receipt()), allOk);
 });
 
@@ -1488,25 +1488,21 @@ test("arg.mjs: the script binds defineFlags and refuses an unknown flag in the s
   assert.match(r.stderr, /^phase0: unknown flag --bogus/m);
 });
 
-test("the instruments pin covers phase0.mjs: a rewrite of it is a changed instrument set, and an untracked file beside it is not", () => {
+test("the instruments pin covers phase0.mjs: a rewrite of it is a changed instrument set", () => {
   const dir = realpathSync(tempDir("phase0-pin-"));
-  mkdirSync(join(dir, "plugin", "scripts"), { recursive: true });
-  cpSync(join(REAL_SCRIPTS, "phase0.mjs"), join(dir, "plugin", "scripts", "phase0.mjs"));
   git(dir, "init", "-q", "-b", "main");
-  git(dir, "add", "-A");
-  git(dir, "commit", "-q", "-m", "i");
-  // The pin certifies the Install root: a fixture HOME whose package entry
-  // links to this checkout's plugin/, so the real install is never read.
+  // The pin certifies the Install root: a fixture HOME whose package entry is
+  // a real directory, so the real install is never read.
   const home = realpathSync(tempDir("phase0-home-"));
-  mkdirSync(join(home, ".omp", "plugins", "node_modules", "@feigi"), { recursive: true });
-  symlinkSync(join(dir, "plugin"), join(home, ".omp", "plugins", "node_modules", "@feigi", "fleet-ctl"));
+  const pkg = join(home, ".omp", "plugins", "node_modules", "@feigi", "fleet-ctl");
+  mkdirSync(join(pkg, "scripts"), { recursive: true });
+  cpSync(join(REAL_SCRIPTS, "phase0.mjs"), join(pkg, "scripts", "phase0.mjs"));
   const pin = (...a) => spawnSync("sh", [join(REAL_SCRIPTS, "instruments.sh"), ...a], { cwd: dir, encoding: "utf8", env: { ...GIT_ENV, HOME: home } });
-  assert.equal(pin("--pin").status, 0);
+  const pinned = pin("--pin");
+  assert.equal(pinned.status, 0, pinned.stderr);
   assert.equal(pin().status, 0, "unchanged");
-  writeFileSync(join(dir, "plugin", "scripts", "scratch.txt"), "untracked\n");
-  assert.equal(pin().status, 0, "an untracked file is no instrument");
-  writeFileSync(join(dir, "plugin", "scripts", "phase0.mjs"), `${readFileSync(join(dir, "plugin", "scripts", "phase0.mjs"), "utf8")}\n// edited\n`);
+  writeFileSync(join(pkg, "scripts", "phase0.mjs"), `${readFileSync(join(pkg, "scripts", "phase0.mjs"), "utf8")}\n// edited\n`);
   const changed = pin();
   assert.equal(changed.status, 1);
-  assert.match(changed.stdout + changed.stderr, /phase0\.mjs/);
+  assert.notEqual(changed.stdout, pinned.stdout);
 });

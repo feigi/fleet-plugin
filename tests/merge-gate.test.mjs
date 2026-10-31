@@ -1098,25 +1098,23 @@ test("--out that cannot be written → 2, and no verdict on stdout the file does
 // handoff across that seam, and a stubbed child proves only the row table —
 // it can echo an exit code, never derive one from two trees.
 
-// A checkout that carries the instrument set — the plugin's own repo —
-// separate from every gate fixture's workspace repo.
-function pluginTree(t) {
-  const dir = mktemp(t, "merge-gate-plugin-");
-  git(dir, "init", "-q", "-b", "main");
-  mkdirSync(join(dir, "plugin", "scripts"), { recursive: true });
-  writeFileSync(join(dir, "plugin", "scripts", "probe.sh"), "echo probe\n");
-  git(dir, "-c", "user.email=t@example.com", "-c", "user.name=t", "add", "-A");
-  git(dir, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qm", "fixture");
-  return dir;
+// An installed package that carries the instrument set — separate from every
+// gate fixture's workspace repo — under a fixture HOME whose
+// `@feigi/fleet-ctl` entry is a real directory: the Install root every
+// resolver reads.
+function installedPackage(t) {
+  const home = mktemp(t, "merge-gate-home-");
+  const pkg = join(home, ".omp", "plugins", "node_modules", "@feigi", "fleet-ctl");
+  mkdirSync(join(pkg, "scripts"), { recursive: true });
+  writeFileSync(join(pkg, "scripts", "probe.sh"), "echo probe\n");
+  return { home, pkg };
 }
 
-// A fixture HOME whose `@feigi/fleet-ctl` entry links to `to` — the Install
-// root every resolver reads — or, with no `to`, has no entry at all.
-function installHome(t, to) {
+// A fixture HOME with the plugin scope in place and no `@feigi/fleet-ctl`
+// entry at all.
+function emptyHome(t) {
   const home = mktemp(t, "merge-gate-home-");
-  const scope = join(home, ".omp", "plugins", "node_modules", "@feigi");
-  mkdirSync(scope, { recursive: true });
-  if (to) symlinkSync(to, join(scope, "fleet-ctl"));
+  mkdirSync(join(home, ".omp", "plugins", "node_modules", "@feigi"), { recursive: true });
   return home;
 }
 
@@ -1134,8 +1132,7 @@ function pinAcrossSeam({ repo, scripts }, home) {
 }
 
 test("a plugin-less workspace reaches a verdict: the gate audits the Install root, gh legs on the workspace", (t) => {
-  const plugin = pluginTree(t);
-  const home = installHome(t, join(plugin, "plugin"));
+  const { home } = installedPackage(t);
   let digest = null;
   const r = gate(t, {
     realInstruments: true,
@@ -1148,33 +1145,49 @@ test("a plugin-less workspace reaches a verdict: the gate audits the Install roo
   assert.equal(
     r.json.instruments,
     digest,
-    "the JSON carries the digest of the plugin tree — the workspace has no instruments to digest",
+    "the JSON carries the digest of the installed package — the workspace has no instruments to digest",
   );
 });
 
 test("tampering the Install root still closes the gate across the seam: 2 instrument-set-changed", (t) => {
-  const plugin = pluginTree(t);
-  const home = installHome(t, join(plugin, "plugin"));
+  const { home, pkg } = installedPackage(t);
   const r = gate(t, {
     realInstruments: true,
     env: { HOME: home },
     instrPre: (ws) => {
       pinAcrossSeam(ws, home);
-      writeFileSync(join(plugin, "plugin", "scripts", "probe.sh"), "echo TAMPERED\n");
+      writeFileSync(join(pkg, "scripts", "probe.sh"), "echo TAMPERED\n");
     },
   });
   assertRow(r, 2, "unknown", "instrument-set-changed");
 });
 
 test("an Install root that resolves elsewhere than the pin reaches the gate as 2 instruments-unanswerable", (t) => {
-  const plugin = pluginTree(t);
-  const other = pluginTree(t);
-  const pinned = installHome(t, join(plugin, "plugin"));
+  const pinned = installedPackage(t);
+  const other = installedPackage(t);
   const r = gate(t, {
     realInstruments: true,
-    env: { HOME: installHome(t, join(other, "plugin")) },
+    env: { HOME: other.home },
     instrPre: (ws) => {
-      pinAcrossSeam(ws, pinned);
+      pinAcrossSeam(ws, pinned.home);
+    },
+  });
+  assertRow(r, 2, "unknown", "instruments-unanswerable");
+  assert.equal(r.json.instruments, null);
+});
+
+test("a linked Install root reaches the gate as 2 instruments-unanswerable, whatever the pin said", (t) => {
+  const pinned = installedPackage(t);
+  const linked = mktemp(t, "merge-gate-linked-");
+  mkdirSync(join(linked, "scripts"), { recursive: true });
+  writeFileSync(join(linked, "scripts", "probe.sh"), "echo probe\n");
+  const home = emptyHome(t);
+  symlinkSync(linked, join(home, ".omp", "plugins", "node_modules", "@feigi", "fleet-ctl"));
+  const r = gate(t, {
+    realInstruments: true,
+    env: { HOME: home },
+    instrPre: (ws) => {
+      pinAcrossSeam(ws, pinned.home);
     },
   });
   assertRow(r, 2, "unknown", "instruments-unanswerable");
@@ -1185,7 +1198,7 @@ test("a plugin-less workspace with NO pin of any kind keeps its exit 2", (t) => 
   // The incident shape stays a refusal, never a silent pass: with no
   // baseline the instruments leg answers nothing, and the gate lands on
   // instruments-unanswerable.
-  const r = gate(t, { realInstruments: true, env: { HOME: installHome(t) } });
+  const r = gate(t, { realInstruments: true, env: { HOME: emptyHome(t) } });
   assertRow(r, 2, "unknown", "instruments-unanswerable");
   assert.equal(r.json.instruments, null);
 });
