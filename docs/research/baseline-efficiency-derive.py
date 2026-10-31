@@ -75,7 +75,12 @@ def scrape_member_outcomes():
                 continue
             cells = line.split("\t")
             if len(cells) != len(COLUMNS):
-                continue
+                # Mirror the producer's parseTsv (member-outcomes.mjs): refuse, don't skip.
+                raise SystemExit(
+                    f"malformed row: {len(cells)} fields, expected {len(COLUMNS)} — "
+                    "COLUMNS in this script has drifted from the schema in "
+                    "plugin/scripts/member-outcomes.mjs; update it to match"
+                )
             rows.append(dict(zip(COLUMNS, cells)))
     return rows
 
