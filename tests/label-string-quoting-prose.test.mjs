@@ -101,6 +101,10 @@ test("negative control: a role placeholder inside single quotes, or bare, does n
   assert.equal(holds("gh pr edit <pr> --remove-label <ready-to-merge string>"), false);
   assert.equal(holds('gh pr edit <pr> --remove-label "<ready-to-merge string>"'), true);
   assert.equal(holds('label="<ready-to-merge string>" gh api x -q \'.[] | env.label\''), true);
+  // Only `won't fix` catches this one: `bash -n` does not parse arithmetic, so
+  // the unquoted `&& &&` is no error there and UNMASKABLE's quotes pair up.
+  assert.equal(holds("(( '<ready-to-merge string>' ))\necho 'z'"), false);
+  assert.equal(holds('(( "<ready-to-merge string>" ))\necho \'z\''), true);
 });
 
 test("negative control: a single-quoted placeholder fails even when a later quote in the same text could pair with its apostrophe", () => {
