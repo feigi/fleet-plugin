@@ -73,7 +73,11 @@ export function readRunReceipt(opts) {
   return { path, read: readReceipt(path) };
 }
 
-const phase0Command = (session) => `~/.fleet/bin/fleet-run phase0.mjs --session ${session ?? "<session>"}`;
+// With no recorded session the remedy is the eval-cell run: phase0.mjs falls
+// back to PI_ARTIFACTS_DIR, which the bash tool's environment carries none of.
+const phase0Command = (session) => session
+  ? `~/.fleet/bin/fleet-run phase0.mjs --session ${session}`
+  : "phase0.mjs from a Python eval cell in the main checkout, without --session (run-team SKILL.md phase 0 step 0)";
 
 /**
  * The tick's gate over one read of the receipt. `controllerAt` is the `at`
