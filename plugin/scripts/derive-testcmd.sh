@@ -58,8 +58,9 @@
 # A Test entrypoint is also INVALID when a glob in it matches no tracked file
 # (the vacuous-suite probe, below): such a suite selects no tests and passes
 # having run nothing. The optional trailing `--at <rev>` names the commit whose
-# tree that probe reads instead of <repo>'s own index, for a caller that runs
-# the command in a worktree cut from a ref.
+# tree the probes read instead of <repo>'s own, for a caller that runs the
+# command in a worktree cut from a ref: the leading word's resolvability probe
+# for any command field, and the vacuous-suite probe for the Test entrypoint.
 #
 # A Test entrypoint is ONE simple command: a join or a group (an unquoted
 # newline, or an unquoted `;`, `&`, `|`, `(` or `)` outside a redirection) is
@@ -139,13 +140,13 @@ unrunnable() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 3; }
 # step, so a controller or reviewer reading any of them knows what to run.
 derive="run the Recipe derivation step (run-team phase 0, before the first claim) to derive, prove and write it"
 
-# `--at <rev>` names the commit whose tree the Test entrypoint will run in, for
-# the vacuous-suite probe below. A caller that builds its worktree from a ref
-# (claim-ticket.sh cuts one from origin/main) is asking about THAT tree, which
-# the repository's own checkout may not hold: after the suite moves upstream
-# the checkout still lists the old layout until someone updates it. Without
-# `--at` the probe reads <repo>'s own index, as for a caller that runs the
-# command in <repo> itself. Three arguments is neither shape: a refusal.
+# `--at <rev>` names the commit whose tree the command will run in. A caller
+# that builds its worktree from a ref (claim-ticket.sh cuts one from
+# origin/main) is asking about THAT tree, which the repository's own checkout
+# may not hold: after a path moves upstream the checkout still has the old
+# layout until someone updates it. Without `--at` the probes read <repo>'s own
+# working tree and index, as for a caller that runs the command in <repo>
+# itself. Three arguments is neither shape: a refusal.
 usage="usage: derive-testcmd.sh <repo> <install|check|test|uncovered> [--at <rev>]
        derive-testcmd.sh --propose <repo> <install|check|test> <command> [--at <rev>]"
 propose=
@@ -185,10 +186,11 @@ case $field in
   *) die "unknown Recipe field '$field' — expected install, check, test or uncovered" ;;
 esac
 
-# A <rev> is only ever consulted by the probe, which only the Test entrypoint
-# has; accepting it for the Install step would answer a question nothing asked.
+# A <rev> is consulted by the probes, which only a command field has:
+# `uncovered` is data that nothing runs, so accepting it there would answer a
+# question nothing asked.
 if [ -n "$rev" ]; then
-  [ "$field" = test ] || die "--at applies to the test field only, not '$field' — $usage"
+  [ "$field" != uncovered ] || die "--at applies to the install, check and test fields, not '$field' — $usage"
   revc=$(git -C "$repo" rev-parse --verify "$rev^{commit}") \
     || die "--at '$rev' does not resolve to a commit in $repo"
 fi
@@ -463,20 +465,88 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ $# -gt 0 ] || die "$subj $field command names no command, only assignments — $tail"
+# On disk, in <repo>, so a relative `./run-tests.sh` resolves where the command
+# itself will run from. `command -v` alone is not exec-bit-aware for a
+# `/`-containing word under dash (Ubuntu's default /bin/sh): it only stat()s
+# the path there, never checking execute permission — measured: `dash -c
+# 'command -v ./run.sh'` on a chmod 0644 file exits 0. `[ -x ]` is the
+# exec-bit-aware check that closes the gap; a bare name (builtin or a PATH
+# match) has no path to test and is left to `command -v`.
+ondisk() {
+  (cd "$repo" && command -v -- "$1" || exit 1
+    case $1 in */*) [ -x "$1" ] || exit 1 ;; esac) >/dev/null 2>&1 \
+    || die "$subj $field command '$1' is not found or not executable from $repo — $stale; $tail"
+}
+# The path a relative `/`-containing word names under <repo>, its `.` and `..`
+# segments folded, in `inrepo`. Status 1, nothing set, for an absolute word, a
+# word that climbs out of <repo>, or one that names <repo> itself: none of them
+# is a path <rev>'s tree can hold, so the disk answers for them.
+inside() {
+  case $1 in /*) return 1 ;; esac
+  in_rest=$1/
+  inrepo=
+  while [ -n "$in_rest" ]; do
+    in_seg=${in_rest%%/*}
+    in_rest=${in_rest#*/}
+    case $in_seg in
+      ''|.) ;;
+      ..)
+        [ -n "$inrepo" ] || return 1
+        case $inrepo in */*) inrepo=${inrepo%/*} ;; *) inrepo= ;; esac ;;
+      *) inrepo=${inrepo:+$inrepo/}$in_seg ;;
+    esac
+  done
+  [ -n "$inrepo" ]
+}
+# The mode <rev>'s tree records at the <repo> path $1 — 100755, 100644, 120000,
+# 160000 or 040000 — in `mode`, empty when the tree holds no entry there. A
+# git that cannot list it is no verdict: exit 3.
+revmode() {
+  mode=$(git -C "$repo" ls-tree "$revc" -- ":(literal)$1" 2>"$errf") || {
+    listed=$?
+    unrunnable "cannot list '$1' in the tree of $rev in $repo to check its $field command (git ls-tree exit $listed): $(cat "$errf" 2>/dev/null)"
+  }
+  mode=${mode%% *}
+}
+# Whether the word $2, naming the <repo> path $1, runs in <rev>'s tree. An
+# executable file there runs. A symlink or a submodule entry — the path's own
+# or a directory's on the way to it — is accepted unprobed, as the
+# vacuous-suite probe accepts one: the shell follows a link, the Install step
+# populates a submodule. A path the tree does not hold runs only when git
+# ignores it, as generated output such as an Install step's product, with the
+# ignore rules read from <repo>'s working copy, the one place git reads them
+# from. Anything else — a file without the exec bit, a directory, an absent
+# path git does not ignore — is refused.
+atrev() {
+  refusal="$subj $field command '$2' is not found or not executable from $repo at $rev — $stale; $tail"
+  revmode "$1"
+  case $mode in
+    100755|120000|160000) return 0 ;;
+    '') ;;
+    *) die "$refusal" ;;
+  esac
+  at_lead=$1
+  while :; do
+    case $at_lead in */*) at_lead=${at_lead%/*} ;; *) break ;; esac
+    revmode "$at_lead"
+    case $mode in 120000|160000) return 0 ;; esac
+  done
+  ignored=0
+  git -C "$repo" check-ignore -q --no-index -- "$1" 2>"$errf" || ignored=$?
+  case $ignored in
+    0) ;;
+    1) die "$refusal" ;;
+    *) unrunnable "cannot ask git whether $repo ignores its $field command '$2' (git check-ignore exit $ignored): $(cat "$errf" 2>/dev/null)" ;;
+  esac
+}
+# With `--at`, a `/`-containing word that names a path inside <repo> is judged
+# against <rev>'s tree, the one the command will run in; an absolute or
+# escaping one, and a bare name, keep the disk's answer.
 case $1 in
   *[\'\"\\\$\`\(\)\{\}\<\>\|\&\;\*\?\[\~]*) ;;
-  *)
-    # In <repo>, so a relative `./run-tests.sh` resolves where the command
-    # itself will run from. `command -v` alone is not exec-bit-aware for a
-    # `/`-containing word under dash (Ubuntu's default /bin/sh): it only
-    # stat()s the path there, never checking execute permission — measured:
-    # `dash -c 'command -v ./run.sh'` on a chmod 0644 file exits 0. `[ -x ]`
-    # is the exec-bit-aware check that closes the gap; a bare name (builtin
-    # or a PATH match) has no path to test and is left to `command -v`.
-    (cd "$repo" && command -v -- "$1" || exit 1
-      case $1 in */*) [ -x "$1" ] || exit 1 ;; esac) >/dev/null 2>&1 \
-      || die "$subj $field command '$1' is not found or not executable from $repo — $stale; $tail"
-    ;;
+  */*)
+    if [ -n "$rev" ] && inside "$1"; then atrev "$inrepo" "$1"; else ondisk "$1"; fi ;;
+  *) ondisk "$1" ;;
 esac
 
 # The vacuous-suite probe, for the Test entrypoint only. A pattern that
@@ -525,8 +595,7 @@ esac
 # nothing. With `--at <rev>` the tracked files are <rev>'s tree, read into a
 # private index file, and the symlink and submodule test reads that tree
 # too; the ignore rules are still <repo>'s working copy's, the one place git
-# reads them from. The resolvability probe of the command's leading word
-# above stays <repo>'s own. A git call of the probe that fails is git not
+# reads them from. A git call of the probe that fails is git not
 # running to an answer, exit 3: no verdict on the cache or on a proposal, so
 # recipe-prove.mjs never reads it as NOT PROVEN.
 if [ "$field" = test ]; then

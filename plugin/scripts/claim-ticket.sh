@@ -186,15 +186,16 @@ script_dir=$(dirname -- "$0")
 # copies could drift apart, and derive-testcmd.sh already keeps its own
 # version the same way (`$derive`).
 rederive="the Recipe cache is invalid; run the Recipe derivation step (run-team phase 0, before the first claim) to re-derive it"
-install=$("$script_dir/derive-testcmd.sh" . install 2>&1) || die "$install"
+# Both are probed against origin/main, not the main checkout: the worktree is
+# cut from origin/main (below), so that tree is where the commands run.
+# Nothing here updates the main checkout, so after a path moves on origin/main
+# the checkout still holds the old layout: an Install step or Test entrypoint
+# whose script origin/main lost reads as runnable there and then fails in the
+# worktree, and a test pattern into the old layout is accepted by a probe of
+# the checkout and then selects nothing in the worktree — a run that reports
+# `tests 0` at exit 0.
+install=$("$script_dir/derive-testcmd.sh" . install --at origin/main 2>&1) || die "$install"
 echo "    Install step → $install" >&2
-# The Test entrypoint is probed against origin/main, not the main checkout: the
-# worktree is cut from origin/main (below), so that tree is where the command
-# runs. Nothing here updates the main checkout, so after the suite moves on
-# origin/main it still lists the old layout, and a pattern into it is accepted
-# by a probe of the checkout and then selects nothing in the worktree — a run
-# that reports `tests 0` at exit 0. The Install step takes no ref: the probe
-# is the Test entrypoint's alone.
 testcmd=$("$script_dir/derive-testcmd.sh" . test --at origin/main 2>&1) || die "$testcmd"
 echo "    test entrypoint → $testcmd" >&2
 

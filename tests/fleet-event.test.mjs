@@ -18,7 +18,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
@@ -203,7 +203,7 @@ function fixture({ rows = [], dispatched = [], retired = [], caps = { impl: 3, r
   writeFileSync(join(repo, ".gitignore"), ".fleet/\n");
   git(repo, "add", "-A");
   git(repo, "commit", "-q", "-m", "root");
-  // origin/main, which the Recipe's `test --at origin/main` read resolves.
+  // origin/main, which every Recipe read's `--at origin/main` resolves.
   git(repo, "update-ref", "refs/remotes/origin/main", "HEAD");
   writeExecStub(join(bin, "gh"), GH_STUB);
   const fleet = join(repo, ".fleet");
@@ -1835,8 +1835,8 @@ for (const { name, argv, fixture: make } of RECIPE_WAKES) {
     refuseRecipe(f);
     const r = f.run(argv);
     assert.equal(r.status, 4, r.err + r.stdout);
-    for (const read of ["install", "check", "test --at origin/main"]) {
-      assert.match(r.stdout, new RegExp(`^derive-testcmd\\.sh \\. ${read} refused:$`, "m"));
+    for (const read of ["install", "check", "test"]) {
+      assert.match(r.stdout, new RegExp(`^derive-testcmd\\.sh \\. ${read} --at origin/main refused:$`, "m"));
     }
     assert.equal(r.out.filter((l) => l === "NEED derive-recipe").length, 1, r.stdout);
     assert.ok(r.out.indexOf("NEED derive-recipe") < r.out.indexOf(eventLine(r)), "the NEED comes before the event line, which comes before the tick's rows");
@@ -1848,8 +1848,8 @@ for (const { name, argv, fixture: make } of RECIPE_WAKES) {
     f.recipe({ check: "no-such-checker --all", checkMutation: "break it" });
     const r = f.run(argv);
     assert.equal(r.status, 4, r.err + r.stdout);
-    assert.match(r.stdout, /^derive-testcmd\.sh \. check refused:$/m);
-    assert.doesNotMatch(r.stdout, /derive-testcmd\.sh \. (install|test --at origin\/main) refused/);
+    assert.match(r.stdout, /^derive-testcmd\.sh \. check --at origin\/main refused:$/m);
+    assert.doesNotMatch(r.stdout, /derive-testcmd\.sh \. (install|test) --at origin\/main refused/);
     assert.equal(r.out.filter((l) => l === "NEED derive-recipe").length, 1, r.stdout);
   });
 
@@ -1860,6 +1860,22 @@ for (const { name, argv, fixture: make } of RECIPE_WAKES) {
     assert.equal(r.status, 4, r.err + r.stdout);
     assert.match(r.stdout, /^derive-testcmd\.sh \. test --at origin\/main refused:$/m);
     assert.match(r.stdout, /--at/);
+    assert.equal(r.out.filter((l) => l === "NEED derive-recipe").length, 1, r.stdout);
+  });
+
+  test(`${name}: a command path the main checkout holds and origin/main does not is refused against origin/main, with the NEED`, () => {
+    const f = make();
+    writeFileSync(join(f.repo, "run-tests.sh"), "#!/bin/sh\n");
+    chmodSync(join(f.repo, "run-tests.sh"), 0o755);
+    git(f.repo, "add", "run-tests.sh");
+    git(f.repo, "commit", "-q", "-m", "a script origin/main does not hold");
+    f.recipe({ install: "./run-tests.sh", check: "./run-tests.sh", checkMutation: "break it" });
+    const r = f.run(argv);
+    assert.equal(r.status, 4, r.err + r.stdout);
+    for (const read of ["install", "check"]) {
+      assert.match(r.stdout, new RegExp(`^derive-testcmd\\.sh \\. ${read} --at origin/main refused:$`, "m"));
+      assert.ok(r.stdout.includes(`its ${read} command './run-tests.sh' is not found or not executable from . at origin/main — `), r.stdout);
+    }
     assert.equal(r.out.filter((l) => l === "NEED derive-recipe").length, 1, r.stdout);
   });
 
@@ -1875,7 +1891,7 @@ for (const { name, argv, fixture: make } of RECIPE_WAKES) {
     const f = make();
     const r = f.run(argv, { env: brokenNode(f) });
     assert.equal(r.status, 4, r.err + r.stdout);
-    assert.match(r.stdout, /^NEED recipe-read after \S+ — derive-testcmd\.sh \. install exit 3 — the cache's state is unknown, and deriving would not help — .*node/m);
+    assert.match(r.stdout, /^NEED recipe-read after \S+ — derive-testcmd\.sh \. install --at origin\/main exit 3 — the cache's state is unknown, and deriving would not help — .*node/m);
     assert.ok(!r.stdout.includes("derive-recipe"), r.stdout);
   });
 }
