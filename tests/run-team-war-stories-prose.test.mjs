@@ -322,3 +322,32 @@ test("the duplication record's When to reconsider says the rendered briefs met i
   assert.match(record, Pin.phrase("nothing is left for a skimmed read to miss"));
   assert.match(record, /^\*\*2026-10-16\.\*\*/m, "the paragraph is not dated");
 });
+
+// --- the out-of-scope record cites run-team's tooling-defect names as they are ---
+
+// #4043: the record's run-team paragraph cited a SKILL.md section and an
+// instruments.md heading under names #3846 retired, and called the scoped
+// action a fix where both now say it is reported. The span pins the record's
+// sentence; the second test holds each name it cites to the heading that
+// carries it, so a rename on either side reddens one of the two.
+const TOOLING_DEFECT_SECTION = "### A tooling defect found mid-run";
+const TOOLING_DEFECT_REFERENCE = "## Triggers and shape of a tooling defect report";
+
+test("the duplication record cites run-team's tooling-defect section and its instruments.md heading by their current names", () => {
+  const p = Pin.file(OUT_OF_SCOPE).paragraph("Both lines also fall under run-team's", ".out-of-scope/fleet-prompt-doc-duplication.md run-team scope paragraph", "Keep regardless of any future edit here:").text;
+  assert.match(
+    Pin.unemphasized(p),
+    Pin.phrase(
+      "Both lines also fall under run-team's A tooling defect found mid-run (in `## Failure handling`), whose Scope paragraph — in `references/instruments.md` § Triggers and shape of a tooling defect report, which that section points to — limits that report to defects *this run produced*",
+    ),
+    "the record's run-team paragraph no longer names the section, the instruments.md heading and the reported (never fixed) defect as SKILL.md and instruments.md carry them",
+  );
+  assert.doesNotMatch(Pin.file(OUT_OF_SCOPE).text, /mid-run tooling fix/, "the record still cites the retired name `mid-run tooling fix`");
+});
+
+test("the headings the duplication record cites exist verbatim where it says they are", () => {
+  const section = Pin.file(join(RUN_TEAM_DIR, "SKILL.md")).section("## Failure handling", "SKILL.md Failure handling").section(TOOLING_DEFECT_SECTION, "SKILL.md tooling-defect section").text;
+  assert.match(section, Pin.phrase("See references/instruments.md."), `SKILL.md's ${TOOLING_DEFECT_SECTION} no longer points to references/instruments.md`);
+  const triggers = Pin.file(join(REFERENCES, "instruments.md")).section(TOOLING_DEFECT_REFERENCE, "references/instruments.md tooling-defect triggers and shape").text;
+  assert.match(triggers, Pin.phrase("**Scope.** Only this install's own commands and skills"), `references/instruments.md's ${TOOLING_DEFECT_REFERENCE} lost the Scope paragraph the record cites`);
+});
