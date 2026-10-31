@@ -179,8 +179,9 @@ test("scratchRoot() is pure: the same answer from any cwd of one repository, and
 // The sibling pass of `reclaim-scratch.mjs --siblings` judges only the
 // directories SCRATCH_KEY_SHAPE matches, so a key scratchRoot() builds that the
 // shape misses is a key no sibling pass ever reclaims. The keys come from
-// scratchRoot() itself, never typed in, so a format change made here and in
-// keyOf() together still fails this test until the shape follows.
+// scratchRoot() itself, never typed in, so a format change made in
+// scratchRoot() and in this file's keyOf() helper together still fails this
+// test until the shape follows.
 test("SCRATCH_KEY_SHAPE matches the key scratchRoot() builds, hyphenated basename and bare repository included", () => {
   const home = realpathSync(tempDir("scratch-home-"));
   const plain = repo("plain");
