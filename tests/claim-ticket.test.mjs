@@ -483,15 +483,32 @@ test("a Recipe whose Test entrypoint names a missing binary refuses as an invali
   assert.match(err, /run the Recipe derivation step/);
 });
 
-// The worktree is built from origin/main, and the cache read no longer reads
-// any ref — so the precondition is asked directly, in the dry run too, where
-// nothing downstream would otherwise refuse before `worktree add`.
+// The worktree is built from origin/main, so the precondition is asked
+// directly, ahead of the cache reads that judge against it, in the dry run
+// too, where nothing downstream would otherwise refuse before `worktree add`.
 test("a repo with no origin/main refuses before anything is claimed", () => {
   const dir = repo({ [TESTS]: "" });
   execFileSync("git", ["update-ref", "-d", "refs/remotes/origin/main"], { cwd: dir, env: FIXTURE_ENV });
   const { err } = claim(dir);
   assert.match(err, /claim-ticket: origin\/main does not resolve to a commit/);
 });
+
+// `--apply` on `dir` refuses at the point its dry run did: exit 2, no receipt,
+// no label, no worktree, no branch.
+function assertApplyClaimsNothing(dir) {
+  const bin = tempDir("claim-bin-");
+  const ghLog = join(bin, "gh.log");
+  writeExecStub(join(bin, "gh"), `#!/bin/sh\necho "$@" >> '${ghLog}'\nexit 0\n`);
+  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], {
+    cwd: dir, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.equal(r.stdout, "", "no receipt");
+  assert.equal(existsSync(ghLog), false, "the issue must not be labelled");
+  assert.equal(existsSync(join(dir, ".worktrees", "42-slug")), false, "no worktree");
+  const branch = spawnSync("git", ["rev-parse", "--verify", "--quiet", "refs/heads/fix/42-slug"], { cwd: dir, env: FIXTURE_ENV });
+  assert.equal(branch.status, 1, "no branch");
+}
 
 // The suite moved on origin/main and the main checkout was not updated: the
 // checkout's index lists plugin/scripts/a.test.mjs, origin/main (where the
@@ -516,19 +533,7 @@ test("a Test entrypoint whose glob matches nothing at origin/main refuses before
   const dry = claim(dir);
   assert.match(dry.err ?? "", /^claim-ticket: derive-testcmd: the Recipe cache at .* is invalid: its test command's pattern 'plugin\/scripts\/\*\.test\.mjs' matches no file tracked in .* at origin\/main/m);
   assert.match(dry.err, /run the Recipe derivation step/);
-  // --apply refuses at the same point: no label, no worktree, no branch.
-  const bin = tempDir("claim-bin-");
-  const ghLog = join(bin, "gh.log");
-  writeExecStub(join(bin, "gh"), `#!/bin/sh\necho "$@" >> '${ghLog}'\nexit 0\n`);
-  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], {
-    cwd: dir, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
-  });
-  assert.equal(r.status, 2, r.stdout + r.stderr);
-  assert.equal(r.stdout, "", "no receipt");
-  assert.equal(existsSync(ghLog), false, "the issue must not be labelled");
-  assert.equal(existsSync(join(dir, ".worktrees", "42-slug")), false, "no worktree");
-  const branch = spawnSync("git", ["rev-parse", "--verify", "--quiet", "refs/heads/fix/42-slug"], { cwd: dir, env: FIXTURE_ENV });
-  assert.equal(branch.status, 1, "no branch");
+  assertApplyClaimsNothing(dir);
 });
 
 test("a Test entrypoint whose glob matches at origin/main claims, though the checkout's index lists no match", () => {
@@ -630,20 +635,35 @@ test("an Install step that writes only ignored files claims cleanly", () => {
   assert.match(r.stdout, /"applied":true/);
 });
 
+// A command path the main checkout holds and origin/main does not — here an
+// executable script only the checkout has — is judged where the worktree is
+// cut from (#4048): the Install step's read and the Test entrypoint's both
+// refuse it with the reader's own words before anything is claimed.
+for (const field of ["install", "test"]) {
+  test(`a ${field} command path the main checkout holds and origin/main does not refuses before anything is claimed`, () => {
+    const dir = repo({ [TESTS]: "" }, { "setup.sh": "#!/bin/sh\n" }, { [field]: "./setup.sh" });
+    chmodSync(join(dir, "setup.sh"), 0o755);
+    const dry = claim(dir);
+    assert.match(dry.err ?? "", /^claim-ticket: derive-testcmd: the Recipe cache at .* is invalid: /m);
+    assert.ok(dry.err.includes(`its ${field} command './setup.sh' is not found or not executable from . at origin/main — `), dry.err);
+    assert.match(dry.err, /run the Recipe derivation step/);
+    assertApplyClaimsNothing(dir);
+  });
+}
+
 // Failure to RUN versus failure: 127 is the shell's own "not found" — an
 // invalid Recipe — while any other non-zero is the install failing, named as
-// that. The unrunnable one gets past derive-testcmd.sh's probe the realistic
-// way: the script exists (executable) in the main checkout the probe reads
-// from, but not at origin/main, which the worktree is built from.
+// that. The unrunnable one gets past derive-testcmd.sh's probe of origin/main
+// as a path origin/main does not hold but git ignores, which the probe accepts
+// as an Install step's own generated output, and which nothing generated.
 test("an Install step that cannot run is named an invalid cache; one that fails is named failing", () => {
-  const dir = repo({ [TESTS]: "" }, { "setup.sh": "#!/bin/sh\n" }, { install: "./setup.sh" });
-  chmodSync(join(dir, "setup.sh"), 0o755);
+  const dir = repo({ [TESTS]: "", ".gitignore": "build/\n" }, {}, { install: "./build/setup.sh" });
   const bin = tempDir("claim-bin-");
   writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 0\n");
   const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` };
   const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], { cwd: dir, encoding: "utf8", env });
   assert.equal(r.status, 2, r.stdout + r.stderr);
-  assert.match(r.stderr, /the Install step '\.\/setup\.sh' did not run in \.worktrees\/42-slug \(exit 127: not executable or not found\) — the Recipe cache is invalid/);
+  assert.match(r.stderr, /the Install step '\.\/build\/setup\.sh' did not run in \.worktrees\/42-slug \(exit 127: not executable or not found\) — the Recipe cache is invalid/);
 
   const failing = applyRecipe({ install: "exit 4" });
   assert.equal(failing.r.status, 2);
@@ -655,16 +675,16 @@ test("an Install step that cannot run is named an invalid cache; one that fails 
 // path but lacks the execute bit is "found but not executable" — the shell's
 // own exit 126, distinct from 127's "not found" but pinned to the identical
 // invalid-cache wording since both mean the Recipe cannot run, not that it
-// failed. Committed non-executable (default `writeFileSync` mode, never
-// chmod'd before `git add`), so `origin/main`'s tree entry is 100644 and a
-// fresh worktree checks it out that way — but chmod'd +x on disk in the MAIN
-// checkout only, AFTER the commit, so derive-testcmd.sh's own resolvability
-// probe (which reads "." — the main checkout — directly, not through git)
-// still passes and this script gets to run it for real, the same asymmetry
-// the 127 case above exploits in the other direction.
+// failed. origin/main holds `setup.sh` as a symlink, which derive-testcmd.sh's
+// probe accepts unprobed, as the shell follows it, to a file committed without
+// the execute bit, so this script gets to run it for real.
 test("an Install step present but not executable is also named an invalid cache (exit 126)", () => {
-  const dir = repo({ [TESTS]: "", "setup.sh": "#!/bin/sh\n" }, {}, { install: "./setup.sh" });
-  chmodSync(join(dir, "setup.sh"), 0o755);
+  const dir = repo({ [TESTS]: "", "setup-real.sh": "#!/bin/sh\n" }, {}, { install: "./setup.sh" });
+  const git = (...a) => execFileSync("git", a, { cwd: dir, stdio: "pipe", env: FIXTURE_ENV, encoding: "utf8" });
+  symlinkSync("setup-real.sh", join(dir, "setup.sh"));
+  git("add", "setup.sh");
+  git("commit", "-q", "-m", "link");
+  git("update-ref", "refs/remotes/origin/main", "HEAD");
   const bin = tempDir("claim-bin-");
   writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 0\n");
   const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` };

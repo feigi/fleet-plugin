@@ -9,7 +9,7 @@ import { join } from "node:path";
 // vacuous-suite probe over the main checkout's own index, and that checkout
 // falls behind `origin/main` mid-run: a test glob that matches only files
 // merged since then reads as matching nothing, and a Recipe that holds refuses.
-// The Install step reads probe no glob and stay as they are.
+// The Install step reads probe no glob, so this file pins the Test reads alone.
 const PLUGIN = join(import.meta.dirname, "..", "plugin");
 const RUN_TEAM = join(PLUGIN, "skills", "run-team");
 const runTeam = ["SKILL.md", ...readdirSync(join(RUN_TEAM, "references")).map((f) => `references/${f}`)]

@@ -74,10 +74,10 @@
 // — <workspace> being the directory workspaceDirFromGitCommonDir() names for the repository,
 // the place derive-testcmd.sh reads it from — and then read back through
 // derive-testcmd.sh for every field, `uncovered` byte for byte as the compact
-// JSON of the list given, the Test entrypoint against `derivedAt`'s
-// tree (`--at`): the tree the proof ran in, and the one a claim probes, so a
-// main checkout still on an older layout cannot refuse a Recipe that holds
-// where it runs. A cache the reader refuses is rolled
+// JSON of the list given, the Install step, the Check step and the Test
+// entrypoint against `derivedAt`'s tree (`--at`): the tree the proof ran in,
+// and the one a claim probes, so a main checkout still on an older layout
+// cannot refuse a Recipe that holds where it runs. A cache the reader refuses is rolled
 // back to whatever stood before, as is one whose read-back is no verdict, so
 // the reader stays the one authority on what a usable cache is. A failed
 // proof never touches an existing cache.
@@ -261,9 +261,11 @@ function checkCovered(json, uncovered, check) {
 
 // The reader's shape check, before any command runs: `--propose` holds a
 // proposed command to the rules the cache is held to, with no cache read and no
-// command run, so one the cache would refuse is refused before the proof.
+// command run, so one the cache would refuse is refused before the proof. `at`
+// is the commit the proof runs against, so a command path only it holds is
+// judged in the tree it will run in, not in the main checkout.
 function preflight(field, command, repo, at) {
-  const args = [READER, "--propose", repo, field, command, ...(field === "test" ? ["--at", at] : [])];
+  const args = [READER, "--propose", repo, field, command, "--at", at];
   const r = spawnSync("sh", args, { env: ENV, encoding: "utf8" });
   if (r.error && !r.pid) throw cannot(`could not start sh to check the ${field} command: ${r.error.message}`);
   if (r.signal) throw cannot(`the reader's sh was killed by ${r.signal}${errorCause(r.error)}, so the ${field} command was not checked`);
@@ -496,7 +498,7 @@ function writeCache(cache, recipe, repo) {
     throw e;
   }
   for (const field of ["install", "check", "test", "uncovered"]) {
-    const r = spawnSync("sh", [READER, repo, field, ...(field === "test" ? ["--at", recipe.derivedAt] : [])], { env: ENV, encoding: "utf8" });
+    const r = spawnSync("sh", [READER, repo, field, ...(field === "uncovered" ? [] : ["--at", recipe.derivedAt])], { env: ENV, encoding: "utf8" });
     const expected = field === "uncovered" ? JSON.stringify(recipe.uncovered) : String(recipe[field]);
     const got = r.status === 0 ? r.stdout.replace(/\n$/, "") : null;
     if (got === expected) continue;

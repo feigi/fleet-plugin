@@ -70,8 +70,8 @@
 //                 for the other keys under the scratch parent, which runs
 //                 whatever the first answered. What either receipt's failed[]
 //                 names is listed. Recorded; never fails the run.
-//   recipe        `derive-testcmd.sh . install`, `. check` and `. test --at
-//                 origin/main` (recipe-read.mjs, which the settle wakes of
+//   recipe        `derive-testcmd.sh . install`, `. check` and `. test`, each
+//                 `--at origin/main` (recipe-read.mjs, which the settle wakes of
 //                 fleet-event.mjs read the cache through as well). Any
 //                 exiting 1 is a cache with nothing valid in it: pending,
 //                 `NEED derive-recipe`. Exit 3 (a tool the reader could not run)

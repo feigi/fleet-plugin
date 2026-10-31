@@ -4,7 +4,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync, symlinkSync, chmodSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { tempDir } from "./support/temp-dir.mjs";
-import { join, dirname } from "node:path";
+import { join, dirname, relative } from "node:path";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { BROKEN_GITFILES, bareProject, gitsReason } from "./support/bare-project.mjs";
 
@@ -409,13 +409,18 @@ test("`check` prints `true` or its command, and a cache that cannot say what it 
   }
 });
 
-test("`--at` applies to the test field only, never to `uncovered`", () => {
+test("`--at` applies to the install, check and test fields, never to `uncovered`", () => {
   const { dir, head } = repo();
   cache(dir, recipe(head, { test: "true" }));
   const r = run([dir, "uncovered", "--at", head]);
   assert.equal(r.status, 1, r.err);
   assert.equal(r.out, "");
-  assert.match(r.err, /--at applies to the test field only, not 'uncovered'/);
+  assert.match(r.err, /--at applies to the install, check and test fields, not 'uncovered'/);
+  for (const field of ["install", "check", "test"]) {
+    const ok = run([dir, field, "--at", head]);
+    assert.equal(ok.status, 0, `${field}: ${ok.err}`);
+    assert.equal(ok.out, "true");
+  }
 });
 
 // Invalid on failure to RUN (ADR 0015): a leading word that does not resolve
@@ -944,7 +949,7 @@ test("--at reads a symlink in the named tree whose name begins with a colon", ()
   assert.equal(derive(dir).status, 1, "fixture: the checkout holds no such link, so without --at it is stale");
 });
 
-test("--at refuses what it cannot read: an unresolvable rev, a non-test field, a malformed flag, a git that cannot read the tree", () => {
+test("--at refuses what it cannot read: an unresolvable rev for any command field, a malformed flag, a git that cannot read the tree", () => {
   const { dir, head } = movedSuite();
   cache(dir, recipe(head, { test: "node --test tests/*.test.mjs" }));
   const gone = deriveAt(dir, "no-such-ref");
@@ -955,10 +960,12 @@ test("--at refuses what it cannot read: an unresolvable rev, a non-test field, a
   const dash = deriveAt(dir, "-x");
   assert.equal(dash.status, 1, dash.err);
   assert.match(dash.err, /--at needs a commit, got '-x'/);
-  const inst = run([dir, "install", "--at", "moved"]);
-  assert.equal(inst.status, 1, inst.err);
-  assert.equal(inst.out, "");
-  assert.match(inst.err, /--at applies to the test field only, not 'install'/);
+  for (const field of ["install", "check"]) {
+    const unresolved = run([dir, field, "--at", "no-such-ref"]);
+    assert.equal(unresolved.status, 1, unresolved.err);
+    assert.equal(unresolved.out, "");
+    assert.match(unresolved.err, /--at 'no-such-ref' does not resolve to a commit/, field);
+  }
   const flag = run([dir, "test", "--on", "moved"]);
   assert.equal(flag.status, 1, flag.err);
   assert.match(flag.err, /usage: derive-testcmd\.sh <repo> <install\|check\|test\|uncovered>/);
@@ -1512,4 +1519,199 @@ test("--propose names only install, check or test, never uncovered (#3491)", () 
   const r = run(["--propose", dir, "uncovered", "true"]);
   assert.equal(r.status, 1, r.err);
   assert.match(r.err, /--propose takes an install, check or test command, not 'uncovered'/);
+});
+
+// --- the leading word against <rev>'s tree (#4048) ----------------------------
+//
+// A caller that runs the command in a worktree cut from <rev> asks whether its
+// leading word runs THERE. The checkout here and the commits it names disagree
+// about the command's path both ways: `lost` removed `run-tests.sh`, which the
+// checkout still holds executable, and `gained` holds what the checkout lacks —
+// an executable, a file without the exec bit, a symlink to a file, a symlink to
+// a directory and a submodule entry. The checkout's `.gitignore` ignores
+// `dist/`, which no commit holds.
+function revFixture() {
+  const { dir } = repo({ "run-tests.sh": "#!/bin/sh\n", ".gitignore": "dist/\n" });
+  const git = (...a) => execFileSync("git", a, { cwd: dir, stdio: "pipe", env: FIXTURE_ENV, encoding: "utf8" }).trim();
+  chmodSync(join(dir, "run-tests.sh"), 0o755);
+  git("add", "-A");
+  git("commit", "-q", "-m", "exec");
+  const head = git("rev-parse", "HEAD");
+  git("rm", "-q", "run-tests.sh");
+  git("commit", "-q", "-m", "lost");
+  const lost = git("rev-parse", "HEAD");
+  git("reset", "-q", "--hard", head);
+  mkdirSync(join(dir, "bin"));
+  writeFileSync(join(dir, "bin", "gained.sh"), "#!/bin/sh\n");
+  chmodSync(join(dir, "bin", "gained.sh"), 0o755);
+  writeFileSync(join(dir, "bin", "plain.sh"), "#!/bin/sh\n");
+  chmodSync(join(dir, "bin", "plain.sh"), 0o644);
+  symlinkSync("gained.sh", join(dir, "bin", "link"));
+  symlinkSync("bin", join(dir, "linkdir"));
+  git("add", "-A");
+  git("update-index", "--add", "--cacheinfo", `160000,${head},vendor/tool`);
+  git("commit", "-q", "-m", "gained");
+  const gained = git("rev-parse", "HEAD");
+  git("reset", "-q", "--hard", head);
+  assert.equal(git("ls-tree", gained, "--", "bin/gained.sh", "bin/plain.sh", "bin/link", "linkdir", "vendor/tool").split("\n").map((l) => l.split(" ")[0]).join(" "),
+    "100755 120000 100644 120000 160000", "fixture: gained records each mode");
+  return { dir, head, lost, gained };
+}
+
+// The cache for `field` with `cmd` as its command; a Check step other than
+// `true` carries its mutation.
+const recipeFor = (head, field, cmd) =>
+  recipe(head, field === "check" ? { check: cmd, checkMutation: "echo broken >> ci.txt" } : { [field]: cmd });
+
+const FIELDS = ["install", "check", "test"];
+
+test("--at refuses a command path <rev> lost though the checkout still holds it, for every command field; without --at it is accepted as before", () => {
+  const { dir, head, lost } = revFixture();
+  for (const field of FIELDS) {
+    cache(dir, recipeFor(head, field, "./run-tests.sh"));
+    const bare = derive(dir, field);
+    assert.equal(bare.status, 0, `${field}: without --at the checkout answers: ${bare.err}`);
+    assert.equal(bare.out, "./run-tests.sh");
+    const r = run([dir, field, "--at", lost]);
+    assert.equal(r.status, 1, `${field}: ${r.err}`);
+    assert.equal(r.out, "", "nothing may reach the caller");
+    assert.ok(r.err.includes(`is invalid: its ${field} command './run-tests.sh' is not found or not executable from ${dir} at ${lost} — `), r.err);
+    assert.match(r.err, NAMES_STEP);
+  }
+});
+
+test("--at accepts a command path only <rev> holds, however the word spells it, and without --at it is refused as before", () => {
+  const { dir, head, gained } = revFixture();
+  for (const field of FIELDS) {
+    for (const cmd of ["./bin/gained.sh", "bin/gained.sh --flag", "./bin/../bin//gained.sh", "CI=1 ./bin/gained.sh"]) {
+      cache(dir, recipeFor(head, field, cmd));
+      const r = run([dir, field, "--at", gained]);
+      assert.equal(r.status, 0, `${field} ${cmd}: ${r.err}`);
+      assert.equal(r.out, cmd);
+      const bare = derive(dir, field);
+      assert.equal(bare.status, 1, `${field} ${cmd}: the checkout lacks it`);
+      assert.ok(bare.err.includes(`is not found or not executable from ${dir} — `), `without --at the refusal names no rev: ${bare.err}`);
+    }
+  }
+});
+
+test("--at judges a path by what <rev> records there: an executable, a symlink or a submodule entry runs; a file without the exec bit or a directory does not; an absent path runs only when git ignores it", () => {
+  const { dir, head, gained } = revFixture();
+  for (const [cmd, ok] of [
+    ["./bin/gained.sh", true],
+    ["./bin/link", true],
+    ["./linkdir/gained.sh", true],
+    ["./vendor/tool", true],
+    ["./vendor/tool/bin/run", true],
+    ["./dist/cli.js", true],
+    ["./bin/plain.sh", false],
+    ["./bin", false],
+    ["./nowhere/x.sh", false],
+    ["./bin/gained.sh/x", false],
+    ["./bin/gained.sh/", false],
+    ["./bin/gained.sh/.", false],
+  ]) {
+    for (const field of FIELDS) {
+      cache(dir, recipeFor(head, field, cmd));
+      const r = run([dir, field, "--at", gained]);
+      if (ok) {
+        assert.equal(r.status, 0, `${field} ${cmd} must be accepted: ${r.err}`);
+        assert.equal(r.out, cmd);
+      } else {
+        assert.equal(r.status, 1, `${field} ${cmd} must be refused: ${r.err}`);
+        assert.equal(r.out, "");
+        assert.ok(r.err.includes(`its ${field} command '${cmd}' is not found or not executable from ${dir} at ${gained} — `), r.err);
+      }
+    }
+  }
+});
+
+// The ignore rules are asked with the checkout's index set aside: the index is
+// the checkout's, not <rev>'s, and a path it tracks reads as not ignored to a
+// plain `git check-ignore`. So a path the checkout tracks under an ignored
+// directory, which <rev> does not hold, is still ignored output there.
+test("--at accepts a path <rev> lacks that the checkout's ignore rules match, even when the checkout's index tracks it", () => {
+  const { dir, head, gained } = revFixture();
+  mkdirSync(join(dir, "dist"));
+  writeFileSync(join(dir, "dist", "tracked.js"), "#!/bin/sh\n");
+  execFileSync("git", ["add", "-f", "dist/tracked.js"], { cwd: dir, stdio: "pipe", env: FIXTURE_ENV });
+  for (const field of FIELDS) {
+    cache(dir, recipeFor(head, field, "./dist/tracked.js"));
+    const r = run([dir, field, "--at", gained]);
+    assert.equal(r.status, 0, `${field} ./dist/tracked.js must be accepted: ${r.err}`);
+    assert.equal(r.out, "./dist/tracked.js");
+  }
+});
+
+test("a bare PATH command, a builtin, and a quoted or expansion-bearing leading word are judged as before, with and without --at", () => {
+  const { dir, head, lost } = revFixture();
+  for (const field of FIELDS) {
+    for (const cmd of ["node --version", "true", ":", `"./my tests.sh"`, "$HOME/bin/runner", "'./nowhere/x.sh'"]) {
+      cache(dir, recipeFor(head, field, cmd));
+      for (const at of [[], ["--at", lost]]) {
+        const r = run([dir, field, ...at]);
+        assert.equal(r.status, 0, `${field} ${cmd} ${at.join(" ")}: ${r.err}`);
+        assert.equal(r.out, cmd);
+      }
+    }
+    cache(dir, recipeFor(head, field, "no-such-binary-4048"));
+    for (const at of [[], ["--at", lost]]) {
+      const r = run([dir, field, ...at]);
+      assert.equal(r.status, 1, `${field} ${at.join(" ")}: ${r.err}`);
+      assert.match(r.err, new RegExp(`its ${field} command 'no-such-binary-4048' is not found or not executable from [^ ]+ — `));
+    }
+  }
+});
+
+test("--at leaves an absolute path and one that climbs out of the repository to the disk", () => {
+  const { dir, head, lost } = revFixture();
+  const outside = join(tempDir("derive-testcmd-outside-"), "run.sh");
+  writeFileSync(outside, "#!/bin/sh\n");
+  chmodSync(outside, 0o755);
+  const escaping = relative(dir, outside);
+  assert.ok(escaping.startsWith("../"), `fixture: ${escaping} climbs out of the repository`);
+  for (const field of FIELDS) {
+    for (const cmd of [outside, escaping, `./${escaping}`]) {
+      cache(dir, recipeFor(head, field, cmd));
+      const r = run([dir, field, "--at", lost]);
+      assert.equal(r.status, 0, `${field} ${cmd}: ${r.err}`);
+      assert.equal(r.out, cmd);
+    }
+    for (const cmd of ["/no/such-4048/run.sh", "../no-such-4048/run.sh"]) {
+      cache(dir, recipeFor(head, field, cmd));
+      const r = run([dir, field, "--at", lost]);
+      assert.equal(r.status, 1, `${field} ${cmd}: ${r.err}`);
+      assert.ok(r.err.includes(`its ${field} command '${cmd}' is not found or not executable from ${dir} — `), r.err);
+    }
+  }
+});
+
+test("--at: a git that cannot list <rev>'s tree or say whether a path is ignored exits 3, no verdict", () => {
+  const { dir, head, lost } = revFixture();
+  for (const field of FIELDS) {
+    cache(dir, recipeFor(head, field, "./run-tests.sh"));
+    const r = run([dir, field, "--at", lost], gitFailing("ls-tree"));
+    assert.equal(r.status, 3, `${field}: ${r.err}`);
+    assert.equal(r.out, "");
+    assert.ok(r.err.includes(`derive-testcmd: cannot list 'run-tests.sh' in the tree of ${lost} in ${dir} to check its ${field} command (git ls-tree exit 128): git: injected ls-tree failure`), r.err);
+    cache(dir, recipeFor(head, field, "./dist/cli.js"));
+    const ign = run([dir, field, "--at", lost], gitFailing("check-ignore"));
+    assert.equal(ign.status, 3, `${field}: ${ign.err}`);
+    assert.equal(ign.out, "");
+    assert.ok(ign.err.includes(`derive-testcmd: cannot ask git whether ${dir} ignores its ${field} command './dist/cli.js' (git check-ignore exit 128): git: injected check-ignore failure`), ign.err);
+  }
+});
+
+test("--propose judges a proposed path against <rev> for every command field", () => {
+  const { dir, lost, gained } = revFixture();
+  for (const field of FIELDS) {
+    const ok = run(["--propose", dir, field, "./bin/gained.sh", "--at", gained]);
+    assert.equal(ok.status, 0, `${field}: ${ok.err}`);
+    assert.equal(ok.out, "./bin/gained.sh");
+    const absent = run(["--propose", dir, field, "./bin/gained.sh"]);
+    assert.equal(absent.status, 1, `${field}: the checkout lacks it`);
+    const gone = run(["--propose", dir, field, "./run-tests.sh", "--at", lost]);
+    assert.equal(gone.status, 1, `${field}: ${gone.err}`);
+    assert.ok(gone.err.includes(`the proposed ${field} command './run-tests.sh' is not found or not executable from ${dir} at ${lost} — `), gone.err);
+  }
 });

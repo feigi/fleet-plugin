@@ -277,7 +277,7 @@ test("a clean run passes every step in order, writes one receipt and exits 0", (
   assert.deepEqual(f.calls("tier-roles")[0].args, ["--check", "--in-flight", "5"]);
   assert.deepEqual(f.calls("reclaim-scratch")[0].args, ["--root", receipt.scratch, "--after-rotate", "--apply"]);
   assert.deepEqual(f.calls("reclaim-scratch")[1].args, ["--siblings", "--root", receipt.scratch, "--apply"]);
-  assert.deepEqual(f.calls("derive-testcmd").map((c) => c.args), [[".", "install"], [".", "check"], [".", "test", "--at", "origin/main"]]);
+  assert.deepEqual(f.calls("derive-testcmd").map((c) => c.args), [[".", "install", "--at", "origin/main"], [".", "check", "--at", "origin/main"], [".", "test", "--at", "origin/main"]]);
   for (let i = 0; i < 40 && f.calls("board").length === 0; i++) wait(100);
   assert.deepEqual(f.calls("board")[0].args, ["serve", "--open"]);
   assert.equal(f.calls("board")[0].cwd, f.repo);
@@ -431,7 +431,7 @@ const REFUSALS = [
   ["metrics", (f) => f.control("metrics-refresh", { exit: 1, err: "metrics-refresh: drain failed" }), /metrics-refresh: drain failed/],
   ["metrics", (f) => f.control("metrics-refresh", { exit: 2, err: "metrics-refresh: usage" }), /metrics-refresh: usage/],
   ["rotate", (f) => f.control("rotate", { exit: 2, err: "refusing to rotate: the controller that owns it is alive" }), /the controller that owns it is alive/],
-  ["recipe", (f) => f.control("derive-testcmd", { by: { ". install": { exit: 3, err: "derive-testcmd: no node" }, ". test --at origin/main": {} } }), /derive-testcmd: no node/],
+  ["recipe", (f) => f.control("derive-testcmd", { by: { ". install --at origin/main": { exit: 3, err: "derive-testcmd: no node" }, ". test --at origin/main": {} } }), /derive-testcmd: no node/],
   ["fold-in", (f) => writeFileSync(join(f.stubs, "gh.fail"), ""), /gh pr list failed: exit 1\ngh boom/],
   ["stranded", (f) => f.control("stranded", { exit: 2, err: "stranded: gh issue list failed" }), /stranded: gh issue list failed/],
   ["shortlist", (f) => f.control("shortlist", { exit: 2, err: "shortlist: the scan did not answer" }), /shortlist: the scan did not answer/],
@@ -480,11 +480,11 @@ test("alarm: a refusal the file's appearance clears is re-run by the next run, n
 
 test("alarm: a resumed run re-checks the alarm, an ok one included, and refuses when this omp's file is gone", () => {
   const f = fixture();
-  f.control("derive-testcmd", { by: { ". install": { exit: 1, err: "no Recipe cache" }, ". test --at origin/main": {} } });
+  f.control("derive-testcmd", { by: { ". install --at origin/main": { exit: 1, err: "no Recipe cache" }, ". test --at origin/main": {} } });
   assert.equal(f.run().status, 4);
   assert.equal(f.receipt().steps.alarm.status, "ok");
   f.disarm();
-  f.control("derive-testcmd", { by: { ". install": { out: "npm ci" }, ". test --at origin/main": { out: "./agent-test" } } });
+  f.control("derive-testcmd", { by: { ". install --at origin/main": { out: "npm ci" }, ". test --at origin/main": { out: "./agent-test" } } });
   const again = f.run();
   assert.equal(again.status, 3, again.stdout + again.err);
   assert.match(again.stdout, /^phase0: alarm: failed — controller alarm is not armed/m);
@@ -605,7 +605,7 @@ test("reclaim: what either pass's receipt lists in failed[] at exit 0 is named, 
 
 test("recipe: a cache that refuses is a pending NEED with exit 4, and a re-run after it is met continues from there", () => {
   const f = fixture();
-  f.control("derive-testcmd", { by: { ". install": { exit: 1, err: "no Recipe cache" }, ". test --at origin/main": {} } });
+  f.control("derive-testcmd", { by: { ". install --at origin/main": { exit: 1, err: "no Recipe cache" }, ". test --at origin/main": {} } });
   const r = f.run();
   assert.equal(r.status, 4, r.stdout + r.err);
   assert.equal(r.out.at(-1), "NEED derive-recipe", "the NEED lines come last");
@@ -614,7 +614,7 @@ test("recipe: a cache that refuses is a pending NEED with exit 4, and a re-run a
   assert.match(receipt.steps.recipe.output, /NEED derive-recipe/);
   assert.deepEqual(f.order().filter((n) => n === "gh" || n === "stranded" || n === "shortlist"), [], "the fold-in waits for the Recipe");
 
-  f.control("derive-testcmd", { by: { ". install": { out: "npm ci" }, ". test --at origin/main": { out: "./agent-test" } } });
+  f.control("derive-testcmd", { by: { ". install --at origin/main": { out: "npm ci" }, ". test --at origin/main": { out: "./agent-test" } } });
   const again = f.run();
   assert.equal(again.status, 0, again.stdout + again.err);
   assert.deepEqual(statuses(f.receipt()), allOk);
@@ -634,26 +634,26 @@ test("recipe: both reads exit 1 at once is one NEED, not two", () => {
 
 test("recipe: a cache whose Check step does not resolve prints the refused read and NEED derive-recipe, and the Check read is the only one named", () => {
   const f = fixture();
-  f.control("derive-testcmd", { by: { ". check": { exit: 1, err: "no-such-checker does not resolve" } } });
+  f.control("derive-testcmd", { by: { ". check --at origin/main": { exit: 1, err: "no-such-checker does not resolve" } } });
   const r = f.run();
   assert.equal(r.status, 4, r.stdout + r.err);
-  assert.match(r.stdout, /derive-testcmd\.sh \. check refused:\n\s+no-such-checker does not resolve/);
-  assert.doesNotMatch(r.stdout, /derive-testcmd\.sh \. (install|test --at origin\/main) refused/);
+  assert.match(r.stdout, /derive-testcmd\.sh \. check --at origin\/main refused:\n\s+no-such-checker does not resolve/);
+  assert.doesNotMatch(r.stdout, /derive-testcmd\.sh \. (install|test) --at origin\/main refused/);
   assert.equal(r.out.at(-1), "NEED derive-recipe");
   assert.equal(f.receipt().steps.recipe.status, "pending");
-  assert.deepEqual(f.calls("derive-testcmd").map((c) => c.args), [[".", "install"], [".", "check"], [".", "test", "--at", "origin/main"]], "all three reads run, so every refusal is named");
+  assert.deepEqual(f.calls("derive-testcmd").map((c) => c.args), [[".", "install", "--at", "origin/main"], [".", "check", "--at", "origin/main"], [".", "test", "--at", "origin/main"]], "all three reads run, so every refusal is named");
 
-  f.control("derive-testcmd", { by: { ". check": { exit: 3, err: "derive-testcmd: no node" } } });
+  f.control("derive-testcmd", { by: { ". check --at origin/main": { exit: 3, err: "derive-testcmd: no node" } } });
   const broken = f.run();
   assert.equal(broken.status, 3, broken.stdout + broken.err);
-  assert.match(broken.stdout, /derive-testcmd\.sh \. check exit 3 — the cache's state is unknown, and deriving would not help\n\s+derive-testcmd: no node/);
+  assert.match(broken.stdout, /derive-testcmd\.sh \. check --at origin\/main exit 3 — the cache's state is unknown, and deriving would not help\n\s+derive-testcmd: no node/);
 });
 
 test("recipe: a valid cache records each read's last line, in read order", () => {
   const f = fixture();
   f.control("derive-testcmd", { by: {
-    ". install": { out: "reading .fleet/recipe.json\nnpm ci\n" },
-    ". check": { out: "reading .fleet/recipe.json\nnpm run lint\n" },
+    ". install --at origin/main": { out: "reading .fleet/recipe.json\nnpm ci\n" },
+    ". check --at origin/main": { out: "reading .fleet/recipe.json\nnpm run lint\n" },
     ". test --at origin/main": { out: "reading .fleet/recipe.json\n./agent-test\n" },
   } });
   const r = f.run();
@@ -691,10 +691,10 @@ test("labels: a map ensure cannot settle is a pending NEED with exit 4, its payl
 
 test("labels: a resumed run whose labels step is ok does not run ensure again", () => {
   const f = fixture();
-  f.control("derive-testcmd", { by: { ". install": { exit: 1, err: "no Recipe cache" }, ". test --at origin/main": {} } });
+  f.control("derive-testcmd", { by: { ". install --at origin/main": { exit: 1, err: "no Recipe cache" }, ". test --at origin/main": {} } });
   assert.equal(f.run().status, 4);
   assert.equal(f.receipt().steps.labels.status, "ok");
-  f.control("derive-testcmd", { by: { ". install": { out: "npm ci" }, ". test --at origin/main": { out: "./agent-test" } } });
+  f.control("derive-testcmd", { by: { ". install --at origin/main": { out: "npm ci" }, ". test --at origin/main": { out: "./agent-test" } } });
   const again = f.run();
   assert.equal(again.status, 0, again.stdout + again.err);
   assert.equal(f.calls("label-map").length, 1, "ensure ran once in this run");
