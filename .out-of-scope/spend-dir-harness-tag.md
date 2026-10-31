@@ -1,5 +1,21 @@
 # Carrying the Spend Directory's Harness as a Tag
 
+> **Superseded in part (2026-10-31).** The body below records the code as it
+> stood when #1878 was refused. #3127 (PR #3449) deleted `findSubagentsDir()`,
+> `spendDirPin()`, the newest-transcript heuristic (`newestTranscriptMs`) and the
+> quoted test. The spend panel now reads the session directory phase 0's receipt
+> records (`receiptSpendDir()`) or the operator's `--spend-dir`, and
+> `gatherSpend()` reads with `readOmpSpend()` only, since there is one harness
+> (ADR 0014), so the two-reader dispatch quoted below no longer exists.
+> Quotations, function names and test titles below are not re-pointed. The
+> refusal still stands on its remaining argument: the name rule
+> `isOmpSessionDirName(basename(dir))` is still the one place a session
+> directory is classified, and a tag cannot replace it, because the path
+> arrives bare: `gatherSpend()` applies the rule to an explicit `--spend-dir`
+> and `receiptSpendDir()` applies it to the receipt's path, and neither path
+> carries a tag. The "What would reopen this" triggers (a third harness, a
+> source the name cannot classify) still apply.
+
 `findSubagentsDir()` in `plugin/scripts/board-gather.mjs` answers the cockpit spend panel's
 "which session directory?" with a bare path. `gatherSpend()` then picks a reader for
 that path by its name:
