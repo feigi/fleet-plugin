@@ -19,16 +19,11 @@
 // CI dependency — node is (the whole test suite is `node --test`). node's
 // `realpathSync` is exact and already required.
 //
-// SINGLE FILE, ON PURPOSE. `fleet-bootstrap` places a copy of exactly this
-// file at `~/.fleet/bin/fleet-run`, OUTSIDE the plugin (CONTEXT.md's
-// Resolver entry: "cannot resolve itself"). Once there it has no siblings —
-// `scripts/repo-root.mjs`, `scripts/arg.mjs` and every other shared helper
-// in this directory are unreachable from that path. So this file requires
-// nothing from the rest of the plugin (CommonJS, core `node:*` modules
-// only) even though `scripts/fleet-provenance` duplicates a couple of lines
-// of its resolution logic rather than sharing a module with it, for the same
-// reason: a module this file `require()`s would need to travel with it, and
-// nothing else does.
+// SINGLE FILE. Prose runs this file where the package holds it,
+// `scripts/fleet-run` under the package entry above. It requires nothing from
+// the rest of the plugin (CommonJS, core `node:*` modules only), and
+// `scripts/fleet-provenance` and `scripts/instruments.sh` resolve the Install
+// root the same way in their own lines rather than calling it.
 "use strict";
 
 const fs = require("node:fs");

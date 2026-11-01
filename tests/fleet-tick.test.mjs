@@ -151,7 +151,7 @@ test("implementers: an unchecked implementer holds the row and asks the controll
   assert.equal(r.action, "HOLD (tier unchecked impl-412)");
   assert.equal(r.acts, true, "running tier-check is the controller's own step — backing off on it is a stall");
   assert.ok(r.detail.includes(
-    `run ~/.fleet/bin/fleet-run tier-check.mjs --batch <file> with [{"member":"impl-412","session":"<session>"}]`), r.detail);
+    `run ~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run tier-check.mjs --batch <file> with [{"member":"impl-412","session":"<session>"}]`), r.detail);
   const both = row(state({ heads: [7], tierMismatch: ["impl-9"], tierUnchecked: ["impl-412"] }), "implementers");
   assert.equal(both.action, "HOLD (tier mismatch impl-9)");
   assert.doesNotMatch(both.detail, /tier-check/, "the detail names the step for the hold the row prints, not the one it outranks");
@@ -166,7 +166,7 @@ test("implementers: several unchecked members share one batch file, one entry ea
 test("implementers: with the phase-0 receipt naming the session, the tier step's batch entries carry no <session> placeholder", () => {
   const r = row(state({ heads: [7], tierUnchecked: ["impl-412", "impl-9"], phase0: { held: false, line: null, session: "/s/run" } }), "implementers");
   assert.ok(r.detail.includes(
-    `run ~/.fleet/bin/fleet-run tier-check.mjs --batch <file> with [{"member":"impl-412"},{"member":"impl-9"}]`), r.detail);
+    `run ~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run tier-check.mjs --batch <file> with [{"member":"impl-412"},{"member":"impl-9"}]`), r.detail);
   assert.doesNotMatch(r.detail, /<session>/);
 });
 
@@ -2578,7 +2578,7 @@ test("CLI: a tier mismatch holds the implementer row until a replacement is disp
 
 test("CLI: an implementer with no tier verdict on the ledger holds the implementer row until tier-check writes one", () => {
   const r = runCli([], { ledger: { rows: ["#7 impl-7 · class=routine"], dispatched: ["impl-7"] }, shortlist: shortlistText([8, 9]) });
-  assert.match(r.stdout, /^implementers 1\/2 → HOLD \(tier unchecked impl-7\) +\(.* — run ~\/\.fleet\/bin\/fleet-run tier-check\.mjs --batch <file> with \[\{"member":"impl-7"\}\]\)$/m);
+  assert.match(r.stdout, /^implementers 1\/2 → HOLD \(tier unchecked impl-7\) +\(.* — run ~\/\.omp\/plugins\/node_modules\/@feigi\/fleet-ctl\/scripts\/fleet-run tier-check\.mjs --batch <file> with \[\{"member":"impl-7"\}\]\)$/m);
   const ok = runCli([], {
     ledger: { rows: ["#7 impl-7 · class=routine · tier-ok=impl-7:fleet-implementer"], dispatched: ["impl-7"] },
     shortlist: shortlistText([8, 9]),
@@ -3513,7 +3513,7 @@ test("CLI: a stray write after the baseline prints MAIN-CHECKOUT-DIRTY first, na
   t.after(() => rmSync(r.dir, { recursive: true, force: true }));
   assert.equal(r.status, 0, r.stderr);
   const lines = r.stdout.trim().split("\n");
-  assert.match(lines[0], /^MAIN-CHECKOUT-DIRTY stray\.mjs — changed since the run's baseline; live members: impl-412 — dispatch held: resolve the stray paths FIRST, then re-baseline with ~\/\.fleet\/bin\/fleet-run main-checkout\.mjs --record/);
+  assert.match(lines[0], /^MAIN-CHECKOUT-DIRTY stray\.mjs — changed since the run's baseline; live members: impl-412 — dispatch held: resolve the stray paths FIRST, then re-baseline with ~\/\.omp\/plugins\/node_modules\/@feigi\/fleet-ctl\/scripts\/fleet-run main-checkout\.mjs --record/);
   assert.match(r.stdout, /^implementers 2\/3 → HOLD \(main checkout dirty\)/m);
   assert.match(r.stdout, /^reviewers +0\/3 → HOLD \(main checkout dirty\)/m);
   assert.match(r.stdout, /^merge-bot +0\/1 → HOLD \(main checkout dirty\)/m);
@@ -3685,7 +3685,7 @@ for (const [what, fixture, named] of [
     beforeRun: withController,
     phase0: (r) => ({ ...r, run: CONTROLLER_AT - 1 }),
   }, new RegExp(`^PHASE0-INCOMPLETE receipt \\S+/\\.fleet/phase0\\.json is another run's: run ${CONTROLLER_AT - 1}, controller record ${CONTROLLER_AT} — dispatch held: `)],
-  ["a failed step", { phase0: withStep("recipe", { status: "failed", output: "derive-testcmd.sh exited 3" }) }, /^PHASE0-INCOMPLETE recipe — dispatch held: run ~\/\.fleet\/bin\/fleet-run phase0\.mjs --session \S+\/session and act on what it prints$/],
+  ["a failed step", { phase0: withStep("recipe", { status: "failed", output: "derive-testcmd.sh exited 3" }) }, /^PHASE0-INCOMPLETE recipe — dispatch held: run ~\/\.omp\/plugins\/node_modules\/@feigi\/fleet-ctl\/scripts\/fleet-run phase0\.mjs --session \S+\/session and act on what it prints$/],
   ["a pending step", { phase0: withStep("stranded", { status: "pending", output: "NEED resume #5 /w b" }) }, /^PHASE0-INCOMPLETE stranded — dispatch held: /],
   ["a step the receipt lacks", { phase0: (r) => { const { recipe: _recipe, ...steps } = r.steps; return { ...r, steps }; } }, /^PHASE0-INCOMPLETE recipe — dispatch held: /],
 ]) {
@@ -3834,7 +3834,7 @@ test("CLI: an unfinished phase 0 over a dirty main checkout prints the phase-0 l
 
 test("CLI: the tier hold's step names no <session> when this run's receipt records one, and keeps the placeholder without it", () => {
   const UNCHECKED = { ledger: { rows: ["#412 impl-412"], dispatched: ["impl-412"] }, shortlist: shortlistText([420]) };
-  const step = (entries) => `run ~/.fleet/bin/fleet-run tier-check.mjs --batch <file> with ${JSON.stringify(entries)}`;
+  const step = (entries) => `run ~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run tier-check.mjs --batch <file> with ${JSON.stringify(entries)}`;
   const withReceipt = runCli([], UNCHECKED);
   assert.equal(withReceipt.status, 0, withReceipt.stderr);
   assert.ok(lineOf(withReceipt, "implementers")[0].includes(step([{ member: "impl-412" }])), withReceipt.stdout);

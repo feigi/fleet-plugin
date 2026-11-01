@@ -391,8 +391,8 @@ const CHANGED = [
   // at close-out is one that never reached it; in the finisher gate a "ruling"
   // is only that row, and the answer owed to a fix-applier is a reply.
   [
-    "**Append one row to `docs/metrics/tier-outcomes.tsv` when you rule each PR's review, with `~/.fleet/bin/fleet-run tier-outcomes.mjs append <pr> --closed-own-ticket yes|no --minted-false-claim yes|no --note \"<text>\"`, never by hand** (that file's header carries the column meanings).",
-    "**Append one row to `docs/metrics/tier-outcomes.tsv` when you rule each PR's review, before its finisher, with `~/.fleet/bin/fleet-run tier-outcomes.mjs append <pr>`, never by hand** (that file's header carries the column meanings).",
+    "**Append one row to `docs/metrics/tier-outcomes.tsv` when you rule each PR's review, with `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run tier-outcomes.mjs append <pr> --closed-own-ticket yes|no --minted-false-claim yes|no --note \"<text>\"`, never by hand** (that file's header carries the column meanings).",
+    "**Append one row to `docs/metrics/tier-outcomes.tsv` when you rule each PR's review, before its finisher, with `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run tier-outcomes.mjs append <pr>`, never by hand** (that file's header carries the column meanings).",
   ],
   [
     "A `NEED tier-outcomes append <pr>` is a PR the ledger marks reviewed with no verdict row: append it with the verdict you rule (**Guard: accumulate per PR**) and run `finish` again.",
@@ -463,8 +463,8 @@ const CHANGED = [
     "An edit to `references/shell-traps.md` lands in that body in the same change."
   ],
   [
-    "`~/.fleet/bin/fleet-run closeout.mjs finish --reason \"<reason>\"` — scrapes the run's member facts, checks the tier-outcomes rows, refreshes the metrics, commits the three metrics files and opens their PR, then records `fleet-heartbeat.mjs --stop` last, because every reader takes a recorded stop as the end of the run.",
-    "`~/.fleet/bin/fleet-run closeout.mjs finish --reason \"<reason>\"` — scrapes the run's member facts, checks the tier-outcomes rows, refreshes the metrics, commits the three metrics files and opens their PR, sets the phase-0 receipt aside as `.fleet/phase0.previous.json`, records `fleet-heartbeat.mjs --stop`, because every reader takes a recorded stop as the end of the run, and then merges the Close-out PR."
+    "`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run closeout.mjs finish --reason \"<reason>\"` — scrapes the run's member facts, checks the tier-outcomes rows, refreshes the metrics, commits the three metrics files and opens their PR, then records `fleet-heartbeat.mjs --stop` last, because every reader takes a recorded stop as the end of the run.",
+    "`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run closeout.mjs finish --reason \"<reason>\"` — scrapes the run's member facts, checks the tier-outcomes rows, refreshes the metrics, commits the three metrics files and opens their PR, sets the phase-0 receipt aside as `.fleet/phase0.previous.json`, records `fleet-heartbeat.mjs --stop`, because every reader takes a recorded stop as the end of the run, and then merges the Close-out PR."
   ],
   [
     "`heartbeat not beating, controller alive (pid N)`, or `(this session's earlier run)` — a controller that stopped beating and kept going.",
@@ -535,8 +535,8 @@ const CHANGED = [
     "| Reviewer, fix-applier or red-check fixer cannot reach green | Report, leave the PR unlabeled, free the slot — the last two settle `failed`; a wake's `NEED derive-recipe` is phase 0's mid-run trigger |"
   ],
   [
-    "Run `~/.fleet/bin/fleet-run phase0.mjs --session <session-dir>` from this main checkout, `<session-dir>` being this run's own session directory.",
-    "Run phase 0 from a Python eval cell in this main checkout, without `--session`: `subprocess.run([os.path.expanduser(\"~/.fleet/bin/fleet-run\"), \"phase0.mjs\", …], stderr=subprocess.STDOUT)`."
+    "Run `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run phase0.mjs --session <session-dir>` from this main checkout, `<session-dir>` being this run's own session directory.",
+    "Run phase 0 from a Python eval cell in this main checkout, without `--session`: `subprocess.run([os.path.expanduser(\"~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run\"), \"phase0.mjs\", …], stderr=subprocess.STDOUT)`."
   ],
   [
     "| 1 `LEFT #N: excluded · behind-…` | `collision` answered `behind-pr:#M` or `behind-issue:#M` | next entry |",
@@ -614,8 +614,8 @@ const CHANGED = [
     "**Mark the beat when there is nothing to do, and end your turn.**"
   ],
   [
-    "```bash ~/.fleet/bin/fleet-run fleet-heartbeat.mjs \\ [--base 300] [--ceiling 1200] [--multiplier 2] [--hold 240] ```",
-    "```bash ~/.fleet/bin/fleet-run fleet-heartbeat.mjs \\ [--base 300] [--ceiling 1200] [--multiplier 2] ```"
+    "```bash ~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run fleet-heartbeat.mjs \\ [--base 300] [--ceiling 1200] [--multiplier 2] [--hold 240] ```",
+    "```bash ~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run fleet-heartbeat.mjs \\ [--base 300] [--ceiling 1200] [--multiplier 2] ```"
   ],
   [
     "It blocks, then prints one line.",
@@ -727,7 +727,7 @@ const DELETED = [
     "dispatch-prompt.mjs's `red-check` kind, which renders the identity paragraph; tests/dispatch-prompt.test.mjs pins the render"
   ],
   [
-    "The brief carries what varies, and the renderer prints it: `~/.fleet/bin/fleet-run dispatch-prompt.mjs render fix-applier --kind <review|conflict|dispositions-retry|red-check> --member <name> --worktree <abs-path> --branch <branch> --testCmd <testCmd> --scratch <scratch>`, plus `--pr <pr#> --run <run>` for a review or a dispositions retry and `--mismatched-record <path> --violations <list>` for a retry.",
+    "The brief carries what varies, and the renderer prints it: `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run dispatch-prompt.mjs render fix-applier --kind <review|conflict|dispositions-retry|red-check> --member <name> --worktree <abs-path> --branch <branch> --testCmd <testCmd> --scratch <scratch>`, plus `--pr <pr#> --run <run>` for a review or a dispositions retry and `--mismatched-record <path> --violations <list>` for a retry.",
     "dispatch-prompt.mjs's render flags, printed by its usage; tests/dispatch-prompt.test.mjs pins the render"
   ],
   [
@@ -768,7 +768,7 @@ const DELETED = [
   ["It refuses a write that adds a `review=`/`reviewed=` token (one the row already holds is carried), and one after which a PR maps to more than one row when it did not before — `row <M>` creating `#M` for a PR a ticket row maps, or a rewrite adding a `PR#M` mention to another row — naming the PR's row (`settle impl-N=PR#M` applies the same rule after its fold).", "ledger.mjs row and review; tests/ledger-row-review.test.mjs"],
   ["It then records each `unrecorded` filing in **filed** and, for a fix-applier, each refutation the report defers in **ruled**, once however often it runs, and prints `{member, outcome, checks, filed, ruled}`.", "ledger.mjs filed and ruled; references/ledger.md"],
   ["No launch appears while an earlier one is open — unanswered and not `=failed`.", "ledger.mjs review; tests/ledger-row-review.test.mjs"],
-  ["One git-ignored `.fleet/ledger.md` per run, updated at **every** state change via `~/.fleet/bin/fleet-run ledger.mjs` subcommands (`row`, `filed`, `ruled`, `check`, `read`, `dispatch`, `settle`, `review`, `drain`, `rotate`).", "references/ledger.md; ledger.mjs"],
+  ["One git-ignored `.fleet/ledger.md` per run, updated at **every** state change via `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run ledger.mjs` subcommands (`row`, `filed`, `ruled`, `check`, `read`, `dispatch`, `settle`, `review`, `drain`, `rotate`).", "references/ledger.md; ledger.mjs"],
   ["Outcomes: `impl-N` = `PR#M | bailed | released | killed | tier-mismatch | blocked`; `fix-pr-M` = `applied:<head> | no-op | failed | killed`; `finisher-pr-M` = `labelled | failed | killed | halted:<cause>`, `<cause>` one of `live-editor | rebase | past-pin | unreadable | missing | absent | other` (**Resolving a finisher halt**); `merge-bot-n` = `done | killed`.", "ledger-grammar.mjs's outcome vocabulary; tests/ledger-grammar.test.mjs"],
   ["Phase 0 rotates it before anything reads it, so no exclusion, filing, ruling or drain marker outlives the run that wrote it, and no row does either — except, when the previous run was this session's own, a row still carrying a live token, which rotate carries forward with its live `## Dispatched` entries (phase 0).", "references/phase-0.md's Rotate the ledger"],
   ["Plus two append-only lists:", "ledger.mjs rotate; tests/ledger-rotate.test.mjs"],

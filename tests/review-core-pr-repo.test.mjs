@@ -196,7 +196,7 @@ const PR = 1270;
 // regressed is still lifted and executed, and fails a named test below rather
 // than this file's lift.
 const CAPTURE = lift(/^ *REPO=\$\(.*\n *if \[ -n "\$REPO" \]; then\n *gh pr diff/m, /^ *fi$/m);
-const SIZING = lift(/^ *REPO=\$\(.*\n *if \[ -n "\$REPO" \]; then ~\/\.fleet\/bin\/fleet-run diff-stats/m, /; fi$/m);
+const SIZING = lift(/^ *REPO=\$\(.*\n *if \[ -n "\$REPO" \]; then ~\/\.omp\/plugins\/node_modules\/@feigi\/fleet-ctl\/scripts\/fleet-run diff-stats/m, /; fi$/m);
 const prCalls = (gh) => gh.calls().filter((c) => c.startsWith("pr "));
 
 function runBlock(block, { worktree, run, cwd, bin, home }) {
@@ -290,9 +290,10 @@ test("capture block: the jq expression renders the PR body, then each commit's s
 test("sizing block: dispatched from an unrelated repository, diff-stats is handed the worktree's repository", (t) => {
   const f = fixture(t);
   const home = scratch(t, "pr-repo-home-");
-  mkdirSync(join(home, ".fleet", "bin"), { recursive: true });
+  const entry = join(home, ".omp", "plugins", "node_modules", "@feigi", "fleet-ctl", "scripts");
+  mkdirSync(entry, { recursive: true });
   const log = join(home, "fleet-run.log");
-  writeExecStub(join(home, ".fleet", "bin", "fleet-run"), `#!/bin/sh\nprintf '%s\\n' "$*" >> ${JSON.stringify(log)}\nexit 3\n`);
+  writeExecStub(join(entry, "fleet-run"), `#!/bin/sh\nprintf '%s\\n' "$*" >> ${JSON.stringify(log)}\nexit 3\n`);
   const gh = ghStub(t);
   const r = runBlock(SIZING, { ...f, bin: gh.dir, home });
   assert.equal(r.status, 3, "the sizing script's own exit status must survive the block — fail-closed");
@@ -302,9 +303,10 @@ test("sizing block: dispatched from an unrelated repository, diff-stats is hande
 test("sizing block: with no origin remote the script is never run and the block says so", (t) => {
   const f = fixture(t, { withOrigin: false });
   const home = scratch(t, "pr-repo-home-");
-  mkdirSync(join(home, ".fleet", "bin"), { recursive: true });
+  const entry = join(home, ".omp", "plugins", "node_modules", "@feigi", "fleet-ctl", "scripts");
+  mkdirSync(entry, { recursive: true });
   const log = join(home, "fleet-run.log");
-  writeExecStub(join(home, ".fleet", "bin", "fleet-run"), `#!/bin/sh\nprintf '%s\\n' "$*" >> ${JSON.stringify(log)}\n`);
+  writeExecStub(join(entry, "fleet-run"), `#!/bin/sh\nprintf '%s\\n' "$*" >> ${JSON.stringify(log)}\n`);
   const r = runBlock(SIZING, { ...f, bin: ghStub(t).dir, home });
   assert.deepEqual(r.out, ["SNAPSHOT_REPO_UNRESOLVED"], r.err);
   assert.equal(existsSync(log), false, "diff-stats ran with no repository to name — it would read the cwd's");

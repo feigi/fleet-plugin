@@ -12,7 +12,7 @@ The main checkout is the parent of `git rev-parse --path-format=absolute
 main checkout or the Install root — for `bash`, a missing or main-checkout
 `cwd` — so re-issue it absolute, under your worktree.
 
-Read `$(~/.fleet/bin/fleet-run --root)/commands/review-and-fix.md` and run **steps 2, 3
+Read `~/.omp/plugins/node_modules/@feigi/fleet-ctl/commands/review-and-fix.md` and run **steps 2, 3
 and 5 only**: split apply-now/defer, commit, push, file every deferral as its
 own issue with the label the finding's state calls for. Skip step 1 — the
 review already ran — and steps 4 and 6: the controller owns the CI wait and

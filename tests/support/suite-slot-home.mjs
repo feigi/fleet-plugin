@@ -10,23 +10,21 @@
 // wrapper resolves is HOME-relative, so that is the whole of the isolation, and
 // `slotHome()` refuses to hand back a directory that is the real one.
 //
-// The Resolver is laid into that home too — `~/.fleet/bin/fleet-run` and the
-// `~/.omp/plugins/node_modules/@feigi/fleet-ctl` entry it reads, pointing at this
-// checkout's `plugin/` — because the runner a claim writes and the review's
-// block both reach the wrapper through it.
+// The Package entry is laid into that home too —
+// `~/.omp/plugins/node_modules/@feigi/fleet-ctl`, pointing at this checkout's
+// `plugin/` — because the runner a claim writes and the review's block both
+// reach the wrapper through the Resolver under it.
 //
 // Deliberately not a `.test.mjs`, so `node --test` never loads it as a suite.
 
 import { spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { tempDir } from "./temp-dir.mjs";
-import { writeExecStub } from "./exec-stub.mjs";
 
 export const PLUGIN = join(import.meta.dirname, "..", "..", "plugin");
 export const SUITE_SLOT = join(PLUGIN, "scripts", "suite-slot.mjs");
-const FLEET_RUN = readFileSync(join(PLUGIN, "scripts", "fleet-run"), "utf8");
 
 // Every module suite-slot.mjs reaches, for a fixture that runs a wrapper from
 // its own copy of a checkout (`agent-test` looks for it beside itself).
@@ -46,8 +44,7 @@ export function slotHome() {
     throw new Error("slotHome: the fixture home is the real home — refusing, a test must never touch the real ~/.fleet");
   }
   const slots = join(home, ".fleet", "suite-slots");
-  mkdirSync(join(home, ".fleet", "bin"), { recursive: true });
-  writeExecStub(join(home, ".fleet", "bin", "fleet-run"), FLEET_RUN);
+  mkdirSync(join(home, ".fleet"));
   const linked = join(home, ".omp", "plugins", "node_modules", "@feigi");
   mkdirSync(linked, { recursive: true });
   symlinkSync(PLUGIN, join(linked, "fleet-ctl"));

@@ -9,8 +9,8 @@
       "The confirmation-state sentence SKILL.md's **A member's claims** requires is the only thing that made either loss visible."
     ],
     [
-      "**Re-check before you act on any instrument reading** — a SHA acceptance, a CI verdict, the reconcile, a reap, a label gate — from that same main checkout: `~/.fleet/bin/fleet-run instruments.sh`.",
-      "**Re-check before you act on any instrument reading** — a SHA acceptance, a CI verdict, the reconcile, a reap, a label gate — from the main checkout phase 0 pinned from: `~/.fleet/bin/fleet-run instruments.sh`."
+      "**Re-check before you act on any instrument reading** — a SHA acceptance, a CI verdict, the reconcile, a reap, a label gate — from that same main checkout: `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run instruments.sh`.",
+      "**Re-check before you act on any instrument reading** — a SHA acceptance, a CI verdict, the reconcile, a reap, a label gate — from the main checkout phase 0 pinned from: `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run instruments.sh`."
     ],
     [
       "**A label gate and a CI verdict are also taken by dispatched members, not only by you** — the finisher labels, and the merge bot merges on its own reading — and neither is dispatched to read this file, so neither can be reached by stating the rule here.",
@@ -21,8 +21,8 @@
       "Nothing you change yourself is a reason: a tooling defect is reported, never fixed by you."
     ],
     [
-      "You run `~/.fleet/bin/fleet-run scratch-root.mjs`: it prints one absolute path, `~/.fleet/scratch/<repo-key>/`, the same from the main checkout and from every linked worktree, and the same again when a compacted or re-invoked controller runs it, so nothing writes it down.",
-      "You run `~/.fleet/bin/fleet-run scratch-root.mjs`; a non-zero exit is an environment to fix, not a cue to pick another root."
+      "You run `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run scratch-root.mjs`: it prints one absolute path, `~/.fleet/scratch/<repo-key>/`, the same from the main checkout and from every linked worktree, and the same again when a compacted or re-invoked controller runs it, so nothing writes it down.",
+      "You run `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run scratch-root.mjs`; a non-zero exit is an environment to fix, not a cue to pick another root."
     ],
     [
       "`<scratch>` in this file is that path, resolved before you send anything: every brief that carries one carries the absolute path you passed it — an implementer's `<scratch>/impl-<N>/`, the recipe deriver's `<scratch>/derive-recipe/`, a fix-applier's, a finisher's and a merge bot's `<scratch>/pr<N>/…`, and a review runner's `scratch` argument, which is the root itself.",
@@ -43,7 +43,7 @@
       "no instruction it pointed at is in SKILL.md or in any briefs/ template; each brief's report paragraph is the report, which references/member-lifecycle.md's report-delivered section says"
     ],
     [
-      "**Pin once**, at phase 0 step 0 below, from the main checkout you are running this from — never from a member's worktree, which is gitignored and carries no baseline: `~/.fleet/bin/fleet-run instruments.sh --pin`.",
+      "**Pin once**, at phase 0 step 0 below, from the main checkout you are running this from — never from a member's worktree, which is gitignored and carries no baseline: `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run instruments.sh --pin`.",
       "phase0.mjs's pin step (phase 0 step 0), and references/phase-0.md's Pin the instruments, which pins from this main checkout"
     ],
     [
@@ -83,7 +83,7 @@
       "SKILL.md's **Then. Report it, and never fix it yourself: the defect stays live for the rest of this run.**"
     ],
     [
-      "**Re-pin first** — `~/.fleet/bin/fleet-run instruments.sh --pin`.",
+      "**Re-pin first** — `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run instruments.sh --pin`.",
       "nothing: a tooling defect is reported, never fixed, so the controller re-pins for none; references/instruments.md's Reporting a tooling defect, which edits nothing, opens no branch and never re-pins"
     ],
     [
@@ -107,7 +107,7 @@
       "references/tick-rows.md's MAIN-CHECKOUT-DIRTY row, which says a `HEAD …` entry clears itself once HEAD reads clean again"
     ],
     [
-      "Re-baseline only a fix you leave edited in the checkout: run `~/.fleet/bin/fleet-run main-checkout.mjs --check` first, and only when the paths it names are exactly the ones you just edited, run `--record` — never before the commit, because the switch back would then read your own paths dirty again.",
+      "Re-baseline only a fix you leave edited in the checkout: run `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run main-checkout.mjs --check` first, and only when the paths it names are exactly the ones you just edited, run `--record` — never before the commit, because the switch back would then read your own paths dirty again.",
       "nothing: no tooling edit is left in the checkout; references/tick-rows.md's MAIN-CHECKOUT-DIRTY row says the maintainer re-baselines"
     ],
     [

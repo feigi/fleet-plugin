@@ -12,7 +12,7 @@
 // `<scratch>/pr<N>/finish-<member>`: the member name is in the path because the
 // scratch root is shared with every sibling, so `pr<N>` alone collides whenever
 // a PR gets a second finisher. Reached through the Resolver:
-// `~/.fleet/bin/fleet-run finisher-tree.mjs ...`.
+// `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run finisher-tree.mjs ...`.
 //
 // In order, each step only once every earlier one held:
 //

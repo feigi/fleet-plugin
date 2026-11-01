@@ -348,10 +348,10 @@ test("End of run follows the drain bullet and ends with finish, which records --
   const b = RUN_TEAM.bullet("- **The run ends, or the maintainer says drain**", "- **The finisher-gate wakes**", "run-team drain bullet").text;
   const steps = [...b.matchAll(/^\s+(\d+)\. /gm)].map((m) => Number(m[1]));
   assert.deepEqual(steps, [1, 2, 3], "End of run is one ordered list: begin, the loop, finish");
-  assert.match(b, Pin.phrase("1. `~/.fleet/bin/fleet-run fleet-event.mjs drain --reason \"<reason>\"` — runs `closeout.mjs begin --reason \"<reason>\"`"));
+  assert.match(b, Pin.phrase("1. `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run fleet-event.mjs drain --reason \"<reason>\"` — runs `closeout.mjs begin --reason \"<reason>\"`"));
   assert.match(EVENT_HEADER, Pin.phrase("`closeout.mjs begin` drains (`ledger.mjs drain`), then releases every claim that never became a PR and settles each `impl-<N>=released`"));
   assert.match(b, Pin.phrase("2. Act on the review, fix-applier and merge rows until the tick prints `ACTION: run over → fleet-heartbeat.mjs --stop \"<reason>\"`, which it does once the run is draining with no open PR and no live implementer."));
-  assert.match(b, Pin.phrase("3. `~/.fleet/bin/fleet-run closeout.mjs finish --reason \"<reason>\"`"));
+  assert.match(b, Pin.phrase("3. `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run closeout.mjs finish --reason \"<reason>\"`"));
   assert.match(b, Pin.phrase("which records `fleet-heartbeat.mjs --stop` and then merges the Close-out PR."));
   assert.match(b, Pin.phrase("On `NEED merge-wait PR #<n>`, run `finish` again at once. A PR it names `left open` is the next run's: you never label or merge it."));
 });

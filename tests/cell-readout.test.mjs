@@ -348,7 +348,7 @@ const RUN_TEAM = Pin.file(join(import.meta.dirname, "..", "plugin", "skills", "r
 
 test("SKILL.md's floor names the script that prints a cell's count, and that script exists", () => {
   const floor = Pin.unemphasized(RUN_TEAM.paragraph("**Report the count the per-cell readout prints", "run-team's per-cell floor", Pin.END).text);
-  const named = /`~\/\.fleet\/bin\/fleet-run (\S+\.mjs)`/.exec(floor)?.[1];
+  const named = /`~\/\.omp\/plugins\/node_modules\/@feigi\/fleet-ctl\/scripts\/fleet-run (\S+\.mjs)`/.exec(floor)?.[1];
   assert.ok(named, "the floor no longer tells the controller which script to run");
   assert.equal(named, "cell-readout.mjs");
   assert.ok(existsSync(join(dirname(SCRIPT), named)), `${named} is not a script beside cell-readout.mjs`);

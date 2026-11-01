@@ -419,7 +419,7 @@ export function resolveTestCmd(explicit, snap) {
 // command is one word to the wrapper — it hands the string to `sh -c` itself —
 // so it is single-quoted here, each embedded `'` closed, escaped and reopened.
 function slotted(cmd) {
-  return `~/.fleet/bin/fleet-run suite-slot.mjs '${cmd.replaceAll("'", "'\\''")}'`;
+  return `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run suite-slot.mjs '${cmd.replaceAll("'", "'\\''")}'`;
 }
 
 // The status suite-slot.mjs exits with when its wait for a slot expired.
@@ -1072,7 +1072,7 @@ export async function runReview(host, args) {
     mkdir -p "${runRootParent}" || { echo SNAPSHOT_RUNROOT_FAILED; exit 1; }
     RUN=$(mktemp -d "${runRootPrefix}XXXXXXXX") || { echo SNAPSHOT_RUNROOT_FAILED; exit 1; }
     echo SNAPSHOT_RUN_ROOT="$RUN"
-    ~/.fleet/bin/fleet-run reclaim-scratch.mjs --pr ${pr} --root "${scratch}" --apply | grep -qF '"failed":[]' || echo SNAPSHOT_PRUNE_FAILED
+    ~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run reclaim-scratch.mjs --pr ${pr} --root "${scratch}" --apply | grep -qF '"failed":[]' || echo SNAPSHOT_PRUNE_FAILED
     SHA=$(git -C ${worktree} rev-parse --short HEAD) || { echo SNAPSHOT_REVPARSE_FAILED; exit 1; }
     SNAP="$RUN/snapshot-$SHA"
     echo SNAPSHOT_DEST="$SNAP"
@@ -1082,7 +1082,7 @@ export async function runReview(host, args) {
     ( cd "$SNAP" && git init -q && git add -A -f && git -c user.name=fleet -c user.email=fleet@invalid commit -q --no-verify -m "review snapshot of $SHA" ) || echo SNAPSHOT_INIT_FAILED
     SNAPTREE=$(git -C "$SNAP" rev-parse 'HEAD^{tree}' 2>/dev/null); SRCTREE=$(git -C ${worktree} rev-parse 'HEAD^{tree}')
     { [ -d "$SNAP/.git" ] && [ -n "$SNAPTREE" ] && [ "$SNAPTREE" = "$SRCTREE" ]; } && echo SNAPSHOT_TREE_MATCH || echo SNAPSHOT_TREE_MISMATCH="snapshot $SNAPTREE vs commit $SRCTREE"
-    INSTALL=$(~/.fleet/bin/fleet-run derive-testcmd.sh ${worktree} install) && echo SNAPSHOT_INSTALL_STEP="$INSTALL" || { INSTALL=; echo SNAPSHOT_INSTALL_UNREAD; }
+    INSTALL=$(~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run derive-testcmd.sh ${worktree} install) && echo SNAPSHOT_INSTALL_STEP="$INSTALL" || { INSTALL=; echo SNAPSHOT_INSTALL_UNREAD; }
     [ -z "$INSTALL" ] || { ( cd "$SNAP" && env -u CI sh -c "$INSTALL" ) >"$RUN/install.log" 2>&1; echo SNAPSHOT_INSTALL_EXIT=$?; }
     if [ -d "$SNAP/.git" ] && git -C "$SNAP" status --porcelain --untracked-files=all >"$RUN/status.txt"; then head -n 20 "$RUN/status.txt" | sed 's/^/SNAPSHOT_UNTRACKED=/'; echo SNAPSHOT_UNTRACKED_COUNT=$(wc -l <"$RUN/status.txt" | tr -d ' '); else echo SNAPSHOT_STATUS_FAILED; fi
 
@@ -1203,7 +1203,7 @@ caller decide.
 
 Then read this repository's Test entrypoint out of its Recipe cache:
 
-    ~/.fleet/bin/fleet-run derive-testcmd.sh ${worktree} test
+    ~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run derive-testcmd.sh ${worktree} test
 
 Report \`testCmd\` = its stdout ONLY if it exited 0. If it exited non-zero,
 report \`testCmdError\` = its stderr and omit \`testCmd\`. Never derive or
@@ -1214,7 +1214,7 @@ that instead of deriving.
 Then read, out of the same cache, the merge-gating CI steps that neither the
 Test entrypoint nor the Check step runs:
 
-    ~/.fleet/bin/fleet-run derive-testcmd.sh ${worktree} uncovered
+    ~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run derive-testcmd.sh ${worktree} uncovered
 
 Report \`uncovered\` = its stdout, one line of JSON copied verbatim, ONLY if it
 exited 0. If it exited non-zero, report \`uncoveredError\` = its stderr and omit
@@ -1226,7 +1226,7 @@ it again because it is a separate command; the capture block above already
 reported why when it could not:
 
     REPO=$(cd ${worktree} && gh repo view --json url -q .url 2>/dev/null)
-    if [ -n "$REPO" ]; then ~/.fleet/bin/fleet-run diff-stats.mjs --pr ${pr} --repo "$REPO"; else echo SNAPSHOT_REPO_UNRESOLVED; fi
+    if [ -n "$REPO" ]; then ~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run diff-stats.mjs --pr ${pr} --repo "$REPO"; else echo SNAPSHOT_REPO_UNRESOLVED; fi
 
 If that printed SNAPSHOT_REPO_UNRESOLVED, omit \`diffStats\`.
 

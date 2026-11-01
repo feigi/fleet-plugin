@@ -1,8 +1,8 @@
 {
   "changed": [
     [
-      "The `tier-roles` step runs `~/.fleet/bin/fleet-run tier-roles.mjs --check --in-flight <B>`, `<B>` being the `--in-flight` given, else the default **Defaults** (**Queue depth**) states.",
-      "The `tier-roles` step runs `~/.fleet/bin/fleet-run tier-roles.mjs --check --in-flight <B>`, `<B>` being the `--in-flight` given, else the default."
+      "The `tier-roles` step runs `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run tier-roles.mjs --check --in-flight <B>`, `<B>` being the `--in-flight` given, else the default **Defaults** (**Queue depth**) states.",
+      "The `tier-roles` step runs `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run tier-roles.mjs --check --in-flight <B>`, `<B>` being the `--in-flight` given, else the default."
     ],
     [
       "None of those triggers runs while `HOLD (in-flight <n>/<B>)` stands (**Queue depth**).",

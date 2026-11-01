@@ -193,7 +193,7 @@ const renderPrune = (path, scratchRoot, pr) =>
   new Function("scratch", "pr", "return `" + pruneLine(path) + "`")(scratchRoot, pr);
 
 /**
- * A HOME whose `~/.fleet/bin/fleet-run` runs this checkout's own plugin
+ * A HOME whose `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run` runs this checkout's own plugin
  * scripts, so the prune line's `fleet-run reclaim-scratch.mjs` and the Install
  * step's `fleet-run derive-testcmd.sh` reach the scripts under test and never
  * an installed plugin, a real scratch root or a real Recipe cache. A `.sh`
@@ -202,10 +202,11 @@ const renderPrune = (path, scratchRoot, pr) =>
  */
 function fleetHome(t) {
   const home = scratch(t, "snapshot-repo-home-");
-  mkdirSync(join(home, ".fleet", "bin"), { recursive: true });
+  const entry = join(home, ".omp", "plugins", "node_modules", "@feigi", "fleet-ctl", "scripts");
+  mkdirSync(entry, { recursive: true });
   const scripts = join(REPO, "scripts");
   writeExecStub(
-    join(home, ".fleet", "bin", "fleet-run"),
+    join(entry, "fleet-run"),
     `#!/bin/sh\ns=$1; shift\ncase $s in *.sh) PATH="${dirname(process.execPath)}:$PATH" exec sh "${scripts}/$s" "$@" ;; esac\nexec "${process.execPath}" "${scripts}/$s" "$@"\n`,
   );
   return home;

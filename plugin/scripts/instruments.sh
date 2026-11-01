@@ -183,10 +183,9 @@ fi
 base="$root/.fleet/instruments.sha"
 
 # The Install root, resolved inline on every pin and every check: the same
-# path fleet-run, fleet-provenance and fleet-bootstrap resolve, the same way —
-# the package entry's own link-ness for the kind, its realpath for the tree.
-# Mirrored rather than called. The placed `~/.fleet/bin/fleet-run` can drift
-# from the package, and an environment override or a `node` call would be a
+# path fleet-run and fleet-provenance resolve, the same way — the package
+# entry's own link-ness for the kind, its realpath for the tree. Mirrored
+# rather than called: an environment override or a `node` call would be a
 # second way to name a tree the fleet does not execute.
 #
 # HOME is checked by hand because `set -u` does not answer for it: measured,

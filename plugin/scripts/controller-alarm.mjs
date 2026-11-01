@@ -65,7 +65,7 @@ import { readState, stateFileIn } from "./fleet-state.mjs";
 import { processSource } from "./proc.mjs";
 
 export const POLL_MS = 30_000;
-export const ALARM_LINE = "[fleet-alarm] run ~/.fleet/bin/fleet-run fleet-event.mjs heartbeat";
+export const ALARM_LINE = "[fleet-alarm] run ~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run fleet-event.mjs heartbeat";
 // Where the extension running as `pid` records that its timer is armed; phase 0 reads it there.
 export const alarmFile = (pid) => join(homedir(), ".fleet", "alarm", `${pid}.json`);
 

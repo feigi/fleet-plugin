@@ -23,21 +23,24 @@
 #      the throwaway `file://` git-subdir dev catalog this step used; the
 #      link route is also the route that honors each agent's declared
 #      tier, which smoke-omp.sh asserts separately).
-#   2. Places the Resolver (`fleet-bootstrap --from-checkout`) and runs
-#      `fleet-provenance` — the Install root, its kind, and the Resolver's
-#      own drift check all come from ONE already-built instrument rather
-#      than reimplemented here; this script only requires the printed kind
-#      to be `linked-checkout`, the shape step 1 installed. The
+#   2. Runs `fleet-provenance` with nothing placed — the Install root, its
+#      kind and its version all come from ONE already-built instrument
+#      rather than reimplemented here; this script only requires the
+#      printed kind to be `linked-checkout`, the shape step 1 installed. The
 #      `enabledProviders` precondition retired with the marketplace route
 #      (ADR 0021), so no scratch config is needed to make this pass
 #      anymore — proving the point.
-#   3. For every script NAME a `~/.fleet/bin/fleet-run <script>` prose
-#      callsite names — grepped fresh from `plugin/skills`,
-#      `plugin/commands`, `plugin/scripts`, never a hardcoded list that can go stale —
-#      resolves it via `fleet-run --path <script>` and asserts the resolved
-#      path exists as a real file inside the install root.
-#   4. Execs `fleet-run arg.mjs` once and requires exit 0 — one real
-#      execution through the Resolver, not just a path resolution.
+#   3. Asserts that every path the shipped prose names under the Package
+#      entry, `~/.omp/plugins/node_modules/@feigi/fleet-ctl` — the Resolver
+#      itself and each runbook read in place — is a real file in the
+#      install, and resolves every script NAME a `fleet-run <script>`
+#      callsite names via the Package entry's own `fleet-run --path
+#      <script>`, asserting the resolved path is a real file inside the
+#      Install root. Both are grepped fresh from `plugin/`, never a
+#      hardcoded list that can go stale.
+#   4. Execs the Package entry's `fleet-run arg.mjs` once and requires exit
+#      0 — one real execution through the Resolver, not just a path
+#      resolution.
 #
 # No test suite runs from an install anywhere in this script.
 set -euo pipefail
@@ -67,8 +70,7 @@ fi
 
 REPO_ROOT="$(pwd)"
 # A scratch HOME this script owns and deletes: every mutation (the link's
-# node_modules entry and lock, the placed Resolver) lands there, never in the
-# caller's real state.
+# node_modules entry and lock) lands there, never in the caller's real state.
 SCRATCH_HOME="$REPO_ROOT/.install-and-smoke-home"
 
 rm -rf "$SCRATCH_HOME"
@@ -88,8 +90,7 @@ if ! HOME="$SCRATCH_HOME" omp plugin link "$REPO_ROOT/plugin" >/dev/null; then
   exit 1
 fi
 
-# ---- place the Resolver, then run the Provenance check ----
-HOME="$SCRATCH_HOME" node plugin/scripts/fleet-bootstrap --from-checkout
+# ---- the Provenance check, with nothing placed ----
 echo "== fleet-provenance =="
 prov_rc=0
 provenance="$(HOME="$SCRATCH_HOME" node plugin/scripts/fleet-provenance)" || prov_rc=$?
@@ -106,31 +107,72 @@ if ! grep -qxF 'fleet-provenance: kind: linked-checkout' <<<"$provenance"; then
   fail=1
 fi
 
-# ---- every ~/.fleet/bin/fleet-run <script> callsite resolves ----
+# The Package entry in the scratch HOME, and the Resolver prose runs under it.
+ENTRY="$SCRATCH_HOME/.omp/plugins/node_modules/$PLUGIN_NAME"
+RESOLVER="$ENTRY/scripts/fleet-run"
+# The same entry as prose writes it, as an ERE: only the dot of `.omp` needs
+# escaping while the package name carries no ERE metacharacter, which the
+# case below holds it to.
+case $PLUGIN_NAME in
+  *[!@A-Za-z0-9/_-]*)
+    echo "::error::install-and-smoke: package name $PLUGIN_NAME carries a character this script's ERE would read as a metacharacter"
+    exit 2
+    ;;
+esac
+# shellcheck disable=SC2088 # literal grep PATTERN text, not a path to expand
+ENTRY_RE="~/\\.omp/plugins/node_modules/$PLUGIN_NAME/"
+
+# ---- every path the prose names under the Package entry is a real file ----
 # Extracted fresh, never hardcoded: a prose edit that adds or renames a
-# callsite is covered on arrival, and a stale list here could not go
-# unnoticed the way a hardcoded one could.
-# The grep runs outside any pipeline so `set -euo pipefail` cannot abort the
-# script on its status before the checks below name the cause: rc 1 is "no
+# callsite or a runbook read is covered on arrival, and a stale list here
+# could not go unnoticed the way a hardcoded one could. A path never ends in
+# `.`, so a sentence's full stop after one is not taken into it.
+# The greps run outside any pipeline so `set -euo pipefail` cannot abort the
+# script on their status before the checks below name the cause: rc 1 is "no
 # match" and lands in the empty-set check, rc 2+ is grep itself failing.
 grep_rc=0
-# shellcheck disable=SC2088 # literal grep PATTERN text, not a path to expand
-CALLSITES="$(grep -rhoE '~/\.fleet/bin/fleet-run[[:space:]]+[A-Za-z][A-Za-z0-9_.-]*\.(mjs|sh)' \
-  plugin/skills plugin/commands plugin/scripts)" || grep_rc=$?
+NAMED="$(grep -rhoE "${ENTRY_RE}[A-Za-z0-9_./-]*[A-Za-z0-9_-]" plugin)" || grep_rc=$?
+if [ "$grep_rc" -gt 1 ]; then
+  echo "::error::install-and-smoke: the Package-entry path grep itself failed (rc $grep_rc) — its stderr is above"
+  fail=1
+fi
+NAMED_PATHS=""
+if [ -n "$NAMED" ]; then
+  NAMED_PATHS="$(sed -E "s#^${ENTRY_RE}##" <<<"$NAMED" | sort -u)"
+fi
+if ! grep -qxF 'scripts/fleet-run' <<<"$NAMED_PATHS"; then
+  echo "::error::install-and-smoke: no prose names the Resolver under the Package entry — the grep itself broke, not the prose"
+  fail=1
+fi
+echo "== every Package-entry path the prose names =="
+count=0
+while IFS= read -r rel; do
+  [ -n "$rel" ] || continue
+  if [ -f "$ENTRY/$rel" ]; then
+    count=$((count + 1))
+  else
+    echo "::error::install-and-smoke: the prose names ~/.omp/plugins/node_modules/$PLUGIN_NAME/$rel, which is not a file in the install"
+    fail=1
+  fi
+done <<<"$NAMED_PATHS"
+echo "install-and-smoke: $count Package-entry path(s) named by the prose are real files"
+
+# ---- every fleet-run <script> callsite resolves ----
+grep_rc=0
+CALLSITES="$(grep -rhoE "${ENTRY_RE}scripts/fleet-run[[:space:]]+[A-Za-z][A-Za-z0-9_.-]*\\.(mjs|sh)" plugin)" || grep_rc=$?
 if [ "$grep_rc" -gt 1 ]; then
   echo "::error::install-and-smoke: the callsite grep itself failed (rc $grep_rc) — its stderr is above"
   fail=1
 fi
 SCRIPT_NAMES=""
 if [ -n "$CALLSITES" ]; then
-  SCRIPT_NAMES="$(sed -E 's#^~/\.fleet/bin/fleet-run[[:space:]]+##' <<<"$CALLSITES" | sort -u)"
+  SCRIPT_NAMES="$(sed -E "s#^${ENTRY_RE}scripts/fleet-run[[:space:]]+##" <<<"$CALLSITES" | sort -u)"
 fi
 if [ -z "$SCRIPT_NAMES" ]; then
   echo "::error::install-and-smoke: no fleet-run callsites found — the grep itself broke, not the callsites"
   fail=1
 fi
 
-RESOLVER="$SCRATCH_HOME/.fleet/bin/fleet-run"
 RESOLVE_ERR="$SCRATCH_HOME/resolve.err"
 echo "== resolving every fleet-run callsite target =="
 count=0
@@ -150,7 +192,7 @@ while IFS= read -r script; do
 done <<<"$SCRIPT_NAMES"
 echo "install-and-smoke: $count callsite target(s) resolved to real files"
 
-# ---- one real execution through the Resolver ----
+# ---- one real execution through the Package entry's Resolver ----
 if ! HOME="$SCRATCH_HOME" node "$RESOLVER" arg.mjs; then
   echo "::error::install-and-smoke: fleet-run arg.mjs exited non-zero through the Resolver"
   fail=1
@@ -161,4 +203,4 @@ if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 
-echo "install-and-smoke: provenance clean, every fleet-run callsite target resolved, arg.mjs ran clean"
+echo "install-and-smoke: provenance clean, every Package-entry path the prose names is a real file, every fleet-run callsite target resolved, arg.mjs ran clean"

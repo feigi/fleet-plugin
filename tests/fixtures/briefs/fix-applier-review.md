@@ -3,7 +3,7 @@ push destination below, given to you because a detached worktree cannot supply
 it. Do NOT create another worktree. The review is done and its result is the
 file below — do not re-review, do not dispatch specialists.
 
-Read `$(~/.fleet/bin/fleet-run --root)/commands/review-and-fix.md` and run **steps 2, 3
+Read `~/.omp/plugins/node_modules/@feigi/fleet-ctl/commands/review-and-fix.md` and run **steps 2, 3
 and 5 only**: split apply-now/defer, commit, push, file every deferral as its
 own issue with the label the finding's state calls for. Skip step 1 — the
 review already ran — and steps 4 and 6: the controller owns the CI wait and
@@ -13,8 +13,8 @@ Label names in this file are roles; the Label map gives the string to type; a me
 
 **Before your first edit or refuter dispatch, read the Label map — the two
 roles you type or compare, once — and use those strings for the rest of your
-run.** `~/.fleet/bin/fleet-run label-map.mjs show needs-triage` and
-`~/.fleet/bin/fleet-run label-map.mjs show wontfix` each print the string the
+run.** `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run label-map.mjs show needs-triage` and
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run label-map.mjs show wontfix` each print the string the
 tracker uses; every `gh` command and label comparison those steps of
 `review-and-fix.md` type for those two roles takes it. You never run `ensure`
 and never ask anyone. **A non-zero exit from `show` ends you with no report** —
@@ -72,7 +72,7 @@ re-run. That command never deletes an ignored file. A path the re-run still
 refuses after that clean → push nothing and report that cause.
 
 **`recipe-check.mjs` is how you run `CHECKCMD-1` and `TESTCMD-1`:**
-`~/.fleet/bin/fleet-run recipe-check.mjs --member <your name> --testCmd "TESTCMD-1" --reports /abs/scratch-fix/reports`,
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run recipe-check.mjs --member <your name> --testCmd "TESTCMD-1" --reports /abs/scratch-fix/reports`,
 from the worktree, after `git add` and before the commit — `TESTCMD-1` copied
 verbatim as the one quoted argument. It runs the Recipe's Check step,
 `CHECKCMD-1`, then `TESTCMD-1`, against the staged tree and records both beside
@@ -117,13 +117,13 @@ nothing past, `applied` and `deferred` empty, `dispositionsRecord` and
 
 Your report is a file, `/abs/scratch-fix/reports/<your name>.json`, `<your name>` the
 `fix-pr-` name you were dispatched as, in the shape
-`~/.fleet/bin/fleet-run report-schema.mjs print fix-pr` prints. A field with
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run report-schema.mjs print fix-pr` prints. A field with
 nothing real to point at is `null`: `dispositionsRecord` for a conflict hold or
 a red-check fix, which write no dispositions record, and `testRun` when no test
 run exists — a `no-op`, or a `failed` that never ran tests. A non-null value
 always reflects a real record or a real run. Write the report before your
 final message, and send nothing until
-`~/.fleet/bin/fleet-run report-schema.mjs validate fix-pr /abs/scratch-fix/reports/<your name>.json`
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run report-schema.mjs validate fix-pr /abs/scratch-fix/reports/<your name>.json`
 answers `valid`. Your final message is then one line,
 `<your name>: <outcome> /abs/scratch-fix/reports/<your name>.json`, `<outcome>` the
 report's `outcome`.

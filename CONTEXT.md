@@ -335,33 +335,38 @@ _Avoid_: undecided, unclear
 
 ### Install
 
+**Package entry**:
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl` — where every install kind places the plugin:
+a real directory for npm, a symlink for a link. Fixed across versions and kinds, so it is the
+one plugin path prose writes down: the Resolver at `scripts/fleet-run` under it, and runbooks
+read in place. Its realpath is the Install root.
+_Avoid_: install path, plugin dir
+
 **Install root**:
-The directory omp actually loaded the plugin from — the realpath of its
-`node_modules/@feigi/fleet-ctl` package entry, the one path every install kind
-(marketplace, link, npm) places. Never a path any artefact may write down:
-it is version- or checkout-dependent and changes across install kinds.
+The directory omp actually loaded the plugin from — the realpath of the Package entry. Never a
+path any artefact may write down: it is version- or checkout-dependent and changes across
+install kinds; prose writes the Package entry instead.
 One exception, evidence: the instrument pin's `root=` line and phase 0's pin line record the root they certified, a check compares it with the live root, and nothing ever follows the recorded path.
 _Avoid_: cache dir, plugin dir, install path
 
 **Resolver**:
 The shipped executable that maps a script name to the Install root and execs it there.
-The single door between prose and code — a callsite naming any other path is a defect.
-Placed once by hand outside the plugin, because it cannot resolve itself. Reads
-omp's extension package layout and nothing else.
+The single door between prose and code: prose runs it as `scripts/fleet-run` under the
+Package entry, and a script reached by any other path is a defect. Reads omp's extension
+package layout and nothing else.
 _Avoid_: shim, wrapper, launcher
 
 **Provenance check**:
-The assertion naming the live Install root, its install kind and recorded version,
-and the Resolver's own drift against the installed copy — with a NOTICE when the
-root is a linked checkout, since then every answer comes from the dev tree.
-Refuses loudly; writes nothing.
+The assertion naming the live Install root, its install kind, recorded version and scripts
+digest — with a NOTICE when the root is a linked checkout, since then every answer comes from
+the dev tree. Refuses loudly when the Package entry does not resolve; writes nothing.
 _Avoid_: doctor, healthcheck
 
 **Pre-flight**:
 The check set run-team runs at the start of phase 0 (`preflight.mjs`) — what this
 machine and the consumer repository must have before anything is shortlisted or
 dispatched: the binaries, `gh` auth, `origin/main`, the ignore rules,
-the repository settings, the Resolver. A pass is remembered in `.fleet/preflight.json`,
+the repository settings. A pass is remembered in `.fleet/preflight.json`,
 keyed to a hash of the check set. It checks the machine and the repository, never
 the install — that is the Provenance check.
 _Avoid_: doctor, healthcheck

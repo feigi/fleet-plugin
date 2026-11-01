@@ -561,7 +561,7 @@ test("the fix commit pushes by refspec, in both files, to a branch the prompt bi
   for (const [label, slice] of [["review-and-fix step 3", step3], ["the fix-applier prompt", prompt()]]) {
     assert.match(
       slice,
-      Pin.phrase("~/.fleet/bin/fleet-run push-sync.mjs --branch <branch>"),
+      Pin.phrase("~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run push-sync.mjs --branch <branch>"),
       `${label} no longer names the push helper — a bare push exits 128 in the detached worktree this path runs from, and a bare refspec push leaves the claim worktree's ref behind`,
     );
     assert.doesNotMatch(slice, /`git push [^`]*HEAD:[^`]*`/, `${label} shows a bare refspec push again, which leaves the claim worktree's ref at its old tip`);

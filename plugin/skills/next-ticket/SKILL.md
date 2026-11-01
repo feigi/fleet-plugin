@@ -18,13 +18,13 @@ Suggest ready tickets, maintainer picks, mark in-progress, implement at depth ti
 Before the query, run the Label map derivation step:
 
 ```bash
-~/.fleet/bin/fleet-run label-map.mjs ensure
+~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run label-map.mjs ensure
 ```
 
-Exit 0 → the map is in place; go on. Exit 3 → it printed the question payload, a JSON object with `certain`, `uncertain` and `tableFile`, the path of the repository's triage-label table: render it to the maintainer as one question listing each uncertain role, its suggestion, why it is uncertain (a role declared in the table but not in the tracker names the payload's `tableFile`) and the alternatives, ending with "reply `defaults` to accept every suggestion, or name `<role>=<label>` for any you want otherwise — a role with no suggestion must be named; labels that do not exist are created on your confirmation". **Wait for the answer**, then run `~/.fleet/bin/fleet-run label-map.mjs set --create` with it — `--accept-suggestions` for `defaults`, plus each `<role>=<label>` the maintainer named — and run `ensure` again, which now exits 0. Tell the maintainer how to make the answer permanent: add or edit the row for the role in the file the payload's `tableFile` names, the role in the first cell and the string in the second; never write that table yourself. Exit 1 or 2 → show what it printed and stop; neither is a question.
+Exit 0 → the map is in place; go on. Exit 3 → it printed the question payload, a JSON object with `certain`, `uncertain` and `tableFile`, the path of the repository's triage-label table: render it to the maintainer as one question listing each uncertain role, its suggestion, why it is uncertain (a role declared in the table but not in the tracker names the payload's `tableFile`) and the alternatives, ending with "reply `defaults` to accept every suggestion, or name `<role>=<label>` for any you want otherwise — a role with no suggestion must be named; labels that do not exist are created on your confirmation". **Wait for the answer**, then run `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run label-map.mjs set --create` with it — `--accept-suggestions` for `defaults`, plus each `<role>=<label>` the maintainer named — and run `ensure` again, which now exits 0. Tell the maintainer how to make the answer permanent: add or edit the row for the role in the file the payload's `tableFile` names, the role in the first cell and the string in the second; never write that table yourself. Exit 1 or 2 → show what it printed and stop; neither is a question.
 
 ```bash
-~/.fleet/bin/fleet-run candidates.mjs --require-label ready-for-agent --allow-fallback
+~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run candidates.mjs --require-label ready-for-agent --allow-fallback
 ```
 
 Script owns the query: label exclusions server-side, raw `body` never fetched for
@@ -55,7 +55,7 @@ Cut runs on step 1 data alone — number, title, labels, `d` — never the Agent
 ## 3. In-flight check (all three, per candidate) — then fetch
 
 ```bash
-~/.fleet/bin/fleet-run inflight.sh <N>   # 0 free, 1 taken, 2 unanswerable
+~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run inflight.sh <N>   # 0 free, 1 taken, 2 unanswerable
 ```
 
 Runs all three — a PR about the ticket, a remote branch, a local worktree or branch. Exit 1 → taken. "Shipped" memory not proof; open PR means unmerged. Exit 2 is not free: the question went unanswered (`gh` failed, no such issue, not a repo), so treat it as taken until you know.
@@ -87,9 +87,9 @@ Ask which. **Wait for answer.** Maintainer says taken → drop, re-suggest.
 gh issue edit <N> --add-label "<in-progress string>"
 ```
 
-`<in-progress string>` is what `~/.fleet/bin/fleet-run label-map.mjs show in-progress` prints. The derivation step in step 1 already confirmed the label exists in the tracker, creating it on the maintainer's confirmation where it was missing.
+`<in-progress string>` is what `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run label-map.mjs show in-progress` prints. The derivation step in step 1 already confirmed the label exists in the tracker, creating it on the maintainer's confirmation where it was missing.
 
-Infer branch/worktree convention from `git worktree list` / `git branch -r` — commonly `feat|fix|refactor/<N>-slug` and `.worktrees/<N>-slug`. Branch off fresh `origin/main`, run the Install step, run the Check step, run the Test entrypoint as the baseline — the repo's **Recipe**, read from its Recipe cache: `~/.fleet/bin/fleet-run derive-testcmd.sh . install`, `… . check` and `… . test --at origin/main` print them. **No usable cache (any of the three exits 1) → run the Recipe derivation step first:** dispatch a `task` member, agent `fleet-recipe-deriver`, its prompt naming the main checkout's absolute path as `<repo>` and `<scratch>/derive-recipe/` as its scratch directory, `<scratch>` the output of `~/.fleet/bin/fleet-run scratch-root.mjs`; it reads the repo, proves all three commands in a throwaway worktree and writes the cache only on proof. `RECIPE NOT PROVEN` → stop and give the maintainer its reason; never pick a command yourself. Exit 3 is no verdict on the cache — the reader could not run a tool it needs — so fix that environment fault and re-run instead of deriving.
+Infer branch/worktree convention from `git worktree list` / `git branch -r` — commonly `feat|fix|refactor/<N>-slug` and `.worktrees/<N>-slug`. Branch off fresh `origin/main`, run the Install step, run the Check step, run the Test entrypoint as the baseline — the repo's **Recipe**, read from its Recipe cache: `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run derive-testcmd.sh . install`, `… . check` and `… . test --at origin/main` print them. **No usable cache (any of the three exits 1) → run the Recipe derivation step first:** dispatch a `task` member, agent `fleet-recipe-deriver`, its prompt naming the main checkout's absolute path as `<repo>` and `<scratch>/derive-recipe/` as its scratch directory, `<scratch>` the output of `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run scratch-root.mjs`; it reads the repo, proves all three commands in a throwaway worktree and writes the cache only on proof. `RECIPE NOT PROVEN` → stop and give the maintainer its reason; never pick a command yourself. Exit 3 is no verdict on the cache — the reader could not run a tool it needs — so fix that environment fault and re-run instead of deriving.
 
 **Run the Install step with `CI` removed**, from the new worktree's root: `env -u CI sh -c "<install>"`, `<install>` the output of `derive-testcmd.sh . install`. A setup script that skips under `CI` installs no git hooks there, and you would then commit with the repository's commit-time checks silently absent. Only the Install step loses `CI`; the Check step and the Test entrypoint baseline run in your shell's own environment.
 
@@ -105,7 +105,7 @@ Come back here. The sizing path hands off; this step always follows.
 
 ```bash
 git fetch origin && git rebase origin/main   # rebase, never merge main in
-~/.fleet/bin/fleet-run recipe-check.mjs --member <your name> --testCmd "<test command>" --reports <scratch>/reports   # re-run after any content change or rebase
+~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run recipe-check.mjs --member <your name> --testCmd "<test command>" --reports <scratch>/reports   # re-run after any content change or rebase
 git push --force-with-lease -u origin HEAD
 gh pr create --base main --body "…
 
@@ -166,7 +166,7 @@ and a member sent into one is on `## HEAD (no branch)`, where the push above exi
 the cause, so no `-u`/force combination reaches it: the unqualified `HEAD`
 destination is, and plain `git push origin HEAD` fails the same way while a bare
 `git push` exits 128 (`fatal: You are not currently on a branch`). Name the branch
-instead, through the helper — `~/.fleet/bin/fleet-run push-sync.mjs --branch <branch> --force-with-lease`.
+instead, through the helper — `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run push-sync.mjs --branch <branch> --force-with-lease`.
 A refspec push alone moves origin's ref and leaves the claim worktree's
 `refs/heads/<branch>` at its old tip; the helper pushes `HEAD:refs/heads/<branch>`,
 then moves the worktree holding `<branch>` to the pushed SHA with `reset --keep`,

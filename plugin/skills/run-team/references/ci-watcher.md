@@ -78,7 +78,7 @@ while :; do                                   # one tick
             hidden_out=
           fi
           for pr in $(printf '%s\n' "$prs"); do # inline $(...): `for pr in $prs` is ONE iteration under zsh
-            st=$(~/.fleet/bin/fleet-run ci-state.mjs --pr "$pr" 2>/dev/null) || : # not-green exits non-zero; the payload is the verdict
+            st=$(~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run ci-state.mjs --pr "$pr" 2>/dev/null) || : # not-green exits non-zero; the payload is the verdict
             if ! printf '%s' "$st" | jq -e '.verdict and .verdict != "rate-limited"' >/dev/null 2>&1; then
               case " $blind " in *" $pr "*) ;; *) # latch keyed BY PR: this cause is per-PR
                 echo "WATCHER DEGRADED: no usable ci-state reading for #$pr — silence is NOT green"

@@ -143,7 +143,7 @@ The full text of each row `fleet-tick.mjs` prints and what it asks of the contro
   when HEAD moved, and every live member; it
   attributes nothing, because concurrent members make that a guess. Dispatch
   nothing new and tell the maintainer: they resolve the stray paths FIRST,
-  then re-baseline with `~/.fleet/bin/fleet-run main-checkout.mjs --record`.
+  then re-baseline with `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run main-checkout.mjs --record`.
   A path entry holds until that re-baseline, tick after tick; a `HEAD …` entry
   clears itself once HEAD reads clean again, and is never re-baselined while
   HEAD is off the run's branch. Never revert the
@@ -164,7 +164,7 @@ The full text of each row `fleet-tick.mjs` prints and what it asks of the contro
   resolve any stray paths, which the line does not name; only then re-record.
 - `MAIN-CHECKOUT-NO-BASELINE …` with `HOLD (main checkout no baseline)` — no
   baseline was recorded. Yours to fix: run
-  `~/.fleet/bin/fleet-run main-checkout.mjs --record`, which references/phase-0.md
+  `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run main-checkout.mjs --record`, which references/phase-0.md
   describes under "Record the main-checkout baseline". A baseline
   that vanished mid-run is not a fresh run — report it to the maintainer
   before recording over whatever the tree now holds.

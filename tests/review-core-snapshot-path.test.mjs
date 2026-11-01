@@ -540,7 +540,7 @@ test("the snapshot block mints a per-run destination, then extracts, probes, com
       "the run root is never printed — the agent cannot report a `runRoot` it can no longer read off this prompt, and the caller's containment check has nothing to check",
     ],
     [
-      /~\/\.fleet\/bin\/fleet-run reclaim-scratch\.mjs --pr \$\{pr\} --root "?\$\{scratch\}"? --apply \| grep -qF '"failed":\[\]' \|\| echo SNAPSHOT_PRUNE_FAILED/,
+      /~\/\.omp\/plugins\/node_modules\/@feigi\/fleet-ctl\/scripts\/fleet-run reclaim-scratch\.mjs --pr \$\{pr\} --root "?\$\{scratch\}"? --apply \| grep -qF '"failed":\[\]' \|\| echo SNAPSHOT_PRUNE_FAILED/,
       "the stale-run-root prune is gone, no longer runs `reclaim-scratch.mjs --pr` on this PR under this scratch root, or no longer maps a receipt with a failed removal (or no receipt at all) to SNAPSHOT_PRUNE_FAILED — every review leaves a tree nothing removes (#1083), and `snapshot-repo.test.mjs`'s executed prune tests are where its behaviour is measured",
     ],
     [
@@ -579,7 +579,7 @@ test("the snapshot block mints a per-run destination, then extracts, probes, com
       "the tree compare no longer names its two outcomes — a failed init or a snapshot that is not the reviewed tree goes back to being reported as a verified environment",
     ],
     [
-      /INSTALL=\$\(~\/\.fleet\/bin\/fleet-run derive-testcmd\.sh \$\{worktree\} install\)/,
+      /INSTALL=\$\(~\/\.omp\/plugins\/node_modules\/@feigi\/fleet-ctl\/scripts\/fleet-run derive-testcmd\.sh \$\{worktree\} install\)/,
       "the Install step is no longer read off the Recipe cache through derive-testcmd.sh — pointed at the snapshot it refuses, since the snapshot holds no cache, and nothing else may guess the command",
     ],
     [
@@ -610,9 +610,13 @@ test("the snapshot block mints a per-run destination, then extracts, probes, com
 // what the install leaves behind. Read over the whole SOURCE, comments
 // included, for the layout name: a comment still naming it is the old special
 // case's explanation outliving it. The exclude and the slot are read over the
-// shell lines alone — the prose names the exclude to forbid adding to it.
+// shell lines alone — the prose names the exclude to forbid adding to it. The
+// Package entry, the Resolver's own path, names omp's plugin directory, not a
+// dependency layout, so it is struck before the layout name is looked for.
+const PACKAGE_ENTRY = "~/.omp/plugins/node_modules/@feigi/fleet-ctl/";
 test("the snapshot block provisions through the Install step alone: no dependency layout named, nothing excluded, no suite slot", () => {
-  assert.ok(!SOURCE.includes("node_modules"), "review-core.mjs names node_modules again — the snapshot provisions one layout by hand instead of running the Install step");
+  assert.ok(SOURCE.includes(PACKAGE_ENTRY), "review-core.mjs no longer runs the Resolver under the Package entry — the strike below strikes nothing");
+  assert.ok(!SOURCE.replaceAll(PACKAGE_ENTRY, "").includes("node_modules"), "review-core.mjs names node_modules again — the snapshot provisions one layout by hand instead of running the Install step");
   const shell = snapshotBlock()
     .split("\n")
     .filter((l) => /^ {4}\S/.test(l))

@@ -16,7 +16,7 @@ terminating in exactly one dispatch or an empty shortlist:
 1. **Take the shortlist head** — the next `.fleet/shortlist.json` entry with no
    `impl-` row and no `excluded` row whose premise still holds, which is the
    ticket the tick's `PULL` row names.
-2. **In-flight check, again** — `~/.fleet/bin/fleet-run inflight.sh <N>`; any
+2. **In-flight check, again** — `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run inflight.sh <N>`; any
    hit = taken, drop it and take the next entry. The shortlist is as old as its
    last refresh. It runs all three probes (PRs, remote heads, local
    worktrees + branches) so a partial one cannot read as free. The PR probe is
@@ -166,7 +166,7 @@ terminating in exactly one dispatch or an empty shortlist:
    `origin/main`, the fatal-not-empty case above.
 
    **`staleness.mjs` runs that check for you, and answers in THREE values.**
-   `~/.fleet/bin/fleet-run staleness.mjs --path <path> --gone
+   `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run staleness.mjs --path <path> --gone
    '<string>'`, or `--present '<string>'`, once per claim the ticket makes.
    It goes here and not in `shortlist.mjs` because choosing WHICH string
    settles a ticket needs the ticket read, which the step above already did —
@@ -246,9 +246,9 @@ terminating in exactly one dispatch or an empty shortlist:
    scope` `#N` refs as candidates: `clear`; `behind-pr:#M`, an open PR or a
    branch with no PR yet by its name; `behind-issue:#M`, an open issue that
    section sequences this one after; or `paths <p>…`, which scans again.
-6. **Claim** — `~/.fleet/bin/fleet-run claim-ticket.sh <N> impl-<N> implementer
+6. **Claim** — `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run claim-ticket.sh <N> impl-<N> implementer
    --apply` (below). Exit 2 → treat it as taken, next entry.
-7. **Route, row, then dispatch** — `~/.fleet/bin/fleet-run ticket-router.mjs route
+7. **Route, row, then dispatch** — `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run ticket-router.mjs route
    --session <session> --ticket <N> --arm <A|B> --impl-row <k>[ --chain-head] --issue
    <scratch>/impl-<N>/issue.json --guard .fleet/cost-guard.json` prints the Pull's
    Routing, `POLICY=… CELL=… DRAW=… BY=… STRATUM=… BRIEF=… CRITERIA=… PARENT=… SIZED=… OBJECTIVE=… TRIPPED=… REASON=…`
@@ -321,8 +321,8 @@ the stranded comment's heading line and URL, which is not one of the
 `briefs/relabel.md` comments.
 `gh issue edit <N> --remove-label "<ready-for-agent string>" --add-label "<label string>"` (no
 `in-progress` to drop — it was never claimed), preceded by exactly one comment,
-the one `~/.fleet/bin/fleet-run dispatch-prompt.mjs render relabel --kind <kind> …`
-prints. Each `<… string>` is what `~/.fleet/bin/fleet-run label-map.mjs show <role>` prints for that role — `<label string>` for the role the cause names — and you type that string, not the role name; where the rendered comment names `ready-for-agent`, file the string `~/.fleet/bin/fleet-run label-map.mjs show ready-for-agent` prints in its place. `--kind needs-triage` takes `--line`, the one-line missing decision;
+the one `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run dispatch-prompt.mjs render relabel --kind <kind> …`
+prints. Each `<… string>` is what `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run label-map.mjs show <role>` prints for that role — `<label string>` for the role the cause names — and you type that string, not the role name; where the rendered comment names `ready-for-agent`, file the string `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run label-map.mjs show ready-for-agent` prints in its place. `--kind needs-triage` takes `--line`, the one-line missing decision;
 `--kind fork` takes `--options`, the options verbatim from the brief, and is
 the `ready-for-human` comment for a fork; `--kind hands` takes `--hands`,
 one of external access, manual testing or judgment during the work, and
@@ -357,7 +357,7 @@ read that way: `gh pr view` finds no PR for the branch, so it is exit 2, not a
 
 ## Claiming
 
-**Claiming.** `~/.fleet/bin/fleet-run claim-ticket.sh <N> impl-<N> implementer --apply` does
+**Claiming.** `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run claim-ticket.sh <N> impl-<N> implementer --apply` does
 the label, worktree, branch, the Recipe's Install step, the clean-tree assertion, and the
 isolation runner in one serial pass. The two arguments are always that literal
 pair — `impl-<N>` as `<slug>`, `implementer` as `<type>` — so the claim is
@@ -397,9 +397,9 @@ a worktree, a branch and an `in-progress` label with no member behind them,
 released by the end-of-run sweep rather than by a member that did the work.
 
 **Record the dispatch before you make it.** `ledger.mjs row` wrote the row at
-the Pull's step 7; `~/.fleet/bin/fleet-run dispatch-prompt.mjs render
+the Pull's step 7; `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run dispatch-prompt.mjs render
 implementer --member impl-<N> …` then renders its brief, and
-`~/.fleet/bin/fleet-run ledger.mjs dispatch <N> impl-<N>`
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run ledger.mjs dispatch <N> impl-<N>`
 marks `impl-<N>` live on it and in `## Dispatched`, and the call follows.
 Its JSON carries `agent`, the definition that call names, and `brief.path`,
 the rendered brief whose content is that call's prompt — read both off that
@@ -661,7 +661,7 @@ floor to a count on stderr.
 
 ## A Pull's entry and exits, in full
 
-A Pull's entry is `~/.fleet/bin/fleet-run pull.mjs next --head <N>`, run from the
+A Pull's entry is `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run pull.mjs next --head <N>`, run from the
 main checkout (without `--head`, the next shortlist entry). It runs the
 mechanical steps in order and stops at each judgement with a `QUESTION
 <qid>:` block and exit 10; `pull.mjs answer <N> <qid> <token> [--path <p>] [--]
@@ -681,3 +681,11 @@ one scan, oldest first; admission never is. The invariant this replaces — one
 human decision per batch of admissions, zero unilateral grabs — is retired
 is retired: zero human decisions per admission, and every non-admission is a
 label or a premise the maintainer can read.
+
+## Red flags: is it decided
+
+- "Touches eight files, too big for the fleet" → size is not the axis. Decided is.
+- "Body is three lines, so it's simple" → short bodies hide open design choices.
+- "The brief is thorough, so it's decided" → thorough ≠ decided. Read it for the
+  choice it leaves open.
+- "I'd have to pick an approach myself" → that IS undecided.

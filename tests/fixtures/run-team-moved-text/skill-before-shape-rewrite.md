@@ -74,12 +74,12 @@ See references/member-lifecycle.md.
 - **Pin once**, at phase 0 step 0 below, from the main checkout you are
   running this from — never from a member's worktree, which is gitignored
   and carries no baseline:
-  `~/.fleet/bin/fleet-run instruments.sh --pin`. On a workspace that does not
+  `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run instruments.sh --pin`. On a workspace that does not
   track `plugin/…`, the pin names the plugin checkout once — `--pin --audit
   <plugin-checkout>` — and every check after it follows the recorded tree.
 - **Re-check before you act on any instrument reading** — a SHA acceptance, a CI
   verdict, the reconcile, a reap, a label gate — from that same main checkout:
-  `~/.fleet/bin/fleet-run instruments.sh`. **Exit 0 is the only code that
+  `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run instruments.sh`. **Exit 0 is the only code that
   lets a gate proceed. Exit 1 (the set changed) and exit 2 (the check could not
   answer) both refuse: report what it printed and do NOT re-read the
   instrument** — a guard that fails open on "could not look" protects nothing.
@@ -109,7 +109,7 @@ refusal on that is noise.
 supplies a scratch directory to a member, so a member left to name its own
 invents one — and the liveness read below, which looks at the files under the
 directory a member's own prompt assigned it, then watches a directory nobody
-else can find. You run `~/.fleet/bin/fleet-run scratch-root.mjs`: it prints one
+else can find. You run `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run scratch-root.mjs`: it prints one
 absolute path, `~/.fleet/scratch/<repo-key>/`, the same from the main checkout
 and from every linked worktree, and the same again when a compacted or
 re-invoked controller runs it, so nothing writes it down. It exits non-zero,
@@ -181,7 +181,7 @@ refreshes the Shortlist itself, and every admission is a **Pull** — one ticket
 into one free implementer slot, the moment it frees (phase 1). Nothing in this
 phase, or in any later one, asks the maintainer which tickets to take.
 
-0. **Once per run, before anything else.** Run `~/.fleet/bin/fleet-run
+0. **Once per run, before anything else.** Run `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run
    phase0.mjs --session <session-dir>` from this main checkout, `<session-dir>`
    being this run's own session directory. Add `--in-flight <n>` when
    `$ARGUMENTS` gave one, `--plugin-checkout
@@ -200,7 +200,7 @@ phase, or in any later one, asks the maintainer which tickets to take.
    `rotate` has run, a re-run skips every `ok` step and resumes where the last
    one stopped; before it, a re-run runs every step again.
 
-   The `tier-roles` step runs `~/.fleet/bin/fleet-run tier-roles.mjs --check
+   The `tier-roles` step runs `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run tier-roles.mjs --check
    --in-flight <B>`, `<B>` being the `--in-flight` given, else the default
    **Defaults** (**Queue depth**) states. What it checks is under **Phase 2**'s
    tier routes. A line it prints on a pass about omp's `task.maxConcurrency`
@@ -209,7 +209,7 @@ phase, or in any later one, asks the maintainer which tickets to take.
 
    - `NEED derive-recipe` — the Recipe cache holds nothing valid. Dispatch a
      `task` member named `derive-recipe`, agent `fleet-recipe-deriver`, its
-     prompt the brief `~/.fleet/bin/fleet-run dispatch-prompt.mjs render
+     prompt the brief `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run dispatch-prompt.mjs render
      recipe-deriver --member derive-recipe --repo <repo> --scratch <scratch>`
      prints (`<repo>` this main checkout's absolute path, `<scratch>` what
      `scratch-root.mjs` prints), and wait for its report. `RECIPE PROVEN` →
@@ -230,7 +230,7 @@ phase, or in any later one, asks the maintainer which tickets to take.
    A `drift` or `unanswered` ruleset step is advice too: surface the diff and
    go on. See references/phase-0.md.
 
-1. **Build the Shortlist** — `~/.fleet/bin/fleet-run shortlist.mjs`, then read
+1. **Build the Shortlist** — `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run shortlist.mjs`, then read
    `.fleet/shortlist.json`. The script runs the cheap filters and nothing else
    — no ticket body is read here, because a Pull reads one ticket in full at
    the moment it admits it:
@@ -305,7 +305,7 @@ label or a premise the maintainer can read.
 Serial, main checkout, one Pull at a time. Never parallel, never inside a member —
 concurrent `worktree add` and label writes race.
 
-A Pull's entry is `~/.fleet/bin/fleet-run pull.mjs next --head <N>`, run from the
+A Pull's entry is `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run pull.mjs next --head <N>`, run from the
 main checkout (without `--head`, the next shortlist entry). It runs the
 mechanical steps in order and stops at each judgement with a `QUESTION
 <qid>:` block and exit 10; `pull.mjs answer <N> <qid> <token> [--path <p>] [--]
@@ -488,7 +488,7 @@ spend classifier and `member-outcomes.mjs` read it.
 prose reminder.** `tick --apply` runs it itself, a batch of one apiece, on every
 implementer it would print `HOLD (tier unchecked impl-<N>)` for, `session` off
 the phase-0 receipt, and prints `APPLIED tier-check impl-<N>: <verdict>`. By
-hand it is `~/.fleet/bin/fleet-run tier-check.mjs --batch <path-to-batch.json>`,
+hand it is `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run tier-check.mjs --batch <path-to-batch.json>`,
 which judges the implementer just dispatched on the ledger's terms. The definition it
 should have run under comes off its ticket row's `tier=` token: none means the
 policy cell, `fleet-implementer-slow-high`; `tier=<cell>` means
@@ -579,7 +579,7 @@ at whatever each role points at; the explicit `:<level>` suffix wins over
 the role's baked one, and the tier check judges a member against the
 role's own target (`modelRoles.<role>`), never a model family.
 
-Before the run's first dispatch run `~/.fleet/bin/fleet-run tier-roles.mjs
+Before the run's first dispatch run `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run tier-roles.mjs
 --check --in-flight <B>`, `<B>` the run's In-flight bound (phase 0's
 `tier-roles` step runs it); exit 1 names every definition whose `model:` is not a route,
 every unset `modelRoles.<role>` a definition needs, every definition whose
@@ -704,7 +704,7 @@ on the cockpit are not yet proof the pipeline is idle.
 **Guard: accumulate per PR, never conclude inside one run.** The unit is the PR —
 supply is one Pull per free slot, so there are no implementer batches. **Append one row to
 `docs/metrics/tier-outcomes.tsv` when you rule each PR's review, with
-`~/.fleet/bin/fleet-run tier-outcomes.mjs append <pr> --closed-own-ticket yes|no --minted-false-claim yes|no --note "<text>"`,
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run tier-outcomes.mjs append <pr> --closed-own-ticket yes|no --minted-false-claim yes|no --note "<text>"`,
 never by hand** (that file's header carries the column meanings). The script
 fills `run_date`, `pr`, `ticket` and `tier` itself — `tier` from what actually
 ran, off the implementer's `tier-ok=` ledger verdict or else its one
@@ -790,7 +790,7 @@ pooled across cells, and stop until
 there are at least ten of them across five or more distinct `run_date`s; below
 that, a comparison count is a number, not evidence, and the last guard fired
 with n=1 on the control side. **Report the count the per-cell readout prints,
-never one from any other query:** `~/.fleet/bin/fleet-run cell-readout.mjs`
+never one from any other query:** `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run cell-readout.mjs`
 prints `<cell> <comparisons> <run_dates> <resolved models>` for each cell past
 that floor and a cell below it only as a count on stderr; a `mixed (…)` models
 column means the cell's history spans more than one model behind its role.
@@ -854,7 +854,7 @@ one it cannot see, and it names the same dispatch again. Every record goes
 through `ledger.mjs` (**Run ledger**), which `fleet-event.mjs` drives — never a
 hand edit. What each kind writes is in the header comment of `fleet-event.mjs`.
 
-Run each as `~/.fleet/bin/fleet-run fleet-event.mjs <kind> <args>`, from the main checkout:
+Run each as `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run fleet-event.mjs <kind> <args>`, from the main checkout:
 
 | Wake | Command |
 |---|---|
@@ -934,7 +934,7 @@ owes beyond its call:
   replacement controller too — and keeps the review, fix-applier and merge rows
   firing until the open PRs merge. The drain starts the end of the run; it does
   not end it. **End of run**, in this order:
-  1. `~/.fleet/bin/fleet-run fleet-event.mjs drain --reason "<reason>"` — runs
+  1. `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run fleet-event.mjs drain --reason "<reason>"` — runs
      `closeout.mjs begin --reason "<reason>"` (**Release the claims that never became
      PRs**), then the tick. A claim it refuses prints `NEED hand-release #<N> <blocker>`: that
      refusal is the finding, so run `worktree-audit.sh` and decide by hand.
@@ -944,7 +944,7 @@ owes beyond its call:
   2. Act on the review, fix-applier and merge rows until the tick prints
      `ACTION: run over → fleet-heartbeat.mjs --stop "<reason>"`, which it does
      once the run is draining with no open PR and no live implementer.
-  3. `~/.fleet/bin/fleet-run closeout.mjs finish --reason "<reason>"` — scrapes
+  3. `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run closeout.mjs finish --reason "<reason>"` — scrapes
      the run's member facts, checks the tier-outcomes rows, refreshes the
      metrics, commits the three metrics files and opens their PR, then records
      `fleet-heartbeat.mjs --stop` last, because every reader takes a recorded
@@ -1024,7 +1024,7 @@ owes beyond its call:
 **In one line, every wake is one `fleet-event.mjs` call, which ends in the tick.** One tick invocation, and you act on what it prints:
 
 ```
-~/.fleet/bin/fleet-run fleet-tick.mjs --apply [--in-flight <n>]
+~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run fleet-tick.mjs --apply [--in-flight <n>]
 ```
 
 It reads the run itself, and nobody states a count. The In-flight count —
@@ -1126,7 +1126,7 @@ depth** guard table applied in code. Act on each line as it reads:
   when HEAD moved, and every live member; it
   attributes nothing, because concurrent members make that a guess. Dispatch
   nothing new and tell the maintainer: they resolve the stray paths FIRST,
-  then re-baseline with `~/.fleet/bin/fleet-run main-checkout.mjs --record`.
+  then re-baseline with `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run main-checkout.mjs --record`.
   A path entry holds until that re-baseline, tick after tick; a `HEAD …` entry
   clears itself once HEAD reads clean again, and is never re-baselined while
   HEAD is off the run's branch. Never revert the
@@ -1150,7 +1150,7 @@ depth** guard table applied in code. Act on each line as it reads:
   resolve any stray paths, which the line does not name; only then re-record.
 - `MAIN-CHECKOUT-NO-BASELINE …` with `HOLD (main checkout no baseline)` — no
   baseline was recorded. Yours to fix: run
-  `~/.fleet/bin/fleet-run main-checkout.mjs --record`, which references/phase-0.md
+  `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run main-checkout.mjs --record`, which references/phase-0.md
   describes under "Record the main-checkout baseline". A baseline
   that vanished mid-run is not a fresh run — report it to the maintainer
   before recording over whatever the tree now holds.
@@ -1224,7 +1224,7 @@ event at all, and the tick goes unrun. That state is the heartbeat's.
 **Beat when there is nothing to do, and never end your turn on a drained queue.** See references/ci-and-staleness.md.
 
 ```bash
-~/.fleet/bin/fleet-run fleet-heartbeat.mjs \
+~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run fleet-heartbeat.mjs \
   [--base 300] [--ceiling 1200] [--multiplier 2] [--hold 240]
 ```
 
@@ -1275,7 +1275,7 @@ detected by its mark going stale. A run that stops KNOWINGLY can do better
 than being detected, and nothing else can write the reason afterwards:
 
 ```bash
-~/.fleet/bin/fleet-run fleet-heartbeat.mjs --stop "budget exhausted"
+~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run fleet-heartbeat.mjs --stop "budget exhausted"
 ```
 
 It holds nothing and returns at once. Use it when the budget goes, or when
@@ -1323,7 +1323,7 @@ latest runs, keyed `<run-id>:<attempt>:<conclusion>` so each terminal state fire
 emit the behind-count and the per-job conclusions with it: a `success` on a branch
 8 behind is not actionable, and `check`-green-with-heavy-skipped is the staleness
 board you must not confuse with a red. Do not reinvent that read: one
-`~/.fleet/bin/fleet-run ci-state.mjs --pr <N>` per open PR already emits
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run ci-state.mjs --pr <N>` per open PR already emits
 run id, attempt, conclusion, behind-count and per-job conclusions, branch derived
 from the PR — including the `gh api --hostname <host>` a GHE compare call needs,
 without which the probe 404s and `behind` comes back `null`, never 0, so every
@@ -1412,7 +1412,7 @@ while :; do                                   # one tick
             hidden_out=
           fi
           for pr in $(printf '%s\n' "$prs"); do # inline $(...): `for pr in $prs` is ONE iteration under zsh
-            st=$(~/.fleet/bin/fleet-run ci-state.mjs --pr "$pr" 2>/dev/null) || : # not-green exits non-zero; the payload is the verdict
+            st=$(~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run ci-state.mjs --pr "$pr" 2>/dev/null) || : # not-green exits non-zero; the payload is the verdict
             if ! printf '%s' "$st" | jq -e '.verdict and .verdict != "rate-limited"' >/dev/null 2>&1; then
               case " $blind " in *" $pr "*) ;; *) # latch keyed BY PR: this cause is per-PR
                 echo "WATCHER DEGRADED: no usable ci-state reading for #$pr — silence is NOT green"
@@ -1506,7 +1506,7 @@ report recovery, never the exit code alone.
 The tick names every PR owed one — `DISPATCH review PR#<M>`, oldest first —
 and each gets one review, once per PR:
 
-a `task` member named `review-pr-<pr#>`, agent `fleet-review-runner`, its prompt the five args `pr`, `branch`, `worktree`, `testCmd` and `scratch` — it loads `review-eval.mjs` through the Resolver (`~/.fleet/bin/fleet-run --path review-eval.mjs`), awaits `runReviewOnOmp` in its own kernel, writes the result file into the review's own run root and reports its path and `reviewed=` token; record `review=member:review-pr-<pr#>` on the PR's row before the dispatch call. **`scratch` is the scratch root itself, the absolute path `scratch-root.mjs` prints, never the review side's `<scratch>/pr<N>` partition:** the review creates `pr<N>/` under it, so a `pr<N>` passed in nests every run root at `pr<N>/pr<N>/`, and the review refuses a `scratch` whose last component is `pr` plus digits before dispatching anything.
+a `task` member named `review-pr-<pr#>`, agent `fleet-review-runner`, its prompt the five args `pr`, `branch`, `worktree`, `testCmd` and `scratch` — it loads `review-eval.mjs` through the Resolver (`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run --path review-eval.mjs`), awaits `runReviewOnOmp` in its own kernel, writes the result file into the review's own run root and reports its path and `reviewed=` token; record `review=member:review-pr-<pr#>` on the PR's row before the dispatch call. **`scratch` is the scratch root itself, the absolute path `scratch-root.mjs` prints, never the review side's `<scratch>/pr<N>` partition:** the review creates `pr<N>/` under it, so a `pr<N>` passed in nests every run root at `pr<N>/pr<N>/`, and the review refuses a `scratch` whose last component is `pr` plus digits before dispatching anything.
 
 Write the `review=` token with `ledger.mjs review <pr> <token>`, which appends
 it to the **PR's row** — the ticket row once `settle impl-<N>=PR#M` has run,
@@ -1751,7 +1751,7 @@ and flag the PR for a human. A new review of the PR counts again from none.
 a host at once — 2 by default, whatever the member caps count — because each run
 already spreads over most of the host's cores. The bound is a wrapper,
 `suite-slot.mjs`, reached through the Resolver:
-`~/.fleet/bin/fleet-run suite-slot.mjs '<entrypoint>' [args…]` runs the
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run suite-slot.mjs '<entrypoint>' [args…]` runs the
 entrypoint under `sh -c` with the arguments after it. It decides by arity. No
 appended arguments is a full run, and waits for a free slot. Appended arguments
 are a narrowed run, which takes none, so a verifier's `<testCmd> <args>` never
@@ -1770,7 +1770,7 @@ for a bare run. The review wraps its own one run, so its args carry the bare
 command; a wrapped string handed to it anyway is harmless, the inner wrapper
 being the nested case. The fix-applier and the finisher run what you hand them,
 so hand them the wrapped string as `<testCmd>` —
-`~/.fleet/bin/fleet-run suite-slot.mjs '<command>'`, each `'` inside the command
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run suite-slot.mjs '<command>'`, each `'` inside the command
 written `'\''` — and it is still one command for every gate.
 
 The wait is capped and never counts against the run: `FLEET_SUITE_WAIT_S`
@@ -1792,7 +1792,7 @@ cannot clear are in the runbook under **Writer policy**.
 
 **Where `testCmd` comes from:** the repository's Test entrypoint, out of the
 Recipe cache phase 0's Recipe derivation step proved —
-`~/.fleet/bin/fleet-run derive-testcmd.sh . test --at origin/main` prints it — and the one you
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run derive-testcmd.sh . test --at origin/main` prints it — and the one you
 hand specialists per **Give specialists a stack-free test command** above. Pass
 the same command to the review, to the fix-applier, and to the finisher — whose
 duty-2 mutation
@@ -1809,7 +1809,7 @@ claim discipline, the refuter prompt, the kill rule, the stash prohibition, the
 dispositions record and the report rules — is the body of
 `agents/fleet-fix-applier.agent.md`, which the harness injects as its system
 prompt, so none of it is pasted. The brief carries what varies, and the
-renderer prints it: `~/.fleet/bin/fleet-run dispatch-prompt.mjs render
+renderer prints it: `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run dispatch-prompt.mjs render
 fix-applier --kind <review|conflict|dispositions-retry|red-check> --member <name>
 --worktree <abs-path> --branch <branch> --testCmd <testCmd> --scratch <scratch>`,
 plus `--pr <pr#> --run <run>` for a review or a dispositions retry and
@@ -1910,7 +1910,7 @@ a minute apart showed *different* mutants, so a member's report and any single
    lookup, the dirty check, the head-equality check and the cause derivation
    are one command, because each of them alone reads like the whole duty. Its
    exit code is the verdict of this duty:
-   `~/.fleet/bin/fleet-run finisher-audit.mjs --worktree <abs-path> --pin <your dispatch pin>`,
+   `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run finisher-audit.mjs --worktree <abs-path> --pin <your dispatch pin>`,
    the path the one you were dispatched with, however it was spelled, and the
    pin the full SHA. It runs `worktree-audit.sh` itself and finds this
    worktree's row by its `realpath`, so a spelling reached through a symlink
@@ -1958,7 +1958,7 @@ refuses a finisher brief rendered without it.
 3. Add `ready-to-merge` by running one script, `finisher-label.mjs` — the
    release-label check and the label write are one command, because the check
    reads like the whole duty. Its exit code is the finisher's verdict:
-   `~/.fleet/bin/fleet-run finisher-label.mjs --pr <pr> --pin <your dispatch pin>`,
+   `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run finisher-label.mjs --pr <pr> --pin <your dispatch pin>`,
    the pin the full SHA. In order, it finds **exactly one** release label,
    `patch`/`minor`/`major` — zero or more than one is exit 3 before anything is
    written, naming which it found; then it records the head you audited as a PR
@@ -1997,7 +1997,7 @@ the harness injects as its system prompt; none of them is pasted. The
 instrument-set rule is stated once, at the top of this file, which no finisher
 is dispatched to read, so it reaches one through that body. The brief carries
 the PR, the worktree, the dispatch pin, `<testCmd>` and the scratch root:
-`~/.fleet/bin/fleet-run dispatch-prompt.mjs render finisher --kind <fresh|repair>
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run dispatch-prompt.mjs render finisher --kind <fresh|repair>
 --member finisher-pr-<pr#> --pr <pr#> --pin <sha> --worktree <abs-path>
 --testCmd <testCmd> --scratch <scratch>`, which `ledger.mjs dispatch <pr#>
 finisher-pr-<pr#>` records.
@@ -2120,11 +2120,11 @@ dispatch merge-bot` again. Dispatch
 it on the tick's `DISPATCH merge-bot`: the first `ready-to-merge` label is
 enough, and it never waits for the finisher's report. Its body
 (`agents/fleet-merge-bot.agent.md`) tells it to read
-`$(~/.fleet/bin/fleet-run --root)/commands/run-merge-bot.md` and run **one**
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/commands/run-merge-bot.md` and run **one**
 pass — drain the queue, re-evaluating after each merge, hold a 15-minute grace
 for late labels, then report once and exit — and that you dispatched it,
 which is what makes it hold that grace instead of arming its own watcher. Its
-brief is `~/.fleet/bin/fleet-run dispatch-prompt.mjs render merge-bot --member
+brief is `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run dispatch-prompt.mjs render merge-bot --member
 merge-bot-<n> --n <n> --scratch <scratch>`, `<scratch>` the absolute
 `scratch-root.mjs` output: the bot writes only under `<scratch>/pr<N>/merge-bot-<n>/`. **Dispatch
 it with the `agent` that `ledger.mjs dispatch merge-bot` printed and omit
@@ -2192,7 +2192,7 @@ bot's `merge-bot-<n>=done`, and `tick --apply` reaps once for every one — a pa
 that merged nothing included (phase 3, **Merge-bot pass reports done**). See
 references/reaping.md.
 
-`~/.fleet/bin/fleet-run reap.sh --apply` recomputes every precondition
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run reap.sh --apply` recomputes every precondition
 inside the same invocation as the delete — `for-each-ref` for `[gone]`, `git
 cherry origin/main` to authorize the `git update-ref -d` delete (plus a fresh
 check that no worktree holds the branch), worktree removal without `--force` —
@@ -2219,7 +2219,7 @@ See references/reaping.md.
 ### Reclaim scratch after each merge pass
 
 `tick --apply` runs it right after `reap.sh --apply`, every pass:
-`~/.fleet/bin/fleet-run reclaim-scratch.mjs --root <scratch> --apply`,
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run reclaim-scratch.mjs --root <scratch> --apply`,
 `<scratch>` the path `scratch-root.mjs` prints. Reap authorizes on git's
 evidence and never removes scratch; Reclaim authorizes on GitHub state and
 age, reading which members are live off `.fleet/ledger.md`:
@@ -2254,7 +2254,7 @@ fires after each merge pass and nothing fires at end of run, so the claim surviv
 it and the in-flight probe reads a free ticket as taken next run. Same silent queue
 shrink as a stale merged worktree, from the opposite end.
 
-`~/.fleet/bin/fleet-run release-ticket.sh <N> impl-<N> implementer --apply` —
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run release-ticket.sh <N> impl-<N> implementer --apply` —
 the pair the claim took, so the two name the same branch and worktree — is the
 inverse of the claim, and recomputes its preconditions inside the same
 invocation as the delete: 0 commits ahead of `origin/main`, no unique commits
@@ -2446,7 +2446,7 @@ A starved implementer queue never stalls the review or merge side.
 
 ## Guards
 
-**Verify every reported SHA.** `~/.fleet/bin/fleet-run verify-sha.sh
+**Verify every reported SHA.** `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run verify-sha.sh
 <branch> <sha>` before enqueueing — a member can commit in a nested worktree,
 leaving the SHA on a stray branch while its report reads normally. Exit codes as
 `inflight.sh`: `# 0 reachable, 1 not reachable, 2 unanswerable`. Not reachable
@@ -2582,7 +2582,7 @@ you superseded; a duplicated rule becomes a contradiction. Exit conditions go in
 section's first paragraph, never its last. Name the mechanism, or name who owns
 the step. Cut before you append.
 
-**Then.** **Re-pin first** — `~/.fleet/bin/fleet-run instruments.sh
+**Then.** **Re-pin first** — `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run instruments.sh
 --pin`. You just changed the instrument set under your own check, and this is the
 only edit that legitimately does; skip it and the next gate refuses on your own
 fix, which teaches you to ignore the refusal. Then the ledger line, save the
@@ -2594,7 +2594,7 @@ branch: the switch back restores the tree the baseline recorded, so the hold
 clears itself with nothing re-recorded, and the fix leaves the checkout until
 its PR merges. A `HEAD …` entry is none of your paths and clears the same way.
 Re-baseline only a fix you leave edited in the checkout: run
-`~/.fleet/bin/fleet-run main-checkout.mjs --check` first, and only when the
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run main-checkout.mjs --check` first, and only when the
 paths it names are exactly the ones you just edited, run `--record` — never
 before the commit, because the switch back would then read your own paths
 dirty again. Any other path on that line is a stray write — leave the hold for
@@ -2640,14 +2640,14 @@ Reviewers that went idle on CI recover as a **finisher, not a re-review** once
 commits are pushed. See references/member-lifecycle.md.
 
 Audit every worktree before dispatching replacements with
-`~/.fleet/bin/fleet-run worktree-audit.sh` — it reports each worktree's
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run worktree-audit.sh` — it reports each worktree's
 ahead-count and uncommitted files, the committed-vs-uncommitted distinction that
 decides whether a replacement redoes or destroys work.
 
 ## Run ledger
 
 One git-ignored `.fleet/ledger.md` per run, updated at **every** state change via
-`~/.fleet/bin/fleet-run ledger.mjs` subcommands (`row`, `filed`, `ruled`,
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run ledger.mjs` subcommands (`row`, `filed`, `ruled`,
 `check`, `read`, `dispatch`, `settle`, `review`, `drain`, `rotate`). Your context is the least
 durable thing in the run: it compacts, and a controller that loses the dispatch
 map or the filed list redoes finished work. Two duplicate tickets shipped in one
