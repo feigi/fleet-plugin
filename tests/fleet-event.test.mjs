@@ -187,7 +187,7 @@ const finisherReport = (member, over = {}) => ({
   member, outcome: "labelled", cause: null, evidence: null, pin: HEAD, labelsReadBack: ["ready-to-merge", "patch"],
   kill: null, filed: [], unrecorded: [], confirmation: [], ...over,
 });
-const mergeBotReport = (member, held, refused = []) => ({ member, merged: [], held, conflictHold: [], refused, branchKept: [] });
+const mergeBotReport = (member, refused = [], over = {}) => ({ member, merged: [], conflictHold: [], refused, branchKept: [], ...over });
 
 // A main checkout with a fixture ledger, a phase-0 receipt naming the scratch
 // root, caps 3 and 5 and In-flight bound 7, the Label map (the identity map
@@ -1042,25 +1042,16 @@ test("with a remapped Label map the repair-finisher escalation compares the read
 
 // ── merge-bot-report ─────────────────────────────────────────────────────────
 
-test("merge-bot-report writes a held-behind token onto each held PR's row, then settles, then ticks; a second run only ticks", () => {
-  const f = fixture({ rows: ["#412 impl-412=PR#88", "#413 impl-413=PR#89", "#414 impl-414=PR#90"], dispatched: ["merge-bot-1"] });
-  f.report(mergeBotReport("merge-bot-1", [{ pr: 89, behind: 88 }, { pr: 90, behind: 88 }]));
-  f.control("settle", { "merge-bot-1": { outcome: "done" } });
-  const first = f.run(["merge-bot-report", "merge-bot-1"]);
-  assert.equal(first.status, 0, first.err + first.stdout);
-  assert.deepEqual(first.order, [
-    "ledger token 89 held-behind:#88",
-    "ledger token 90 held-behind:#88",
-    `settle merge-bot-1 --from-report --reports ${join(f.scratch, "reports")}`,
-    TICK,
-  ]);
-  assert.deepEqual(f.rows(), ["#412 impl-412=PR#88", "#413 impl-413=PR#89 · held-behind:#88", "#414 impl-414=PR#90 · held-behind:#88"]);
-
-  const ledger = f.ledger();
-  const second = f.run(["merge-bot-report", "merge-bot-1"]);
-  assert.equal(second.status, 0, second.err);
-  assert.deepEqual(second.order, [TICK]);
-  assert.equal(f.ledger(), ledger);
+test("merge-bot-report writes no token for a merged or conflict-held PR, nor for a report still carrying held, and settles, then ticks", () => {
+  for (const over of [{ merged: [{ pr: 89, sha: HEAD }], conflictHold: [90] }, { held: [{ pr: 89, behind: 88 }] }]) {
+    const f = fixture({ rows: ["#412 impl-412=PR#88", "#413 impl-413=PR#89", "#414 impl-414=PR#90"], dispatched: ["merge-bot-1"] });
+    f.report(mergeBotReport("merge-bot-1", [], over));
+    f.control("settle", { "merge-bot-1": { outcome: "done" } });
+    const r = f.run(["merge-bot-report", "merge-bot-1"]);
+    assert.equal(r.status, 0, r.err + r.stdout);
+    assert.deepEqual(r.order, [`settle merge-bot-1 --from-report --reports ${join(f.scratch, "reports")}`, TICK], Object.keys(over).join());
+    assert.deepEqual(f.rows(), ["#412 impl-412=PR#88", "#413 impl-413=PR#89", "#414 impl-414=PR#90"]);
+  }
 });
 
 // #3608: a main-gain refusal parks the PR, bound to the head and body digest
@@ -1080,7 +1071,7 @@ function gateReading(f, over = {}) {
 test("merge-bot-report parks a main-gain-removed refusal at the head and body digest its gate reading refused, reads no gh, ignores every other reason, then settles and ticks; a second run writes nothing", () => {
   const f = fixture({ rows: ["#412 impl-412=PR#88", "#413 impl-413=PR#89", "#414 impl-414=PR#90"], dispatched: ["merge-bot-1"] });
   f.setGh({ issue: {}, pr: { 89: { labels: ["ready-to-merge"], comments: [] } } });
-  f.report(mergeBotReport("merge-bot-1", [], [
+  f.report(mergeBotReport("merge-bot-1", [
     { pr: 89, reason: MG },
     // One verdict per PR: each other reason refuses a PR of its own.
     { pr: 90, reason: "behind:2" },
@@ -1123,7 +1114,7 @@ test("merge-bot-report whose gate reading cannot bind a main-gain park prints a 
     [{ head: "abc1234" }, "carries no full head and body digest"],
   ]) {
     const f = fixture({ rows: ["#413 impl-413=PR#89"], dispatched: ["merge-bot-1"] });
-    f.report(mergeBotReport("merge-bot-1", [], [{ pr: 89, reason: MG }]));
+    f.report(mergeBotReport("merge-bot-1", [{ pr: 89, reason: MG }]));
     if (reading !== null) gateReading(f, reading);
     f.control("settle", { "merge-bot-1": { outcome: "done" } });
     const r = f.run(["merge-bot-report", "merge-bot-1"]);
@@ -1401,11 +1392,11 @@ test("conflict refuses a PR whose row carries both spellings, answered or not, r
   assert.equal(f.ledger(), ledger);
 });
 
-test("conflict accepts a row that carries other holds and another PR's conflict row", () => {
-  const f = fixture({ rows: ["#412 impl-412=PR#88 · held-behind:#80", "#413 impl-413=PR#89 · conflict-hold:#89"] });
+test("conflict accepts a row that carries other tokens and another PR's conflict row", () => {
+  const f = fixture({ rows: ["#412 impl-412=PR#88 · ci=123:2:success", "#413 impl-413=PR#89 · conflict-hold:#89"] });
   const r = f.run(["conflict", "88"]);
   assert.equal(r.status, 0, r.err + r.stdout);
-  assert.deepEqual(f.rows(), ["#412 impl-412=PR#88 · held-behind:#80 · conflict-hold:#88", "#413 impl-413=PR#89 · conflict-hold:#89"]);
+  assert.deepEqual(f.rows(), ["#412 impl-412=PR#88 · ci=123:2:success · conflict-hold:#88", "#413 impl-413=PR#89 · conflict-hold:#89"]);
 });
 
 // ── heartbeat ────────────────────────────────────────────────────────────────

@@ -64,7 +64,7 @@ import { makeDie, isFlagLike, hasEqualsForm, isDigits, writeAll } from "./arg.mj
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { readReceipt } from "./phase0-receipt.mjs";
 import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, settledOnLedger, retiredOnLedger, retiredName, readRetired, agentDefinition, expectedDefinition, CELL, POLICY_CELL, tierValues, cellValues, decidingCell, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, HALT_CAUSES, ROWS, DISPATCHED, ROUTED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, CLOSEOUT_RECEIPT, closeoutArchiveName, BRIEFS, briefsArchiveName, memberRole, parseDispatchedEntry, dispatchedEntry, parseRouting, parseRoutedEntry, routedEntry, headerRe, escapeText, ledgerSection, nextReviewerName, isOmpSessionDirName } from "./ledger-grammar.mjs";
-import { deriveRun, LedgerError, labelOffMember, HELD, CONFLICT_HOLD, PARKED } from "./fleet-tick.mjs";
+import { deriveRun, LedgerError, labelOffMember, CONFLICT_HOLD, PARKED } from "./fleet-tick.mjs";
 import { stateFileIn, readState, writeState, assessBeat, stallsAt } from "./fleet-state.mjs";
 import { processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "./proc.mjs";
 import { attemptLock, releaseLockFile, reapPathOf } from "./pid-lock.mjs";
@@ -2698,7 +2698,7 @@ function recordFiled(id, subject) {
 //                             evidence is not empty
 //   merge-bot-n=done          every merged[].pr reads MERGED; every PR the
 //                             bot's `## Dispatched` entry records as queued=
-//                             at dispatch has a verdict in merged, held,
+//                             at dispatch has a verdict in merged,
 //                             conflictHold or refused, or no longer reads
 //                             OPEN with ready-to-merge
 //
@@ -2947,7 +2947,7 @@ async function runSettleFromReport() {
     for (const pr of unjudged) {
       const v = prView(pr, "state,labels");
       const left = v.state !== "OPEN" || !v.labels.some((l) => l?.name === ready);
-      check(`PR #${pr}, queued at dispatch, has a verdict in merged, held, conflictHold or refused, or has left the queue`, left);
+      check(`PR #${pr}, queued at dispatch, has a verdict in merged, conflictHold or refused, or has left the queue`, left);
     }
     for (const { pr, reason } of report.refused) ruledLines.push(`${member} refused #${pr}: ${reason.trim()}`);
   }
@@ -3127,8 +3127,8 @@ function withTier(line, tok) {
 // token is `dispatch`'s or `settle`'s, a review token `review`'s. A word
 // shaped like a member that the grammar cannot parse, a `tier=` that is not
 // a cell, a `tier=` naming a second tier in one call, any `cell=` (the row
-// step's, never a token), a `held-behind`,
-// `conflict-hold` or `parked` token the tick cannot read, and a lone `→` — an
+// step's, never a token), a `conflict-hold` or `parked` token the tick cannot
+// read, and a lone `→` — an
 // arrow with no PR beside it points at nothing — are refused. Every other
 // word is a freeform token.
 function tokenRefusal(tok, earlier) {
@@ -3146,10 +3146,8 @@ function tokenRefusal(tok, earlier) {
   if (MEMBER_FAMILIES.some((family) => name.startsWith(`${family}-`))) {
     return "is shaped like a member token this grammar cannot parse — a member is impl-<N>, fix-pr-<M>, finisher-pr-<M> or merge-bot-<n>, a retry suffix allowed";
   }
-  for (const [prefix, shape] of [["held-behind", HELD], ["conflict-hold", CONFLICT_HOLD]]) {
-    if (tok.startsWith(prefix) && !shape.test(tok)) {
-      return `is not ${prefix}:#<M> — the tick reads only ${prefix}:#<number> and would ignore this one`;
-    }
+  if (tok.startsWith("conflict-hold") && !CONFLICT_HOLD.test(tok)) {
+    return "is not conflict-hold:#<M> — the tick reads only conflict-hold:#<number> and would ignore this one";
   }
   if (tok.startsWith("parked=") && !PARKED.test(tok)) {
     return "is not parked=<head>:<body digest>:main-gain-removed:<path> — the tick reads only a 40-hex head, a 12-hex body digest and a main-gain-removed reason, and would ignore this one";

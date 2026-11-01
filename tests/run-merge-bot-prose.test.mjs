@@ -1337,8 +1337,8 @@ test("a dispatched bot holds a 15-minute grace, polling every 60s, before its on
     "the grace poll lost its --limit, so it reads gh's bare default of 30 as the whole labelled queue (#2108)");
   assert.match(
     s,
-    Pin.phrase("**re-run selection from the top**, hold rule included, drain what it makes actionable, and restart the grace after that drain"),
-    "a label arriving in grace no longer re-enters selection with the hold rule, or no longer restarts the grace",
+    Pin.phrase("**re-run selection from the top**, drain what it makes actionable, and restart the grace after that drain"),
+    "a label arriving in grace no longer re-enters selection, or no longer restarts the grace",
   );
   assert.match(s, Pin.phrase("**One report, at exit, and none before it**"));
 });
@@ -1367,65 +1367,6 @@ test("the top-level invocation still arms its Monitor, and a dispatched bot stil
   assert.match(
     DOC.text,
     Pin.phrase("**Skip this whole section if a controller dispatched you** (`/skill:run-team`, or any caller that says it owns the watcher) — hold the grace above instead."),
-  );
-});
-
-// #705. `pr-overlap.mjs` grew a fourth signal, and a signal the runbook does
-// not name is a signal the bot never reads — which is the same silent failure
-// the ticket is about, moved from the script into its caller. The count is
-// pinned in both of the places this document states it, because they rot
-// independently: the invocation paragraph tells the bot what "firing" means,
-// and the verdict-strength line tells it how hard to hold. Sliced to the hold
-// rule alone — unbounded, "four signals" anywhere later in a 300-line
-// document would satisfy these with the rule itself reverted to three.
-const holdRule = () => DOC.between("Before touching labeled PR `N`", "## The labelled head", "the hold rule").text;
-
-test("the hold rule names all four signals, prose included", () => {
-  const s = holdRule();
-  assert.match(
-    s,
-    Pin.phrase("**Any** of its four signals (`files`, `modules`, `dirs`, `prose`) firing means related"),
-    "the hold rule no longer names four signals — pr-overlap.mjs computes `prose` and a bot reading three ignores it",
-  );
-  assert.match(
-    s,
-    Pin.phrase("Directory-only and prose-only hits prompt investigation"),
-    "the hold rule no longer rates a prose hit as weak evidence beside a directory one",
-  );
-});
-
-// The half that is not the count: an empty `prose[]` is a clear only when the
-// scan covered the diff, and the script reports that in its own field rather
-// than on stderr alone. A runbook that names the signal and not its unrun
-// field reintroduces #705's exact shape — the clearest-looking output being
-// the one that missed something — one level in.
-test("the hold rule says prose=0 clears only when proseUnrun is null", () => {
-  assert.match(
-    holdRule(),
-    Pin.phrase("**`prose=0` is a clear only when `proseUnrun` is `null`.**"),
-    "the hold rule no longer gates an empty prose result on the scan having run",
-  );
-});
-
-// The soft-signal bullet this mechanises. It predates the signal and stayed
-// pure judgement for years; what changed is that one third of it — a data
-// file cited by name — now has a mechanism, and the bullet has to point at it
-// or the bot re-derives by hand what the script already computed. The other
-// two thirds deliberately stay human: the paragraph below the bullet is the
-// measurement (two PRs sharing `reset_hint=`/`resetHint`/`terminalFailure`,
-// provably unrelated) that says mechanising a bare symbol name would cost
-// more than it buys.
-test("the same-docs-section bullet points at signal 4 and keeps symbols human", () => {
-  const s = DOC.paragraph("they change the same exported symbol", "the same-section bullet", "Genuinely unclear → **hold**. Waiting costs").text;
-  assert.match(
-    s,
-    Pin.phrase("signal 4 mechanises the half of this where the section is a **data file** cited by name"),
-    "the same-section bullet no longer names the signal that mechanises its data-file half",
-  );
-  assert.match(
-    s,
-    Pin.phrase("a bare symbol or key name is still yours to read"),
-    "the same-section bullet no longer keeps bare symbol and config-key matching a human read",
   );
 });
 

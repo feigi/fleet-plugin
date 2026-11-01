@@ -87,7 +87,7 @@ test("run-merge-bot.md reads ready-to-merge before selection; a refusal holds no
   assert.match(section, Pin.phrase("Validate it as **One verdict per queued PR** says, then send your final line followed by what `show` printed."));
   assert.match(section, Pin.phrase("**The top-level invocation** prints what `show` printed and stops. It writes no report."));
   // Before selection: the section sits above the first step that selects.
-  assert.ok(doc.indexOf("## The Label map") < doc.indexOf("## Order, and the hold rule"), "the read sits after selection begins");
+  assert.ok(doc.indexOf("## The Label map") < doc.indexOf("\n## Order\n"), "the read sits after selection begins");
   // The one string serves both polls and the timeline comparison.
   assert.match(doc, Pin.phrase('gh pr list --state open --label "<ready-to-merge string>" --limit 200 --json number'));
   assert.match(doc, Pin.phrase('label="<ready-to-merge string>"'));

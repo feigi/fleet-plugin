@@ -10,7 +10,7 @@ import { readFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { classify, computeStats, isTestName, testSubject } from "../plugin/scripts/diff-stats.mjs";
+import { classify, computeStats } from "../plugin/scripts/diff-stats.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 
 // `main()` runs only when this file is executed directly, so the CLI wiring is
@@ -85,41 +85,6 @@ test("classifier: a test-shaped name on a docs or config extension stays docs/co
   assert.equal(classify("projects/app/tsconfig.spec.json"), "config");
   assert.equal(classify("docs/test_plan.md"), "docs");
   assert.equal(classify("api/openapi.spec.yaml"), "config");
-});
-
-// testSubject is the basename with its test affix and extension removed —
-// pr-overlap.mjs's `modules` key — and it is derived from the same shapes as
-// isTestName rather than from a pattern of its own.
-test("testSubject: strips each test-name shape's affix and the extension", () => {
-  assert.equal(testSubject("src/foo.test.ts"), "foo");
-  assert.equal(testSubject("pkg/foo_test.go"), "foo");
-  assert.equal(testSubject("tests/test_foo.py"), "foo");
-  assert.equal(testSubject("TEST_foo.py"), "foo");
-  assert.equal(testSubject("com/acme/FooTest.java"), "Foo");
-  assert.equal(testSubject("com/acme/FooTests.cs"), "Foo");
-  assert.equal(testSubject("lib/foo.spec.rb"), "foo");
-  assert.equal(testSubject("lib/foo_spec.rb"), "foo");
-  assert.equal(testSubject("web/Foo.Spec.tsx"), "Foo");
-  // only the last extension is removed, and an extensionless test_ name keeps its whole tail
-  assert.equal(testSubject("app/test_foo.bar.py"), "foo.bar");
-  assert.equal(testSubject("bin/test_foo"), "foo");
-  // a name with no test shape has no subject
-  assert.equal(testSubject("src/a.ts"), null);
-  assert.equal(testSubject("pkg/latest.go"), null);
-  assert.equal(testSubject("src/Test.java"), null);
-  assert.equal(testSubject("tests/helpers.py"), null);
-});
-
-// The two exports must never disagree on which names are test names, or a
-// file could be a test to the review sizing and moduleless to pr-overlap.mjs.
-test("testSubject: non-null exactly where isTestName holds", () => {
-  const paths = [
-    "a.test.ts", "src/a.ts", "pkg/x_test.go", "app/test_x.py", "com/acme/FooTest.java", "lib/foo_spec.rb",
-    "com/acme/FooTests.cs", "pkg/latest.go", "src/Contest.java", "app/attest_x.py", "app/testing.py",
-    "src/Test.java", "docker-compose.test.yml", "docs/test_plan.md", ".test.ts", "test_", "a/test_/b.py",
-    "x.test", "ABTest.tsx", "foo.test.d.ts",
-  ];
-  for (const p of paths) assert.equal(testSubject(p) !== null, isTestName(p), p);
 });
 
 test("computeStats: profile ladder", () => {

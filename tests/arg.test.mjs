@@ -48,7 +48,7 @@ const ARG_MODULE = fileURLToPath(new URL("../plugin/scripts/arg.mjs", import.met
 // import arg.mjs: a discovered set silently SHRINKS when a consumer drops the
 // import, which is precisely the regression being pinned. A consumer added
 // later has to be added here deliberately.
-const CONSUMERS = ["board", "candidates", "ci-state", "diff-stats", "fleet-event", "fleet-tick", "ledger", "pr-overlap", "report-schema"];
+const CONSUMERS = ["board", "candidates", "ci-state", "diff-stats", "fleet-event", "fleet-tick", "ledger", "report-schema"];
 // board.mjs takes NAME and die() from board-common.mjs, which its gather and
 // server halves share, so that is where board's wiring is read.
 const WIRED_IN = { board: "board-common" };
@@ -699,7 +699,6 @@ test("writeAll() delivers the full payload across more confirmed EAGAIN stalls t
 const GH_FLOOD = [
   { script: "ci-state", argv: ["--pr", "42"] },
   { script: "diff-stats", argv: ["--pr", "42"] },
-  { script: "pr-overlap", argv: ["--a", "5", "--b", "6"] },
   { script: "fleet-tick", argv: [] },
 ];
 
@@ -806,7 +805,6 @@ const STRAYS = [
   { script: "candidates", argv: ["--require-labell", "x"], stray: "--require-labell" },
   { script: "ci-state", argv: ["--pr", "42", "--basee", "main"], stray: "--basee" },
   { script: "diff-stats", argv: ["--pr", "42", "--basee", "main"], stray: "--basee" },
-  { script: "pr-overlap", argv: ["--a", "5", "--b", "6", "--basee", "main"], stray: "--basee" },
 ];
 
 // A `gh` that records the fact of being called and then fails. Two jobs: it
@@ -897,14 +895,11 @@ test("#880: the gh stub records a real call, from a directory whose path holds a
 // ── #878: a required argument that must be a PR number ───────────────────
 //
 // #840 closed this in ci-state.mjs alone. The identical shape stayed live in
-// its siblings, and the class is NOT bounded by the `arg("pr")` spelling —
-// pr-overlap.mjs reads `--a`/`--b`, which is how a sweep for the flag NAME
-// missed it. Measured on the pre-fix tree against a `gh` that ANSWERS, the way
-// a real one does for a branch ref: `diff-stats.mjs --pr abc` reached
-// `gh pr view abc` and printed `{"pr":null,…}` at exit 0, and `pr-overlap.mjs
-// --a abc --b def` printed `{"a":null,"b":null,…}` at exit 0 carrying a real
-// `signal: "files"` verdict. Each payload's only identifying field was built
-// with `Number()`, and `JSON.stringify(NaN)` is `null`.
+// its siblings, and the class is NOT bounded by the `arg("pr")` spelling.
+// Measured on the pre-fix tree against a `gh` that ANSWERS, the way a real one
+// does for a branch ref: `diff-stats.mjs --pr abc` reached `gh pr view abc`
+// and printed `{"pr":null,…}` at exit 0. The payload's only identifying field
+// was built with `Number()`, and `JSON.stringify(NaN)` is `null`.
 //
 // Driven per script, for the reason the matrices above are: numArg()'s own
 // verdicts are covered by shared-refusal.test.mjs, and that unit contract
@@ -928,12 +923,6 @@ const NON_NUMERIC = [
   { script: "diff-stats", argv: ["--pr", "abc"], flag: "--pr" },
   { script: "diff-stats", argv: ["--pr", "42x"], flag: "--pr" },
   { script: "diff-stats", argv: ["--pr", "x42"], flag: "--pr" },
-  // The second flag, given a good first one: pr-overlap.mjs refuses each on
-  // its own name rather than dumping the usage line that names both.
-  { script: "pr-overlap", argv: ["--a", "abc", "--b", "6"], flag: "--a" },
-  { script: "pr-overlap", argv: ["--a", "5", "--b", "def"], flag: "--b" },
-  { script: "pr-overlap", argv: ["--a", "5", "--b", "6x"], flag: "--b" },
-  { script: "pr-overlap", argv: ["--a", "x5", "--b", "6"], flag: "--a" },
 ];
 
 for (const { script, argv, flag } of NON_NUMERIC) {
@@ -955,10 +944,9 @@ for (const { script, argv, flag } of NON_NUMERIC) {
   });
 }
 
-// A `gh` that ANSWERS both shapes these two scripts ask for, so the accepting
+// A `gh` that ANSWERS the shape diff-stats.mjs asks for, so the accepting
 // path can be measured rather than inferred from a refusal that did not
-// happen. `$2` is the subcommand (`gh pr view <n> --json …`, `gh pr diff <n>
-// --name-only`), the same positional pr-overlap.test.mjs's own stub keys on.
+// happen. `$2` is the subcommand (`gh pr view <n> --json …`).
 function stubGhAnswering() {
   const dir = tempDir("arg num-");
   const receipt = join(dir, "gh-was-called");
@@ -966,7 +954,6 @@ function stubGhAnswering() {
     join(dir, "gh"),
     '#!/bin/sh\necho "$@" >> "$GH_LOG"\ncase "$2" in\n' +
       "  view) echo '{\"files\":[{\"path\":\"a.ts\",\"additions\":1,\"deletions\":0}],\"changedFiles\":1}' ;;\n" +
-      "  diff) echo src/shared.ts ;;\n" +
       "  *) exit 1 ;;\n" +
       "esac\n",
   );
@@ -990,23 +977,16 @@ const runAnswering = (script, argv, env, dir) =>
 // restates `Number(pr)`, and those restatements are exactly where `NaN` became
 // `null`: a payload reading back the string "42" would satisfy a loose check
 // while telling every consumer that keys on a number something else.
-test("#878: a digits value is accepted, and each payload names its PR as a number", () => {
+test("#878: a digits value is accepted, and the payload names its PR as a number", () => {
   const { dir, receipt, env } = stubGhAnswering();
 
   const stats = runAnswering("diff-stats", ["--pr", "42"], env, dir);
   assert.equal(stats.status, 0, stats.stdout + stats.stderr);
   assert.strictEqual(JSON.parse(stats.stdout).pr, 42, `diff-stats.mjs's payload lost its PR number: ${stats.stdout}`);
 
-  const overlap = runAnswering("pr-overlap", ["--a", "5", "--b", "6"], env, dir);
-  assert.equal(overlap.status, 0, overlap.stdout + overlap.stderr);
-  const payload = JSON.parse(overlap.stdout);
-  assert.strictEqual(payload.a, 5, `pr-overlap.mjs's payload lost --a: ${overlap.stdout}`);
-  assert.strictEqual(payload.b, 6, `pr-overlap.mjs's payload lost --b: ${overlap.stdout}`);
-
-  // The stub really answered, so the two exit-0 rows above are the accepting
+  // The stub really answered, so the exit-0 row above is the accepting
   // path and not a script that refused quietly at code 0.
   assert.match(readFileSync(receipt, "utf8"), /^pr view 42 /m, "diff-stats.mjs never asked gh for PR 42");
-  assert.match(readFileSync(receipt, "utf8"), /^pr diff 5 /m, "pr-overlap.mjs never asked gh for PR 5");
 });
 
 // `--pr 0` is the row the `=== null` absence check exists for, and the one a
@@ -1056,7 +1036,6 @@ const STRAY_POSITIONALS = [
   { script: "ci-state", argv: ["--pr", "42", "basee", "main"], stray: "basee" },
   { script: "ci-state", argv: ["--pr", "42", "-basee", "main"], stray: "-basee" },
   { script: "diff-stats", argv: ["--pr", "42", "stray"], stray: "stray" },
-  { script: "pr-overlap", argv: ["--a", "5", "--b", "6", "stray"], stray: "stray" },
   { script: "board", argv: ["build", "--ledger", "x", "serve"], stray: "serve" },
   { script: "staleness", argv: ["--path", "README.md", "--present", "needle", "JUNKTOKEN"], stray: "JUNKTOKEN" },
 ];

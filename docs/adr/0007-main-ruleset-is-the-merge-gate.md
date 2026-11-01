@@ -4,6 +4,7 @@
 premises of #164, all three of which were stale when it was picked up. Amended by ADR 0012: guard 1's trigger reads "a single pass in which the last PR waits more than 3 h"; threshold unchanged. Amended by ADR 0021: the §table's required set loses `npm-name-gate` (deleted with the marketplace route) — `validate-claude` had already died with ADR 0014 — leaving `rebase-check`, `check`, `validate-release-label`, `smoke-omp`, `install-and-smoke`; every other rule, and the gate-is-the-ruleset premise, stands.
 Amended by #3036: the §table's required set gains `proc-macos`, `ci.yml`'s `macos-latest` job running `tests/proc.test.mjs`, which has no job-level `if:` and so cannot skip — leaving `rebase-check`, `check`, `validate-release-label`, `smoke-omp`, `install-and-smoke`, `proc-macos`. The spec gains it here; the live gate gains it when `apply-ruleset.sh` next applies the spec.
 Amended by #3846: the controller reports a tooling defect instead of fixing it mid-run, so `run-team/SKILL.md` no longer has the section this ADR cites; the no-bypass rule stands.
+Amended by #4029: the merge bot no longer holds a labelled PR behind a lower-numbered open PR without the label — the `held-behind-#<lower>` hold rule and `pr-overlap.mjs` are gone — so "FIFO by PR number" in § Why not GitHub's native merge queue orders labelled PRs only, and a conflict a merge creates lands on the PR that merges later; the three blockers, and the rejection of the native queue, stand.
 
 ## Context
 

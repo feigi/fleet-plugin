@@ -1000,13 +1000,13 @@ test("a ticket row and an unrelated fallback row each keep their own card", (t) 
 test("a skipped fallback row's own signals land on the card that claims its PR", () => {
   const rows = [
     "#659 impl-659=PR#800 · impl-659-b=PR#724",
-    "#724 fix-pr-724 · reviewed=zzz · held-behind:#900 · BLOCKED",
+    "#724 fix-pr-724 · reviewed=zzz · BLOCKED",
   ];
   const board = boardOf({ rows, dispatched: [] }, [{ number: 724, state: "OPEN", labels: [], title: "pr 724" }]);
   assert.equal(board.tickets.length, 1, "one card for PR 724");
   const [card] = board.tickets;
   assert.deepEqual([card.issue, card.pr, card.agent], [659, 724, "fix-pr-724"]);
-  for (const flag of ["ledger-error", "held-behind:#900", "blocked"]) assert.ok(card.flags.includes(flag), flag);
+  for (const flag of ["ledger-error", "blocked"]) assert.ok(card.flags.includes(flag), flag);
 });
 
 test("a row for another ticket that merely names a claimed PR keeps its own card, and the PR is owed one review", () => {

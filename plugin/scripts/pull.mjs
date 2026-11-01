@@ -872,7 +872,7 @@ class Pull {
       const d = this.gh("collision", ["pr", "diff", String(pr), "--name-only"]);
       const common = shared(d.stdout, "\n");
       if (d.status !== 0) unread.push(`gh pr diff ${pr} (${failure(d)})`);
-      // Fail closed, as pr-overlap.mjs does: a PR with no changed file is a query that did not work, never "no overlap".
+      // Fail closed: a PR with no changed file is a query that did not work, never "no overlap".
       else if (d.stdout === "") unread.push(`gh pr diff ${pr} (printed no file)`);
       else if (common.paths.length > 0) {
         for (const f of common.files) sharedFiles.add(f);

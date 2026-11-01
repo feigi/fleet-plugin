@@ -168,7 +168,6 @@ export const SCHEMAS = {
   "merge-bot": report({
     member: str,
     merged: listOf({ pr: id, sha }),
-    held: listOf({ pr: id, behind: id }),
     conflictHold: { type: "array", items: id },
     // A refusal is a verdict only with a reason: the reason is the record
     // `## Ruled` gets, so one with no text but whitespace is invalid.
@@ -178,12 +177,12 @@ export const SCHEMAS = {
 };
 
 // Every verdict a merge-bot report gives, as `{pr, path}`, `path` the entry's
-// PR field: `merged`, `held`, `conflictHold`, then `refused`, each in report
-// order. `branchKept` gives none: it names a merged PR's branch and the open
-// PR keeping it.
+// PR field: `merged`, `conflictHold`, then `refused`, each in report order.
+// `branchKept` gives none: it names a merged PR's branch and the open PR
+// keeping it.
 export function mergeBotVerdicts(report) {
   return [
-    ...["merged", "held"].flatMap((k) => report[k].map((e, i) => ({ pr: e.pr, path: `$.${k}[${i}].pr` }))),
+    ...report.merged.map((e, i) => ({ pr: e.pr, path: `$.merged[${i}].pr` })),
     ...report.conflictHold.map((pr, i) => ({ pr, path: `$.conflictHold[${i}]` })),
     ...report.refused.map((e, i) => ({ pr: e.pr, path: `$.refused[${i}].pr` })),
   ];
@@ -198,7 +197,7 @@ export function mergeBotVerdicts(report) {
 // settle checks. For a fix-pr report: an `applied` outcome names its
 // `testRun`, the run behind the commit, and a `refuted` deferral, under any
 // outcome, names the `dispositionsRecord` settle reads its reason from. For a
-// merge-bot report: each PR gets one verdict — merged, held, conflict-held or
+// merge-bot report: each PR gets one verdict — merged, conflict-held or
 // refused — the last it reached in the pass, so a PR named twice, in one list
 // or in two, is a violation at its second entry.
 export function reportViolation(family, value) {

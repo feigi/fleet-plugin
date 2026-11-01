@@ -104,7 +104,7 @@ The full text of each row `fleet-tick.mjs` prints and what it asks of the contro
   unchecked tier, the In-flight bound reached (`HOLD (in-flight <n>/<B>)` —
   nothing to do unless its detail names a replacement to dispatch, else a
   merge brings n below B), or every
-  queued merge candidate held behind a lower PR or on a conflict hold no
+  queued merge candidate held on a conflict hold no
   fix-applier has cleared. An unchecked tier is `tick --apply`'s to check, and
   the hold stays while the check writes no verdict (its `tier-ok=`, or
   `tier-unverifiable=` for a member settled `killed` or `released` with no

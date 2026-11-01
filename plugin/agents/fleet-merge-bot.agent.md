@@ -19,7 +19,7 @@ Your scratch directory is `<scratch>/`; you write only under
 
 Your report is the one file you write outside it: `<scratch>/reports/merge-bot-<n>.json`,
 the path your brief names, giving every PR queued when you were dispatched
-exactly one verdict — `merged`, `held`, `conflictHold` or `refused` — as
+exactly one verdict — `merged`, `conflictHold` or `refused` — as
 run-merge-bot.md's **One verdict per queued PR** says. Your final
 message is the one line your brief gives, `merge-bot-<n>: done <path>`. A Label map
 refusal follows that line with what `show` printed.

@@ -1,12 +1,12 @@
 ---
-description: merge every ready-to-merge open PR in numeric order — rebase, wait green, merge, never jumping a related PR
+description: merge every ready-to-merge open PR in numeric order — rebase, wait green, merge
 ---
 
 Label names in this file are roles; the Label map gives the string to type; a member never derives the map.
 
 Set the goal, then work it until no open PR is left:
 
-`/goal Merge all of this repo's open PRs in numeric order if labeled ready-to-merge. Rebase -> Wait for checks green -> check for the ready-to-merge label -> merge if labeled. Never merge past a lower-numbered PR whose work is related — wait for its label instead.`
+`/goal Merge all of this repo's open PRs in numeric order if labeled ready-to-merge. Rebase -> Wait for checks green -> check for the ready-to-merge label -> merge if labeled.`
 
 Only `ready-to-merge` PRs are in scope — it is the author's sign-off. Never add the label yourself. A PR-body line `main-gain-removal: <path> <key> - <why>` is a second sign-off, scoped to one file and one landing source: it lets through the removal of lines `main` gained after the PR began in that file from that source, and nothing else (step 3's `main-gain-removed`).
 
@@ -19,45 +19,15 @@ Only `ready-to-merge` PRs are in scope — it is the author's sign-off. Never ad
 - **A bot a controller dispatched** holds no grace. Read the queue your dispatch recorded, which needs no map — `~/.fleet/bin/fleet-run ledger.mjs read | jq -c '.queued["merge-bot-<n>"]'` — and write your one report giving every PR there `refused` with `reason` `label-map-refused`; an empty or absent queue gives every list empty. Validate it as **One verdict per queued PR** says, then send your final line followed by what `show` printed.
 - **The top-level invocation** prints what `show` printed and stops. It writes no report.
 
-## Order, and the hold rule
+## Order
 
-Lowest number first. But the label alone does not authorize a merge: **a labeled PR must not jump a lower-numbered open PR touching related work.** Numeric order is the author's intended order; jumping it silently rebases the lower PR onto changes it was never written against.
-
-Before touching labeled PR `N`, list every open PR below `N` lacking the label. For each, decide related or not:
-
-```bash
-~/.fleet/bin/fleet-run pr-overlap.mjs --a <lower-pr> --b <N>
-```
-
-**Any** of its four signals (`files`, `modules`, `dirs`, `prose`) firing means related. Path equality alone is too weak: a repo mid-migration has `src/…/test_foo.py` in one PR and `tests/unit/…/test_foo.py` in the other — same module, zero shared paths. A module is a test file's name with its test affix and extension removed, in any language (`foo.test.ts`, `foo_test.go` and `test_foo.py` are all `foo`); other files are not modules.
-
-Two false positives in signal 3:
-
-- **Repo root (`.`) is excluded above.** Every top-level file shares it, so it fires on PRs with nothing in common.
-- **A bare top-level directory (`docs`, `tests`, `src`) is weak evidence.** Two PRs editing different documents under `docs/` are unrelated. Look at the actual files first: same document, module, or config → related. Different subjects sharing an ancestor → not related; proceed and say so.
-
-**Signal 4, `prose`, is the one `signal=none` used to miss, and the only one that reads content rather than paths.** It fires when one PR changes a data file (`.tsv`, `.json`, `.yml`, …) whose path or basename appears in the other PR's own diff — the append-vs-rewrite collision `docs/metrics/tier-outcomes.tsv` has with `run-team/SKILL.md`'s tier guard by construction, since the file is append-only and every run produces a PR touching it. Weak evidence, on a par with a directory hit, and it prints its witness — the cited file, the citing file, the token and the line — because one read disproves it. It is ranked LAST, so it only ever converts a `none`: a `files`, `modules` or `dirs` verdict still reads exactly as it did before, with `prose=<n>` on the summary line beside it.
-
-**`prose=0` is a clear only when `proseUnrun` is `null`.** A non-null `proseUnrun` means the scan was reached and could not cover the diff, so an empty `prose[]` there is silence rather than data — read the reason it names and settle the pair by hand.
-
-Directory-only and prose-only hits prompt investigation. Shared *files* and *module names* are verdicts.
-
-- **Related → HOLD `N`.** Do not rebase, do not merge. Report `held-behind-#<lower>` and move on. The watcher picks it up once the lower PR is signed off and merged.
-- **Unrelated → proceed**, and report that it went ahead of `#<lower>` and on what evidence.
-
-Also **related** even with an empty file intersection when:
-
-- both reference the same issue, or were split from one
-- one branch is stacked on the other, or their names share an issue/cluster
-- they change the same exported symbol, config key, or docs section from different files — signal 4 mechanises the half of this where the section is a **data file** cited by name, so read `prose` before reaching for this bullet; a bare symbol or key name is still yours to read, and the measurement in the next paragraph is why it stays that way
-
-Genuinely unclear → **hold**. Waiting costs a label; merging out of order costs a conflict resolution on someone else's branch, and the loser is the PR already reviewed.
-
-**A fired signal is not a verdict — disprove it.** Soft signals fire on deliberately-partitioned PRs. Observed: two PRs sharing two issue refs and all of `reset_hint=` / `resetHint` / `terminalFailure`, provably unrelated — one handed the other a specific emit site in its own body, their exact-string pins were punctuation-distinct so neither could match the other's site, and **both were test-only**. That generalizes: **a test-only PR cannot invalidate what another PR asserts**, and neither can a docs-only one.
-
-**`git merge-tree --write-tree <branch-a> <branch-b>` disproves a fired signal without inference.** It performs the merge in-memory and writes a tree, exiting non-zero with the conflicting paths on stdout only when the merge genuinely conflicts. That is a real answer, not an inference from a behind-count — being behind is not evidence of conflict. `rc=0` with a written tree means the two branches merge clean; run it on `files` before holding. It answers only whether the two trees conflict textually, not whether one PR's content invalidates the other's — the same-issue, stacked-branch, and shared-symbol conditions still decide that.
-
-Obeying a fired signal blindly stalls the queue on a non-conflict; ignoring one is sloppy. Do the work, report which evidence settled it.
+Lowest number first, among the PRs that carry the label. A labelled PR never
+waits on an open PR without it, however related their work: if merging it
+leaves that PR conflicting, the conflict is that PR's to clear, as after any
+merge — a fleet run's tick hands one on a PR it tracks to a fix-applier, and
+any other PR's author clears it. Waiting would not avoid the conflict, only
+move it onto the labelled PR, where clearing it changes the change the label
+was given for, and the label no longer covers it.
 
 ## The labelled head
 
@@ -94,7 +64,7 @@ What this gate deliberately does not answer. It does not ask *who* audited — a
 
 ## Per-PR sequence
 
-For each labeled PR clearing the hold rule, lowest first:
+For each labeled PR, lowest first:
 
 **Before step 1, check the ledger for an unresolved conflict hold on this PR.** Read the ticket row that names it — the same lookup step 4 below uses (`ledger.mjs read`). A `conflict-hold:#<pr>` token with no `fix-pr-<n>` settled (`applied:`/`no-op`) *after* it — reading the row left to right, past whatever dispatched after the LATEST hold token — is unresolved: a fix-applier already owns this PR's conflict, whether the hold came from this pass, an earlier one, or the controller off the tick's `CONFLICT` line. **Skip it**: do not rebase, do not touch the row, do not report `rebase-fallback-#<pr>` again. Report `conflict-held-#<pr>` and move to the next labeled PR. Only once a fix-applier dispatched after the hold has settled does it clear — proceed through the sequence below as normal from there.
 
@@ -295,8 +265,8 @@ Measured over one three-merge pass: the next queue member went 0 → 2 → 7 →
 
 **A PR whose heavy jobs have only ever `skipped` is getting its first real verification from your rebase.** Reviewers may legitimately have labelled on the checks that did run plus local evidence, saying so explicitly. When your post-rebase run finally executes those suites, treat a red there as a **genuine first result**, not a regression you caused — read the failing job before concluding, and do not hand it back as "the rebase broke it".
 
-Report merged / skipped-unlabeled / held-behind-#X / worktree-diverged-#X / head-moved-after-label-#X / rebase-carry-#X (merged or not, with the labelled and accepted SHAs) / main-gain-removed:<path>-#X / label-drop-failed-#X / label-read-failed-#X / branch-delete-failed-#X / branch-kept-#X (X the open PR that keeps the merged branch — a keep, not a failure) / rebase-fallback-#X / instrument-set-changed-#X / ci-wait-timeout-#X (with the run id and its `status`) / `<reason>-#X` for any other gate refusal / blocked after the pass — a dispatched bot once, at exit, after its grace (**Grace, then one report**, below). Every acknowledged main-gain removal the gate passed is named in the report, with its reason.
-In the report file, every PR queued when you were dispatched is listed under exactly one of `merged`, `held`, `conflictHold` or `refused` — those four lists are its verdict, the tokens above are not — and a settle check refuses a report that leaves one out (**One verdict per queued PR**, under **Grace, then one report**).
+Report merged / skipped-unlabeled / worktree-diverged-#X / head-moved-after-label-#X / rebase-carry-#X (merged or not, with the labelled and accepted SHAs) / main-gain-removed:<path>-#X / label-drop-failed-#X / label-read-failed-#X / branch-delete-failed-#X / branch-kept-#X (X the open PR that keeps the merged branch — a keep, not a failure) / rebase-fallback-#X / instrument-set-changed-#X / ci-wait-timeout-#X (with the run id and its `status`) / `<reason>-#X` for any other gate refusal / blocked after the pass — a dispatched bot once, at exit, after its grace (**Grace, then one report**, below). Every acknowledged main-gain removal the gate passed is named in the report, with its reason.
+In the report file, every PR queued when you were dispatched is listed under exactly one of `merged`, `conflictHold` or `refused` — those lists are its verdict, the tokens above are not — and a settle check refuses a report that leaves one out (**One verdict per queued PR**, under **Grace, then one report**).
 
 ## No-undo audit (before every rebase)
 
@@ -328,8 +298,8 @@ Three dots, never two: a two-dot diff on a stale branch renders `main`'s gains a
 
 **Only a bot a controller dispatched holds a grace** (`/skill:run-team`, or any caller that says it owns the watcher); the top-level invocation arms its Monitor instead (**Then stay armed**). You were dispatched on the first `ready-to-merge` label, never after anyone's report, and a label landing minutes after your last merge is the common case — so the pass does not end the moment the queue empties. It drains, then waits **15 minutes** for late labels, then reports once:
 
-- Grace starts once no labelled PR is actionable — every one merged, skipped or held. Seed the labelled set then, the way **Then stay armed** seeds its Monitor, so a PR you already handled does not re-fire.
-- Every 60s, poll `gh pr list --state open --label "<ready-to-merge string>" --limit 200 --json number`. A number not in the seed → **re-run selection from the top**, hold rule included, drain what it makes actionable, and restart the grace after that drain. A failed poll is no reading: keep the seed and poll again. A poll that returns 200 numbers is not a whole reading either — gh stops at `--limit` with exit 0 and no warning, so a label past it is unseen: act on the numbers it did return, and name `poll-capped-at-200` in the report, so the controller knows the grace's silence covered only the first 200.
+- Grace starts once no labelled PR is actionable — every one merged, skipped or conflict-held. Seed the labelled set then, the way **Then stay armed** seeds its Monitor, so a PR you already handled does not re-fire.
+- Every 60s, poll `gh pr list --state open --label "<ready-to-merge string>" --limit 200 --json number`. A number not in the seed → **re-run selection from the top**, drain what it makes actionable, and restart the grace after that drain. A failed poll is no reading: keep the seed and poll again. A poll that returns 200 numbers is not a whole reading either — gh stops at `--limit` with exit 0 and no warning, so a label past it is unseen: act on the numbers it did return, and name `poll-capped-at-200` in the report, so the controller knows the grace's silence covered only the first 200.
 - At grace start and on every 60s poll after it, also read `gh pr list --state open --limit 1 --json number`. An empty list (no PR open at all, any author, labelled or not) ends the grace: report and exit now. A failed read is no reading: keep waiting. It applies draining or not, and again after a late-label drain restarts the grace.
 - 15 minutes with no new label → report and exit.
 
@@ -337,9 +307,9 @@ The wait:
 
 `bash` backgrounds any call past about 60s even with `timeout` set — hold the whole grace in one Python `eval` cell that polls `gh` through `subprocess.run`, its cell `timeout` at 1000s or more; never `bash` plus `wait`, which then returns "Skipped due to a queued background completion".
 
-**One report, at exit, and none before it** — every PR this pass touched, in the vocabulary above, a pass that merged nothing included. The controller reaps on that report and records each `held-behind-#<lower>` on the held ticket's row, so a report sent mid-pass is one it acts on too early.
+**One report, at exit, and none before it** — every PR this pass touched, in the vocabulary above, a pass that merged nothing included. The controller reaps on that report, so a report sent mid-pass is one it acts on too early.
 
-**One verdict per queued PR, in the report file.** A dispatched bot's report file (`<scratch>/reports/merge-bot-<n>.json`) gives every PR that carried `ready-to-merge` when you were dispatched exactly one verdict — the last it reached in the pass: `merged`, `held` (a `held-behind-#<lower>`), `conflictHold` (a `conflict-held-#<pr>`, or a `rebase-fallback-#<pr>` you recorded as a conflict hold), or `refused` with the token above as its `reason` (`main-gain-removed:<path>`, `head-moved-after-label`, `ci-wait-timeout`, any other gate refusal). A PR you never reached is still `refused`, with the reason you stopped short of it; a PR refused `behind:<n>` and merged later in the same pass is only `merged`. `branchKept` is not a verdict. Two checks enforce this, not the rule alone: `report-schema.mjs validate merge-bot` answers `invalid` for a PR named twice, in one list or in two, and for a `refused` entry whose `reason` is empty or only whitespace; and `ledger.mjs settle merge-bot-<n> --from-report`, which `fleet-event.mjs merge-bot-report` runs, judges the report against the queue `ledger.mjs dispatch merge-bot` recorded on your `## Dispatched` entry — never a list your report supplies — and refuses it, naming each PR, when a PR from that queue that is still open and carries `ready-to-merge` has no verdict. A PR labelled after your dispatch, or one that left the queue before the settle, never fails it. Each `refused` entry lands in the ledger's `## Ruled` as `merge-bot-<n> refused #<pr>: <reason>`, the reason trimmed, a record only: it moves no label and holds nothing.
+**One verdict per queued PR, in the report file.** A dispatched bot's report file (`<scratch>/reports/merge-bot-<n>.json`) gives every PR that carried `ready-to-merge` when you were dispatched exactly one verdict — the last it reached in the pass: `merged`, `conflictHold` (a `conflict-held-#<pr>`, or a `rebase-fallback-#<pr>` you recorded as a conflict hold), or `refused` with the token above as its `reason` (`main-gain-removed:<path>`, `head-moved-after-label`, `ci-wait-timeout`, any other gate refusal). A PR you never reached is still `refused`, with the reason you stopped short of it; a PR refused `behind:<n>` and merged later in the same pass is only `merged`. `branchKept` is not a verdict. Two checks enforce this, not the rule alone: `report-schema.mjs validate merge-bot` answers `invalid` for a PR named twice, in one list or in two, and for a `refused` entry whose `reason` is empty or only whitespace; and `ledger.mjs settle merge-bot-<n> --from-report`, which `fleet-event.mjs merge-bot-report` runs, judges the report against the queue `ledger.mjs dispatch merge-bot` recorded on your `## Dispatched` entry — never a list your report supplies — and refuses it, naming each PR, when a PR from that queue that is still open and carries `ready-to-merge` has no verdict. A PR labelled after your dispatch, or one that left the queue before the settle, never fails it. Each `refused` entry lands in the ledger's `## Ruled` as `merge-bot-<n> refused #<pr>: <reason>`, the reason trimmed, a record only: it moves no label and holds nothing.
 
 Your `task` result is the report, delivered when you exit.
 
@@ -396,6 +366,5 @@ Arm with `persistent: true`, description `ready-to-merge label on this repo's PR
 - **A full page is not a whole reading either.** `gh pr list` stops at its `--limit` — 30 when the flag is absent — with exit 0 and no warning, so `poll` passes an explicit one (`cap`, one variable for the flag and the check), and `capcheck` says once when a poll fills it and once when one comes back under it: the DEGRADED/RECOVERED latch `run-team/SKILL.md`'s CI Monitor uses for the same cause, and never a line per tick. The numbers a capped poll did return are still real events; the line is for the labels past them, which fire nothing while it holds.
 - **The per-PR loop is heredoc-fed on purpose — `for n in $cur` is the one form that cannot work here.** This runs under zsh, which word-splits an unquoted command substitution's result but *not* an unquoted parameter expansion, and `cur` is a parameter. Measured on zsh 5.9 with `seen` holding two PR numbers and `cur` those two plus a third: the bare form runs **one** iteration with the whole list glued into a single value and emits one `ready-to-merge label added:` event with all three numbers glued into it, one nonsense event naming no PR, while the real new PR is never reported; the heredoc form emits the third alone. `run-team/references/shell-traps.md`'s **Shell traps** carries the mechanism and the `</dev/null` trap that bites the next command added inside this loop, and that file carries the remedy table. Note the contrast with step 1's `for _ in $(seq 1 60)`: that is a command substitution, it splits, and it is correct as written.
 - 60s poll — remote API, stay off rate limits.
-- A held PR stays in `seen`, so its own label will not re-fire. Fine: what unblocks it is the **lower** PR getting labeled, which does fire, and step 4's re-evaluation picks up both in numeric order.
 
-On an event, do not merge that PR on sight — **re-run selection from the top**, hold rule included. Report each outcome and leave the monitor armed. One watch per session; stop it with `proc://<id>/kill`.
+On an event, do not merge that PR on sight — **re-run selection from the top**. Report each outcome and leave the monitor armed. One watch per session; stop it with `proc://<id>/kill`.
