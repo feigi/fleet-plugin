@@ -681,3 +681,11 @@ one scan, oldest first; admission never is. The invariant this replaces — one
 human decision per batch of admissions, zero unilateral grabs — is retired
 is retired: zero human decisions per admission, and every non-admission is a
 label or a premise the maintainer can read.
+
+## Red flags: is it decided
+
+- "Touches eight files, too big for the fleet" → size is not the axis. Decided is.
+- "Body is three lines, so it's simple" → short bodies hide open design choices.
+- "The brief is thorough, so it's decided" → thorough ≠ decided. Read it for the
+  choice it leaves open.
+- "I'd have to pick an approach myself" → that IS undecided.

@@ -229,3 +229,11 @@ retry letter's when there are several), so you pass no `--sizing`; the member
 also puts it in the PR body's `Sizing:` line, with the signal it turned on;
 `profile`, `loc` and `files` all come from `diff-stats.mjs` over the merged
 diff.
+
+## What a shared snapshot did to its readers
+
+`review-and-fix.md`'s **Cut TWO trees, not one** rests on this. Observed with a single shared snapshot: three specialists read two *different* in-flight mutations, one reporting the PR's own bug as still present; elsewhere three watched their file go clean → `M` mid-analysis; twice a reviewer came one step from filing a false finding.
+
+## What an unbounded read costs
+
+`review-and-fix.md`'s **Then bound the read** rests on this. The cost of not bounding is never one-off: a specialist that dumps a 37 KB file carries it in its prefix for every remaining turn, re-billed as cache-read on each. Over one run's 92 subagents the 88 unpiped whole-file calls carried 434 KB (~110k tokens) — the single largest attributed line item in that run — against 319 piped ones. Agents already reach for the bounded form; nothing told them when it is required.

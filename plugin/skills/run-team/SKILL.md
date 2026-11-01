@@ -901,13 +901,8 @@ Stop when a thought of yours matches one of these, and act on the line it carrie
 - "This member finished, send it the next ticket" → resumes its transcript.
 - "The name is cosmetic" → the name is the ledger token and the hub address.
 - "ready-for-agent came back empty, widen to ready-for-human" → empty with no `specs-dropped=` means no work; empty with drops means specs awaiting to-tickets, and is still never a reason to widen.
-- "The reap at the end will pick up the claim I never dispatched" → it declines:
-  not `[gone]`, no unique commits. Release it, or it reads as taken next run.
-- "Touches eight files, too big for the fleet" → size is not the axis. Decided is.
-- "Body is three lines, so it's simple" → short bodies hide open design choices.
-- "The brief is thorough, so it's decided" → thorough ≠ decided. Read it for the
-  choice it leaves open.
-- "I'd have to pick an approach myself" → that IS undecided.
+- A thought about whether a ticket is decided → its red flags are in references/pull.md.
+- A thought about reaping or removing a worktree → its red flags are in references/reaping.md.
 - "It reported the SHA, so it's on the branch" → verify.
 - "Let the merge bot arm its own monitor" → it dies, the queue stops.
 - "The member died, message it the state" → dead agents do not read mail.
@@ -919,13 +914,6 @@ Stop when a thought of yours matches one of these, and act on the line it carrie
 - "A quick install to set up the worktree" → the claim already ran the Recipe's
   Install step; any other install can rewrite the lockfile for the whole repo.
 - "I'm on my own copy, so I'm isolated" → not from the docker stack.
-- "`commit-commands:clean_gone` printed nothing, the tree is clean" → its
-  `[gone]` detection works fine; it just runs `-D`/`--force` with no merged
-  check, so "printed nothing" only means nothing was gone yet, not that it's safe.
-- "`--force` the worktree removal, the PR merged anyway" → merged says nothing
-  about uncommitted files, and the reviewer may still be in there.
-- "Reap once at the end of the run" → stale worktrees make phase 0 read merged
-  tickets as taken, so the starvation compounds with every Pull.
 
 ## Report
 
