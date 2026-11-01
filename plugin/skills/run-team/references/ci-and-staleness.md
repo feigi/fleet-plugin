@@ -137,7 +137,7 @@ detected by its mark going stale. A run that stops KNOWINGLY can do better
 than being detected, and nothing else can write the reason afterwards:
 
 ```bash
-~/.fleet/bin/fleet-run fleet-heartbeat.mjs --stop "budget exhausted"
+~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run fleet-heartbeat.mjs --stop "budget exhausted"
 ```
 
 Skipping it is not fatal — the next reader still reports the stop, it just

@@ -126,7 +126,7 @@ test("the mutation gate runs in a detached worktree at the dispatch pin, at a pa
 // values, reads its exit code as the verdict, and builds no tree on the paths
 // that skip the mutation.
 test("the gate's tree is built by finisher-tree.mjs, which runs the Install step in it", () => {
-  const CALL = "`~/.fleet/bin/fleet-run finisher-tree.mjs --worktree <abs-path> --pin <your dispatch pin> --pr <N> --member <your member name> --scratch <scratch>`";
+  const CALL = "`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run finisher-tree.mjs --worktree <abs-path> --pin <your dispatch pin> --pr <N> --member <your member name> --scratch <scratch>`";
   for (const [where, text] of [["the agent body's duty 2", duty2Text()], ["references/finisher.md", gateText()]]) {
     assert.match(
       text,
@@ -262,7 +262,7 @@ test("duty 1 is one script, called through the Resolver with both flags, its exi
     "duty 1 no longer opens by running one script whose exit code is the verdict — it is back to being steps a finisher follows by hand",
   );
   assert.ok(
-    said(/`~\/\.fleet\/bin\/fleet-run finisher-audit\.mjs --worktree <abs-path> --pin <your dispatch pin>` \(the path you were dispatched with, and the full SHA\)/),
+    said(/`~\/\.omp\/plugins\/node_modules\/@feigi\/fleet-ctl\/scripts\/fleet-run finisher-audit\.mjs --worktree <abs-path> --pin <your dispatch pin>` \(the path you were dispatched with, and the full SHA\)/),
     "duty 1 no longer gives the script's call with the dispatched path as --worktree and the full dispatch SHA as --pin",
   );
   assert.ok(

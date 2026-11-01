@@ -61,7 +61,7 @@ test("phase0Gate: failed, pending and unknown statuses hold, every one named in 
     { path: PATH, controllerAt: 5 });
   assert.deepEqual(g, {
     held: true,
-    line: "PHASE0-INCOMPLETE baseline, recipe, stranded — dispatch held: run ~/.fleet/bin/fleet-run phase0.mjs --session /s/run and act on what it prints",
+    line: "PHASE0-INCOMPLETE baseline, recipe, stranded — dispatch held: run ~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run phase0.mjs --session /s/run and act on what it prints",
     session: "/s/run",
   });
 });
@@ -80,7 +80,7 @@ test("phase0Gate: a step the receipt does not carry holds, named after the steps
   const none = phase0Gate(ok({ ...receipt(), steps: {} }), { path: PATH, controllerAt: 5 });
   assert.deepEqual(none, {
     held: true,
-    line: `PHASE0-INCOMPLETE ${STEPS.join(", ")} — dispatch held: run ~/.fleet/bin/fleet-run phase0.mjs --session /s/run and act on what it prints`,
+    line: `PHASE0-INCOMPLETE ${STEPS.join(", ")} — dispatch held: run ~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run phase0.mjs --session /s/run and act on what it prints`,
     session: "/s/run",
   });
   const { recipe: _recipe, ...rest } = receipt({ steps: { baseline: { status: "failed" } } }).steps;

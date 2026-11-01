@@ -20,7 +20,7 @@
 // `realpathSync` is exact and already required.
 //
 // SINGLE FILE, ON PURPOSE. `fleet-bootstrap` places a copy of exactly this
-// file at `~/.fleet/bin/fleet-run`, OUTSIDE the plugin (CONTEXT.md's
+// file at `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run`, OUTSIDE the plugin (CONTEXT.md's
 // Resolver entry: "cannot resolve itself"). Once there it has no siblings —
 // `scripts/repo-root.mjs`, `scripts/arg.mjs` and every other shared helper
 // in this directory are unreachable from that path. So this file requires

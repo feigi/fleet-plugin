@@ -38,7 +38,7 @@ job is red on its current head and you are here to fix it — do not review, do
 not dispatch specialists.
 
 ## kind: review, dispositions-retry
-Read `$(~/.fleet/bin/fleet-run --root)/commands/review-and-fix.md` and run **steps 2, 3
+Read `$(~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run --root)/commands/review-and-fix.md` and run **steps 2, 3
 and 5 only**: split apply-now/defer, commit, push, file every deferral as its
 own issue with the label the finding's state calls for. Skip step 1 — the
 review already ran — and steps 4 and 6: the controller owns the CI wait and
@@ -48,8 +48,8 @@ Label names in this file are roles; the Label map gives the string to type; a me
 
 **Before your first edit or refuter dispatch, read the Label map — the two
 roles you type or compare, once — and use those strings for the rest of your
-run.** `~/.fleet/bin/fleet-run label-map.mjs show needs-triage` and
-`~/.fleet/bin/fleet-run label-map.mjs show wontfix` each print the string the
+run.** `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run label-map.mjs show needs-triage` and
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run label-map.mjs show wontfix` each print the string the
 tracker uses; every `gh` command and label comparison those steps of
 `review-and-fix.md` type for those two roles takes it. You never run `ensure`
 and never ask anyone. **A non-zero exit from `show` ends you with no report** —
@@ -91,13 +91,13 @@ The ticket:
 <ticket>
 ## kind: conflict
 Bring `<branch>` current with `origin/main`, resolving every conflict by the
-**No-undo audit** in `$(~/.fleet/bin/fleet-run --root)/commands/run-merge-bot.md`.
+**No-undo audit** in `$(~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run --root)/commands/run-merge-bot.md`.
 Run `recipe-check.mjs` (below) from the worktree before you push, then push with
-`~/.fleet/bin/fleet-run push-sync.mjs --branch <branch>`. Report the new head, or that no conflict was
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run push-sync.mjs --branch <branch>`. Report the new head, or that no conflict was
 left.
 ## kind: red-check
 Read the failing job's log and fix the cause. Run `recipe-check.mjs` (below)
-from the worktree before you push, then push with `~/.fleet/bin/fleet-run push-sync.mjs --branch <branch>`.
+from the worktree before you push, then push with `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run push-sync.mjs --branch <branch>`.
 Report the new head and **stop**: do not watch, poll or wait for CI — the
 controller owns the next run on the pushed head. A red that is not yours to
 fix — a flake that passes on rerun, or staleness — gets nothing pushed: report
@@ -121,7 +121,7 @@ re-run. That command never deletes an ignored file. A path the re-run still
 refuses after that clean → push nothing and report that cause.
 
 **`recipe-check.mjs` is how you run `<checkCmd>` and `<testCmd>`:**
-`~/.fleet/bin/fleet-run recipe-check.mjs --member <your name> --testCmd "<testCmd>" --reports <scratch>/reports`,
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run recipe-check.mjs --member <your name> --testCmd "<testCmd>" --reports <scratch>/reports`,
 from the worktree, after `git add` and before the commit — `<testCmd>` copied
 verbatim as the one quoted argument. It runs the Recipe's Check step,
 `<checkCmd>`, then `<testCmd>`, against the staged tree and records both beside
@@ -166,13 +166,13 @@ nothing past, `applied` and `deferred` empty, `dispositionsRecord` and
 
 Your report is a file, `<scratch>/reports/<your name>.json`, `<your name>` the
 `fix-pr-` name you were dispatched as, in the shape
-`~/.fleet/bin/fleet-run report-schema.mjs print fix-pr` prints. A field with
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run report-schema.mjs print fix-pr` prints. A field with
 nothing real to point at is `null`: `dispositionsRecord` for a conflict hold or
 a red-check fix, which write no dispositions record, and `testRun` when no test
 run exists — a `no-op`, or a `failed` that never ran tests. A non-null value
 always reflects a real record or a real run. Write the report before your
 final message, and send nothing until
-`~/.fleet/bin/fleet-run report-schema.mjs validate fix-pr <scratch>/reports/<your name>.json`
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run report-schema.mjs validate fix-pr <scratch>/reports/<your name>.json`
 answers `valid`. Your final message is then one line,
 `<your name>: <outcome> <scratch>/reports/<your name>.json`, `<outcome>` the
 report's `outcome`.

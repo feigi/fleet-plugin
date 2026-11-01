@@ -79,7 +79,7 @@ test("the block runs the audit as one script through the Resolver, its exit code
   const text = causeText();
   assert.match(
     text,
-    Pin.phrase("**Duty 1 is one script, and its exit code is your verdict.** `~/.fleet/bin/fleet-run finisher-audit.mjs --worktree <abs-path> --pin <your dispatch pin>`"),
+    Pin.phrase("**Duty 1 is one script, and its exit code is your verdict.** `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run finisher-audit.mjs --worktree <abs-path> --pin <your dispatch pin>`"),
     "the block no longer runs `finisher-audit.mjs` through the Resolver with --worktree and --pin — a finisher that reaches the audit by another route, or by hand, skips the derivation the script owns",
   );
   // The steps are the script's. A git command spelled again here is the by-hand

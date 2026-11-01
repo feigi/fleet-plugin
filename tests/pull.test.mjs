@@ -2155,7 +2155,7 @@ test("SKILL.md Phase 1 names `pull.mjs next` as the Pull's entry, and its step p
   const phase1 = SKILL.slice(SKILL.indexOf("## Phase 1 — Pull"), SKILL.indexOf("### Dispatching the Pull's member"));
   assert.ok(phase1.length > 1000, "Phase 1 is found");
   const flat = phase1.replace(/\s+/g, " ");
-  assert.ok(flat.includes("A Pull's entry is `~/.fleet/bin/fleet-run pull.mjs next --head <N>`"), "Phase 1 names pull.mjs next as the entry");
+  assert.ok(flat.includes("A Pull's entry is `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run pull.mjs next --head <N>`"), "Phase 1 names pull.mjs next as the entry");
   assert.ok(flat.includes("`pull.mjs answer <N> <qid> <token> [--path <p>] [--] [<text>…]`"), "and the answer command");
   const steps = PULL_MD.replace(/\s+/g, " ");
   for (const step of ["1. **Take the shortlist head**", "2. **In-flight check, again**", "3. **Read the ticket in full, once**", "4. **Collision scan", "5. **Sequence check**", "6. **Claim**", "7. **Route, row, then dispatch**"]) {

@@ -240,7 +240,7 @@ head is not part of it, and duty 1 audits that head separately.
 
 ## A Ticketless PR has no mutation and no ruling
 
-**A Ticketless PR skips the acceptance mutation on `ticketless.mjs`'s exit 0 alone.** Run `~/.fleet/bin/fleet-run ticketless.mjs --pr <M>`. It reads whether the PR closes an issue in its own repository and whether a settled `impl-<N>=PR#<M>` token names it; with neither, no ticket supplies a mutation to re-run, so exit 0 skips it whatever the diff, and the rest of duty 2 runs. Exit 1 and exit 2 (could not look) run duty 2 as for a ticket PR. Where a kill's evidence line would go, the report says that no mutation ran because the PR is ticketless.
+**A Ticketless PR skips the acceptance mutation on `ticketless.mjs`'s exit 0 alone.** Run `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run ticketless.mjs --pr <M>`. It reads whether the PR closes an issue in its own repository and whether a settled `impl-<N>=PR#<M>` token names it; with neither, no ticket supplies a mutation to re-run, so exit 0 skips it whatever the diff, and the rest of duty 2 runs. Exit 1 and exit 2 (could not look) run duty 2 as for a ticket PR. Where a kill's evidence line would go, the report says that no mutation ran because the PR is ticketless.
 
 **Duty 3 holds a Ticketless PR whose diff is not inert.** `finisher-label.mjs` adds `patch` to a Ticketless PR that carries no release label, then runs the Inert diff verdict in-process at your pin. A diff that is not inert, or a verdict that could not look, gets the `ready-to-merge-head:` record and no `ready-to-merge`, and the script exits 5: halt with cause `human`. No ticket gives that PR a ruling or a mutation, so the maintainer's `ready-to-merge` is the merge. The merge bot merges it off the record at the pinned head, and a head that moved after the record is merged by hand.
 
@@ -257,7 +257,7 @@ ordering is detectable afterwards from the diff — a restore lands on the
 uncommitted clause and destroys it silently, or the mutant is still in the
 tree when the fix-applier commits and a deliberately broken guard ships as
 the fix, in a commit nothing re-reviews. So take your own:
-`~/.fleet/bin/fleet-run finisher-tree.mjs --worktree <abs-path> --pin <your dispatch pin> --pr <N> --member <your member name> --scratch <scratch>`
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run finisher-tree.mjs --worktree <abs-path> --pin <your dispatch pin> --pr <N> --member <your member name> --scratch <scratch>`
 adds `git worktree add --detach <scratch>/pr<N>/finish-<your member name> <your dispatch pin>`
 and runs the Install step in it, as a claim does: a detached worktree holds
 tracked files only, so without that step a suite whose dependencies are

@@ -122,12 +122,12 @@ test("pull.md has the controller type what `show` prints, in the relabel command
   );
   assert.match(
     section,
-    Pin.phrase("Each `<… string>` is what `~/.fleet/bin/fleet-run label-map.mjs show <role>` prints for that role"),
+    Pin.phrase("Each `<… string>` is what `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run label-map.mjs show <role>` prints for that role"),
     "pull.md no longer says where the relabel command's strings come from",
   );
   assert.match(
     section,
-    Pin.phrase("where the rendered comment names `ready-for-agent`, file the string `~/.fleet/bin/fleet-run label-map.mjs show ready-for-agent` prints in its place"),
+    Pin.phrase("where the rendered comment names `ready-for-agent`, file the string `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run label-map.mjs show ready-for-agent` prints in its place"),
     "pull.md no longer has the controller file the mapped string in the comment text",
   );
   assert.doesNotMatch(section, /--remove-label ready-for-agent/, "the relabel command types the role name");

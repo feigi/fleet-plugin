@@ -75,7 +75,7 @@ export const CHECKS = [
   { name: "allow-merge-commit", argv: ["gh", "api", "repos/{owner}/{repo}", "--jq", ".allow_merge_commit"], want: "true" },
   { name: "ruleset", argv: ["gh", "api", "repos/{owner}/{repo}/rulesets", "--jq", ".[].name"], want: NONEMPTY },
   { name: "ci-workflow", argv: ["sh", "-c", CI_NAMED], warn: true },
-  { name: "resolver", argv: ["~/.fleet/bin/fleet-run", "--root"] },
+  { name: "resolver", argv: ["~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run", "--root"] },
 ];
 
 /** sha256 over every row's name, argv, want and warn, in table order. */

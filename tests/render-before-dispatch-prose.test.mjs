@@ -18,7 +18,7 @@ const PULL_MD = Pin.file(join(PLUGIN, "skills", "run-team", "references", "pull.
 
 test("phase 2 renders the implementer's brief, then records the dispatch, and the call is handed the printed brief", () => {
   const p = PULL_MD.paragraph("**Record the dispatch before you make it.**", "references/pull.md record-the-dispatch paragraph", "**The prompt carries only what varies.**").text;
-  assert.match(p, Pin.phrase("`~/.fleet/bin/fleet-run dispatch-prompt.mjs render implementer --member impl-<N> …` then renders its brief, and `~/.fleet/bin/fleet-run ledger.mjs dispatch <N> impl-<N>` marks `impl-<N>` live on it and in `## Dispatched`, and the call follows."));
+  assert.match(p, Pin.phrase("`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run dispatch-prompt.mjs render implementer --member impl-<N> …` then renders its brief, and `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run ledger.mjs dispatch <N> impl-<N>` marks `impl-<N>` live on it and in `## Dispatched`, and the call follows."));
   assert.match(p, Pin.phrase("Its JSON carries `agent`, the definition that call names, and `brief.path`, the rendered brief whose content is that call's prompt — read both off that output, never recall them."));
   assert.match(p, Pin.phrase("`dispatch` refuses a member with no brief rendered for its role, naming the `render` command to run first"));
 });

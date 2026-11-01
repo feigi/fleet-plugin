@@ -60,7 +60,7 @@ that was never read and from one whose rows you have to read yourself.
 
 ## Why the ledger outlives your context
 
-One git-ignored `.fleet/ledger.md` per run is updated at every state change through the `~/.fleet/bin/fleet-run ledger.mjs` subcommands (`row`, `filed`, `ruled`, `check`, `read`, `dispatch`, `settle`, `review`, `drain`, `rotate`). Your context is the least durable thing in the run: it compacts, and a controller that loses the dispatch map or the filed list redoes finished work. Two duplicate tickets shipped in one run from exactly that.
+One git-ignored `.fleet/ledger.md` per run is updated at every state change through the `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run ledger.mjs` subcommands (`row`, `filed`, `ruled`, `check`, `read`, `dispatch`, `settle`, `review`, `drain`, `rotate`). Your context is the least durable thing in the run: it compacts, and a controller that loses the dispatch map or the filed list redoes finished work. Two duplicate tickets shipped in one run from exactly that.
 
 ## One line per ticket
 

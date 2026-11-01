@@ -359,7 +359,7 @@ const FILES = [
     // same line on the cited side.
     path: ["..", "tests", "node-floor-sweep.test.mjs"],
     stale: [/SKILL\.md:\d/],
-    live: ["`node ~/.fleet/bin/fleet-run board.mjs serve --open &`"],
+    live: ["`node ~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run board.mjs serve --open &`"],
   },
   {
     path: ["..", "tests", "printf-die-sweep.test.mjs"],
@@ -450,7 +450,7 @@ const FILES = [
   {
     path: ["skills", "run-team", "references", "phase-0.md"],
     stale: [/board\.mjs:153/],
-    live: ["`node ~/.fleet/bin/fleet-run board.mjs serve --open &`"],
+    live: ["`node ~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run board.mjs serve --open &`"],
   },
   {
     path: ["skills", "run-team", "references", "close-out.md"],

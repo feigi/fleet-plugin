@@ -61,8 +61,8 @@ test("run-team names scratch-root.mjs where it first defines <scratch>, and in e
 });
 
 test("the standalone entry points resolve <scratch> through scratch-root.mjs when nothing dispatched them", () => {
-  assert.match(read("commands", "review-and-fix.md"), /Run standalone, with no dispatcher, it is what `~\/\.fleet\/bin\/fleet-run scratch-root\.mjs` prints/);
-  assert.match(read("skills", "sizing-a-ticket", "SKILL.md"), /with no dispatcher, the output of `~\/\.fleet\/bin\/fleet-run scratch-root\.mjs`/);
-  assert.match(read("skills", "next-ticket", "SKILL.md"), /`<scratch>` the output of `~\/\.fleet\/bin\/fleet-run scratch-root\.mjs`/);
+  assert.match(read("commands", "review-and-fix.md"), /Run standalone, with no dispatcher, it is what `~\/\.omp\/plugins\/node_modules\/@feigi\/fleet-ctl\/scripts\/fleet-run scratch-root\.mjs` prints/);
+  assert.match(read("skills", "sizing-a-ticket", "SKILL.md"), /with no dispatcher, the output of `~\/\.omp\/plugins\/node_modules\/@feigi\/fleet-ctl\/scripts\/fleet-run scratch-root\.mjs`/);
+  assert.match(read("skills", "next-ticket", "SKILL.md"), /`<scratch>` the output of `~\/\.omp\/plugins\/node_modules\/@feigi\/fleet-ctl\/scripts\/fleet-run scratch-root\.mjs`/);
   assert.match(read("agents", "fleet-recipe-deriver.agent.md"), /scratch-root\.mjs/);
 });

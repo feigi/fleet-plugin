@@ -36,7 +36,7 @@
 // node shebang. Until #1855 the sweep read the `.mjs` half alone, so the three
 // extensionless entrypoints that run under the consumer's own node exactly as
 // the `.mjs` files do — `fleet-run` (the Resolver, copied to
-// `~/.fleet/bin/fleet-run`), `fleet-bootstrap`, `fleet-provenance` — could
+// `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run`), `fleet-bootstrap`, `fleet-provenance` — could
 // reach above the floor unseen (measured: `Object.groupBy(` appended to
 // `fleet-run` left this suite green). They are CommonJS, so every table entry
 // below that is matched at a module site matches its `require(…)` form too.
@@ -324,9 +324,9 @@ function nonMjsRelativeImports(source) {
 // line alone, a line CI never needs — .github/scripts/install-and-smoke.sh
 // runs all three as `node <path>` (and plugin/skills/run-team/references/phase-0.md
 // runs fleet-run that way too, in its cockpit launch line
-// `node ~/.fleet/bin/fleet-run board.mjs serve --open &`), so losing it
+// `node ~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run board.mjs serve --open &`), so losing it
 // breaks only direct-exec callers
-// (`~/.fleet/bin/fleet-run <script>`, and fleet-run's own spawnSync of
+// (`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run <script>`, and fleet-run's own spawnSync of
 // fleet-bootstrap/fleet-provenance) at run time, not any check here. It
 // would drop out of every check below while the other two kept the half
 // non-empty. Measured: `fleet-run` with its shebang line deleted and

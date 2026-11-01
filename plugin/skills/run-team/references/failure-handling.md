@@ -37,7 +37,7 @@ reaches it anyway, and neither replaces the other.
 ## Audit every worktree before dispatching replacements
 
 Audit every worktree before dispatching replacements with
-`~/.fleet/bin/fleet-run worktree-audit.sh` — it reports each worktree's
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run worktree-audit.sh` — it reports each worktree's
 ahead-count and uncommitted files, the committed-vs-uncommitted distinction that
 decides whether a replacement redoes or destroys work.
 
@@ -54,7 +54,7 @@ review-due. A
 runner member that is killed rather than failed follows **Failure
 handling** (fresh name, inherited state stated).
 
-**Verify every reported SHA.** `~/.fleet/bin/fleet-run verify-sha.sh
+**Verify every reported SHA.** `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run verify-sha.sh
 <branch> <sha>` before enqueueing — a member can commit in a nested worktree,
 leaving the SHA on a stray branch while its report reads normally. Exit codes as
 `inflight.sh`: `# 0 reachable, 1 not reachable, 2 unanswerable`. Not reachable

@@ -65,7 +65,7 @@ metrics and docs THIS run builds on and nothing pulls them.
 ## Pin the instruments
 
 **Pin the instruments, after that fast-forward and before anything reads
-them, from this main checkout.** `~/.fleet/bin/fleet-run instruments.sh --pin`
+them, from this main checkout.** `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run instruments.sh --pin`
 records what the scripts and runbooks of the Install root — the tree the
 fleet executes — say right now, which is what every later gate compares
 against; SKILL.md's **Re-check before you act on any instrument reading** says
@@ -83,7 +83,7 @@ differ. Never dispatch a member into a run whose phase-0 pin refused.
 ## Record the main-checkout baseline
 
 **Record the main-checkout baseline in the same step, right after the
-pin.** `~/.fleet/bin/fleet-run main-checkout.mjs --record` writes
+pin.** `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run main-checkout.mjs --record` writes
 `.fleet/main-checkout.sha`: the main checkout's `git status --porcelain
 -uall` entries plus a content hash of every path they name, and its HEAD —
 symbolic ref and commit. Your own
@@ -117,7 +117,7 @@ and before the pre-flight.** The **Label map** (`.fleet/labels.json`) gives
 the string this repository's tracker uses for each Label role:
 `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`,
 `wontfix`, `in-progress`, `onhold`, `ready-to-merge`. The `labels` step runs
-`~/.fleet/bin/fleet-run label-map.mjs ensure` in this main checkout, which
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run label-map.mjs ensure` in this main checkout, which
 reads the cached map, the repository's triage-label table and the tracker's
 live label list, on every call, and never creates a label.
 This step is yours, once per run start: a member never derives the map and
@@ -164,7 +164,7 @@ want otherwise — a role with no suggestion must be named; labels that do not
 exist are created on your confirmation.
 
 **Write the answer, say how to keep it, run phase 0 again.** Run
-`~/.fleet/bin/fleet-run label-map.mjs set --create` with the reply:
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run label-map.mjs set --create` with the reply:
 `--accept-suggestions` for `defaults`, and each `<role>=<label>` the
 maintainer named. Exit 0 prints the map it wrote; exit 1 is a refusal naming
 the role and the rule, nothing written and nothing created — put it to the
@@ -181,7 +181,7 @@ the maintainer what it printed and stop, as for a failed `labels` step.
 ## Run the pre-flight
 
 **Run the pre-flight, once the pin and the baseline are recorded.**
-`~/.fleet/bin/fleet-run preflight.mjs` checks what this machine and this
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run preflight.mjs` checks what this machine and this
 repository must give the fleet — the binaries, `gh` auth, `origin/main`,
 `.worktrees/` and `.fleet/` ignored, merge commits on, a
 ruleset, the Resolver — and prints one `ok`, `WARN` or `FAIL` line per
@@ -227,7 +227,7 @@ person choosing to.
 
 **Drain the pending ticket-features rows and refresh the cost guard, after
 the fast-forward and before the first Pull is routed.**
-`~/.fleet/bin/fleet-run metrics-refresh.mjs` moves
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run metrics-refresh.mjs` moves
 `.fleet/ticket-features.pending.tsv` into `docs/metrics/ticket-features.tsv`,
 deduped on `session`+`agent` — this recovers the rows of a run that crashed
 before its close-out — and then runs `pr-cost.mjs --guard`, rewriting
@@ -253,7 +253,7 @@ line leaves the exit at 0, so it never stops the run.
 ## Launch the cockpit
 
 **Launch the cockpit.** On every phase-0 pass, not just the first:
-`node ~/.fleet/bin/fleet-run board.mjs serve --open &` in the
+`node ~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run board.mjs serve --open &` in the
 background. It is a read-only mirror of `.fleet/ledger.md` + `gh` — you never
 feed or update it, and it survives your own compaction. The launch is
 idempotent per workspace when the running cockpit answers the identity
@@ -295,7 +295,7 @@ it and nothing signals its pid.
 
 **Rotate the ledger before the fold-in below and before shortlisting —
 every run, whatever way the previous one ended.** One ledger per run:
-`~/.fleet/bin/fleet-run ledger.mjs rotate` moves the previous run's
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run ledger.mjs rotate` moves the previous run's
 `.fleet/ledger.md` byte-for-byte to `.fleet/ledger.<UTC
 YYYY-MM-DDTHHMMSSZ>.md` and leaves none behind. What it carries forward
 turns on the verdict it reaches below. After `dead` or `none` nothing is
@@ -391,7 +391,7 @@ Before the rotation, `phase0.mjs` puts the held-aside receipt (`phase0.previous.
 ## Reclaim scratch
 
 **Reclaim scratch straight after the rotation — every run.**
-`~/.fleet/bin/fleet-run reclaim-scratch.mjs --root <scratch>
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run reclaim-scratch.mjs --root <scratch>
 --after-rotate --apply`, `<scratch>` the path `scratch-root.mjs` prints,
 so a run that merges nothing still reclaims the previous run's leftovers
 (`reclaim-scratch.mjs`'s header says what it removes).
@@ -410,7 +410,7 @@ its reason — and exits 0 even when a removal failed; record nothing on the
 ledger.
 
 Straight after that, the same step reclaims the other keys under the scratch parent:
-`~/.fleet/bin/fleet-run reclaim-scratch.mjs --siblings --root <scratch> --apply`. A key
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run reclaim-scratch.mjs --siblings --root <scratch> --apply`. A key
 goes whole when nothing under it has changed in 7 days, and stays whole otherwise. The
 call runs whatever the root sweep answered, and records nothing on the ledger. A non-zero
 exit, and each path its receipt's `failed[]` names, is listed in the step's output; neither
@@ -419,7 +419,7 @@ stops the run.
 ## Evict idle claim trees
 
 **Evict straight after the reclaim — every run.**
-`~/.fleet/bin/fleet-run evict.mjs --after-rotate --apply` is phase 0's own
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run evict.mjs --after-rotate --apply` is phase 0's own
 `evict` step. A claim tree with neither a HEAD move nor a restore in 7 days loses
 every path git ignores in it but its `agent-test` runner; the claim, its tree,
 its branch and its commits stay (`evict.mjs`'s header says what keeps a tree).
@@ -434,7 +434,7 @@ straight after its reclaim, and reports it on an `APPLIED evict:` or
 **An evicted tree is restored before a member runs code there.**
 `dispatch-prompt.mjs render implementer` and `render fix-applier` refuse a
 worktree evict.mjs marked, naming
-`~/.fleet/bin/fleet-run evict.mjs --restore <tree> --apply`: run it, then render
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run evict.mjs --restore <tree> --apply`: run it, then render
 again. It runs the Install step in the tree as a claim does and refuses as a
 claim does. A refused restore leaves the tree evicted: dispatch nothing into
 it, report the restore's message, and the row comes up again on the next wake.
@@ -448,9 +448,9 @@ and before the first claim.** Every claim runs this repository's Install
 step and bakes its Test entrypoint into the member's runner, and every
 review reads the Test entrypoint, all out of the **Recipe cache**
 (`.fleet/recipe.json` beside the common git dir); no script infers either
-command. Check it first: `~/.fleet/bin/fleet-run derive-testcmd.sh .
-install --at origin/main`, `~/.fleet/bin/fleet-run derive-testcmd.sh . check
---at origin/main` and `~/.fleet/bin/fleet-run derive-testcmd.sh . test --at
+command. Check it first: `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run derive-testcmd.sh .
+install --at origin/main`, `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run derive-testcmd.sh . check
+--at origin/main` and `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run derive-testcmd.sh . test --at
 origin/main`. **All three exit
 0 → the cache is present and valid: use it as it stands and derive
 nothing.** Any exits 1 (a refusal about the cache) → derive it; a refusal
@@ -461,7 +461,7 @@ unknown: fix that environment fault and check again; deriving would not
 help. This step is yours: one derivation
 per run start at most, never one per member, and a member never derives.
 Dispatch a `task` member named `derive-recipe`, agent
-`fleet-recipe-deriver`, its prompt the brief `~/.fleet/bin/fleet-run
+`fleet-recipe-deriver`, its prompt the brief `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run
 dispatch-prompt.mjs render recipe-deriver --member derive-recipe --repo <repo>
 --scratch <scratch>` prints, and wait for its report — nothing in this run can
 claim before it lands. `<repo>` is this main checkout's absolute path and
@@ -481,7 +481,7 @@ PROVEN`** → re-run the three reads above (`derive-testcmd.sh . install --at or
 their output is the Recipe this run uses. **`RECIPE NOT PROVEN`** →
 stall, below.
 
-**Where `checkCmd` comes from:** the repository's Check step, out of the same Recipe cache — `~/.fleet/bin/fleet-run derive-testcmd.sh . check` prints it. Pass it to the fix-applier beside `testCmd`; the review does not run it. Neither member runs the two by hand: `recipe-check.mjs` runs the Check step it reads off that cache, then the `testCmd` it is handed, on the member's staged tree, and writes the record `ledger.mjs settle --from-report` requires of an implementer's and a fix-applier's report.
+**Where `checkCmd` comes from:** the repository's Check step, out of the same Recipe cache — `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run derive-testcmd.sh . check` prints it. Pass it to the fix-applier beside `testCmd`; the review does not run it. Neither member runs the two by hand: `recipe-check.mjs` runs the Check step it reads off that cache, then the `testCmd` it is handed, on the member's staged tree, and writes the record `ledger.mjs settle --from-report` requires of an implementer's and a fix-applier's report.
 
 **Mid-run, a cache that stops running is re-derived once, then the run
 stalls.** A claim or a review that refuses because the Recipe cache is
@@ -542,7 +542,7 @@ push, and rotation after a dead run carries no row forward, the candidate
 scan excludes `in-progress`, and the in-flight check reads the worktree as
 taken — so a
 claim the previous run left without a PR is held by nobody until this step
-names it. `~/.fleet/bin/fleet-run stranded.mjs` lists and classifies; you
+names it. `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run stranded.mjs` lists and classifies; you
 dispatch. It reads the `prior` rotate just recorded, never the record
 itself, which names this run's own live controller, and prints
 `{prior, claims: [{n, t, action, worktree, branch, why}], carried: [{name,
@@ -622,7 +622,7 @@ stranded.
 
 ## Build the Shortlist
 
-1. **Build the Shortlist** — `~/.fleet/bin/fleet-run shortlist.mjs`, then read
+1. **Build the Shortlist** — `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run shortlist.mjs`, then read
    `.fleet/shortlist.json`. The script runs the cheap filters and nothing else
    — no ticket body is read here, because a Pull reads one ticket in full at
    the moment it admits it:

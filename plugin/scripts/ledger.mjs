@@ -2019,7 +2019,7 @@ async function rulingOf(pr) {
     if (ruling !== undefined) return { tickets, ruling, tsv, refusal: null };
   }
   return { tickets, ruling: null, refusal: `PR #${pr}, the implementer PR of ${tickets.length === 1 ? "ticket" : "tickets"} ${tickets.map((n) => `#${n}`).join(", ")}, has no ruling — `
-    + `${tsv} has no row for it; rule its review with \`~/.fleet/bin/fleet-run tier-outcomes.mjs append ${pr}\`, `
+    + `${tsv} has no row for it; rule its review with \`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run tier-outcomes.mjs append ${pr}\`, `
     + "then dispatch the finisher again" };
 }
 

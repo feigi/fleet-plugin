@@ -339,7 +339,7 @@ exits; no outcome is reported, and the controller settles the missing report as
 `failed`.
 **Deferring everything is a normal
 outcome, not a stall:** nothing is then staged, `git commit` refuses an empty
-index, `~/.fleet/bin/fleet-run push-sync.mjs --branch <branch>` prints git's
+index, `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run push-sync.mjs --branch <branch>` prints git's
 `Everything up-to-date`, and your
 report's `outcome` is `no-op`, its `head` the unchanged SHA. Say it
 explicitly — silence there is indistinguishable from a member that died. Never

@@ -8,9 +8,9 @@ scratch: /abs/scratch-fin-r
 
 Your report is a file, `/abs/scratch-fin-r/reports/<your name>.json`, `<your name>` the
 `finisher-pr-3296[-x]` you were dispatched as, in the shape
-`~/.fleet/bin/fleet-run report-schema.mjs print finisher` prints. Write it
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run report-schema.mjs print finisher` prints. Write it
 before your final message, and send nothing until
-`~/.fleet/bin/fleet-run report-schema.mjs validate finisher /abs/scratch-fin-r/reports/<your name>.json`
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run report-schema.mjs validate finisher /abs/scratch-fin-r/reports/<your name>.json`
 answers `valid`. Your final message is then one line,
 `<your name>: <outcome> /abs/scratch-fin-r/reports/<your name>.json`, `<outcome>` the
 report's `outcome`.

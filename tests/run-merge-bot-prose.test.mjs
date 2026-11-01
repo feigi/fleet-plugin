@@ -1254,7 +1254,7 @@ const step3 = () =>
 
 test("step 3 runs the merge gate twice and merges only on the second exit 0", () => {
   const s = step3();
-  assert.match(s, /~\/\.fleet\/bin\/fleet-run merge-gate\.mjs --pr <pr> --pre <pre> --post <post>/);
+  assert.match(s, /~\/\.omp\/plugins\/node_modules\/@feigi\/fleet-ctl\/scripts\/fleet-run merge-gate\.mjs --pr <pr> --pre <pre> --post <post>/);
   assert.match(
     s,
     Pin.phrase("**Run it again immediately before `gh pr merge`, and merge only on that second exit 0.**"),

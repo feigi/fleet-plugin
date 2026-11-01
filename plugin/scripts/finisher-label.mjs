@@ -7,7 +7,7 @@
 //
 // `--pin` is the full 40-hex head the finisher audited; `--repo` is the
 // directory `gh` runs in (it resolves the repository from there), the cwd when
-// omitted. Reached through the Resolver: `~/.fleet/bin/fleet-run
+// omitted. Reached through the Resolver: `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run
 // finisher-label.mjs ...`.
 //
 // Steps, in this order, each one only if every earlier one held:

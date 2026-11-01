@@ -127,7 +127,7 @@ assert.ok(BLOCK.includes(TICK_LOOP), `the block no longer opens with '${TICK_LOO
 
 function run(env, ticks, shell = "sh", { strict = false } = {}) {
   const harness = BLOCK
-    .replace("~/.fleet/bin/fleet-run ci-state.mjs", "ci-state.mjs")
+    .replace("~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run ci-state.mjs", "ci-state.mjs")
     .replace(TICK_LOOP, `tick=0\nwhile tick=$((tick+1)); [ "$tick" -le ${ticks} ]; do`);
   const path = join(DIR, "harness.sh");
   // #1334: `strict` prefixes `set -eu` onto the harness so a regression to an

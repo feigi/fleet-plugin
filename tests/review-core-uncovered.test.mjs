@@ -79,7 +79,7 @@ test("the uncovered line reaches the payload's testEnvironment and every special
 // prompt asking for it and the schema declaring it are pinned together.
 test("the snapshot agent reads `uncovered` through derive-testcmd.sh and the schema declares it", () => {
   const snapshot = Pin.of(CODE, "CODE").between("const snap = await agent(", "if (snap) {", "the snapshot agent dispatch").text;
-  assert.match(snapshot, /~\/\.fleet\/bin\/fleet-run derive-testcmd\.sh \$\{worktree\} uncovered/);
+  assert.match(snapshot, /~\/\.omp\/plugins\/node_modules\/@feigi\/fleet-ctl\/scripts\/fleet-run derive-testcmd\.sh \$\{worktree\} uncovered/);
   const B = "\\\\?`";
   assert.match(snapshot, new RegExp(`Report\\s+${B}uncovered${B}\\s*=\\s*its\\s+stdout,\\s+one\\s+line\\s+of\\s+JSON\\s+copied\\s+verbatim,\\s+ONLY\\s+if\\s+it\\s+exited\\s+0`));
   assert.match(snapshot, new RegExp(`report\\s+${B}uncoveredError${B}\\s*=\\s*its\\s+stderr`));

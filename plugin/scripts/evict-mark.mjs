@@ -22,7 +22,7 @@ const GIT_TIMEOUT_MS = 30_000;
 const shellWord = (s) => (/^[\w/.@%+=:,-]+$/.test(s) ? s : `'${s.replaceAll("'", "'\\''")}'`);
 
 /** The command that restores an evicted tree, as the controller runs it. */
-export const restoreCommand = (tree) => `~/.fleet/bin/fleet-run evict.mjs --restore ${shellWord(tree)} --apply`;
+export const restoreCommand = (tree) => `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run evict.mjs --restore ${shellWord(tree)} --apply`;
 
 /** Why a spawnSync result failed, in one phrase: its error, its signal, or its exit and last stderr line. */
 export const how = (r) => {

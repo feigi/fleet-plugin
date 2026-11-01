@@ -11,7 +11,7 @@ BRIEF-TEXT-1
 The controller's staleness probe: STALE-NOTE-1
 
 Before you commit and push, run
-`~/.fleet/bin/fleet-run recipe-check.mjs --member <your name> --testCmd ./agent-test --reports /abs/scratch-impl/reports`
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run recipe-check.mjs --member <your name> --testCmd ./agent-test --reports /abs/scratch-impl/reports`
 from the worktree, after `git add`: it runs the Recipe's Check step, then
 `./agent-test`, against the staged tree and records both beside your report.
 Run it again after any content change or rebase. After the commit, and before
@@ -53,9 +53,9 @@ maintainer.
 
 Your report is a file, `/abs/scratch-impl/reports/<your name>.json`, `<your name>` the
 `impl-4120[-x]` you were dispatched as, in the shape
-`~/.fleet/bin/fleet-run report-schema.mjs print impl` prints. Write it before
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run report-schema.mjs print impl` prints. Write it before
 your final message, and send nothing until
-`~/.fleet/bin/fleet-run report-schema.mjs validate impl /abs/scratch-impl/reports/<your name>.json`
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run report-schema.mjs validate impl /abs/scratch-impl/reports/<your name>.json`
 answers `valid`. Your final message is then one line,
 `<your name>: <outcome> /abs/scratch-impl/reports/<your name>.json`, `<outcome>` the
 report's `outcome`.
