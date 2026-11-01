@@ -304,7 +304,7 @@ A PR diff the finisher may skip the acceptance mutation for: every entry a regul
 _Avoid_: docs-only, prose-only, safe diff
 
 **Prompt surface**:
-The files the harness reads as instructions: any `skills`, `agents`, `commands` or `plugin` directory segment, any directory segment that starts with a dot (`.omp`, `.claude`, `.github` and the rest of where a harness keeps its rules and prompts), and any `AGENTS.md`, `CLAUDE.md` or `GEMINI.md`, at any depth. Markdown there changes behavior, so it is never prose.
+The files the harness reads as instructions: any `skills`, `agents` or `commands` directory segment, any directory segment that starts with a dot (`.omp`, `.claude`, `.github` and the rest of where a harness keeps its rules and prompts), and any `AGENTS.md`, `CLAUDE.md` or `GEMINI.md`, at any depth. Markdown there changes behavior, so it is never prose. The one exception is a file directly in the root `.out-of-scope/`, spelled exactly so: a rejection record the triage skill writes, read as settled precedent, so the dot-directory rule alone passes over it. Nested or elsewhere, `.out-of-scope` is a dot-directory like any other.
 _Avoid_: docs
 
 **Ticketless PR**:

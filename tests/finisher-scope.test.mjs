@@ -59,6 +59,9 @@ const BASE = {
   "docs/metrics/tier-outcomes.tsv": "x\n",
   "docs/metrics/pricing.json": "{}\n",
   "plugin/scripts/router-table.json": "{}\n",
+  "docs/agents/triage-labels.md": "labels\n",
+  ".out-of-scope/x.md": "record\n",
+  ".out-of-scope/gone.md": "record\n",
   "src/code.mjs": "export {};\n",
   "ci.yml": "on: push\n",
 };
@@ -207,17 +210,28 @@ test("exit 1: a metrics-looking file that is not one of the three METRICS paths 
 
 // --- exit 1: the prompt surface -----------------------------------------------
 
-test("exit 1: a markdown file under a skills, agents, commands or plugin directory is the prompt surface", () => {
+test("exit 1: a markdown file under a skills, agents or commands directory is the prompt surface", () => {
   for (const rel of [
     ".omp/skills/x/SKILL.md",
     "docs/agents/domain.md",
     "commands/run.md",
-    "plugin/README.md",
+    "plugin/skills/x/SKILL.md",
+    "plugin/agents/x.md",
+    "plugin/commands/x.md",
   ]) {
     const f = fixture();
     const r = verdictFor(f, (wt) => write(wt, rel, "# edited\n"));
     assert.equal(r.status, 1, `${rel}: ${r.stderr}`);
     assert.equal(classes(r.out)[rel], null, rel);
+  }
+});
+
+test("exit 0: a markdown file under a plugin directory is prose", () => {
+  for (const rel of ["plugin/README.md", "docs/plugin/x.md"]) {
+    const f = fixture();
+    const r = verdictFor(f, (wt) => write(wt, rel, "# edited\n"));
+    assert.equal(r.status, 0, `${rel}: ${r.stderr}`);
+    assert.equal(classes(r.out)[rel], "prose", rel);
   }
 });
 
@@ -247,6 +261,79 @@ test("exit 1: a markdown file under any dot-directory is the prompt surface", ()
     const dir = rel.split("/").find((s) => s.startsWith("."));
     assert.deepEqual(r.out.paths.map((p) => [p.path, p.class, p.why]), [[rel, null, `prompt surface: directory ${dir}`]], rel);
   }
+});
+
+// --- the root .out-of-scope/ records ------------------------------------------
+
+test("exit 0: adding, editing and deleting records directly in the root .out-of-scope/ is inert, every path prose", () => {
+  const f = fixture();
+  const r = verdictFor(f, (wt) => {
+    write(wt, ".out-of-scope/new.md", "# New\n");
+    write(wt, ".out-of-scope/also-new.markdown", "# Also new\n");
+    write(wt, ".out-of-scope/x.md", "record, edited\n");
+    rmSync(join(wt, ".out-of-scope/gone.md"));
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.paths.map((p) => [p.path, p.status, p.class]).sort(), [
+    [".out-of-scope/also-new.markdown", "A", "prose"],
+    [".out-of-scope/gone.md", "D", "prose"],
+    [".out-of-scope/new.md", "A", "prose"],
+    [".out-of-scope/x.md", "M", "prose"],
+  ]);
+});
+
+test("exit 1: a record path at any other depth, of any other file type or under a name that only starts with .out-of-scope is not prose, and is named", () => {
+  for (const [rel, why] of [
+    [".out-of-scope/AGENTS.md", "prompt surface: AGENTS.md"],
+    [".out-of-scope/sub/x.md", "prompt surface: directory .out-of-scope"],
+    ["docs/.out-of-scope/x.md", "prompt surface: directory .out-of-scope"],
+    [".out-of-scope/x.txt", "docs, but not .md or .markdown"],
+    [".out-of-scope-x/a.md", "prompt surface: directory .out-of-scope-x"],
+    [".out-of-scopes/a.md", "prompt surface: directory .out-of-scopes"],
+    [".out-of-scope.d/a.md", "prompt surface: directory .out-of-scope.d"],
+  ]) {
+    const f = fixture();
+    const r = verdictFor(f, (wt) => write(wt, rel, "# edited\n"));
+    assert.equal(r.status, 1, `${rel}: ${r.stderr}`);
+    assert.deepEqual(r.out.paths.map((p) => [p.path, p.class, p.why]), [[rel, null, why]], rel);
+  }
+});
+
+// Staged through the index, not written to disk: on a case-insensitive
+// filesystem a write to `.Out-Of-Scope/` lands in the fixture's existing
+// `.out-of-scope/` and git records it under that spelling.
+test("exit 1: a record directory spelled in another case is not prose, and is named", () => {
+  const f = fixture();
+  const rel = ".Out-Of-Scope/x.md";
+  const blob = git(f.wt, "rev-parse", "HEAD:.out-of-scope/x.md");
+  git(f.wt, "update-index", "--add", "--cacheinfo", `100644,${blob},${rel}`);
+  git(f.wt, "commit", "-q", "-m", "work");
+  const r = scope(f, git(f.wt, "rev-parse", "HEAD"));
+  assert.equal(r.status, 1, r.stderr);
+  assert.deepEqual(r.out.paths.map((p) => [p.path, p.class, p.why]), [[rel, null, "prompt surface: directory .Out-Of-Scope"]]);
+});
+
+test("exit 1: a record renamed into a dot-directory is not inert, the old side prose and the new side named", () => {
+  const f = fixture();
+  const r = verdictFor(f, (wt) => {
+    mkdirSync(join(wt, ".omp"), { recursive: true });
+    git(wt, "mv", ".out-of-scope/x.md", ".omp/x.md");
+  });
+  assert.equal(r.status, 1, r.stderr);
+  assert.equal(classes(r.out)[".out-of-scope/x.md"], "prose");
+  assert.equal(classes(r.out)[".omp/x.md"], null);
+  assert.equal(whys(r.out)[".omp/x.md"], "prompt surface: directory .omp");
+});
+
+test("exit 1: a deleted record beside an edit to docs/agents/triage-labels.md is not inert, the agents file the one path with no class", () => {
+  const f = fixture();
+  const r = verdictFor(f, (wt) => {
+    rmSync(join(wt, ".out-of-scope/gone.md"));
+    write(wt, "docs/agents/triage-labels.md", "labels, edited\n");
+  });
+  assert.equal(r.status, 1, r.stderr);
+  assert.equal(classes(r.out)[".out-of-scope/gone.md"], "prose");
+  assert.deepEqual(r.out.paths.filter((p) => p.class === null).map((p) => p.path), ["docs/agents/triage-labels.md"]);
 });
 
 // --- exit 1: the file types that carry behavior -------------------------------
@@ -354,10 +441,13 @@ test("exit 1: an empty diff is not inert", () => {
 
 test("exit 1: a rename whose new path is in the prompt surface is not inert, both sides named", () => {
   const f = fixture();
-  const r = verdictFor(f, (wt) => git(wt, "mv", "docs/old.md", "plugin/new.md"));
+  const r = verdictFor(f, (wt) => {
+    mkdirSync(join(wt, "plugin/agents"), { recursive: true });
+    git(wt, "mv", "docs/old.md", "plugin/agents/new.md");
+  });
   assert.equal(r.status, 1, r.stderr);
   assert.equal(classes(r.out)["docs/old.md"], "prose", "the deleted old side is prose");
-  assert.equal(classes(r.out)["plugin/new.md"], null, "the added new side is not");
+  assert.equal(classes(r.out)["plugin/agents/new.md"], null, "the added new side is not");
 });
 
 test("exit 1: a rename from markdown to a code file is not inert", () => {
