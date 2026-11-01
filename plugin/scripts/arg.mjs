@@ -262,21 +262,17 @@ export function makeHas(die) {
 // ci-state.mjs alone, and the identical shape stayed live in its siblings.
 // Measured on the pre-fix tree against a stub `gh` that ANSWERS, the way a
 // real one does for a branch ref: `diff-stats.mjs --pr abc` reached
-// `gh pr view abc` and printed `{"pr":null,…}` at exit 0, and
-// `pr-overlap.mjs --a abc --b def` printed `{"a":null,"b":null,…}` at exit 0
-// under a real `signal: "files"` verdict. Each payload's only identifying
-// field was built with `Number()`, and `JSON.stringify(NaN)` is `null` — a
-// report that cannot be attributed to the PR it answered for, at the exit code
-// the fleet gates on. `gh pr view` resolves a non-numeric ref as a BRANCH, so
-// the answer underneath was genuine and about a different PR.
+// `gh pr view abc` and printed `{"pr":null,…}` at exit 0. The payload's only
+// identifying field was built with `Number()`, and `JSON.stringify(NaN)` is
+// `null` — a report that cannot be attributed to the PR it answered for, at
+// the exit code the fleet gates on. `gh pr view` resolves a non-numeric ref as
+// a BRANCH, so the answer underneath was genuine and about a different PR.
 //
-// The class is NOT bounded by the `arg("pr")` spelling — pr-overlap.mjs reads
-// `--a`/`--b` — so it is enumerated by SHAPE: an argument checked for
-// truthiness alone, then handed to `gh` as a ref AND to `Number()` in a
-// payload field. Its members are ci-state.mjs, diff-stats.mjs and
-// pr-overlap.mjs, and all three now route through numArg() below. A sweep for
-// the flag NAME finds two of the three, which is how the third stayed open
-// through that first fix's review.
+// The class is NOT bounded by the `arg("pr")` spelling — a script may take its
+// PR under any flag name — so it is enumerated by SHAPE: an argument checked
+// for truthiness alone, then handed to `gh` as a ref AND to `Number()` in a
+// payload field. Every member routes through numArg() below. A sweep for the
+// flag NAME misses a member that spells its flag otherwise.
 //
 // Stated here rather than a third time at the call sites, because the
 // invariant had no single expression: ci-state.mjs spelled it `/^[0-9]+$/`
@@ -326,9 +322,9 @@ export function isDigits(value) {
 // specific wording wins — the same ordering rule sweep() states below.
 //
 // Absent returns null and is never refused here. That half does not decompose:
-// pr-overlap.mjs's usage line names `--a` and `--b` at once, so its absent
-// case has no per-flag wording to give. So only the MALFORMED refusal travels,
-// and it is flag-named because all three callers mean one thing by it, while
+// a usage line that names several flags at once has no per-flag wording to
+// give an absent one. So only the MALFORMED refusal travels, and it is
+// flag-named because every caller means one thing by it, while
 // each caller keeps its own absent refusal above its own usage text — the
 // header's "what travels is the RULE, never the refusal text", applied to a
 // product whose two refusals genuinely differ in that respect.

@@ -41,25 +41,12 @@ export const isTestDir = (p) => /(^|\/)(__tests__|tests?|e2e|__mocks__)\//i.test
 // suffix is a naming heuristic: it also claims a production component named like
 // `ABTest.tsx`, which is the accepted cost of recognising `FooTest.java` without
 // naming a language.
-//
-// Each shape captures the basename with its affix and extension removed, so
-// `testSubject` names what the test is about from the same patterns this
-// predicate judges by: `foo.test.ts`, `foo_test.go`, `test_foo.py` and
-// `foo.spec.rb` give `foo`, and `FooTest.java` gives `Foo`. The first shape
-// that matches decides. `null` means no test name.
 const TEST_NAME_SHAPES = [
-  /(?:^|\/)([^/]*)[._](?:test|spec)\.[^/.]+$/i,
-  /(?:^|\/)test_([^/]*?)(?:\.[^/.]+)?$/i,
-  /(?:^|\/)([^/]*[A-Za-z0-9])Tests?\.[^/.]+$/,
+  /(?:^|\/)[^/]*[._](?:test|spec)\.[^/.]+$/i,
+  /(?:^|\/)test_[^/]*$/i,
+  /(?:^|\/)[^/]*[A-Za-z0-9]Tests?\.[^/.]+$/,
 ];
-export const testSubject = (p) => {
-  for (const shape of TEST_NAME_SHAPES) {
-    const m = shape.exec(p);
-    if (m) return m[1];
-  }
-  return null;
-};
-export const isTestName = (p) => testSubject(p) !== null;
+export const isTestName = (p) => TEST_NAME_SHAPES.some((shape) => shape.test(p));
 
 // Only a prose or config extension, or a conventional name, makes a file docs or
 // config — which those already do anywhere, so neither `docs/` nor `.github/` has
@@ -223,7 +210,7 @@ function main() {
   // came back empty gets a refusal here, never the cwd fallback an empty `-R ""`
   // would be.
   const repo = arg("repo");
-  // The misspelled-flag sweep, weaker here for the same reason as pr-overlap.mjs: `--pr` is
+  // The misspelled-flag sweep, the weaker half of the fix here: `--pr` is
   // required, so a misspelled `--prr 5` already fell through to the usage die
   // above. What was silently ignored at exit 0 is a stray riding along with a
   // good `--pr` (`--pr 5 --base main`), and that is what this closes.

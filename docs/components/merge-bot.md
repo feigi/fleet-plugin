@@ -15,28 +15,24 @@ lifetime is one **Pass**.
 2. **Drain the queue**, lowest PR# first, re-evaluating from the top
    after every merge (a merge invalidates every other open PR's CI
    currency).
-3. **Per PR**, [`pr-overlap.mjs`](../../plugin/scripts/pr-overlap.mjs)
-   checks every lower-numbered open PR for shared files, test-file module
-   names, top-level directories, or diff-prose citing a shared data
-   file — any signal holds this PR as `held-behind:#<lower>`.
-4. **Rebase** an unrelated PR server-side (`gh pr update-branch
+3. **Rebase** the PR server-side (`gh pr update-branch
    --rebase`). A genuine conflict is recorded as `conflict-hold:#<pr>`
-   instead — distinct from `held-behind` — and cleared only once a
+   instead, and cleared only once a
    fix-applier dispatched against it settles as landed. The controller
    records the same token when the tick prints `CONFLICT PR#<M>` for a PR
    no live merge bot owns.
-5. **Gate twice:** [`merge-gate.mjs`](../../plugin/scripts/merge-gate.mjs)
+4. **Gate twice:** [`merge-gate.mjs`](../../plugin/scripts/merge-gate.mjs)
    (a read-only conjunction of [Instruments](instruments.md), `gh pr
    view`, the main-gain check
    [`main-gain.mjs`](../../plugin/scripts/main-gain.mjs), and
    [CI State](ci-state.md)) runs once, waits on CI if in
    progress, then runs again immediately before `gh pr merge` — merging
    only on that **second** exit 0.
-6. **Grace, then exit.** Once nothing is left to merge, hold a
+5. **Grace, then exit.** Once nothing is left to merge, hold a
    15-minute grace polling labels every 60s; the grace ends once no PR
    is open. A label landing after exit dispatches a fresh
    `merge-bot-<n+1>` immediately.
-7. **Delete the head branch, then reap.** After every merge the bot
+6. **Delete the head branch, then reap.** After every merge the bot
    runs [`delete-merged-branch.sh`](../../plugin/scripts/delete-merged-branch.sh),
    which removes the head branch from `origin` (so it reads `[gone]`) and
    drops `in-progress` from the issues the merged PR closes.
@@ -49,11 +45,9 @@ lifetime is one **Pass**.
 flowchart TD
     LABEL(["first ready-to-merge label<br/>appears on any open PR"]) --> DISPATCH["tick: DISPATCH merge-bot<br/>(controller never waits for<br/>the finisher's own report)"]
     DISPATCH --> DRAIN{"drain the ready-to-merge queue,<br/>lowest PR# first"}
-    DRAIN --> HOLD["pr-overlap.mjs vs every<br/>lower-numbered open PR"]
-    HOLD -->|"related"| SKIP["held-behind:#lower,<br/>skip to next PR"]
-    HOLD -->|"unrelated"| REBASE["gh pr update-branch --rebase"]
+    DRAIN --> REBASE["gh pr update-branch --rebase"]
     REBASE -->|"conflict"| CONFLICT["conflict-hold:#pr"]
-    CONFLICT -.->|"tick: DISPATCH fix-pr PR#pr<br/>(rebase via implementer);<br/>next Pass retries once landed"| SKIP
+    CONFLICT -.->|"tick: DISPATCH fix-pr PR#pr<br/>(rebase via implementer);<br/>next Pass retries once landed"| SKIP["skip to next PR"]
     REBASE -->|"clean"| GATE1["merge-gate.mjs, 1st run"]
     GATE1 -->|"CI in progress"| WAITCI["wait, poll ci-state.mjs"]
     WAITCI --> GATE2
@@ -97,6 +91,6 @@ A line edited in place that keeps every token, a hunk re-wrapped keeping every t
   ([ADR 0024](../adr/0024-ready-to-merge-binds-to-the-net-change.md)).
 - **GitHub's native merge queue is rejected.** Its `merge_group` event
   has no workflow in this repo, and a behind PR would enter the queue
-  with a red `rebase-check` by design — the fleet's own label+hold-rule
+  with a red `rebase-check` by design — the fleet's own label
   queue is what makes currency enforceable at all
   ([ADR 0007](../adr/0007-main-ruleset-is-the-merge-gate.md)).

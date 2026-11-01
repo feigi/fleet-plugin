@@ -1104,7 +1104,7 @@ test("CLI: a stray flag riding after a valueless roster flag never pre-empts tha
 // `--`-prefixed tokens, so the ticket's stated harm was only half closed —
 // a single-dash misspelling (`-ledger`) rode through in silence the same
 // way `--ledgerr` used to. Binding stray() alongside sweep(), the same
-// pairing every sibling CLI (ci-state, diff-stats, board, pr-overlap)
+// pairing every sibling CLI (ci-state, diff-stats, board)
 // already uses, closes the other half.
 test("CLI: a single-dash misspelling (`-ledger`) refuses as a stray, not a computed verdict", () => {
   const d = dir();

@@ -74,9 +74,7 @@
 //       carries it.
 //       A settle that refuses on `ready-to-merge` — missing from the PR or from the read-back — is the case the tick's `DISPATCH finisher PR#<M>` catches next: settle it `ledger.mjs settle finisher-pr-<M>=labelled` as reported, and `ledger.mjs filed <N> "<subject>"` for each `unrecorded` entry.
 //   merge-bot-report <merge-bot-n>
-//       `ledger.mjs token <pr> held-behind:#<behind>` for each `held[]` entry
-//       of the report the PR's rows do not already carry, then `ledger.mjs
-//       token <pr> parked=<head>:<body digest>:<reason>` for each `refused[]`
+//       `ledger.mjs token <pr> parked=<head>:<body digest>:<reason>` for each `refused[]`
 //       entry whose reason is `main-gain-removed:<path>`, bound to the head
 //       and body digest the bot's gate reading `<scratch>/pr<pr>/<merge-bot-n>/ci.json`
 //       records it refused, unless the rows already carry it (a reading that
@@ -84,7 +82,6 @@
 //       `settle --from-report`.
 //       Every other refusal reason writes nothing. The reap and the reclaim
 //       run under the tick's `--apply`.
-//       The verdict moves no label and leaves nothing in the repo, so the row is the only place the tick can read a `held-behind` from.
 //       The reap and the reclaim run once for every merge bot settled `done`, always, even when the pass merged nothing, and again on the next tick after an `APPLY FAILED` line, and on every tick while this run has no controller record to remember the pass by.
 //       The bot may also have written `conflict-hold:#<pr>` onto a held PR's own row earlier in the same pass, before reporting: a token the bot wrote in that pass, never one `reap.sh` writes.
 //   review-result <pr> <path>
@@ -670,16 +667,6 @@ function finisherReport(ev, member) {
 
 function mergeBotReport(ev, member) {
   const read = ev.report(member);
-  for (const { pr, behind } of read.state === "ok" ? read.report.held : []) {
-    const tok = `held-behind:#${behind}`;
-    if (prWords(ev.ledger, pr).includes(tok)) {
-      ev.note(`#${pr} already ${tok}`);
-      continue;
-    }
-    const r = node("ledger.mjs", ["token", String(pr), tok]);
-    if (r.status === 0) ev.note(`#${pr} ${tok}`);
-    else ev.refuse(`token #${pr} ${tok}`, r);
-  }
   for (const { pr, reason } of read.state === "ok" ? read.report.refused : []) {
     if (PARKS.test(reason)) park(ev, member, pr, reason);
   }

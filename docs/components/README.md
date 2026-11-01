@@ -26,7 +26,7 @@ these pages use.
 - [Finisher](finisher.md) — the last gate before `ready-to-merge`: audit,
   confirm, label.
 - [Merge bot](merge-bot.md) — one Pass over the `ready-to-merge` queue:
-  hold rule, rebase, gate, merge.
+  rebase, gate, merge.
 
 ## Shared building blocks
 

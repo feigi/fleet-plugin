@@ -28,8 +28,8 @@
 //             it once recorded only that someone was dispatched. Live
 //             implementers, live reviewer units (in-flight `review=` plus
 //             unsettled `fix-pr-`), the merge bot (`## Dispatched`), merge
-//             holds (`held-behind:#M`, and `conflict-hold:#<pr>`, written by
-//             the merge bot or by the controller off a `CONFLICT` line),
+//             holds (`conflict-hold:#<pr>`, written by the merge bot or by
+//             the controller off a `CONFLICT` line),
 //             merge parks (`parked=<head>:<body digest>:<reason>`, written by
 //             `fleet-event.mjs merge-bot-report`), tier mismatches and the
 //             drain marker
@@ -463,10 +463,9 @@ function mergeBot(s) {
   if (s.mergeBotLive >= 1) return row("AT CAP");
   if (s.mergeQueue === 0) return row("IDLE OK");
   // `ready-to-merge` is the author's sign-off and nothing more. A bot
-  // dispatched against a queue whose candidates are all held — behind a lower
-  // open PR, or on a conflict merge-bot already refused to force — or parked
-  // on a refusal only a human edit clears spends a whole member re-deriving a
-  // verdict already recorded.
+  // dispatched against a queue whose candidates are all held — on a conflict
+  // merge-bot already refused to force — or parked on a refusal only a human
+  // edit clears spends a whole member re-deriving a verdict already recorded.
   if (s.mergeQueue - s.mergeHeld - parked.length <= 0) {
     if (parked.length > 0) {
       return row(`HOLD (parked ${parked.map((p) => `#${p.pr} ${p.reason}`).join(", ")})`, {
@@ -474,8 +473,7 @@ function mergeBot(s) {
           + (s.mergeHeld > 0 ? `; ${s.mergeHeld} more held` : ""),
       });
     }
-    const why = s.mergeConflictHeld ? "behind a lower PR or on a merge conflict no fix-pr has cleared" : "behind a lower PR";
-    return row("HOLD", { extra: `every queued candidate is held ${why}` });
+    return row("HOLD", { extra: "every queued candidate is held on a merge conflict no fix-pr has cleared" });
   }
   return row("DISPATCH merge-bot", { acts: true });
 }
@@ -591,12 +589,10 @@ export class LedgerError extends Error {}
 // nothing can tell which review a dispositions verdict answered. Only a ledger
 // written before the plugin update and read after it can hold one.
 const REVIEWED_RUNLESS = /^reviewed=[0-9a-fA-F]{7,40}:\d+\/\d+\/\d+$/;
-export const HELD = /^held-behind[:-]#?(\d+)$/;
 // The durable record that a PR conflicts — written onto the held PR's own
 // row by the merge bot, when its local-rebase fallback hits a conflict it would
-// not force, or by the controller off this tick's `CONFLICT` line — and
-// spelled like `held-behind` so the two read alike. Distinct from an
-// Exclusion, which gates a ticket's claim; this gates a PR's merge.
+// not force, or by the controller off this tick's `CONFLICT` line. Distinct
+// from an Exclusion, which gates a ticket's claim; this gates a PR's merge.
 export const CONFLICT_HOLD = /^conflict-hold[:-]#?(\d+)$/;
 // The durable record that a merge bot refused a PR on a main-gain hit — a
 // refusal only a human edit clears — written onto the PR's own row by
@@ -791,8 +787,8 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
   // for a member found mismatched after it had already settled some other way
   // (a live one is settled `tier-mismatch` instead). Neither parses as a member
   // token nor as `review=`/`reviewed=`, so both always reach this loop's own
-  // `else` branch below, alongside HELD/CONFLICT_HOLD — one pass over every
-  // row's tokens covers all four.
+  // `else` branch below, alongside CONFLICT_HOLD — one pass over every row's
+  // tokens covers them all.
   // `tier-unverifiable=<member>:no-transcript` is the third: a settled member
   // with nothing to check, which clears the unchecked hold and nothing else.
   const verdicts = { ok: new Set(), mismatch: new Set(), unverifiable: new Set() };
@@ -847,7 +843,7 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
     // CONFLICT line off, since it may be pushing to the branch right now.
     const st = (pr !== null && byPr.get(pr)) || {
       inFlight: false, reviewedAny: false, survived: 0, unverified: 0, reviewFixed: false,
-      fixMembers: new Set(), fixLanded: new Set(), conflictLanded: new Set(), held: [],
+      fixMembers: new Set(), fixLanded: new Set(), conflictLanded: new Set(),
       conflictOpen: false, reviewedHead: null, reviewedRun: null, pastPinHalt: false, dispositions: [], workers: new Set(),
       finishers: new Set(), parked: [],
     };
@@ -950,8 +946,6 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
         if (!lenient) throw new LedgerError(`${where}: '${tok}' is not label-off=<finisher-pr member> — fix the row with \`ledger.mjs row\``);
         malformed.add(i);
       } else {
-        const h = HELD.exec(tok);
-        if (h) st.held.push(Number(h[1]));
         // Every park the PR's rows carry: the tick matches each against the
         // PR's current head and body, so a stale one is never cleared here.
         const k = PARKED.exec(tok);
@@ -985,8 +979,7 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
     if (premises !== null) {
       // An `excluded` row claims its ticket only while its
       // premise still holds. Lifted here only when EVERY premise is a
-      // verifiable, now-closed `behind-pr:#M` — the same rule a
-      // `held-behind` merge hold uses — since a mixed or `behind-issue`
+      // verifiable, now-closed `behind-pr:#M`, since a mixed or `behind-issue`
       // premise needs a live gh probe this pure half cannot make;
       // unclaimed() covers that case once the refreshed shortlist re-admits
       // the ticket.
@@ -1106,9 +1099,8 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, queued
   const queued = prs.filter(isQueued);
   const asc = (a, b) => a - b;
   const state = (n) => byPr.get(n);
-  const heldBehind = (st) => (st?.held ?? []).some((n) => open.has(n));
   const conflictHeld = (st) => st !== undefined && st.conflictOpen;
-  const mergeHeldOn = (p) => heldBehind(state(p.number)) || conflictHeld(state(p.number));
+  const mergeHeldOn = (p) => conflictHeld(state(p.number));
   // The latest park on a queued PR whose head and body still match it, or
   // undefined: a new head or an edited body lifts every earlier park.
   const parkOn = (p) => {
@@ -1205,13 +1197,9 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, queued
         && (!state(p.number)?.reviewedAny || pastPinDue(state(p.number), p.headRefOid)))
       .map((p) => p.number).sort(asc),
     mergeQueue: queued.length,
-    // A `held-behind` hold lifts once its premise PR has left the open list —
-    // MERGED or CLOSED, the same lift rule as a `behind-pr` Exclusion. A
-    // conflict hold lifts only once a fix-applier after it has SETTLED
+    // A conflict hold lifts only once a fix-applier after it has SETTLED
     // `applied:`/`no-op` — never on dispatch alone.
     mergeHeld: queued.filter(mergeHeldOn).length,
-    // How many of those are conflict holds — the HOLD row's wording, no field.
-    mergeConflictHeld: queued.filter((p) => conflictHeld(state(p.number))).length,
     // Each queued PR no hold counts that a park still matches, `{pr, reason}`
     // ascending: the merge bot would only refuse it again.
     mergeParked: queued.flatMap((p) => {

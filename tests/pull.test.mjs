@@ -2179,9 +2179,6 @@ test("references/pull.md steps 4 and 5 answer Q3 off the printed scan and the Ou
     assert.ok(steps.includes(phrase), `steps 4 and 5 say: ${phrase}`);
   }
   assert.ok(!steps.includes("git diff --name-only") && !steps.includes("gh pr diff <PR>"), "the controller is no longer told to run the scan's commands");
-  const overlap = steps.slice(steps.indexOf("`pr-overlap.mjs` is **PR-vs-PR only**"), steps.indexOf("5. **Sequence check**"));
-  assert.ok(overlap.length > 0, "the pr-overlap.mjs sentence stays");
-  assert.equal(overlap.match(/\.(\s|$)/g).length, 1, `the pr-overlap.mjs paragraph is one sentence: ${overlap}`);
 });
 
 test("an unknown flag is refused at exit 2 naming it, as arg.mjs's own refusal is; the other command-line mistakes are exit 3", () => {

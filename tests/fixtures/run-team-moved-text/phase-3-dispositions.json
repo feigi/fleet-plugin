@@ -50,7 +50,7 @@
     ],
     [
       "`ci=<run-id>:<attempt>:<conclusion>` and `held-behind:#<lower>` are row tokens the same way (Phase 3), and so is `conflict-hold:#<pr>` — written by the merge bot itself (`run-merge-bot.md` step 1), or by you off the tick's `CONFLICT` line, naming the row's own PR.",
-      "`ci=<run-id>:<attempt>:<conclusion>` and `held-behind:#<lower>` are row tokens the same way, and so is `conflict-hold:#<pr>` — written by the merge bot itself (`run-merge-bot.md` step 1), or by you off the tick's `CONFLICT` line, naming the row's own PR."
+      "`ci=<run-id>:<attempt>:<conclusion>` is a row token the same way, and so is `conflict-hold:#<pr>` — written by the merge bot itself (`run-merge-bot.md` step 1), or by you off the tick's `CONFLICT` line, naming the row's own PR."
     ],
     [
       "Phase 3's monitor paragraph points here instead of restating any of it.",

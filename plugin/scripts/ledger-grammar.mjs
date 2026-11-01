@@ -13,7 +13,7 @@
 //
 // Rows stay freeform text. Only a token whose name part is a member name is
 // claimed as a member here; everything else a row carries (`class=routine`,
-// `ports=`, `ci=`, `held-behind:#M`, `conflict-hold:#<pr>`, the
+// `ports=`, `ci=`, `conflict-hold:#<pr>`, the
 // `review=`/`reviewed=` pair, the `→ PR#M` arrow) is not a member. The
 // review pair has a grammar of its own below, REVIEW and REVIEWED, which
 // `ledger.mjs review` writes and `ledger.mjs row` checks a write against

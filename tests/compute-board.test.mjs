@@ -15,17 +15,15 @@ test("parseRow: a merged row", () => {
   assert.equal(r.merged, true);
   assert.equal(r.sha, "73b356de");
   assert.equal(r.agent, null, "impl-332 settled at PR#344 — nobody is live on this row");
-  assert.equal(r.heldBehind, null);
 });
 
-test("parseRow: an in-review row with a live review runner, ruling and held-behind", () => {
-  const r = parseRow("#324 impl-324=PR#346 → PR#346 · review=member:review-pr-346-b · ports=16324 · ruled:6-applies · held-behind:#313");
+test("parseRow: an in-review row with a live review runner and a ruling", () => {
+  const r = parseRow("#324 impl-324=PR#346 → PR#346 · review=member:review-pr-346-b · ports=16324 · ruled:6-applies");
   assert.equal(r.issue, 324);
   assert.equal(r.impl, "impl-324");
   assert.equal(r.agent, "review-pr-346-b");
   assert.equal(r.pr, 346);
   assert.equal(r.merged, false);
-  assert.equal(r.heldBehind, 313);
 });
 
 test("parseRow: implementing row, no PR yet", () => {
@@ -81,16 +79,16 @@ test("deriveFlags: unknown CI never flags red", () => {
   assert.ok(!f.includes("red-ci"));
 });
 
-test("deriveFlags: held-behind carries the blocker number", () => {
-  const p = parseRow("#324 impl-324=PR#346 → PR#346 · held-behind:#313");
-  const f = deriveFlags(p, { ci: "green", column: "REVIEW", sinceEnteredStage: null, now: 0 });
-  assert.ok(f.includes("held-behind:#313"));
+test("deriveFlags: a held-behind word on a row is freeform and raises no flag", () => {
+  const ctx = { ci: "green", column: "REVIEW", sinceEnteredStage: null, now: 0 };
+  const row = "#324 impl-324=PR#346 → PR#346";
+  assert.deepEqual(deriveFlags(parseRow(`${row} · held-behind:#313`), ctx), deriveFlags(parseRow(row), ctx));
 });
 
 // #3608: the park `fleet-event.mjs merge-bot-report` writes is a row token the
 // board reads past, never a refusal of the row.
 test("parseRow and deriveFlags: a parked= token leaves the row read as it was", () => {
-  const row = "#324 impl-324=PR#346 → PR#346 · held-behind:#313";
+  const row = "#324 impl-324=PR#346 → PR#346 · ruled:6-applies";
   const park = `parked=${"a".repeat(40)}:0123456789ab:main-gain-removed:tests/gate.test.mjs`;
   const p = parseRow(`${row} · ${park}`);
   assert.deepEqual(p, parseRow(row));
@@ -119,13 +117,13 @@ test("deriveFlags: cause tokens surface as flags", () => {
 });
 
 import { computeBoard, mergedReadPrs, issuesOfPrs } from "../plugin/scripts/compute-board.mjs";
-import { deriveRun } from "../plugin/scripts/fleet-tick.mjs";
+import { deriveRun, foldLedger } from "../plugin/scripts/fleet-tick.mjs";
 
 const baseInputs = () => ({
   ledger: {
     rows: [
       "#332 impl-332=PR#344 → PR#344 → MERGED 73b356de",
-      "#324 impl-324=PR#346 → PR#346 · review=member:review-pr-346 · held-behind:#313",
+      "#324 impl-324=PR#346 → PR#346 · review=member:review-pr-346",
       "#340 impl-340",
     ],
     filed: ["#351 flaky retry marker in ci logs"],
@@ -210,9 +208,9 @@ test("computeBoard: ruling attaches to the PR ticket", () => {
   assert.equal(b.tickets.find((t) => t.issue === 324).ruling, "6-applies keep the fallback");
 });
 
-test("computeBoard: attention holds only flagged tickets, red-ci before held-behind", () => {
+test("computeBoard: attention holds only flagged tickets", () => {
   const b = computeBoard(baseInputs());
-  assert.deepEqual(b.attention.map((t) => t.issue), [324]); // red-ci + held-behind
+  assert.deepEqual(b.attention.map((t) => t.issue), [324]); // red-ci
   assert.ok(b.attention[0].flags.includes("red-ci"));
 });
 
@@ -640,23 +638,23 @@ test("#2083: a PR whose latest finisher halted carries the cause as a flag, rank
   // severity and is otherwise stable, so the halted card stays between them
   // only at exactly 4 — at 5 it would lead, at 3 or below it would trail.
   const b = computeBoard(reproInputs({
-    rows: ["#904 impl-904=killed", HALTED, "#942 impl-942=killed", "#943 impl-943=PR#932 · held-behind:#931"],
+    rows: ["#904 impl-904=killed", HALTED, "#942 impl-942=killed"],
     prev: { tickets: [] },
   }));
   assert.equal(card(b, 941).column, "REVIEW");
   assert.deepEqual(card(b, 941).flags, ["halted:unreadable"]);
-  assert.deepEqual(b.attention.map((t) => t.issue), [904, 941, 942, 943]);
+  assert.deepEqual(b.attention.map((t) => t.issue), [904, 941, 942]);
 });
 
 test("a PR whose latest finisher halted stray carries the flag in REVIEW, ranked exactly at severity 4", () => {
   const stray = HALTED.replace("halted:unreadable", "halted:stray");
   const b = computeBoard(reproInputs({
-    rows: ["#904 impl-904=killed", stray, "#942 impl-942=killed", "#943 impl-943=PR#932 · held-behind:#931"],
+    rows: ["#904 impl-904=killed", stray, "#942 impl-942=killed"],
     prev: { tickets: [] },
   }));
   assert.equal(card(b, 941).column, "REVIEW");
   assert.deepEqual(card(b, 941).flags, ["halted:stray"]);
-  assert.deepEqual(b.attention.map((t) => t.issue), [904, 941, 942, 943]);
+  assert.deepEqual(b.attention.map((t) => t.issue), [904, 941, 942]);
 });
 
 test("#2083: a later finisher attempt decides — a live or labelled `-b` clears the halt, in any token order", () => {
@@ -695,13 +693,12 @@ test("#2083: a halt a human already resolved — PR labelled or merged — flags
 // is repairing it or has escalated it.
 test("#2331: a labelled finisher on a PR without ready-to-merge flags unlabelled, ranked exactly at severity 4", () => {
   const b = computeBoard(reproInputs({
-    rows: ["#904 impl-904=killed", "#941 impl-941=PR#931 · finisher-pr-931=labelled", "#942 impl-942=killed",
-      "#943 impl-943=PR#932 · held-behind:#931"],
+    rows: ["#904 impl-904=killed", "#941 impl-941=PR#931 · finisher-pr-931=labelled", "#942 impl-942=killed"],
     prev: { tickets: [] },
   }));
   assert.equal(card(b, 941).column, "REVIEW");
   assert.deepEqual(card(b, 941).flags, ["unlabelled"]);
-  assert.deepEqual(b.attention.map((t) => t.issue), [904, 941, 942, 943]);
+  assert.deepEqual(b.attention.map((t) => t.issue), [904, 941, 942]);
   // Escalated (a second labelled attempt) flags the same.
   assert.deepEqual(cardFor("#941 impl-941=PR#931 · finisher-pr-931=labelled · finisher-pr-931-b=labelled", 941).card.flags, ["unlabelled"]);
 });
@@ -814,13 +811,12 @@ test("#2331: the cockpit reads `## Dispatched` as the tick does — a settled fi
 test("a PR whose latest finisher settled failed or killed flags finisher:failed / finisher:killed, ranked exactly at severity 4", () => {
   for (const outcome of ["failed", "killed"]) {
     const b = computeBoard(reproInputs({
-      rows: ["#904 impl-904=killed", `#941 impl-941=PR#931 · finisher-pr-931=${outcome}`, "#942 impl-942=killed",
-        "#943 impl-943=PR#932 · held-behind:#931"],
+      rows: ["#904 impl-904=killed", `#941 impl-941=PR#931 · finisher-pr-931=${outcome}`, "#942 impl-942=killed"],
       prev: { tickets: [] },
     }));
     assert.equal(card(b, 941).column, "REVIEW", outcome);
     assert.deepEqual(card(b, 941).flags, [`finisher:${outcome}`], outcome);
-    assert.deepEqual(b.attention.map((t) => t.issue), [904, 941, 942, 943], outcome);
+    assert.deepEqual(b.attention.map((t) => t.issue), [904, 941, 942], outcome);
   }
 });
 
@@ -1350,12 +1346,10 @@ test("#1820 amendment 2a: a row carrying any impl token is untouched, a malforme
   assert.ok(card(b, 925).flags.includes("ledger-error"));
 });
 
-// fleet-tick.mjs's PR for a row, observed rather than restated: a merge hold on
-// a queued PR counts only when the row carrying the hold is keyed to that PR.
-const tickKeysTo = (row, n) => deriveRun({ rows: [`${row} held-behind:#1`], dispatched: [], drain: null }, [
-  { number: n, labels: [{ name: "ready-to-merge" }], closingIssuesReferences: [] },
-  { number: 1, labels: [], closingIssuesReferences: [] },
-], "ready-to-merge").mergeHeld === 1;
+// fleet-tick.mjs's PR for a row, observed rather than restated: a conflict hold
+// on a PR counts only when the row carrying the hold is keyed to that PR.
+const tickKeysTo = (row, n) =>
+  foldLedger({ rows: [`${row} conflict-hold:#${n}`], dispatched: [] }, new Set([n]), { lenient: true }).byPr.get(n)?.conflictOpen === true;
 
 test("#1820 amendment 2a: on the same PR-signaled row text, the cockpit's PR is fleet-tick.mjs's", () => {
   const rows = [INHERITED, "#1237 fix-pr-1237", "#1237 finisher-pr-1237=labelled", "#1237 reviewed=abc1234:1/0/0:run-abc1234r", "#1300 PR#1301 · fix-pr-1301"];

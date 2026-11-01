@@ -38,7 +38,7 @@ const FIELDS = {
   impl: ["member", "outcome", "pr", "head", "branch", "sizing", "bailCause", "bailDetail", "confirmation"],
   "fix-pr": ["member", "outcome", "head", "branch", "applied", "deferred", "filed", "unrecorded", "dispositionsRecord", "testRun", "confirmation"],
   finisher: ["member", "outcome", "cause", "evidence", "pin", "labelsReadBack", "kill", "filed", "unrecorded", "confirmation"],
-  "merge-bot": ["member", "merged", "held", "conflictHold", "refused", "branchKept"],
+  "merge-bot": ["member", "merged", "conflictHold", "refused", "branchKept"],
 };
 
 const VALID = {
@@ -81,7 +81,6 @@ const VALID = {
   "merge-bot": {
     member: "merge-bot-1",
     merged: [{ pr: 3300, sha: SHA }],
-    held: [{ pr: 3304, behind: 3300 }],
     conflictHold: [3305],
     refused: [{ pr: 3306, reason: "ci-wait-timeout" }],
     branchKept: [{ pr: 3300, by: 3307 }],
@@ -233,7 +232,14 @@ test("validate passes the null and empty shapes each family allows", () => {
   ok("impl", { sizing: { verdict: "light", signal: "one file", ranBeforePr: false }, confirmation: [] });
   ok("fix-pr", { outcome: "no-op", applied: [], deferred: [], filed: [] });
   ok("finisher", { outcome: "halted", cause: "live-editor", evidence: "a member still edits the worktree", kill: null, labelsReadBack: [] });
-  ok("merge-bot", { merged: [], held: [], conflictHold: [], refused: [], branchKept: [] });
+  ok("merge-bot", { merged: [], conflictHold: [], refused: [], branchKept: [] });
+});
+
+// A merge bot holds no PR behind a lower one, so a report that still carries
+// `held` is an older bot's, and the closed top level refuses it.
+test("validate refuses a merge-bot report that still carries held, as an unexpected field", () => {
+  assertInvalid(check("merge-bot", variant("merge-bot", { held: [] })), '$: unexpected field "held"');
+  assertInvalid(check("merge-bot", variant("merge-bot", { held: [{ pr: 3304, behind: 3300 }] })), '$: unexpected field "held"');
 });
 
 test("validate fails a file that is not JSON", () => {
@@ -253,8 +259,8 @@ test("validate() answers null for a valid report and the violation text otherwis
 test("validate refuses a merge-bot report giving one PR two verdicts, in two lists or in one, and accepts one verdict each", () => {
   for (const [changes, said] of [
     [{ refused: [{ pr: 3300, reason: "behind:2" }] }, "$.refused[0].pr: PR #3300 already has a verdict at $.merged[0].pr"],
-    [{ conflictHold: [3304] }, "$.conflictHold[0]: PR #3304 already has a verdict at $.held[0].pr"],
-    [{ held: [{ pr: 3305, behind: 3300 }] }, "$.conflictHold[0]: PR #3305 already has a verdict at $.held[0].pr"],
+    [{ conflictHold: [3300] }, "$.conflictHold[0]: PR #3300 already has a verdict at $.merged[0].pr"],
+    [{ refused: [{ pr: 3305, reason: "r" }] }, "$.refused[0].pr: PR #3305 already has a verdict at $.conflictHold[0]"],
     [{ merged: [{ pr: 3300, sha: SHA }, { pr: 3300, sha: SHA }] }, "$.merged[1].pr: PR #3300 already has a verdict at $.merged[0].pr"],
     [{ refused: [{ pr: 3306, reason: "a" }, { pr: 3306, reason: "b" }] }, "$.refused[1].pr: PR #3306 already has a verdict at $.refused[0].pr"],
   ]) {
@@ -459,10 +465,10 @@ test("validate passes a nullable impl pr that is null", () => {
   assert.equal(r.status, 0, r.stdout + r.stderr);
 });
 
-// An id is a PR or issue number: a `pr`, `issue`, `behind` or `by` field, or
+// An id is a PR or issue number: a `pr`, `issue` or `by` field, or
 // a `conflictHold` item. It is held to 1; every other integer to the safe range.
 test("print states the bounds on every integer node, minimum 1 on an id and the safe range elsewhere", () => {
-  const IDS = new Set(["pr", "issue", "behind", "by", "conflictHold"]);
+  const IDS = new Set(["pr", "issue", "by", "conflictHold"]);
   const nodes = [];
   // `name` is the property a node sits under; an array's items keep it.
   const walk = (node, path, name) => {
@@ -483,14 +489,14 @@ test("print states the bounds on every integer node, minimum 1 on an id and the 
 
 // Duplicate keys: JSON.parse keeps the last, so the text is scanned for them.
 test("validate names a top-level duplicate key before any schema check, though its second value is also wrong", () => {
-  const text = '{"member":"merge-bot-1","merged":[],"held":[],"conflictHold":[],"refused":[],"branchKept":[],"merged":[5]}';
+  const text = '{"member":"merge-bot-1","merged":[],"conflictHold":[],"refused":[],"branchKept":[],"merged":[5]}';
   assertInvalid(run("validate", "merge-bot", file(text)), '$.merged: duplicate key "merged"');
   const first = '{"pr":"oops","pr":42}';
   assertInvalid(run("validate", "impl", file(first)), '$.pr: duplicate key "pr"');
 });
 
 test("validate names a nested duplicate key by its full path", () => {
-  const text = `{"member":"merge-bot-1","merged":[{"pr":1,"sha":"${SHA}"},{"pr":2,"sha":"${SHA}","sha":"${OTHER}"}],"held":[],"conflictHold":[],"refused":[],"branchKept":[]}`;
+  const text = `{"member":"merge-bot-1","merged":[{"pr":1,"sha":"${SHA}"},{"pr":2,"sha":"${SHA}","sha":"${OTHER}"}],"conflictHold":[],"refused":[],"branchKept":[]}`;
   assertInvalid(run("validate", "merge-bot", file(text)), '$.merged[1].sha: duplicate key "sha"');
   const deep = '{"a":{"b":[[{"c":1,"c":2}]]}}';
   assertInvalid(run("validate", "impl", file(deep)), '$.a.b[0][0].c: duplicate key "c"');
@@ -503,7 +509,7 @@ test("validate compares keys decoded, so an escaped spelling of a key collides w
 });
 
 test("validate does not call the same key in two sibling or nested objects a duplicate", () => {
-  const text = `{"member":"merge-bot-1","merged":[{"pr":1,"sha":"${SHA}"},{"pr":2,"sha":"${SHA}"}],"held":[{"pr":3,"behind":1}],"conflictHold":[],"refused":[{"pr":4,"reason":"r"}],"branchKept":[{"pr":1,"by":2}]}`;
+  const text = `{"member":"merge-bot-1","merged":[{"pr":1,"sha":"${SHA}"},{"pr":2,"sha":"${SHA}"}],"conflictHold":[],"refused":[{"pr":4,"reason":"r"}],"branchKept":[{"pr":1,"by":2}]}`;
   const r = run("validate", "merge-bot", file(text));
   assert.equal(r.status, 0, r.stdout + r.stderr);
   // A key whose value is a string that looks like a key is no key.
