@@ -150,8 +150,15 @@ test("an Install step that cannot run, one that fails, and one that changes the 
 
 test("an Install step killed by a signal is a failed install with no exit status of its own", (t) => {
   const f = fixture(t);
+  // `exec`, so the shell the signal kills is the one `sh -c` started: under a
+  // `sh` that runs a lone command in a child of its own, as the Linux CI
+  // runner's does (it reported exit 137 here), that `sh` would exit 137 itself
+  // and finisher-tree.mjs would read that exit, never the signal.
+  const recipe = join(f.repo, ".fleet", "recipe.json");
+  writeFileSync(recipe, JSON.stringify({ ...JSON.parse(readFileSync(recipe, "utf8")), install: "exec sh install.sh" }));
   const r = f.run({}, { env: { INSTALL_KILL: "1" } });
   assert.equal(r.status, 4, r.stderr + r.stdout);
+  assert.equal(r.receipt.install, "exec sh install.sh");
   assert.equal(r.receipt.kind, "failed");
   assert.equal(r.receipt.exit, null);
   assert.equal(r.receipt.message, `install failed in ${f.tree()} (killed by SIGKILL)`);
