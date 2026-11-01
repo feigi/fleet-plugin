@@ -601,17 +601,35 @@ test("AC3: a body marker for that path and key -> 0, with the hit under acknowle
   assert.equal(r.json.acknowledged[0].lines.length, 3);
 });
 
-test("AC3: a marker for another key, another file, or with an empty reason acknowledges nothing -> 1", (t) => {
+test("AC3: a marker for another key, another file, or with an empty or placeholder-only reason acknowledges nothing -> 1", (t) => {
   const { w, head } = deleteAfterRebase(t);
   for (const body of [
     "main-gain-removal: tests.txt #8 - wrong landing source\n",
     "main-gain-removal: other.txt #7 - wrong file\n",
     "main-gain-removal: tests.txt #7 - \n",
     "main-gain-removal: tests.txt #7 -    \n",
+    "main-gain-removal: tests.txt #7 - <why>\n",
+    "main-gain-removal: tests.txt #7 - <reason>\n",
+    "main-gain-removal: tests.txt #7 - <why it was removed>\n",
+    "main-gain-removal: tests.txt #7 - <>\n",
+    "main-gain-removal: tests.txt #7 - <why>   \n",
+    "main-gain-removal: tests.txt #7 - <why>\r\n",
+    "Drops it.\r\n\r\nmain-gain-removal: tests.txt #7 - <why>\r\n",
   ]) {
     const r = run(w, head, { body });
     assert.equal(r.code, 1, `${JSON.stringify(body)}: exit ${r.code}\n${r.stdout}`);
     assert.deepEqual(r.json.acknowledged, [], JSON.stringify(body));
+    assert.deepEqual(r.json.hits.map((h) => [h.path, h.key]), [["tests.txt", "#7"]], JSON.stringify(body));
+  }
+});
+
+test("AC3: a reason that merely contains a placeholder among real words still acknowledges", (t) => {
+  const { w, head } = deleteAfterRebase(t);
+  for (const reason of ["superseded <why>", "<why> superseded", "<why> superseded <why>", "see <PR> for why"]) {
+    const r = run(w, head, { body: `main-gain-removal: tests.txt #7 - ${reason}\n` });
+    expect(r, 0);
+    assert.deepEqual(r.json.hits, [], reason);
+    assert.equal(r.json.acknowledged[0].reason, reason);
   }
 });
 
