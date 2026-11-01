@@ -31,9 +31,10 @@ Plus whatever your Recipe runs (§2.3): `mvn`, `go`, `cargo`, …
 Install: `omp plugin install @feigi/fleet-ctl` per [README → Installation](../README.md#installation).
 Check: `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run --root` prints the plugin root or fails naming why.
 
-If that command answers "command not found" instead of one of the
-reasons above, the Resolver copy at `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run` was never
-placed — that is not a side effect of `omp plugin install`.
+If the shell cannot find that command at all, instead of it printing one of
+those reasons, the package is not installed or its entry is a dangling link:
+the Resolver lives inside the package, so without one there is nothing to run.
+Run the Install line above.
 
 Settings ([ADR 0011](adr/0011-omp-tier-routes-through-roles.md), [ADR 0014](adr/0014-omp-is-the-only-harness.md), [ADR 0021](adr/0021-omp-native-install-route-replaces-the-marketplace.md)):
 - `modelRoles.slow`, `.task`, `.smol`: set to real models — the only install-time setting the fleet needs
@@ -41,7 +42,6 @@ Settings ([ADR 0011](adr/0011-omp-tier-routes-through-roles.md), [ADR 0014](adr/
 Check: `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run tier-roles.mjs --check`
 
 ### 1.4 Disk layout — SOFT
-- `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run` — placed once by hand via `fleet-bootstrap` ([ADR 0003](adr/0003-dual-harness-dev-loop-install-is-the-only-path.md))
 - `<repo>/.worktrees/<issue>-<slug>/` — one worktree per claimed ticket
 - `<repo>/.fleet/` — ledger, heartbeat, shortlist, board, instruments
 - `.worktrees/` and `.fleet/` must be writable and git-ignored (§2.5)
@@ -199,7 +199,6 @@ so one pass names every failure.
 | `allow-merge-commit` | `gh api "repos/{owner}/{repo}" --jq '.allow_merge_commit'` (§2.6) | prints `true` |
 | `ruleset` | `gh api "repos/{owner}/{repo}/rulesets" --jq '.[].name'` (§2.6) | prints a ruleset name |
 | `ci-workflow` | `grep -lE` for a top-level `name: CI` in `.github/workflows/*.y*ml`, quoted or not, with an optional trailing ` # comment` — the way `ci-state.mjs` reads a name (§2.7) | exit 0; a miss is a WARN and passes |
-| `resolver` | `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run --root` (§1.3) | exit 0 |
 
 Exit 0: passed, warnings included. Exit 1: a check failed; the last line is
 `PREFLIGHT FAILED: <names>`, and the run stops before the shortlist. Exit 2:
