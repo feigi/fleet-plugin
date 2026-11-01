@@ -25,9 +25,11 @@
 //
 //   prose  isDocs() calls it docs, it ends in .md or .markdown, it is not
 //          under a test directory, and it is outside the prompt surface: no
-//          directory segment named skills, agents, commands or plugin, no
-//          directory segment that starts with a dot, and no file named
-//          AGENTS.md, CLAUDE.md or GEMINI.md, at any depth
+//          directory segment named skills, agents or commands, no directory
+//          segment that starts with a dot, and no file named AGENTS.md,
+//          CLAUDE.md or GEMINI.md, at any depth. A file directly in the root
+//          .out-of-scope/, spelled exactly so, is exempt from the dot rule
+//          alone
 //   data   one of the METRICS paths closeout.mjs names, and no other file
 //
 // Stdout is one JSON line:
@@ -69,7 +71,8 @@ const ZERO = "000000";
 const PLAIN = "100644";
 const SHA = /^[0-9a-f]{40}$/;
 const RAW = /^:(\d{6}) (\d{6}) ([0-9a-f]+) ([0-9a-f]+) (\S+)$/;
-const PROMPT_DIRS = new Set(["skills", "agents", "commands", "plugin"]);
+const PROMPT_DIRS = new Set(["skills", "agents", "commands"]);
+const RECORDS_DIR = ".out-of-scope";
 const PROMPT_FILES = new Set(["agents.md", "claude.md", "gemini.md"]);
 const USAGE = "usage: finisher-scope.mjs --worktree <abs-path> --pin <sha> [--repo <dir>]";
 const EXIT = { inert: 0, "not-inert": 1, unknown: 2 };
@@ -110,11 +113,17 @@ function modeProblem(status, oldMode, newMode) {
 // is where omp and the tools it discovers keep what they load as instructions
 // (`.omp/rules`, `.omp/RULES.md`, `.omp/SYSTEM.md`, `.claude`, `.cursor`,
 // `.github/copilot-instructions.md`), so every one is the prompt surface
-// rather than a list of them that drifts as discovery grows.
+// rather than a list of them that drifts as discovery grows. The one exception
+// is a file directly in the root `.out-of-scope/`: the triage skill writes a
+// rejection record there, read as settled precedent rather than as an
+// instruction, so the dot rule alone passes over it. Nested, elsewhere or
+// spelled otherwise, it is a dot-directory like any other, and the file-name
+// rule still applies.
 function promptSurface(path) {
   const parts = path.split("/");
+  const record = parts.length === 2 && parts[0] === RECORDS_DIR;
   for (const dir of parts.slice(0, -1)) {
-    if (dir.startsWith(".") || PROMPT_DIRS.has(dir.toLowerCase())) return `prompt surface: directory ${dir}`;
+    if ((dir.startsWith(".") && !record) || PROMPT_DIRS.has(dir.toLowerCase())) return `prompt surface: directory ${dir}`;
   }
   const file = parts.at(-1).toLowerCase();
   if (PROMPT_FILES.has(file)) return `prompt surface: ${parts.at(-1)}`;
