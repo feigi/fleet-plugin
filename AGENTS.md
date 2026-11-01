@@ -65,3 +65,21 @@ name.
 An accepted ADR's body stays as ruled. A later change that falsifies or closes
 something it states is recorded on its `**Status:**` line as `Amended by #N: …`
 (the issue) or `Amended by ADR NNNN: …`.
+
+## Spec amendments
+
+A merged spec under `docs/specs/` records a later change to what it states
+next to the changed text, never in its header. The note starts on its own line
+directly under the last line of the paragraph or list item it amends, with no
+blank line between, so it renders inside it (in a list, indented to the item's
+text); it is never appended to an existing line. It reads `*Amended (#N): …*`,
+`#N` being the issue that ruled the change; when another ticket carried it
+out, `*Amended (#N, implemented by #M): …*`. A change that adds a whole
+section opens it with `**Amended (#N): <claim>.**`, a paragraph of its own
+after a blank line.
+
+The header — the metadata lines under the title, `Status:` and `Relates to:`
+among them — holds no amendment, no pointer to one and no summary of them. A
+new lifecycle state (`implemented`, `ticketed as #…`, `superseded by …`) and
+the fix of a reference that no longer resolves are still edited in place.
+Amendments already in a header stay as written.
