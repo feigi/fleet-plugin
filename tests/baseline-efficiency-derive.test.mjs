@@ -13,6 +13,7 @@ import { COLUMNS } from "../plugin/scripts/member-outcomes.mjs";
 // calls neither node nor gh), pin that copy against the scraper's COLUMNS, and
 // pin that a row of any other width stops the scrape instead of being skipped.
 const SCRIPT = new URL("../docs/research/baseline-efficiency-derive.py", import.meta.url).pathname;
+const HAS_PYTHON3 = spawnSync("python3", ["-c", ""]).status === 0;
 
 const LOAD = `
 import importlib.util, json, sys
@@ -60,7 +61,7 @@ function fixtureArgs(prefix, tsv) {
 const FULL = COLUMNS.map((c) => `v-${c}`).join("\t");
 
 test("the derive script's COLUMNS is member-outcomes.mjs's COLUMNS, and scrape_member_outcomes() keys a full-width row by it", (t) => {
-  if (spawnSync("python3", ["-c", ""]).status !== 0) return t.skip("needs python3");
+  if (!HAS_PYTHON3) return t.skip("needs python3");
   assert.deepEqual(python("print(json.dumps(mod.COLUMNS))", []), COLUMNS);
 
   // A `#` line and a blank line around the full-width row stay skipped.
@@ -72,7 +73,7 @@ test("the derive script's COLUMNS is member-outcomes.mjs's COLUMNS, and scrape_m
 // guard that refused only short rows, or only wide ones, fails one case.
 for (const [label, width] of [["short", COLUMNS.length - 1], ["too-wide", COLUMNS.length + 1]]) {
   test(`scrape_member_outcomes() exits non-zero on a ${label} row, naming both widths and the producer`, (t) => {
-    if (spawnSync("python3", ["-c", ""]).status !== 0) return t.skip("needs python3");
+    if (!HAS_PYTHON3) return t.skip("needs python3");
     const bad = Array.from({ length: width }, (_, i) => `x${i}`).join("\t");
     const r = runPython(SCRAPE, fixtureArgs(`derive-${label}-`, `# ${COLUMNS.join("\t")}\n${FULL}\n${bad}\n`));
     assert.notEqual(r.status, 0, `expected a refusal, got exit 0 with ${r.stdout}`);
@@ -98,14 +99,14 @@ print(json.dumps(mod.first_last_ts(mod.Path(sys.argv[2]))))
 `;
 
 test("first_last_ts() returns (None, None) for a missing transcript and for one with no parseable line", (t) => {
-  if (spawnSync("python3", ["-c", ""]).status !== 0) return t.skip("needs python3");
+  if (!HAS_PYTHON3) return t.skip("needs python3");
   const dir = sessionDir("derive-first-last-", { garbage: "garbage\n{bad\n" });
   assert.deepEqual(python(FIRST_LAST, [join(dir, "missing.jsonl")]), [null, null]);
   assert.deepEqual(python(FIRST_LAST, [join(dir, "garbage.jsonl")]), [null, null]);
 });
 
 test("first_last_ts() skips garbage lines between timestamped ones and keeps the real first and last", (t) => {
-  if (spawnSync("python3", ["-c", ""]).status !== 0) return t.skip("needs python3");
+  if (!HAS_PYTHON3) return t.skip("needs python3");
   const dir = sessionDir("derive-first-last-mixed-", {
     mixed: 'garbage\n{"timestamp":"2026-09-18T15:05:00.000Z"}\n{bad\n{"type":"x"}\n{"timestamp":"2026-09-18T16:00:00.000Z"}\ngarbage\n',
   });
@@ -114,7 +115,7 @@ test("first_last_ts() skips garbage lines between timestamped ones and keeps the
 });
 
 test("first_last_ts()'s per-line guard catches only a JSON decode error", (t) => {
-  if (spawnSync("python3", ["-c", ""]).status !== 0) return t.skip("needs python3");
+  if (!HAS_PYTHON3) return t.skip("needs python3");
   const dir = sessionDir("derive-first-last-guard-", { m: VALID });
   const body = `
 def loads(_s):
@@ -140,7 +141,7 @@ print(json.dumps({"intervals": [[s.isoformat(), e.isoformat()] for s, e in inter
 const VALID_INTERVAL = [["2026-09-18T15:05:00+00:00", "2026-09-18T16:00:00+00:00"]];
 
 test("implementer_intervals() names the implementers whose transcript gave no timestamps in one WARNING, and leaves them out of the intervals", (t) => {
-  if (spawnSync("python3", ["-c", ""]).status !== 0) return t.skip("needs python3");
+  if (!HAS_PYTHON3) return t.skip("needs python3");
   const dir = sessionDir("derive-intervals-", { "impl-1": VALID, "impl-2": "garbage\n{bad\n" });
   const rows = [
     { role: "implementer", member: "impl-1" },
@@ -158,8 +159,48 @@ test("implementer_intervals() names the implementers whose transcript gave no ti
 });
 
 test("implementer_intervals() prints nothing when every implementer's transcript gave timestamps", (t) => {
-  if (spawnSync("python3", ["-c", ""]).status !== 0) return t.skip("needs python3");
+  if (!HAS_PYTHON3) return t.skip("needs python3");
   const dir = sessionDir("derive-intervals-clean-", { "impl-1": VALID });
   const got = python(INTERVALS, [dir, JSON.stringify([{ role: "implementer", member: "impl-1" }])]);
   assert.deepEqual(got, { intervals: VALID_INTERVAL, skipped: [], out: "" });
+});
+
+// main() end to end on a fixture session: the scraper and `gh` are replaced
+// with one merged PR's rows, and SESSION_DIR/TOP_JSONL point into this test's
+// own directory. The snapshot and specialist transcripts are there because
+// Signal 4's statistics need at least one review dispatch to describe.
+const MAIN_RUN = `
+import contextlib, io
+sess = mod.Path(sys.argv[2])
+mod.SESSION_DIR = sess
+mod.TOP_JSONL = sess / "top.jsonl"
+rows = []
+for role, member in [("implementer", "impl-1"), ("reviewer", "snapshot"), ("reviewer", "reviewtests")]:
+    r = dict.fromkeys(mod.COLUMNS, "")
+    r.update(role=role, member=member, pr="9", tokens_cache_create="5")
+    rows.append(r)
+mod.scrape_member_outcomes = lambda: rows
+mod.fetch_merged_prs = lambda: {9: {"createdAt": "2026-09-18T15:30:00Z", "mergedAt": "2026-09-18T17:00:00Z"}}
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    mod.main()
+print(json.dumps(buf.getvalue()))
+`;
+
+// impl-1's transcript spans exactly the script's first segment, the cap-3 one
+// between its first two hardcoded invocations, so that segment is 2/3 idle and
+// both cap-2 segments after it wholly idle: 0.909 over the segment durations.
+// An idle ratio that never saw impl-1's interval reads 1.000.
+test("main() feeds implementer_intervals() into the idle ratio", (t) => {
+  if (!HAS_PYTHON3) return t.skip("needs python3");
+  const line = (ts) => JSON.stringify({ timestamp: ts }) + "\n";
+  const dir = sessionDir("derive-main-", {
+    "impl-1": line("2026-09-18T15:04:56.850Z") + line("2026-09-19T21:38:11.735Z"),
+    snapshot: JSON.stringify({ type: "session_init", task: "intro\ngh pr diff 9 \n", timestamp: "2026-09-18T16:00:00.000Z" }) + "\n",
+    reviewtests: JSON.stringify({ type: "session_init", task: "Review PR #9 (branch x)", timestamp: "2026-09-18T16:10:00.000Z" }) + "\n",
+    top: "",
+  });
+  const out = python(MAIN_RUN, [dir]);
+  assert.doesNotMatch(out, /WARNING: .*implementer/);
+  assert.match(out, /^3\. implementer idle ratio {2}: 0\.909$/m);
 });
