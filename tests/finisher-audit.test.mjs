@@ -533,7 +533,7 @@ function supersededByRebase() {
   return f;
 }
 
-const auditAt = (f, pin) => audit(f, ["--worktree", f.wt, "--pin", pin, "--sample-seconds", "0"]);
+const auditAt = (f, pin) => std({ ...f, pin });
 
 test("exit 0: a worktree a remote rebase superseded holds nothing the pin lacks, and the cherry read is the evidence", () => {
   const f = supersededByRebase();
@@ -704,6 +704,18 @@ test("past-pin: the same merge commit, pushed, is carried", () => {
   assert.equal(r.status, 1, r.stderr);
   assert.equal(r.out.cause, "past-pin");
   assert.deepEqual(r.out.evidence.remote, { ref: "refs/heads/feat", sha: f.merge, carries: true });
+});
+
+test("stray: a remote tip holding every parent patch of a merge commit does not carry the merge's own file", () => {
+  const f = mergePastPin();
+  git(f.wt, "push", "-q", "-f", "origin", `${f.mergePin}:refs/heads/feat`);
+  const r = auditAt(f, f.pin);
+  assert.equal(r.status, 1, r.stderr);
+  assert.equal(r.out.head, f.merge);
+  assert.match(r.out.evidence.cherry.listing, /^\+/m, "pin..HEAD holds a patch the pin lacks");
+  assert.equal(r.out.evidence.remote.sha, f.mergePin);
+  assert.equal(r.out.cause, "stray", JSON.stringify(r.out.evidence));
+  assert.equal(r.out.evidence.remote.carries, false);
 });
 
 test("other: a move that is neither a rebase nor a commit halts with both status reads, the reflog line and both SHAs", () => {

@@ -102,13 +102,14 @@
 //           name so a branch named like the tail of another ref matches only
 //           itself - and `<remote sha>..HEAD` is tested the same way. Nothing
 //           unique there: `past-pin`, a member's commit past the pin that a
-//           reviewer can reach. Anything else: `stray`, a commit existing only
-//           in that worktree. Evidence adds `cherry` and `remote` = `{ref, sha,
-//           carries, error?}`. `carries` is true or false, and null when it could
-//           not be told: a failed read, a timeout, a detached HEAD with no branch
-//           to ask about, or a remote SHA the object store lacks. An absent ref
-//           is `sha` null, `carries` false. The remote is asked rather than the
-//           PR object, whose head lags a ref move.
+//           reviewer can reach. Anything else: `stray`, a commit the branch's
+//           remote ref is not shown to carry - the ref lacks it or is absent,
+//           or the read could not tell. Evidence adds `cherry` and `remote` =
+//           `{ref, sha, carries, error?}`. `carries` is true or false, and null
+//           when it could not be told: a failed read, a timeout, a detached HEAD
+//           with no branch to ask about, or a remote SHA the object store lacks.
+//           An absent ref is `sha` null, `carries` false. The remote is asked
+//           rather than the PR object, whose head lags a ref move.
 //         Nothing is fetched: a pin the object store lacks fails the `git
 //         cherry` read, exit 2. The patch test ignores whitespace, so a local
 //         commit that differs from a pushed one only in whitespace reads clean.
@@ -348,11 +349,11 @@ if (/^(reset|rebase)\b/.test(subject)) {
 
 if (/^commit\b/.test(subject)) {
   evidence.commit = git("log", ["log", "-1", "--format=%h %s"]).out.trim();
-  const ahead = uniqueIn(pin);
-  evidence.cherry = { listing: ahead.listing, merges: ahead.merges };
+  const { unique, ...cherry } = uniqueIn(pin);
+  evidence.cherry = cherry;
   // Nothing in pin..HEAD the pin lacks: a remote rebase superseded this
   // worktree, or it sits behind the pin. Refreshing it loses nothing.
-  if (!ahead.unique) finish(0);
+  if (!unique) finish(0);
   const remote = remoteRef(row.branch);
   evidence.remote = { ref: remote.ref, sha: remote.sha, carries: null };
   if (remote.error !== undefined) evidence.remote.error = remote.error;

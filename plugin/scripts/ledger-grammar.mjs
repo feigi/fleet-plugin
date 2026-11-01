@@ -59,7 +59,8 @@ const FAMILIES = {
 export const MEMBER_FAMILIES = Object.freeze(Object.keys(FAMILIES));
 // A finisher halt's causes: the finisher worked correctly and refused
 // to label, which `failed` (it crashed or gave up) does not say. `stray` is a
-// worktree commit past the pin that no remote ref carries. `unreadable`,
+// worktree commit past the pin that the branch's remote ref is not shown to
+// carry: the ref lacks it or is absent, or the read could not tell. `unreadable`,
 // `missing` and `absent` are duty 1's audit-read halts. `human` is a Ticketless
 // PR whose diff is not inert: it merges only when the maintainer labels it.
 export const HALT_CAUSES = ["live-editor", "rebase", "past-pin", "stray", "unreadable", "missing", "absent", "other", "human"];

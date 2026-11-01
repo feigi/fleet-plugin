@@ -26,8 +26,9 @@ durable, and applies the label the merge bot waits on.
    worktree's `HEAD` against the dispatch pin, and names the cause of any
    divergence — a non-null cause halts before the label. A worktree that
    differs from the pin but holds nothing the pin lacks, because a remote
-   rebase superseded it, is clean; a commit the pin lacks that no remote ref
-   carries is a `stray` halt.
+   rebase superseded it, is clean; a commit the pin lacks that the branch's
+   remote ref is not shown to carry — the ref lacks it or is absent, or the
+   read could not tell — is a `stray` halt.
 3. **Confirm durable homes.** A deferral of a finding in the review's
    result is judged by the `dispositions-ok` verdict
    [`ledger.mjs`](../../plugin/scripts/ledger.mjs) `dispatch` required
