@@ -1,0 +1,125 @@
+{
+  "computed_at": "2026-11-01T00:00:56.101Z",
+  "window_start": "2026-10-03",
+  "baseline": {
+    "cell": "slow-high",
+    "generation": "claude-opus-5-5",
+    "n": 104,
+    "mean_usd": 14.51,
+    "fail_rate": 0.1923
+  },
+  "cells": [
+    {
+      "cell": "slow-high",
+      "generation": "claude-opus-5-5",
+      "n": 104,
+      "n_pulls": 104,
+      "n_merged": 104,
+      "n_claims": 104,
+      "n_failed": 20,
+      "fail_rate": 0.1923,
+      "mean_usd": 14.51,
+      "median_usd": 13.01,
+      "by_hand": 0,
+      "no_ruling": 0,
+      "no_ruling_prs": [],
+      "pending": 0,
+      "pending_prs": [],
+      "router_usd": 0,
+      "usd_diff_ci95": null,
+      "left_out": 0,
+      "unpriced": 0,
+      "untimed": 0,
+      "excluded": 0,
+      "older": []
+    },
+    {
+      "cell": "smol-high",
+      "generation": "claude-haiku-5-5",
+      "n": 32,
+      "n_pulls": 32,
+      "n_merged": 32,
+      "n_claims": 32,
+      "n_failed": 18,
+      "fail_rate": 0.5625,
+      "mean_usd": 11.06,
+      "median_usd": 11.32,
+      "by_hand": 1,
+      "no_ruling": 0,
+      "no_ruling_prs": [],
+      "pending": 0,
+      "pending_prs": [],
+      "router_usd": 0,
+      "usd_diff_ci95": [
+        -6.53,
+        -0.43
+      ],
+      "left_out": 0,
+      "unpriced": 1,
+      "untimed": 0,
+      "excluded": 5,
+      "older": [
+        {
+          "cell": "smol-high",
+          "generation": "claude-haiku-4-5",
+          "n_pulls": 21,
+          "n_merged": 21,
+          "n_claims": 21,
+          "n_failed": 17,
+          "fail_rate": 0.8095,
+          "mean_usd": 11.77,
+          "median_usd": 10.76,
+          "by_hand": 0,
+          "no_ruling": 0,
+          "no_ruling_prs": [],
+          "pending": 0,
+          "pending_prs": [],
+          "router_usd": 0,
+          "usd_diff_ci95": null,
+          "left_out": 0,
+          "unpriced": 0,
+          "untimed": 0
+        }
+      ]
+    },
+    {
+      "cell": "task-high",
+      "generation": "claude-sonnet-5-5",
+      "n": 104,
+      "n_pulls": 104,
+      "n_merged": 104,
+      "n_claims": 104,
+      "n_failed": 28,
+      "fail_rate": 0.2692,
+      "mean_usd": 10.28,
+      "median_usd": 8.98,
+      "by_hand": 1,
+      "no_ruling": 0,
+      "no_ruling_prs": [],
+      "pending": 0,
+      "pending_prs": [],
+      "router_usd": 0,
+      "usd_diff_ci95": [
+        -6.51,
+        -2.04
+      ],
+      "left_out": 0,
+      "unpriced": 0,
+      "untimed": 0,
+      "excluded": 1,
+      "older": []
+    }
+  ],
+  "tripped": [
+    "smol-high"
+  ],
+  "verdict": "tripped",
+  "retire": false,
+  "min_n": 20,
+  "trip_points": 15,
+  "tsv_blobs": {
+    "docs/metrics/member-outcomes.tsv": "d176d764ea0daf568f9fbfa2460378c147f606eb",
+    "docs/metrics/ticket-features.tsv": "1d8dd680eaf97fd7f65dd2925cfac3dc82881678",
+    "docs/metrics/tier-outcomes.tsv": "511a54145a497611606c9298892ff8d9442b8a40"
+  }
+}
