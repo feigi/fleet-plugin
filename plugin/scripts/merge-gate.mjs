@@ -4,9 +4,10 @@
 //   merge-gate.mjs --pr <n> --pre <sha> [--post <sha>] [--out <path>]
 //
 // Runs, in order, `instruments.sh --repo <main checkout>`, `gh pr view <n>
-// --json labels,reviewDecision,headRefOid,body`, `main-gain.mjs` against the
-// PR head in the main checkout, and `ci-state.mjs --pr <n> --declare-no-ci`,
-// then answers the conjunction. All four run on every call, whatever the
+// --json labels,reviewDecision,headRefOid,body,url,closingIssuesReferences`,
+// `main-gain.mjs` against the PR head in the main checkout, and `ci-state.mjs
+// --pr <n> --declare-no-ci`, then answers the conjunction. All four run on
+// every call, whatever the
 // earlier ones said — except main-gain.mjs, which needs the head and body gh
 // read and the main checkout, and is skipped when either could not be had — so
 // the JSON line carries every field that was read. A head gh reads outside
@@ -31,8 +32,9 @@
 // `bodyDigest`), or null with `head` when gh could not be read, `rebaseCarry`
 // naming the labelled head and the head accepted as carrying it (`{labelled,
 // accepted}`), or null when no carry was proven, `mainGain` echoing
-// main-gain.mjs's own payload — hits, acknowledged removals, edited lines and unchecked
-// files — or null when it did not run or printed no JSON object; an unusable
+// main-gain.mjs's own payload — hits, acknowledged removals, edited lines, the
+// closing issues it read and unchecked files — or null when it did not run or
+// printed no JSON object; an unusable
 // payload is still echoed. Stderr: the children's own diagnostics, passed
 // straight through and never folded into stdout. A refusal (exit 2 with its
 // reason on stderr: a usage error, a Label map that cannot be read — see THE
@@ -94,7 +96,8 @@
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeDie, defineFlags, writeAll } from "./arg.mjs";
@@ -271,7 +274,7 @@ function readInstruments() {
 // null for anything that is not the four fields in their gh shapes: a parse
 // that succeeds on the wrong shape must not reach a check that reads it.
 function readPr() {
-  const r = spawnSync("gh", ["pr", "view", String(pr), "--json", "labels,reviewDecision,headRefOid,body"], CHILD);
+  const r = spawnSync("gh", ["pr", "view", String(pr), "--json", "labels,reviewDecision,headRefOid,body,url,closingIssuesReferences"], CHILD);
   if (r.error || r.status !== 0) return null;
   let v;
   try {
@@ -286,14 +289,18 @@ function readPr() {
   if (!Object.hasOwn(v, "reviewDecision") || (v.reviewDecision !== null && typeof v.reviewDecision !== "string")) return null;
   if (typeof v.headRefOid !== "string" || !/^[0-9a-f]{40}$/.test(v.headRefOid)) return null;
   // The body carries the main-gain acknowledgements. gh answers `""` for an
-  // empty one, so a missing field is a read that did not happen.
+  // empty one, so a missing field is a read that did not happen. `url` and
+  // `closingIssuesReferences` are main-gain.mjs's to read: it takes them as gh
+  // printed them, and without them the retraction rule is off.
   if (typeof v.body !== "string") return null;
   return v;
 }
 
 // --- main-gain.mjs --------------------------------------------------------
 // Against the head gh just read, in the main checkout, with the body on
-// stdin. Not run without both, and its row then stays silent:
+// stdin and the PR's number, url and closing references, as gh printed them,
+// in a file of their own. Not run without both head and body, and its row then
+// stays silent:
 // instruments-unanswerable or pr-unreadable names the missing input. As with
 // ci-state below, the payload decides and the exit code has to agree with
 // it — exit 0 with a hit, or exit 1 without one, is not a verdict. `payload`
@@ -302,15 +309,28 @@ function readPr() {
 // `usable`.
 function readMainGain(root, prView) {
   if (root === null || prView === null) return { usable: false, exit: null, payload: null };
+  // A refs file that cannot be written leaves the retraction rule off: more
+  // hits, never fewer.
+  let scratch = null;
+  const refsArgs = [];
+  try {
+    scratch = mkdtempSync(join(tmpdir(), "merge-gate-"));
+    const refs = join(scratch, "closing-refs.json");
+    writeFileSync(refs, JSON.stringify({ number: pr, url: prView.url, closingIssuesReferences: prView.closingIssuesReferences }));
+    refsArgs.push("--closing-refs", refs);
+  } catch {
+    refsArgs.length = 0;
+  }
   const r = spawnSync(
     process.execPath,
-    [join(SCRIPT_DIR, "main-gain.mjs"), "--head", prView.headRefOid, "--body-file", "-"],
+    [join(SCRIPT_DIR, "main-gain.mjs"), "--head", prView.headRefOid, "--body-file", "-", ...refsArgs],
     // A PR that removes a large main-gained file prints every removed line:
     // past spawnSync's 1 MiB default the read fails ENOBUFS and the verdict
     // that PR earned reads as unanswerable. main-gain.mjs's own git reads
     // carry the same 1 GiB bound.
     { ...CHILD, stdio: ["pipe", "pipe", "inherit"], cwd: root, input: prView.body, maxBuffer: 1 << 30 },
   );
+  if (scratch !== null) rmSync(scratch, { recursive: true, force: true });
   if (r.error) writeAll(2, `merge-gate: main-gain.mjs could not be read: ${r.error.code ?? r.error.message}\n`);
   let v = null;
   try {

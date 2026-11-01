@@ -283,7 +283,7 @@ pre-merge conjunction, not the **Merge gate** ruleset — refuses it as
 acknowledged in the PR body as `main-gain-removal: <path> <key> - <why>`, a
 second sign-off scoped to one file and one landing source (ADR 0023). The
 post-rebase counterpart of the **No-undo audit**.
-A hit's removed lines each carry a `kind`: `modified` when the hunk that removed them also adds lines, `deleted` when it only removes them. A removed line edited in place that keeps every token of its text is not a hit.
+A hit's removed lines each carry a `kind`: `modified` when the hunk that removed them also adds lines, `deleted` when it only removes them. A removed line edited in place that keeps every token of its text is not a hit. Nor is a gained line of a hunk that adds lines when either rule clears the hunk: the hunk rule, when every removed token of the hunk — gained and older lines alike, a blank line counting as one token — is among its added lines, as in a re-wrap; the retraction rule, when that holds once a forward reference to a ticket the PR closes (`once #N lands`) is dropped from the removed side and the one token after it may differ in case alone. Cleared lines are listed in the gate's `edited[]`, each entry with the `rule` that cleared it (`line`, `hunk`, `retracted #N`); a `deleted` line is never cleared this way. Each hit carries its `hunks[]`: the lines, the added lines compared against, and the removed tokens they miss (`missing`), which the controller quotes in the one yes/no question it puts to the maintainer before it writes the acknowledgement. The gate reads the PR's closing issues from `closes`, `null` when they could not be read, which turns the retraction rule off.
 _Avoid_: lost work, reverted lines, regression
 
 **Rebase-carry**:

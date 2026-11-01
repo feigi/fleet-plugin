@@ -41,7 +41,9 @@ const POST = "b".repeat(40);
 const THIRD = "c".repeat(40);
 const DIGEST = "d".repeat(64);
 
-const PR_VIEW = { labels: [{ name: "patch" }, { name: "ready-to-merge" }], reviewDecision: "APPROVED", headRefOid: PRE, body: "" };
+const PR_URL = "https://github.com/o/r/pull/42";
+const REFS = [{ number: 4000, url: "https://github.com/o/r/issues/4000", repository: { name: "r", owner: { login: "o" } } }];
+const PR_VIEW = { labels: [{ name: "patch" }, { name: "ready-to-merge" }], reviewDecision: "APPROVED", headRefOid: PRE, body: "", url: PR_URL, closingIssuesReferences: REFS };
 
 // Shaped like ci-state.mjs's own payload (its `payload` literal, plus
 // `jobs`/`missing` outside --quiet), green at exit 0.
@@ -75,12 +77,19 @@ exit "$INSTR_EXIT"
 `;
 
 // main-gain.mjs, resolved beside the gate like the other two. It logs its
-// argv and cwd, keeps the stdin it was handed, and answers MG_STDOUT at
-// MG_EXIT — by default a clean payload about the head it was asked for.
+// argv and cwd, keeps the stdin it was handed and a copy of the file named by
+// `--closing-refs` (which the gate removes afterwards; the log names it
+// `<refs>` because its directory is random), and answers MG_STDOUT at MG_EXIT —
+// by default a clean payload about the head it was asked for.
 // MG_PAD leading spaces, which a JSON parse ignores, stand in for a payload
 // too large for spawnSync's default buffer without passing it through the env.
 const MAIN_GAIN_STUB = `import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 const argv = process.argv.slice(2);
+const refsAt = argv.indexOf("--closing-refs");
+if (refsAt >= 0) {
+  writeFileSync(process.env.MG_REFS_FILE, readFileSync(argv[refsAt + 1]));
+  argv[refsAt + 1] = "<refs>";
+}
 appendFileSync(process.env.CALL_LOG, "main-gain.mjs " + argv.join(" ") + " (cwd " + process.cwd() + ")\\n");
 writeFileSync(process.env.MG_STDIN_FILE, readFileSync(0));
 const head = argv[argv.indexOf("--head") + 1];
@@ -177,6 +186,7 @@ function gate(
   writeFileSync(join(root, "pr-view.json"), prView);
   writeFileSync(join(root, "ci.out"), ciOut);
   writeFileSync(join(root, "mg.stdin"), "");
+  writeFileSync(join(root, "mg.refs"), "");
 
   const repo = join(root, "repo");
   mkdirSync(repo);
@@ -202,6 +212,7 @@ function gate(
       INSTR_STDOUT: instrOut,
       INSTR_EXIT: String(instrExit),
       MG_STDIN_FILE: join(root, "mg.stdin"),
+      MG_REFS_FILE: join(root, "mg.refs"),
       MG_EXIT: String(mgExit),
       ...(mgOut === null ? {} : { MG_STDOUT: mgOut }),
       ...env,
@@ -214,6 +225,7 @@ function gate(
     json: res.stdout.trim() ? JSON.parse(res.stdout) : null,
     calls: readFileSync(log, "utf8").split("\n").filter(Boolean),
     mgStdin: readFileSync(join(root, "mg.stdin"), "utf8"),
+    mgRefs: readFileSync(join(root, "mg.refs"), "utf8"),
     root,
     repo,
   };
@@ -257,10 +269,23 @@ test("every check holds → 0 mergeable, one JSON line with every field, four re
   // read, in the main checkout.
   assert.deepEqual(r.calls, [
     `instruments.sh --repo ${r.repo}`,
-    "gh pr view 42 --json labels,reviewDecision,headRefOid,body",
-    `main-gain.mjs --head ${PRE} --body-file - (cwd ${r.repo})`,
+    "gh pr view 42 --json labels,reviewDecision,headRefOid,body,url,closingIssuesReferences",
+    `main-gain.mjs --head ${PRE} --body-file - --closing-refs <refs> (cwd ${r.repo})`,
     CI_CALL,
   ]);
+});
+
+test("main-gain gets the PR's number, url and closing references, as gh printed them, in a file of its own", (t) => {
+  const r = gate(t);
+  assertRow(r, 0, "mergeable", null);
+  assert.deepEqual(JSON.parse(r.mgRefs), { number: 42, url: PR_URL, closingIssuesReferences: REFS });
+});
+
+test("a gh read without url or closing references still reaches main-gain, with those fields left out of its input", (t) => {
+  const { url, closingIssuesReferences, ...bare } = PR_VIEW;
+  const r = gate(t, { prView: JSON.stringify(bare) });
+  assertRow(r, 0, "mergeable", null);
+  assert.deepEqual(JSON.parse(r.mgRefs), { number: 42 });
 });
 
 test("the rebased path: head and ci-state both on --post → 0", (t) => {
@@ -1018,7 +1043,7 @@ test("from a linked worktree, instruments.sh audits the main checkout (--git-com
   const r = gate(t, { cwd: wt });
   assertRow(r, 0, "mergeable", null);
   assert.deepEqual(r.calls.filter((c) => c.startsWith("instruments.sh")), [`instruments.sh --repo ${main}`]);
-  assert.deepEqual(r.calls.filter((c) => c.startsWith("main-gain.mjs")), [`main-gain.mjs --head ${PRE} --body-file - (cwd ${main})`]);
+  assert.deepEqual(r.calls.filter((c) => c.startsWith("main-gain.mjs")), [`main-gain.mjs --head ${PRE} --body-file - --closing-refs <refs> (cwd ${main})`]);
 });
 
 test("an ambient GIT_DIR cannot move the audited instrument set into another repository", (t) => {

@@ -585,6 +585,11 @@ const CHANGED = [
     "PR stays queued, label untouched, nothing written to the ledger, and no member is dispatched to restore the lines — the removal may be deliberate.",
     "PR stays queued, label untouched, and no member is dispatched to restore the lines — the removal may be deliberate."
   ],
+  // The main-gain-hit row puts the question to the maintainer itself: it reads the hunks, drafts the acknowledgement lines and asks.
+  [
+    "| Merge bot's gate finds the merge would remove lines `main` gained after the PR's work began (`main-gain-removed:<path>`, exit 1) | Relay `main-gain-removed:<path>-#<pr>` to a human with the hit list and the acknowledgement keys the bot printed.",
+    "| Merge bot's gate finds the merge would remove lines `main` gained after the PR's work began (`main-gain-removed:<path>`, exit 1) | In the same turn, read each hit group's `hunks[]` from the bot's gate reading `<scratch>/pr<pr>/merge-bot-<n>/ci.json` — each hunk's `added` lines and `missing` tokens (a blank line is `\"\\n\"`)."
+  ],
   // Phase 0's `alarm` step is re-run on every invocation, an `ok` one included.
   [
     "Once `rotate` has run, a re-run skips every `ok` step and resumes where the last one stopped; before it, a re-run runs every step again.",

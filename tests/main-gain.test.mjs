@@ -20,7 +20,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, unlinkSync, renameSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/main-gain.mjs", import.meta.url));
@@ -107,12 +107,27 @@ function commitFeat(w, n, message = "feat change") {
   return git(w, "rev-parse", "HEAD");
 }
 
-function run(cwd, head, { body = null, args = [], env = {} } = {}) {
+// `closing` is the object `gh pr view --json number,url,closingIssuesReferences`
+// prints, or a string written as it is, handed over as `--closing-refs`.
+function run(cwd, head, { body = null, args = [], env = {}, closing = null } = {}) {
   const argv = [SCRIPT, "--head", head, ...args];
   if (body !== null) argv.push("--body-file", "-");
+  if (closing !== null) {
+    const file = join(dirname(cwd), "closing-refs.json");
+    writeFileSync(file, typeof closing === "string" ? closing : JSON.stringify(closing));
+    argv.push("--closing-refs", file);
+  }
   const r = spawnSync(process.execPath, argv, { cwd, env: { ...ENV, ...env }, encoding: "utf8", input: body ?? "" });
   return { code: r.status, stdout: r.stdout, stderr: r.stderr, json: r.stdout.trim() ? JSON.parse(r.stdout) : null };
 }
+
+const PR_URL = "https://github.com/o/r/pull/5";
+/** What gh prints for a PR that closes `numbers` in its own repository. */
+const closing = (...numbers) => ({
+  number: 5,
+  url: PR_URL,
+  closingIssuesReferences: numbers.map((number) => ({ number, url: `https://github.com/o/r/issues/${number}` })),
+});
 
 const expect = (r, code) => assert.equal(r.code, code, `exit ${r.code}, expected ${code}\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
 
@@ -185,27 +200,212 @@ test("a removed line edited in place, keeping every token, is not a hit", (t) =>
   const r = run(w, commitFeat(w, 5));
   expect(r, 0);
   assert.deepEqual(r.json.hits, []);
-  assert.deepEqual(r.json.edited, [{ path: "tests.txt", line: 5, text: "new2", replacement: "new2 extra" }]);
+  assert.deepEqual(r.json.edited, [{ path: "tests.txt", line: 5, text: "new2", replacement: "new2 extra", rule: "line" }]);
 });
 
-test("one added line holding the tokens of two removed lines covers only the first", (t) => {
+test("one added line holding the tokens of two removed lines covers only the first, when the hunk rule fails", (t) => {
+  const { w } = world(t);
+  rewriteAt(4, w, "rebase", "-q", "origin/main");
+  // `new1` is dropped, so the added tokens do not hold the hunk's removed ones.
+  write(w, "tests.txt", OLD + "new2 new3 extra\n");
+  const r = run(w, commitFeat(w, 5));
+  expect(r, 1);
+  assert.deepEqual(r.json.edited, [{ path: "tests.txt", line: 5, text: "new2", replacement: "new2 new3 extra", rule: "line" }]);
+  assert.deepEqual(r.json.hits[0].lines, [
+    { line: 4, text: "new1", kind: "modified" },
+    { line: 6, text: "new3", kind: "modified" },
+  ]);
+});
+
+// --- hunk rule ---------------------------------------------------------------
+
+test("a gained line re-wrapped over two added lines keeping every token clears as `hunk`", (t) => {
+  const r = rewriteLanded(t, "w.txt", "aa bb cc dd\n", "aa bb\ncc dd\n");
+  expect(r, 0);
+  assert.deepEqual(r.json.hits, []);
+  assert.deepEqual(r.json.edited, [{ path: "w.txt", line: 1, text: "aa bb cc dd", replacement: "aa bb\ncc dd", rule: "hunk" }]);
+});
+
+test("two gained lines joined into one: the first is an in-place edit, the rest of the hunk clears as `hunk`", (t) => {
   const { w } = world(t);
   rewriteAt(4, w, "rebase", "-q", "origin/main");
   write(w, "tests.txt", OLD + "new1\nnew2 new3 extra\n");
   const r = run(w, commitFeat(w, 5));
+  expect(r, 0);
+  assert.deepEqual(r.json.hits, []);
+  assert.deepEqual(r.json.edited, [
+    { path: "tests.txt", line: 5, text: "new2", replacement: "new2 new3 extra", rule: "line" },
+    { path: "tests.txt", line: 6, text: "new3", replacement: "new2 new3 extra", rule: "hunk" },
+  ]);
+});
+
+test("a hunk entry lists the first cleared gained line, every cleared line and every added line compared", (t) => {
+  const r = rewriteLanded(t, "w.txt", "aa bb\ncc dd\nee ff\n", "aa bb cc dd ee ff\ngg\n");
+  expect(r, 0);
+  assert.deepEqual(r.json.edited.filter((e) => e.rule === "hunk"), [
+    { path: "w.txt", line: 2, text: "cc dd\nee ff", replacement: "aa bb cc dd ee ff\ngg", rule: "hunk" },
+  ]);
+});
+
+test("tokens count at the hunk level: `foo bar` and `foo baz` rewritten as `foo bar baz` stays a hit", (t) => {
+  const r = rewriteLanded(t, "c.txt", "foo bar\nfoo baz\n", "foo bar baz\n");
   expect(r, 1);
-  assert.deepEqual(r.json.edited, [{ path: "tests.txt", line: 5, text: "new2", replacement: "new2 new3 extra" }]);
-  assert.deepEqual(r.json.hits[0].lines, [{ line: 6, text: "new3", kind: "modified" }]);
+  assert.deepEqual(r.json.hits[0].lines, [{ line: 2, text: "foo baz", kind: "modified" }]);
+  assert.deepEqual(r.json.hits[0].hunks, [{ lines: [2], added: ["foo bar baz"], missing: [["foo", 1]] }]);
+});
+
+test("a token moved into a different hunk is missing from its own hunk: the line stays a hit", (t) => {
+  const r = rewriteLanded(t, "h.txt", "a1 a2\nm1\nm2\nm3\nb1\n", "a1\nm1\nm2\nm3\nb1 a2\n");
+  expect(r, 1);
+  assert.deepEqual(r.json.hits[0].lines, [{ line: 1, text: "a1 a2", kind: "modified" }]);
+  assert.deepEqual(r.json.hits[0].hunks, [{ lines: [1], added: ["a1"], missing: [["a2", 1]] }]);
+  assert.deepEqual(r.json.edited, [{ path: "h.txt", line: 5, text: "b1", replacement: "b1 a2", rule: "line" }]);
+});
+
+test("a blank gained line replaced by text and a blank line in the same hunk, every other token kept, clears as `hunk`", (t) => {
+  const r = rewriteLanded(t, "b.txt", "x1\n   \nx3\n", "x1\nX\n\nx3\n");
+  expect(r, 0);
+  assert.deepEqual(r.json.edited, [{ path: "b.txt", line: 2, text: "   ", replacement: "X\n", rule: "hunk" }]);
+});
+
+test("a hunk that adds nothing is never cleared: a deleted gained line stays a hit", (t) => {
+  const r = rewriteLanded(t, "d.txt", "x1\nx2\nx3\n", "x1\nx3\n");
+  expect(r, 1);
+  assert.deepEqual(r.json.hits[0].lines, [{ line: 2, text: "x2", kind: "deleted" }]);
+  assert.deepEqual(r.json.hits[0].hunks, [{ lines: [2], added: [] }]);
+});
+
+// --- retraction rule ---------------------------------------------------------
+
+// The retraction of a forward reference, re-wrapped; the PR closes the ticket.
+const FORWARD = "acceptance criteria, `unknown` when either is missing. Once #3956 lands, a\nSlice is `heavy` whatever its length. `light` means a short ticket, not an\n";
+const RETRACTED = "acceptance criteria, `unknown` when either is missing. A Slice is `heavy`\nwhatever its length. `light` means a short ticket, not an\n";
+
+test("a forward reference to a ticket the PR closes is retracted: the hunk clears as `retracted #N`", (t) => {
+  const r = rewriteLanded(t, "s.md", FORWARD, RETRACTED, { closing: closing(3956) });
+  expect(r, 0);
+  assert.deepEqual(r.json.closes, [3956]);
+  assert.deepEqual(r.json.hits, []);
+  assert.deepEqual(r.json.edited, [{ path: "s.md", line: 1, text: FORWARD.trimEnd(), replacement: RETRACTED.trimEnd(), rule: "retracted #3956" }]);
+});
+
+test("the same retraction in a PR that only refers to the ticket stays a hit, with the missing tokens named", (t) => {
+  const r = rewriteLanded(t, "s.md", FORWARD, RETRACTED, { closing: closing() });
+  expect(r, 1);
+  assert.deepEqual(r.json.closes, []);
+  assert.deepEqual(r.json.hits[0].lines.map((l) => [l.line, l.kind]), [[1, "modified"], [2, "modified"]]);
+  assert.deepEqual(r.json.hits[0].hunks[0].missing, [[",", 1], ["Once", 1], ["#", 1], ["3956", 1], ["lands", 1], ["a", 1]]);
+  assert.deepEqual(r.json.hits[0].hunks[0].lines, [1, 2]);
+});
+
+test("a phrase may span lines", (t) => {
+  const r = rewriteLanded(t, "s.md", "Once #12\nlands, the X\n", "The X\n", { closing: closing(12) });
+  expect(r, 0);
+  assert.deepEqual(r.json.edited.map((e) => e.rule), ["retracted #12"]);
+});
+
+test("a hunk that only removes a gained `Once #12 lands,` stays a deleted hit, even for a PR that closes #12", (t) => {
+  const r = rewriteLanded(t, "d.txt", "x1\nOnce #12 lands,\nx3\n", "x1\nx3\n", { closing: closing(12) });
+  expect(r, 1);
+  assert.deepEqual(r.json.hits[0].lines, [{ line: 2, text: "Once #12 lands,", kind: "deleted" }]);
+});
+
+test("a phrase naming a number the PR does not close does not count", (t) => {
+  const r = rewriteLanded(t, "p.txt", "(target; #12 and #13 still to land)\n", "(target; #13 still to land)\n", { closing: closing(12) });
+  expect(r, 1);
+  assert.deepEqual(r.json.hits[0].lines, [{ line: 1, text: "(target; #12 and #13 still to land)", kind: "modified" }]);
+});
+
+test("a phrase naming only closed numbers counts, whatever joins them", (t) => {
+  const r = rewriteLanded(t, "p.txt", "(target; #12 and #13 still to land)\n", "(target;)\n", { closing: closing(12, 13) });
+  expect(r, 0);
+  assert.deepEqual(r.json.edited.map((e) => e.rule), ["retracted #12 #13"]);
+});
+
+test("an amendment note is no forward reference: dropping a gained `Amended by #12.` stays a hit", (t) => {
+  const r = rewriteLanded(t, "a.txt", "Some rule. Amended by #12.\n", "Some rule.\n", { closing: closing(12) });
+  expect(r, 1);
+  assert.deepEqual(r.json.hits[0].lines, [{ line: 1, text: "Some rule. Amended by #12.", kind: "modified" }]);
+});
+
+test("a Status line whose gained `Amended by #12: …` text the PR's own edit drops stays a hit", (t) => {
+  const landed = "**Status:** Accepted. Amended by #12: the row is gone.\n";
+  const r = rewriteLanded(t, "adr.md", landed, "**Status:** Accepted.\n", { closing: closing(12) });
+  expect(r, 1);
+  assert.equal(r.json.hits[0].lines[0].text, landed.trimEnd());
+});
+
+test("case tolerance covers the one token after the phrase: `Once #12 lands, the X` -> `The X` clears", (t) => {
+  const r = rewriteLanded(t, "k.txt", "Once #12 lands, the X\n", "The X\n", { closing: closing(12) });
+  expect(r, 0);
+  assert.deepEqual(r.json.edited.map((e) => e.rule), ["retracted #12"]);
+});
+
+test("case tolerance covers one token only: `Once #12 lands, the X` -> `The x` stays a hit", (t) => {
+  const r = rewriteLanded(t, "k.txt", "Once #12 lands, the X\n", "The x\n", { closing: closing(12) });
+  expect(r, 1);
+});
+
+test("a phrase is matched case-insensitively, on whole tokens", (t) => {
+  const loud = rewriteLanded(t, "k.txt", "ONCE #12 LANDS, the X\n", "The X\n", { closing: closing(12) });
+  expect(loud, 0);
+  const partial = rewriteLanded(t, "k.txt", "nonce #12 lands, the X\n", "The X\n", { closing: closing(12) });
+  expect(partial, 1);
+});
+
+// --- closing issues ----------------------------------------------------------
+
+test("no --closing-refs: closes is null and the retraction rule is off", (t) => {
+  const r = rewriteLanded(t, "s.md", FORWARD, RETRACTED);
+  expect(r, 1);
+  assert.equal(r.json.closes, null);
+});
+
+test("closes keeps this repository's closing references and drops another repository's", (t) => {
+  const refs = {
+    number: 5,
+    url: PR_URL,
+    closingIssuesReferences: [
+      { number: 3956, url: "https://github.com/o/r/issues/3956" },
+      { number: 12, url: "https://github.com/o/other/issues/12" },
+    ],
+  };
+  const r = rewriteLanded(t, "s.md", FORWARD, RETRACTED, { closing: refs });
+  expect(r, 0);
+  assert.deepEqual(r.json.closes, [3956]);
+  const foreign = rewriteLanded(t, "k.txt", "Once #12 lands, the X\n", "The X\n", { closing: refs });
+  expect(foreign, 1);
+});
+
+test("a closing reference it cannot place, a url that is not this PR's, or an unreadable file: it still answers, closes null, rule off", (t) => {
+  const unplaced = { ...closing(3956), closingIssuesReferences: [{ number: 3956 }] };
+  const wrongUrl = { ...closing(3956), url: "https://github.com/o/r/pull/6" };
+  for (const bad of [unplaced, wrongUrl, "not json", "null"]) {
+    const r = rewriteLanded(t, "s.md", FORWARD, RETRACTED, { closing: bad });
+    expect(r, 1);
+    assert.equal(r.json.closes, null);
+  }
+  const { w } = world(t);
+  const missing = run(w, git(w, "rev-parse", "HEAD"), { args: ["--closing-refs", join(dirname(w), "absent.json")] });
+  expect(missing, 0);
+  assert.equal(missing.json.closes, null);
+});
+
+test("every in-place edit carries rule `line`, and the output carries closes", (t) => {
+  const r = rewriteLanded(t, "i.mjs", `${IMPORT}\n`, 'import { a, b, c } from "./m.mjs";\n');
+  expect(r, 0);
+  assert.deepEqual(r.json.edited.map((e) => e.rule), ["line"]);
+  assert.equal(r.json.closes, null);
 });
 
 /** Lands `path` holding `landed` through #9 after R, then the PR rewrites it to `edited`. */
-function rewriteLanded(t, path, landed, edited) {
+function rewriteLanded(t, path, landed, edited, options = {}) {
   const { w } = world(t);
   landPr(w, 4, 9, { [path]: landed });
   git(w, "checkout", "-q", "feat");
   rewriteAt(6, w, "rebase", "-q", "origin/main");
   write(w, path, edited);
-  return run(w, commitFeat(w, 7));
+  return run(w, commitFeat(w, 7), options);
 }
 
 const IMPORT = 'import { a, b } from "./m.mjs";';
@@ -214,13 +414,13 @@ test("a name appended to a gained import line is an in-place edit, not a hit", (
   const r = rewriteLanded(t, "i.mjs", `${IMPORT}\n`, 'import { a, b, c } from "./m.mjs";\n');
   expect(r, 0);
   assert.deepEqual(r.json.hits, []);
-  assert.deepEqual(r.json.edited, [{ path: "i.mjs", line: 1, text: IMPORT, replacement: 'import { a, b, c } from "./m.mjs";' }]);
+  assert.deepEqual(r.json.edited, [{ path: "i.mjs", line: 1, text: IMPORT, replacement: 'import { a, b, c } from "./m.mjs";', rule: "line" }]);
 });
 
 test("an in-place edit reports both lines verbatim, indentation included", (t) => {
   const r = rewriteLanded(t, "g.mjs", "if (ok) {\n  run(a);\n}\n", "if (ok) {\n  run(a, b);\n}\n");
   expect(r, 0);
-  assert.deepEqual(r.json.edited, [{ path: "g.mjs", line: 2, text: "  run(a);", replacement: "  run(a, b);" }]);
+  assert.deepEqual(r.json.edited, [{ path: "g.mjs", line: 2, text: "  run(a);", replacement: "  run(a, b);", rule: "line" }]);
 });
 
 test("a name dropped from a gained import line is a modified hit", (t) => {
@@ -264,6 +464,7 @@ test("a gained blank line replaced by text is a modified hit, not an unanswerabl
   const r = rewriteLanded(t, "b.txt", "x1\n\nx3\n", "x1\nX\nx3\n");
   expect(r, 1);
   assert.deepEqual(r.json.hits[0].lines, [{ line: 2, text: "", kind: "modified" }]);
+  assert.deepEqual(r.json.hits[0].hunks, [{ lines: [2], added: ["X"], missing: [["\n", 1]] }]);
 });
 
 test("a long removed line claims an added line holding its tokens before a short one does", (t) => {
@@ -271,7 +472,7 @@ test("a long removed line claims an added line holding its tokens before a short
   // order hands the added line to the long one.
   const r = rewriteLanded(t, "s.txt", "a\na b c\n", "a b c d\n");
   expect(r, 1);
-  assert.deepEqual(r.json.edited, [{ path: "s.txt", line: 2, text: "a b c", replacement: "a b c d" }]);
+  assert.deepEqual(r.json.edited, [{ path: "s.txt", line: 2, text: "a b c", replacement: "a b c d", rule: "line" }]);
   assert.deepEqual(r.json.hits[0].lines, [{ line: 1, text: "a", kind: "modified" }]);
 });
 
