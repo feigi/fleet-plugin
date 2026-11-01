@@ -79,7 +79,9 @@ branch, and every later rebase replayed it with zero conflicts.
    `main-gain-removal: <path> <key> - <why>`, the key being `#<n>` for a
    GitHub merge of PR n and otherwise the landing commit's 12-character SHA.
    It is read whenever the gate runs, so editing the body resolves a hit
-   without rewriting history. A marker with an empty reason does not count.
+   without rewriting history. A marker with an empty reason, or one whose
+   whole reason is a single angle-bracket placeholder such as the printed
+   `<why>`, does not count.
    Acknowledged removals pass and are always listed, in the gate payload and
    in the merge bot's report.
 7. **The pre-rebase head gives the same verdict as the rebased one.** On the

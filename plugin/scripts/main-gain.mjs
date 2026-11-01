@@ -62,7 +62,8 @@
 // GitHub's merge subject for PR n, otherwise that commit's 12-character
 // abbreviated SHA. A PR-body line `main-gain-removal: <path> <key> - <why>`
 // acknowledges every hit in that file with that key, and nothing else; one
-// with an empty reason does not count. Acknowledged hits move from `hits[]`
+// with an empty reason, or a reason that is only an angle-bracket placeholder
+// such as the printed `<why>`, does not count. Acknowledged hits move from `hits[]`
 // to `acknowledged[]` and both are reported.
 //
 // Stdout: one JSON line, `{head, base, closes, since, hits, acknowledged,
@@ -380,12 +381,14 @@ function blame(path, lines) {
 }
 
 // `main-gain-removal: <path> <key> - <why>`, one per line. The key is the
-// token before ` - `, so a path may carry spaces; a blank <why> never matches.
+// token before ` - `, so a path may carry spaces; a blank <why> never matches,
+// and neither does one that is a single angle-bracket placeholder, the line
+// the gate prints for the author to copy included.
 function acknowledgements(text) {
   const acks = [];
   for (const raw of text.split(/\r?\n/)) {
     const m = /^main-gain-removal: (.+) (#[1-9][0-9]*|[0-9a-f]{12}) - (\S.*)$/.exec(raw.trim());
-    if (m) acks.push({ path: m[1], key: m[2], reason: m[3] });
+    if (m && !/^<[^<>]*>$/.test(m[3])) acks.push({ path: m[1], key: m[2], reason: m[3] });
   }
   return acks;
 }
