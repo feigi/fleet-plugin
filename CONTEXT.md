@@ -550,8 +550,10 @@ _Avoid_: exclusion, held-behind, blocked
 
 **Exploration Pull**:
 A Pull whose implementer cell is drawn rather than dispatched at the
-policy cell — every 5th `impl-` row by ledger count (every Pull, during
-the router's burn-in). Recorded as `exploration_draw = <k>/<K>` in
+policy cell — every Pull during the router's burn-in, afterwards every 5th
+`impl-` row by ledger count, drawn within the Pull's Stratum from its Cell
+with one effort level more and less, the bigger model one level less and the
+smaller model one level more. Recorded as `exploration_draw = <k>/<K>` in
 `ticket-features.tsv`; the member is never told. A Pull the Router routes
 without a draw still dispatches at the Cell the Router printed, and is no
 Exploration Pull.
@@ -559,8 +561,10 @@ _Avoid_: alt-tier, A/B pull
 
 **Exploration draw**:
 The pure function (`drawCell`) that picks a cell uniformly from the
-eligible cells on an Exploration Pull — deterministic from the session id
-and ticket number, no RNG, no seed.
+eligible cells on an Exploration Pull — during burn-in the starting table's
+Cells, afterwards the Stratum's exploration Cells — deterministic from the
+session id and ticket number, no RNG, no seed. Each Pull's probability of the
+Cell it got is known at the draw, and the Fit weighs the Pull by it.
 _Avoid_: random draw, coin flip
 
 **Ending**:
@@ -635,9 +639,9 @@ that generation.
 _Avoid_: model (bare), cell version, tier generation
 
 **Router**:
-The checked-in table (`router-table.json`) plus the script that reads and
-fits it (`ticket-router.mjs`), mapping a ticket's stratum and the run's
-Objective to a Cell, with one row set per Objective.
+The per-repository **Fit** (or the **Starting table**, while there is none)
+plus the script that reads it (`ticket-router.mjs`), mapping a ticket's
+Stratum and the run's Objective to a Cell, with one row set per Objective.
 Not a dispatched member — no `fleet-router` agent definition exists; sizing a
 ticket for the table is one `judge()` call in the controller's own eval.
 _Avoid_: fleet-router, sizer
@@ -652,32 +656,47 @@ it in the run ledger's `## Routed` section, and the Pull's board card shows it
 _Avoid_: route (bare: the Tier route is the `modelRoles` mapping), routing
 line, verdict (that word belongs to a Ruling)
 
-**Preview fit**:
-The Router's fit over the workspace's own records, written beside the cost
-guard at phase 0 and close-out (`.fleet/router-preview.json`) with the
-installed table as its prior; never routed, never committed. It is what the
-evidence favours, shown beside what routes now. In a consumer it fits the
-consumer's records alone, while the table that routes is fitted on this
-repository's runs.
-_Avoid_: re-fit (that changes the table), shadow table, readout
+**Fit**:
+The Router's table recomputed from the repository's own records, at every phase
+0 and kept beside the cost guard (`.fleet/`); never committed, with the blob id
+of each metrics file it read and the guard it used recorded so it can be
+recomputed. It routes that run; each close-out's evidence routes the next. A run
+whose Fit fails routes by the last Fit that computed, else by the **Starting
+table**. It holds the tree of Strata, each Stratum's rows and every candidate
+Cell's verdict.
+_Avoid_: Preview fit (it was only displayed, beside a table fitted elsewhere),
+re-fit (a Fit changes no checked-in table), shadow table, readout
+
+**Starting table**:
+The table every repository routes by until its first Fit: one Stratum for every
+ticket, the three models at `high`, every row `slow-high`, no estimates, in
+burn-in. It ships with the plugin and changes only when the starting point
+itself does, never by a Fit; nothing from this repository's own runs is in it.
+_Avoid_: default table, seed table, shipped table (it stops routing once a Fit
+exists)
 
 **Cell evidence**:
 What the cockpit's Cell evidence tab shows about why each implementer Cell is
-used: per Objective × Stratum row, the Cell routes now gives and the Cell the
-Preview fit favours, with each candidate's verdict and interval; per Cell,
-what the cost guard holds it to; and, through each board card, every live
-Pull's Routing. Every figure is read from a record, never recomputed by the
-cockpit, and shown beside its trust status. The tab opens once #3894 lands.
+used: one view of the Fit that routes the run — the tree of Strata, each row's
+Cell with every candidate's verdict and interval, burn-in progress, what each
+Stratum is exploring, the Cells the cost guard has tripped, a notice when a
+role's model changed and burn-in restarted, and a flag when the Fit failed and
+the last good one routes; per Cell, what the cost guard holds it to; and,
+through each board card, every live Pull's Routing. Every figure is read from a
+record, never recomputed by the cockpit, and shown beside its trust status. The
+tab opens once #3894 lands.
 _Avoid_: tier outcomes, router stats, readout
 
 **Stratum**:
-The class of ticket the Router keys on: `light`, `heavy` or `unknown`, set by
-the Router's classifier — today a rule on the brief's length and its count of
-acceptance criteria, `unknown` when either is missing. A Slice is `heavy`
-whatever its length. `light` means a short ticket, not an
-easy one. The table's `*` row covers every ticket together and is not a
-stratum.
-_Avoid_: size, difficulty, bucket
+A group of tickets that shares a row, and so a Cell: a leaf of the Router's tree
+of readable splits on inputs recorded at dispatch, such as brief length,
+criteria, kind or the paths a brief names. It is learned per repository from its
+own Pulls: the tree starts as one Stratum, and a split stands only after the
+evidence shows it pays at two consecutive Fits, to a depth of two splits, and
+merges back on one failure. No fixed rule such as light or heavy defines one.
+The table's `*` row covers every ticket together: the only Stratum before any
+split, and the row a ticket follows when it lacks a split's input.
+_Avoid_: cluster, class, size, difficulty, bucket
 
 **Slice**:
 A ticket cut from another issue, its parent, which holds its design: its body
@@ -691,9 +710,10 @@ _Avoid_: spec ticket, sub-issue, child ticket
 **Quality floor**:
 How far a Cell's fail rate (false claims over claims) may rise above
 `slow-high`'s before the Cell is refused: under 15 points. The cost guard
-holds it over every ticket together and trips the Cell. The Router's fit also
-holds it within each stratum and on the `*` row, afresh at every fit, and
-refuses the Cell only for that row; the Cell still takes Exploration Pulls.
+holds it over every ticket together and trips the Cell. The Router's Fit also
+holds it within each Stratum's rows, afresh at every Fit and comparing the two
+Cells only over the stretches in which both were drawn, and refuses the Cell
+only for that row; the Cell still takes Exploration Pulls.
 _Avoid_: veto, quality gate
 
 **As-routed**:
