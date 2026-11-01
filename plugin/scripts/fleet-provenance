@@ -2,23 +2,19 @@
 // The Provenance check (CONTEXT.md § Install
 // "Provenance check"). Names the live Install root — the realpath of omp's
 // `node_modules/@feigi/fleet-ctl` package entry, the one path every install kind
-// places — its kind and recorded version, and hashes the placed
-// Resolver (`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run`) against the Install root's own copy and
-// refuses on drift. Writes nothing, mutates no config — every path below is
-// read-only.
+// places — its kind and recorded version, and a digest over its scripts/.
+// Exits 0 when the package entry resolves and 2 when it does not. Writes
+// nothing, mutates no config — every path below is read-only.
 //
 // The `enabledProviders: ["claude-plugins"]` assertion retired here: omp
 // 18.2.1 exempts omp-origin installs from
 // that provider gate, and the native package route never depended on it.
 // Asserting it refused correct setups.
 //
-// SEPARATE FILE, not `fleet-run --check`. `fleet-run` is deliberately a
-// single self-contained file because it alone gets copied to
-// `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run` (see that file's own header) — folding a second,
-// unrelated responsibility into it would grow the one artefact outside the
-// plugin for a feature that never needs to travel there. This script stays
-// inside the install and is reached like every other one, through the
-// Resolver: `fleet-run fleet-provenance`.
+// SEPARATE FILE, not `fleet-run --check`. `fleet-run` is the single door
+// between prose and a script, and maps a script name to the Install root and
+// nothing else; this check is one more script behind that door, reached like
+// every other one, through the Resolver: `fleet-run fleet-provenance`.
 "use strict";
 
 const fs = require("node:fs");
@@ -30,9 +26,8 @@ const NAME = "fleet-provenance";
 const PLUGIN_KEY = "@feigi/fleet-ctl"; // the plugin's package name, and its node_modules package dir.
 
 // Same resolution point as scripts/fleet-run (its header names the shape of
-// each install kind). Duplicated rather than shared because a module the
-// Resolver requires would have to travel with its placed copy — see
-// fleet-run's own header.
+// each install kind), resolved in this file's own lines: fleet-run requires
+// nothing from the rest of the plugin, so there is no shared module to call.
 function resolveInstall(home) {
   const packagePath = path.join(home, ".omp", "plugins", "node_modules", PLUGIN_KEY);
   let stat;
@@ -132,17 +127,6 @@ function main() {
     process.exit(2);
   }
 
-  const placedPath = path.join(home, ".fleet", "bin", "fleet-run");
-  let placedBuf = null;
-  let placedError = null;
-  try {
-    placedBuf = fs.readFileSync(placedPath);
-  } catch (e) {
-    placedError = `${e.code || e.message}`;
-  }
-
-  let failed = false;
-
   const kind = kindOf(reg);
   const version = readLockVersion(home);
   process.stdout.write(`${NAME}: Install root: ${reg.installPath}\n`);
@@ -156,31 +140,6 @@ function main() {
     process.stdout.write(`${NAME}: scripts/ digest: sha256 ${digest.digest} (${digest.fileCount} files)\n`);
   }
 
-  const installedRunPath = path.join(reg.installPath, "scripts", "fleet-run");
-  let installedRunBuf = null;
-  let installedRunError = null;
-  try {
-    installedRunBuf = fs.readFileSync(installedRunPath);
-  } catch (e) {
-    installedRunError = `${e.code || e.message}`;
-  }
-
-  if (placedError) {
-    process.stdout.write(`${NAME}: Resolver drift: REFUSED — placed copy ${placedPath} unreadable (${placedError})\n`);
-    failed = true;
-  } else if (installedRunError) {
-    process.stdout.write(`${NAME}: Resolver drift: REFUSED — installed copy ${installedRunPath} unreadable (${installedRunError})\n`);
-    failed = true;
-  } else if (!placedBuf.equals(installedRunBuf)) {
-    process.stdout.write(
-      `${NAME}: Resolver drift: REFUSED — ${placedPath} (sha256 ${sha256(placedBuf)}) `
-      + `!= ${installedRunPath} (sha256 ${sha256(installedRunBuf)})\n`,
-    );
-    failed = true;
-  } else {
-    process.stdout.write(`${NAME}: Resolver drift: none — ${placedPath} matches ${installedRunPath}\n`);
-  }
-
   if (kind === "linked-checkout") {
     // Not a failure: a link is the dev loop. It is a NOTICE on
     // every other install's answer, because a linked root outranks an
@@ -192,7 +151,7 @@ function main() {
     );
   }
 
-  process.exit(failed ? 1 : 0);
+  process.exit(0);
 }
 
 main();
