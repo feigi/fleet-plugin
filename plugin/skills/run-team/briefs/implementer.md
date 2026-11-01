@@ -12,8 +12,11 @@ literal that path
 literal outcome
 ---
 Implement ticket <N>. You are ALREADY in worktree `<abs-path>`, whose PR branch is
-`<branch>`. Your scratch directory is `<scratch>/impl-<N>/`; outside the worktree,
-write nowhere else but your report file below.
+`<branch>`: commit on it and open your PR from it, even when the ticket below names
+another branch; the settle refuses a PR from any other branch. If the ticket names
+one, say in the PR body that you used `<branch>`. Your scratch directory is
+`<scratch>/impl-<N>/`; outside the worktree, write nowhere else but your report file
+below.
 
 The ticket, pasted verbatim from the controller's own read — its title, the
 `## Agent Brief` comment or the issue body, whichever carries the brief, and its

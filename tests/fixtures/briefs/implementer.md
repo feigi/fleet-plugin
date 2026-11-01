@@ -1,6 +1,9 @@
 Implement ticket 4120. You are ALREADY in worktree `/abs/wt-impl`, whose PR branch is
-`impl-branch`. Your scratch directory is `/abs/scratch-impl/impl-4120/`; outside the worktree,
-write nowhere else but your report file below.
+`impl-branch`: commit on it and open your PR from it, even when the ticket below names
+another branch; the settle refuses a PR from any other branch. If the ticket names
+one, say in the PR body that you used `impl-branch`. Your scratch directory is
+`/abs/scratch-impl/impl-4120/`; outside the worktree, write nowhere else but your report file
+below.
 
 The ticket, pasted verbatim from the controller's own read — its title, the
 `## Agent Brief` comment or the issue body, whichever carries the brief, and its
