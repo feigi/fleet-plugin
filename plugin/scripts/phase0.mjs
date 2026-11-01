@@ -77,10 +77,12 @@
 //                 never fails the run.
 //   recipe        `derive-testcmd.sh . install`, `. check` and `. test`, each
 //                 `--at origin/main` (recipe-read.mjs, which the settle wakes of
-//                 fleet-event.mjs read the cache through as well). Any
+//                 fleet-event.mjs read the cache through as well). Any read
+//                 exiting neither 0 nor 1 — exit 3, a tool the reader could not
+//                 run, or any other failure — fails the step whatever the other
+//                 reads answered: deriving would not help. Otherwise any
 //                 exiting 1 is a cache with nothing valid in it: pending,
-//                 `NEED derive-recipe`. Exit 3 (a tool the reader could not run)
-//                 fails the step — deriving would not help.
+//                 `NEED derive-recipe`.
 //   fold-in       every Owned PR (owned-pr.mjs: open, not a draft, authored by
 //                 the login `gh api user` answers to) that no carried ledger
 //                 row names gets a `#<pr>` row from `ledger.mjs row`, closing an
