@@ -1528,7 +1528,9 @@ test("--propose names only install, check or test, never uncovered (#3491)", () 
 // about the command's path both ways: `lost` removed `run-tests.sh`, which the
 // checkout still holds executable, and `gained` holds what the checkout lacks —
 // an executable, a file without the exec bit, a symlink to a file, a symlink to
-// a directory and a submodule entry. The checkout's `.gitignore` ignores
+// a directory, a submodule entry, a directory `bin/sub/x` to fold `..` through,
+// and executables under directories named `:d` and `:^x`, which read as
+// pathspec magic unless named `:(literal)`. The checkout's `.gitignore` ignores
 // `dist/`, which no commit holds.
 function revFixture() {
   const { dir } = repo({ "run-tests.sh": "#!/bin/sh\n", ".gitignore": "dist/\n" });
@@ -1548,6 +1550,13 @@ function revFixture() {
   chmodSync(join(dir, "bin", "plain.sh"), 0o644);
   symlinkSync("gained.sh", join(dir, "bin", "link"));
   symlinkSync("bin", join(dir, "linkdir"));
+  mkdirSync(join(dir, "bin", "sub", "x"), { recursive: true });
+  writeFileSync(join(dir, "bin", "sub", "x", "keep"), "");
+  for (const p of [":d/run.sh", ":^x/run.sh"]) {
+    mkdirSync(join(dir, dirname(p)));
+    writeFileSync(join(dir, p), "#!/bin/sh\n");
+    chmodSync(join(dir, p), 0o755);
+  }
   git("add", "-A");
   git("update-index", "--add", "--cacheinfo", `160000,${head},vendor/tool`);
   git("commit", "-q", "-m", "gained");
@@ -1555,6 +1564,8 @@ function revFixture() {
   git("reset", "-q", "--hard", head);
   assert.equal(git("ls-tree", gained, "--", "bin/gained.sh", "bin/plain.sh", "bin/link", "linkdir", "vendor/tool").split("\n").map((l) => l.split(" ")[0]).join(" "),
     "100755 120000 100644 120000 160000", "fixture: gained records each mode");
+  assert.equal(git("ls-tree", "-r", gained, "--", ":(literal):d", ":(literal):^x", "bin/sub").split("\n").map((l) => `${l.split(" ")[0]} ${l.split("\t")[1]}`).join(", "),
+    "100755 :^x/run.sh, 100755 :d/run.sh, 100644 bin/sub/x/keep", "fixture: gained records the folded directory and the colon-named executables");
   return { dir, head, lost, gained };
 }
 
@@ -1583,7 +1594,17 @@ test("--at refuses a command path <rev> lost though the checkout still holds it,
 test("--at accepts a command path only <rev> holds, however the word spells it, and without --at it is refused as before", () => {
   const { dir, head, gained } = revFixture();
   for (const field of FIELDS) {
-    for (const cmd of ["./bin/gained.sh", "bin/gained.sh --flag", "./bin/../bin//gained.sh", "CI=1 ./bin/gained.sh"]) {
+    for (const cmd of [
+      "./bin/gained.sh",
+      "bin/gained.sh --flag",
+      "./bin/../bin//gained.sh",
+      "CI=1 ./bin/gained.sh",
+      "./bin/sub/../gained.sh",
+      "./bin/sub/x/../../gained.sh",
+      ":d/run.sh",
+      ":^x/run.sh",
+      "./bin/../:d/run.sh",
+    ]) {
       cache(dir, recipeFor(head, field, cmd));
       const r = run([dir, field, "--at", gained]);
       assert.equal(r.status, 0, `${field} ${cmd}: ${r.err}`);
@@ -1682,6 +1703,20 @@ test("--at leaves an absolute path and one that climbs out of the repository to 
       const r = run([dir, field, "--at", lost]);
       assert.equal(r.status, 1, `${field} ${cmd}: ${r.err}`);
       assert.ok(r.err.includes(`its ${field} command '${cmd}' is not found or not executable from ${dir} — `), r.err);
+    }
+  }
+});
+
+test("--at leaves a word that folds to the repository itself to the disk, answering as without --at", () => {
+  const { dir, head, gained } = revFixture();
+  mkdirSync(join(dir, "ondisk"));
+  for (const field of FIELDS) {
+    for (const cmd of ["./bin/..", "bin/..", "./ondisk/.."]) {
+      cache(dir, recipeFor(head, field, cmd));
+      const bare = derive(dir, field);
+      const r = run([dir, field, "--at", gained]);
+      assert.deepEqual(r, bare, `${field} ${cmd}: --at answers as the disk does`);
+      assert.ok(!r.err.includes(` at ${gained}`), `${field} ${cmd}: the answer names no rev: ${r.err}`);
     }
   }
 });
