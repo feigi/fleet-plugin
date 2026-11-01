@@ -264,7 +264,8 @@ tracked files only, so without that step a suite whose dependencies are
 ignored cannot start. Mutate and run `<testCmd>` in that tree, then
 `git worktree remove --force <scratch>/pr<N>/finish-<your member name>`.
 **At your dispatch pin, never at the fetched branch tip** — duty 1 just
-proved the owned worktree sits at that pin, and `PR headRefOid` may carry
+proved the owned worktree holds nothing your dispatch pin lacks, though its
+`HEAD` may differ from it, and `PR headRefOid` may carry
 commits no reviewer read, the substitution the halt block's head-equality
 check rejects for the same reason. `<scratch>` is the absolute root your dispatch prompt names. The member name is in the path because
 the scratch root is shared with every sibling, so `<scratch>/pr<N>` alone
@@ -338,6 +339,36 @@ merge. `review-and-fix.md` states them; the body says they apply.
 A re-review at the same head is a run of its own, so the earlier round's verdict never answers it; once the check has run for the fix-applier answering the new round, its verdict is the current one.
 
 ## A halt's cause comes from one script
+
+A worktree whose head differs from the pin because a remote rebase superseded
+it is not a halt. When the newest reflog move is a `commit`, duty 1 tests
+whether `pin..HEAD` holds anything the pin lacks: `git cherry <pin> HEAD`
+prints no `+` line and the range holds no merge commit. A worktree that holds
+nothing the pin lacks exits 0, because refreshing it would lose nothing — the
+commits it holds are already in the pin, rebased. Only a range that does hold
+something is a halt: `past-pin` when the branch's remote ref carries it,
+`stray` otherwise. The test is by patch, so it has two limits. `git
+cherry` never lists a merge commit, so a merge in the range counts as unique
+whatever its parents carry. And patch ids ignore whitespace, so a local commit
+that differs from a pushed one only in whitespace reads clean; it stays behind
+in the owned worktree and never reaches the merge. A newest move that is a
+`reset` or a `rebase` stays `rebase`, even when `pin..HEAD` would test clean.
+
+A `stray` halt is a commit the branch's remote ref is not shown to carry — the
+ref lacks it or is absent, or the read could not tell — so nothing pushes it and
+nothing re-reviews it. Read the patches off `evidence.cherry` (`+` for a patch
+the pin lacks; `merges` counts merge commits, which the listing never shows)
+and `evidence.remote` (`carries` false: the ref lacks it; `sha` null: the ref is
+absent; `carries` null: the read could not be told, and `error` says why). A
+pushed stray is a head no reviewer read: record its review by hand with
+`ledger.mjs review <M>`, under the next runner letter as for a `past-pin`
+re-review below, before any finisher is dispatched.
+
+A `human` halt is a Ticketless PR whose diff is not inert: the maintainer adds
+`ready-to-merge` at the pinned head, which the merge bot merges off the
+finisher's `ready-to-merge-head:` comment; a moved head is merged by hand.
+
+The tick prints `DISPATCH review PR#<M>` for a PR whose latest finisher is `halted:past-pin` and whose latest `reviewed=<head>` is not its current head, until a review of it is running or has returned; record that review's tokens as any review's, with `ledger.mjs review <M>` onto the PR's row, its runner under the next letter the PR's rows do not carry yet (`review-pr-<M>-b`, or `-c` where a retry already took `-b`) — `review` refuses a second `review-pr-<M>` and names the free one — and its result reaches a fresh finisher through the same gate.
 
 A halt at duty 1 reads identical from a bare SHA mismatch whatever caused it,
 and the causes `finisher-audit.mjs` names are the ones seen so far, not a

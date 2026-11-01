@@ -112,6 +112,12 @@ const CORRECTIONS = [
     "and `worktree add` on an occupied path fails closed into a halt with a purely mechanical cause.",
     "and the script fails closed on an occupied path.",
   ],
+  // Duty 1 exits 0 on a worktree whose HEAD differs from the pin when it holds
+  // nothing the pin lacks, so it no longer proves the worktree sits at the pin.
+  [
+    "duty 1 just proved the owned worktree sits at that pin,",
+    "duty 1 just proved the owned worktree holds nothing your dispatch pin lacks, though its `HEAD` may differ from it,",
+  ],
 ];
 
 // The removed text as its blocks — paragraphs, a table, a code block — each

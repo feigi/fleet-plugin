@@ -459,6 +459,17 @@ test("finisher-pr-M=halted:<cause>: a cause and its evidence settle, and unrecor
   assert.deepEqual(f.ok("read").filed, ["#70 a deferral whose filed failed twice"]);
 });
 
+test("finisher-pr-M=halted:stray: the cause the audit's stray names settles, with the cherry and remote read as its evidence", () => {
+  const f = fixture();
+  f.pr(6, { closingIssuesReferences: [], labels: [{ name: "patch" }] });
+  f.ok("dispatch", "6", "finisher-pr-6");
+  f.report("finisher-pr-6", finisherReport(f, {
+    outcome: "halted", cause: "stray", evidence: `{"cherry":{"listing":"+ abc123","merges":0},"remote":{"ref":"refs/heads/feat","sha":null,"carries":false}}`, labelsReadBack: [],
+  }));
+  assert.equal(f.settled("finisher-pr-6").outcome, "halted:stray");
+  assert.equal(dispatched(f, "finisher-pr-6"), "finisher-pr-6=halted:stray");
+});
+
 test("finisher-pr-M=halted:<cause>: a null cause is exit 3", () => {
   const f = fixture();
   f.pr(6, { closingIssuesReferences: [], labels: [{ name: "patch" }] });

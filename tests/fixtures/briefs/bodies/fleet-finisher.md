@@ -22,12 +22,14 @@ that could not look — `outcome` `halted`, `cause` `other`, `evidence` what
 (the path you were dispatched with, and the full SHA). It finds your
 worktree's row, reads whether the tree is dirty, compares the worktree's
 `HEAD` to your pin, and when the head differs derives the cause from the
-reflog. Exit 0, with `cause` null, is the only code that means the worktree is
-clean at your pin. Exit 1 means `cause` is non-null: you are halted, and
-`cause` is the word you name — `live-editor`, `rebase`, `past-pin`,
-`unreadable`, `missing`, `absent` or `other`, and `other` is a cause too, not
-a gap. Exit 2 means the script could not look: you are halted with cause
-`other`, with the line it printed on stderr as the evidence.
+reflog. Exit 0, with `cause` null, is the only code that means the worktree
+holds nothing your pin lacks: it sits at your pin, or it differs from it only
+by commits whose patches your pin already carries. Exit 1 means `cause` is
+non-null: you are halted, and `cause` is the word you name — `live-editor`,
+`rebase`, `past-pin`, `stray`, `unreadable`, `missing`, `absent` or `other`,
+and `other` is a cause too, not a gap. Exit 2 means the script could not look:
+you are halted with cause `other`, with the line it printed on stderr as the
+evidence.
 
 The pin is the SHA you were dispatched against, never `PR headRefOid`: a
 member that kept working and pushed after the pin matches the branch tip on a
@@ -39,7 +41,7 @@ it. Put the verdict, the JSON line it printed, in your report as printed: its
 
 Every cause halts, always — named or not, you never verify the dirt is
 harmless and label over it, a rebase is not a fast-forward you get to accept,
-a commit past the pin is not one either, and a cause you could not name is
+a commit your pin lacks is not one either, and a cause you could not name is
 the least settled of the lot. Naming the cause makes the halt cheap to
 resolve, never a reason to skip it.
 
@@ -104,7 +106,7 @@ alone — it exists and is correct — and report it `unrecorded: #N <subject>`.
 
 **A fix-applier's "applied" is a claim like any other**, and nothing else
 checks it — the review ran against a snapshot cut before those edits existed.
-Confirm `git diff origin/main...HEAD` actually contains what it reported
+Confirm `git diff origin/main...<your dispatch pin>` actually contains what it reported
 applying. Two finishers in one run extended duty 2 this way unprompted, and
 one found five applies where the controller's hand-written list named three:
 a controller's list of what to verify is itself a claim.
@@ -112,8 +114,8 @@ a controller's list of what to verify is itself a claim.
 **That range is right for the positive check and wrong for a negative one.**
 It spans the implementer's commits too, so a constraint of the form *file X
 was not touched* has to be scoped to the apply commit. Measured on one PR:
-a controller wrote "neither document was touched" against
-`origin/main...HEAD` on a two-commit branch whose documents the IMPLEMENTER
+a controller wrote "neither document was touched" against that range on a
+two-commit branch whose documents the IMPLEMENTER
 had correctly edited — the PR's whole point — and a finisher reading that
 literally halts a correct PR. It caught the error instead, and said so; do
 not rely on that.
@@ -155,7 +157,8 @@ tracked files only, so without that step a suite whose dependencies are
 ignored cannot start. Mutate and run `<testCmd>` in that tree, then
 `git worktree remove --force <scratch>/pr<N>/finish-<your member name>`.
 **At your dispatch pin, never at the fetched branch tip** — duty 1 just
-proved the owned worktree sits at that pin, and `PR headRefOid` may carry
+proved the owned worktree holds nothing your dispatch pin lacks, though its
+`HEAD` may differ from it, and `PR headRefOid` may carry
 commits no reviewer read, the substitution the halt block's head-equality
 check rejects for the same reason. `<scratch>` is the absolute root your dispatch prompt names. The member name is in the path because
 the scratch root is shared with every sibling, so `<scratch>/pr<N>` alone
@@ -288,7 +291,7 @@ created, and `unrecorded` for one whose `filed` failed twice, which the
 controller's settle records — and, for anything it halted on, `cause` and
 `evidence`, below, never a bare "head moved". The
 cause is one word of the ledger's `halted:<cause>` vocabulary:
-`live-editor`, `rebase`, `past-pin`, `unreadable`, `missing` or `absent` as
+`live-editor`, `rebase`, `past-pin`, `stray`, `unreadable`, `missing` or `absent` as
 duty 1's verdict names it, `human` for duty 3's exit 5, and `other` for every other halt — that
 verdict's own `other`, and a halt at duty 2, duty 3 or the instrument
 re-check. A duty 1 halt's `evidence` carries the verdict as
