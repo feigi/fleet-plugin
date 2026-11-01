@@ -19,6 +19,7 @@ import { WINDOW_START, MIN_N } from "../plugin/scripts/pr-cost.mjs";
 import { FEATURE_COLUMNS } from "../plugin/scripts/pull-attribution.mjs";
 import { validateTable } from "../plugin/scripts/ticket-router.mjs";
 import { writePreview } from "../plugin/scripts/metrics-refresh.mjs";
+import { refitFailure } from "../plugin/scripts/compute-cell-evidence.mjs";
 
 // A copy of the scripts holding the day-one table, so the installed table the run reads as its prior does not move with a re-fit.
 const SCRIPT = join(dayOneScripts(), "metrics-refresh.mjs");
@@ -359,6 +360,7 @@ test("a preview that cannot be written keeps the old file and leaves the exit as
   const r = f.run();
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /metrics-refresh: preview: failed — \S/);
+  assert.match(refitFailure(r.stdout), /^EISDIR: /, "the cockpit's own parse reads the reason off this run's real stdout");
   assert.match(r.stdout, /cost guard: verdict none/, "the guard ran and stands");
   assert.equal(readFileSync(join(f.repo, PREVIEW), "utf8"), "old preview\n");
 });

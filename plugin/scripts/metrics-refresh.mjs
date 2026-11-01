@@ -70,7 +70,9 @@
 // in-process because a fit has no verdict for an exit status to carry, and the
 // `fit` CLI reads the TSVs only as committed. It never fails the run: an error
 // prints `metrics-refresh: preview: failed — <why>`, leaves the old file in
-// place and leaves the exit status as the other duties set it.
+// place and leaves the exit status as the other duties set it. That line stays
+// on stdout: the cockpit reads it off the receipts' `metrics` step, and
+// close-out's receipt keeps only stdout from a run that exits 0.
 //
 // One `metrics-refresh: <duty>: …` line per duty on stdout. Exit 0 when no
 // duty failed; 1 when one failed — named on stderr, and the duties after

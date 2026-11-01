@@ -16,6 +16,9 @@
 // rowDispatch, the function `route` itself calls), and on the evidence-favours
 // side the same for the Preview fit's table (`.fleet/router-preview.json`, which
 // metrics-refresh.mjs writes beside the guard), marked where its Cell differs.
+// The receipts' newest `metrics` step, which the guard section quotes when there
+// is no guard, also feeds the evidence-favours side: a refit that step says
+// failed, with no fit written after it, is said in that side's heading.
 // Figures show only from a guard `readCostGuard` (fleet-tick.mjs, the reader
 // the tick judges the file by) accepts; `guard` here is that reader's own
 // answer, `{ status: "ok", guard }` or
@@ -108,12 +111,21 @@ function tierRoute(role, level, generation, modelRoles) {
 }
 
 // ---------------------------------------------------------------------------
-// No guard: the newest `metrics` step of the phase 0 and close-out receipts.
+// The newest `metrics` step of the phase 0 and close-out receipts: the guard
+// section quotes it when there is no guard, and evidence favours reads a failed refit off it.
 // ---------------------------------------------------------------------------
 
 // `step` is `{ status, at, output }` or null. A step that has not run carries no
 // refresh to quote.
 const ran = (step) => step != null && step.status !== "pending" && Number.isFinite(Date.parse(step.at));
+
+// The newest `metrics` step of the two receipts that has run, by `at`; on equal
+// times, phase 0's. Null when neither receipt has run one.
+function newestStep(receipts) {
+  const steps = [receipts?.phase0, receipts?.closeout].filter(ran);
+  if (steps.length === 0) return null;
+  return steps.reduce((a, b) => (Date.parse(b.at) > Date.parse(a.at) ? b : a));
+}
 
 // metrics-refresh's own line from a step's output: the cost-guard duty's, else
 // the last of its lines, else the output's first line. Its own prefix, the
@@ -128,15 +140,21 @@ function refreshLine(output) {
   return line.trim().replace(/; \S*cost-guard\.json left as it is$/, "");
 }
 
-// The newest `metrics` step of the two receipts, with the verb its status and
-// line give it: `{ verb, at, why }`, or null when neither receipt has run one.
-function newestRefresh(receipts) {
-  const steps = [receipts?.phase0, receipts?.closeout].filter(ran);
-  if (steps.length === 0) return null;
-  const step = steps.reduce((a, b) => (Date.parse(b.at) > Date.parse(a.at) ? b : a));
+// The newest `metrics` step, with the verb its status and line give it:
+// `{ verb, at, why }`, or null when neither receipt has run one.
+function newestRefresh(step) {
+  if (step === null) return null;
   const why = refreshLine(step.output);
   const verb = step.status === "failed" ? "failed" : /metrics-refresh: cost guard: skipped,/.test(step.output ?? "") ? "skipped" : "ran";
   return { verb, at: step.at, why };
+}
+
+// Why the Preview fit's refit failed, off a `metrics` step's output: the rest of
+// metrics-refresh's `preview: failed — ` line, trimmed, or null when the output
+// has none. Found anywhere in a line, as refreshLine finds its own.
+export function refitFailure(output) {
+  const m = /metrics-refresh: preview: failed — ([^\n]*)/.exec(String(output ?? ""));
+  return m === null ? null : m[1].trim();
 }
 
 // ---------------------------------------------------------------------------
@@ -352,9 +370,10 @@ function booked(entry, pulls) {
 // The Cells drawn: the five, then any the guard holds or a card names beyond them.
 const drawOrder = (held, pulls) => [...new Set([...CELLS, ...held, ...pulls.flatMap((p) => p.targets.map((t) => t.cell)).filter((c) => CELL.test(c))])];
 
-function guardSection(read, receipts, modelRoles, pulls, recordsNote = null) {
+// `step` is the receipts' newest `metrics` step, newestStep's pick.
+function guardSection(read, receipts, step, modelRoles, pulls, recordsNote = null) {
   const label = readLabel(modelRoles);
-  const refresh = newestRefresh(receipts);
+  const refresh = newestRefresh(step);
   const notes = [];
   const footnotes = [];
 
@@ -601,9 +620,23 @@ const FAVOURS = "evidence favours";
 
 // The evidence-favours side with no Preview fit to lay out: its heading says
 // why, and its column is empty — nothing is unknown there, there is nothing to show.
-const noFit = (heading) => ({
-  title: FAVOURS, source: { text: "Preview fit", check: null }, heading, labels: [], footnotes: [], rows: null, unread: null,
+const noFit = (heading, labels = []) => ({
+  title: FAVOURS, source: { text: "Preview fit", check: null }, heading, labels, footnotes: [], rows: null, unread: null,
 });
+
+// The newest refit failed: `step` is the receipts' newest `metrics` step, `p`
+// the Preview fit read, null when none was. Said while that step's output holds
+// the failed line and no fit was written after it — a `computed_at` before the
+// step's `at`, or one that is no time. A later step, a fit written after this
+// one, or the receipt no longer read clears it.
+function refitLabel(step, p) {
+  if (step === null) return [];
+  const why = refitFailure(step.output);
+  if (why === null) return [];
+  const computed = p === null ? NaN : Date.parse(p.computed_at);
+  if (Number.isFinite(computed) && computed >= Date.parse(step.at)) return [];
+  return [`the newest refit failed at ${when(step.at)}: ${why}`];
+}
 
 // The Preview fit's heading labels, against `raw`, the guard on disk, `routed`,
 // readGuard's answer for it, `table`, the installed one, and `records`, whether
@@ -650,12 +683,13 @@ function nDiffers(p, raw, records) {
 // Cell marked where it differs from the Cell routes now gives that row. `preview`
 // is gather's read, `{ status: "ok", preview } | { status: "missing" } | {
 // status: "unreadable", why }`; `guard` readCostGuard's answer and `routed`
-// readGuard's for the same file, null when the router reads none; `mark` the
-// footnote mark its n footnote takes.
-function evidenceFavours({ preview, guard, routed, table, modelRoles, mark }) {
+// readGuard's for the same file, null when the router reads none; `step` the
+// receipts' newest `metrics` step, newestStep's pick; `mark` the footnote mark
+// its n footnote takes.
+function evidenceFavours({ preview, guard, routed, table, modelRoles, step, mark }) {
   if (routed === null) return noFit("no Preview fit: it is written only beside a cost guard");
-  if (preview?.status === "unreadable") return noFit(`no Preview fit read: ${preview.why}`);
-  if (preview?.status !== "ok") return noFit("no Preview fit yet: the next phase 0 writes one");
+  if (preview?.status === "unreadable") return noFit(`no Preview fit read: ${preview.why}`, refitLabel(step, null));
+  if (preview?.status !== "ok") return noFit("no Preview fit yet: the next phase 0 writes one", refitLabel(step, null));
   const p = preview.preview;
   const fit = p.table;
   const raw = guard.guard;
@@ -676,7 +710,7 @@ function evidenceFavours({ preview, guard, routed, table, modelRoles, mark }) {
     title: FAVOURS,
     source: { text: ["Preview fit", "this repository's runs", `computed ${when(p.computed_at)}`, plural(fit.n_rows, "Pull")].join(" · "), check: null },
     heading: fit.burn_in ? `stage ${fit.stage}: ${shortWords(fit, "present") ?? "every Cell has its merged PRs"}` : null,
-    labels: previewLabels(p, raw, routed, table, records),
+    labels: [...refitLabel(step, p), ...previewLabels(p, raw, routed, table, records)],
     footnotes: differ.length === 0 ? [] : [{ mark, text: `${list(differ)}: the guard counts merges by GitHub's state, the fit by Rulings, and the fit admits only drawn or rule-sized Pulls` }],
     rows: Object.fromEntries(OBJECTIVES.map((o) => [o,
       Object.fromEntries(["*", ...STRATA].filter((s) => Object.hasOwn(fit.rows[o], s)).map((s) => [s, entry(o, s)])),
@@ -904,12 +938,13 @@ export function computeCellEvidence({ guard, receipts, agents, modelRoles = null
   guardJson = null, mainMetrics = null, closeoutPr = null, openPrs = null, checkoutTable = null }) {
   const routed = guard?.status === "ok" ? readGuard(guard.guard) : null;
   const routes = routesNow({ table, guard: routed, modelRoles, install, repoUrl, checkout: checkoutTable });
-  const favours = evidenceFavours({ preview, guard, routed, table, modelRoles, mark: superscript(routes.footnotes.length + 1) });
+  const step = newestStep(receipts);
+  const favours = evidenceFavours({ preview, guard, routed, table, modelRoles, step, mark: superscript(routes.footnotes.length + 1) });
   const records = recordsAgainstMain({ read: guard, preview, main: mainMetrics, closeoutPr, openPrs });
   return {
     alerts: [records.alert, noRulingAlert(guard), readersAlert(guardJson)].filter((a) => a !== null),
     policy: policyRowsView({ sides: [routes, favours], objective }),
-    guard: guardSection(guard, receipts, modelRoles, pulls, records.note),
+    guard: guardSection(guard, receipts, step, modelRoles, pulls, records.note),
     declared: declaredSection(agents, modelRoles),
   };
 }
