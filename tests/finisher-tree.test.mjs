@@ -10,7 +10,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
-  chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync,
+  chmodSync, closeSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, realpathSync, rmSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,11 +35,14 @@ delete ENV.CI;
 const git = (cwd, args) => execFileSync("git", ["-c", "maintenance.auto=false", ...args], { cwd, env: ENV, encoding: "utf8" }).trim();
 
 // The Install step: it logs what `CI` read as, leaves the dependencies the test
-// command needs, and fails or dirties the tree when the case says so.
+// command needs, and fails, dies by a signal, dirties the tree or removes its
+// gitfile when the case says so.
 const INSTALL = `#!/bin/sh
 [ -n "\${INSTALL_LOG:-}" ] && printf '%s\\n' "\${CI-unset}" > "$INSTALL_LOG"
+[ -n "\${INSTALL_KILL:-}" ] && kill -9 $$
 [ -n "\${INSTALL_MISSING:-}" ] && exit 127
 mkdir -p node_modules/pkg && echo installed > node_modules/pkg/index.js
+[ -n "\${INSTALL_RMGIT:-}" ] && rm -f .git
 [ -n "\${INSTALL_DIRTY:-}" ] && echo dirty >> tracked.txt
 exit "\${INSTALL_EXIT:-0}"
 `;
@@ -118,13 +122,14 @@ test("the premise: a bare detached tree at the pin cannot start the suite", (t) 
   assert.equal(suite.status, 127);
 });
 
-test("an Install step that cannot run, one that fails, and one that dirties the tree each get their own exit and a receipt", (t) => {
+test("an Install step that cannot run, one that fails, and one that changes the tree or hides its state each get their own exit and a receipt", (t) => {
   const cases = [
     [{ INSTALL_EXIT: "127" }, 3, "not-run", 127, (tree) => `the Install step 'sh install.sh' did not run in ${tree} (exit 127: not executable or not found) — ${REDERIVE}`],
     [{ INSTALL_EXIT: "126" }, 3, "not-run", 126, (tree) => `the Install step 'sh install.sh' did not run in ${tree} (exit 126: not executable or not found) — ${REDERIVE}`],
     [{ INSTALL_EXIT: "1" }, 4, "failed", 1, (tree) => `install failed in ${tree} (exit 1)`],
     [{ INSTALL_EXIT: "9" }, 4, "failed", 9, (tree) => `install failed in ${tree} (exit 9)`],
     [{ INSTALL_DIRTY: "1" }, 5, "dirtied", 0, (tree) => `the Install step 'sh install.sh' changed the tree in ${tree} (first:  M tracked.txt) — ${REDERIVE}`],
+    [{ INSTALL_RMGIT: "1" }, 5, "status-after", 0, (tree) => `could not verify the tree state in ${tree} after the Install step`],
   ];
   const seen = new Set();
   for (const [env, code, kind, exit, said] of cases) {
@@ -140,7 +145,16 @@ test("an Install step that cannot run, one that fails, and one that dirties the 
     assert.ok(existsSync(f.tree()), "the script removed the tree the finisher is to remove");
     seen.add(`${kind}:${code}`);
   }
-  assert.deepEqual([...seen].sort(), ["dirtied:5", "failed:4", "not-run:3"]);
+  assert.deepEqual([...seen].sort(), ["dirtied:5", "failed:4", "not-run:3", "status-after:5"]);
+});
+
+test("an Install step killed by a signal is a failed install with no exit status of its own", (t) => {
+  const f = fixture(t);
+  const r = f.run({}, { env: { INSTALL_KILL: "1" } });
+  assert.equal(r.status, 4, r.stderr + r.stdout);
+  assert.equal(r.receipt.kind, "failed");
+  assert.equal(r.receipt.exit, null);
+  assert.equal(r.receipt.message, `install failed in ${f.tree()} (killed by SIGKILL)`);
 });
 
 test("a path with anything at it fails closed with a receipt and leaves what was there", (t) => {
@@ -195,7 +209,8 @@ test("a tree already dirty before the Install step fails before it runs", (t) =>
 
   assert.equal(r.status, 1, r.stderr + r.stdout);
   assert.equal(r.receipt.kind, "dirty-before");
-  assert.match(r.receipt.message, /is not clean before the install \(first: \?\? stray\.txt\) — the Install step did not run/);
+  // It ends there: the finisher halts on it, so it names no retry by hand.
+  assert.match(r.receipt.message, /is not clean before the install \(first: \?\? stray\.txt\) — the Install step did not run$/);
   assert.equal(r.receipt.exit, null);
   assert.equal(existsSync(log), false, "the Install step ran");
 });
@@ -214,6 +229,97 @@ test("a pin the repository does not hold, or a missing Recipe cache, exits 1 wit
   assert.equal(derived.receipt.kind, "derive");
   assert.equal(derived.receipt.head, f.pin);
   assert.equal(derived.receipt.install, null);
+});
+
+test("a tree whose HEAD is not the pin once the add returns exits 1 before the Install step runs", (t) => {
+  const f = fixture(t);
+  const log = join(f.dir, "install.log");
+  // A post-checkout hook that moves the new tree's HEAD to the branch tip:
+  // `worktree add` succeeds, and only the read-back of HEAD can tell.
+  const hook = join(f.repo, ".git", "hooks", "post-checkout");
+  mkdirSync(join(f.repo, ".git", "hooks"), { recursive: true });
+  writeFileSync(hook, `#!/bin/sh\ngit reset -q --hard ${f.tip}\n`);
+  chmodSync(hook, 0o755);
+
+  const r = f.run({}, { env: { INSTALL_LOG: log } });
+
+  assert.equal(r.status, 1, r.stderr + r.stdout);
+  assert.equal(r.receipt.kind, "head-mismatch");
+  assert.equal(r.receipt.head, f.tip);
+  assert.equal(r.receipt.pin, f.pin);
+  assert.equal(r.receipt.message, `HEAD in ${f.tree()} is ${f.tip}, not the pin ${f.pin}`);
+  assert.equal(existsSync(log), false, "the Install step ran");
+});
+
+test("a tree whose HEAD cannot be read once the add returns exits 1 before the Install step runs", (t) => {
+  const f = fixture(t);
+  const log = join(f.dir, "install.log");
+  // A post-checkout hook that removes the new tree's gitfile: `worktree add`
+  // still exits 0, and `rev-parse HEAD` in the tree then finds no repository.
+  const hook = join(f.repo, ".git", "hooks", "post-checkout");
+  mkdirSync(join(f.repo, ".git", "hooks"), { recursive: true });
+  writeFileSync(hook, "#!/bin/sh\nrm -f .git\n");
+  chmodSync(hook, 0o755);
+
+  const r = f.run({}, { env: { INSTALL_LOG: log } });
+
+  assert.equal(r.status, 1, r.stderr + r.stdout);
+  assert.equal(r.receipt.kind, "head-unreadable");
+  assert.equal(r.receipt.head, null);
+  assert.match(r.receipt.message, /^could not read HEAD in /);
+  assert.equal(existsSync(log), false, "the Install step ran");
+});
+
+test("a tree path that cannot be looked at is not a free one: exit 1 and nothing built", { skip: process.getuid?.() === 0 && "root searches any directory" }, (t) => {
+  const f = fixture(t);
+  const parent = join(f.scratch, "pr7");
+  mkdirSync(parent);
+  chmodSync(parent, 0o000);
+  let r;
+  try {
+    r = f.run();
+  } finally {
+    chmodSync(parent, 0o755);
+  }
+
+  assert.equal(r.status, 1, r.stderr + r.stdout);
+  assert.equal(r.receipt.kind, "unreadable");
+  assert.equal(r.receipt.head, null);
+  assert.equal(r.receipt.message, `cannot look at ${f.tree()} (EACCES)`);
+  assert.equal(git(f.repo, ["worktree", "list", "--porcelain"]).includes("finish-"), false, "a tree was built");
+});
+
+test("a pin given in upper case is the same commit: the receipt carries it lower-cased", (t) => {
+  const f = fixture(t);
+  const upper = f.pin.toUpperCase();
+  assert.notEqual(upper, f.pin, "the fixture pin has no letter to case");
+  const r = f.run({}, { flags: ["--worktree", f.repo, "--pin", upper, "--pr", "7", "--member", "finisher-pr-7", "--scratch", f.scratch] });
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  assert.equal(r.receipt.kind, "installed");
+  assert.equal(r.receipt.pin, f.pin);
+  assert.equal(r.receipt.head, f.pin);
+});
+
+// A built tree whose receipt never reached stdout is not exit 0: the finisher
+// would have a verdict and no `tree` to work in.
+test("a receipt that cannot be written to stdout is exit 2, never the build's own exit", (t) => {
+  const f = fixture(t);
+  const run = (member, stdout) =>
+    spawnSync(process.execPath, [SCRIPT, "--worktree", f.repo, "--pin", f.pin, "--pr", "7", "--member", member, "--scratch", f.scratch], {
+      cwd: f.repo,
+      env: ENV,
+      encoding: "utf8",
+      stdio: ["ignore", stdout, "pipe"],
+    });
+  assert.equal(run("finisher-pr-7", "pipe").status, 0, "control: the same build writes its receipt and exits 0");
+  const readOnly = openSync("/dev/null", "r");
+  try {
+    const r = run("finisher-pr-7-b", readOnly);
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /finisher-tree: the receipt could not be written to stdout/);
+  } finally {
+    closeSync(readOnly);
+  }
 });
 
 test("an inherited GIT_DIR naming another repository cannot retarget the tree", (t) => {

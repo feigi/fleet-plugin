@@ -398,21 +398,27 @@ function sweep({ afterRotate, apply }) {
  *   failed         it was killed by a signal, or exited non-zero
  *   status-after   the tree state could not be read after it
  *   dirtied        it left the tree changed
- * `verb` names the operation in the dirty-before refusal. Nothing here writes a
- * mark or a restore time, and it never exits the process.
+ * `verb` names the operation in the dirty-before refusal, and `retry` whether
+ * that refusal tells its reader to clear the change and run the operation again:
+ * a restore's caller may, the finisher may not. `install` is null in a refusal
+ * that came before the command was read. Nothing here writes a mark or a
+ * restore time, and it never exits the process.
  */
-export function installIn(tree, apply, verb = "restore") {
-  const refuse = (kind, message, install = "", exit = null) => ({ refusal: { kind, message, install, exit } });
+export function installIn(tree, apply, { verb = "restore", retry = true } = {}) {
+  const refuse = (kind, message, install = null, exit = null) => ({ refusal: { kind, message, install, exit } });
   const derived = run("sh", [join(SCRIPT_DIR, "derive-testcmd.sh"), tree, "install", "--at", "origin/main"]);
   const install = String(derived.stdout ?? "").replace(/\n$/, "");
   if (derived.error || derived.status !== 0 || install === "") {
-    return refuse("derive", `${String(derived.stderr ?? "").trim() || `derive-testcmd.sh ${tree} install failed (${how(derived)})`}`);
+    return refuse("derive", String(derived.stderr ?? "").trim() || `derive-testcmd.sh ${tree} install failed (${how(derived)})`);
   }
   // Dirty before anything runs is no Install step's doing: said in its own
   // words, so the dirty-after refusal below never blames the Recipe for it.
   const before = git(tree, ["status", "--porcelain", "-uall"]);
   if (before.error || before.status !== 0) return refuse("status-before", `could not read the tree state in ${tree} before the Install step (${how(before)})`, install);
-  if (before.stdout !== "") return refuse("dirty-before", `${tree} is not clean before the ${verb} (first: ${before.stdout.split("\n")[0]}) — the Install step did not run; clear that change, then ${verb} again`, install);
+  if (before.stdout !== "") {
+    const then = retry ? `; clear that change, then ${verb} again` : "";
+    return refuse("dirty-before", `${tree} is not clean before the ${verb} (first: ${before.stdout.split("\n")[0]}) — the Install step did not run${then}`, install);
+  }
   if (!apply) return { install };
   // Through `sh -c` with `CI` unset and the output dropped, as claim-ticket.sh
   // runs it; no timeout, as there.

@@ -49,11 +49,14 @@
 //   0  installed and clean: the tree is at the pin with its dependencies in it
 //   1  no usable tree, nothing the Install step did: an occupied path, a failed
 //      add, a head that is not the pin, a Recipe that could not be read, a
-//      tree dirty before the Install step or a status that could not be read
-//   2  a usage refusal, on stderr with no receipt, as in every other script
+//      status that could not be read before the Install step, or a tree dirty
+//      before it
+//   2  a refusal on stderr with no receipt: a usage refusal, as in every other
+//      script, or a receipt that could not be written to stdout
 //   3  the Install step did not run: exit 126 or 127, or it could not be started
 //   4  the Install step failed: another non-zero exit, or a signal
-//   5  the Install step ran and left the tree changed
+//   5  the Install step ran and left the tree changed, or left its state
+//      unreadable
 //
 // Any non-zero exit leaves the tree where it stands, and the finisher removes
 // it with `git worktree remove --force` on every path as it always did: this
@@ -74,15 +77,18 @@ const die = makeDie(NAME);
 const USAGE = "usage: finisher-tree.mjs --worktree <abs> --pin <sha> --pr <N> --member <name> --scratch <abs>";
 const SHA = /^[0-9a-f]{40}$/;
 // A member name is one path segment: dispatch names (`finisher-pr-12`,
-// `finisher-pr-12-b`) and nothing that could climb out of `pr<N>/`.
+// `finisher-pr-12-b`) and nothing that could climb out of `pr<N>/`. The
+// alphanumeric first character is what rules out `.` and `..`.
 const MEMBER = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const GIT_TIMEOUT_MS = 5 * 60_000;
 const MAX_BUFFER = 64 * 1024 * 1024;
 
+// The installIn() refusal kinds an Install step that ran or tried to run
+// answers for; every other refusal is exit 1.
 const EXIT = {
-  installed: 0,
   "not-run": 3,
   failed: 4,
+  "status-after": 5,
   dirtied: 5,
 };
 
@@ -108,14 +114,17 @@ function main() {
   const pin = pinArg.toLowerCase();
   if (!SHA.test(pin)) die(`--pin needs a full 40-character commit SHA, got ${pinArg}`);
   if (!/^[1-9][0-9]*$/.test(pr)) die(`--pr needs a PR number, got ${pr}`);
-  if (!MEMBER.test(member) || member === "." || member === "..") die(`--member needs one path segment of letters, digits, '.', '_' and '-', got ${JSON.stringify(member)}`);
+  if (!MEMBER.test(member)) die(`--member needs one path segment of letters, digits, '.', '_' and '-', got ${JSON.stringify(member)}`);
 
   const tree = join(scratch, `pr${pr}`, `finish-${member}`);
   const receipt = { tree, member, pr: Number(pr), pin, head: null, install: null, kind: null, exit: null, message: null };
   const finish = (code, kind, message = null) => {
     receipt.kind = kind;
     receipt.message = message;
-    writeAll(1, `${JSON.stringify(receipt)}\n`);
+    // A receipt lost on its way to stdout must not leave its exit standing: an
+    // exit 0 with no receipt names no tree to work in, so a lost write is the
+    // no-receipt exit.
+    if (!writeAll(1, `${JSON.stringify(receipt)}\n`)) die("the receipt could not be written to stdout");
     process.exitCode = code;
   };
 
@@ -137,11 +146,12 @@ function main() {
   receipt.head = at;
   if (at !== pin) return finish(1, "head-mismatch", `HEAD in ${tree} is ${at}, not the pin ${pin}`);
 
-  // 3: the Install step.
-  const done = installIn(tree, true, "install");
+  // 3: the Install step. No retry in a dirty-before refusal: the finisher runs
+  // none of this script's steps by hand to get past one.
+  const done = installIn(tree, true, { verb: "install", retry: false });
   if (done.refusal) {
     const { kind, message, install, exit } = done.refusal;
-    receipt.install = install === "" ? null : install;
+    receipt.install = install;
     receipt.exit = exit;
     return finish(EXIT[kind] ?? 1, kind, message);
   }

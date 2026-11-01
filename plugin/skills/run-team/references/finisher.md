@@ -276,8 +276,9 @@ it. The codes are distinct: 1 no usable tree (an occupied path, a failed add,
 a head that is not your pin, a Recipe that could not be read, a tree dirty
 before the Install step), 3 the Install step did not run (exit 126 or 127, a
 broken Recipe), 4 the Install step failed, 5 the Install step changed the
-tree; exit 2 is a refused invocation with no receipt. The script removes
-nothing, so a tree it left behind is removed like any other below.
+tree or left its state unreadable; exit 2 is a refusal with no receipt, a
+refused invocation or a receipt the script could not write. The script
+removes nothing, so a tree it left behind is removed like any other below.
 
 ## Remove the verification worktree on every path
 
