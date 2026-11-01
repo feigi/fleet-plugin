@@ -90,3 +90,15 @@ fix-pr PR#<pr>` (**The fix-applier**).
 ## Never reap a branch a live member is on
 
 Cross-check `.fleet/ledger.md` before running: row without terminal state means someone may still be in that worktree — merged PR can still have reviewer filing follow-ups. Dirty check does not see member that committed but not pushed. Update reaped tickets' ledger rows in same step, report reaped and kept counts. Kept-with-reason is half worth reading.
+
+## Red flags: reaping and removing a worktree
+
+- "The reap at the end will pick up the claim I never dispatched" → it declines:
+  not `[gone]`, no unique commits. Release it, or it reads as taken next run.
+- "`commit-commands:clean_gone` printed nothing, the tree is clean" → its
+  `[gone]` detection works fine; it just runs `-D`/`--force` with no merged
+  check, so "printed nothing" only means nothing was gone yet, not that it's safe.
+- "`--force` the worktree removal, the PR merged anyway" → merged says nothing
+  about uncommitted files, and the reviewer may still be in there.
+- "Reap once at the end of the run" → stale worktrees make phase 0 read merged
+  tickets as taken, so the starvation compounds with every Pull.
