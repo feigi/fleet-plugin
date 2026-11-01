@@ -13,9 +13,9 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { scratchRoot, scratchRootRefusal } from "../plugin/scripts/fleet-dir.mjs";
+import { SCRATCH_KEY_SHAPE, scratchRoot, scratchRootRefusal } from "../plugin/scripts/fleet-dir.mjs";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import { tempDir } from "./support/temp-dir.mjs";
 
@@ -174,6 +174,25 @@ test("scratchRoot() is pure: the same answer from any cwd of one repository, and
   assert.equal(scratchRoot({ cwd: join(dir, "sub"), home }), a);
   assert.equal(a, join(home, ".fleet", "scratch", keyOf(dir)));
   assert.equal(existsSync(a), false);
+});
+
+// The sibling pass of `reclaim-scratch.mjs --siblings` judges only the
+// directories SCRATCH_KEY_SHAPE matches, so a key scratchRoot() builds that the
+// shape misses is a key no sibling pass ever reclaims. The keys come from
+// scratchRoot() itself, never typed in, so a format change made in
+// scratchRoot() and in this file's keyOf() helper together still fails this
+// test until the shape follows.
+test("SCRATCH_KEY_SHAPE matches the key scratchRoot() builds, hyphenated basename and bare repository included", () => {
+  const home = realpathSync(tempDir("scratch-home-"));
+  const plain = repo("plain");
+  const hyphenated = repo("impl-tool");
+  const bare = join(dirname(hyphenated), "impl-tool.git");
+  git(dirname(hyphenated), "clone", "-q", "--bare", hyphenated, bare);
+  for (const cwd of [plain, hyphenated, bare]) {
+    const key = basename(scratchRoot({ cwd, home }));
+    assert.match(key, SCRATCH_KEY_SHAPE,
+      `scratchRoot() built the key ${key} for ${cwd}, which SCRATCH_KEY_SHAPE ${SCRATCH_KEY_SHAPE} does not match — the sibling pass would never judge it`);
+  }
 });
 
 test("scratchRootRefusal() answers null outside any work tree and a reason inside an unignoring one", () => {
