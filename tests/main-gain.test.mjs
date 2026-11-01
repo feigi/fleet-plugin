@@ -353,6 +353,70 @@ test("a phrase is matched case-insensitively, on whole tokens", (t) => {
   expect(partial, 1);
 });
 
+// Each documented phrase form, with the closing numbers it names, for a PR
+// that closes #12 and #13. One hunk per form, so each clears or fails alone.
+const PHRASES = [
+  ["until #12 lands", "#12"],
+  ["when #12 land", "#12"],
+  ["after #12 ships", "#12"],
+  ["pending #12 ship", "#12"],
+  ["once #12 merges", "#12"],
+  ["once #12 merge", "#12"],
+  ["once #12 is built", "#12"],
+  ["written once #12 lands", "#12"],
+  ["once #12, #13 land", "#12 #13"],
+  ["once #12/#13 land", "#12 #13"],
+  ["once #12 & #13 land", "#12 #13"],
+  ["once `#12` lands", "#12"],
+  ["pending #12, not yet built", "#12"],
+  ["#12 and #13 are still to land", "#12 #13"],
+];
+
+test("every documented phrase form is retracted", (t) => {
+  const landed = PHRASES.map(([phrase], i) => `keep${i}\nL${i} ${phrase} tail${i}\n`).join("");
+  const edited = PHRASES.map((_, i) => `keep${i}\nL${i} tail${i}\n`).join("");
+  const r = rewriteLanded(t, "f.md", landed, edited, { closing: closing(12, 13) });
+  expect(r, 0);
+  assert.deepEqual(
+    r.json.edited.map((e) => [e.text, e.rule]),
+    PHRASES.map(([phrase, named], i) => [`L${i} ${phrase} tail${i}`, `retracted ${named}`]),
+  );
+});
+
+test("a phrase ends on a token boundary: `once #12 landed` is no phrase", (t) => {
+  const r = rewriteLanded(t, "k.txt", "Once #12 landed the X\n", "the X\n", { closing: closing(12) });
+  expect(r, 1);
+});
+
+test("a lead word inside a longer word starts no phrase, beside a real phrase that retracts", (t) => {
+  const r = rewriteLanded(t, "k.txt", "nonce #12 lands, once #12 lands, the X\n", "nonce #12 lands, The X\n", { closing: closing(12) });
+  expect(r, 0);
+  assert.deepEqual(r.json.edited.map((e) => e.rule), ["retracted #12"]);
+});
+
+test("a phrase at the very end of the removed lines is retracted", (t) => {
+  const r = rewriteLanded(t, "k.txt", "The X until #12 lands\n", "The X\n", { closing: closing(12) });
+  expect(r, 0);
+  assert.deepEqual(r.json.edited.map((e) => e.rule), ["retracted #12"]);
+});
+
+test("two phrases side by side are each retracted", (t) => {
+  const r = rewriteLanded(t, "k.txt", "Once #12 lands, once #13 lands, the X\n", "The X\n", { closing: closing(12, 13) });
+  expect(r, 0);
+  assert.deepEqual(r.json.edited.map((e) => e.rule), ["retracted #12 #13"]);
+});
+
+test("the token after a phrase must still be there: `Once #12 lands, the X` -> `X` stays a hit", (t) => {
+  const r = rewriteLanded(t, "k.txt", "Once #12 lands, the X\n", "X\n", { closing: closing(12) });
+  expect(r, 1);
+});
+
+test("a number two phrases name is listed once in the rule", (t) => {
+  const r = rewriteLanded(t, "k.txt", "Once #12 lands, the X\nUntil #12 lands, the Y\n", "The X\nThe Y\n", { closing: closing(12) });
+  expect(r, 0);
+  assert.deepEqual(r.json.edited.map((e) => e.rule), ["retracted #12"]);
+});
+
 // --- closing issues ----------------------------------------------------------
 
 test("no --closing-refs: closes is null and the retraction rule is off", (t) => {

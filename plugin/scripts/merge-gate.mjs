@@ -7,14 +7,13 @@
 // --json labels,reviewDecision,headRefOid,body,url,closingIssuesReferences`,
 // `main-gain.mjs` against the PR head in the main checkout, and `ci-state.mjs
 // --pr <n> --declare-no-ci`, then answers the conjunction. All four run on
-// every call, whatever the
-// earlier ones said — except main-gain.mjs, which needs the head and body gh
-// read and the main checkout, and is skipped when either could not be had — so
-// the JSON line carries every field that was read. A head gh reads outside
-// {pre, post} adds one more read, the rebase-carry proof below, in the main
-// checkout. It never merges, labels, rebases or waits: the merge bot runs it
-// once before any wait and once immediately before `gh pr merge`, and merges
-// only on that second exit 0.
+// every call, whatever the earlier ones said — except main-gain.mjs, which
+// needs the head and body gh read and the main checkout, and is skipped when
+// either could not be had — so the JSON line carries every field that was
+// read. A head gh reads outside {pre, post} adds one more read, the
+// rebase-carry proof below, in the main checkout. It never merges, labels,
+// rebases or waits: the merge bot runs it once before any wait and once
+// immediately before `gh pr merge`, and merges only on that second exit 0.
 //
 // `--pre` is the labelled head, `--post` the head the bot's own
 // `gh pr update-branch --rebase` produced; omitted, it is `--pre` (the
@@ -34,13 +33,12 @@
 // accepted}`), or null when no carry was proven, `mainGain` echoing
 // main-gain.mjs's own payload — hits, acknowledged removals, edited lines, the
 // closing issues it read and unchecked files — or null when it did not run or
-// printed no JSON object; an unusable
-// payload is still echoed. Stderr: the children's own diagnostics, passed
-// straight through and never folded into stdout. A refusal (exit 2 with its
-// reason on stderr: a usage error, a Label map that cannot be read — see THE
-// LABEL MAP below — an `--out` that cannot be written, a gate that failed)
-// prints no JSON line, and one made before any child runs writes no `--out`
-// file.
+// printed no JSON object; an unusable payload is still echoed. Stderr: the
+// children's own diagnostics, passed straight through and never folded into
+// stdout. A refusal (exit 2 with its reason on stderr: a usage error, a Label
+// map that cannot be read — see THE LABEL MAP below — an `--out` that cannot
+// be written, a gate that failed) prints no JSON line, and one made before any
+// child runs writes no `--out` file.
 //
 // Exit vocabulary — the same three-way contract as inflight.sh, prove-merge.sh
 // and staleness.mjs:
@@ -318,9 +316,7 @@ function readMainGain(root, prView) {
     const refs = join(scratch, "closing-refs.json");
     writeFileSync(refs, JSON.stringify({ number: pr, url: prView.url, closingIssuesReferences: prView.closingIssuesReferences }));
     refsArgs.push("--closing-refs", refs);
-  } catch {
-    refsArgs.length = 0;
-  }
+  } catch {}
   const r = spawnSync(
     process.execPath,
     [join(SCRIPT_DIR, "main-gain.mjs"), "--head", prView.headRefOid, "--body-file", "-", ...refsArgs],

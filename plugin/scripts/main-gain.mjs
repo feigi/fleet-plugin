@@ -217,11 +217,7 @@ function fileDiff(tree, oldPath, newPath) {
 // The tokens an in-place edit keeps: a run of letters, digits or underscores is
 // one token, and each other character that is not whitespace is one.
 const TOKEN = /[\p{L}\p{N}_]+|[^\s\p{L}\p{N}_]/gu;
-function tokensOf(text) {
-  const counts = new Map();
-  for (const t of text.match(TOKEN) ?? []) counts.set(t, (counts.get(t) ?? 0) + 1);
-  return counts;
-}
+const tokensOf = (text) => countOf(text.match(TOKEN) ?? []);
 
 // Each unclaimed added line of one hunk claims at most one removed line of that
 // hunk. Removed lines choose in turn, most tokens first so a short line does not
@@ -323,13 +319,13 @@ function consume(stream, have) {
 }
 
 // The hunk rule, then the retraction rule, on one hunk's removed and added
-// lines: `{rule}` when no gained line of the hunk is a hit, else `null`. A hunk
-// that adds nothing is never cleared.
+// lines: the rule name when no gained line of the hunk is a hit, else `null`.
+// A hunk that adds nothing is never cleared.
 function clearsHunk(removed, added, closes) {
   if (added.length === 0) return null;
   const gone = streamOf(removed);
   const have = countOf(streamOf(added));
-  if (shortfall(gone, have).length === 0) return { rule: "hunk" };
+  if (shortfall(gone, have).length === 0) return "hunk";
   if (closes === null) return null;
   const phrases = retractions(gone, closes);
   if (phrases.length === 0) return null;
@@ -347,7 +343,7 @@ function clearsHunk(removed, added, closes) {
     have.set(key, have.get(key) - 1);
   }
   const named = [...new Set(phrases.flatMap((p) => p.numbers))];
-  return { rule: `retracted ${named.map((n) => `#${n}`).join(" ")}` };
+  return `retracted ${named.map((n) => `#${n}`).join(" ")}`;
 }
 
 // line number on `<base>` → {sha, time, summary} for the requested lines,
@@ -469,17 +465,21 @@ function check() {
           }
         }
         if (gained.length === 0) return;
-        const cleared = clearsHunk(candsByHunk[hunk].map((c) => c.text), compared, closes);
+        const removed = candsByHunk[hunk].map((c) => c.text);
+        const cleared = clearsHunk(removed, compared, closes);
         if (cleared !== null) {
           edited.push({
             path: oldPath,
             line: gained[0].line,
             text: gained.map((c) => c.text).join("\n"),
             replacement: compared.join("\n"),
-            rule: cleared.rule,
+            rule: cleared,
           });
           return;
         }
+        const missing = h.added.length > 0 ? shortfall(streamOf(removed), countOf(streamOf(compared))) : null;
+        // This hunk's diagnosis for each landing key, made once.
+        const diagnoses = new Map();
         for (const c of gained) {
           const b = blamed.get(c.line);
           const key = landingKey(b.sha, b.summary);
@@ -488,18 +488,14 @@ function check() {
           }
           const hit = byKey.get(key);
           hit.lines.push({ line: c.line, text: c.text, kind: c.kind });
-          let diagnosis = hit.hunks.find((x) => x.hunk === hunk);
-          if (diagnosis === undefined) {
-            diagnosis = { hunk, lines: [], added: compared };
-            if (h.added.length > 0) diagnosis.missing = shortfall(streamOf(candsByHunk[hunk].map((x) => x.text)), countOf(streamOf(compared)));
+          if (!diagnoses.has(key)) {
+            const diagnosis = missing === null ? { lines: [], added: compared } : { lines: [], added: compared, missing };
+            diagnoses.set(key, diagnosis);
             hit.hunks.push(diagnosis);
           }
-          diagnosis.lines.push(c.line);
+          diagnoses.get(key).lines.push(c.line);
         }
       });
-      for (const hit of byKey.values()) {
-        hit.hunks = hit.hunks.map(({ lines, added, missing }) => (missing === undefined ? { lines, added } : { lines, added, missing }));
-      }
       hits.push(...byKey.values());
     }
   }

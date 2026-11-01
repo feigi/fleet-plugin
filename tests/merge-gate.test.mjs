@@ -22,7 +22,7 @@
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, realpathSync, chmodSync, symlinkSync, unlinkSync, cpSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, rmSync, realpathSync, chmodSync, symlinkSync, unlinkSync, cpSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -286,6 +286,20 @@ test("a gh read without url or closing references still reaches main-gain, with 
   const r = gate(t, { prView: JSON.stringify(bare) });
   assertRow(r, 0, "mergeable", null);
   assert.deepEqual(JSON.parse(r.mgRefs), { number: 42 });
+});
+
+test("the closing-refs file's directory is removed once main-gain has answered", (t) => {
+  const tmp = mktemp(t, "gate-tmp-");
+  const r = gate(t, { env: { TMPDIR: tmp } });
+  assertRow(r, 0, "mergeable", null);
+  assert.deepEqual(JSON.parse(r.mgRefs), { number: 42, url: PR_URL, closingIssuesReferences: REFS });
+  assert.deepEqual(readdirSync(tmp), []);
+});
+
+test("a closing-refs file that cannot be written leaves --closing-refs off, and main-gain still runs", (t) => {
+  const r = gate(t, { env: { TMPDIR: join(mktemp(t, "gate-tmp-"), "absent") } });
+  assertRow(r, 0, "mergeable", null);
+  assert.deepEqual(r.calls.filter((c) => c.startsWith("main-gain.mjs")), [`main-gain.mjs --head ${PRE} --body-file - (cwd ${r.repo})`]);
 });
 
 test("the rebased path: head and ci-state both on --post → 0", (t) => {
