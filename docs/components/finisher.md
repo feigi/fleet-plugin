@@ -24,7 +24,10 @@ durable, and applies the label the merge bot waits on.
    [`worktree-audit.sh`](../../plugin/scripts/worktree-audit.sh)'s output,
    checks it for dirty, unreadable, missing, or absent state, compares the
    worktree's `HEAD` against the dispatch pin, and names the cause of any
-   divergence — a non-null cause halts before the label.
+   divergence — a non-null cause halts before the label. A worktree that
+   differs from the pin but holds nothing the pin lacks, because a remote
+   rebase superseded it, is clean; a commit the pin lacks that no remote ref
+   carries is a `stray` halt.
 3. **Confirm durable homes.** A deferral of a finding in the review's
    result is judged by the `dispositions-ok` verdict
    [`ledger.mjs`](../../plugin/scripts/ledger.mjs) `dispatch` required
@@ -34,7 +37,7 @@ durable, and applies the label the merge bot waits on.
    `homeHolds`, is one such home. Every other deferral and claimed apply
    needs a tracker issue or in-tree comment (via `ledger.mjs check`,
    filing what isn't found), and every "applied" claim is re-verified
-   against `git diff origin/main...HEAD`, plus the acceptance mutation
+   against `git diff origin/main...<dispatch pin>`, plus the acceptance mutation
    re-run in the finisher's own detached worktree (never the owned one).
    The re-run is skipped on an **Inert diff**, which
    [`finisher-scope.mjs`](../../plugin/scripts/finisher-scope.mjs) reads at

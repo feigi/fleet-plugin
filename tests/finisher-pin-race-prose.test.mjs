@@ -96,8 +96,8 @@ test("the exit vocabulary: 0 alone is clean, 1 names a cause from the ledger's v
   const text = causeText();
   assert.match(
     text,
-    Pin.phrase("Exit 0, with `cause` null, is the only code that means the worktree is clean at your pin."),
-    "the block no longer says exit 0 with a null cause is the only clean result — a finisher can read any other code as a pass",
+    Pin.phrase("Exit 0, with `cause` null, is the only code that means the worktree holds nothing your pin lacks: it sits at your pin, or it differs from it only by commits whose patches your pin already carries."),
+    "the block no longer says exit 0 with a null cause is the only result that leaves nothing the pin lacks — a finisher can read any other code as a pass",
   );
   assert.match(
     text,
@@ -168,7 +168,7 @@ test("a moved head still halts, always — the cause decides what the report say
   // Hence `named or not`, inside the same contiguous span.
   assert.match(
     text,
-    /Every cause halts, always — named or not, you never verify the dirt is harmless and label over it, a rebase is not a fast-forward you get to accept, a commit past the pin is not one either, and a cause you could not name is the least settled of the lot\./,
+    /Every cause halts, always — named or not, you never verify the dirt is harmless and label over it, a rebase is not a fast-forward you get to accept, a commit your pin lacks is not one either, and a cause you could not name is the least settled of the lot\./,
     "the always-halts invariant no longer reads verbatim in the block the finisher reads — either it's gone, or a clause was inserted into it that makes the halt conditional, or it stopped quantifying over the unnamed cause, or the ban on labelling over a moved head was dropped",
   );
 });

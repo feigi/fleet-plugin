@@ -648,6 +648,17 @@ test("#2083: a PR whose latest finisher halted carries the cause as a flag, rank
   assert.deepEqual(b.attention.map((t) => t.issue), [904, 941, 942, 943]);
 });
 
+test("a PR whose latest finisher halted stray carries the flag in REVIEW, ranked exactly at severity 4", () => {
+  const stray = HALTED.replace("halted:unreadable", "halted:stray");
+  const b = computeBoard(reproInputs({
+    rows: ["#904 impl-904=killed", stray, "#942 impl-942=killed", "#943 impl-943=PR#932 · held-behind:#931"],
+    prev: { tickets: [] },
+  }));
+  assert.equal(card(b, 941).column, "REVIEW");
+  assert.deepEqual(card(b, 941).flags, ["halted:stray"]);
+  assert.deepEqual(b.attention.map((t) => t.issue), [904, 941, 942, 943]);
+});
+
 test("#2083: a later finisher attempt decides — a live or labelled `-b` clears the halt, in any token order", () => {
   for (const [row, flags] of [
     ["#941 impl-941=PR#931 · finisher-pr-931=halted:past-pin · finisher-pr-931-b", []],

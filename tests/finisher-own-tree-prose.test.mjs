@@ -279,7 +279,7 @@ test("duty 1 is one script, called through the Resolver with both flags, its exi
 test("duty 1's exit codes: 0 alone is clean, 1 names a cause from the ledger's vocabulary, 2 halts as `other`", () => {
   const said = (re) => Pin.sentences(duty1Text()).some((s) => re.test(s));
   assert.ok(
-    said(/Exit 0, with `cause` null, is the only code that means the worktree is clean at your pin/),
+    said(/Exit 0, with `cause` null, is the only code that means the worktree holds nothing your pin lacks/),
     "duty 1 no longer says exit 0 with a null cause is the only clean result",
   );
   // `human` is duty 3's exit 5 and no verdict of duty 1's audit, so duty 1 does not name it.

@@ -162,8 +162,15 @@ test("the finisher verifies a claimed APPLY against the branch diff, not the app
   // ceiling this whole file already accepts.
   assert.match(
     finisherDeferrals(),
-    /\*\*A fix-applier's "applied" is a claim like any other\*\*.{0,200}?Confirm `git diff origin\/main\.\.\.HEAD` actually contains what it reported applying\./,
+    /\*\*A fix-applier's "applied" is a claim like any other\*\*.{0,200}?Confirm `git diff origin\/main\.\.\.<your dispatch pin>` actually contains what it reported applying\./,
     "duty 2 no longer requires the finisher to verify a claimed APPLY against the branch diff — an applier's \"applied\" becomes self-certifying and a dropped fix ships labelled",
+  );
+  // The owned worktree's HEAD may differ from the pin and hold nothing the pin
+  // lacks, so a diff taken there is a diff of a head no reviewer was shown.
+  assert.doesNotMatch(
+    finisherDeferrals(),
+    /git diff origin\/main\.\.\.HEAD/,
+    "duty 2 diffs the owned worktree's HEAD again — that head may differ from the dispatch pin, and the diff is then not the reviewed one",
   );
 });
 

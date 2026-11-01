@@ -936,6 +936,13 @@ test("deriveRun: a head past reviewed= with no past-pin halt stays not due — a
   }
 });
 
+test("deriveRun: a stray halt never makes a PR review-due — no review can read what only the owned worktree holds", () => {
+  const halted = "#10 impl-10=PR#40 → PR#40 · review=wf:a reviewed=abc1234:0/0/0:run-abc1234r · finisher-pr-40=halted:stray";
+  for (const head of [HEAD_A, HEAD_B]) {
+    assert.deepEqual(run({ rows: [halted] }, [pr(40, [], [10], head)]).reviewDue, [], `@ ${head}`);
+  }
+});
+
 test("deriveRun: a past-pin halt is answered once the head is the reviewed one, or a review is running or returned after it", () => {
   const halted = "#10 impl-10=PR#40 → PR#40 · review=wf:a reviewed=abc1234:0/0/0:run-abc1234r · finisher-pr-40=halted:past-pin";
   const not = (row, head) => assert.deepEqual(run({ rows: [row] }, [pr(40, [], [10], head)]).reviewDue, [], `${row} @ ${head}`);

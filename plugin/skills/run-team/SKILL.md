@@ -751,10 +751,11 @@ decides the rest — two resolve automatically, every other one escalates:
 | Cause | Resolution |
 |---|---|
 | `live-editor` | **Automatic.** Ask the live member **by name** for its report, wait for it, then dispatch `finisher-pr-<M>-b` at the current head. If the head moved in the meantime, resolve it as `past-pin` instead. |
-| `past-pin` | **Automatic, through the tick: re-review.** The head carries commits no reviewer read. The tick prints `DISPATCH review PR#<M>` for a PR whose latest finisher is `halted:past-pin` and whose latest `reviewed=<head>` is not its current head, until a review of it is running or has returned; record that review's tokens as any review's, with `ledger.mjs review <M>` onto the PR's row, its runner under the next letter the PR's rows do not carry yet (`review-pr-<M>-b`, or `-c` where a retry already took `-b`) — `review` refuses a second `review-pr-<M>` and names the free one — and its result reaches a fresh finisher through the same gate. |
+| `past-pin` | **Automatic, through the tick: re-review.** The head carries commits no reviewer read. The tick prints `DISPATCH review PR#<M>` for a PR whose latest finisher is `halted:past-pin` and whose latest `reviewed=<head>` is not its current head, until a review of it is running or has returned; record that review's tokens as any review's, with `ledger.mjs review <M>` onto the PR's row, its runner the next free letter `review` names, and its result reaches a fresh finisher through the same gate. |
 | `rebase` | **Escalate** — comment and flag, nothing more. The report's `evidence.replay` reads `pure` only when `git range-diff origin/main <pin> HEAD` pairs every pinned commit with an unchanged one; `changed` (a commit dropped, edited or added, or a stale `origin/main`) or `unknown` means read `evidence.rangeDiff` before acting, and `evidence.remote.state` says whether that head is on the PR. No automatic rule until a live halt shows the case recurring. |
+| `stray` | **Escalate** — comment and flag; nothing pushes it automatically. Read `evidence.cherry` and `.remote`. Push or discard is yours, or the maintainer's if the evidence cannot settle it. A pushed stray is unreviewed: `ledger.mjs review <M>` first. |
 | `unreadable`, `missing`, `absent`, `other` | **Escalate** — comment and flag, no automatic retry. |
-| `human` | **Escalate** — no retry. A Ticketless PR whose diff is not inert: the maintainer adds `ready-to-merge` at the pinned head, which the merge bot merges off the finisher's `ready-to-merge-head:` comment; a moved head is merged by hand. |
+| `human` | **Escalate** — no retry. A Ticketless PR whose diff is not inert: the maintainer labels it (references/finisher.md). |
 
 ### Resolving a finisher that died
 
