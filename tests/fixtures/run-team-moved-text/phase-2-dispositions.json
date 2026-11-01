@@ -171,7 +171,7 @@
       "references/pull.md's `dispatch` refusal, which names a member with no brief rendered for its role and the `dispatch-prompt.mjs render` command to run first"
     ],
     [
-      "Its body (`agents/fleet-merge-bot.agent.md`) tells it to read `$(~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run --root)/commands/run-merge-bot.md` and run **one** pass — drain the queue, re-evaluating after each merge, hold a 15-minute grace for late labels, then report once and exit — and that you dispatched it, which is what makes it hold that grace instead of arming its own watcher.",
+      "Its body (`agents/fleet-merge-bot.agent.md`) tells it to read `~/.omp/plugins/node_modules/@feigi/fleet-ctl/commands/run-merge-bot.md` and run **one** pass — drain the queue, re-evaluating after each merge, hold a 15-minute grace for late labels, then report once and exit — and that you dispatched it, which is what makes it hold that grace instead of arming its own watcher.",
       "agents/fleet-merge-bot.agent.md"
     ],
     [

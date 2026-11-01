@@ -5,7 +5,7 @@ conflict hold and you are here to clear it — do not review, do not dispatch
 specialists.
 
 Bring `conflict-branch` current with `origin/main`, resolving every conflict by the
-**No-undo audit** in `$(~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run --root)/commands/run-merge-bot.md`.
+**No-undo audit** in `~/.omp/plugins/node_modules/@feigi/fleet-ctl/commands/run-merge-bot.md`.
 Run `recipe-check.mjs` (below) from the worktree before you push, then push with
 `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run push-sync.mjs --branch conflict-branch`. Report the new head, or that no conflict was
 left.

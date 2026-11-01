@@ -3,7 +3,7 @@ push destination below, given to you because a detached worktree cannot supply
 it. Do NOT create another worktree. The review is done and its result is the
 file below — do not re-review, do not dispatch specialists.
 
-Read `$(~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run --root)/commands/review-and-fix.md` and run **steps 2, 3
+Read `~/.omp/plugins/node_modules/@feigi/fleet-ctl/commands/review-and-fix.md` and run **steps 2, 3
 and 5 only**: split apply-now/defer, commit, push, file every deferral as its
 own issue with the label the finding's state calls for. Skip step 1 — the
 review already ran — and steps 4 and 6: the controller owns the CI wait and
