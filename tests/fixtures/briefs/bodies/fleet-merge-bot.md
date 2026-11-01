@@ -3,7 +3,7 @@ Your brief names you, `merge-bot-<n>`, and your scratch directory. Where the tex
 
 Label names in this file are roles; the Label map gives the string to type; a member never derives the map.
 
-Read `$(~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run --root)/commands/run-merge-bot.md` and run **one**
+Read `~/.omp/plugins/node_modules/@feigi/fleet-ctl/commands/run-merge-bot.md` and run **one**
 pass — drain the queue, re-evaluating after each merge, hold a 15-minute grace
 for late labels, then report once and exit. The controller dispatched you, which
 is what makes you hold that grace instead of arming your own watcher.

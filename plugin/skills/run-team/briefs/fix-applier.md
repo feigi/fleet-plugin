@@ -38,7 +38,7 @@ job is red on its current head and you are here to fix it — do not review, do
 not dispatch specialists.
 
 ## kind: review, dispositions-retry
-Read `$(~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run --root)/commands/review-and-fix.md` and run **steps 2, 3
+Read `~/.omp/plugins/node_modules/@feigi/fleet-ctl/commands/review-and-fix.md` and run **steps 2, 3
 and 5 only**: split apply-now/defer, commit, push, file every deferral as its
 own issue with the label the finding's state calls for. Skip step 1 — the
 review already ran — and steps 4 and 6: the controller owns the CI wait and
@@ -91,7 +91,7 @@ The ticket:
 <ticket>
 ## kind: conflict
 Bring `<branch>` current with `origin/main`, resolving every conflict by the
-**No-undo audit** in `$(~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run --root)/commands/run-merge-bot.md`.
+**No-undo audit** in `~/.omp/plugins/node_modules/@feigi/fleet-ctl/commands/run-merge-bot.md`.
 Run `recipe-check.mjs` (below) from the worktree before you push, then push with
 `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run push-sync.mjs --branch <branch>`. Report the new head, or that no conflict was
 left.

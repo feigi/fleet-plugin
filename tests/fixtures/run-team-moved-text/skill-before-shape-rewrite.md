@@ -2120,7 +2120,7 @@ dispatch merge-bot` again. Dispatch
 it on the tick's `DISPATCH merge-bot`: the first `ready-to-merge` label is
 enough, and it never waits for the finisher's report. Its body
 (`agents/fleet-merge-bot.agent.md`) tells it to read
-`$(~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run --root)/commands/run-merge-bot.md` and run **one**
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/commands/run-merge-bot.md` and run **one**
 pass — drain the queue, re-evaluating after each merge, hold a 15-minute grace
 for late labels, then report once and exit — and that you dispatched it,
 which is what makes it hold that grace instead of arming its own watcher. Its
