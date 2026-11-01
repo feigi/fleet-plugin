@@ -55,6 +55,11 @@ Bundled, the cheap half gates the expensive one. So the metrics branch carries
 the `docs/metrics/` files and nothing else, and prose that wants review goes
 on its own branch with its own PR.
 
+A ticket the fleet works delivers on its claim branch, metrics tickets
+included: its brief states the content rule (`docs/metrics/` files and nothing
+else) and names no branch. `chore/run-artifacts-<date>` is the Close-out PR's
+name.
+
 ## ADR amendments
 
 An accepted ADR's body stays as ruled. A later change that falsifies or closes
