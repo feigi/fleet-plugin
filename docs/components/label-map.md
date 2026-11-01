@@ -15,21 +15,16 @@ plugin knows
 ([ADR 0035](../adr/0035-label-strings-come-from-the-consumer-repo-into-fleet-state-the-shipped-surface-names-roles.md)).
 
 **Status.** The derivation step, the cache, the reader and `show` are shipped,
-and the run-team controller's phase 0 runs the derivation step. The scripts
-move onto the map ticket by ticket: `claim-ticket.sh` adds the in-progress
+and the run-team controller's phase 0 and the solo entry points run the
+derivation step. Every script that reads or writes a label takes its string
+from the map: `claim-ticket.sh` adds the in-progress
 label, and `release-ticket.sh` and `drop-merged-label.sh` scan for and remove
 it, each through `label-map.mjs show in-progress`. `stranded.mjs` and
 `fleet-tick.mjs` read the map once at their entry: `stranded.mjs` lists and
 compares claims against the in-progress string, and the tick counts claimed
 tickets by it and takes its queued set from the ready-to-merge string. With
 no valid map `stranded.mjs` exits 2 and the tick refuses, each naming
-`label-map.mjs ensure`. A script not yet moved
-still uses each role's own name as its string, so until that migration lands
-a repository's role labels must
-be exactly the role names. Steps 5 and 6 below, and the opinionated choices
-that name the shipped runbooks and every entry point, describe the target the
-follow-up tickets reach: #3865 and #3866 for the runbook prose, #3872
-for the scripts still to move.
+`label-map.mjs ensure`.
 
 ## How it works
 1. **Declare.** The repository's triage-label table,
@@ -61,22 +56,21 @@ for the scripts still to move.
    table as it was when derived, the string per role and the origin of each
    (`table`, `default` or `maintainer`). It is gitignored, never committed and
    never written by hand; deleting it forces a fresh derivation.
-5. **Read** (target; #3872 still to land). Every script that reads
-   or writes a label is to resolve its role through the one reader in
+5. **Read.** Every script that reads
+   or writes a label resolves its role through the one reader in
    `label-map.mjs`, or `label-map.mjs show <role>` from shell. The reader never
    reads the tracker and has no defaults: an absent or broken map is a refusal
    naming the derivation step.
-6. **Entry points** (target for all but phase 0; #3865). The run-team
-   controller's phase 0 runs the derivation step first, before any query; the
-   solo entry points are to do the same, and these are the only places that
-   ask. A dispatched member — implementer, finisher, fix-applier, merge bot —
-   is to only read the map, and to report a refusal to the controller as a
-   halt cause, like a Recipe cache refusal.
+6. **Entry points.** The run-team controller's phase 0 runs the derivation
+   step first, before any query, and so do the solo entry points,
+   `/next-ticket` and `/review-and-fix`; these are the only places that ask. A
+   dispatched member — implementer, finisher, fix-applier, merge bot — only
+   reads the map.
 
 ## Opinionated choices
 
-- **Roles, not strings, in everything shipped** (target; #3865, #3866). A prose
-  rule at the top of each shipped runbook is to say label names there are
+- **Roles, not strings, in everything shipped.** A prose
+  rule at the top of each shipped runbook says label names there are
   roles. A member never derives the map itself.
 - **The tracker's own spelling wins.** Whenever a string exists live, the map
   stores the live label's spelling, never the table's or the answer's. GitHub
@@ -92,8 +86,8 @@ for the scripts still to move.
 - **The map is checked against the tracker on every derivation, not trusted
   until its inputs change.** A label renamed in the tracker changes no file the
   fleet can see, so the cached map is validated against the live label list at
-  the start of the run-team controller's phase 0, and of every entry point once
-  #3865 lands. This is the one place it differs from the Recipe cache.
+  the start of the run-team controller's phase 0, and of every entry point.
+  This is the one place it differs from the Recipe cache.
 - **A record the fleet posts and parses back is not a label.** The head record
   `ready-to-merge-head: <sha>` keeps its fixed grammar even though it contains a
   role name, so re-mapping `ready-to-merge` never orphans a record already

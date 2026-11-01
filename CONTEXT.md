@@ -667,7 +667,7 @@ used: per Objective × Stratum row, the Cell routes now gives and the Cell the
 Preview fit favours, with each candidate's verdict and interval; per Cell,
 what the cost guard holds it to; and, through each board card, every live
 Pull's Routing. Every figure is read from a record, never recomputed by the
-cockpit, and shown beside its trust status. The tab opens once #3894 lands.
+cockpit, and shown beside its trust status.
 _Avoid_: tier outcomes, router stats, readout
 
 **Stratum**:
