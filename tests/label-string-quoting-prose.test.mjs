@@ -49,7 +49,10 @@ const spliced = (text, at, string) => {
   return text.replace(ROLE_PLACEHOLDER, () => (index++ === at ? string : "word")).replace(/<[^<>\n]+>/g, () => "word");
 };
 
-const parses = (text) => spawnSync("bash", ["-n"], { input: text, encoding: "utf8" }).status === 0;
+// `bash -n` does not parse inside a backtick substitution, so each `` `…` `` on
+// one line becomes `$(…)`, which it does parse.
+const parses = (text) =>
+  spawnSync("bash", ["-n"], { input: text.replace(/`([^`\n]*)`/g, "$($1)"), encoding: "utf8" }).status === 0;
 
 const lineAt = (text, offset) => {
   const end = text.indexOf("\n", offset);
@@ -105,6 +108,11 @@ test("negative control: a role placeholder inside single quotes, or bare, does n
   // the unquoted `&& &&` is no error there and UNMASKABLE's quotes pair up.
   assert.equal(holds("(( '<ready-to-merge string>' ))\necho 'z'"), false);
   assert.equal(holds('(( "<ready-to-merge string>" ))\necho \'z\''), true);
+});
+
+test("negative control: a single-quoted placeholder inside backtick command substitution does not parse", () => {
+  assert.equal(holds("x=`echo '<wontfix string>'`\necho 'z'"), false);
+  assert.equal(holds('x=`echo "<wontfix string>"`\necho \'z\''), true);
 });
 
 test("negative control: a single-quoted placeholder fails even when a later quote in the same text could pair with its apostrophe", () => {
