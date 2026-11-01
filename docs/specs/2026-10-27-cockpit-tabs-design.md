@@ -93,7 +93,7 @@ Footnote texts sit under the section that carries their marks.
 |---|---|---|
 | Routes now | the router table installed beside the script (`router-table.json` in `ticket-router.mjs`'s own directory, the file `route` reads) and `.fleet/cost-guard.json` | `validateTable` and `readGuard`, and `rowDispatch` (new, § 10.1), the function `route` itself calls, so the tab cannot disagree with routing |
 | What the guard holds each Cell to | `.fleet/cost-guard.json`, extended (§ 10.3) | `readCostGuard` (`fleet-tick.mjs`): figures show only from a file it accepts; nothing is recomputed |
-| What the evidence favours | `.fleet/router-preview.json`, new (§ 10.4) | `validateTable` on its `table` |
+| What the evidence favours | `.fleet/router-preview.json`, new (§ 10.4); (amended by #4020: and the newest `metrics` step of `.fleet/phase0.json` and `.fleet/closeout.json`, the one the guard section's heading reads, for a failed refit, § 6.2) | `validateTable` on its `table` |
 | Each Cell's Tier route model | `omp config get modelRoles --json`, in the cockpit's own environment (which can differ from the controller's; each card's Resolved tier stays the record of what ran) | `tier-roles.mjs`: `readOmpConfigValue`, `resolveRole`, `modelsEqual` |
 | Declared, not measured | the installed definitions, `../agents/*.agent.md` from the script's directory, minus the five implementer Cells (14 members today) | `parseFrontmatter` |
 | The live run's Objective | `.fleet/phase0.json` `objective`; absent between runs, so nothing is marked | the receipt read the gather already makes every tick |
@@ -352,6 +352,7 @@ never raises an alert. A label states its claim and cites no ticket.
 | Guard and Preview fit count different merges on the same files | both files' `n` | footnote on the fit's n | yes |
 | Preview fit read another guard or other TSVs | `guard_computed_at` against the guard's `computed_at`; both files' `tsv_blobs` | evidence favours' heading | yes |
 | Preview fit's prior is not the installed table | `prior`'s `stage`, `cells`, `classifier`, `window_start` against the installed table's | evidence favours' heading | yes; likeliest right after a plugin update |
+| The Preview fit's newest refit failed | the newest step's failed line, against the fit's `computed_at` | in evidence favours' heading, first; also when no fit was read; never with no guard | yes |
 | Router and tick read the guard differently | `readGuard` against `readCostGuard` | alert | yes |
 | `modelRoles` read failing | the read's time and error, carried in `board.json` | beside the Tier route model, after a failed read only | yes |
 
@@ -428,6 +429,28 @@ fields the fit recomputes, or only `fitted_commit` and `version`, raises no
 label, because the next phase 0's refit would come out the same. The words
 name the prior: "fitted against <version, fitted_commit>; the next phase 0
 refits".
+
+**The Preview fit's newest refit failed.** (amended by #4020: this signal's
+table row and this paragraph.) It reads the newest `metrics` step of the
+phase 0 and close-out receipts, the one the guard section's heading reads: by
+`at`, and on equal `at` phase 0's. Evidence favours' heading reads "the newest
+refit failed at <the step's `at`>: <why>" while all three hold:
+
+- the side has a guard the router reads;
+- that step's output has the line `metrics-refresh: preview: failed — <why>`;
+- no fit was written after that step: no fit was read, or the fit's
+  `computed_at` is before the step's `at`. A `computed_at` that is no time
+  counts as not after.
+
+It is the side's first label, and the fit's own labels follow unchanged. A
+newest step that stopped before the refit, or skipped it, has no failed line,
+so nothing shows, even when the other receipt's older step has one. With no
+Preview fit yet, or none read, the heading is unchanged and this is the
+side's one label; with no guard the router reads, it never shows. It clears
+when the newest step no longer has the line, when a fit is written after the
+step, or when the receipt holding the step is no longer read: close-out's
+`phase0-receipt` step moves `phase0.json`, and phase 0's `rotate` step
+archives `closeout.json`.
 
 **Guard readers.** The guard section shows figures only from a file
 `readCostGuard` accepts. A guard that `readGuard` accepts and `readCostGuard`
@@ -669,7 +692,9 @@ It writes `.fleet/router-preview.json` through a temp file and a rename:
 - It runs only when the guard duty wrote a guard.
 - It never fails the run: an error prints
   `metrics-refresh: preview: failed — <why>`, leaves the old file in place
-  and leaves the exit status unchanged.
+  and leaves the exit status unchanged. (amended by #4020: the line goes to
+  stdout, the one stream close-out's receipt keeps on exit 0, and the cockpit
+  reads it there, § 6.2.)
 - It is never routed and never committed.
 
 ### 10.5 The cockpit

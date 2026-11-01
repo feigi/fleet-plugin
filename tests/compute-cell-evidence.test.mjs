@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CELLS, computeCellEvidence } from "../plugin/scripts/compute-cell-evidence.mjs";
+import { CELLS, computeCellEvidence, refitFailure } from "../plugin/scripts/compute-cell-evidence.mjs";
 import { readCostGuard } from "../plugin/scripts/fleet-tick.mjs";
 import { guardFile } from "../plugin/scripts/pr-cost.mjs";
 import { DAY_ONE_TABLE } from "./support/day-one-router-table.mjs";
@@ -967,4 +967,73 @@ test("the guard-against-fit n footnote shows when both read the same files and a
   const consumer = favours({ repoUrl: "https://ghe.example.com/acme/widgets", preview: PREVIEW({ table: FIT({ estimates: est(67) }) }) });
   assert.equal(consumer.sides[0].footnotes[0].mark, "¹");
   assert.equal(favoursOf(consumer).footnotes[0].mark, "²", "numbered after routes now's own");
+});
+
+// -- evidence favours: the newest refit failed ---------------------------------
+
+const EISDIR = "EISDIR: illegal operation on a directory, open '/x/.fleet/router-preview.json.tmp'";
+const refitOut = (why = EISDIR) => [
+  "metrics-refresh: drain: nothing pending",
+  "metrics-refresh: cost guard: verdict none; pr-cost.mjs exit 4; .fleet/cost-guard.json computed 2026-10-28T08:00:00.000Z",
+  `metrics-refresh: preview: failed — ${why}`,
+].join("\n");
+const REFIT = `the newest refit failed at 2026-10-28 08:00Z: ${EISDIR}`;
+const failedAt = (at, output = refitOut()) => step("ok", at, output);
+
+test("refitFailure reads the reason off the failed preview line, found anywhere in a line, and nothing else", () => {
+  assert.equal(refitFailure(refitOut()), EISDIR);
+  assert.equal(refitFailure("metrics-refresh.mjs failed: metrics-refresh: preview: failed —   spaced out  \r\nnext"), "spaced out");
+  assert.equal(refitFailure("metrics-refresh: preview: skipped, no guard written — .fleet/router-preview.json left as it is"), null);
+  assert.equal(refitFailure("metrics-refresh: preview: fitted 235 Pulls, stage 2, in burn-in; .fleet/router-preview.json computed 2026-10-28T08:00:00.000Z"), null);
+  assert.equal(refitFailure(""), null);
+  assert.equal(refitFailure(null), null);
+});
+
+test("evidence favours: a fit older than the newest step that failed its refit says so first, and its own labels follow", () => {
+  const p = favours({ receipts: { phase0: failedAt("2026-10-28T08:00:00.000Z"), closeout: null }, preview: PREVIEW({ guard_computed_at: "2026-10-25T08:00:00.000Z" }) });
+  assert.deepEqual(favoursOf(p).labels, [REFIT, "fitted beside the guard of 2026-10-25 08:00Z, not this one"]);
+  const closeout = favours({ receipts: { phase0: null, closeout: failedAt("2026-10-28T08:00:00.000Z") } });
+  assert.deepEqual(favoursOf(closeout).labels, [REFIT], "close-out's step is read as phase 0's is");
+});
+
+test("evidence favours: no refit label when the newest step has no failed line, a fit came after it, there is no receipt, or no guard", () => {
+  const older = failedAt("2026-10-28T08:00:00.000Z");
+  const newer = step("ok", "2026-10-28T10:00:00.000Z", "metrics-refresh: cost guard: verdict none\nmetrics-refresh: preview: fitted 235 Pulls, stage 2, in burn-in");
+  assert.deepEqual(favoursOf(favours({ receipts: { phase0: older, closeout: newer } })).labels, [], "the older step's failed line is not the newest");
+  const stopped = step("failed", "2026-10-28T10:00:00.000Z", "metrics-refresh.mjs failed: metrics-refresh: drain failed: pending file malformed");
+  assert.deepEqual(favoursOf(favours({ receipts: { phase0: stopped, closeout: older } })).labels, [], "a newest step that stopped before the refit");
+  const tie = { phase0: step("ok", "2026-10-28T08:00:00.000Z", "metrics-refresh: preview: fitted 235 Pulls"), closeout: older };
+  assert.deepEqual(favoursOf(favours({ receipts: tie })).labels, [], "on equal times, phase 0's step is the newest");
+
+  const before = failedAt("2026-10-26T19:00:00.000Z");
+  assert.deepEqual(favoursOf(favours({ receipts: { phase0: before, closeout: null } })).labels, [], "the fit was written after the step");
+  const same = failedAt("2026-10-26T19:17:40.000Z");
+  assert.deepEqual(favoursOf(favours({ receipts: { phase0: same, closeout: null } })).labels, [], "a fit computed at the step's own time is not before it");
+
+  assert.deepEqual(favoursOf(favours()).labels, [], "no receipt");
+  const pending = step("pending", "2026-10-28T08:00:00.000Z", refitOut());
+  assert.deepEqual(favoursOf(favours({ receipts: { phase0: pending, closeout: null } })).labels, [], "a step that has not run");
+
+  for (const guard of [{ status: "missing" }, { status: "unreadable", why: "not JSON" }]) {
+    const s = favoursOf(favours({ guard, receipts: { phase0: older, closeout: null } }));
+    assert.equal(s.heading, "no Preview fit: it is written only beside a cost guard", guard.status);
+    assert.deepEqual(s.labels, [], guard.status);
+  }
+});
+
+test("evidence favours: with no fit read, the failed refit is the side's one label and its heading is unchanged", () => {
+  const receipts = { phase0: failedAt("2026-10-28T08:00:00.000Z"), closeout: null };
+  for (const [preview, heading] of [
+    [{ status: "missing" }, "no Preview fit yet: the next phase 0 writes one"],
+    [{ status: "unreadable", why: "not JSON" }, "no Preview fit read: not JSON"],
+  ]) {
+    const s = favoursOf(favours({ preview, receipts }));
+    assert.equal(s.heading, heading, preview.status);
+    assert.deepEqual(s.labels, [REFIT], preview.status);
+  }
+});
+
+test("evidence favours: a fit whose computed_at is no time counts as not after the step, so the label shows", () => {
+  const p = favours({ receipts: { phase0: failedAt("2026-10-28T08:00:00.000Z"), closeout: null }, preview: PREVIEW({ computed_at: "garbage" }) });
+  assert.deepEqual(favoursOf(p).labels, [REFIT]);
 });
