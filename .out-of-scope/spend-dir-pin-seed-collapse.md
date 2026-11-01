@@ -1,5 +1,12 @@
 # Spend-Dir Pin Seed Collapse
 
+> **Superseded (2026-10-31).** #3127 (PR #3449) deleted `spendDirPin`. The
+> cockpit now reads the session from the phase-0 receipt on every tick, with no
+> latch (`spendSource` / `receiptSpendDir`), so the reshape this record refused
+> has nothing to apply to, and neither reopen trigger below (the explicit
+> `--spend-dir` path, the `launchMs` gate) can fire. The record is kept as the
+> history of #1686's closure; the text below is not re-pointed.
+
 `spendDirPin()` in `plugin/scripts/board-gather.mjs` builds a latching closure over the
 cockpit's spend directory. Its current shape opens with a guard and two
 declarations:
