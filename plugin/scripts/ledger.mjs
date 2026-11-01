@@ -2080,7 +2080,7 @@ function checkReaders(where) {
   // field has the type that field has. Anything else was not what was asked
   // for, so it could not look.
   const isString = (v) => typeof v === "string";
-  const prFieldOk = { state: isString, labels: Array.isArray, closingIssuesReferences: Array.isArray, url: isString };
+  const prFieldOk = { state: isString, labels: Array.isArray, closingIssuesReferences: Array.isArray, url: isString, headRefName: isString };
   const prView = (pr, fields) => {
     const what = `gh pr view ${pr} --json ${fields}`;
     const { r, v } = lookJson(what, ["pr", "view", String(pr), "--json", fields]);
@@ -2683,7 +2683,8 @@ function recordFiled(id, subject) {
 //
 //   impl-N=PR#M               verify-sha.sh <branch> <head> exits 0; PR M
 //                             reads OPEN and its closingIssuesReferences in its
-//                             own repository name N;
+//                             own repository name N; its head branch is
+//                             implementer/N-impl-N;
 //                             the Check-step record (below) holds for <head>
 //   impl-N=bailed             bailCause is not null; the receipt names it.
 //                             report-schema.mjs already refuses a bail that
@@ -2860,9 +2861,14 @@ async function runSettleFromReport() {
       const sha = verifyShaOf(report.branch, report.head);
       check(`verify-sha.sh ${report.branch} ${report.head} exits 0`, sha.status === 0);
       recipeGate(report.head);
-      const { view: pr, numbers } = prViewClosing(report.pr, "state,closingIssuesReferences,url");
+      const { view: pr, numbers } = prViewClosing(report.pr, "state,closingIssuesReferences,url,headRefName");
       check(`PR #${report.pr} reads OPEN`, pr.state === "OPEN");
       check(`PR #${report.pr} closes #${live.number}`, numbers.includes(live.number));
+      // The claim's branch comes from the ticket, the way the Pull claims it
+      // and close-out releases it, never from the member's name or its report:
+      // a replacement impl-N-x holds the same claim as impl-N.
+      const claimBranch = `implementer/${live.number}-impl-${live.number}`;
+      check(`PR #${report.pr}'s head is ${claimBranch} (GitHub: ${pr.headRefName})`, pr.headRefName === claimBranch);
     } else if (report.outcome === "blocked") {
       outcome = "blocked";
     } else {

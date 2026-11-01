@@ -36,6 +36,9 @@ const GIT_ENV = {
   GIT_CONFIG_SYSTEM: "/dev/null",
 };
 
+// The claim branch of ticket 5, `implementer/<N>-impl-<N>`.
+const CLAIM = "implementer/5-impl-5";
+
 function fixture() {
   const root = tempDir("ledger-settle-report-");
   const env = { ...process.env, ...GIT_ENV };
@@ -53,7 +56,7 @@ function fixture() {
   git(work, "checkout", "-q", "-b", "feat");
   git(work, "commit", "-q", "--allow-empty", "-m", "the PR's work");
   const head = git(work, "rev-parse", "HEAD");
-  git(work, "push", "-q", "origin", "feat");
+  git(work, "push", "-q", "origin", "feat", "feat:refs/heads/implementer/5-impl-5");
   git(work, "checkout", "-q", "-b", "stray");
   git(work, "commit", "-q", "--allow-empty", "-m", "never pushed");
   const stray = git(work, "rev-parse", "HEAD");
@@ -95,8 +98,9 @@ cat "$f"
   const bytes = () => (existsSync(file) ? readFileSync(file, "utf8") : null);
   const report = (member, body) => writeFileSync(join(reports, `${member}.json`), JSON.stringify(body));
   // PR `n`'s `gh pr view` answer: `body`, with the PR's url in its own
-  // repository unless `body` names one — `url: undefined` for none.
-  const pr = (n, body) => writeFileSync(join(ghDir, `${n}.json`), JSON.stringify({ url: prUrl(n), ...body }));
+  // repository and its head on ticket 5's claim branch unless `body` names
+  // otherwise — `url: undefined` or `headRefName: undefined` for none.
+  const pr = (n, body) => writeFileSync(join(ghDir, `${n}.json`), JSON.stringify({ url: prUrl(n), headRefName: CLAIM, ...body }));
   // The open ready-to-merge PRs the next `dispatch merge-bot` records.
   const queue = (...prs) => writeFileSync(join(ghDir, "queue.json"), JSON.stringify(prs.map((number) => ({ number }))));
   const settle = (member, more = []) => run("settle", member, "--from-report", "--reports", reports, ...more);
@@ -120,7 +124,7 @@ cat "$f"
 }
 
 const implReport = (f, over = {}) => ({
-  member: "impl-5", outcome: "pr", pr: 6, head: f.head, branch: "feat",
+  member: "impl-5", outcome: "pr", pr: 6, head: f.head, branch: CLAIM,
   sizing: { verdict: "light", signal: "one file", ranBeforePr: true },
   bailCause: null, bailDetail: null, confirmation: [], ...over,
 });
@@ -150,13 +154,35 @@ test("impl-N=PR#M: a head on the branch and an OPEN PR closing N settles", () =>
   assert.deepEqual(receipt, {
     member: "impl-5", outcome: "PR#6", filed: [], ruled: [],
     checks: [
-      { name: `verify-sha.sh feat ${f.head} exits 0`, ok: true },
+      { name: `verify-sha.sh ${CLAIM} ${f.head} exits 0`, ok: true },
       { name: "PR #6 reads OPEN", ok: true },
       { name: "PR #6 closes #5", ok: true },
+      { name: `PR #6's head is ${CLAIM} (GitHub: ${CLAIM})`, ok: true },
     ],
   });
   assert.equal(dispatched(f, "impl-5"), "impl-5=PR#6");
-  assert.match(readFileSync(join(f.root, "gh.log"), "utf8"), /^pr view 6 --json state,closingIssuesReferences,url$/m);
+  assert.match(readFileSync(join(f.root, "gh.log"), "utf8"), /^pr view 6 --json state,closingIssuesReferences,url,headRefName$/m);
+});
+
+test("impl-N=PR#M: a PR headed on another branch is exit 3, naming the check and the head GitHub reported, and writes nothing", () => {
+  const f = fixture();
+  f.ok("dispatch", "5", "impl-5");
+  f.report("impl-5", implReport(f));
+  f.pr(6, { state: "OPEN", closingIssuesReferences: [ref(5)], headRefName: "chore/run-artifacts-x" });
+  f.refused("impl-5", 3, /failed: PR #6's head is implementer\/5-impl-5 \(GitHub: chore\/run-artifacts-x\)/);
+  assert.equal(dispatched(f, "impl-5"), "impl-5", "the member stays dispatched, unsettled");
+});
+
+test("impl-N=PR#M: a replacement impl-N-x's PR on the claim branch settles — the claim comes from the ticket, not the member's name", () => {
+  const f = fixture();
+  f.ok("dispatch", "5", "impl-5");
+  f.ok("settle", "impl-5", "killed");
+  f.ok("dispatch", "5", "impl-5-b");
+  f.report("impl-5-b", implReport(f, { member: "impl-5-b" }));
+  f.pr(6, { state: "OPEN", closingIssuesReferences: [ref(5)], headRefName: CLAIM });
+  const receipt = f.settled("impl-5-b");
+  assert.equal(receipt.outcome, "PR#6");
+  assert.deepEqual(receipt.checks.at(-1), { name: `PR #6's head is ${CLAIM} (GitHub: ${CLAIM})`, ok: true });
 });
 
 test("impl-N=PR#M: a head verify-sha.sh does not find on the branch is exit 3", () => {
@@ -164,7 +190,7 @@ test("impl-N=PR#M: a head verify-sha.sh does not find on the branch is exit 3", 
   f.ok("dispatch", "5", "impl-5");
   f.report("impl-5", implReport(f, { head: f.stray }));
   f.pr(6, { state: "OPEN", closingIssuesReferences: [ref(5)] });
-  f.refused("impl-5", 3, new RegExp(`failed: verify-sha\\.sh feat ${f.stray} exits 0`));
+  f.refused("impl-5", 3, new RegExp(`failed: verify-sha\\.sh ${CLAIM} ${f.stray} exits 0`));
 });
 
 test("impl-N=PR#M: a PR that is not OPEN is exit 3", () => {
@@ -197,7 +223,7 @@ test("could not look: a closing reference with neither a url nor a repository is
   f.report("impl-5", implReport(f));
   const { url: _url, repository: _repository, ...unplaced } = ref(5);
   f.pr(6, { state: "OPEN", closingIssuesReferences: [unplaced] });
-  f.refused("impl-5", 2, /could not look — gh pr view 6 --json state,closingIssuesReferences,url answered a reference to #5 with neither a url nor a repository; nothing written/);
+  f.refused("impl-5", 2, /could not look — gh pr view 6 --json state,closingIssuesReferences,url,headRefName answered a reference to #5 with neither a url nor a repository; nothing written/);
 });
 
 test("could not look: a gh that fails is exit 2, not a failed check", () => {
@@ -205,7 +231,7 @@ test("could not look: a gh that fails is exit 2, not a failed check", () => {
   f.ok("dispatch", "5", "impl-5");
   f.report("impl-5", implReport(f));
   // No answer file for PR 6: the stub exits 1, as gh does when it cannot reach GitHub.
-  f.refused("impl-5", 2, /could not look — gh pr view 6 --json state,closingIssuesReferences,url exited 1: gh stub: no PR 6/);
+  f.refused("impl-5", 2, /could not look — gh pr view 6 --json state,closingIssuesReferences,url,headRefName exited 1: gh stub: no PR 6/);
 });
 
 test("could not look: a gh that answers something other than JSON is exit 2", () => {
@@ -227,7 +253,12 @@ test("could not look: a gh answer lacking a field it was asked for is exit 2, no
   f.report("merge-bot-1", botReport(f, { merged: [{ pr: 7, sha: f.head }] }));
   for (const body of [{}, { closingIssuesReferences: [ref(5)] }, { state: "OPEN", closingIssuesReferences: null }, { state: "OPEN" }, { state: "OPEN", closingIssuesReferences: [ref(5)], url: undefined }]) {
     f.pr(6, body);
-    f.refused("impl-5", 2, /could not look — gh pr view 6 --json state,closingIssuesReferences,url answered without a usable/);
+    f.refused("impl-5", 2, /could not look — gh pr view 6 --json state,closingIssuesReferences,url,headRefName answered without a usable/);
+  }
+  // No string headRefName: not a PR on another branch but one that could not be read.
+  for (const headRefName of [undefined, null, 5, ["implementer/5-impl-5"]]) {
+    f.pr(6, { state: "OPEN", closingIssuesReferences: [ref(5)], headRefName });
+    f.refused("impl-5", 2, /could not look — gh pr view 6 --json state,closingIssuesReferences,url,headRefName answered without a usable headRefName/);
   }
   f.pr(6, {});
   f.refused("finisher-pr-6", 2, /could not look — gh pr view 6 --json labels answered without a usable labels/);

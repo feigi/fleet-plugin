@@ -113,6 +113,8 @@ Closes #N"
 gh pr edit --add-label <patch|minor|major>   # own command, own exit status
 ```
 
+Push and open the PR from the branch you claimed in step 5, whatever branch the ticket names: release and reap find a claim only through its own branch.
+
 `recipe-check.mjs` runs the Recipe's Check step, then `<test command>` — the
 Recipe's Test entrypoint, as you were handed it, which runs through the suite
 slot already — against the staged tree, and records both results beside your
