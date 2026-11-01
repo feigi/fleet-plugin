@@ -81,3 +81,85 @@ for (const [label, width] of [["short", COLUMNS.length - 1], ["too-wide", COLUMN
     assert.match(r.stderr, /COLUMNS .*plugin\/scripts\/member-outcomes\.mjs/);
   });
 }
+
+// Signal 3 reads each implementer's own transcript, SESSION_DIR/<member>.jsonl,
+// through first_last_ts(); implementer_intervals() is that collection. Here
+// SESSION_DIR points into this test's own directory.
+const VALID = '{"timestamp":"2026-09-18T15:05:00.000Z"}\n{"timestamp":"2026-09-18T16:00:00.000Z"}\n';
+
+function sessionDir(prefix, transcripts) {
+  const dir = tempDir(prefix);
+  for (const [member, text] of Object.entries(transcripts)) writeFileSync(join(dir, `${member}.jsonl`), text);
+  return dir;
+}
+
+const FIRST_LAST = `
+print(json.dumps(mod.first_last_ts(mod.Path(sys.argv[2]))))
+`;
+
+test("first_last_ts() returns (None, None) for a missing transcript and for one with no parseable line", (t) => {
+  if (spawnSync("python3", ["-c", ""]).status !== 0) return t.skip("needs python3");
+  const dir = sessionDir("derive-first-last-", { garbage: "garbage\n{bad\n" });
+  assert.deepEqual(python(FIRST_LAST, [join(dir, "missing.jsonl")]), [null, null]);
+  assert.deepEqual(python(FIRST_LAST, [join(dir, "garbage.jsonl")]), [null, null]);
+});
+
+test("first_last_ts() skips garbage lines between timestamped ones and keeps the real first and last", (t) => {
+  if (spawnSync("python3", ["-c", ""]).status !== 0) return t.skip("needs python3");
+  const dir = sessionDir("derive-first-last-mixed-", {
+    mixed: 'garbage\n{"timestamp":"2026-09-18T15:05:00.000Z"}\n{bad\n{"type":"x"}\n{"timestamp":"2026-09-18T16:00:00.000Z"}\ngarbage\n',
+  });
+  assert.deepEqual(python(FIRST_LAST, [join(dir, "mixed.jsonl")]),
+    ["2026-09-18T15:05:00.000Z", "2026-09-18T16:00:00.000Z"]);
+});
+
+test("first_last_ts()'s per-line guard catches only a JSON decode error", (t) => {
+  if (spawnSync("python3", ["-c", ""]).status !== 0) return t.skip("needs python3");
+  const dir = sessionDir("derive-first-last-guard-", { m: VALID });
+  const body = `
+def loads(_s):
+    raise RuntimeError("not a decode error")
+mod.json.loads = loads
+mod.first_last_ts(mod.Path(sys.argv[2]))
+`;
+  const r = runPython(body, [join(dir, "m.jsonl")]);
+  assert.notEqual(r.status, 0, `expected the RuntimeError to escape, got exit 0 with ${r.stdout}`);
+  assert.match(r.stderr, /RuntimeError: not a decode error/);
+});
+
+const INTERVALS = `
+import contextlib, io
+mod.SESSION_DIR = mod.Path(sys.argv[2])
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    intervals, skipped = mod.implementer_intervals(json.loads(sys.argv[3]))
+print(json.dumps({"intervals": [[s.isoformat(), e.isoformat()] for s, e in intervals],
+                  "skipped": skipped, "out": buf.getvalue()}))
+`;
+
+const VALID_INTERVAL = [["2026-09-18T15:05:00+00:00", "2026-09-18T16:00:00+00:00"]];
+
+test("implementer_intervals() names the implementers whose transcript gave no timestamps in one WARNING, and leaves them out of the intervals", (t) => {
+  if (spawnSync("python3", ["-c", ""]).status !== 0) return t.skip("needs python3");
+  const dir = sessionDir("derive-intervals-", { "impl-1": VALID, "impl-2": "garbage\n{bad\n" });
+  const rows = [
+    { role: "implementer", member: "impl-1" },
+    { role: "implementer", member: "impl-2" },
+    { role: "implementer", member: "impl-3" },
+    // A non-implementer with no transcript is not Signal 3's, so not named.
+    { role: "reviewer", member: "snapshot-9" },
+  ];
+  const got = python(INTERVALS, [dir, JSON.stringify(rows)]);
+  assert.deepEqual(got.intervals, VALID_INTERVAL);
+  assert.deepEqual(got.skipped, ["impl-2", "impl-3"]);
+  const warnings = got.out.split("\n").filter((l) => l.includes("WARNING:"));
+  assert.equal(warnings.length, 1, `expected one WARNING line, got ${JSON.stringify(got.out)}`);
+  assert.match(warnings[0], /^ {2}WARNING: 2 implementer\(s\) .*counted idle.*: impl-2, impl-3$/);
+});
+
+test("implementer_intervals() prints nothing when every implementer's transcript gave timestamps", (t) => {
+  if (spawnSync("python3", ["-c", ""]).status !== 0) return t.skip("needs python3");
+  const dir = sessionDir("derive-intervals-clean-", { "impl-1": VALID });
+  const got = python(INTERVALS, [dir, JSON.stringify([{ role: "implementer", member: "impl-1" }])]);
+  assert.deepEqual(got, { intervals: VALID_INTERVAL, skipped: [], out: "" });
+});

@@ -104,7 +104,7 @@ def first_last_ts(path):
                     continue
                 try:
                     d = json.loads(line)
-                except Exception:
+                except json.JSONDecodeError:
                     continue
                 ts = d.get("timestamp")
                 if isinstance(ts, str):
@@ -113,6 +113,26 @@ def first_last_ts(path):
     except FileNotFoundError:
         return None, None
     return first, last
+
+
+def implementer_intervals(rows):
+    """Signal 3's live intervals, one per implementer-role row whose own
+    transcript gave timestamps. A row whose transcript is missing or has no
+    parseable timestamped line has no interval, so it counts idle; those
+    members are returned as `skipped` and named in one warning."""
+    intervals, skipped = [], []
+    for r in rows:
+        if r["role"] != "implementer":
+            continue
+        f, l = first_last_ts(SESSION_DIR / f"{r['member']}.jsonl")
+        if f and l:
+            intervals.append((parse_ts(f), parse_ts(l)))
+        else:
+            skipped.append(r["member"])
+    if skipped:
+        print(f"  WARNING: {len(skipped)} implementer(s) have no timestamped transcript line; "
+              f"counted idle: {', '.join(skipped)}")
+    return intervals, skipped
 
 
 def avg_live(intervals, lo, hi):
@@ -179,13 +199,7 @@ def main():
                 controller_cache_create += int(m["usage"].get("cacheWrite") or 0)
 
     # --- Signal 3: implementer idle ratio ---
-    impl_intervals = []
-    for r in rows:
-        if r["role"] != "implementer":
-            continue
-        f, l = first_last_ts(SESSION_DIR / f"{r['member']}.jsonl")
-        if f and l:
-            impl_intervals.append((parse_ts(f), parse_ts(l)))
+    impl_intervals, _ = implementer_intervals(rows)
 
     invocations = [  # (timestamp, implementer-cap) read off the session's own
                      # literal "/fleet-ctl:run-team <impl> <reviewers>" lines
