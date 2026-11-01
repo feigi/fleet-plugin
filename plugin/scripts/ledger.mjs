@@ -877,10 +877,14 @@ if (cmd === "read") {
 } else if (cmd === "ruled") {
   const [pr, ...decisionParts] = rest;
   if (!pr || decisionParts.length === 0) die("usage: ledger.mjs ruled <pr> <decision>");
-  // Nothing reads this section back — save() is its only consumer — so the
-  // harm here is the narrowest of the three: a permanently wrong decision
-  // record in an append-only file, with no verdict riding on it. Guarded
-  // anyway, because that record is what the subcommand exists to write.
+  // compute-board.mjs reads a `## Ruled` line led by `#<n>` as the
+  // controller's ruling on PR n, the last such line winning, and shows it on
+  // that PR's board card; `settle --from-report` reads the section to skip a
+  // line already there. So the `#<pr> <decision>` lead is a contract with the
+  // board, not free text. No verdict, label or row token depends on the
+  // section. A wrong id misattributes the ruling to another PR or hides it
+  // from the board, and leaves a permanently wrong record in an append-only
+  // file. Guarded because that record is what the subcommand exists to write.
   refuseStrayInId(pr, "a PR number");
   const decision = decisionParts.join(" ");
   data.ruled.push(`#${pr.replace(/^#/, "")} ${decision}`);
