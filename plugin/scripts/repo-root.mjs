@@ -533,7 +533,7 @@ function hasNodeShebang(path, buf) {
  * Every tracked file this repository ships that the consumer's own `node`
  * executes, in the working tree at `root`, repo-relative: each `*.mjs`, and
  * any other file whose first line is a node shebang — the extensionless
- * entrypoints `fleet-run`, `fleet-bootstrap` and `fleet-provenance`.
+ * entrypoints `fleet-run` and `fleet-provenance`.
  * A shebang decides, never an extension alone: `plugin/workflows/*.js` is ESM
  * a harness runs and plain node never loads, and carries none. Test files —
  * `*.test.mjs`, the one naming this repository gives them — are not shipped,

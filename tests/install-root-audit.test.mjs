@@ -139,10 +139,10 @@ function classifyScript(rel, content) {
   return null;
 }
 
-// The extensionless entrypoints, by path — the same three
+// The extensionless entrypoints, by path — the same ones
 // node-floor-sweep.test.mjs names in its own NODE_SHEBANG_ENTRYPOINTS
 // (#1884). classifyScript() finds them by their first line alone, a line CI
-// never needs — .github/scripts/install-and-smoke.sh runs all three as
+// never needs — .github/scripts/install-and-smoke.sh runs each as
 // `node <path>`, so losing it breaks only direct-exec callers at run time —
 // so one that lost it came back `null` and was skipped by the sweep below
 // without a word. The sweep's `files.length > 30` guard cannot notice, since it
@@ -151,7 +151,7 @@ function classifyScript(rel, content) {
 // (#1923): `fleet-run` with its shebang deleted and a
 // `git rev-parse` call anchored at `cwd: __dirname` appended left this
 // suite green; with the shebang kept, the same call fails it.
-const NODE_SHEBANG_ENTRYPOINTS = ["plugin/scripts/fleet-bootstrap", "plugin/scripts/fleet-provenance", "plugin/scripts/fleet-run"];
+const NODE_SHEBANG_ENTRYPOINTS = ["plugin/scripts/fleet-provenance", "plugin/scripts/fleet-run"];
 
 // Per-kind floors over what classifyScript() returns, at ~60% of each kind's
 // measured baseline — the same ratio the #1821 retired-word sweep's own

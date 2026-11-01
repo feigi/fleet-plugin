@@ -43,7 +43,7 @@ test("the sweep's own pattern matches each Node-consumer form it exists to catch
 });
 
 test("the sweep's own pattern passes omp's plugin install dir, which is the fleet's install, not a consumer's", () => {
-  assert.doesNotMatch("~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-bootstrap", NODE_CONSUMER);
+  assert.doesNotMatch("~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run", NODE_CONSUMER);
   assert.match("~/.omp/plugins/node_modules beside the consumer's node_modules", NODE_CONSUMER);
   // The exemption is only omp's install dir: another slash-preceded
   // `node_modules` is still a consumer's.

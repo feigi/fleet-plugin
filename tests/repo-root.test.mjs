@@ -346,7 +346,7 @@ test("trackedNodeScripts: an inherited GIT_DIR must not substitute another repos
 // consumer's own `node` executes, and nothing else — a `.mjs` by its
 // extension, any other file by a node shebang on its first line. #1855's own
 // case is `scripts/fleet-tool`, the shape of this repository's extensionless
-// entrypoints (`fleet-run`, `fleet-bootstrap`, `fleet-provenance`), which an
+// entrypoints (`fleet-run`, `fleet-provenance`), which an
 // extension-only rule never listed. `eval-only.js` is the other half of that
 // ticket: ESM in a `.js` with no shebang, run only by a plugin-runner's own
 // loader and never by plain node — the shape this repo's own retired review
