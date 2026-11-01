@@ -96,9 +96,9 @@ These stay literal strings in every repository:
 
 A repository whose tracker spells a role differently declares it in the `Label in our tracker` column of the triage-label table in `docs/agents/triage-labels.md` (the file `/setup-matt-pocock-skills` writes; the fleet only reads it). A role that neither the table nor the tracker's live labels settles is asked once, with a suggestion where one exists — the default when nothing else fits, and never a string that has vanished from the tracker; the answer is kept as fleet state, not written into the repository. A confirmed label the tracker lacks is created, but only on that confirmation.
 
-The Label map derivation step (`label-map.mjs ensure`, see [Label map](components/label-map.md)) replaces a hand-run check loop. It checks every mapped string against the tracker's live label list, so a label renamed or deleted since the last run is caught before the pre-flight and before any dispatch. Today the run-team controller's phase 0 runs it; the solo entry points are to run it first too (#3865).
+The Label map derivation step (`label-map.mjs ensure`, see [Label map](components/label-map.md)) replaces a hand-run check loop. It checks every mapped string against the tracker's live label list, so a label renamed or deleted since the last run is caught before the pre-flight and before any dispatch. The run-team controller's phase 0 runs it, and the solo entry points, `/next-ticket` and `/review-and-fix`, run it first too.
 
-Until every script reads the map (#3870 and #3872 are still to land), a script not yet moved still queries and sets each role's own name as its string — the stranded scan's in-progress query, for one. `claim-ticket.sh` already adds the in-progress label through the map, and `release-ticket.sh` and `drop-merged-label.sh` scan for and remove it through the map. So, for now, a repository's role labels must be exactly the role names: a different string declared in the table is mapped, but the label queries not yet moved do not use it.
+Every script that reads or writes a label resolves its role through the map's reader — `stranded.mjs`, the tick and `dispositions-check.mjs` among them — so a different string declared in the table is the one their label queries use.
 
 ### 2.5 `.gitignore` — HARD
 ```
