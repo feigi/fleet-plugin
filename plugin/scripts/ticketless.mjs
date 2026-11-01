@@ -16,7 +16,7 @@
 // it; `--ledger` names the ledger file instead. A ledger that cannot be
 // resolved is exit 2: `ledger.mjs`'s own cwd-relative fallback is never taken,
 // since an empty cwd-local ledger would answer Ticketless. Reached through the
-// Resolver: `~/.fleet/bin/fleet-run ticketless.mjs ...`.
+// Resolver: `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run ticketless.mjs ...`.
 //
 // Stdout is one JSON line:
 //

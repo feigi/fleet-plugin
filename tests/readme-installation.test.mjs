@@ -4,12 +4,12 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 // README's `## Installation` code block is what a fresh consumer types, top to
-// bottom. The Resolver (`~/.fleet/bin/fleet-run`) exists only once
+// bottom. The Resolver (`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run`) exists only once
 // `fleet-bootstrap` has placed it, so the block must run the bootstrap — from
 // the install root, where it needs no flag — before its first Resolver call.
 const README = readFileSync(join(import.meta.dirname, "..", "README.md"), "utf8");
 const BOOTSTRAP = "~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-bootstrap";
-const RESOLVER = "~/.fleet/bin/fleet-run";
+const RESOLVER = "~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run";
 
 function installationCommands(readmeText) {
   const section = /## Installation\n([\s\S]*?)(?=\n## )/.exec(readmeText);

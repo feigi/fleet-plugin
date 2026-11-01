@@ -88,7 +88,7 @@ test("requirements 2.3 describes the Recipe derivation: any technology, what it 
   assert.doesNotMatch(section, /no\s+ambient\s+environment/, "rule 4 names only shared services again");
   assert.doesNotMatch(section, /proves both|Both commands|both commands/, "2.3 describes a two-command Recipe again");
   // Ends at the line's end: the fence line is the whole command, so a longer ref (`origin/main-old`) or a trailing `&& …` is a different command.
-  assert.match(section, new RegExp(`${Pin.phrase("~/.fleet/bin/fleet-run derive-testcmd.sh . install && ~/.fleet/bin/fleet-run derive-testcmd.sh . test --at origin/main").source}[ \\t]*$`, "m"));
+  assert.match(section, new RegExp(`${Pin.phrase("~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run derive-testcmd.sh . install && ~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run derive-testcmd.sh . test --at origin/main").source}[ \\t]*$`, "m"));
 });
 
 test("the Recipe component doc states the running-service rule the deriver follows", () => {
@@ -132,13 +132,13 @@ test("review-and-fix's git archive bullet runs the Install step in the copy, rea
 
 test("run-team: a tree with no runner gets the Recipe's Test entrypoint, with no shared-stack carve-out", () => {
   const p = ISOLATION.paragraph("**A reused worktree may lack the runner.**", "references/isolation.md reused-worktree runner paragraph", "**A reused worktree may also be").text;
-  assert.match(p, Pin.phrase("tell the member the runner is absent and to run the Recipe's Test entrypoint directly (`~/.fleet/bin/fleet-run derive-testcmd.sh <main checkout> test --at origin/main` prints it)."));
+  assert.match(p, Pin.phrase("tell the member the runner is absent and to run the Recipe's Test entrypoint directly (`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run derive-testcmd.sh <main checkout> test --at origin/main` prints it)."));
   assert.doesNotMatch(p, /shared stack|stack-free|docker-free/, "the reused-worktree paragraph carves the Test entrypoint out for a stack again");
 });
 
 test("run-team: checkCmd comes from the Recipe cache, and the review does not run it", () => {
   const p = readPlugin("skills/run-team/references/phase-0.md").paragraph("**Where `checkCmd` comes from:**", "references/phase-0.md checkCmd source paragraph", "**Mid-run, a cache that stops running").text;
-  assert.match(p, Pin.phrase("`~/.fleet/bin/fleet-run derive-testcmd.sh . check` prints it"));
+  assert.match(p, Pin.phrase("`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run derive-testcmd.sh . check` prints it"));
   assert.match(p, Pin.phrase("the review does not run it"));
 });
 

@@ -73,7 +73,7 @@ test("phase 0's mid-run rule counts a settle wake's NEED derive-recipe in its on
 test("phase 0's Recipe read names the Check step beside install and test, each at origin/main", () => {
   const p = Pin.of(read("skills", "run-team", "references", "phase-0.md"), "phase-0.md")
     .between("**Derive the Recipe — the Recipe derivation step — before the fold-in below", "**Where `checkCmd` comes from:**", "the Recipe derivation step").text;
-  assert.match(p, Pin.phrase("`~/.fleet/bin/fleet-run derive-testcmd.sh . install --at origin/main`, `~/.fleet/bin/fleet-run derive-testcmd.sh . check --at origin/main` and `~/.fleet/bin/fleet-run derive-testcmd.sh . test --at origin/main`."));
+  assert.match(p, Pin.phrase("`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run derive-testcmd.sh . install --at origin/main`, `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run derive-testcmd.sh . check --at origin/main` and `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run derive-testcmd.sh . test --at origin/main`."));
   assert.match(p, Pin.phrase("**All three exit 0 → the cache is present and valid: use it as it stands and derive nothing.**"));
   assert.match(p, Pin.phrase("**`RECIPE PROVEN`** → re-run the three reads above (`derive-testcmd.sh . install --at origin/main`, `derive-testcmd.sh . check --at origin/main` and `derive-testcmd.sh . test --at origin/main`);"));
 });

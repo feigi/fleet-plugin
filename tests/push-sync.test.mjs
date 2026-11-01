@@ -400,7 +400,7 @@ test("each detached-push prose site names the helper and shows no bare `git push
   ];
   for (const [rel, mentions] of SITES) {
     const text = readFileSync(join(PLUGIN, rel), "utf8").replace(/\s+/g, " ");
-    const named = text.split("~/.fleet/bin/fleet-run push-sync.mjs --branch ").length - 1;
+    const named = text.split("~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run push-sync.mjs --branch ").length - 1;
     assert.equal(named, mentions, `${rel} names the helper ${named} time(s), expected ${mentions}`);
     assert.doesNotMatch(text, /git push\b[^.]*\bHEAD:/, `${rel} still shows a bare refspec push`);
   }

@@ -3,7 +3,7 @@
 // "Provenance check"). Names the live Install root — the realpath of omp's
 // `node_modules/@feigi/fleet-ctl` package entry, the one path every install kind
 // places — its kind and recorded version, and hashes the placed
-// Resolver (`~/.fleet/bin/fleet-run`) against the Install root's own copy and
+// Resolver (`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run`) against the Install root's own copy and
 // refuses on drift. Writes nothing, mutates no config — every path below is
 // read-only.
 //
@@ -14,7 +14,7 @@
 //
 // SEPARATE FILE, not `fleet-run --check`. `fleet-run` is deliberately a
 // single self-contained file because it alone gets copied to
-// `~/.fleet/bin/fleet-run` (see that file's own header) — folding a second,
+// `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run` (see that file's own header) — folding a second,
 // unrelated responsibility into it would grow the one artefact outside the
 // plugin for a feature that never needs to travel there. This script stays
 // inside the install and is reached like every other one, through the

@@ -42,7 +42,7 @@ retries it under the next letter.
 
    ```js
    return await (async () => {
-     const path = (await Bun.$`~/.fleet/bin/fleet-run --path review-eval.mjs`.text()).trim();
+     const path = (await Bun.$`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run --path review-eval.mjs`.text()).trim();
      const { runReviewToFile } = await import(path);
      return runReviewToFile({ pr: 1234, branch: "the-branch", worktree: "/abs/worktree", testCmd: "the test command", scratch: "/abs/scratch-root" });
    })();

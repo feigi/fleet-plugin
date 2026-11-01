@@ -176,7 +176,7 @@ test("End of run and references/close-out.md: a PR closing none or several is a 
 
 test("the verdict rules stay in the guard, where the controller rules each PR; the BLANK rule's paragraph is in references/reviewers.md", () => {
   const guard = SKILL.between("**Guard: accumulate per PR", "### Nothing to do: mark the beat and end your turn", "run-team guard").text;
-  assert.match(guard, Pin.phrase("`~/.fleet/bin/fleet-run tier-outcomes.mjs append <pr>`, never by hand** (that file's header carries the column meanings)."));
+  assert.match(guard, Pin.phrase("`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run tier-outcomes.mjs append <pr>`, never by hand** (that file's header carries the column meanings)."));
   assert.doesNotMatch(guard, /--closed-own-ticket|--minted-false-claim|yes\|no/, "the guard tells the controller to type a verdict");
   assert.match(guard, Pin.phrase("**A verdict is a measurement only if it post-dates the run that produced it.** See references/reviewers.md."));
   const moved = Pin.file(join(REFERENCES, "reviewers.md")).section("## A sizing verdict is a measurement only if it post-dates the run that produced it", "references/reviewers.md").text;
@@ -204,7 +204,7 @@ test("every NEED kind closeout.mjs prints has its place in End of run", () => {
 
 test("the derive-recipe paragraph dispatches the deriver with its rendered brief and stalls on RECIPE NOT PROVEN", () => {
   const s = step0();
-  assert.match(s, Pin.phrase("Dispatch a `task` member named `derive-recipe`, agent `fleet-recipe-deriver`, its prompt the brief `~/.fleet/bin/fleet-run dispatch-prompt.mjs render recipe-deriver --member derive-recipe --repo <repo> --scratch <scratch>` prints"));
+  assert.match(s, Pin.phrase("Dispatch a `task` member named `derive-recipe`, agent `fleet-recipe-deriver`, its prompt the brief `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run dispatch-prompt.mjs render recipe-deriver --member derive-recipe --repo <repo> --scratch <scratch>` prints"));
   assert.match(s, Pin.phrase("`RECIPE NOT PROVEN` → stall: report `STALL — Recipe not proven: <cause>` to the maintainer with the deriver's reason verbatim"));
 });
 
@@ -228,7 +228,7 @@ test("phase-0.md derives the Label map after the baseline and before the pre-fli
 
 test("the Label map section words the question as the derivation step's payload asks, and says how to keep the answer", () => {
   const s = Pin.of(PHASE0, "phase-0.md").section("## Derive the Label map", "phase-0 Label map section").text;
-  assert.match(s, Pin.phrase("`~/.fleet/bin/fleet-run label-map.mjs ensure` in this main checkout"));
+  assert.match(s, Pin.phrase("`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run label-map.mjs ensure` in this main checkout"));
   assert.match(s, Pin.phrase("Nothing after it runs — no pre-flight, no Shortlist, no claim — until the map is written."));
   assert.match(s, Pin.phrase("show the maintainer what the step printed and stop. Neither is a question."));
   assert.match(s, Pin.phrase("Put it to the maintainer as one question listing each uncertain role, its suggestion, why, and the alternatives"));
@@ -251,7 +251,7 @@ test("the Label map section words the question as the derivation step's payload 
   assert.doesNotMatch(tableExists, /not in the tracker/, "the reason for a live first table string claims it is missing from the tracker");
   assert.doesNotMatch(s, /^\s*- `origin` `table` —/m, "the single `origin` `table` reason is back, whatever the entry's `exists`");
   assert.match(s, Pin.phrase("reply `defaults` to accept every suggestion, or name `<role>=<label>` for any you want otherwise — a role with no suggestion must be named; labels that do not exist are created on your confirmation."));
-  assert.match(s, Pin.phrase("`~/.fleet/bin/fleet-run label-map.mjs set --create` with the reply: `--accept-suggestions` for `defaults`, and each `<role>=<label>` the maintainer named."));
+  assert.match(s, Pin.phrase("`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run label-map.mjs set --create` with the reply: `--accept-suggestions` for `defaults`, and each `<role>=<label>` the maintainer named."));
   assert.match(s, Pin.phrase("and `tableFile`, the path of the repository's triage-label table, the file the reasons below name. It is the payload's string, read from the echoed payload, never a path you spell yourself."));
   assert.match(s, Pin.phrase("In the same reply, tell the maintainer how to make the answer permanent: add or edit the role's row in the file the payload's `tableFile` names, the role in the first cell and the string in the second."));
   assert.match(s, Pin.phrase("The plugin never writes that table, so neither do you."));
@@ -372,7 +372,7 @@ test("the carried-token reconciliation after /resume is sent to the stranded-cla
 
 test("the no-baseline remedy runs main-checkout.mjs --record and names the baseline section, never a phase0.mjs re-run", () => {
   const row = TICK_ROWS.bullet("- `MAIN-CHECKOUT-NO-BASELINE …`", "- `PHASE0-INCOMPLETE <step>[, <step>…] …`", "run-team tick rows").text;
-  assert.match(row, Pin.phrase(`Yours to fix: run \`~/.fleet/bin/fleet-run main-checkout.mjs --record\`, which references/phase-0.md describes under "${BASELINE}".`));
+  assert.match(row, Pin.phrase(`Yours to fix: run \`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run main-checkout.mjs --record\`, which references/phase-0.md describes under "${BASELINE}".`));
   assert.match(row, Pin.phrase("A baseline that vanished mid-run is not a fresh run — report it to the maintainer before recording over whatever the tree now holds."));
   assert.doesNotMatch(row, /phase0\.mjs/, "a re-run skips the `ok` baseline step, so it records nothing");
 });

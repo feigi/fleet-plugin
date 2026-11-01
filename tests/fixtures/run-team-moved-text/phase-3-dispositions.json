@@ -21,8 +21,8 @@
       "A `rebase-fallback-#<pr>` on a conflict needs no record from you — the bot already appended `conflict-hold:#<pr>` to that PR's row, and the tick turns it into `DISPATCH fix-pr PR#<pr>` (**The fix-applier**)."
     ],
     [
-      "`~/.fleet/bin/fleet-run fleet-event.mjs drain --reason \"<reason>\"` — runs `closeout.mjs begin --reason \"<reason>\"` (**Release the claims that never became PRs**), then the tick.",
-      "`~/.fleet/bin/fleet-run fleet-event.mjs drain --reason \"<reason>\"` — runs `closeout.mjs begin --reason \"<reason>\"` (references/reaping.md), then the tick."
+      "`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run fleet-event.mjs drain --reason \"<reason>\"` — runs `closeout.mjs begin --reason \"<reason>\"` (**Release the claims that never became PRs**), then the tick.",
+      "`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run fleet-event.mjs drain --reason \"<reason>\"` — runs `closeout.mjs begin --reason \"<reason>\"` (references/reaping.md), then the tick."
     ],
     [
       "`DISPATCH fix-pr PR#<M> …` — a fix-applier per PR, for a review's survived or unverified findings, a dispositions mismatch no retry has answered, or a `conflict-hold:#<M>` — the merge bot's, or one you recorded off a `CONFLICT` line (**Reviewers**).",
@@ -167,7 +167,7 @@
       "suite-slot.mjs's header and tests/suite-slot.test.mjs; **The test command every gate runs** keeps the wrapped string the controller hands out, and **Reading a review result** what a no-slot review asks"
     ],
     [
-      "The bound is a wrapper, `suite-slot.mjs`, reached through the Resolver: `~/.fleet/bin/fleet-run suite-slot.mjs '<entrypoint>' [args…]` runs the entrypoint under `sh -c` with the arguments after it.",
+      "The bound is a wrapper, `suite-slot.mjs`, reached through the Resolver: `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run suite-slot.mjs '<entrypoint>' [args…]` runs the entrypoint under `sh -c` with the arguments after it.",
       "suite-slot.mjs's header and tests/suite-slot.test.mjs; **The test command every gate runs** keeps the wrapped string the controller hands out, and **Reading a review result** what a no-slot review asks"
     ],
     [
@@ -227,7 +227,7 @@
       "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt, with finisher-audit.mjs and finisher-label.mjs (tests/finisher-audit.test.mjs, tests/finisher-label.test.mjs); phase 2's **The finisher** points at references/finisher.md"
     ],
     [
-      "Its exit code is the verdict of this duty: `~/.fleet/bin/fleet-run finisher-audit.mjs --worktree <abs-path> --pin <your dispatch pin>`, the path the one you were dispatched with, however it was spelled, and the pin the full SHA.",
+      "Its exit code is the verdict of this duty: `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run finisher-audit.mjs --worktree <abs-path> --pin <your dispatch pin>`, the path the one you were dispatched with, however it was spelled, and the pin the full SHA.",
       "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt, with finisher-audit.mjs and finisher-label.mjs (tests/finisher-audit.test.mjs, tests/finisher-label.test.mjs); phase 2's **The finisher** points at references/finisher.md"
     ],
     [
@@ -299,7 +299,7 @@
       "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt, with finisher-audit.mjs and finisher-label.mjs (tests/finisher-audit.test.mjs, tests/finisher-label.test.mjs); phase 2's **The finisher** points at references/finisher.md"
     ],
     [
-      "Its exit code is the finisher's verdict: `~/.fleet/bin/fleet-run finisher-label.mjs --pr <pr> --pin <your dispatch pin>`, the pin the full SHA.",
+      "Its exit code is the finisher's verdict: `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run finisher-label.mjs --pr <pr> --pin <your dispatch pin>`, the pin the full SHA.",
       "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt, with finisher-audit.mjs and finisher-label.mjs (tests/finisher-audit.test.mjs, tests/finisher-label.test.mjs); phase 2's **The finisher** points at references/finisher.md"
     ],
     [
@@ -375,7 +375,7 @@
       "reap.sh, which `tick --apply` runs for every `merge-bot-<n>=done` (fleet-event.mjs's header; tests/reap.test.mjs), and references/reaping.md, which carries why; the **Merge-bot pass reports done** wake keeps the controller's part"
     ],
     [
-      "`~/.fleet/bin/fleet-run reap.sh --apply` recomputes every precondition inside the same invocation as the delete — `for-each-ref` for `[gone]`, `git cherry origin/main` to authorize the `git update-ref -d` delete (plus a fresh check that no worktree holds the branch), worktree removal without `--force` — and reports reaped and kept-with-reason counts.",
+      "`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run reap.sh --apply` recomputes every precondition inside the same invocation as the delete — `for-each-ref` for `[gone]`, `git cherry origin/main` to authorize the `git update-ref -d` delete (plus a fresh check that no worktree holds the branch), worktree removal without `--force` — and reports reaped and kept-with-reason counts.",
       "reap.sh, which `tick --apply` runs for every `merge-bot-<n>=done` (fleet-event.mjs's header; tests/reap.test.mjs), and references/reaping.md, which carries why; the **Merge-bot pass reports done** wake keeps the controller's part"
     ],
     [
@@ -391,7 +391,7 @@
       "reap.sh, which `tick --apply` runs for every `merge-bot-<n>=done` (fleet-event.mjs's header; tests/reap.test.mjs), and references/reaping.md, which carries why; the **Merge-bot pass reports done** wake keeps the controller's part"
     ],
     [
-      "`tick --apply` runs it right after `reap.sh --apply`, every pass: `~/.fleet/bin/fleet-run reclaim-scratch.mjs --root <scratch> --apply`, `<scratch>` the path `scratch-root.mjs` prints.",
+      "`tick --apply` runs it right after `reap.sh --apply`, every pass: `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run reclaim-scratch.mjs --root <scratch> --apply`, `<scratch>` the path `scratch-root.mjs` prints.",
       "reclaim-scratch.mjs's header, which `tick --apply` runs after the reap, and tests/reclaim-scratch.test.mjs"
     ],
     [
@@ -435,7 +435,7 @@
       "release-ticket.sh's header and tests/release-ticket.test.mjs, and references/reaping.md's **Why reap declines a claim that was never dispatched**; the Failure handling row for a claim abandoned mid-run keeps the controller's part"
     ],
     [
-      "`~/.fleet/bin/fleet-run release-ticket.sh <N> impl-<N> implementer --apply` — the pair the claim took, so the two name the same branch and worktree — is the inverse of the claim, and recomputes its preconditions inside the same invocation as the delete: 0 commits ahead of `origin/main`, no unique commits (`git cherry`), no branch on `origin`, and — whenever the worktree directory is there to read — a clean worktree.",
+      "`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run release-ticket.sh <N> impl-<N> implementer --apply` — the pair the claim took, so the two name the same branch and worktree — is the inverse of the claim, and recomputes its preconditions inside the same invocation as the delete: 0 commits ahead of `origin/main`, no unique commits (`git cherry`), no branch on `origin`, and — whenever the worktree directory is there to read — a clean worktree.",
       "release-ticket.sh's header and tests/release-ticket.test.mjs, and references/reaping.md's **Why reap declines a claim that was never dispatched**; the Failure handling row for a claim abandoned mid-run keeps the controller's part"
     ],
     [

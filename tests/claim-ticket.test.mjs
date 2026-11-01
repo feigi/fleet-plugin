@@ -96,7 +96,7 @@ function apply(files, script = SCRIPT, recipe = {}) {
   });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const wt = join(dir, ".worktrees", "42-slug");
-  // The runner reaches the suite slots by `$HOME/.fleet/bin/fleet-run`: it runs
+  // The runner reaches the suite slots by `$HOME/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run`: it runs
   // under the fixture's own Resolver and HOME, never the real ones.
   const host = slotHome();
   return {
@@ -180,7 +180,7 @@ test("runner: the Test entrypoint's own exit status is the runner's", () => {
 // its meaning with the runner's arguments appended after it.
 test("runner: a quoted or compound Test entrypoint runs exactly as written", () => {
   const quoted = apply({}, SCRIPT, { test: `echo "it's \\$HOME's"` });
-  assert.match(quoted.text, /^exec "\$HOME\/\.fleet\/bin\/fleet-run" suite-slot\.mjs '/m);
+  assert.match(quoted.text, /^exec "\$HOME\/\.omp\/plugins\/node_modules\/@feigi\/fleet-ctl\/scripts\/fleet-run" suite-slot\.mjs '/m);
   const q = quoted.run("x");
   assert.equal(q.status, 0, q.stderr);
   assert.equal(q.stdout, "it's $HOME's x\n");

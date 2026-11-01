@@ -17,7 +17,7 @@ Read first: `gh issue view <N> --json title,body,comments --jq '.title, .body, (
 | **light** | States exactly what to change, one-two files, no design choice open | Test first, make the one change, run it with the repo's test runner |
 | **heavy** | Ambiguity in *what* to build, >~3 files, new API/schema/UX, or several viable approaches | Write a short plan, then carry it out inline, test first |
 
-**Fleet member on heavy: write the plan under your own scratch path, `<scratch>/impl-<N>/` (`<scratch>` is the path your dispatch prompt names; with no dispatcher, the output of `~/.fleet/bin/fleet-run scratch-root.mjs`), then carry it out inline, test first.**
+**Fleet member on heavy: write the plan under your own scratch path, `<scratch>/impl-<N>/` (`<scratch>` is the path your dispatch prompt names; with no dispatcher, the output of `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run scratch-root.mjs`), then carry it out inline, test first.**
 Heavy is never a reason to give up: a `ready-for-agent` ticket's `## Agent Brief`
 already settles the open design choices, so plan from it. Solo session has a user:
 settle the open design choices with them before planning.

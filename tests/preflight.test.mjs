@@ -61,8 +61,9 @@ esac
   for (const name of ["jq", "python3", "shasum"]) writeExecStub(join(bin, name), "#!/bin/sh\nexit 0\n");
 
   const home = join(root, "home");
-  mkdirSync(join(home, ".fleet", "bin"), { recursive: true });
-  writeExecStub(join(home, ".fleet", "bin", "fleet-run"), "#!/bin/sh\n[ \"$1\" = --root ] && echo /install/root\n");
+  const entry = join(home, ".omp", "plugins", "node_modules", "@feigi", "fleet-ctl", "scripts");
+  mkdirSync(entry, { recursive: true });
+  writeExecStub(join(entry, "fleet-run"), "#!/bin/sh\n[ \"$1\" = --root ] && echo /install/root\n");
 
   const env = gitEnv({ PATH: `${bin}:${process.env.PATH}`, HOME: home }, process.env);
   return { ws, env, log, marker: join(ws, ".fleet", MARKER_FILE) };
@@ -207,15 +208,16 @@ test("a marker that cannot be written exits 2 naming the path, after printing ev
 
 test("a ~/ argv element with HOME unset is reported as not run, never resolved against the repository", () => {
   const f = fixture();
-  const checks = [{ name: "resolver", argv: ["~/.fleet/bin/fleet-run", "--root"] }];
+  const checks = [{ name: "resolver", argv: ["~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run", "--root"] }];
   assert.deepEqual(runPreflight({ cwd: f.ws, env: f.env, checks }).failed, [], "control: with HOME set the row passes");
 
   // A second repository, so the control's marker does not skip this run. It
   // holds an executable at the path a `~` expanded to "" would name.
   const g = fixture();
   const { HOME, ...noHome } = g.env;
-  mkdirSync(join(g.ws, ".fleet", "bin"), { recursive: true });
-  writeExecStub(join(g.ws, ".fleet", "bin", "fleet-run"), "#!/bin/sh\nexit 0\n");
+  const stray = join(g.ws, ".omp", "plugins", "node_modules", "@feigi", "fleet-ctl", "scripts");
+  mkdirSync(stray, { recursive: true });
+  writeExecStub(join(stray, "fleet-run"), "#!/bin/sh\nexit 0\n");
   const r = runPreflight({ cwd: g.ws, env: noHome, checks });
   assert.deepEqual(r.failed, ["resolver"]);
   assert.match(r.results[0].why, /HOME is not set/);

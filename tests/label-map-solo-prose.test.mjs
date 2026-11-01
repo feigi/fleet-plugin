@@ -57,7 +57,7 @@ test("/next-ticket runs ensure before its candidates query and no longer creates
   assert.match(step1, Pin.phrase("Exit 3 → it printed the question payload"));
   assert.match(step1, Pin.phrase("a JSON object with `certain`, `uncertain` and `tableFile`, the path of the repository's triage-label table"));
   assert.match(step1, Pin.phrase("(a role declared in the table but not in the tracker names the payload's `tableFile`)"));
-  assert.match(step1, Pin.phrase("**Wait for the answer**, then run `~/.fleet/bin/fleet-run label-map.mjs set --create` with it"));
+  assert.match(step1, Pin.phrase("**Wait for the answer**, then run `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run label-map.mjs set --create` with it"));
   assert.match(step1, Pin.phrase("run `ensure` again, which now exits 0"));
   assert.match(step1, Pin.phrase("add or edit the row for the role in the file the payload's `tableFile` names"));
   assert.match(step1, Pin.phrase("Exit 1 or 2 → show what it printed and stop; neither is a question."));
@@ -65,14 +65,14 @@ test("/next-ticket runs ensure before its candidates query and no longer creates
   assert.doesNotMatch(NEXT_TICKET.text, /gh label create in-progress/, "the claim still creates the label itself");
   const claim = NEXT_TICKET.between("## 5. Claim it", "## 6. Size the ticket", "next-ticket step 5").text;
   assert.match(claim, Pin.phrase('gh issue edit <N> --add-label "<in-progress string>"'));
-  assert.match(claim, Pin.phrase("`<in-progress string>` is what `~/.fleet/bin/fleet-run label-map.mjs show in-progress` prints"));
+  assert.match(claim, Pin.phrase("`<in-progress string>` is what `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run label-map.mjs show in-progress` prints"));
   assert.doesNotMatch(claim, /--add-label in-progress/, "the claim types the role name where the mapped string goes");
 });
 
 test("/review-and-fix runs ensure standalone before step 1 and says a dispatched fix-applier never does", () => {
   const preamble = REVIEW_AND_FIX.between("`<scratch>` below is", "1. Run the review yourself.", "review-and-fix.md preamble").text;
-  assert.match(preamble, Pin.phrase("**Standalone, before step 1, run the Label map derivation step:** `~/.fleet/bin/fleet-run label-map.mjs ensure`."));
-  assert.match(preamble, Pin.phrase("wait for the answer, run `~/.fleet/bin/fleet-run label-map.mjs set --create` with it"));
+  assert.match(preamble, Pin.phrase("**Standalone, before step 1, run the Label map derivation step:** `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run label-map.mjs ensure`."));
+  assert.match(preamble, Pin.phrase("wait for the answer, run `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run label-map.mjs set --create` with it"));
   assert.match(preamble, Pin.phrase("then `ensure` again, which now exits 0. Exit 1 or 2 → show what it printed and stop."));
   // The payload's table file, named for the question and for making the answer permanent; the maintainer edits that table, the agent never does.
   assert.match(preamble, Pin.phrase("it printed the question payload, whose `tableFile` is the path of the repository's triage-label table"));

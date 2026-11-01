@@ -122,7 +122,7 @@ test("the snapshot agent is told to derive testCmd AND the schema declares it", 
 
   assert.match(
     snapshot,
-    /~\/\.fleet\/bin\/fleet-run derive-testcmd\.sh \$\{worktree\} test/,
+    /~\/\.omp\/plugins\/node_modules\/@feigi\/fleet-ctl\/scripts\/fleet-run derive-testcmd\.sh \$\{worktree\} test/,
     "the snapshot agent no longer reads the Test entrypoint through derive-testcmd.sh via the Resolver",
   );
   // Deriving the command is half the job — it also has to RUN where the
@@ -134,7 +134,7 @@ test("the snapshot agent is told to derive testCmd AND the schema declares it", 
   // destination — from its root.
   assert.match(
     snapshot,
-    /INSTALL=\$\(~\/\.fleet\/bin\/fleet-run derive-testcmd\.sh \$\{worktree\} install\)/,
+    /INSTALL=\$\(~\/\.omp\/plugins\/node_modules\/@feigi\/fleet-ctl\/scripts\/fleet-run derive-testcmd\.sh \$\{worktree\} install\)/,
     "the snapshot agent no longer reads the Install step through derive-testcmd.sh via the Resolver, off the worktree that holds the cache",
   );
   assert.match(

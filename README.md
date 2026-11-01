@@ -23,10 +23,10 @@ ADR 0014, ADR 0021).
 ```
 omp plugin install @feigi/fleet-ctl
 ~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-bootstrap
-~/.fleet/bin/fleet-run tier-roles.mjs --check
+~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run tier-roles.mjs --check
 ```
 
-`fleet-bootstrap` places the Resolver, `~/.fleet/bin/fleet-run`, and is
+`fleet-bootstrap` places the Resolver, `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run`, and is
 idempotent; re-run it after updating with `omp plugin install
 @feigi/fleet-ctl@latest`.
 

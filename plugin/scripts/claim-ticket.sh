@@ -417,7 +417,7 @@ else
 #!/bin/sh
 # agent-test template: $tmpl_stamp
 export TEST_COMPOSE_PROJECT=ab-$issue TEST_POSTGRES_PORT=$pg TEST_OLLAMA_PORT=$ollama
-exec "\$HOME/.fleet/bin/fleet-run" suite-slot.mjs '$quoted' "\$@"
+exec "\$HOME/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run" suite-slot.mjs '$quoted' "\$@"
 SH
   chmod +x "$runner"
   excl="$(git rev-parse --git-common-dir)/info/exclude"

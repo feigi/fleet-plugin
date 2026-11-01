@@ -78,7 +78,7 @@ is the repository that `repository.url` in the Install root's `package.json`
 names — the same host and `owner/repo` — file it the way `review-and-fix.md`
 step 5 files a deferral: `ledger.mjs check "<subject>"`, then
 `gh issue create --label "<needs-triage string>"`, `<needs-triage string>` being what
-`~/.fleet/bin/fleet-run label-map.mjs show needs-triage` prints, then `ledger.mjs filed <N> "<subject>"` with the same subject. A
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run label-map.mjs show needs-triage` prints, then `ledger.mjs filed <N> "<subject>"` with the same subject. A
 tracker hit is handled the way step 5 handles one. The subject is `<path>: <the
 defect in one line>`; the body carries the evidence — the members, the text
 they followed, the transcript and ledger lines — the trigger it met, the

@@ -9,7 +9,7 @@ through an install, never a source path.
 
 ## How it works
 1. **Call by name.** Every prose callsite names a script, never a path:
-   `~/.fleet/bin/fleet-run <script> [args...]`.
+   `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run <script> [args...]`.
 2. **Resolve.** [`fleet-run`](../../plugin/scripts/fleet-run) — the
    **Resolver** — takes the realpath of omp's extension package entry
    `~/.omp/plugins/node_modules/@feigi/fleet-ctl`, the one path every install
@@ -19,7 +19,7 @@ through an install, never a source path.
 3. **Bootstrap once.** The Resolver ships *inside* the plugin, so it
    can't resolve itself the first time.
    [`fleet-bootstrap`](../../plugin/scripts/fleet-bootstrap) places one
-   copy at `~/.fleet/bin/fleet-run` — the one artefact this repo owns
+   copy at `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run` — the one artefact this repo owns
    outside the plugin, since nothing survives between an agent's tool
    calls. Idempotent and self-limiting: it only overwrites the placed
    copy when its own directory resolves to omp's Install root,

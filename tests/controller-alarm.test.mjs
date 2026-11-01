@@ -205,7 +205,7 @@ test("extension: a due poll sends the one-line message once, with no second argu
   const s = session();
   await s.start();
   s.state.timers[0].fn();
-  assert.deepEqual(s.state.sent, [["[fleet-alarm] run ~/.fleet/bin/fleet-run fleet-event.mjs heartbeat"]]);
+  assert.deepEqual(s.state.sent, [["[fleet-alarm] run ~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run fleet-event.mjs heartbeat"]]);
   assert.equal(ALARM_LINE, s.state.sent[0][0]);
   s.state.timers[0].fn();
   assert.equal(s.state.sent.length, 1, "the same beat, inside its interval, is not fired again");

@@ -2,7 +2,7 @@
 // review-core.mjs directly) through
 // the Resolver, from an `eval` cell:
 //
-//   const path = (await Bun.$`~/.fleet/bin/fleet-run --path review-eval.mjs`.text()).trim();
+//   const path = (await Bun.$`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run --path review-eval.mjs`.text()).trim();
 //   const { runReviewOnOmp } = await import(path);
 //   const result = await runReviewOnOmp({ pr, branch, worktree, testCmd, scratch });
 //

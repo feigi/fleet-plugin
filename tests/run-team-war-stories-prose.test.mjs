@@ -73,7 +73,7 @@ const CORRECTIONS = [
   ["**Phase 2** carries all three rules to every member.", "**Dispatching the Pull's member** carries all three rules to every member."],
   [
     "so `git push origin \"HEAD:$(git branch --show-current)\"` exits 128 on `fatal: invalid refspec 'HEAD:'`.",
-    "so `~/.fleet/bin/fleet-run push-sync.mjs --branch \"$(git branch --show-current)\"` is handed an empty branch and exits 2 before pushing anything.",
+    "so `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run push-sync.mjs --branch \"$(git branch --show-current)\"` is handed an empty branch and exits 2 before pushing anything.",
   ],
   ["is what Phase 3's block uses", "is what the watcher block in references/ci-watcher.md uses"],
   // The controller ends its turn on a drained queue and an alarm wakes it, so
@@ -106,7 +106,7 @@ const CORRECTIONS = [
   // script's refusal.
   [
     "So take your own: `git worktree add --detach <scratch>/pr<N>/finish-<your member name> <your dispatch pin>`, mutate and run `<testCmd>` in there, then `git worktree remove --force <scratch>/pr<N>/finish-<your member name>`.",
-    "So take your own: `~/.fleet/bin/fleet-run finisher-tree.mjs --worktree <abs-path> --pin <your dispatch pin> --pr <N> --member <your member name> --scratch <scratch>` adds `git worktree add --detach <scratch>/pr<N>/finish-<your member name> <your dispatch pin>` and runs the Install step in it, as a claim does: a detached worktree holds tracked files only, so without that step a suite whose dependencies are ignored cannot start. Mutate and run `<testCmd>` in that tree, then `git worktree remove --force <scratch>/pr<N>/finish-<your member name>`.",
+    "So take your own: `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run finisher-tree.mjs --worktree <abs-path> --pin <your dispatch pin> --pr <N> --member <your member name> --scratch <scratch>` adds `git worktree add --detach <scratch>/pr<N>/finish-<your member name> <your dispatch pin>` and runs the Install step in it, as a claim does: a detached worktree holds tracked files only, so without that step a suite whose dependencies are ignored cannot start. Mutate and run `<testCmd>` in that tree, then `git worktree remove --force <scratch>/pr<N>/finish-<your member name>`.",
   ],
   [
     "and `worktree add` on an occupied path fails closed into a halt with a purely mechanical cause.",

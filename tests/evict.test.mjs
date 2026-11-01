@@ -440,10 +440,10 @@ test("REDERIVE is claim-ticket.sh's own refusal, word for word", () => {
 
 test("the restore command keeps a tree path with a space or a quote in it one word", () => {
   for (const tree of ["/Users/x/My Projects/repo/.worktrees/7-impl-7", "/tmp/it's/.worktrees/8-impl-8", "/tmp/plain/.worktrees/9-impl-9"]) {
-    const cmd = restoreCommand(tree).replace("~/.fleet/bin/fleet-run", "printf '[%s]\\n'");
+    const cmd = restoreCommand(tree).replace("~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run", "printf '[%s]\\n'");
     assert.equal(execFileSync("sh", ["-c", cmd], { encoding: "utf8" }), `[evict.mjs]\n[--restore]\n[${tree}]\n[--apply]\n`, cmd);
   }
-  assert.equal(restoreCommand("/tmp/plain/.worktrees/9-impl-9"), "~/.fleet/bin/fleet-run evict.mjs --restore /tmp/plain/.worktrees/9-impl-9 --apply");
+  assert.equal(restoreCommand("/tmp/plain/.worktrees/9-impl-9"), "~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run evict.mjs --restore /tmp/plain/.worktrees/9-impl-9 --apply");
 });
 
 test("--restore refuses a tree that is not evicted, a relative path, and --after-rotate", (t) => {

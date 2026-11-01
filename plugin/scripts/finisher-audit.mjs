@@ -11,7 +11,7 @@
 // `worktree-audit.sh` runs in (it audits the worktrees of whichever repository
 // it stands in); the cwd when omitted. `--sample-seconds` is the gap between the
 // two `git diff --stat` samples of a dirty tree, 60 when omitted. Reached
-// through the Resolver: `~/.fleet/bin/fleet-run finisher-audit.mjs ...`.
+// through the Resolver: `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run finisher-audit.mjs ...`.
 //
 // Stdout is always one JSON line, the verdict:
 //

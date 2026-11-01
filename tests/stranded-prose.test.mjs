@@ -14,7 +14,7 @@ const step = () => PHASE0.section("## Resume the claims a dead run left without 
 
 test("the stranded-claim step runs stranded.mjs after the rotation and reads prior, never the record", () => {
   const s = step();
-  assert.match(s, Pin.phrase("`~/.fleet/bin/fleet-run stranded.mjs` lists and classifies; you dispatch."));
+  assert.match(s, Pin.phrase("`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run stranded.mjs` lists and classifies; you dispatch."));
   assert.match(s, Pin.phrase("It reads the `prior` rotate just recorded, never the record itself, which names this run's own live controller"));
   // `between` throws when either anchor is gone or the two come in the other
   // order, which a bare `indexOf` comparison reads as true when one is missing.

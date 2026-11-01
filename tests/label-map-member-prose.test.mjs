@@ -24,7 +24,7 @@ const FIX_APPLIER = file("agents", "fleet-fix-applier.agent.md");
 const MERGE_BOT_AGENT = file("agents", "fleet-merge-bot.agent.md");
 const MERGE_BOT_BRIEF = file("skills", "run-team", "briefs", "merge-bot.md");
 
-const SHOW = (role) => `~/.fleet/bin/fleet-run label-map.mjs show ${role}`;
+const SHOW = (role) => `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run label-map.mjs show ${role}`;
 const SHOW_RE = /label-map\.mjs\s+show\b/;
 
 for (const kind of ["review", "dispositions-retry"]) {
@@ -82,7 +82,7 @@ test("run-merge-bot.md reads ready-to-merge before selection; a refusal holds no
   assert.match(section, Pin.phrase("You run no `ensure` and ask no one."));
   assert.match(section, Pin.phrase("**A non-zero exit from `show` ends your pass before selection**, with nothing else done first and `ready-to-merge` never typed in place of the string"));
   assert.match(section, Pin.phrase("holds no grace"));
-  assert.match(section, Pin.phrase("~/.fleet/bin/fleet-run ledger.mjs read | jq -c '.queued[\"merge-bot-<n>\"]'"));
+  assert.match(section, Pin.phrase("~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run ledger.mjs read | jq -c '.queued[\"merge-bot-<n>\"]'"));
   assert.match(section, Pin.phrase("every PR there `refused` with `reason` `label-map-refused`; an empty or absent queue gives every list empty"));
   assert.match(section, Pin.phrase("Validate it as **One verdict per queued PR** says, then send your final line followed by what `show` printed."));
   assert.match(section, Pin.phrase("**The top-level invocation** prints what `show` printed and stops. It writes no report."));

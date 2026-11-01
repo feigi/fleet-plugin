@@ -22,10 +22,10 @@ const CONTEXT = Pin.file(join(ROOT, "CONTEXT.md"));
 // carries the paragraph in full, the review's harmless-wrap clause with it.
 test("SKILL.md tells the controller to hand the fix-applier and the finisher the wrapped string as <testCmd>", () => {
   const p = RUN_TEAM.paragraph("**The test command every gate runs.**", "run-team/SKILL.md suite slot hand-out paragraph", "**Where `<branch>` comes from:**").text;
-  assert.match(p, Pin.phrase("the fix-applier and the finisher get the wrapped string as `<testCmd>` — `~/.fleet/bin/fleet-run suite-slot.mjs '<command>'`, each `'` inside the command written `'\\''`"),
+  assert.match(p, Pin.phrase("the fix-applier and the finisher get the wrapped string as `<testCmd>` — `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run suite-slot.mjs '<command>'`, each `'` inside the command written `'\\''`"),
     "the hand-out no longer gives the fix-applier and the finisher the wrapped string — their gate then runs unbounded");
   const full = MEMBER_LIFECYCLE.section("## The test command every gate runs", "references/member-lifecycle.md test command section").text;
-  assert.match(full, Pin.phrase("The fix-applier and the finisher run what you hand them, so hand them the wrapped string as `<testCmd>` — `~/.fleet/bin/fleet-run suite-slot.mjs '<command>'`, each `'` inside the command written `'\\''`"),
+  assert.match(full, Pin.phrase("The fix-applier and the finisher run what you hand them, so hand them the wrapped string as `<testCmd>` — `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run suite-slot.mjs '<command>'`, each `'` inside the command written `'\\''`"),
     "references/member-lifecycle.md no longer gives the fix-applier and the finisher the wrapped string");
   assert.match(full, Pin.phrase("a wrapped string handed to it anyway is harmless"),
     "the hand-out no longer says the review's own wrapper makes a wrapped string harmless");

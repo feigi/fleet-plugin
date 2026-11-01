@@ -291,7 +291,7 @@ test("render implementer and every fix-applier kind refuse an evicted worktree, 
       assert.equal(r.status, 2, label(c));
       assert.equal(r.out, "");
       assert.ok(r.err.includes(`${wt} is evicted`), `${label(c)}: ${r.err}`);
-      assert.ok(r.err.includes(`run \`~/.fleet/bin/fleet-run evict.mjs --restore ${wt} --apply\`, then render again`), `${label(c)}: ${r.err}`);
+      assert.ok(r.err.includes(`run \`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run evict.mjs --restore ${wt} --apply\`, then render again`), `${label(c)}: ${r.err}`);
     } else {
       assert.equal(r.status, 0, `${label(c)}: ${r.err}`);
       assert.ok(r.out.includes(wt), label(c));

@@ -3,9 +3,9 @@ You are merge-bot-17.
 scratch: /abs/scratch-bot
 
 Your report is a file, `/abs/scratch-bot/reports/merge-bot-17.json`, in the shape
-`~/.fleet/bin/fleet-run report-schema.mjs print merge-bot` prints. Write it
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run report-schema.mjs print merge-bot` prints. Write it
 before your final message, and send nothing until
-`~/.fleet/bin/fleet-run report-schema.mjs validate merge-bot /abs/scratch-bot/reports/merge-bot-17.json`
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run report-schema.mjs validate merge-bot /abs/scratch-bot/reports/merge-bot-17.json`
 answers `valid`. Your final message is then one line,
 `merge-bot-17: done /abs/scratch-bot/reports/merge-bot-17.json`. A Label map
 refusal, which `run-merge-bot.md` describes, follows that line with what

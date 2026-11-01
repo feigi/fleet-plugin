@@ -31,7 +31,7 @@
 #      `enabledProviders` precondition retired with the marketplace route
 #      (ADR 0021), so no scratch config is needed to make this pass
 #      anymore — proving the point.
-#   3. For every script NAME a `~/.fleet/bin/fleet-run <script>` prose
+#   3. For every script NAME a `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run <script>` prose
 #      callsite names — grepped fresh from `plugin/skills`,
 #      `plugin/commands`, `plugin/scripts`, never a hardcoded list that can go stale —
 #      resolves it via `fleet-run --path <script>` and asserts the resolved
@@ -106,7 +106,7 @@ if ! grep -qxF 'fleet-provenance: kind: linked-checkout' <<<"$provenance"; then
   fail=1
 fi
 
-# ---- every ~/.fleet/bin/fleet-run <script> callsite resolves ----
+# ---- every ~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run <script> callsite resolves ----
 # Extracted fresh, never hardcoded: a prose edit that adds or renames a
 # callsite is covered on arrival, and a stale list here could not go
 # unnoticed the way a hardcoded one could.
@@ -115,7 +115,7 @@ fi
 # match" and lands in the empty-set check, rc 2+ is grep itself failing.
 grep_rc=0
 # shellcheck disable=SC2088 # literal grep PATTERN text, not a path to expand
-CALLSITES="$(grep -rhoE '~/\.fleet/bin/fleet-run[[:space:]]+[A-Za-z][A-Za-z0-9_.-]*\.(mjs|sh)' \
+CALLSITES="$(grep -rhoE '~/\.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run[[:space:]]+[A-Za-z][A-Za-z0-9_.-]*\.(mjs|sh)' \
   plugin/skills plugin/commands plugin/scripts)" || grep_rc=$?
 if [ "$grep_rc" -gt 1 ]; then
   echo "::error::install-and-smoke: the callsite grep itself failed (rc $grep_rc) — its stderr is above"
@@ -123,14 +123,14 @@ if [ "$grep_rc" -gt 1 ]; then
 fi
 SCRIPT_NAMES=""
 if [ -n "$CALLSITES" ]; then
-  SCRIPT_NAMES="$(sed -E 's#^~/\.fleet/bin/fleet-run[[:space:]]+##' <<<"$CALLSITES" | sort -u)"
+  SCRIPT_NAMES="$(sed -E 's#^~/\.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run[[:space:]]+##' <<<"$CALLSITES" | sort -u)"
 fi
 if [ -z "$SCRIPT_NAMES" ]; then
   echo "::error::install-and-smoke: no fleet-run callsites found — the grep itself broke, not the callsites"
   fail=1
 fi
 
-RESOLVER="$SCRATCH_HOME/.fleet/bin/fleet-run"
+RESOLVER="$SCRATCH_HOME/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run"
 RESOLVE_ERR="$SCRATCH_HOME/resolve.err"
 echo "== resolving every fleet-run callsite target =="
 count=0
