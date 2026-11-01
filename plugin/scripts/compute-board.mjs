@@ -28,7 +28,7 @@
 // not off the card's own row — a ticket retried under a new PR has that PR's
 // tokens on another row. A fallback `#M` row for a PR a ticket row's latest
 // attempt claims is that card's other half and renders no card of its own:
-// its row-level signals (`ledger-error`, held-behind, the cause words, a live
+// its row-level signals (`ledger-error`, the cause words, a live
 // member) are the claiming card's.
 // fleet-tick.mjs's I/O and main() never run here, main() being guarded on
 // argv[1].
@@ -43,7 +43,7 @@ import { implementerCell, modelsEqual } from "./tier-roles.mjs";
 
 // A ledger row is freeform, controller-authored text. Two example shapes:
 //   #<n> impl-<n>=PR#<m> → PR#<m> → MERGED 73b356de
-//   #<n> impl-<n>=PR#<m> → PR#<m> · fix-pr-<m> · ruled:6-applies · held-behind:#<k>
+//   #<n> impl-<n>=PR#<m> → PR#<m> · fix-pr-<m> · ruled:6-applies
 // Extract by token, never by position — the controller reorders and appends
 // tokens freely. Unknown text is ignored, never fatal.
 //
@@ -140,7 +140,6 @@ export function parseRow(row) {
   if (!issueM) return null;
   const ticket = Number(issueM[1]);
   const mergedM = row.match(/\bMERGED\s+([0-9a-f]{7,40})\b/i);
-  const heldM = row.match(/\bheld-behind[:\s]+#?(\d+)\b/i);
   const causes = [];
   for (const t of ["KILLED", "BLOCKED", "SHA-OFF-BRANCH"]) {
     if (new RegExp(`\\b${t}\\b`).test(row)) causes.push(t.toLowerCase());
@@ -228,7 +227,6 @@ export function parseRow(row) {
     pr,
     merged: !!mergedM,
     sha: mergedM ? mergedM[1] : null,
-    heldBehind: heldM ? Number(heldM[1]) : null,
     causes,
     malformed,
   };
@@ -278,7 +276,6 @@ export function deriveFlags(parsed, ctx) {
   const flags = [];
   if (parsed.malformed) flags.push("ledger-error");
   if (ctx.ci === "red") flags.push("red-ci");
-  if (parsed.heldBehind != null) flags.push(`held-behind:#${parsed.heldBehind}`);
   for (const c of parsed.causes) flags.push(c); // killed | blocked | sha-off-branch
   const o = parsed.implOutcome;
   if ((o === "killed" || o === "tier-mismatch" || o === "blocked") && !flags.includes(o)) flags.push(o);
@@ -515,10 +512,7 @@ const FLAG_SEVERITY = {
 };
 function severity(flags) {
   let s = 0;
-  for (const f of flags) {
-    if (f.startsWith("held-behind")) s = Math.max(s, 2);
-    else s = Math.max(s, FLAG_SEVERITY[f] ?? 0);
-  }
+  for (const f of flags) s = Math.max(s, FLAG_SEVERITY[f] ?? 0);
   return s;
 }
 
@@ -697,7 +691,6 @@ export function computeBoard(inputs) {
     const claimer = p.impl === null && p.pr === p.issue ? claimedBy.get(p.pr) : undefined;
     if (claimer === undefined) { cards.push(p); continue; }
     claimer.malformed ||= p.malformed;
-    claimer.heldBehind ??= p.heldBehind;
     for (const c of p.causes) if (!claimer.causes.includes(c)) claimer.causes.push(c);
     claimer.agent = p.agent ?? claimer.agent;
     claimer.merged ||= p.merged;

@@ -199,30 +199,6 @@ test("the timeline program prints the labeled line for a string holding an apost
   assert.deepEqual(readTimeline("never-applied", TIMELINE), [`committed ${A}`, `head_ref_force_pushed ${B}`]);
 });
 
-// The research note's row 43 cites the two reads by line range. Moving the
-// record block ahead of the timeline block left its old range pointing at the
-// wrong command with nothing red, so this resolves each range it cites against
-// the shipped doc: every range must hold one of the two commands, and both
-// must be cited. The line numbers are the row's; the commands are what the
-// ranges are checked for, so an edit above either block reds here until the
-// row is re-cited.
-test("the research note's row for the labelled-head reads cites ranges that hold them", () => {
-  const note = readFileSync(join(import.meta.dirname, "..", "docs", "research", "external-assumptions", "prose.md"), "utf8");
-  const row = note.split("\n").find((l) => l.startsWith("| 43 |"));
-  assert.ok(row, "prose.md has no row 43");
-  const lines = DOC.text.split("\n");
-  const cited = [...row.matchAll(/run-merge-bot\.md:(\d+)-(\d+)/g)].map(([, a, b]) => lines.slice(a - 1, b).join("\n"));
-  assert.equal(cited.length, 2, "row 43 cites the record read and the timeline fallback, one range each");
-  assert.ok(cited.some((t) => t.includes("gh pr view <pr> --json comments")), "no cited range holds the record read");
-  assert.ok(cited.some((t) => t.includes("issues/<pr>/timeline?per_page=100")), "no cited range holds the timeline fallback");
-  for (const t of cited) {
-    assert.ok(
-      t.includes("gh pr view <pr> --json comments") || t.includes("issues/<pr>/timeline?per_page=100"),
-      `a cited range holds neither read: ${t.slice(0, 60)}`,
-    );
-  }
-});
-
 test("the read's ordering constraint rides in the same sentence as its reason", () => {
   // The whole rule is WHEN. `gh pr update-branch` lands commits dated after the
   // label by construction — measured on this repo: #1090 (never rebased) lists

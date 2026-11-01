@@ -1,6 +1,7 @@
 # 0031 — One In-flight bound replaces the implementer and reviewer caps: Pulls hold at B tickets between Claim and merge, reviews never wait
 
 **Status:** Accepted. Ruled 2026-10-09 on #2873, #2874, #2875 and 2026-10-13 on #2876 (map #2870), against the measurements below (#2871, #2872). Amends ADR 0012 (decision 1's "Defaults: 2 implementers, 6 reviewers; no hard caps", decision 2's "there is no minimum queue depth", the Guard), ADR 0013 (§ 5's refresh trigger, § 7's and Consequences' "gains no argument", the Guard). Amended by #3277: § Guard's history band is built from disjoint, adjoining pairs of N-PR windows — the N PRs at positions s … s+N−1 and the N at s+N … s+2N−1, for s = 0, K, 2K, …, the shape of the pre and post windows, one pair every K PRs — not from overlapping consecutive windows; the published ×2.23 cycle / ×0.68 throughput band and its 79 pairs are that construction's. The False-trip bullet's overlapping-band reasoning (24.9 % per test, about 82 % for any of the six) does not hold; the disjoint-pair rate it sets beside it (about 10 % per test, as #2875 ruled) does.
+Amended by #4029: decision 3's table drops `held-behind` from its "Held or halted PR" row — the merge bot no longer holds a PR behind a lower one; the row's other holds and halts still count.
 
 ## Context
 

@@ -259,8 +259,8 @@ const saw = (obj, key) => {
 // belongs to.
 //
 // The rule itself lives in arg.mjs's numArg(), because the identical
-// shape was still live in diff-stats.mjs and pr-overlap.mjs and a fourth
-// spelling of it here is what the fix had to stop. What stays this file's own
+// shape was still live in this file's siblings and another spelling of it
+// here is what the fix had to stop. What stays this file's own
 // is the usage line below — absent and malformed are different mistakes, and
 // numArg() refuses only the second.
 //

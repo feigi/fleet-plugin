@@ -1813,9 +1813,9 @@ test("the design spec's script-surface row names every field `check` emits", () 
 // run(), which always builds a well-formed `--file <path>` pair, so the whole
 // suite stayed green while `--file --require-file` silently disabled the
 // duplicate-filing guard at exit 0 (measured, #362). These spawn the CLI
-// directly, the way pr-overlap.test.mjs pins its own `--a --b 5` case — the
-// identical fail-open shape, in the hand-rolled reader arg.mjs's shared arg()
-// deliberately does not reach.
+// directly: a flag given another flag as its value is the fail-open shape
+// arg.mjs's shared arg() refuses by name, here in a hand-rolled reader that
+// arg() deliberately does not reach.
 function cliFixture(t) {
   const dir = mkdtempSync(join(tmpdir(), "ledger-cli-"));
   const bin = join(dir, "bin");
@@ -4037,13 +4037,13 @@ test("token refuses the ` · ` separator, an arrow, and an argument that is not 
   assert.equal(run("token", "5", "ci=1:1:success").payload.added.length, 1, "the same row still takes a clean token");
 });
 
-test("token refuses a held-behind or conflict-hold token the tick cannot read, and takes the ones it reads", (t) => {
+test("token refuses a conflict-hold token the tick cannot read, takes the one it reads, and takes any held-behind word as freeform", (t) => {
   const { run, refused, rows } = tokenFixture(t, ["#5 impl-5"]);
-  for (const tok of ["conflict-hold:#4O", "conflict-hold:", "conflict-hold", "held-behind:#x", "held-behind:#", "held-behind=4"]) {
+  for (const tok of ["conflict-hold:#4O", "conflict-hold:", "conflict-hold"]) {
     refused(["token", "5", tok], /would ignore this one/);
   }
-  for (const tok of ["held-behind:#3", "conflict-hold:#9"]) run("token", "5", tok);
-  assert.match(rows()[0], /^#5 impl-5 · held-behind:#3 · conflict-hold:#9$/);
+  for (const tok of ["held-behind:#x", "held-behind=4", "conflict-hold:#9"]) run("token", "5", tok);
+  assert.match(rows()[0], /^#5 impl-5 · held-behind:#x · held-behind=4 · conflict-hold:#9$/);
 });
 
 // #3608: the park `fleet-event.mjs merge-bot-report` writes off a main-gain

@@ -545,7 +545,7 @@ merge because its rebase conflicted and the merge bot will not force a resolutio
 recorded as `conflict-hold:#<pr>` on the PR's own row by the merge bot, or by the
 controller on the tick's `CONFLICT` line, and cleared only when a fix-applier
 dispatched after it settles as landed. Merge-time, never claim-time: distinct from an
-Exclusion, and from a `held-behind` hold, which waits on a lower PR rather than on a fix.
+Exclusion.
 _Avoid_: exclusion, held-behind, blocked
 
 **Exploration Pull**:

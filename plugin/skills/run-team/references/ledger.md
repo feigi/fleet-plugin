@@ -68,7 +68,7 @@ One line per ticket, rewritten in place (`ledger.mjs row <ticket> <text>`; `ledg
 
 ```
 #<t1> impl-<t1>=PR#<p1> → PR#<p1> → MERGED 73b356de
-#<t2> impl-<t2>=PR#<p2> → PR#<p2> · fix-pr-<p2> · ports=16<t2> · ruled:6-applies · held-behind:#<t3>
+#<t2> impl-<t2>=PR#<p2> → PR#<p2> · fix-pr-<p2> · ports=16<t2> · ruled:6-applies
 #<t3> impl-<t3> · tier=task-high
 #<t4> excluded · behind-pr:#<p2>
 #<t5> excluded · behind-issue:#<t3>
@@ -80,7 +80,7 @@ A row's cell is its `tier=` (the cell a draw picked), else its `cell=` (the cell
 
 A member that dies between spawn and write is invisible — and members die in batches.
 
-`dispatch merge-bot` also records the queue the bot is dispatched against: its `## Dispatched` entry carries `queued=<pr>,<pr>…` (`queued=none` for an empty queue), the open `ready-to-merge` PRs gh lists at that moment. A gh that cannot answer refuses the dispatch, nothing written. `settle merge-bot-<n> --from-report` judges the bot's report against that queue, not against anything the report names: a PR from it that is still open and carries the label, with no verdict in `merged`, `held`, `conflictHold` or `refused`, fails the settle at exit 3, naming the PR, and an entry without `queued=` cannot be judged (exit 2) — settle that bot by hand.
+`dispatch merge-bot` also records the queue the bot is dispatched against: its `## Dispatched` entry carries `queued=<pr>,<pr>…` (`queued=none` for an empty queue), the open `ready-to-merge` PRs gh lists at that moment. A gh that cannot answer refuses the dispatch, nothing written. `settle merge-bot-<n> --from-report` judges the bot's report against that queue, not against anything the report names: a PR from it that is still open and carries the label, with no verdict in `merged`, `conflictHold` or `refused`, fails the settle at exit 3, naming the PR, and an entry without `queued=` cannot be judged (exit 2) — settle that bot by hand.
 
 `dispatch impl-<N>` also records the definition it prints: the implementer's `## Dispatched` entry ends with `agent=<definition>` (`agent=fleet-implementer-<cell>`), and `ledger.mjs read` prints it under `agents`, by member name. tier-check judges the implementer against that record, falling back to the row's `tier=` (else `cell=`) for an entry without one, so a `tier=` replaced after the implementer settled does not change what it is judged against. `settle` and `rotate` keep the word with its entry. A value that is not `[a-z0-9]` words joined by `-` makes the entry malformed, and the ledger is refused.
 
@@ -96,9 +96,9 @@ A member that dies between spawn and write is invisible — and members die in b
 
 `label-off=<finisher-pr-M[-x]>` is written before you take `ready-to-merge` off PR M on purpose (taking it off before you approve a push, or clearing one left on a moved head), naming that PR's latest finisher attempt: the tick reads a missing label as a finisher's miss only after the last attempt a `label-off=` names, so without it your own removal reads as one.
 
-`ci=<run-id>:<attempt>:<conclusion>` and `held-behind:#<lower>` are row tokens the same way, and so is `conflict-hold:#<pr>` — written by the merge bot itself (`run-merge-bot.md` step 1), or by you off the tick's `CONFLICT` line, naming the row's own PR. It is not an Exclusion: that gates a ticket's claim, this a PR's merge.
+`ci=<run-id>:<attempt>:<conclusion>` is a row token the same way, and so is `conflict-hold:#<pr>` — written by the merge bot itself (`run-merge-bot.md` step 1), or by you off the tick's `CONFLICT` line, naming the row's own PR. It is not an Exclusion: that gates a ticket's claim, this a PR's merge.
 
-`parked=<head>:<body digest>:main-gain-removed:<path>` is a row token too, written by `fleet-event.mjs merge-bot-report` off a merge bot's `main-gain-removed` refusal, binding the head and a digest of the body the bot's gate refused, read from its gate reading `<scratch>/pr<N>/merge-bot-<n>/ci.json`: while both still match, the tick counts the PR parked beside the held ones, so it alone never prints `DISPATCH merge-bot`, and a new head or an edited body lifts it with no write. No other refusal reason parks.
+`parked=<head>:<body digest>:main-gain-removed:<path>` is a row token too, written by `fleet-event.mjs merge-bot-report` off a merge bot's `main-gain-removed` refusal, binding the head and a digest of the body the bot's gate refused, read from its gate reading `<scratch>/pr<N>/merge-bot-<n>/ci.json`: while both still match, the tick counts the PR parked beside the conflict-held ones, so it alone never prints `DISPATCH merge-bot`, and a new head or an edited body lifts it with no write. No other refusal reason parks.
 
 PR stays queued, label untouched, and no member is dispatched to restore the lines — the removal may be deliberate. A hit line's `kind` is `modified` when its hunk also adds lines, `deleted` when it only removes lines; a gained line cleared by in-place pairing, a token-keeping re-wrap of its hunk or the retraction of a forward reference to a ticket the PR closes is in `mainGain.edited[]` with its `rule`, not a hit. The `ruled` record the main-gain-hit row restores an acknowledgement from lasts only the run that wrote it — `ledger.mjs rotate` carries no `ruled` line into the next ledger — so a later run puts the question again.
 

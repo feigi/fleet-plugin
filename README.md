@@ -150,13 +150,9 @@ flowchart TD
 
     subgraph MERGEBOTSUB["Merge bot — run-merge-bot, one Pass"]
         MB["dispatched on first<br/>ready-to-merge label"]
-        HOLD{"pr-overlap.mjs<br/>hold rule vs lower PRs"}
-        MB --> HOLD
-        HOLD -->|"unrelated"| REBASE["rebase onto main"] --> GATE["merge-gate.mjs<br/>green twice"] --> MERGE["gh pr merge"]
-        HOLD -->|"related"| WAIT["held-behind:#lower"]
-        WAIT -.->|"lower PR merges,<br/>re-evaluated"| HOLD
+        MB --> REBASE["rebase onto main"] --> GATE["merge-gate.mjs<br/>green twice"] --> MERGE["gh pr merge"]
         REBASE -.->|"conflict"| CONFLICT["conflict-hold:#pr"]
-        CONFLICT -.->|"tick: DISPATCH fix-pr PR#pr<br/>(rebase via implementer)"| HOLD
+        CONFLICT -.->|"tick: DISPATCH fix-pr PR#pr<br/>(rebase via implementer)"| MB
     end
     MERGE --> MERGED(["PR merged"])
     MERGED -.->|"a merge brings In flight<br/>below the bound"| SL

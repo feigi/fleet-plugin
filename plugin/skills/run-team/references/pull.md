@@ -233,8 +233,7 @@ terminating in exactly one dispatch or an empty shortlist:
    ticket does not collide, whatever files it shares. A target file the brief
    does not spell as a path → `paths <p>…`, which scans again and asks again. A
    PR the scan could not read is still yours to judge, and `behind-pr` on it is
-   taken. `pr-overlap.mjs` is **PR-vs-PR only** — it runs `gh pr diff` on both
-   args and errors on an issue number, so never run it on a ticket here.
+   taken.
 5. **Sequence check** — the `#N` refs of the brief's `Out of scope` section are
    printed beside Q3 as the candidates: one naming an open ticket this one
    sequences after → `behind-issue:#M`. No overlap and no such ticket →

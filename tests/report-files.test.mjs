@@ -37,7 +37,7 @@ test("reportStatus: `-` needs no scratch root at all, a covered member reads its
 
 test("a report that repeats a key reads invalid, naming the duplicate before any schema check", () => {
   const scratch = tempDir("rf-");
-  put(scratch, "merge-bot-1.json", '{"member":"merge-bot-1","merged":[],"held":[],"conflictHold":[],"refused":[],"branchKept":[],"merged":[5]}');
+  put(scratch, "merge-bot-1.json", '{"member":"merge-bot-1","merged":[],"conflictHold":[],"refused":[],"branchKept":[],"merged":[5]}');
   const read = readReport(scratch, "merge-bot-1");
   assert.equal(read.state, "invalid");
   assert.equal(read.violation, '$.merged: duplicate key "merged"');

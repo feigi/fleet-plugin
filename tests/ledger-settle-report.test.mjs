@@ -134,7 +134,7 @@ const finisherReport = (f, over = {}) => ({
   labelsReadBack: ["patch", "ready-to-merge"], kill: null, filed: [], unrecorded: [], confirmation: [], ...over,
 });
 const botReport = (f, over = {}) => ({
-  member: "merge-bot-1", merged: [{ pr: 6, sha: f.head }, { pr: 7, sha: f.head }], held: [], conflictHold: [], refused: [], branchKept: [], ...over,
+  member: "merge-bot-1", merged: [{ pr: 6, sha: f.head }, { pr: 7, sha: f.head }], conflictHold: [], refused: [], branchKept: [], ...over,
 });
 
 const dispatched = (f, member) => f.ok("read").dispatched.find((e) => e.split("=")[0] === member);
@@ -529,7 +529,7 @@ test("merge-bot-n=done: a report giving every queued PR one verdict settles, eac
   f.ok("ruled", "10", "kept: reviewer finding 3 rejected");
   const rows = f.ok("read").rows;
   f.report("merge-bot-1", botReport(f, {
-    held: [{ pr: 8, behind: 6 }], conflictHold: [9], refused: [{ pr: 10, reason: "main-gain-removed:plugin/a.md" }],
+    conflictHold: [8, 9], refused: [{ pr: 10, reason: "main-gain-removed:plugin/a.md" }],
   }));
   f.pr(6, { state: "MERGED" });
   f.pr(7, { state: "MERGED" });
@@ -581,16 +581,16 @@ test("merge-bot-n=done: a queued PR still queued with no verdict is exit 3 namin
   f.pr(7, { state: "MERGED" });
   f.pr(8, { state: "OPEN", labels: [{ name: "patch" }, { name: "ready-to-merge" }] });
   f.pr(9, { state: "OPEN", labels: [{ name: "ready-to-merge" }] });
-  f.report("merge-bot-1", botReport(f, { held: [{ pr: 9, behind: 6 }] }));
-  f.refused("merge-bot-1", 3, /failed: PR #8, queued at dispatch, has a verdict in merged, held, conflictHold or refused, or has left the queue; nothing written/);
+  f.report("merge-bot-1", botReport(f, { conflictHold: [9] }));
+  f.refused("merge-bot-1", 3, /failed: PR #8, queued at dispatch, has a verdict in merged, conflictHold or refused, or has left the queue; nothing written/);
   // A report cannot carry a queue of its own to be judged against instead.
-  f.report("merge-bot-1", { ...botReport(f, { held: [{ pr: 9, behind: 6 }] }), queued: [6, 7, 9] });
+  f.report("merge-bot-1", { ...botReport(f, { conflictHold: [9] }), queued: [6, 7, 9] });
   f.refused("merge-bot-1", 2, /is not a merge-bot report — \$: unexpected field "queued"; nothing written/);
   // Nor does a later queue count: the one dispatch recorded is the one judged.
   f.queue(6, 7, 9);
-  f.report("merge-bot-1", botReport(f, { held: [{ pr: 9, behind: 6 }] }));
+  f.report("merge-bot-1", botReport(f, { conflictHold: [9] }));
   f.refused("merge-bot-1", 3, /failed: PR #8, queued at dispatch/);
-  f.report("merge-bot-1", botReport(f, { held: [{ pr: 9, behind: 6 }], refused: [{ pr: 8, reason: "ci-wait-timeout" }] }));
+  f.report("merge-bot-1", botReport(f, { conflictHold: [9], refused: [{ pr: 8, reason: "ci-wait-timeout" }] }));
   assert.deepEqual(f.settled("merge-bot-1").ruled, ["merge-bot-1 refused #8: ci-wait-timeout"]);
 });
 
@@ -606,8 +606,8 @@ test("merge-bot-n=done: a queued PR that left the queue before the settle, or a 
   f.report("merge-bot-1", botReport(f));
   const receipt = f.settled("merge-bot-1");
   assert.deepEqual(receipt.checks.slice(2), [
-    { name: "PR #8, queued at dispatch, has a verdict in merged, held, conflictHold or refused, or has left the queue", ok: true },
-    { name: "PR #9, queued at dispatch, has a verdict in merged, held, conflictHold or refused, or has left the queue", ok: true },
+    { name: "PR #8, queued at dispatch, has a verdict in merged, conflictHold or refused, or has left the queue", ok: true },
+    { name: "PR #9, queued at dispatch, has a verdict in merged, conflictHold or refused, or has left the queue", ok: true },
   ]);
   assert.doesNotMatch(readFileSync(join(f.root, "gh.log"), "utf8"), /^pr view 11 /m, "a PR labelled after dispatch is never looked up");
 });
