@@ -50,7 +50,10 @@ const spliced = (text, at, string) => {
 };
 
 // `bash -n` does not parse inside a backtick substitution, so each `` `…` `` on
-// one line becomes `$(…)`, which it does parse.
+// one line becomes `$(…)`, which it does parse. A pair never spans a line end:
+// across lines, a stray backtick in a `#` comment would pair with a later
+// line's. So a substitution spanning lines goes unparsed inside — a gap #4096
+// leaves out of scope, pinned by the "known gap" test.
 const parses = (text) =>
   spawnSync("bash", ["-n"], { input: text.replace(/`([^`\n]*)`/g, "$($1)"), encoding: "utf8" }).status === 0;
 
@@ -113,6 +116,22 @@ test("negative control: a role placeholder inside single quotes, or bare, does n
 test("negative control: a single-quoted placeholder inside backtick command substitution does not parse", () => {
   assert.equal(holds("x=`echo '<wontfix string>'`\necho 'z'"), false);
   assert.equal(holds('x=`echo "<wontfix string>"`\necho \'z\''), true);
+});
+
+test("negative control: a backtick substitution inside double quotes is parsed as a substitution, not as quoted text", () => {
+  assert.equal(holds("x=\"`echo '<wontfix string>'`\""), false);
+  assert.equal(holds('x="`echo "<wontfix string>"`"'), true);
+});
+
+test("negative control: a stray backtick in a comment does not pair with a later line's", () => {
+  assert.equal(holds("# it`s odd\nx=`echo \"<wontfix string>\"`\necho 'z'"), true);
+  assert.equal(holds("# it`s odd\nx=`echo '<wontfix string>'`\necho 'z'"), false);
+});
+
+test("known gap: a backtick substitution spanning lines is not parsed inside, so a single-quoted placeholder in one passes", () => {
+  // #4096 leaves multi-line backticks out of scope. If this fails, the gap has
+  // closed: assert `false` here and fold it into the backtick control.
+  assert.equal(holds("x=`echo a \\\n  '<wontfix string>'`\necho 'z'"), true);
 });
 
 test("negative control: a single-quoted placeholder fails even when a later quote in the same text could pair with its apostrophe", () => {
