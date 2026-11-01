@@ -9,13 +9,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
+import { isMarkdown } from "../plugin/scripts/diff-stats.mjs";
 import { classifyEntry } from "../plugin/scripts/finisher-scope.mjs";
 import { repoRoot, skipWithoutRepo, trackedPaths } from "../plugin/scripts/repo-root.mjs";
 
 const ROOT = repoRoot(fileURLToPath(new URL(".", import.meta.url)));
 const SKIP_WITHOUT_REPO = skipWithoutRepo(ROOT, "the check over plugin/'s shipped markdown");
-const MARKDOWN = /\.(md|markdown)$/i;
-const PROMPTS = ROOT === null ? [] : trackedPaths(ROOT, ["plugin"]).filter((p) => MARKDOWN.test(p));
+const PROMPTS = ROOT === null ? [] : trackedPaths(ROOT, ["plugin"]).filter(isMarkdown);
 
 test("the check sees plugin/'s shipped markdown", { skip: SKIP_WITHOUT_REPO }, () => {
   assert.notEqual(PROMPTS.length, 0, "no tracked .md or .markdown file under plugin/, so the check below would pass over nothing");

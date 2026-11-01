@@ -282,12 +282,15 @@ test("exit 0: adding, editing and deleting records directly in the root .out-of-
   ]);
 });
 
-test("exit 1: a record path at any other depth or of any other file type is not prose, and is named", () => {
+test("exit 1: a record path at any other depth, of any other file type or under a name that only starts with .out-of-scope is not prose, and is named", () => {
   for (const [rel, why] of [
     [".out-of-scope/AGENTS.md", "prompt surface: AGENTS.md"],
     [".out-of-scope/sub/x.md", "prompt surface: directory .out-of-scope"],
     ["docs/.out-of-scope/x.md", "prompt surface: directory .out-of-scope"],
     [".out-of-scope/x.txt", "docs, but not .md or .markdown"],
+    [".out-of-scope-x/a.md", "prompt surface: directory .out-of-scope-x"],
+    [".out-of-scopes/a.md", "prompt surface: directory .out-of-scopes"],
+    [".out-of-scope.d/a.md", "prompt surface: directory .out-of-scope.d"],
   ]) {
     const f = fixture();
     const r = verdictFor(f, (wt) => write(wt, rel, "# edited\n"));

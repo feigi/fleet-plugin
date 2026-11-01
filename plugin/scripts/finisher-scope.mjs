@@ -116,14 +116,14 @@ function modeProblem(status, oldMode, newMode) {
 // rather than a list of them that drifts as discovery grows. The one exception
 // is a file directly in the root `.out-of-scope/`: the triage skill writes a
 // rejection record there, read as settled precedent rather than as an
-// instruction, so the dot rule alone passes over it. Nested, elsewhere or
+// instruction, so the directory rule passes over it. Nested, elsewhere or
 // spelled otherwise, it is a dot-directory like any other, and the file-name
 // rule still applies.
 function promptSurface(path) {
   const parts = path.split("/");
-  const record = parts.length === 2 && parts[0] === RECORDS_DIR;
-  for (const dir of parts.slice(0, -1)) {
-    if ((dir.startsWith(".") && !record) || PROMPT_DIRS.has(dir.toLowerCase())) return `prompt surface: directory ${dir}`;
+  const dirs = parts.length === 2 && parts[0] === RECORDS_DIR ? [] : parts.slice(0, -1);
+  for (const dir of dirs) {
+    if (dir.startsWith(".") || PROMPT_DIRS.has(dir.toLowerCase())) return `prompt surface: directory ${dir}`;
   }
   const file = parts.at(-1).toLowerCase();
   if (PROMPT_FILES.has(file)) return `prompt surface: ${parts.at(-1)}`;
