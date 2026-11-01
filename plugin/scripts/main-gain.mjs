@@ -2,7 +2,7 @@
 // Which lines would merging this head remove that `main` gained after the
 // PR's work began — the main-gain check, read-only.
 //
-//   main-gain.mjs --head <sha> [--base <ref>] [--body-file <path|->]
+//   main-gain.mjs --head <sha> [--base <ref>] [--body-file <path|->] [--closing-refs <path>]
 //
 // Reads the repository at the cwd. `--head` is a full commit SHA; `--base`
 // defaults to `origin/main` and is spelled the way no-undo-audit.sh takes its
@@ -10,6 +10,12 @@
 // full `refs/remotes/` path before any read so a local tag or branch literally
 // named `origin/main` cannot answer for it. `--body-file` is the PR body
 // (`-` reads stdin); omitted, the body is empty and nothing is acknowledged.
+// `--closing-refs` is a file holding the JSON object `gh pr view <pr> --json
+// number,url,closingIssuesReferences` prints; the references in this PR's own
+// repository (`ownClosingIssues`, a pure function, so no `gh` call here) are the
+// issues the PR closes, echoed as `closes`. Absent, unreadable, or a reference
+// that cannot be placed: `closes` is `null` and the retraction rule below is
+// off, so there are more hits, never fewer.
 // It never fetches, writes or changes refs: the caller fetches first.
 //
 // The reference point R is the earliest author date among the PR's own
@@ -36,9 +42,21 @@
 // each added line claims at most one. A token is a run of letters, digits or
 // underscores, or else one other character that is not whitespace, so
 // appending a name to an import is an in-place edit and dropping one is not.
-// Binary files cannot be read line by line and are listed in `unchecked[]`
-// instead of blocking. A merge-tree that reports conflicts is a head that
-// cannot merge as it stands, which is no answer about its content.
+//
+// Two more rules clear what in-place pairing leaves, hunk by hunk, for a hunk
+// that adds at least one line; tokens never cross hunks. The hunk rule: the
+// token multiset of every removed line of the hunk that is not a move (gained
+// and older lines alike, a blank line being one blank token) is contained in
+// that of every added line not spent on a move, claimed lines included, so a
+// re-wrap that keeps every token clears. The retraction rule, when the hunk rule
+// fails: a forward reference in the removed tokens (`once #N lands` and the
+// like, read across lines) naming only issues the PR closes is dropped from the
+// removed side, and the one token after it may differ from an added token in
+// case alone; if what remains is contained, the hunk clears. A hunk that only
+// removes lines is never cleared by either rule. Binary files cannot be read
+// line by line and are listed in `unchecked[]` instead of blocking. A
+// merge-tree that reports conflicts is a head that cannot merge as it stands,
+// which is no answer about its content.
 //
 // Each hit carries a landing key: `#<n>` when the landing commit's subject is
 // GitHub's merge subject for PR n, otherwise that commit's 12-character
@@ -47,15 +65,26 @@
 // with an empty reason does not count. Acknowledged hits move from `hits[]`
 // to `acknowledged[]` and both are reported.
 //
-// Stdout: one JSON line, `{head, base, since, hits, acknowledged, edited,
-// unchecked, reason}`, `since` being R as an ISO timestamp. Each hit is `{path,
-// key, landed, lines: [{line, text, kind}], ack}`, `path` the file's name on
+// Stdout: one JSON line, `{head, base, closes, since, hits, acknowledged,
+// edited, unchecked, reason}`, `since` being R as an ISO timestamp and `closes`
+// the PR's own closing issue numbers or `null`. Each hit is `{path, key,
+// landed, lines: [{line, text, kind}], hunks, ack}`, `path` the file's name on
 // `<base>` and `ack` the body line to copy, reason left for the author to
 // write. `kind` is `modified` when the hunk that removed the line also adds
-// lines, and `deleted` when it only removes them. `edited` lists the gained
-// lines an in-place edit kept, as `{path, line, text, replacement}`, the
-// `replacement` being the added line that holds their tokens. An edited line is
-// not a hit and needs no acknowledgement.
+// lines, and `deleted` when it only removes them. `hunks` has one entry per
+// hunk holding any of the hit's lines, `{lines: [line numbers], added: [the
+// added lines the removed tokens were compared against], missing: [[token,
+// count], ...]}`: the removed tokens those added lines do not carry, with
+// counts, in order of first appearance, case-sensitive, a blank line's token
+// written "\n"; a hunk with no added lines has `added: []` and no `missing`.
+// `edited` lists the gained lines cleared as not removed, as `{path, line,
+// text, replacement, rule}`. `rule` `line` is an in-place edit, one entry per
+// line, `replacement` being the added line that holds its tokens. `hunk` and
+// `retracted #N` (every closing number the removed phrases named, space
+// separated) are one entry per cleared hunk: `line` is the first cleared gained
+// line, `text` the cleared gained lines joined with "\n", `replacement` the
+// added lines compared against, joined with "\n". An edited line is not a hit
+// and needs no acknowledgement.
 //
 //   0  clean, or every hit acknowledged
 //   1  at least one unacknowledged hit             reason main-gain-removed:<first path>
@@ -66,19 +95,21 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { makeDie, defineFlags, writeAll } from "./arg.mjs";
+import { ownClosingIssues } from "./closing-refs.mjs";
 import { gitEnv } from "./git-env.mjs";
 
 const NAME = "main-gain";
 const die = makeDie(NAME);
 const { arg, sweep, stray } = defineFlags(die, {
-  flags: { head: "value", base: "value", "body-file": "value" },
+  flags: { head: "value", base: "value", "body-file": "value", "closing-refs": "value" },
 });
 
-const USAGE = "usage: main-gain.mjs --head <sha> [--base <ref>] [--body-file <path|->]";
+const USAGE = "usage: main-gain.mjs --head <sha> [--base <ref>] [--body-file <path|->] [--closing-refs <path>]";
 
 const headArg = arg("head");
 const base = arg("base") ?? "origin/main";
 const bodyFile = arg("body-file");
+const closingRefsFile = arg("closing-refs");
 if (headArg === null) die(USAGE);
 sweep();
 stray();
@@ -96,6 +127,20 @@ if (bodyFile !== null) {
     die(`cannot read --body-file ${bodyFile}: ${e.code ?? e.message}`);
   }
 }
+
+// The issue numbers this PR closes in its own repository, or `null` for no
+// answer: the retraction rule is then off. Unreadable, unparsable and
+// unplaceable all read the same, which is more hits, never fewer.
+function closingIssues() {
+  if (closingRefsFile === null) return null;
+  try {
+    const pr = JSON.parse(readFileSync(closingRefsFile, "utf8"));
+    return ownClosingIssues(pr.number, pr.url, pr.closingIssuesReferences);
+  } catch {
+    return null;
+  }
+}
+const closes = closingIssues();
 
 // LC_ALL=C: the `Binary files … differ` line below is read by its text.
 // GIT_LITERAL_PATHSPECS: a path is a name here, never a glob or magic.
@@ -172,11 +217,7 @@ function fileDiff(tree, oldPath, newPath) {
 // The tokens an in-place edit keeps: a run of letters, digits or underscores is
 // one token, and each other character that is not whitespace is one.
 const TOKEN = /[\p{L}\p{N}_]+|[^\s\p{L}\p{N}_]/gu;
-function tokensOf(text) {
-  const counts = new Map();
-  for (const t of text.match(TOKEN) ?? []) counts.set(t, (counts.get(t) ?? 0) + 1);
-  return counts;
-}
+const tokensOf = (text) => countOf(text.match(TOKEN) ?? []);
 
 // Each unclaimed added line of one hunk claims at most one removed line of that
 // hunk. Removed lines choose in turn, most tokens first so a short line does not
@@ -205,6 +246,104 @@ function claimInPlace(removed, added) {
       c.replacement = a.text;
     }
   }
+}
+
+// The hunk rules read a hunk's lines as token streams, where a blank or
+// whitespace-only line is one blank token, which no real token can equal.
+const BLANK = "\n";
+const streamOf = (lines) => lines.flatMap((text) => text.match(TOKEN) ?? [BLANK]);
+
+function countOf(stream) {
+  const counts = new Map();
+  for (const t of stream) counts.set(t, (counts.get(t) ?? 0) + 1);
+  return counts;
+}
+
+// `[token, count]` for each removed token the added tokens carry fewer of, in
+// order of first appearance in the removed stream, the count being the shortfall.
+function shortfall(removed, have) {
+  const out = [];
+  for (const [t, n] of countOf(removed)) {
+    const lack = n - (have.get(t) ?? 0);
+    if (lack > 0) out.push([t, lack]);
+  }
+  return out;
+}
+
+// The forward references a PR may retract. The patterns run over the tokens
+// joined by single spaces, case-insensitively, and each match must begin and
+// end on a token boundary.
+const ID = "(?:`\\s)?#\\s\\d+(?:\\s`)?";
+const IDS = `${ID}(?:\\s(?:and|,|/|&)\\s${ID})*`;
+const RETRACTION = new RegExp(
+  "(?<=^|\\s)(?:" +
+    `(?:written\\s)?(?:once|until|when|after|pending)\\s${IDS}\\s(?:lands?|ships?|merges?|is\\sbuilt)(?:\\s,)?` +
+    `|pending\\s${ID}\\s,\\snot\\syet\\sbuilt` +
+    `|${IDS}\\s(?:are\\s)?still\\sto\\sland` +
+    ")(?=\\s|$)",
+  "gi",
+);
+
+// `{start, end, numbers}` for each phrase in `stream` that names only issues in
+// `closes` — token indices, `end` exclusive — in stream order.
+function retractions(stream, closes) {
+  const starts = [];
+  let joined = "";
+  for (const t of stream) {
+    if (joined !== "") joined += " ";
+    starts.push(joined.length);
+    joined += t === BLANK ? "\0" : t;
+  }
+  const mine = new Set(closes.map(String));
+  const found = [];
+  for (const m of joined.matchAll(RETRACTION)) {
+    const numbers = [...m[0].matchAll(/#\s(\d+)/g)].map((n) => n[1]);
+    if (!numbers.every((n) => mine.has(n))) continue;
+    const first = starts.indexOf(m.index);
+    let end = first;
+    while (end < stream.length && starts[end] < m.index + m[0].length) end++;
+    found.push({ start: first, end, numbers });
+  }
+  return found;
+}
+
+// Takes the tokens of `stream` off `have` (mutating it), each exactly; false
+// when one is not there as often as the stream holds it.
+function consume(stream, have) {
+  for (const t of stream) {
+    const n = have.get(t) ?? 0;
+    if (n === 0) return false;
+    have.set(t, n - 1);
+  }
+  return true;
+}
+
+// The hunk rule, then the retraction rule, on one hunk's removed and added
+// lines: the rule name when no gained line of the hunk is a hit, else `null`.
+// A hunk that adds nothing is never cleared.
+function clearsHunk(removed, added, closes) {
+  if (added.length === 0) return null;
+  const gone = streamOf(removed);
+  const have = countOf(streamOf(added));
+  if (shortfall(gone, have).length === 0) return "hunk";
+  if (closes === null) return null;
+  const phrases = retractions(gone, closes);
+  if (phrases.length === 0) return null;
+  const dropped = new Set();
+  for (const { start, end } of phrases) for (let i = start; i < end; i++) dropped.add(i);
+  const after = new Set(phrases.map((p) => p.end).filter((i) => i < gone.length && !dropped.has(i)));
+  const rest = gone.filter((_, i) => !dropped.has(i) && !after.has(i));
+  if (!consume(rest, have)) return null;
+  // The token after a retracted phrase may differ from an added one in case
+  // alone; only after every other token has had its exact match.
+  for (const i of [...after].sort((a, b) => a - b)) {
+    const t = gone[i];
+    const key = (have.get(t) ?? 0) > 0 ? t : [...have.keys()].find((u) => have.get(u) > 0 && u.toLowerCase() === t.toLowerCase());
+    if (key === undefined) return null;
+    have.set(key, have.get(key) - 1);
+  }
+  const named = [...new Set(phrases.flatMap((p) => p.numbers))];
+  return `retracted ${named.map((n) => `#${n}`).join(" ")}`;
 }
 
 // line number on `<base>` → {sha, time, summary} for the requested lines,
@@ -289,7 +428,7 @@ function check() {
       const twins = new Map();
       d.hunks.forEach((h, hunk) => {
         for (const text of h.added) {
-          const a = { text, claimed: false, tokens: null };
+          const a = { text, moved: false, claimed: false, tokens: null };
           addsByHunk[hunk].push(a);
           if (!twins.has(text)) twins.set(text, []);
           twins.get(text).push(a);
@@ -300,7 +439,9 @@ function check() {
         for (const { line, text } of h.removed) {
           const spare = twins.get(text);
           if (spare?.length) {
-            spare.pop().claimed = true;
+            const twin = spare.pop();
+            twin.moved = true;
+            twin.claimed = true;
             continue;
           }
           const kind = h.added.length > 0 ? "modified" : "deleted";
@@ -308,23 +449,53 @@ function check() {
         }
       });
       d.hunks.forEach((_, hunk) => claimInPlace(candsByHunk[hunk], addsByHunk[hunk]));
+      if (candsByHunk.every((cs) => cs.length === 0)) continue;
       const cands = candsByHunk.flat();
-      if (cands.length === 0) continue;
       const blamed = blame(oldPath, cands);
       const byKey = new Map();
-      for (const c of cands) {
-        const b = blamed.get(c.line);
-        if (b.time <= since) continue;
-        if (c.replacement !== null) {
-          edited.push({ path: oldPath, line: c.line, text: c.text, replacement: c.replacement });
-          continue;
+      d.hunks.forEach((h, hunk) => {
+        const compared = addsByHunk[hunk].filter((a) => !a.moved).map((a) => a.text);
+        const gained = [];
+        for (const c of candsByHunk[hunk]) {
+          if (blamed.get(c.line).time <= since) continue;
+          if (c.replacement !== null) {
+            edited.push({ path: oldPath, line: c.line, text: c.text, replacement: c.replacement, rule: "line" });
+          } else {
+            gained.push(c);
+          }
         }
-        const key = landingKey(b.sha, b.summary);
-        if (!byKey.has(key)) {
-          byKey.set(key, { path: oldPath, key, landed: b.sha, lines: [], ack: `main-gain-removal: ${oldPath} ${key} - <why>` });
+        if (gained.length === 0) return;
+        const removed = candsByHunk[hunk].map((c) => c.text);
+        const cleared = clearsHunk(removed, compared, closes);
+        if (cleared !== null) {
+          edited.push({
+            path: oldPath,
+            line: gained[0].line,
+            text: gained.map((c) => c.text).join("\n"),
+            replacement: compared.join("\n"),
+            rule: cleared,
+          });
+          return;
         }
-        byKey.get(key).lines.push({ line: c.line, text: c.text, kind: c.kind });
-      }
+        const missing = h.added.length > 0 ? shortfall(streamOf(removed), countOf(streamOf(compared))) : null;
+        // This hunk's diagnosis for each landing key, made once.
+        const diagnoses = new Map();
+        for (const c of gained) {
+          const b = blamed.get(c.line);
+          const key = landingKey(b.sha, b.summary);
+          if (!byKey.has(key)) {
+            byKey.set(key, { path: oldPath, key, landed: b.sha, lines: [], hunks: [], ack: `main-gain-removal: ${oldPath} ${key} - <why>` });
+          }
+          const hit = byKey.get(key);
+          hit.lines.push({ line: c.line, text: c.text, kind: c.kind });
+          if (!diagnoses.has(key)) {
+            const diagnosis = missing === null ? { lines: [], added: compared } : { lines: [], added: compared, missing };
+            diagnoses.set(key, diagnosis);
+            hit.hunks.push(diagnosis);
+          }
+          diagnoses.get(key).lines.push(c.line);
+        }
+      });
       hits.push(...byKey.values());
     }
   }
@@ -357,5 +528,5 @@ try {
   result = { since: null, hits: [], acknowledged: [], edited: [], unchecked: [], reason: e.message, unknown: true };
 }
 const { unknown, ...payload } = result;
-writeAll(1, `${JSON.stringify({ head, base, ...payload })}\n`);
+writeAll(1, `${JSON.stringify({ head, base, closes, ...payload })}\n`);
 process.exit(unknown ? 2 : payload.hits.length ? 1 : 0);

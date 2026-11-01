@@ -16,6 +16,7 @@ prints as `HOLD (parked …)` when nothing else queued is dispatchable, rather
 than a report repeated every tick. The label is still left alone and no
 agent restores lines.
 Amended by #3609: a removed line edited in place that keeps every token is not a hit, and each hit line carries `kind` (`modified` or `deleted`).
+Amended by #4000: Decision 4's "what counts as removed" — a hunk whose removed tokens all reappear among its added lines, a blank line counting as a token, or do so once a forward reference to a ticket the PR closes is deleted, is not a hit; cleared lines are listed in `edited[]` with the rule that cleared them, a `deleted` line is never cleared this way, and each hit carries its hunks' added lines and missing tokens.
 
 ## Context
 

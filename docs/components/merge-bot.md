@@ -88,7 +88,7 @@ flowchart TD
   would remove lines `main` gained after the PR's work began unless the
   PR body acknowledges them
   ([ADR 0023](../adr/0023-main-gain-check-is-a-merge-gate-row.md)).
-A line edited in place that keeps every token is not a removal; the gate lists it as edited, not as a hit.
+A line edited in place that keeps every token, a hunk re-wrapped keeping every token, and a forward reference to a ticket the PR closes that the PR deletes are not removals; the gate lists them as edited, with the rule that cleared them, not as a hit.
 - **The label binds to the net change, not to one SHA.** A head that
   moved after `ready-to-merge` passes the gate's head row only as a
   proven rebase-carry — its net change byte-identical to the labelled
