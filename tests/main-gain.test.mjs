@@ -610,7 +610,9 @@ test("AC3: a marker for another key, another file, or with an empty or placehold
     "main-gain-removal: tests.txt #7 -    \n",
     "main-gain-removal: tests.txt #7 - <why>\n",
     "main-gain-removal: tests.txt #7 - <reason>\n",
-    "main-gain-removal: tests.txt #7 -   <why>   \n",
+    "main-gain-removal: tests.txt #7 - <why it was removed>\n",
+    "main-gain-removal: tests.txt #7 - <>\n",
+    "main-gain-removal: tests.txt #7 - <why>   \n",
     "main-gain-removal: tests.txt #7 - <why>\r\n",
     "Drops it.\r\n\r\nmain-gain-removal: tests.txt #7 - <why>\r\n",
   ]) {
@@ -623,7 +625,7 @@ test("AC3: a marker for another key, another file, or with an empty or placehold
 
 test("AC3: a reason that merely contains a placeholder among real words still acknowledges", (t) => {
   const { w, head } = deleteAfterRebase(t);
-  for (const reason of ["superseded <why>", "<why> superseded", "see <PR> for why"]) {
+  for (const reason of ["superseded <why>", "<why> superseded", "<why> superseded <why>", "see <PR> for why"]) {
     const r = run(w, head, { body: `main-gain-removal: tests.txt #7 - ${reason}\n` });
     expect(r, 0);
     assert.deepEqual(r.json.hits, [], reason);
