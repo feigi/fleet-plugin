@@ -9,15 +9,23 @@
 //   reclaim-scratch.mjs --siblings --root <abs> [--apply]
 //
 // Dry run by default; `--apply` removes. `--root` is required, an absolute
-// path to an existing directory: the controller passes the path
-// scratch-root.mjs prints.
+// path to an existing directory, and in every mode it must be this
+// workspace's own scratch root (the path scratch-root.mjs prints, computed
+// from the cwd): the controller passes that path. The root sweep and
+// `--siblings` refuse any other, dry run included, before reading anything
+// under it; `--pr` mode reads no ledger and asks GitHub nothing, and does not
+// check it.
 //
-// `--siblings` is the sibling pass, its own invocation: `--root` names the live
-// key, which must be this workspace's own scratch root (the path
-// scratch-root.mjs prints), and the pass judges the other key-shaped
-// directories beside it by age alone (judgeSiblings below), judging each again
-// just before `--apply` removes it. It reads no ledger and is never combined
-// with --pr or --after-rotate.
+// The root sweep reads the ledger, the claim worktrees and GitHub of the
+// repository the cwd is in, so another workspace's key judged there would be
+// judged against this one's numbers.
+//
+// `--siblings` is the sibling pass, its own invocation: `--root` names the
+// live key, and the pass judges the other key-shaped directories beside it by
+// age alone (judgeSiblings below), judging each again just before `--apply`
+// removes it. Any other key passed as `--root` would put the real live key
+// among the judged siblings. It reads no ledger and is never combined with
+// --pr or --after-rotate.
 //
 // THE ROOT SWEEP judges every entry directly under `--root`:
 //   pr<M>/, dispositions-fix-pr-<M>[-x].json
@@ -99,8 +107,10 @@
 // `removed` naming what --apply would remove.
 // Exit 0 whenever the receipt is printed, failures included; 2 for a refused
 // invocation — bad arguments, no --root, a root that is not a directory, a
-// root sweep with no ledger and no --after-rotate, a ledger that cannot be
-// read for any reason other than ENOENT. Nothing is removed before a refusal.
+// root sweep or sibling pass whose --root is not this workspace's own scratch
+// root or whose own scratch root cannot be resolved, a root sweep with no
+// ledger and no --after-rotate, a ledger that cannot be read for any reason
+// other than ENOENT. Nothing is removed before a refusal.
 
 import { spawnSync } from "node:child_process";
 import { lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
@@ -539,15 +549,22 @@ function main() {
   if (siblings) {
     if (pr !== null) die("--siblings and --pr are separate passes");
     if (afterRotate) die("--after-rotate is the root sweep's; --siblings reads no ledger");
-    // The live key is never judged, so it must be this workspace's own: any other
-    // key passed here would put the real live key among the judged siblings.
+  }
+  if (pr === null) {
+    // Only this workspace's own scratch root: the header says why, per pass.
     let own;
     try {
       own = scratchRoot();
     } catch (e) {
-      die(`--siblings judges the keys beside this workspace's scratch root, which could not be resolved: ${e.message}`);
+      die(siblings
+        ? `--siblings judges the keys beside this workspace's scratch root, which could not be resolved: ${e.message}`
+        : `the root sweep judges this workspace's scratch root, which could not be resolved: ${e.message}`);
     }
-    if (root !== own) die(`--siblings judges the keys beside the live one: --root must be this workspace's scratch root ${own}, got ${root}`);
+    if (root !== own) {
+      die(siblings
+        ? `--siblings judges the keys beside the live one: --root must be this workspace's scratch root ${own}, got ${root}`
+        : `the root sweep judges entries against this workspace's ledger, worktrees and GitHub repository: --root must be this workspace's scratch root ${own}, got ${root}`);
+    }
   }
 
   const now = Date.now();

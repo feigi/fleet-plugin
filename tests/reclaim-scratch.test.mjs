@@ -2,7 +2,8 @@
 // runs the real script against a fixture root, a fixture ledger in a
 // throwaway repository's `.fleet/`, and a `gh` stub on PATH that answers the
 // GraphQL batch from a per-case table and logs every call. No case names a
-// real scratch root: `--root` is always the fixture's own directory.
+// real scratch root: `--root` is the fixture repository's own scratch root
+// under the fixture's HOME, which every run is given.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -86,8 +87,9 @@ function fixture(t) {
   mkdirSync(join(repo, ".fleet"), { recursive: true });
   const g = spawnSync("git", ["init", "-q", repo], { env: GIT_ENV, encoding: "utf8" });
   assert.equal(g.status, 0, g.stderr);
-  const root = join(dir, "root");
-  mkdirSync(root);
+  const home = join(dir, "home");
+  const root = scratchRoot({ cwd: repo, home });
+  mkdirSync(root, { recursive: true });
   const bin = join(dir, "bin");
   mkdirSync(bin);
   writeExecStub(join(bin, "gh"), GH_STUB);
@@ -98,7 +100,7 @@ function fixture(t) {
   const ledgerPath = join(repo, ".fleet", "ledger.md");
 
   const f = {
-    base: dir, repo, root, ledgerPath,
+    base: dir, repo, home, root, ledgerPath,
     states(table) {
       writeFileSync(statesFile, JSON.stringify(table));
     },
@@ -133,10 +135,10 @@ function fixture(t) {
       walk(p);
       return p;
     },
-    run(args, { env = {} } = {}) {
+    run(args, { env = {}, cwd = repo } = {}) {
       const r = spawnSync(process.execPath, [SCRIPT, ...args], {
-        cwd: repo, encoding: "utf8",
-        env: { ...GIT_ENV, PATH: `${bin}:${process.env.PATH}`, GH_LOG: ghLog, GH_STATES: statesFile, ...env },
+        cwd, encoding: "utf8",
+        env: { ...GIT_ENV, PATH: `${bin}:${process.env.PATH}`, HOME: home, GH_LOG: ghLog, GH_STATES: statesFile, ...env },
       });
       r.gh = readFileSync(ghLog, "utf8").split("\n").filter(Boolean);
       r.out = r.status === 0 && r.stdout.trim() ? JSON.parse(r.stdout) : null;
@@ -837,6 +839,77 @@ test("(9) every refused invocation exits 2 and touches nothing", (t) => {
   assert.deepEqual(f.run(["--root", f.root, "--apply"]).gh, [], "a refused root sweep asked gh");
 });
 
+test("(9) a root sweep given another workspace's scratch root refuses, naming both, before reading the ledger or asking GitHub", (t) => {
+  const f = fixture(t);
+  const other = join(f.base, "other");
+  const init = spawnSync("git", ["init", "-q", other], { env: GIT_ENV, encoding: "utf8" });
+  assert.equal(init.status, 0, init.stderr);
+  const otherKey = scratchRoot({ cwd: other, home: f.home });
+  const pr5 = join(otherKey, "pr5");
+  mkdirSync(pr5, { recursive: true });
+  f.age(pr5, 8);
+  // This workspace's #5 is MERGED: judged here, the other key's pr5/ would go.
+  f.states({ 5: PR("MERGED") });
+  for (const [ledger, setUp] of [
+    ["a readable ledger", () => f.ledger()],
+    ["no ledger", () => rmSync(f.ledgerPath, { recursive: true, force: true })],
+    ["a ledger that cannot be read", () => mkdirSync(f.ledgerPath)],
+  ]) {
+    setUp();
+    for (const args of [["--root", otherKey], ["--root", otherKey, "--apply"], ["--root", otherKey, "--after-rotate", "--apply"]]) {
+      const r = f.run(args);
+      const what = `${args.join(" ")} with ${ledger}`;
+      assert.equal(r.status, 2, `${what}: ${r.stdout}${r.stderr}`);
+      assert.match(r.stderr, /the root sweep .*--root must be this workspace's scratch root/, what);
+      assert.ok(r.stderr.includes(f.root) && r.stderr.includes(otherKey), `${what}: the refusal does not name both roots: ${r.stderr}`);
+      assert.doesNotMatch(r.stderr, /ledger\.md|ledger\.mjs/, `${what}: the ledger was looked at before the refusal`);
+      assert.equal(r.stdout, "", `${what}: a refusal printed a receipt`);
+      assert.ok(existsSync(pr5), `${what}: another workspace's pr5/ was removed`);
+      assert.deepEqual(r.gh, [], `${what}: a refused root sweep asked gh`);
+    }
+  }
+  // `--pr` reads no ledger and asks GitHub nothing, so it does not check the root.
+  const run = join(pr5, "run-staleaaa");
+  mkdirSync(run);
+  f.age(run, 8);
+  const p = f.run(["--pr", "5", "--root", otherKey, "--apply"]);
+  assert.equal(p.status, 0, p.stderr);
+  assert.deepEqual(paths(p.out.removed), [run]);
+});
+
+test("(9) a root sweep whose own scratch root cannot be resolved refuses", (t) => {
+  const f = fixture(t);
+  f.ledger();
+  f.states({ 5: PR("MERGED") });
+  const entry = f.dir("pr5", 8);
+  const nowhere = join(f.base, "nowhere");
+  mkdirSync(nowhere);
+  for (const args of [["--root", f.root], ["--root", f.root, "--apply"], ["--root", f.root, "--after-rotate", "--apply"]]) {
+    const r = f.run(args, { cwd: nowhere, env: { GIT_CEILING_DIRECTORIES: f.base } });
+    assert.equal(r.status, 2, `${args.join(" ")}: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /the root sweep .*this workspace's scratch root, which could not be resolved/);
+    assert.equal(r.stdout, "", "a refusal printed a receipt");
+    assert.ok(existsSync(entry), `${args.join(" ")} removed an entry`);
+    assert.deepEqual(r.gh, [], "a refused root sweep asked gh");
+  }
+});
+
+test("(9) a root sweep accepts its own scratch root however the caller reaches it: a trailing slash, or a linked worktree's cwd", (t) => {
+  const f = fixture(t);
+  f.ledger();
+  f.states({ 5: PR("MERGED") });
+  const entry = f.dir("pr5", 8);
+  const linked = worktree(f, "7-impl-7", "implementer/7-impl-7");
+  for (const [how, args, cwd] of [
+    ["a trailing slash", ["--root", `${f.root}/`], f.repo],
+    ["a linked worktree's cwd", ["--root", f.root], linked],
+  ]) {
+    const r = f.run(args, { cwd });
+    assert.equal(r.status, 0, `${how}: ${r.stderr}`);
+    assert.deepEqual(paths(r.out.removed), [entry], how);
+  }
+});
+
 test("(9) a ledger that exists but cannot be read refuses under --after-rotate too", (t) => {
   const f = fixture(t);
   f.states({ 5: PR("MERGED") });
@@ -1203,17 +1276,12 @@ test("(10) a `reports` whose type cannot be read is kept, never aged out whole",
   assert.ok(existsSync(bot));
 });
 
-// The sibling pass: `--root` names the live key, which must be the fixture
-// repository's own scratch root under the fixture's HOME. Returns the live key,
-// aged 8 d, plus the scratch parent and the env for the run.
+// The sibling pass: `--root` names the live key, the fixture's own scratch
+// root. Returns the live key, aged 8 d, plus the scratch parent.
 function siblingFixture(t) {
   const f = fixture(t);
-  const home = join(f.base, "home");
-  const live = scratchRoot({ cwd: f.repo, home });
-  const parent = dirname(live);
-  mkdirSync(live, { recursive: true });
-  f.age(live, 8);
-  return { ...f, parent, live, env: { HOME: home } };
+  f.age(f.root, 8);
+  return { ...f, parent: dirname(f.root), live: f.root };
 }
 
 test("(11) a sibling key idle 8 d is removed whole; a sibling with a fresh file three levels down is kept; non-key entries and the live key are untouched", (t) => {
@@ -1238,7 +1306,7 @@ test("(11) a sibling key idle 8 d is removed whole; a sibling with a fresh file 
   writeFileSync(liveFile, "x");
   f.age(f.live, 8);
 
-  const dry = f.run(["--siblings", "--root", f.live], { env: f.env });
+  const dry = f.run(["--siblings", "--root", f.live]);
 
   assert.equal(dry.status, 0, dry.stderr);
   assert.equal(dry.out.applied, false);
@@ -1249,7 +1317,7 @@ test("(11) a sibling key idle 8 d is removed whole; a sibling with a fresh file 
   assert.equal(reasonOf(dry.out.kept, fresh), "sibling key modified within 7 days");
   assert.ok(existsSync(stale), "a dry run removed");
 
-  const r = f.run(["--siblings", "--root", f.live, "--apply"], { env: f.env });
+  const r = f.run(["--siblings", "--root", f.live, "--apply"]);
 
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.out.applied, true);
@@ -1275,7 +1343,7 @@ test("(11) a key-shaped file or a symlink under the scratch parent is never remo
   // Aged too, so a pass that admitted links as keys would find nothing fresh and remove it.
   spawnSync("touch", ["-h", "-t", "200001010000", link]);
 
-  const r = f.run(["--siblings", "--root", f.live, "--apply"], { env: f.env });
+  const r = f.run(["--siblings", "--root", f.live, "--apply"]);
 
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.out.removed, []);
@@ -1292,18 +1360,20 @@ test("(11) the sibling pass refuses a root that is not this workspace's own scra
   const outside = join(f.base, "outside-abcdef12");
   mkdirSync(outside);
   f.age(outside, 8);
+  const plain = join(f.base, "root");
+  mkdirSync(plain);
 
   const bad = [
     ["--siblings", "--root", notKey],
     ["--siblings", "--root", outside],
-    ["--siblings", "--root", f.root],
+    ["--siblings", "--root", plain],
     // Another key under the same parent: accepted, it would judge the live key.
     ["--siblings", "--root", stale, "--apply"],
     ["--siblings", "--pr", "5", "--root", f.live],
     ["--siblings", "--after-rotate", "--root", f.live],
   ];
   for (const args of bad) {
-    const r = f.run(args, { env: f.env });
+    const r = f.run(args);
     assert.equal(r.status, 2, `${args.join(" ")} was accepted: ${r.stdout}`);
   }
   assert.ok(existsSync(stale) && existsSync(outside) && existsSync(f.live), "a refused invocation removed something");
@@ -1318,7 +1388,7 @@ test("(11) a sibling key with nothing modified in 7 days is removed, one modifie
   mkdirSync(young);
   f.age(young, 6);
 
-  const r = f.run(["--siblings", "--root", f.live, "--apply"], { env: f.env });
+  const r = f.run(["--siblings", "--root", f.live, "--apply"]);
 
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(paths(r.out.removed), [old]);
@@ -1338,7 +1408,7 @@ test("(11) a sibling key written to while an earlier key is being removed is jud
   writeExecStub(join(f.base, "bin", "rm"), `#!/bin/sh\nfor a in "$@"; do [ "$a" = "$RACE_ON" ] && : > "$RACE_WRITE"; done\nexec /bin/rm "$@"\n`);
   const written = join(second, "fresh.txt");
 
-  const r = f.run(["--siblings", "--root", f.live, "--apply"], { env: { ...f.env, RACE_ON: first, RACE_WRITE: written } });
+  const r = f.run(["--siblings", "--root", f.live, "--apply"], { env: { RACE_ON: first, RACE_WRITE: written } });
 
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(paths(r.out.removed), [first]);
@@ -1356,7 +1426,7 @@ test("(11) a sibling key with a part that cannot be read is kept whole, with tha
   f.age(key, 8);
   chmodSync(locked, 0o000);
 
-  const r = f.run(["--siblings", "--root", f.live, "--apply"], { env: f.env });
+  const r = f.run(["--siblings", "--root", f.live, "--apply"]);
 
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.out.removed, []);
