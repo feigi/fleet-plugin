@@ -352,6 +352,14 @@ const COVERED_MJS = {
   // that repository's diff. Behavioural fixture: finisher-scope.test.mjs,
   // "an ambient GIT_DIR cannot retarget the verdict".
   "finisher-scope.mjs": 1,
+  // ONE scrubbed env, handed to the single `git()` helper behind the
+  // `worktree add` and the `rev-parse HEAD` read. An ambient GIT_DIR would add
+  // the tree to another repository, and the receipt would name that
+  // repository's head. The Install step's own git and shell children are
+  // evict.mjs's `installIn()`, counted under evict.mjs. Behavioural fixture:
+  // finisher-tree.test.mjs, "an inherited GIT_DIR naming another repository
+  // cannot retarget the tree".
+  "finisher-tree.mjs": 1,
   // TWO scrubbed envs. `run()` is the one spawn primitive for the `gh` reads
   // and the `git` upstream reads and writes; an ambient GIT_DIR would answer
   // those reads for another repository and write the upstream into its config.

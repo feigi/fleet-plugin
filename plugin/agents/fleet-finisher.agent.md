@@ -153,16 +153,32 @@ ordering is detectable afterwards from the diff — a restore lands on the
 uncommitted clause and destroys it silently, or the mutant is still in the
 tree when the fix-applier commits and a deliberately broken guard ships as
 the fix, in a commit nothing re-reviews. So take your own:
-`git worktree add --detach <scratch>/pr<N>/finish-<your member name> <your dispatch pin>`,
-mutate and run `<testCmd>` in there, then
+`~/.fleet/bin/fleet-run finisher-tree.mjs --worktree <abs-path> --pin <your dispatch pin> --pr <N> --member <your member name> --scratch <scratch>`
+adds `git worktree add --detach <scratch>/pr<N>/finish-<your member name> <your dispatch pin>`
+and runs the Install step in it, as a claim does: a detached worktree holds
+tracked files only, so without that step a suite whose dependencies are
+ignored cannot start. Mutate and run `<testCmd>` in that tree, then
 `git worktree remove --force <scratch>/pr<N>/finish-<your member name>`.
 **At your dispatch pin, never at the fetched branch tip** — duty 1 just
 proved the owned worktree sits at that pin, and `PR headRefOid` may carry
 commits no reviewer read, the substitution the halt block's head-equality
 check rejects for the same reason. `<scratch>` is the absolute root your dispatch prompt names. The member name is in the path because
 the scratch root is shared with every sibling, so `<scratch>/pr<N>` alone
-collides whenever a PR gets a second finisher, and `worktree add` on an
-occupied path fails closed into a halt with a purely mechanical cause.
+collides whenever a PR gets a second finisher, and the script fails closed on
+an occupied path.
+
+**The script's exit code is your verdict on the tree, and its one JSON line is
+the receipt.** Only exit 0 means a tree at your pin with its dependencies
+installed and the tree clean; the receipt's `tree` is the path to work in.
+Any other exit is a halt at duty 2: cause `other`, the receipt as the
+evidence, no label, and you run none of the script's steps by hand to get past
+it. The codes are distinct: 1 no usable tree (an occupied path, a failed add,
+a head that is not your pin, a Recipe that could not be read, a tree dirty
+before the Install step), 3 the Install step did not run (exit 126 or 127, a
+broken Recipe), 4 the Install step failed, 5 the Install step changed the
+tree or left its state unreadable; exit 2 is a refusal with no receipt, a
+refused invocation or a receipt the script could not write. The script
+removes nothing, so a tree it left behind is removed like any other below.
 
 **Remove it on every path, the failing ones included** — a mutant that comes
 back green, a suite that will not start, your own halt at any duty. `--force`

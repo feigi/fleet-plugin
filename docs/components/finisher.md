@@ -63,9 +63,12 @@ durable, and applies the label the merge bot waits on.
   trusting the review pipeline's own account of itself — a final report
   was twice measured not to be proof a member actually stopped.
 - **Everything it verifies by running, it runs in a tree nobody else
-  owns** — an add-detach, mutate, remove cycle in its own scratch
+  owns** — an add-detach, install, mutate, remove cycle in its own scratch
   worktree, never the PR's own, because two members writing the same
   tree at once was measured to silently destroy uncommitted work.
+  `finisher-tree.mjs` builds the tree and runs the Install step in it, as
+  a claim does: a detached worktree holds tracked files only, so a suite
+  whose dependencies are ignored cannot start without it.
 - **A deliberately cheap tier** ([Tier routing](tier-routing.md)) is
   acceptable for the same reason it is on the [Merge bot](merge-bot.md):
   the merge gate downstream still catches whatever the finisher gets

@@ -101,6 +101,17 @@ const CORRECTIONS = [
   // The guard also refuses a path writer's target inside the Install root (#3853).
   ["into the main checkout's non-ignored tree and an implementer's", "into the main checkout's non-ignored tree or into the Install root, and an implementer's"],
   ["Measured: a member edited two files there instead of in its worktree", "Measured: a member edited two files in the main checkout instead of in its worktree"],
+  // The finisher's tree is built by finisher-tree.mjs, which also runs the
+  // Install step in it, so the add is the script's and an occupied path is the
+  // script's refusal.
+  [
+    "So take your own: `git worktree add --detach <scratch>/pr<N>/finish-<your member name> <your dispatch pin>`, mutate and run `<testCmd>` in there, then `git worktree remove --force <scratch>/pr<N>/finish-<your member name>`.",
+    "So take your own: `~/.fleet/bin/fleet-run finisher-tree.mjs --worktree <abs-path> --pin <your dispatch pin> --pr <N> --member <your member name> --scratch <scratch>` adds `git worktree add --detach <scratch>/pr<N>/finish-<your member name> <your dispatch pin>` and runs the Install step in it, as a claim does: a detached worktree holds tracked files only, so without that step a suite whose dependencies are ignored cannot start. Mutate and run `<testCmd>` in that tree, then `git worktree remove --force <scratch>/pr<N>/finish-<your member name>`.",
+  ],
+  [
+    "and `worktree add` on an occupied path fails closed into a halt with a purely mechanical cause.",
+    "and the script fails closed on an occupied path.",
+  ],
 ];
 
 // The removed text as its blocks — paragraphs, a table, a code block — each

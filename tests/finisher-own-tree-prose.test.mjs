@@ -72,7 +72,7 @@ test("duty 2 states the gate's two rules in the finisher's agent body", () => {
   assert.match(text, Pin.phrase("**Remove it on every path, the failing ones included** — a mutant that comes back green, a suite that will not start, your own halt at any duty."));
 });
 
-test("the mutation gate runs in a worktree the finisher adds itself, at its dispatch pin", () => {
+test("the mutation gate runs in a detached worktree at the dispatch pin, at a path that carries the member name", () => {
   const text = gateText();
   // ONE contiguous span. The command and its ref operand have to stay joined:
   // `worktree add --detach` at some other ref is a different instruction, and
@@ -115,6 +115,55 @@ test("the mutation gate runs in a worktree the finisher adds itself, at its disp
     new RegExp(`git worktree remove --force ${added[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
     "the remove names a different path than the add — either the remove refuses and the tree leaks, or it removes a differently-scoped tree that is not this finisher's",
   );
+});
+
+// The tree the gate runs in is built by one script that also runs the Install
+// step in it: a detached worktree holds tracked files only, so on a consumer
+// whose dependencies are ignored the suite cannot start (exit 127), and
+// nothing else in the finisher's body or brief ran the Install step there.
+// finisher-tree.test.mjs drives the script against real repositories; what
+// stays pinned here is that the finisher's text calls it with the dispatched
+// values, reads its exit code as the verdict, and builds no tree on the paths
+// that skip the mutation.
+test("the gate's tree is built by finisher-tree.mjs, which runs the Install step in it", () => {
+  const CALL = "`~/.fleet/bin/fleet-run finisher-tree.mjs --worktree <abs-path> --pin <your dispatch pin> --pr <N> --member <your member name> --scratch <scratch>`";
+  for (const [where, text] of [["the agent body's duty 2", duty2Text()], ["references/finisher.md", gateText()]]) {
+    assert.match(
+      text,
+      Pin.phrase(`${CALL} adds \`git worktree add --detach <scratch>/pr<N>/finish-<your member name> <your dispatch pin>\` and runs the Install step in it, as a claim does`),
+      `${where} no longer has the finisher build its tree through finisher-tree.mjs with the path, the pin, the PR, the member name and the scratch root — the tree is back to tracked files only, and a suite whose dependencies are ignored cannot start`,
+    );
+    assert.match(
+      text,
+      Pin.phrase("Only exit 0 means a tree at your pin with its dependencies installed and the tree clean"),
+      `${where} no longer says exit 0 alone is a usable tree`,
+    );
+    assert.match(
+      text,
+      Pin.phrase("Any other exit is a halt at duty 2: cause `other`, the receipt as the evidence, no label"),
+      `${where} no longer halts every non-zero exit at duty 2 with cause \`other\`, the receipt as evidence and no label`,
+    );
+    assert.match(
+      text,
+      Pin.phrase("1 no usable tree (an occupied path, a failed add, a head that is not your pin, a Recipe that could not be read, a tree dirty before the Install step), 3 the Install step did not run (exit 126 or 127, a broken Recipe), 4 the Install step failed, 5 the Install step changed the tree or left its state unreadable; exit 2 is a refusal with no receipt, a refused invocation or a receipt the script could not write"),
+      `${where} no longer names the script's distinct exit codes`,
+    );
+    assert.match(text, /the script fails closed on an occupied path/, `${where} no longer says an occupied path fails closed`);
+    assert.doesNotMatch(text, /`worktree add` on an occupied path fails closed into a halt/, `${where} still says the finisher's own \`worktree add\` meets an occupied path`);
+  }
+});
+
+test("the tree is built only on the mutation's path: after the Inert diff and Ticketless skips, never before them", () => {
+  const text = duty2Text();
+  const at = (s) => {
+    const i = text.indexOf(s);
+    assert.notEqual(i, -1, `duty 2 no longer contains '${s}' — update this test`);
+    return i;
+  };
+  const tree = at("fleet-run finisher-tree.mjs");
+  assert.ok(at("**Run the Inert diff verdict before the acceptance mutation.**") < tree, "the Inert diff verdict no longer runs before the tree is built — an inert PR gets a tree it never needed");
+  assert.ok(at("**A Ticketless PR has no acceptance mutation to re-run.**") < tree, "the Ticketless check no longer runs before the tree is built — a ticketless PR gets a tree it never needed");
+  assert.match(text, Pin.phrase("Only its exit 0 skips the acceptance mutation below"), "the Ticketless skip no longer covers the tree below it");
 });
 
 test("the throwaway tree is removed on every path, failures included, and --force is scoped to it", () => {
