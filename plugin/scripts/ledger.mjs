@@ -2363,7 +2363,7 @@ async function runDispatch() {
   // conflict hold, dispositions retry — so its definition reads nothing off
   // the ledger.
   //
-  // The finisher's gates below turn on the tick's own verdict, not a second
+  // The fix-applier's and the finisher's gates below turn on the tick's own verdict, not a second
   // reading of row `i`: a PR's tokens can be split across its ticket row and
   // its own `#<pr>` row, and a settle can live in `## Dispatched` alone, so
   // one row's text can read held where the tick reads cleared, and the
@@ -2378,6 +2378,19 @@ async function runDispatch() {
       die(`${e.message} — fleet-tick.mjs refuses this ledger, so ${member.name}'s ${what} cannot be read off it; fix it with \`ledger.mjs row\` before dispatching`);
     }
   };
+
+  // No third fix-applier, of any kind, on a PR where two have settled
+  // `failed` since its latest review with none landed after them — read off
+  // the tick's own fold, the one its `ESCALATE fix-failed` row reads, so a
+  // hand-dispatched one is refused like the tick's. A new review restarts the
+  // count.
+  if (member.family === "fix-pr") {
+    const failed = tickFold("fix-applier failure count").fixFailed.find((f) => f.pr === member.number);
+    if (failed !== undefined) {
+      die(`${member.name}: ${failed.members.join(", ")} settled failed on PR #${member.number} since its latest review — the fleet dispatches no third fix-applier; `
+        + `a new review of PR #${member.number} (\`ledger.mjs review ${member.number} review=member:<next reviewer name>\`, dispatched as any review) restarts the count — not dispatching ${member.name}`);
+    }
+  }
 
   // A finisher labels its PR `ready-to-merge`, so it is recorded only once
   // the PR sits on no conflict hold a fix-applier has yet to clear — a PR

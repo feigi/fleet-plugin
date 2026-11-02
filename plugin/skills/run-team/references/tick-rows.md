@@ -65,6 +65,31 @@ The full text of each row `fleet-tick.mjs` prints and what it asks of the contro
   and flag it for a human; write no hold and dispatch no fix-applier. Not
   actionable; it repeats while the PR reads CONFLICTING and clears once it
   stops, closes or merges.
+- `ESCALATE fix-failed PR#<M> …` — PR M is owed a fix-applier, but two
+  fix-appliers on it have settled `failed` since its latest `reviewed=` (from
+  its first token, with none), each with a retry suffix after that of every
+  fix-applier on the PR that landed `applied:`/`no-op`. Every kind counts —
+  review, conflict, dispositions retry, red-check; `killed` and live ones
+  neither count nor restart the count, and a landed one restarts it. The row
+  prints in place of `DISPATCH fix-pr PR#<M>`, its detail naming the counted
+  members, and `ledger.mjs dispatch` refuses a third fix-applier of any kind
+  on M, a hand-dispatched red-check fixer included. It refuses one on any PR
+  whose count reaches two, even one owed no fix-applier, for which no row
+  prints — two failed red-check fixers after a review with nothing to fix.
+  Handle that refusal as the row. Dispatch no fix-applier for M. Comment on
+  the PR once — read its comments for the first line before posting, since
+  the row repeats and the comment does not. Its first line is `**Two
+  fix-appliers failed on this PR since its latest review; the fleet
+  dispatches no third.**`; then each
+  counted member with what its report says (`confirmation`, and `testRun`
+  when not null), or `no report`; then: a new review hands the PR back, and a
+  draft PR is skipped by the next run. Tell the maintainer. On their word,
+  launch a new review with `ledger.mjs review <M> review=member:<next
+  reviewer name>` and dispatch it as any review: its `reviewed=` restarts the
+  count. Not actionable; it repeats every tick while it holds and clears once
+  a new `reviewed=` lands or the PR closes or merges. Nothing carries it
+  across runs: the next run's fold-in queues the PR for review like any Owned
+  PR, and a draft is not one.
 - `ESCALATE pr-closed #<N> PR#<M>` — PR M, ticket N's latest PR (the latest
   `impl-<N>…=PR#<M>` on the row), is CLOSED unmerged while issue #N is not
   read CLOSED (an issue gh cannot read counts as open), and no

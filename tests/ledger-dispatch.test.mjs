@@ -863,6 +863,23 @@ test("a review's survivors outlive a conflict fix-applier's settle: the next fix
   assert.deepEqual(tick().fixDue, []);
 });
 
+// Two fix-appliers settled `failed` since the PR's latest review: the tick
+// escalates the PR, and `dispatch` refuses a third of any kind off the same
+// fold until a new review restarts the count.
+test("dispatch refuses a third fix-applier after two failed since the latest review, and a new review hands the PR back", (t) => {
+  const { ok, read, put, refused } = fixture(t);
+  put("20", "impl-20=PR#21 · review=member:review-pr-21 reviewed=abc1234:1/0/0:run-abc1234r");
+  ok("dispatch", "21", "fix-pr-21");
+  ok("settle", "fix-pr-21", "failed");
+  assert.equal(ok("dispatch", "21", "fix-pr-21-b").agent, "fleet-fix-applier", "one failure is replaced as before");
+  ok("settle", "fix-pr-21-b", "failed");
+  refused(["dispatch", "21", "fix-pr-21-c"],
+    /ledger: fix-pr-21-c: fix-pr-21, fix-pr-21-b settled failed on PR #21 since its latest review — the fleet dispatches no third fix-applier; a new review of PR #21 \(`ledger\.mjs review 21 review=member:<next reviewer name>`/);
+  ok("review", "21", "review=member:review-pr-21-b", "reviewed=def5678:1/0/0:run-def5678r");
+  assert.equal(ok("dispatch", "21", "fix-pr-21-c").agent, "fleet-fix-applier");
+  assert.ok(read().rows[0].endsWith(" · fix-pr-21-c"), read().rows[0]);
+});
+
 test("the fold takes the PR row's settled tokens in order, under the two-argument spelling, wherever the PR row sits", (t) => {
   const { ok, read, put } = fixture(t);
   // The PR's row comes first here, and a third row follows the ticket's.

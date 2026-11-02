@@ -18,7 +18,7 @@ const state = (over = {}) => ({
   bound: 5, inFlight: 0, inFlightImpl: 0, inFlightPrs: 0, owedCounted: [],
   draining: null, tierMismatch: [], tierUnchecked: [], implNames: [],
   heads: [], supply: 0, shortlistStatus: "ok", refresh: null, dropped: [], pulls: new Map(),
-  reviewsLive: 0, fixLive: 0, fixDue: [], reviewDue: [], unlabelled: [], conflicts: [], conflictEscalate: [],
+  reviewsLive: 0, fixLive: 0, fixDue: [], fixEscalate: [], reviewDue: [], unlabelled: [], conflicts: [], conflictEscalate: [],
   prClosed: [], prUnchecked: [],
   mergeBotLive: 0, mergeQueue: 0, mergeHeld: 0, mergeParked: [],
   mainCheckout: { state: "clean" }, phase0: { held: false, line: null, session: null },
@@ -867,6 +867,81 @@ test("deriveRun: a review counting only unverified findings is fix-due until a r
   assert.deepEqual(at(" · fix-pr-21").fixDue, [], "a live fix-applier is not re-offered");
   assert.deepEqual(at(" · fix-pr-21=no-op · dispositions-ok=fix-pr-21:run-abc1234r").fixDue, [], "a landed no-op answers it");
   assert.deepEqual(at(" · fix-pr-21=failed").fixDue, [21], "a dead one leaves it due for a replacement");
+});
+
+// Two fix-appliers settled `failed` since the PR's latest review, none landed
+// after them: no third. The PR leaves fixDue for `fixEscalate`, the reviewers
+// row escalates it, and `fixFailed` — read with no open list — is what
+// `ledger.mjs dispatch` refuses off.
+const F = (tail) => `#20 impl-20=PR#21 → PR#21 · reviewed=abc1234:1/0/0:run-abc1234r · ${tail}`;
+const failedAt = (tail, prs = [pr(21)]) => run({ rows: [F(tail)] }, prs);
+
+test("deriveRun: two failed fix-appliers since the latest review escalate the PR instead of re-offering it", () => {
+  const r = failedAt("fix-pr-21=failed · fix-pr-21-b=failed");
+  assert.deepEqual(r.fixDue, []);
+  assert.deepEqual(r.fixEscalate, [{ pr: 21, members: ["fix-pr-21", "fix-pr-21-b"] }]);
+  assert.deepEqual(r.fixFailed, [{ pr: 21, members: ["fix-pr-21", "fix-pr-21-b"] }]);
+  const s = state({ fixDue: r.fixDue, fixEscalate: r.fixEscalate });
+  const rs = rowsOf(s, "reviewers");
+  assert.deepEqual(rs.map((x) => x.action), ["IDLE OK", "ESCALATE fix-failed PR#21"]);
+  assert.equal(rs[1].acts, false);
+  assert.match(rs[1].detail, /fix-pr-21, fix-pr-21-b settled failed since the latest review; no third fix-applier/);
+  assert.equal(actionable(reconcile(s)), false);
+  // One failure is re-offered as before, and a killed one neither counts nor
+  // restarts the count.
+  assert.deepEqual(failedAt("fix-pr-21=failed").fixDue, [21]);
+  assert.deepEqual(failedAt("fix-pr-21=failed").fixFailed, []);
+  assert.deepEqual(failedAt("fix-pr-21=failed · fix-pr-21-b=killed").fixDue, [21]);
+  assert.deepEqual(failedAt("fix-pr-21=failed · fix-pr-21-b=killed · fix-pr-21-c=failed").fixEscalate,
+    [{ pr: 21, members: ["fix-pr-21", "fix-pr-21-c"] }]);
+});
+
+test("deriveRun: a landed fix-applier restarts the fix-failed count, of any kind", () => {
+  const after = failedAt("fix-pr-21=failed · fix-pr-21-b=applied:def5678 · conflict-hold:#21 · fix-pr-21-c=failed");
+  assert.deepEqual([after.fixDue, after.fixFailed], [[21], []]);
+  const before = failedAt("fix-pr-21=applied:def5678 · conflict-hold:#21 · fix-pr-21-b=failed · fix-pr-21-c=failed");
+  assert.deepEqual([before.fixDue, before.fixEscalate], [[], [{ pr: 21, members: ["fix-pr-21-b", "fix-pr-21-c"] }]]);
+  // A no-op lands as well as an applied.
+  assert.deepEqual(failedAt("fix-pr-21=failed · fix-pr-21-b=no-op · conflict-hold:#21 · fix-pr-21-c=failed").fixDue, [21]);
+});
+
+test("deriveRun: a dispositions retry and its replacement both failed escalate the mismatch", () => {
+  const tail = "fix-pr-21=applied:def5678 · dispositions-mismatch=fix-pr-21:run-abc1234r";
+  assert.deepEqual(failedAt(`${tail} · fix-pr-21-b=failed`).fixDue, [21]);
+  const r = failedAt(`${tail} · fix-pr-21-b=failed · fix-pr-21-c=failed`);
+  assert.deepEqual([r.fixDue, r.fixEscalate], [[], [{ pr: 21, members: ["fix-pr-21-b", "fix-pr-21-c"] }]]);
+});
+
+test("deriveRun: a new review restarts the fix-failed count, and a PR never reviewed counts from its first token", () => {
+  assert.deepEqual(failedAt("fix-pr-21=failed · fix-pr-21-b=failed · review=wf:x reviewed=def5678:1/0/0:run-def5678r").fixDue, [21]);
+  assert.deepEqual(failedAt("fix-pr-21=failed · fix-pr-21-b=failed · review=wf:x").fixEscalate, [], "a review in flight owes no fix-applier");
+  const unreviewed = run({ rows: ["#20 impl-20=PR#21 → PR#21 · conflict-hold:#21 · fix-pr-21=failed · fix-pr-21-b=failed"] }, [pr(21)]);
+  assert.deepEqual([unreviewed.fixDue, unreviewed.fixEscalate.map((e) => e.pr)], [[], [21]]);
+});
+
+test("deriveRun: the fix-failed count reads each member once, off its merged record, and fixFailed reads no open list", () => {
+  // Settled in `## Dispatched` alone, the bare row copies count.
+  const dispatched = run({ rows: [F("fix-pr-21 · fix-pr-21-b")], dispatched: ["fix-pr-21=failed", "fix-pr-21-b=failed"] }, [pr(21)]);
+  assert.deepEqual(dispatched.fixFailed, [{ pr: 21, members: ["fix-pr-21", "fix-pr-21-b"] }]);
+  // One member's two copies are one failure.
+  const split = run({ rows: [F("fix-pr-21=failed"), "#21 PR#21 · fix-pr-21=failed"] }, [pr(21)]);
+  assert.deepEqual([split.fixDue, split.fixFailed], [[21], []]);
+  // A live fix-applier holds the PR off both lists, and counts nothing.
+  assert.deepEqual(failedAt("fix-pr-21=failed · fix-pr-21-b").fixEscalate, []);
+  // A PR off the open list is nobody's row, but dispatch still refuses on it.
+  const closed = failedAt("fix-pr-21=failed · fix-pr-21-b=failed", []);
+  assert.deepEqual([closed.fixEscalate, closed.fixFailed.map((e) => e.pr)], [[], [21]]);
+});
+
+test("deriveRun: a bare fix-applier copy after a later review counts no failure since that review", () => {
+  // Each member's settled copy sits before the new `reviewed=`; the bare copies
+  // after it are placed by those, so the review restarts the count.
+  const head = "fix-pr-21=failed · fix-pr-21-b=failed · review=wf:x reviewed=def5678:1/0/0:run-def5678r";
+  const bare = failedAt(`${head} · fix-pr-21 · fix-pr-21-b`);
+  assert.deepEqual([bare.fixDue, bare.fixFailed], [[21], []]);
+  // One real failure since the review, beside a bare copy, is re-offered.
+  const one = failedAt(`${head} · fix-pr-21-b · fix-pr-21-c=failed`);
+  assert.deepEqual([one.fixDue, one.fixEscalate, one.fixFailed], [[21], [], []]);
 });
 
 test("deriveRun: review is due on open PRs that close an issue and carry no review token, oldest first", () => {
