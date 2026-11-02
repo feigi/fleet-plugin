@@ -75,6 +75,9 @@ export function defang(text, names) {
   return names.reduce((t, n) => t.split(`<${n}>`).join(`‹${n}›`), text);
 }
 
+/** A brief path's trailing line reference, `:N` or `:N-M`. */
+export const LINE_REF = /:(\d+)(?:-(\d+))?$/;
+
 /**
  * The file paths a brief names: every backticked token without whitespace that
  * holds a `/` or ends in an extension, in first-seen order, each once. The

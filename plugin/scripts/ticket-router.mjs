@@ -14,9 +14,11 @@
 //     REASON=<reason>`,
 //     routing by the objective's row set, and appends the Pull's
 //     ticket-features row to the pending TSV (by default
-//     `ticket-features.pending.tsv` beside `--guard`, in the run's `.fleet/`). Exit 0 on
-//     every data degradation — a missing or unreadable issue, sizing or guard
-//     file degrades the line, never the exit. Exit 2 only on a usage error or
+//     `ticket-features.pending.tsv` beside `--guard`, in the run's `.fleet/`).
+//     The paths its brief names are looked up under the working directory,
+//     the checkout, for `named_lines`. Exit 0 on every data degradation — a
+//     missing or unreadable issue, sizing or guard file degrades the line,
+//     never the exit. Exit 2 only on a usage error or
 //     an unreadable/invalid table: the caller does not dispatch then. With no
 //     `--session`, the session is the one the phase-0 receipt
 //     `.fleet/phase0.json` records, and with no `--objective` the objective
@@ -43,9 +45,9 @@
 // the guard are files the caller wrote, and a fitted commit is fetched by the
 // caller.
 
-import { readFileSync, writeFileSync, renameSync, appendFileSync, mkdirSync, statSync } from "node:fs";
+import { readFileSync, writeFileSync, renameSync, appendFileSync, mkdirSync, statSync, realpathSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { isCLI } from "./is-cli.mjs";
@@ -58,11 +60,13 @@ import {
   AttributionError, FEATURE_COLUMNS, OPTIONAL_COLUMNS, TRIP_POINTS, attribute, bootUnit, bootstrapDiffCI, generations, parseFeatures, tally, underFloor,
 } from "./pull-attribution.mjs";
 import { RulingError, parseTierOutcomes } from "./tier-outcomes.mjs";
-import { briefPaths, briefText } from "./ticket-text.mjs";
+import { LINE_REF, briefPaths, briefText } from "./ticket-text.mjs";
 
 const NAME = "ticket-router";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_TABLE = join(SCRIPT_DIR, "router-table.json");
+// The install's own package.json, whose `version` names the plugin a Pull was routed by.
+export const INSTALL_PACKAGE = join(SCRIPT_DIR, "..", "package.json");
 
 // The free classifier's thresholds: heavy past the median brief length of
 // the tickets whose sizing verdict is known, or past five criteria.
@@ -109,6 +113,25 @@ export function sliceParent(body) {
   return ref === null ? "" : ref[1] ?? ref[2];
 }
 
+/** The install's `package.json` `version`, or null when it names none or cannot be read. */
+export function installVersion(path = INSTALL_PACKAGE) {
+  try {
+    const v = JSON.parse(readFileSync(path, "utf8"))?.version;
+    return typeof v === "string" ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+// The directory a brief path names: its parent once a line reference and any
+// trailing `/` are dropped, or the path itself when it ended in `/`; `.` for a
+// bare filename.
+function pathDir(token) {
+  const t = token.replace(LINE_REF, "");
+  const q = t.replace(/\/+$/, "");
+  return posix.normalize(q === t ? posix.dirname(q) : q || "/");
+}
+
 /** The metric columns for a parsed `gh issue view --json title,body,comments,labels,createdAt`, or null when it is not one. */
 export function issueMetrics(issue, now = Date.now()) {
   if (issue === null || typeof issue !== "object" || Array.isArray(issue) || typeof issue.body !== "string") return null;
@@ -127,7 +150,62 @@ export function issueMetrics(issue, now = Date.now()) {
     xrefs: String(new Set([...brief.matchAll(/#(\d+)/g)].map((m) => m[1])).size),
     kind,
     parent: sliceParent(issue.body),
+    // briefPaths' tokens hold no whitespace, so one space separates them unambiguously.
+    named_paths: paths.join(" "),
+    dirs: paths.length === 0 ? "" : String(new Set(paths.map(pathDir)).size),
+    title: typeof issue.title === "string" ? issue.title : "",
   };
+}
+
+// Whether `abs` is `root` or lies below it. Posix `relative` resolves both
+// first and never answers with an absolute path.
+function within(root, abs) {
+  const r = relative(root, abs);
+  return r !== ".." && !r.startsWith(`..${sep}`);
+}
+
+// One `named_lines` entry: a line reference dropped, the path resolved against
+// `root`, absolute, whose realpath is `realRoot`. One that is absolute, starts
+// with `~` or lies outside `root` — as spelled, or once its symlinks are
+// followed — is `-` and never read; so is one that does not exist, a file
+// named with a trailing `/`, or one that is neither a file nor a directory.
+function lineEntry(token, root, realRoot) {
+  const t = token.replace(LINE_REF, "");
+  if (isAbsolute(t) || t.startsWith("~")) return "-";
+  const at = join(root, t);
+  if (!within(root, at)) return "-";
+  try {
+    const real = realpathSync(at);
+    if (!within(realRoot, real)) return "-";
+    // `at`, not `real`: realpath drops a trailing `/`, which stat keeps, so a
+    // file named as a directory is ENOTDIR here.
+    const st = statSync(at);
+    if (st.isDirectory()) return "dir";
+    if (!st.isFile()) return "-";
+    const bytes = readFileSync(real);
+    let n = 0;
+    for (const b of bytes) if (b === 0x0a) n += 1;
+    return String(bytes.length > 0 && bytes[bytes.length - 1] !== 0x0a ? n + 1 : n);
+  } catch {
+    return "-";
+  }
+}
+
+/**
+ * The `named_lines` value for `named`, a `named_paths` value, resolved against
+ * the checkout `root`: per path, aligned and space-separated, the file's line
+ * count (its `\n`s, plus one when its last line has none), `dir` for a
+ * directory, `-` for anything else (lineEntry). Blank when `named` is.
+ */
+export function namedLines(named, root) {
+  if (named === "") return "";
+  const paths = named.split(" ");
+  let realRoot;
+  // A root that cannot be resolved — null when the CLI's working directory is
+  // gone — reads every path `-`.
+  try { realRoot = realpathSync(root); } catch { return paths.map(() => "-").join(" "); }
+  const abs = resolve(root);
+  return paths.map((p) => lineEntry(p, abs, realRoot)).join(" ");
 }
 
 /**
@@ -280,21 +358,28 @@ export function sessionDate(session) {
 }
 
 /**
- * One Pull's routing, by `objective`'s row set. Pure: every input is already
- * read. The exploration draw ignores the objective: it leaves out the cell
+ * One Pull's routing, by `objective`'s row set. Every input is already read
+ * but the paths the brief names, which `named_lines` reads under `root`, the
+ * checkout. `version` is the install's, `plugin_version` on the row. The
+ * exploration draw ignores the objective: it leaves out the cell
  * the `cost` set routes the Pull to — by the sizing when arm B is live for
  * the `cost` set, whichever set routes the Pull — so a Pull draws the same
  * cell under both.
  * @returns {{ line: string, row: Record<string,string> }}
  */
-export function route({ session, ticket, arm, implRow, chainHead = false, issue, sizing = null, guard, table, objective, now = Date.now() }) {
+export function route({
+  session, ticket, arm, implRow, chainHead = false, issue, sizing = null, guard, table, objective, now = Date.now(),
+  root = process.cwd(), version = installVersion(),
+}) {
   let reason = null;
   const degrade = (r) => { reason ??= r; };
 
   const metrics = issueMetrics(issue, now);
   if (metrics === null) degrade("no-issue-json");
-  const blank = Object.fromEntries(["brief_chars", "criteria", "comments", "age_days", "paths", "test_paths", "xrefs", "kind", "parent"].map((c) => [c, ""]));
-  const m = metrics ?? blank;
+  const blank = Object.fromEntries(FEATURE_COLUMNS
+    .slice(FEATURE_COLUMNS.indexOf("brief_chars"), FEATURE_COLUMNS.indexOf("plugin_version"))
+    .filter((c) => c !== "objective").map((c) => [c, ""]));
+  const m = metrics === null ? blank : { ...metrics, named_lines: namedLines(metrics.named_paths, root) };
   const ruleS = ruleStratum(m);
 
   let stratum = ruleS;
@@ -345,7 +430,7 @@ export function route({ session, ticket, arm, implRow, chainHead = false, issue,
   const row = {
     run_date: sessionDate(session), session, agent: `impl-${ticket}`, ticket: String(ticket),
     policy_cell: policy, chosen_cell: cell, exploration_draw: draw === null ? "" : `${draw.k}/${draw.K}`,
-    sizing_src: sizingSrc, sizing_pre: sizingPre, router_usd: routerUsd, ...m, objective,
+    sizing_src: sizingSrc, sizing_pre: sizingPre, router_usd: routerUsd, ...m, objective, plugin_version: version ?? "",
   };
   const line = formatRouting({
     policy, cell, draw, by, stratum,
@@ -754,9 +839,17 @@ function main() {
     } else if (!OBJECTIVES.includes(objective)) {
       die(`--objective ${objective} is not ${OBJECTIVES.join(" or ")}`);
     }
+    // A working directory removed under the run, or an install `package.json`
+    // with no readable version, degrades the row and warns, never the exit.
+    let root = null;
+    try { root = process.cwd(); } catch (e) {
+      process.stderr.write(`${NAME}: WARNING cannot resolve the working directory: ${e.message} — every named path reads \`-\`\n`);
+    }
+    const version = installVersion();
+    if (version === null) process.stderr.write(`${NAME}: WARNING ${INSTALL_PACKAGE} names no readable version — plugin_version is blank\n`);
     const { line, row } = route({
       session, ticket: Number(ticket), arm, implRow: Number(implRowArg), chainHead: F.has("chain-head"),
-      issue: readJson(issuePath), sizing: readJson(F.arg("sizing")), guard: readGuard(readJson(guardPath)), table, objective,
+      issue: readJson(issuePath), sizing: readJson(F.arg("sizing")), guard: readGuard(readJson(guardPath)), table, objective, root, version,
     });
     const pending = F.arg("pending") ?? join(dirname(guardPath), "ticket-features.pending.tsv");
     // The header decision and the append are not atomic and take no lock. That is

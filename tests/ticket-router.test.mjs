@@ -1,13 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { cpSync, mkdtempSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import {
-  DEFAULT_TABLE, HEAVY_BRIEF_CHARS, HEAVY_CRITERIA, bArmLive, issueMetrics, ruleStratum, route, rowDispatch, rowFor, fitTable, readGuard, validateTable, formatFeatureRow, mergedSince, resolveCommit, sliceParent,
+  DEFAULT_TABLE, HEAVY_BRIEF_CHARS, HEAVY_CRITERIA, bArmLive, installVersion, issueMetrics, ruleStratum, route, rowDispatch, rowFor, fitTable, readGuard, validateTable, formatFeatureRow, mergedSince, resolveCommit, sliceParent,
 } from "../plugin/scripts/ticket-router.mjs";
 import { FEATURE_COLUMNS as COLUMNS, parseFeatures } from "../plugin/scripts/pull-attribution.mjs";
 import { drawCell, CELL, formatRouting, parseRouting } from "../plugin/scripts/ledger-grammar.mjs";
@@ -22,6 +22,9 @@ const SCRIPT = fileURLToPath(new URL("../plugin/scripts/ticket-router.mjs", impo
 const SESSION = "2026-10-01T10-00-00-000Z_01a0b344-33f6-7640-96a8-05f45bf847a9";
 const SESSION2 = "2026-10-01T11-00-00-000Z_01a0b344-33f6-7640-96a8-05f45bf847b0";
 const STAGE1 = ["slow-high", "task-high", "smol-high"];
+// The columns #4159 appended after `parent`, and the version the install's package.json names.
+const NAMED = ["named_paths", "named_lines", "dirs", "title", "plugin_version"];
+const INSTALLED_VERSION = JSON.parse(readFileSync(new URL("../plugin/package.json", import.meta.url), "utf8")).version;
 
 // A table's `rows` or `reasons`: one set per objective, the speed set the cost set's unless named.
 const both = (cost, speed = cost) => ({ cost, speed });
@@ -73,6 +76,8 @@ test("route: a clean non-exploration Pull prints the full line, REASON=ok, and r
   assert.equal(r.stdout, "POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=light BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok\n");
   const lines = readFileSync(p.pending, "utf8").replace(/\n$/, "").split("\n");
   assert.equal(lines[0], COLUMNS.join("\t"), "a new pending file starts with the header");
+  assert.equal(COLUMNS.length, 25);
+  assert.deepEqual(COLUMNS.slice(-NAMED.length), NAMED, "the new columns come after parent, in order");
   const [row] = parseFeatures(lines.join("\n"));
   assert.equal(row.run_date, "2026-10-01");
   assert.equal(row.session, SESSION);
@@ -84,6 +89,9 @@ test("route: a clean non-exploration Pull prints the full line, REASON=ok, and r
   assert.equal(row.criteria, "2");
   assert.equal(row.age_days, "3");
   assert.equal(row.kind, "bug");
+  assert.equal(row.title, "t");
+  assert.equal(row.plugin_version, INSTALLED_VERSION, "the install's package.json version");
+  assert.deepEqual([row.named_paths, row.named_lines, row.dirs], ["", "", ""], "a brief that names no path");
   // A second Pull appends, never a second header.
   routeCli(p, { ticket: 43 });
   const again = readFileSync(p.pending, "utf8").replace(/\n$/, "").split("\n");
@@ -165,7 +173,8 @@ test("route: no-issue-json — a missing or unparseable issue file blanks the me
       POLICY: "slow-high", CELL: "slow-high", DRAW: "-", BY: "-", STRATUM: "unknown", BRIEF: "-", CRITERIA: "-", PARENT: "-", SIZED: "-", OBJECTIVE: "cost", TRIPPED: "-", REASON: "no-issue-json",
     });
     const [row] = parseFeatures(readFileSync(p.pending, "utf8"));
-    for (const c of ["brief_chars", "criteria", "comments", "age_days", "paths", "test_paths", "xrefs", "kind"]) assert.equal(row[c], "", c);
+    for (const c of ["brief_chars", "criteria", "comments", "age_days", "paths", "test_paths", "xrefs", "kind", "named_paths", "named_lines", "dirs", "title"]) assert.equal(row[c], "", c);
+    assert.equal(row.plugin_version, INSTALLED_VERSION, "the version is no issue metric: it is still recorded");
   }
 });
 
@@ -754,17 +763,162 @@ test("route: a short-brief Slice routes heavy and names its parent, by either fo
   }
 });
 
-test("route: a pending file begun before the parent column keeps its width", (t) => {
-  const p = world(t, { issueJson: issue({ body: "Spec: #3177 § D3." }) });
-  const older = COLUMNS.filter((c) => c !== "parent");
-  mkdirSync(dirname(p.pending), { recursive: true });
-  writeFileSync(p.pending, `${older.join("\t")}\n`);
-  const r = routeCli(p);
+test("route: a pending file begun before the parent column, or before the named-path columns, keeps its width", (t) => {
+  for (const lacks of [["parent", ...NAMED], NAMED]) {
+    const p = world(t, { issueJson: issue({ body: "Spec: #3177 § D3. Change `plugin/scripts/a.mjs`.", title: "x" }) });
+    const older = COLUMNS.filter((c) => !lacks.includes(c));
+    mkdirSync(dirname(p.pending), { recursive: true });
+    writeFileSync(p.pending, `${older.join("\t")}\n`);
+    for (const ticket of [42, 43]) assert.equal(routeCli(p, { ticket }).status, 0);
+    const lines = readFileSync(p.pending, "utf8").replace(/\n$/, "").split("\n");
+    assert.deepEqual(lines.map((l) => l.split("\t").length), [older.length, older.length, older.length], lacks.join());
+    const rows = parseFeatures(lines.join("\n"));
+    assert.deepEqual(rows.map((r) => r.ticket), ["42", "43"]);
+    for (const row of rows) {
+      assert.equal(row.objective, "cost");
+      for (const c of lacks) assert.equal(row[c], "", `${lacks.join()}: the row is written at the file's width, so ${c} reads blank`);
+    }
+  }
+});
+
+// A checkout root under its own base directory, so `../` from the root lands on a file of the base.
+function checkout(t) {
+  const base = mkdtempSync(join(tmpdir(), "ticket-router-root-"));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const root = join(base, "root");
+  mkdirSync(join(root, "plugin", "scripts"), { recursive: true });
+  return { base, root };
+}
+const rowAt = (root, body, over = {}) => route({
+  session: SESSION, ticket: 42, arm: "A", implRow: 3, issue: issue({ body }), guard: readGuard(guardFile()), table: baseTable(), objective: "cost", root, version: "9.9.9", ...over,
+}).row;
+
+test("route: the row records the paths the brief names as named, each one's lines aligned, and the directories they span", (t) => {
+  const { root } = checkout(t);
+  writeFileSync(join(root, "plugin", "scripts", "a.mjs"), "one\ntwo\nthree\n");
+  writeFileSync(join(root, "plugin", "scripts", "b.mjs"), "one\ntwo");
+  writeFileSync(join(root, "README.md"), "");
+  const body = "Change `plugin/scripts/a.mjs`, `docs/gone.md`, `plugin/scripts/b.mjs:12-30`, `plugin/scripts/`, `README.md` and `plugin/scripts/a.mjs:4`.\n\n## Out of scope\n- `other/x.mjs`";
+  const row = rowAt(root, body);
+  assert.equal(row.named_paths, "plugin/scripts/a.mjs docs/gone.md plugin/scripts/b.mjs:12-30 plugin/scripts/ README.md plugin/scripts/a.mjs:4", "as named, first-seen order, Out of scope skipped");
+  assert.equal(row.named_lines, "3 - 2 dir 0 3", "a count, `-` when missing, the suffixed file's count, `dir`, an empty file, a last line with no newline counted");
+  assert.equal(row.dirs, "3", "plugin/scripts (a trailing `/` its own), docs, and `.` for the bare filename");
+  assert.equal(row.paths, "6");
+  assert.equal(row.plugin_version, "9.9.9", "the injected version");
+  assert.equal(rowAt(root, "Change `a/b.mjs`.", { version: null }).plugin_version, "", "a version that cannot be read is blank");
+  assert.deepEqual(issueMetrics(issue({ body: "`a/x.mjs` `./a/y.mjs` `a/b/../z.mjs` `a/b/` `a/b`" })).dirs, "2", "a directory is counted once however it is spelled: a, and a/b");
+});
+
+test("route: a path outside the checkout — `..`, absolute, `~`, or through a symlink — is recorded `-` and never read; one inside it is read however it is spelled", (t) => {
+  const { base, root } = checkout(t);
+  writeFileSync(join(base, "x"), "1\n2\n3\n4\n5\n");
+  // Read as spelled, `~/.fleet/x` would be this file under the root: its count would show it was opened.
+  mkdirSync(join(root, "~", ".fleet"), { recursive: true });
+  writeFileSync(join(root, "~", ".fleet", "x"), "1\n2\n");
+  symlinkSync(join(base, "x"), join(root, "out.mjs"));
+  symlinkSync(base, join(root, "outdir"));
+  const outside = ["../x", "/etc/passwd", "~/.fleet/x", "plugin/../../x", "out.mjs", "outdir/x"];
+  const outRow = rowAt(root, outside.map((p) => `\`${p}\``).join(" "));
+  assert.equal(outRow.named_paths, outside.join(" "));
+  assert.equal(outRow.named_lines, outside.map(() => "-").join(" "));
+
+  writeFileSync(join(root, "plugin", "scripts", "a.mjs"), "one\ntwo\n");
+  symlinkSync(join(root, "plugin", "scripts", "a.mjs"), join(root, "in.mjs"));
+  symlinkSync(root, join(base, "alias"));
+  const inside = ["plugin/scripts/a.mjs", "./plugin/scripts/a.mjs", "plugin/x/../scripts/a.mjs", "in.mjs"];
+  for (const at of [root, join(base, "alias")]) {
+    assert.equal(rowAt(at, inside.map((p) => `\`${p}\``).join(" ")).named_lines, "2 2 2 2", `root ${at}`);
+  }
+});
+
+test("route: a path spelled outside the checkout is `-` even where a symlink there leads back inside it", (t) => {
+  const { base, root } = checkout(t);
+  writeFileSync(join(root, "plugin", "scripts", "a.mjs"), "one\ntwo\n");
+  symlinkSync(join(root, "plugin", "scripts", "a.mjs"), join(base, "sib"));
+  symlinkSync(join(root, "plugin"), join(base, "sibdir"));
+  assert.equal(rowAt(root, "`../sib` `../sibdir/scripts/a.mjs` `../sibdir` `plugin/scripts/a.mjs`").named_lines, "- - - 2");
+});
+
+test("route: a file named with a trailing `/` is `-`, not its line count", (t) => {
+  const { root } = checkout(t);
+  writeFileSync(join(root, "plugin", "scripts", "a.mjs"), "1\n2\n3\n");
+  assert.equal(rowAt(root, "`plugin/scripts/a.mjs/` `plugin/scripts/a.mjs`").named_lines, "- 3");
+});
+
+test("route: a FIFO inside the checkout is recorded `-` and never opened", (t) => {
+  const { root } = checkout(t);
+  const fifo = join(root, "plugin", "scripts", "pipe.fifo");
+  const made = spawnSync("mkfifo", [fifo]);
+  if (made.status !== 0) return t.skip("mkfifo unavailable");
+  // A writer that holds the FIFO's data for any reader that opens it: opened, the FIFO reads `2`; never opened, the writer stays blocked until killed.
+  const writer = spawn("sh", ["-c", 'printf "one\\ntwo\\n" > "$1"', "sh", fifo], { stdio: "ignore" });
+  t.after(() => writer.kill("SIGKILL"));
+  assert.equal(rowAt(root, "`plugin/scripts/pipe.fifo`").named_lines, "-");
+});
+
+test("route: run with no root, the CLI looks the brief's paths up under its working directory", (t) => {
+  const p = world(t, { issueJson: issue({ body: "Change `plugin/scripts/a.mjs` and `docs/b.md`." }) });
+  mkdirSync(join(p.dir, "plugin", "scripts"), { recursive: true });
+  writeFileSync(join(p.dir, "plugin", "scripts", "a.mjs"), "a\nb\nc\nd\n");
+  const r = spawnSync(process.execPath, [SCRIPT, "route", "--session", SESSION, "--objective", "cost", "--ticket", "42", "--arm", "A", "--impl-row", "3",
+    "--issue", p.issue, "--guard", p.guard, "--table", p.table, "--pending", p.pending], { encoding: "utf8", cwd: p.dir });
   assert.equal(r.status, 0, r.stderr);
+  const [row] = parseFeatures(readFileSync(p.pending, "utf8"));
+  assert.deepEqual([row.named_paths, row.named_lines, row.dirs], ["plugin/scripts/a.mjs docs/b.md", "4 -", "2"]);
+  assert.equal(row.plugin_version, installVersion());
+});
+
+test("route: a working directory removed under the CLI warns and reads every named path `-`, exit 0", (t) => {
+  const p = world(t, { issueJson: issue({ body: "Change `plugin/scripts/a.mjs`." }) });
+  const gone = join(p.dir, "gone");
+  mkdirSync(gone);
+  const r = spawnSync("sh", ["-c", 'cd "$1" && rmdir "$1" && shift && exec "$@"', "sh", gone, process.execPath, SCRIPT, "route", "--session", SESSION,
+    "--objective", "cost", "--ticket", "42", "--arm", "A", "--impl-row", "3", "--issue", p.issue, "--guard", p.guard, "--table", p.table, "--pending", p.pending],
+  { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^POLICY=.* REASON=ok$/m);
+  assert.match(r.stderr, /WARNING cannot resolve the working directory/);
+  const [row] = parseFeatures(readFileSync(p.pending, "utf8"));
+  assert.equal(row.named_lines, "-");
+});
+
+test("route: an install package.json with no readable version warns and leaves plugin_version blank, exit 0", (t) => {
+  const p = world(t);
+  const install = join(p.dir, "install");
+  cpSync(dirname(SCRIPT), join(install, "scripts"), { recursive: true });
+  const args = ["route", "--session", SESSION, "--objective", "cost", "--ticket", "42", "--arm", "A", "--impl-row", "3",
+    "--issue", p.issue, "--guard", p.guard, "--table", p.table, "--pending", p.pending];
+  const run = (pkg) => {
+    writeFileSync(join(install, "package.json"), pkg);
+    const r = spawnSync(process.execPath, [join(install, "scripts", "ticket-router.mjs"), ...args], { encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    return { stderr: r.stderr, row: parseFeatures(readFileSync(p.pending, "utf8")).at(-1) };
+  };
+  const ok = run('{"version":"1.2.3"}');
+  assert.equal(ok.row.plugin_version, "1.2.3");
+  assert.doesNotMatch(ok.stderr, /WARNING/);
+  const bad = run("{oops");
+  assert.equal(bad.row.plugin_version, "");
+  assert.match(bad.stderr, /WARNING .*package\.json names no readable version/);
+});
+
+test("installVersion: a string version comes back; a numeric, missing, unparseable or unreadable one is null", () => {
+  const dir = tempDir("router-version-");
+  const at = (name, text) => { const p = join(dir, name); writeFileSync(p, text); return p; };
+  assert.equal(installVersion(at("string.json", '{"version":"1.2.3"}')), "1.2.3");
+  assert.equal(installVersion(at("number.json", '{"version":3}')), null);
+  assert.equal(installVersion(at("missing.json", "{}")), null);
+  assert.equal(installVersion(at("nul.json", "null")), null);
+  assert.equal(installVersion(at("bad.json", "{not json")), null);
+  assert.equal(installVersion(join(dir, "absent.json")), null);
+});
+
+test("route: a title holding a tab, a newline or a carriage return lands as one field, and the row parses at the header's width", (t) => {
+  const p = world(t, { issueJson: issue({ title: "tab\there\nnew\r\nline" }) });
+  assert.equal(routeCli(p).status, 0);
   const lines = readFileSync(p.pending, "utf8").replace(/\n$/, "").split("\n");
-  assert.deepEqual(lines.map((l) => l.split("\t").length), [older.length, older.length]);
-  const [row] = parseFeatures(lines.join("\n"));
-  assert.deepEqual([row.ticket, row.objective, row.parent], ["42", "cost", ""], "the row is written at the file's width; the fill sets its parent later");
+  assert.deepEqual(lines.map((l) => l.split("\t").length), [COLUMNS.length, COLUMNS.length]);
+  assert.equal(parseFeatures(lines.join("\n"))[0].title, "tab here new  line");
 });
 
 test("route: a pending file whose first line is no features header is left alone, with the WARNING, and the route still prints", (t) => {
@@ -898,6 +1052,28 @@ test("fit: a day-one three-TSV fixture writes an estimates-only table, and --che
   const check = cli(["--check", ...p.fitArgs]);
   assert.equal(check.status, 0, check.stderr);
   assert.match(check.stdout, new RegExp(`matches a re-fit of 3 Pulls at ${sha.slice(0, 8)}\n`));
+});
+
+test("fit and --check read a features corpus with the named-path columns as one without them", (t) => {
+  const features = [
+    featureRow({ ticket: "1", chosen_cell: "task-high", exploration_draw: "2/3" }),
+    featureRow({ ticket: "2", chosen_cell: "slow-high", exploration_draw: "1/3", brief_chars: "5000" }),
+  ].map((f) => ({ ...f, named_paths: "plugin/a.mjs docs/b.md", named_lines: "3 -", dirs: "2", title: "a title", plugin_version: "1.2.3" }));
+  const verdicts = [{ pr: "11", ticket: "1" }, { pr: "12", ticket: "2" }];
+  const p = fitWorld(t, { features, members: [], verdicts });
+  const fitted = () => {
+    const r = fitCli(p);
+    assert.equal(r.status, 0, r.stderr);
+    const { fitted_commit: _, ...table } = JSON.parse(readFileSync(p.table, "utf8"));
+    const check = cli(["--check", ...p.fitArgs]);
+    assert.equal(check.status, 0, check.stderr);
+    return table;
+  };
+  const withThem = fitted();
+  assert.equal(withThem.n_rows, 2);
+  writeFileSync(p.features, tsv(COLUMNS.filter((c) => !NAMED.includes(c)), features, true));
+  p.commit();
+  assert.deepEqual(fitted(), withThem);
 });
 
 test("fit: an older generation prints on its own `(older)` segment with its own fix rounds, and a cell with only excluded Pulls names no generation", (t) => {

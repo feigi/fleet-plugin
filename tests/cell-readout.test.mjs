@@ -56,16 +56,16 @@ function addComparisons(w, cell, n, dates, rowOpts = {}) {
   }
 }
 
-function files(w) {
+function files(w, cols = FEATURE_COLUMNS) {
   const dir = tempDir("cell-readout-");
   const features = join(dir, "ticket-features.tsv");
   const members = join(dir, "member-outcomes.tsv");
-  writeFileSync(features, [FEATURE_COLUMNS.join("\t"), ...w.features.map((r) => FEATURE_COLUMNS.map((c) => r[c] ?? "").join("\t"))].join("\n") + "\n");
+  writeFileSync(features, [cols.join("\t"), ...w.features.map((r) => cols.map((c) => r[c] ?? "").join("\t"))].join("\n") + "\n");
   writeFileSync(members, "# header\n" + formatTsv(w.members));
   return { features, members, dir };
 }
-function cli(w, extra = []) {
-  const f = files(w);
+function cli(w, extra = [], cols = FEATURE_COLUMNS) {
+  const f = files(w, cols);
   return spawnSync(process.execPath, [SCRIPT, "--ticket-features", f.features, "--member-outcomes", f.members, ...extra], { encoding: "utf8", cwd: f.dir });
 }
 const lineFor = (stdout, cell) => stdout.split("\n").find((l) => l.split(" ")[0] === cell);
@@ -85,6 +85,18 @@ test("the gate is ten comparisons across five run_dates: nine across five does n
   assert.equal(lineFor(at.stdout, "task-high"), "task-high 10 5 claude-sonnet-5");
   assert.doesNotMatch(at.stderr, /task-high below the gate/);
   assert.deepEqual(GATE, { comparisons: 10, runDates: 5 });
+});
+
+test("a features corpus with the named-path columns reads out as one without them", () => {
+  const w = world();
+  addComparisons(w, "task-high", 10, 5);
+  w.features = w.features.map((r) => ({ ...r, named_paths: "plugin/a.mjs", named_lines: "3", dirs: "1", title: "a title", plugin_version: "1.2.3" }));
+  const named = ["named_paths", "named_lines", "dirs", "title", "plugin_version"];
+  const withThem = cli(w);
+  assert.equal(withThem.status, 0, withThem.stderr);
+  assert.equal(lineFor(withThem.stdout, "task-high"), "task-high 10 5 claude-sonnet-5");
+  const without = cli(w, [], FEATURE_COLUMNS.filter((c) => !named.includes(c)));
+  assert.deepEqual([without.status, without.stdout, without.stderr], [withThem.status, withThem.stdout, withThem.stderr]);
 });
 
 test("ten comparisons across four run_dates does not gate: both halves of the gate bind", () => {

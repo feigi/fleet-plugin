@@ -251,15 +251,20 @@ test("a pending file with a column the corpus lacks fails the drain, leaves the 
   assert.deepEqual(f.ghCalls(), []);
 });
 
-// A corpus or pending file from before `objective` lacks `parent` too, the later column.
-const OLDER = [["objective", "parent"], ["parent"]];
+// A corpus or pending file from before a column lacks every later column too:
+// `objective`, then `parent`, then the named-path columns, the title and the plugin version.
+const NAMED = ["named_paths", "named_lines", "dirs", "title", "plugin_version"];
+const OLDER = [["objective", "parent", ...NAMED], ["parent", ...NAMED], NAMED];
 
-test("a corpus written before the objective or parent column gains it, blank on the rows it holds, when the pending file carries it", () => {
+test("a corpus written before the objective, parent or named-path columns gains them, blank on the rows it holds, when the pending file carries them", () => {
   for (const lacks of OLDER) {
     const rows = corpus();
     ruled(rows, { ticket: 1 });
     const older = FEATURE_COLUMNS.filter((c) => !lacks.includes(c));
-    const fresh = pull({ ticket: "2", agent: "impl-2", objective: "speed", parent: "3177" });
+    const fresh = pull({
+      ticket: "2", agent: "impl-2", objective: "speed", parent: "3177",
+      named_paths: "plugin/a.mjs docs/gone.md", named_lines: "12 -", dirs: "2", title: "A title", plugin_version: "1.2.3",
+    });
     const f = fixture({ rows, pending: featuresTsv([fresh]) });
     write(f.repo, FEATURES, featuresTsv(rows.features, older));
     const r = f.run();
@@ -270,10 +275,10 @@ test("a corpus written before the objective or parent column gains it, blank on 
   }
 });
 
-test("a pending file written before the objective or parent column drains, its rows blank in that column", () => {
+test("a pending file written before the objective, parent or named-path columns drains, its rows blank in them", () => {
   for (const lacks of OLDER) {
     const older = FEATURE_COLUMNS.filter((c) => !lacks.includes(c));
-    const fresh = pull({ ticket: "2", agent: "impl-2", parent: "3177" });
+    const fresh = pull({ ticket: "2", agent: "impl-2", parent: "3177", title: "A title" });
     const f = fixture({ pending: featuresTsv([fresh], older) });
     const r = f.run();
     assert.equal(r.status, 0, r.stderr);

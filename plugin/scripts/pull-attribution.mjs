@@ -88,16 +88,23 @@ import { parseMemberName } from "./member-record.mjs";
 import { isImplementer } from "./member-outcomes.mjs";
 import { DATE, isDerivedNote, rulingFor, rulingsByTicket } from "./tier-outcomes.mjs";
 
-// The ticket-features row, one per Pull, in this order. `objective` and
-// `parent` came last and are optional on read: a file whose header lacks
-// either reads it blank. `parent` is a Slice's parent issue number, blank for
-// a ticket that is no Slice (ticket-router.mjs's sliceParent).
+// The ticket-features row, one per Pull, in this order. `objective`, `parent`
+// and every column after them came last and are optional on read: a file whose
+// header lacks one reads it blank. `parent` is a Slice's parent issue number,
+// blank for a ticket that is no Slice (ticket-router.mjs's sliceParent).
+// `named_paths` is the paths the brief names (ticket-text.mjs's briefPaths),
+// space-separated as named; `named_lines` one entry per path, aligned: the
+// file's line count, `dir` for a directory, `-` for a path that does not exist
+// or lies outside the checkout; `dirs` the number of distinct directories they
+// span. Those three are blank when the brief names no path. `title` is the
+// issue's title, and `plugin_version` the install's `package.json` `version`.
 export const FEATURE_COLUMNS = Object.freeze([
   "run_date", "session", "agent", "ticket", "policy_cell", "chosen_cell", "exploration_draw",
   "sizing_src", "sizing_pre", "router_usd", "brief_chars", "criteria", "comments", "age_days",
   "paths", "test_paths", "xrefs", "kind", "objective", "parent",
+  "named_paths", "named_lines", "dirs", "title", "plugin_version",
 ]);
-export const OPTIONAL_COLUMNS = new Set(["objective", "parent"]);
+export const OPTIONAL_COLUMNS = new Set(FEATURE_COLUMNS.slice(FEATURE_COLUMNS.indexOf("objective")));
 
 // The quality floor's margin, in points of fail rate.
 export const TRIP_POINTS = 15;
