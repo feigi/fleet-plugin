@@ -10,19 +10,20 @@
 // trailing whitespace (a newline, CRLF, blank lines). A prefix before the
 // keyword, a suffix after the SHA, a second line, a short or uppercase SHA is
 // not a record.
-export const HEAD_RECORD = /^ready-to-merge-head: ([0-9a-f]{40})\s*$/;
+const HEAD_RECORD = /^ready-to-merge-head: ([0-9a-f]{40})\s*$/;
 
 // The body the writer posts for `sha`.
 export const headRecordBody = (sha) => `ready-to-merge-head: ${sha}`;
 
 // The newest record among `comments` (`{body, createdAt}` as `gh pr view --json
 // comments` prints them): newest by `createdAt`, the later array position
-// winning a tie. A comment that is not a record, however new, hides nothing.
-// Answers the SHA, or null when no comment is a record.
+// winning a tie, since the sort is stable. A comment that is not a record,
+// however new, hides nothing. Answers the SHA, or null when no comment is a
+// record.
 export function newestHeadRecord(comments) {
   const records = comments
-    .map((c, i) => ({ i, at: c.createdAt, m: HEAD_RECORD.exec(c.body) }))
+    .map((c) => ({ at: c.createdAt, m: HEAD_RECORD.exec(c.body) }))
     .filter((c) => c.m !== null)
-    .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.i - b.i));
+    .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
   return records.length === 0 ? null : records[records.length - 1].m[1];
 }

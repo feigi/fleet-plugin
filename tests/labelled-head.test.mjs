@@ -12,13 +12,14 @@
 // `gh` is stubbed on PATH and every invocation is appended to one call log.
 // `pr view` answers from `pr-view.out`; `api` answers by running the `-q`
 // program it was handed through `jq` over `timeline.json`, the way `gh api -q`
-// filters, so the shipped program is the one under test. `<key>.fail` makes
-// that call print its text on stderr and exit 1.
+// filters, so the shipped program is the one under test. `timeline.raw`, when
+// present, is printed in place of that run, for an answer no `-q` program
+// gives. `<key>.fail` makes that call print its text on stderr and exit 1.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
@@ -54,6 +55,7 @@ esac
 if [ -f "$d/$key.fail" ]; then cat "$d/$key.fail" >&2; exit 1; fi
 if [ "$key" = timeline ]; then
   [ "$3 $4" = "--paginate -q" ] || { echo "stub gh: unexpected $*" >&2; exit 99; }
+  if [ -f "$d/timeline.raw" ]; then cat "$d/timeline.raw"; exit 0; fi
   jq -r "$5" < "$d/timeline.json"
   exit 0
 fi
@@ -71,8 +73,9 @@ const forcePushed = (sha) => ({ event: "head_ref_force_pushed", commit_id: sha, 
 
 // A rig for one case: a fresh stub directory and a repository the script runs
 // in, holding the Label map (`roles` merged over the identity map; null for no
-// map). `pages` is the timeline, one array per page.
-function rig({ prView, pages = [], fails = {}, roles = {} } = {}) {
+// map). `pages` is the timeline, one array per page; `raw`, when given, is what
+// the timeline call prints instead.
+function rig({ prView, pages = [], raw = null, fails = {}, roles = {} } = {}) {
   const dir = tempDir("labelled-head-");
   const bin = join(dir, "bin");
   mkdirSync(bin);
@@ -84,13 +87,15 @@ function rig({ prView, pages = [], fails = {}, roles = {} } = {}) {
   if (roles !== null) seedLabelMap(repo, { roles });
   writeFileSync(join(bin, "pr-view.out"), prView ?? view(HEAD));
   writeFileSync(join(bin, "timeline.json"), pages.map((p) => JSON.stringify(p)).join("\n"));
+  if (raw !== null) writeFileSync(join(bin, "timeline.raw"), raw);
   for (const [k, v] of Object.entries(fails)) writeFileSync(join(bin, `${k}.fail`), v);
   const log = (name) => (existsSync(join(bin, name)) ? readFileSync(join(bin, name), "utf8").trim().split("\n").filter(Boolean) : []);
-  const run = (args = ["--pr", "42"], { env = {} } = {}) => {
+  const run = (args = ["--pr", "42"], { env = {}, stdout = "pipe" } = {}) => {
     const full = args.includes("--repo") ? args : [...args, "--repo", repo];
     const r = spawnSync(process.execPath, [SCRIPT, ...full], {
       encoding: "utf8",
       env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, ...env },
+      stdio: ["ignore", stdout, "pipe"],
     });
     let out = null;
     try {
@@ -151,7 +156,7 @@ test("timeline: no record at all is `timeline`, the verdict `moved` for a commit
     record: null,
     head: HEAD,
     route: "timeline",
-    timeline: { label: "ready-to-merge", verdict: "moved", after: [`committed ${RECORDED}`, "head_ref_force_pushed"] },
+    timeline: { label: "ready-to-merge", verdict: "moved", after: [`committed ${RECORDED}`, `head_ref_force_pushed ${HEAD}`] },
     exit: 0,
   });
   assert.equal(t.calls().length, 2);
@@ -191,18 +196,63 @@ test("timeline: a remapped label is the one the verdict keys on, and a string ho
   const r = t.run();
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.out.timeline, { label: "queue's ok", verdict: "moved", after: [`committed ${OTHER}`] });
-  // Another label's line is not the label line: the commit is after no
-  // `ready-to-merge` line there, so every commit counts as after.
-  const other = rig({ pages: [[label("other"), committed(OTHER)]] });
-  assert.equal(other.run().out.timeline.verdict, "moved");
   // A commit before the label's line is clean however many other labels follow.
   const before = rig({ pages: [[committed(OTHER), label("ready-to-merge"), label("other")]] });
   assert.equal(before.run().out.timeline.verdict, "clean");
 });
 
-test("timeline: events other than the three that move a head are ignored", () => {
+test("timeline: another label after a commit is not the label line, so the commit still moved the head", () => {
+  const t = rig({ pages: [[label("ready-to-merge"), committed(OTHER), label("other")]] });
+  const r = t.run();
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.timeline, { label: "ready-to-merge", verdict: "moved", after: [`committed ${OTHER}`] });
+});
+
+test("timeline: the label applied again after a commit is the line the verdict keys on", () => {
+  const t = rig({ pages: [[label("ready-to-merge"), committed(OTHER), label("ready-to-merge")]] });
+  const r = t.run();
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.timeline, { label: "ready-to-merge", verdict: "clean", after: [] });
+});
+
+test("timeline: events other than labeled, committed and head_ref_force_pushed are ignored", () => {
   const t = rig({ pages: [[label("ready-to-merge"), { event: "commented" }, { event: "reviewed" }, { event: "assigned" }]] });
   assert.equal(t.run().out.timeline.verdict, "clean");
+});
+
+test("exit 2: a timeline with no labeled event for the string is a failed read, never `clean`", () => {
+  // The label is on the PR, so a timeline that never shows it applied is a
+  // read that came back empty or wrong, whatever else it holds.
+  for (const pages of [[], [[]], [[label("other"), committed(OTHER)]]]) {
+    const r = rig({ pages }).run();
+    assert.equal(r.status, 2, JSON.stringify(pages));
+    assert.equal(r.out.route, null);
+    assert.equal(r.out.timeline, null);
+    assert.equal(r.out.step, "read-timeline");
+    assert.match(r.out.error, /no labeled event for ready-to-merge/);
+  }
+});
+
+test("exit 2: a timeline line that is not an event object is refused rather than read", () => {
+  const r = rig({ raw: `${JSON.stringify(label("ready-to-merge"))}\nnull\n` }).run();
+  assert.equal(r.status, 2, r.stderr);
+  assert.equal(r.out.step, "read-timeline");
+  assert.match(r.out.error, /unexpected shape/);
+});
+
+// The receipt is the only carrier of the route: a decided route whose receipt
+// never reached stdout must not exit 0.
+test("exit 2: a receipt that cannot be written to stdout is never a decided route", () => {
+  const t = rig({ pages: [[label("ready-to-merge")]] });
+  assert.equal(t.run().status, 0, "control: the same run writes its receipt and exits 0");
+  const readOnly = openSync("/dev/null", "r");
+  try {
+    const r = t.run(["--pr", "42"], { stdout: readOnly });
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /labelled-head: the receipt could not be written to stdout/);
+  } finally {
+    closeSync(readOnly);
+  }
 });
 
 test("exit 2: a failed PR read is a receipt naming the step, and nothing else was read", () => {
@@ -248,7 +298,7 @@ test("gh runs in --repo, with no ambient GIT_DIR or GIT_WORK_TREE", () => {
   assert.deepEqual(t.envs(), []);
 });
 
-test("usage: a missing --pr, an unknown flag and a --repo that is not a directory are refused", () => {
+test("usage: a missing --pr, an unknown flag and a --repo that is not a readable directory are refused", () => {
   const t = rig();
   const missing = t.run(["--repo", t.repo]);
   assert.notEqual(missing.status, 0);
@@ -259,4 +309,12 @@ test("usage: a missing --pr, an unknown flag and a --repo that is not a director
   assert.equal(notDir.status, 2);
   assert.equal(notDir.out.step, "read-pr");
   assert.deepEqual(t.calls(), [], "none of these reached gh");
+  // A path stat cannot read (here a symlink loop, ELOOP) takes the same
+  // receipt, not a stack trace.
+  const loop = join(t.repo, "loop");
+  symlinkSync(loop, loop);
+  const unreadable = t.run(["--pr", "42", "--repo", loop]);
+  assert.equal(unreadable.status, 2, unreadable.stderr);
+  assert.equal(unreadable.out.step, "read-pr");
+  assert.match(unreadable.out.error, /--repo cannot be read: .*ELOOP/);
 });

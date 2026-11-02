@@ -96,47 +96,46 @@ test("the committer-date guard and the beforeCommit derivation are gone", () => 
 // that takes the newest record from one that takes the oldest, or one that a
 // quoted record inside a longer comment satisfies. ACCEPT and REFUSE both: a
 // reader that never answers passes every refuse case.
-const readRecord = (comments) => newestHeadRecord(comments) ?? "";
 const A = "a".repeat(40);
 const B = "b".repeat(40);
 
 test("the record grammar reads the newest record's SHA", () => {
-  assert.equal(readRecord([{ createdAt: "2026-10-01T00:00:00Z", body: `ready-to-merge-head: ${A}` }]), A);
+  assert.equal(newestHeadRecord([{ createdAt: "2026-10-01T00:00:00Z", body: `ready-to-merge-head: ${A}` }]), A);
   // Newest by createdAt, not by array position.
   assert.equal(
-    readRecord([
+    newestHeadRecord([
       { createdAt: "2026-10-02T00:00:00Z", body: `ready-to-merge-head: ${B}` },
       { createdAt: "2026-10-01T00:00:00Z", body: `ready-to-merge-head: ${A}` },
     ]),
     B,
   );
   // A trailing newline, CRLF or blank lines are still the whole body.
-  assert.equal(readRecord([{ createdAt: "2026-10-01T00:00:00Z", body: `ready-to-merge-head: ${A}\n` }]), A);
-  assert.equal(readRecord([{ createdAt: "2026-10-01T00:00:00Z", body: `ready-to-merge-head: ${A}\r\n\n` }]), A);
+  assert.equal(newestHeadRecord([{ createdAt: "2026-10-01T00:00:00Z", body: `ready-to-merge-head: ${A}\n` }]), A);
+  assert.equal(newestHeadRecord([{ createdAt: "2026-10-01T00:00:00Z", body: `ready-to-merge-head: ${A}\r\n\n` }]), A);
 });
 
 test("the record grammar reads nothing from a comment that is not exactly a record", () => {
-  assert.equal(readRecord([]), "");
+  assert.equal(newestHeadRecord([]), null);
   // Each anchor is pinned by a fixture only IT rejects. One fixture carrying
   // both a prefix and a suffix is rejected by either anchor alone, so deleting
   // `^` or `$` left every case green. A prefix with nothing after the SHA is
   // what `^` refuses; a suffix with nothing before the keyword is what `$`
   // refuses; the multi-line cases put the stray text on its own line.
-  const record = (body) => readRecord([{ createdAt: "2026-10-01T00:00:00Z", body }]);
-  assert.equal(record(`see: ready-to-merge-head: ${A}`), "");
-  assert.equal(record(`the bot read\nready-to-merge-head: ${A}`), "");
-  assert.equal(record(`ready-to-merge-head: ${A} trailing`), "");
-  assert.equal(record(`ready-to-merge-head: ${A}\nhere`), "");
-  assert.equal(record(`ready-to-merge-head: ${A}a`), "");
-  assert.equal(record(`ready-to-merge-head: ${A}\nready-to-merge-head: ${B}`), "");
-  assert.equal(record(`the bot read\nready-to-merge-head: ${A}\nhere`), "");
-  assert.equal(record(` ready-to-merge-head: ${A}`), "");
-  assert.equal(record(`ready-to-merge-head: ${"A".repeat(40)}`), "");
-  assert.equal(readRecord([{ createdAt: "2026-10-01T00:00:00Z", body: `ready-to-merge-head: ${A.slice(0, 12)}` }]), "");
-  assert.equal(readRecord([{ createdAt: "2026-10-01T00:00:00Z", body: "ready-to-merge-head: <sha>" }]), "");
+  const record = (body) => newestHeadRecord([{ createdAt: "2026-10-01T00:00:00Z", body }]);
+  assert.equal(record(`see: ready-to-merge-head: ${A}`), null);
+  assert.equal(record(`the bot read\nready-to-merge-head: ${A}`), null);
+  assert.equal(record(`ready-to-merge-head: ${A} trailing`), null);
+  assert.equal(record(`ready-to-merge-head: ${A}\nhere`), null);
+  assert.equal(record(`ready-to-merge-head: ${A}a`), null);
+  assert.equal(record(`ready-to-merge-head: ${A}\nready-to-merge-head: ${B}`), null);
+  assert.equal(record(`the bot read\nready-to-merge-head: ${A}\nhere`), null);
+  assert.equal(record(` ready-to-merge-head: ${A}`), null);
+  assert.equal(record(`ready-to-merge-head: ${"A".repeat(40)}`), null);
+  assert.equal(newestHeadRecord([{ createdAt: "2026-10-01T00:00:00Z", body: `ready-to-merge-head: ${A.slice(0, 12)}` }]), null);
+  assert.equal(newestHeadRecord([{ createdAt: "2026-10-01T00:00:00Z", body: "ready-to-merge-head: <sha>" }]), null);
   // A non-record comment newer than the record does not hide it.
   assert.equal(
-    readRecord([
+    newestHeadRecord([
       { createdAt: "2026-10-01T00:00:00Z", body: `ready-to-merge-head: ${A}` },
       { createdAt: "2026-10-02T00:00:00Z", body: "LGTM" },
     ]),
@@ -145,7 +144,7 @@ test("the record grammar reads nothing from a comment that is not exactly a reco
 });
 
 test("the writer's body is a record the reader reads back", () => {
-  assert.equal(readRecord([{ createdAt: "2026-10-01T00:00:00Z", body: headRecordBody(A) }]), A);
+  assert.equal(newestHeadRecord([{ createdAt: "2026-10-01T00:00:00Z", body: headRecordBody(A) }]), A);
 });
 
 // #4113: the bot ran the record query, saw `4a36a6dd…` for #3901 next to head

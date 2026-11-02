@@ -26,11 +26,14 @@
 // The timeline read is the only one that needs the Label map's string for
 // `ready-to-merge`, so the map is read only on that route. The `timeline`
 // object holds `verdict`, `moved` when a `committed` or `head_ref_force_pushed`
-// event follows the last `labeled` event for that string (every such event, if
-// none names it), else `clean`; and `after`, those events as `<event> <sha>`.
+// event follows the last `labeled` event for that string, else `clean`; and
+// `after`, those events as `<event> <sha>`. A timeline with no `labeled` event
+// for that string has no verdict: the label is on the PR, so a read that never
+// saw it applied came back empty or wrong, and it fails as `read-timeline`.
 // The label is left where it is on every verdict: this command writes nothing.
 //
-// Stdout is always one JSON line:
+// Stdout is one JSON line on every run that gets past its flags (a flag
+// refusal, and a receipt that cannot be written, print none):
 //
 //   {pr, record, head, route, timeline [, step, error], exit}
 //
@@ -45,8 +48,9 @@
 // Exit vocabulary:
 //
 //   0  a route was decided
-//   2  the invocation or a read failed — a missing or unknown flag is a refusal
-//      on stderr with no receipt, as in every other script's `die()`
+//   2  the invocation or a read failed — a missing or unknown flag, or a
+//      receipt stdout would not take, is a refusal on stderr with no receipt,
+//      as in every other script's `die()`
 
 import { spawnSync } from "node:child_process";
 import { statSync } from "node:fs";
@@ -78,8 +82,11 @@ const receipt = { pr, record: null, head: null, route: null, timeline: null, exi
 
 function finish(exit, extra = {}, message = null) {
   Object.assign(receipt, extra, { exit });
-  writeAll(1, `${JSON.stringify(receipt)}\n`);
+  const written = writeAll(1, `${JSON.stringify(receipt)}\n`);
   if (message !== null) writeAll(2, `${NAME}: ${message}\n`);
+  // The receipt is the only carrier of the route: a lost write is exit 2, never
+  // a decided route with nothing printed.
+  if (!written) die("the receipt could not be written to stdout");
   process.exit(exit);
 }
 
@@ -87,8 +94,16 @@ function fail(step, error) {
   finish(2, { step, error }, `${step}: ${error}`);
 }
 
-if (repo !== null && !statSync(repo, { throwIfNoEntry: false })?.isDirectory()) {
-  fail("read-pr", `--repo is not a directory: ${repo}`);
+if (repo !== null) {
+  // `throwIfNoEntry` covers ENOENT alone: an unreadable path (EACCES, ELOOP)
+  // still throws, and must take the receipt path rather than a stack trace.
+  let stat;
+  try {
+    stat = statSync(repo, { throwIfNoEntry: false });
+  } catch (e) {
+    fail("read-pr", `--repo cannot be read: ${repo} (${e.code ?? e.message})`);
+  }
+  if (!stat?.isDirectory()) fail("read-pr", `--repo is not a directory: ${repo}`);
 }
 
 // `gh` resolves its repository from the cwd's git remotes, so an ambient
@@ -113,12 +128,12 @@ function routeOf(record, head) {
 }
 
 // The verdict the timeline events give, `events` as `{event, sha, label}` in
-// timeline order, `label` the string the `ready-to-merge` role maps to.
+// timeline order, `label` the string the `ready-to-merge` role maps to; null
+// when no `labeled` event names `label`, since nothing is after a line never
+// seen.
 function timelineVerdict(events, label) {
-  let last = -1;
-  events.forEach((e, i) => {
-    if (e.event === "labeled" && e.label === label) last = i;
-  });
+  const last = events.findLastIndex((e) => e.event === "labeled" && e.label === label);
+  if (last === -1) return null;
   const after = events.slice(last + 1).filter((e) => MOVING.has(e.event)).map((e) => `${e.event} ${e.sha ?? ""}`.trimEnd());
   return { label, verdict: after.length > 0 ? "moved" : "clean", after };
 }
@@ -154,12 +169,13 @@ try {
 }
 // `-q` runs per page, so a paginated timeline answers one JSON value per
 // line however many pages it took.
+// A `head_ref_force_pushed` event carries its SHA in `commit_id`, `sha` null.
 const lines = gh("read-timeline", [
   "api",
   `repos/{owner}/{repo}/issues/${pr}/timeline?per_page=100`,
   "--paginate",
   "-q",
-  '.[] | select(.event == "labeled" or .event == "committed" or .event == "head_ref_force_pushed") | {event, sha, label: .label.name} | tojson',
+  '.[] | select(.event == "labeled" or .event == "committed" or .event == "head_ref_force_pushed") | {event, sha: (.sha // .commit_id), label: .label.name} | tojson',
 ]);
 let events;
 try {
@@ -167,4 +183,7 @@ try {
 } catch {
   fail("read-timeline", `gh printed no JSON: ${lines.slice(0, 200)}`);
 }
-finish(0, { route, timeline: timelineVerdict(events, label) });
+if (!events.every(isObject)) fail("read-timeline", `gh printed an unexpected shape: ${lines.slice(0, 200)}`);
+const timeline = timelineVerdict(events, label);
+if (timeline === null) fail("read-timeline", `no labeled event for ${label} in the timeline`);
+finish(0, { route, timeline });
