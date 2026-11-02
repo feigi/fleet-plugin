@@ -493,8 +493,10 @@ settled `blocked` and `fix-report` for a fix-applier settled `failed`: it is
 counted in the same once per run, a line printed while that derivation runs
 is covered by it, and one printed after its `RECIPE PROVEN` is the second
 refusal that stalls the run. What to retry for a wake's line: a fix-applier's
-PR is fix-due again and the tick re-dispatches it; a blocked implementer's
-ticket is reported to the maintainer and waits for their `replace #<N>`.
+PR is fix-due again and the tick re-dispatches it, unless that `failed` was its
+second since the PR's latest review, which escalates (`ESCALATE fix-failed`);
+a blocked implementer's ticket is reported to the maintainer and waits for
+their `replace #<N>`.
 The count is yours to keep; the ledger holds no record of it. The Install step's refusals
 fire after the claim has labelled the ticket and created its worktree, so
 release that claim with `release-ticket.sh` first (SKILL.md's Failure handling

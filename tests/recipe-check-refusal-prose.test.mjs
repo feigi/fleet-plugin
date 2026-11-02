@@ -66,7 +66,7 @@ test("phase 0's mid-run rule counts a settle wake's NEED derive-recipe in its on
     .paragraph("**Mid-run, a cache that stops running is re-derived once", "phase 0's mid-run rule", "## Fold in every Owned PR a prior").text;
   assert.match(p, Pin.phrase("So is the `NEED derive-recipe` a settle wake prints, `fleet-event.mjs impl-report` for an implementer settled `blocked` and `fix-report` for a fix-applier settled `failed`:"));
   assert.match(p, Pin.phrase("a line printed while that derivation runs is covered by it, and one printed after its `RECIPE PROVEN` is the second refusal that stalls the run."));
-  assert.match(p, Pin.phrase("What to retry for a wake's line: a fix-applier's PR is fix-due again and the tick re-dispatches it; a blocked implementer's ticket is reported to the maintainer and waits for their `replace #<N>`."));
+  assert.match(p, Pin.phrase("What to retry for a wake's line: a fix-applier's PR is fix-due again and the tick re-dispatches it, unless that `failed` was its second since the PR's latest review, which escalates (`ESCALATE fix-failed`); a blocked implementer's ticket is reported to the maintainer and waits for their `replace #<N>`."));
   assert.match(p, Pin.phrase("The count is yours to keep; the ledger holds no record of it."));
 });
 

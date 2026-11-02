@@ -315,6 +315,7 @@ const ROW_NAMES = [
   "`ESCALATE unlabelled PR#<M> …`",
   "`CONFLICT PR#<M> …`",
   "`ESCALATE conflict PR#<M> …`",
+  "`ESCALATE fix-failed PR#<M> …`",
   "`ESCALATE pr-closed #<N> PR#<M>`, `… pr-unchecked …`",
   "`HOLD (…)`",
   "`AT CAP`, `IDLE OK`",
@@ -529,10 +530,11 @@ const CHANGED = [
     "Leave `in-progress`, report — the ticket is not In flight and waits for a human; its `NEED derive-recipe` is phase 0's mid-run trigger |"
   ],
   // A fix-applier or red-check fixer settled `failed` is read by the settle
-  // wake's Recipe read: a refusal there is phase 0's mid-run trigger.
+  // wake's Recipe read: a refusal there is phase 0's mid-run trigger. A
+  // second `failed` fix-applier since the PR's latest review escalates.
   [
     "| Reviewer, fix-applier or red-check fixer cannot reach green | Report, leave the PR unlabeled, free the slot — a fix-applier or red-check fixer settles `failed` |",
-    "| Reviewer, fix-applier or red-check fixer cannot reach green | Report, leave the PR unlabeled, free the slot — the last two settle `failed`; a wake's `NEED derive-recipe` is phase 0's mid-run trigger |"
+    "| Reviewer, fix-applier or red-check fixer cannot reach green | Report, leave the PR unlabeled, free the slot — the last two settle `failed`; a wake's `NEED derive-recipe` is phase 0's mid-run trigger; a second `failed` fix-applier since review escalates |"
   ],
   [
     "Run `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run phase0.mjs --session <session-dir>` from this main checkout, `<session-dir>` being this run's own session directory.",

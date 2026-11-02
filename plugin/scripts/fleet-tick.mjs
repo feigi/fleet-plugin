@@ -164,7 +164,7 @@ export function reconcile(s) {
   // The conflict rows only ask the controller to write a record — never to
   // dispatch — so they stand outside the dispatch hold: the fix-applier a
   // conflict hold leads to obeys the hold through its own role's row. The
-  // closed-PR rows dispatch nothing either.
+  // fix-failed escalation and the closed-PR rows dispatch nothing either.
   return [
     ...dispatchHold(s, [...implementers(s), ...rev.rows]),
     ...rev.conflictRows,
@@ -449,6 +449,15 @@ function reviewers(s) {
   if (s.conflictEscalate.length) {
     conflictRows.push(row(`ESCALATE conflict ${prs(s.conflictEscalate)}`,
       { extra: "GitHub reads CONFLICTING again after two conflict fix-appliers landed; comment on the PR and flag it for a human — no hold, no fix-applier" }));
+  }
+  // A PR owed a fix-applier on which two have settled `failed` since its
+  // latest review, none landed after them: no third, so not actionable, and
+  // repeated every tick until a new `reviewed=` lands or the PR closes. Like
+  // the conflict escalation it dispatches nothing and is no review unit.
+  if (s.fixEscalate.length) {
+    conflictRows.push(row(`ESCALATE fix-failed ${prs(s.fixEscalate.map((e) => e.pr))}`,
+      { extra: `${s.fixEscalate.flatMap((e) => e.members).join(", ")} settled failed since the latest review; no third fix-applier`
+        + " — comment on the PR once and tell the maintainer; a new review hands it back" }));
   }
   if (!rows.length && !unlabelledRows.length) rows.push(row("IDLE OK"));
   rows.push(...unlabelledRows);
@@ -830,6 +839,11 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
     // `fixMembers`: every fix-applier on this PR, wherever its token sits —
     // one still unsettled anywhere holds the PR off fixDue, since `dispatch`
     // refuses a second live one on the PR.
+    // `fixFailed`: every fix-applier on this PR settled `failed` after the
+    // latest `reviewed=` (from the first token, with none), in row order, one
+    // copy per member as for `fixLanded`; `fixFailures()` keeps those whose
+    // retry suffix sorts after every landed one's. `killed` and live members
+    // are not in it, and a `reviewed=` empties it, as it resets `reviewFixed`.
     // `reviewedHead`/`reviewedRun`: the latest `reviewed=<head>:…:<run>`.
     // `pastPinHalt`: the latest
     // finisher since that review settled `halted:past-pin` — any
@@ -843,7 +857,7 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
     // CONFLICT line off, since it may be pushing to the branch right now.
     const st = (pr !== null && byPr.get(pr)) || {
       inFlight: false, reviewedAny: false, survived: 0, unverified: 0, reviewFixed: false,
-      fixMembers: new Set(), fixLanded: new Set(), conflictLanded: new Set(),
+      fixMembers: new Set(), fixLanded: new Set(), conflictLanded: new Set(), fixFailed: [],
       conflictOpen: false, reviewedHead: null, reviewedRun: null, pastPinHalt: false, dispositions: [], workers: new Set(),
       finishers: new Set(), parked: [],
     };
@@ -864,7 +878,9 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
         if ((t.bound === "pr" && t.number === pr) || t.family === "impl") st.workers.add(t.name);
         // A settled `failed`/`killed` fix-applier leaves review findings or a
         // conflict unfixed and no successor dispatched — the PR stays fix-due
-        // for a `-b` replacement. Only a live attempt, or one that actually
+        // for a `-b` replacement, unless that `failed` is the second since the
+        // PR's latest review with none landed after it (`fixFailed`), which
+        // escalates. Only a live attempt, or one that actually
         // landed (`applied:`/`no-op`), holds it off. Read the outcome off the
         // member's merged record (`members`, narrowed above) rather than this
         // row's own copy of the token: "a member settled ANYWHERE is settled",
@@ -896,14 +912,15 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
         if (t.family === "fix-pr" && t.number === pr) {
           st.fixMembers.add(t.name);
           const o = members.get(t.name).outcome;
-          if ((o === "no-op" || /^applied:/.test(o)) && !st.fixLanded.has(t.name)
-            && (t.outcome !== null || !settledInRow.has(t.name))) {
+          const placed = t.outcome !== null || !settledInRow.has(t.name);
+          if ((o === "no-op" || /^applied:/.test(o)) && !st.fixLanded.has(t.name) && placed) {
             st.fixLanded.add(t.name);
             if (st.conflictOpen) {
               st.conflictOpen = false;
               st.conflictLanded.add(t.name);
             } else st.reviewFixed = true;
           }
+          if (o === "failed" && placed && !st.fixFailed.includes(t.name)) st.fixFailed.push(t.name);
         }
         if (t.family === "finisher-pr" && t.number === pr) st.finishers.add(t.name);
         if (t.family === "finisher-pr" && t.number === pr
@@ -929,7 +946,7 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
         if (!m && lenient) {
           malformed.add(i);
           latestFinisher = null;
-          Object.assign(st, { inFlight: false, reviewedAny: true, reviewFixed: false, pastPinHalt: false });
+          Object.assign(st, { inFlight: false, reviewedAny: true, reviewFixed: false, pastPinHalt: false, fixFailed: [] });
           continue;
         }
         if (!m && REVIEWED_RUNLESS.test(tok)) {
@@ -940,7 +957,7 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
         latestFinisher = null;
         Object.assign(st, {
           inFlight: false, reviewedAny: true, survived: Number(m[2]), unverified: Number(m[4]), reviewFixed: false,
-          reviewedHead: m[1].toLowerCase(), reviewedRun: m[5], pastPinHalt: false,
+          reviewedHead: m[1].toLowerCase(), reviewedRun: m[5], pastPinHalt: false, fixFailed: [],
         });
       } else if (labelOffMember(tok) === null) {
         if (!lenient) throw new LedgerError(`${where}: '${tok}' is not label-off=<finisher-pr member> — fix the row with \`ledger.mjs row\``);
@@ -1135,6 +1152,25 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, queued
     const retry = parseMember(cur.member).retry ?? "";
     return ![...st.fixLanded].some((n) => !st.conflictLanded.has(n) && (parseMember(n).retry ?? "") > retry);
   };
+  // The fix-appliers settled `failed` since the PR's latest review whose retry
+  // suffix sorts after that of every one on the PR that landed: a landed one
+  // restarts the count, of any kind. Two of them and the fleet dispatches no
+  // third fix-applier to the PR until a new review restarts it.
+  const fixFailures = (st) => st.fixFailed.filter((n) => {
+    const retry = parseMember(n).retry ?? "";
+    return ![...st.fixLanded].some((l) => (parseMember(l).retry ?? "") >= retry);
+  });
+  const fixEscalated = (st) => fixFailures(st).length >= 2;
+  // A returned review whose survived or unverified findings no review
+  // fix-applier has answered — `ledger.mjs dispatch` refuses a finisher
+  // on either until one has — a conflict hold no fix-applier has cleared,
+  // or a dispositions mismatch no retry has answered — on a PR still open,
+  // with no fix-applier working it and no newer review running. The first
+  // two are answered apart here: a landed conflict fix-applier lifts the
+  // hold and leaves findings it never read due for a review one.
+  const fixOwed = ([n, st]) => open.has(n)
+    && (((st.survived > 0 || st.unverified > 0) && !st.reviewFixed) || conflictHeld(st) || mismatchDue(st))
+    && !fixRunning(st) && !st.inFlight;
   // A `review=` token with no `reviewed=` after it reads as in flight, and the
   // ledger alone never says otherwise: a review whose own `reviewed=` write
   // never landed stays in flight after its PR merges, counting as a review unit
@@ -1171,18 +1207,21 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, queued
     // The in-flight reviews of PRs the open list does not carry: the ones
     // the probe could retire, so the caller asks gh about these and no others.
     reviewsOffList: reviewing.filter(([n]) => !open.has(n)).map(([n]) => n).sort(asc),
-    // A returned review whose survived or unverified findings no review
-    // fix-applier has answered — `ledger.mjs dispatch` refuses a finisher
-    // on either until one has — a conflict hold no fix-applier has cleared,
-    // or a dispositions mismatch no retry has answered — on a PR still open,
-    // with no fix-applier working it and no newer review running. The first
-    // two are answered apart here: a landed conflict fix-applier lifts the
-    // hold and leaves findings it never read due for a review one.
-    fixDue: [...byPr.entries()]
-      .filter(([n, st]) => open.has(n)
-        && (((st.survived > 0 || st.unverified > 0) && !st.reviewFixed) || conflictHeld(st) || mismatchDue(st))
-        && !fixRunning(st) && !st.inFlight)
-      .map(([n]) => n).sort(asc),
+    // Each PR a fix-applier is owed on (`fixOwed`), unless two fix-appliers
+    // have settled `failed` on it since its latest review with none landed
+    // after them: that PR is `fixEscalate`'s instead.
+    fixDue: [...byPr.entries()].filter((e) => fixOwed(e) && !fixEscalated(e[1])).map(([n]) => n).sort(asc),
+    // Each PR a fix-applier would be owed on but for two `failed` since its
+    // latest review, `{pr, members}` ascending, `members` the counted ones:
+    // the reviewers row escalates it, dispatching nothing.
+    fixEscalate: [...byPr.entries()].filter((e) => fixOwed(e) && fixEscalated(e[1]))
+      .map(([n, st]) => ({ pr: n, members: fixFailures(st) })).sort((a, b) => a.pr - b.pr),
+    // Every PR, open or not, with two `failed` fix-appliers counted, `{pr,
+    // members}` ascending — the one reading of the count: `ledger.mjs
+    // dispatch` refuses any fix-applier on a PR off this list, so it answers
+    // with no open list, as `conflictHeld` does.
+    fixFailed: [...byPr.entries()].filter(([, st]) => fixEscalated(st))
+      .map(([n, st]) => ({ pr: n, members: fixFailures(st) })).sort((a, b) => a.pr - b.pr),
     // Open, not signed off, owned (openPrs() reads that off the PR's author
     // and draft flag; a PR closing no issue is as due as one closing one),
     // with no live or returned review on record —
