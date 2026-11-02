@@ -1352,7 +1352,8 @@ wt_outcome() {
 # a later claim under the same name inherits the leftover upstream, which
 # names a remote ref that no longer exists and so reads `[gone]` at once
 # (measured, git 2.50.1). Calling it with the ref still present would unset the
-# live branch's upstream: the caller establishes that the ref is absent first.
+# live branch's upstream, so while `refs/heads/<name>` exists it removes
+# nothing and returns 1.
 #
 # Returns 0 when no key of that section is left, whether this call removed it
 # or there was none to remove, and 1 when one remains or the config could not
@@ -1362,24 +1363,31 @@ wt_outcome() {
 # `branch_keys_left` does, and only a key of this branch's section left behind
 # is a failure. `${key%.*}` drops the variable name off `branch.<name>.<var>`;
 # the subsection may itself hold dots and slashes, so a regex built from the
-# name would misread them. Writes `$wt_err` and `$wt_cfg_keys`; call as a bare
-# `if`/`||` condition, never inside `$( )`.
-# shellcheck disable=SC2034
+# name would misread them. Only the repository's own config file is cleared and
+# listed (`--local`): a section in an included file or in config.worktree is
+# neither removed nor reported, and its upstream still applies. Writes
+# `$wt_err`, and clobbers `$wt_cfg_out`, `$wt_cfg_keys` and `$wt_cfg_k`; call as
+# a bare `if`/`||` condition, never inside `$( )`.
 wt_clear_branch_config() {
   wt_err=
+  if git show-ref --verify --quiet "refs/heads/$1"; then
+    wt_err="branch $1 still exists"
+    return 1
+  fi
   if wt_cfg_out=$(git config --remove-section "branch.$1" 2>&1); then return 0; fi
-  wt_err=$(printf '%s' "$wt_cfg_out" | tr '\n' ' ')
   if wt_cfg_keys=$(git config --local --name-only --get-regexp '^branch\.' 2>&1); then :
-  elif [ "$?" -eq 1 ]; then wt_err=; return 0
+  elif [ "$?" -eq 1 ]; then return 0
   else
     wt_err="could not list the branch config keys: $(printf '%s' "$wt_cfg_keys" | tr '\n' ' ')"
     return 1
   fi
   while IFS= read -r wt_cfg_k; do
-    [ "${wt_cfg_k%.*}" != "branch.$1" ] || return 1
+    if [ "${wt_cfg_k%.*}" = "branch.$1" ]; then
+      wt_err=$(printf '%s' "$wt_cfg_out" | tr '\n' ' ')
+      return 1
+    fi
   done <<EOK
 $wt_cfg_keys
 EOK
-  wt_err=
   return 0
 }

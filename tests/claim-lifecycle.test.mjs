@@ -194,8 +194,9 @@ test("release-ticket.sh still refuses a claim that carries work", (t) => {
 // the ref and leaves `[branch "<b>"]` behind, and `git worktree add --no-track
 // -b <b>` does not clear it: a re-claim of the same name inherits an upstream
 // naming a remote ref that is gone, and reads `[gone]` from its first moment.
-// The fixtures write the leftover by hand, the same two keys a `push -u`
-// leaves, so no case here depends on how a past run happened to push.
+// Most fixtures write the leftover by hand, the same two keys a `push -u`
+// leaves, so those cases do not depend on how a past run happened to push; the
+// end-to-end case pushes for real.
 
 /** What a released claim's `push -u` leaves behind once its ref is deleted. */
 const leaveUpstream = (git, w, branch) => {
@@ -311,4 +312,17 @@ test("release-ticket.sh --apply notes a config section it could not remove, and 
   assert.match(rel.stderr, /fix\/42-slug deleted, but its branch config section was left/);
   assert.equal(JSON.parse(rel.stdout.trim().split("\n").pop()).released, true);
   assert.match(branchKeys(f, "fix/42-slug"), /\.remote/);
+});
+
+test("a repository with no branch.* keys at all claims and releases without a config note", (t) => {
+  // The key listing finds nothing at all and exits 1, which is not a fault:
+  // every other fixture keeps main's upstream, so its listing never comes up empty.
+  const f = fixture(t);
+  f.git(f.w, "config", "--remove-section", "branch.main");
+  assert.equal(spawnSync("git", ["-C", f.w, "config", "--local", "--get-regexp", "^branch\\."], { env: f.env }).status, 1);
+  const claim = sh(CLAIM, f.w, f.env, "42", "slug", "fix", "--apply");
+  assert.equal(claim.status, 0, claim.stdout + claim.stderr);
+  const rel = sh(RELEASE, f.w, f.env, "42", "slug", "fix", "--apply");
+  assert.equal(rel.status, 0, rel.stdout + rel.stderr);
+  assert.doesNotMatch(rel.stderr, /config section/);
 });

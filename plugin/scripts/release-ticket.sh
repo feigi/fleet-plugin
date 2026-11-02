@@ -1484,9 +1484,12 @@ else
     # and reap.sh then removes the live claim (claim-ticket.sh clears it too;
     # this is the deleter cleaning up after itself, as reap.sh's delete does).
     # The ref is already gone and the release otherwise complete, so a section
-    # that stays is a note and never a halt — the housekeeping `git worktree
-    # prune` below is the same shape. A claim that never pushed has no section,
-    # and that is not a fault: `wt_clear_branch_config` tells the two apart.
+    # that stays is a note on stderr and never a halt — the housekeeping
+    # `git worktree prune` below is the same shape. Unlike reap.sh, which also
+    # puts that note in its stdout `warnings`, the receipt has no field for it:
+    # the next claim of the name removes the section itself, and refuses when
+    # it cannot. A claim that never pushed has no section, and that is not a
+    # fault: `wt_clear_branch_config` tells the two apart.
     wt_clear_branch_config "$branch" ||
       echo "$NAME: $branch deleted, but its branch config section was left: $wt_err" >&2
     done_branch=true
