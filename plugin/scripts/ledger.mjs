@@ -2864,9 +2864,10 @@ async function runSettleFromReport() {
       const { view: pr, numbers } = prViewClosing(report.pr, "state,closingIssuesReferences,url,headRefName");
       check(`PR #${report.pr} reads OPEN`, pr.state === "OPEN");
       check(`PR #${report.pr} closes #${live.number}`, numbers.includes(live.number));
-      // The claim's branch comes from the ticket, the way the Pull claims it
-      // and close-out releases it, never from the member's name or its report:
-      // a replacement impl-N-x holds the same claim as impl-N.
+      // The claim's branch comes from the ticket: the Pull claims with member
+      // impl-N, so its branch is implementer/N-impl-N, and close-out releases
+      // impl-N. Never from the settling member's name or its report: a
+      // replacement impl-N-x holds the same claim as impl-N.
       const claimBranch = `implementer/${live.number}-impl-${live.number}`;
       check(`PR #${report.pr}'s head is ${claimBranch} (GitHub: ${pr.headRefName})`, pr.headRefName === claimBranch);
     } else if (report.outcome === "blocked") {

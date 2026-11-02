@@ -56,7 +56,7 @@ function fixture() {
   git(work, "checkout", "-q", "-b", "feat");
   git(work, "commit", "-q", "--allow-empty", "-m", "the PR's work");
   const head = git(work, "rev-parse", "HEAD");
-  git(work, "push", "-q", "origin", "feat", "feat:refs/heads/implementer/5-impl-5");
+  git(work, "push", "-q", "origin", "feat", `feat:refs/heads/${CLAIM}`);
   git(work, "checkout", "-q", "-b", "stray");
   git(work, "commit", "-q", "--allow-empty", "-m", "never pushed");
   const stray = git(work, "rev-parse", "HEAD");
@@ -173,6 +173,19 @@ test("impl-N=PR#M: a PR headed on another branch is exit 3, naming the check and
   assert.equal(dispatched(f, "impl-5"), "impl-5", "the member stays dispatched, unsettled");
 });
 
+test("impl-N=PR#M: a PR headed on an implementer branch other than the ticket's claim branch is exit 3", () => {
+  const f = fixture();
+  f.ok("dispatch", "5", "impl-5");
+  f.report("impl-5", implReport(f));
+  // Another ticket's claim branch, and one named for a replacement member the
+  // way the Pull names a member's own branch: neither is ticket 5's claim.
+  for (const headRefName of ["implementer/6-impl-6", "implementer/5-impl-5-b"]) {
+    f.pr(6, { state: "OPEN", closingIssuesReferences: [ref(5)], headRefName });
+    f.refused("impl-5", 3, new RegExp(`failed: PR #6's head is ${CLAIM} \\(GitHub: ${headRefName}\\)`));
+  }
+  assert.equal(dispatched(f, "impl-5"), "impl-5", "the member stays dispatched, unsettled");
+});
+
 test("impl-N=PR#M: a replacement impl-N-x's PR on the claim branch settles — the claim comes from the ticket, not the member's name", () => {
   const f = fixture();
   f.ok("dispatch", "5", "impl-5");
@@ -256,7 +269,7 @@ test("could not look: a gh answer lacking a field it was asked for is exit 2, no
     f.refused("impl-5", 2, /could not look — gh pr view 6 --json state,closingIssuesReferences,url,headRefName answered without a usable/);
   }
   // No string headRefName: not a PR on another branch but one that could not be read.
-  for (const headRefName of [undefined, null, 5, ["implementer/5-impl-5"]]) {
+  for (const headRefName of [undefined, null, 5, [CLAIM]]) {
     f.pr(6, { state: "OPEN", closingIssuesReferences: [ref(5)], headRefName });
     f.refused("impl-5", 2, /could not look — gh pr view 6 --json state,closingIssuesReferences,url,headRefName answered without a usable headRefName/);
   }

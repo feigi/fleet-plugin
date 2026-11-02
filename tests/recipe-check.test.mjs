@@ -41,6 +41,9 @@ const INHERITED = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GH_REPO"];
 
 const TEST_CMD = "sh ./t.sh";
 
+// The claim branch of ticket 5, `implementer/<N>-impl-<N>`.
+const CLAIM = "implementer/5-impl-5";
+
 function fixture({ check = "sh ./check.sh" } = {}) {
   const root = tempDir("recipe-check-");
   const env = { ...process.env, ...GIT_ENV };
@@ -122,7 +125,7 @@ exec '${realGit}' "$@"
   const readRecord = (member) => JSON.parse(readFileSync(recordFile(member), "utf8"));
   const ran = (dir = work) => (existsSync(join(dir, "ran.log")) ? readFileSync(join(dir, "ran.log"), "utf8").trim().split("\n") : []);
   const implReport = (head, over = {}) => writeFileSync(join(reports, "impl-5.json"), JSON.stringify({
-    member: "impl-5", outcome: "pr", pr: 6, head, branch: "feat",
+    member: "impl-5", outcome: "pr", pr: 6, head, branch: CLAIM,
     sizing: { verdict: "light", signal: "one file", ranBeforePr: true },
     bailCause: null, bailDetail: null, confirmation: [], ...over,
   }));
@@ -131,7 +134,7 @@ exec '${realGit}' "$@"
     applied: [], deferred: [], filed: [], unrecorded: [], dispositionsRecord: join(root, "dispositions-fix-pr-6.json"),
     testRun: { cmd: "./agent-test", exit: 0, tests: 3, cancelled: 0 }, confirmation: [], ...over,
   }));
-  writeFileSync(join(ghDir, "6.json"), JSON.stringify({ state: "OPEN", closingIssuesReferences: [ref(5)], url: prUrl(6), headRefName: "implementer/5-impl-5" }));
+  writeFileSync(join(ghDir, "6.json"), JSON.stringify({ state: "OPEN", closingIssuesReferences: [ref(5)], url: prUrl(6), headRefName: CLAIM }));
 
   // The member's own steps: a branch with a staged change, ready to record.
   git(work, "checkout", "-q", "-b", "feat");
@@ -141,7 +144,7 @@ exec '${realGit}' "$@"
   };
   const commitAndPush = (message = "the work") => {
     git(work, "commit", "-q", "-m", message);
-    git(work, "push", "-q", "--force", "origin", "feat");
+    git(work, "push", "-q", "--force", "origin", "feat", `feat:refs/heads/${CLAIM}`);
     return git(work, "rev-parse", "HEAD");
   };
   return {
@@ -705,7 +708,7 @@ test("settle: a message-only amend after recording keeps the record valid", () =
   f.commitAndPush("first message");
   f.git(f.work, "commit", "-q", "--amend", "-m", "a better message");
   f.head = f.git(f.work, "rev-parse", "HEAD");
-  f.git(f.work, "push", "-q", "--force", "origin", "feat");
+  f.git(f.work, "push", "-q", "--force", "origin", "feat", `feat:refs/heads/${CLAIM}`);
   settledImpl(f);
   assert.equal(f.settled("impl-5").outcome, "PR#6");
 });
@@ -734,7 +737,7 @@ test("settle: a rebase onto a moved base after recording is refused, naming the 
   f.git(f.work, "checkout", "-q", "feat");
   f.git(f.work, "rebase", "-q", "main");
   f.head = f.git(f.work, "rev-parse", "HEAD");
-  f.git(f.work, "push", "-q", "--force", "origin", "feat");
+  f.git(f.work, "push", "-q", "--force", "origin", "feat", `feat:refs/heads/${CLAIM}`);
   settledImpl(f);
   f.refused("impl-5", 3, /failed: the recorded tree /);
 });
@@ -806,7 +809,7 @@ test("settle: a repository with no usable Recipe applies no gate", () => {
   settledImpl(f);
   const receipt = f.settled("impl-5");
   assert.equal(receipt.outcome, "PR#6");
-  assert.deepEqual(receipt.checks.map((c) => c.name), [`verify-sha.sh feat ${f.head} exits 0`, "PR #6 reads OPEN", "PR #6 closes #5", "PR #6's head is implementer/5-impl-5 (GitHub: implementer/5-impl-5)"]);
+  assert.deepEqual(receipt.checks.map((c) => c.name), [`verify-sha.sh ${CLAIM} ${f.head} exits 0`, "PR #6 reads OPEN", "PR #6 closes #5", `PR #6's head is ${CLAIM} (GitHub: ${CLAIM})`]);
 });
 
 // The gate reads the cache against origin/main, the tree members' worktrees
@@ -824,7 +827,7 @@ test("settle: a Recipe whose Check step names a path origin/main does not hold a
   settledImpl(f);
   const receipt = f.settled("impl-5");
   assert.equal(receipt.outcome, "PR#6");
-  assert.deepEqual(receipt.checks.map((c) => c.name), [`verify-sha.sh feat ${f.head} exits 0`, "PR #6 reads OPEN", "PR #6 closes #5", "PR #6's head is implementer/5-impl-5 (GitHub: implementer/5-impl-5)"]);
+  assert.deepEqual(receipt.checks.map((c) => c.name), [`verify-sha.sh ${CLAIM} ${f.head} exits 0`, "PR #6 reads OPEN", "PR #6 closes #5", `PR #6's head is ${CLAIM} (GitHub: ${CLAIM})`]);
 });
 
 // derive-testcmd.sh refuses an `--at` that does not resolve with the same exit
