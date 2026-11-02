@@ -16,7 +16,12 @@ work in flight rather than every run's history.
    `--root <scratch> --apply` runs straight after `reap.sh --apply` on every
    merge-bot pass report, and `--root <scratch> --after-rotate --apply` runs in
    phase 0 straight after `ledger.mjs rotate`, so a run that merges nothing
-   still reclaims the previous run's leftovers.
+   still reclaims the previous run's leftovers. In every mode `--root` must be
+   this workspace's own scratch root, the path `scratch-root.mjs` prints from
+   the same cwd. The root sweep refuses any other, dry run included, and
+   when its own scratch root cannot be resolved: it reads the ledger, the
+   claim worktrees and GitHub of the repository the cwd is in, so another
+   workspace's key would be judged against this one's numbers.
 2. **Keyed entries are judged on GitHub state.** One `gh api graphql` call per
    ≤100 numbers asks what each `pr<N>` and `impl-<N>` is. A merged or closed
    PR's `pr<M>/` and `dispositions-fix-pr-<M>*.json` go unless a live
@@ -43,7 +48,8 @@ work in flight rather than every run's history.
 4. **The review snapshot prunes its own PR.** `review-core.mjs` runs
    `reclaim-scratch.mjs --pr <N>`, which removes only `pr<N>/run-*` roots idle
    past 7 days — no ledger, no `gh` — and prints `SNAPSHOT_PRUNE_FAILED` when
-   the receipt names a failed removal.
+   the receipt names a failed removal. Reading nothing the cwd decides, it
+   does not check that `--root` is this workspace's own.
 5. **One removal sequence.** Every removal restores owner rwx, clears darwin's
    `uchg`/`uappnd` flags where `chflags` exists, then `rm -rf`, so a fixture
    that dropped its own read bit cannot wedge it. A removal that still fails is
