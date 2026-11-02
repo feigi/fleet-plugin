@@ -21,6 +21,19 @@ row set per objective. The `cost` rows are fitted as above; a `speed` row starts
 minutes of Work time per merged PR **and** with the bootstrap 95% CI of the
 difference wholly below zero. Quality stays a floor under both, and the guard
 ignores the objective.
+Amended by ADR 0037 (ruled 2026-11-01 by the maintainer on map #4118):
+decision 1's "changes only through a reviewed PR whose diff is the table and its
+estimates" is retired — each repository's Fit is computed at its own phase 0, kept
+in `.fleet/` and never committed, and the shipped table is only the starting
+table; decision 2's fixed `light|heavy|unknown` stratum is retired — the Stratum
+is a group learned from the repository's own Pulls, a tree of readable splits (its
+"never a parametric ticket→cell model" stands); decision 4's burn-in and stages
+are retired — burn-in covers the three models at `high`, there is no stage 2, and
+a Cell that exploration adds does not re-enter burn-in. The Guard's retire
+condition ("every non-default cell of stage 1") reads over the starting table's
+Cells, and its cumulative baseline compares time-matched, as ADR 0037 and the
+spec say. The exploration draw is over the Pull's group's exploration Cells, one
+Pull in five.
 
 ## Context
 
