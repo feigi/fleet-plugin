@@ -151,6 +151,15 @@ test("duty 3 is one script — named in the member prompt, with no gh commands s
     "the block no longer reports the script's receipt");
 });
 
+// #4117: a finisher labelled a ticket PR whose diff was not inert with no kill
+// in hand (#3972). The script now refuses such a PR at exit 6 unless the call
+// carries the kill's evidence line, so the block must hand it over.
+test("duty 3 passes the kill's evidence line with --kill, and names exit 6", () => {
+  const block = finisherLabelDuty();
+  assert.match(block, Pin.phrase("--kill '<evidence line>'"), "the duty 3 call no longer passes the kill's evidence line");
+  assert.match(block, Pin.phrase("Exit 6 means a ticket PR whose diff is not inert"), "the block no longer says what exit 6 is");
+});
+
 test("the solo labelling step gates on the release label too — the fleet finisher is not its only writer", () => {
   // `review-and-fix.md` step 6 is the other writer of `ready-to-merge`. A guard
   // on the fleet path alone leaves the standalone path labelling PRs with no

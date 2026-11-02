@@ -3,12 +3,13 @@
 // read as one: the release-label check is a precondition, and a finisher that
 // stopped after it reported `labelled` on a PR that never got the label.
 //
-//   finisher-label.mjs --pr <M> --pin <sha> [--repo <dir>]
+//   finisher-label.mjs --pr <M> --pin <sha> [--kill <evidence line>] [--repo <dir>]
 //
 // `--pin` is the full 40-hex head the finisher audited; `--repo` is the
 // directory `gh` runs in (it resolves the repository from there), the cwd when
-// omitted. Reached through the Resolver: `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run
-// finisher-label.mjs ...`.
+// omitted. `--kill` is the evidence line of the acceptance mutation's kill,
+// read only at step 1b. Reached through the Resolver:
+// `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run finisher-label.mjs ...`.
 //
 // Steps, in this order, each one only if every earlier one held:
 //
@@ -24,10 +25,14 @@
 //      list is read only when the PR carries none of them — one on the PR
 //      proves it is defined — and a list that fills the limit it was read with
 //      proves nothing, so it is exit 2 rather than a skipped count.
-//   1b on a Ticketless PR, finisher-scope.mjs's Inert diff verdict at `--pin`,
-//      run in-process. A diff that is not inert, or a verdict that could not
-//      look, stops after step 2: the head record is posted, the label is not
-//      added, and the exit is 5.
+//   1b finisher-scope.mjs's Inert diff verdict at `--pin`, run in-process on
+//      every PR. On a Ticketless PR a diff that is not inert, or a verdict
+//      that could not look, stops after step 2: the head record is posted,
+//      the label is not added, and the exit is 5. On a ticket PR either one
+//      needs a `--kill` claim — non-empty and in the finisher's evidence-line
+//      grammar, `red: … ; baseline: …` — and without one the exit is 6 and
+//      nothing is written. The claim is taken on its word: the script cannot
+//      rerun the mutation. An inert diff, or a Ticketless PR, ignores `--kill`.
 //   2  comment `ready-to-merge-head: <pin>`, the record the merge bot reads as
 //      the head the label was applied to — skipped when the newest such
 //      comment already names this pin.
@@ -48,8 +53,8 @@
 //
 // Stdout is always one JSON line, the receipt:
 //
-//   {pr, pin, ticketless, releaseLabels, patchAdded, inert, commented, added,
-//    readBack, exit, firstRead [, step, error]}
+//   {pr, pin, ticketless, releaseLabels, patchAdded, inert, kill, commented,
+//    added, readBack, exit, firstRead [, step, error] [, killGiven]}
 //
 //   ticketless     the Ticketless test's answer, null when it never got one
 //   releaseLabels  the release labels the PR carried (`patch` once added to a
@@ -57,6 +62,7 @@
 //                  never got an answer
 //   patchAdded     this run added `patch`
 //   inert          the Inert diff verdict object, null when it never ran
+//   kill           the `--kill` claim step 1b accepted, null when it took none
 //   commented      this run posted the head record
 //   added          this run wrote the label
 //   readBack       every label name the step 4 read carried, null if it never ran
@@ -64,6 +70,8 @@
 //   step           on exit 2 only, the step that failed: `pin`, `repo`,
 //                  `label-map`, or the step whose `gh` call failed
 //   error          on exit 2 only, what `gh` (or the invocation) said
+//   killGiven      on exit 6 only, what `--kill` carried, null when it was
+//                  not given
 //
 // A usage error that never reaches `gh` — a missing or unknown flag — is a
 // refusal on stderr with no receipt, as in every other script's `die()`.
@@ -80,6 +88,8 @@
 //   5  a Ticketless PR whose diff is not inert, or whose verdict could not
 //      look: the head record is posted and the label is not added, so the
 //      maintainer's `ready-to-merge` is the merge
+//   6  a ticket PR whose diff is not inert, or whose verdict could not look,
+//      with no well-formed `--kill` claim — nothing was written
 
 import { spawnSync } from "node:child_process";
 import { statSync } from "node:fs";
@@ -96,10 +106,10 @@ const NAME = "finisher-label";
 
 const die = makeDie(NAME);
 const { arg, numArg, sweep, stray } = defineFlags(die, {
-  flags: { pr: "value", pin: "value", repo: "value" },
+  flags: { pr: "value", pin: "value", repo: "value", kill: "value" },
 });
 
-const USAGE = "usage: finisher-label.mjs --pr <M> --pin <sha> [--repo <dir>]";
+const USAGE = "usage: finisher-label.mjs --pr <M> --pin <sha> [--kill <evidence line>] [--repo <dir>]";
 
 // The sweep runs before the required-flag check so a misspelt flag is named
 // as that, not buried under a missing-flag usage line.
@@ -108,6 +118,12 @@ stray();
 const pr = numArg("pr");
 const pinArg = arg("pin");
 const repo = arg("repo");
+// Read by hand past arg(), which refuses an empty value as a usage error: an
+// empty claim is a malformed kill, refused at exit 6 like a missing one, and
+// only where the verdict needs a claim. arg() still reads the absent case, so
+// a `--kill=` form is refused by name rather than read as no claim.
+const killAt = process.argv.indexOf("--kill");
+const killArg = killAt === -1 ? arg("kill") : (process.argv[killAt + 1] ?? "");
 if (pr === null || pinArg === null) die(USAGE);
 
 const receipt = {
@@ -117,6 +133,7 @@ const receipt = {
   releaseLabels: null,
   patchAdded: false,
   inert: null,
+  kill: null,
   commented: false,
   added: false,
   readBack: null,
@@ -225,11 +242,30 @@ if (found.length === 0) {
   receipt.releaseLabels = found;
 }
 
-// --- 1b: the Inert diff verdict, on a Ticketless PR ------------------------
+// --- 1b: the Inert diff verdict ---------------------------------------------
 // No ticket gives a Ticketless PR its ruling or its acceptance mutation, so it
 // merges unattended only when its whole diff is inert; otherwise the head is
-// recorded and the maintainer's label is the merge.
-if (ticketless) receipt.inert = inertVerdict({ worktree: resolve(repo ?? "."), pin });
+// recorded and the maintainer's label is the merge. A ticket PR whose diff is
+// not inert merges on its acceptance mutation's kill, so it is labelled only
+// with that kill's evidence line in hand.
+receipt.inert = inertVerdict({ worktree: resolve(repo ?? "."), pin });
+const why = receipt.inert.verdict === "unknown" ? `its diff could not be read (${receipt.inert.reason})` : "its diff is not inert";
+
+// The finisher's evidence-line grammar,
+// `red: <cmd> → exit N, fail K incl <test>; baseline: <cmd> → exit 0, <test> pass`,
+// checked for its two halves, each non-blank, on one line (`.` stops at a newline).
+const EVIDENCE = /^red:(.*?); baseline:(.*)$/;
+const evidence = (s) => {
+  const m = EVIDENCE.exec(s ?? "");
+  return m !== null && m[1].trim() !== "" && m[2].trim() !== "";
+};
+if (!ticketless && receipt.inert.exit !== 0) {
+  if (!evidence(killArg)) {
+    const claim = killArg === null ? "no --kill claim was given" : `the --kill claim is not an evidence line (red: … ; baseline: …): ${JSON.stringify(killArg)}`;
+    finish(6, { killGiven: killArg }, `the PR is a ticket PR and ${why}, and ${claim}; nothing was written`);
+  }
+  receipt.kill = killArg;
+}
 
 // --- 2: the head record ----------------------------------------------------
 // The newest record wins, the way the merge bot reads it: a matching record
@@ -243,7 +279,6 @@ if (!recorded) {
 }
 
 if (ticketless && receipt.inert.exit !== 0) {
-  const why = receipt.inert.verdict === "unknown" ? `its diff could not be read (${receipt.inert.reason})` : "its diff is not inert";
   finish(5, {}, `the PR is a Ticketless PR and ${why}: the head is recorded and ${LABEL} is left to the maintainer`);
 }
 
