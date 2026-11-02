@@ -35,3 +35,4 @@ The same missing rule let a stranger's, a fork's or a draft issue-closing PR be 
 - Tier-outcomes takes no row for a Ticketless PR: there is no ticket to key one on.
 - A repository with several maintainers sharing one `gh` login owns every PR any of them opens, as the fleet's own are indistinguishable from theirs by author.
 - `finisher-label.mjs` now reads the Ticketless test before it counts labels, so a failed `gh` or ledger read there is exit 2 for a ticket PR too.
+- Ticket PRs are now held too (#4117): `finisher-label.mjs` runs the Inert diff verdict on every PR, and a ticket PR whose diff is not inert, or whose verdict could not look, is labelled only with its kill's evidence line passed as `--kill`. Without one it writes nothing and exits 6, and the finisher halts `other`.

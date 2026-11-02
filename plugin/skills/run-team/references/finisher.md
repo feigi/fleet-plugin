@@ -244,6 +244,8 @@ head is not part of it, and duty 1 audits that head separately.
 
 **Duty 3 holds a Ticketless PR whose diff is not inert.** `finisher-label.mjs` adds `patch` to a Ticketless PR that carries no release label, then runs the Inert diff verdict in-process at your pin. A diff that is not inert, or a verdict that could not look, gets the `ready-to-merge-head:` record and no `ready-to-merge`, and the script exits 5: halt with cause `human`. No ticket gives that PR a ruling or a mutation, so the maintainer's `ready-to-merge` is the merge. The merge bot merges it off the record at the pinned head, and a head that moved after the record is merged by hand.
 
+**Duty 3 holds a ticket PR whose diff is not inert until it is handed the kill.** `finisher-label.mjs` runs the same Inert diff verdict on a ticket PR. A diff that is not inert, or a verdict that could not look, is labelled only when the call carries `--kill '<evidence line>'`, the kill's evidence line in the `red: … ; baseline: …` grammar, which the receipt records as `kill`. Without one, or with one not in that grammar, the script writes nothing — no head record, no label — and exits 6: halt with cause `other` and the receipt as evidence. The script takes the claim on its word; it cannot rerun the mutation. An Inert diff and a Ticketless PR ran no mutation, so they omit `--kill`, and the script ignores one they pass.
+
 ## Whatever you verify by running, run in a tree nobody else owns
 
 **Whatever you verify by RUNNING, run in a tree nobody else owns.**

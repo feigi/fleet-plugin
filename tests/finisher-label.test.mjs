@@ -26,6 +26,10 @@ import { seedLabelMap } from "./support/label-map-seed.mjs";
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/finisher-label.mjs", import.meta.url));
 const PIN = "a".repeat(40);
 const OTHER = "b".repeat(40);
+// A kill's evidence line in the finisher's grammar. PIN names no commit, so
+// its Inert diff verdict is `unknown` and a ticket PR at PIN is labelled only
+// with a claim: the baseline run carries this one.
+const KILL = "red: node --test tests/x.test.mjs → exit 1, fail 1 incl x; baseline: node --test tests/x.test.mjs → exit 0, x pass";
 
 // The Ticketless test's read, `gh pr view <n> --json closingIssuesReferences,url`,
 // is kept out of calls.log, which holds the calls the labelling steps make, and
@@ -73,7 +77,7 @@ function git(cwd, ...args) {
 // (`roles` merged over the identity map; null for no map) and an
 // `origin/main` to take a pin's merge base against. `outs` and `fails` are
 // keyed by the stub's call keys. The baseline is a ticket PR with one release
-// label and a read-back that carries the label. `commit(files)` makes a commit
+// label, a `--kill` claim, and a read-back that carries the label. `commit(files)` makes a commit
 // holding `files` (path → text) on top of origin/main and answers its SHA,
 // the pin of a case about the diff.
 function rig({ outs = {}, fails = {}, closes = [5], rows = [], roles = {} } = {}) {
@@ -113,7 +117,7 @@ function rig({ outs = {}, fails = {}, closes = [5], rows = [], roles = {} } = {}
     return git(repo, "rev-parse", "HEAD");
   };
   // Without its own `--repo` a run is in the rig's repository, so no case reads a real run's ledger.
-  const run = (args = ["--pr", "42", "--pin", PIN], { env = {}, cwd } = {}) => {
+  const run = (args = ["--pr", "42", "--pin", PIN, "--kill", KILL], { env = {}, cwd } = {}) => {
     const full = args.includes("--repo") ? args : [...args, "--repo", repo];
     const r = spawnSync(process.execPath, [SCRIPT, ...full], {
       encoding: "utf8",
@@ -146,13 +150,15 @@ test("exit 0: one release label, the head recorded, the label added and read bac
   // The order is the contract: record before label, read-back last.
   assert.deepEqual(t.calls(), [VIEW, COMMENT, EDIT, BACK]);
   assert.deepEqual(t.closing(), [CLOSING], "the Ticketless test read comes first, and once");
-  assert.deepEqual(r.out, {
+  const { inert, ...rest } = r.out;
+  assert.equal(inert.verdict, "unknown", "the verdict runs on a ticket PR too");
+  assert.deepEqual(rest, {
     pr: 42,
     pin: PIN,
     ticketless: false,
     releaseLabels: ["patch"],
     patchAdded: false,
-    inert: null,
+    kill: KILL,
     commented: true,
     added: true,
     readBack: ["patch", "bug", "ready-to-merge"],
@@ -345,18 +351,97 @@ test("a PR that closes nothing but that a settled impl token names is a ticket P
   assert.deepEqual(t.calls(), [VIEW, LIST]);
 });
 
-test("a ticket PR is never held on its diff: a non-inert diff is labelled as ever, and its verdict never runs", () => {
+// --- a ticket PR's diff -------------------------------------------------------
+
+test("exit 6: a ticket PR whose diff is not inert and that carries no --kill writes nothing", () => {
   const t = rig();
   const r = t.run(["--pr", "42", "--pin", t.commit(NOT_INERT)]);
-  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.status, 6, r.stderr);
+  assert.deepEqual(t.calls(), [VIEW], "only reads: no head record, no label, no patch");
   assert.equal(r.out.ticketless, false);
-  assert.equal(r.out.inert, null);
-  assert.equal(r.out.added, true);
+  assert.equal(r.out.inert.verdict, "not-inert");
+  assert.equal(r.out.kill, null);
+  assert.equal(r.out.killGiven, null);
+  assert.equal(r.out.commented, false);
+  assert.equal(r.out.added, false);
+  assert.equal(r.out.exit, 6);
+  assert.match(r.stderr, /ticket PR and its diff is not inert, and no --kill claim was given/);
+});
+
+test("exit 6: a ticket PR whose verdict could not look and that carries no --kill writes nothing", () => {
+  const t = rig();
+  // The pin names no commit in the repository: the verdict is `unknown`.
+  const r = t.run(["--pr", "42", "--pin", OTHER]);
+  assert.equal(r.status, 6, r.stderr);
+  assert.deepEqual(t.calls(), [VIEW]);
+  assert.equal(r.out.inert.verdict, "unknown");
+  assert.equal(r.out.killGiven, null);
+  assert.match(r.stderr, /its diff could not be read/);
+});
+
+test("exit 0: a ticket PR whose diff is not inert is labelled on a well-formed --kill, and the receipt records the claim", () => {
+  const t = rig();
+  const pin = t.commit(NOT_INERT);
+  const r = t.run(["--pr", "42", "--pin", pin, "--kill", KILL]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(t.calls(), [VIEW, headRecord(pin), EDIT, BACK]);
+  assert.equal(r.out.inert.verdict, "not-inert");
+  assert.equal(r.out.kill, KILL);
+  assert.equal("killGiven" in r.out, false, "killGiven is an exit-6 field");
+});
+
+for (const bad of ["", "   ", "killed it", "red: x", "baseline: node --test → exit 0, x pass", "red: ; baseline: x", "red: x; baseline: ", `${KILL}\nmore`]) {
+  test(`exit 6: a malformed --kill ${JSON.stringify(bad)} is refused like a missing one`, () => {
+    const t = rig();
+    const r = t.run(["--pr", "42", "--pin", t.commit(NOT_INERT), "--kill", bad]);
+    assert.equal(r.status, 6, r.stderr);
+    assert.deepEqual(t.calls(), [VIEW]);
+    assert.equal(r.out.kill, null);
+    assert.equal(r.out.killGiven, bad);
+    assert.match(r.stderr, /the --kill claim is not an evidence line/);
+  });
+}
+
+test("exit 6: a --kill with no value after it is an empty claim, refused at exit 6", () => {
+  const t = rig();
+  const r = t.run(["--pr", "42", "--pin", t.commit(NOT_INERT), "--repo", t.repo, "--kill"]);
+  assert.equal(r.status, 6, r.stderr);
+  assert.equal(r.out.killGiven, "");
+});
+
+test("exit 0: a ticket PR with an inert diff is labelled with no --kill, and a malformed one is ignored", () => {
+  const none = rig();
+  const a = none.run(["--pr", "42", "--pin", none.commit(INERT)]);
+  assert.equal(a.status, 0, a.stderr);
+  assert.equal(a.out.inert.verdict, "inert");
+  assert.equal(a.out.kill, null);
+  assert.equal(a.out.added, true);
+  const bad = rig();
+  const b = bad.run(["--pr", "42", "--pin", bad.commit(INERT), "--kill", "not a claim"]);
+  assert.equal(b.status, 0, b.stderr);
+  assert.equal(b.out.kill, null, "an inert diff takes no claim");
+});
+
+test("exit 5: a Ticketless PR whose diff is not inert is held whatever --kill says", () => {
+  const t = ticketless({ outs: { "pr-view-1": view(["bug"]) } });
+  const pin = t.commit(NOT_INERT);
+  const r = t.run(["--pr", "42", "--pin", pin, "--kill", KILL]);
+  assert.equal(r.status, 5, r.stderr);
+  assert.deepEqual(t.calls(), [VIEW, LIST, PATCH, headRecord(pin)]);
+  assert.equal(r.out.kill, null);
+  assert.equal(r.out.added, false);
+});
+
+test("an `=`-joined --kill is refused as a usage error before any gh call", () => {
+  const t = rig();
+  const r = t.run(["--pr", "42", "--pin", PIN, `--kill=${KILL}`]);
+  assert.equal(r.status, 2, r.stderr);
+  assert.deepEqual(t.calls(), []);
 });
 
 test("exit 0: a pin in capitals is recorded in the lowercase the merge bot reads", () => {
   const t = rig();
-  const r = t.run(["--pr", "42", "--pin", PIN.toUpperCase()]);
+  const r = t.run(["--pr", "42", "--pin", PIN.toUpperCase(), "--kill", KILL]);
   assert.equal(r.status, 0, r.stderr);
   assert.ok(t.calls().includes(COMMENT), t.calls().join("\n"));
   assert.equal(r.out.pin, PIN);
@@ -618,7 +703,7 @@ test("an already-labelled PR with no release label is still refused", () => {
 
 test("--repo is the directory gh runs in, for the Ticketless test's read and every labelling call", () => {
   const t = rig();
-  const r = t.run(["--pr", "42", "--pin", PIN, "--repo", t.repo]);
+  const r = t.run(["--pr", "42", "--pin", PIN, "--kill", KILL, "--repo", t.repo]);
   assert.equal(r.status, 0, r.stderr);
   const cwds = [...t.log("closing-cwd.log").trim().split("\n"), ...t.log("cwd.log").trim().split("\n")];
   assert.equal(cwds.length, 5);

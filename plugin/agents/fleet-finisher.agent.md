@@ -269,8 +269,10 @@ cause `other`, with both runs — the mutant's and the unmutated tree's — as
 evidence; label nothing. A kill's evidence line goes in your report.
 
 **Duty 3 is one script, and its exit code is your verdict.**
-`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run finisher-label.mjs --pr <M> --pin <your dispatch pin>`
-(the full SHA). It confirms exactly one of `patch`/`minor`/`major` is on the
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run finisher-label.mjs --pr <M> --pin <your dispatch pin> --kill '<evidence line>'`
+(the full SHA; `--kill` carries your kill's evidence line as one quoted
+argument, and a PR whose mutation you skipped — an Inert diff or a Ticketless
+PR — omits it). It confirms exactly one of `patch`/`minor`/`major` is on the
 PR — a Ticketless PR with none gets `patch` added first — records the head you
 audited, adds `ready-to-merge`, and reads the labels
 back. Exit 0 is the only code that means the label is on. Exit 3 means the PR
@@ -280,7 +282,9 @@ before the label, and the receipt names which it found. Exit 4 means the
 read-back does not carry the label, written or not. Exit 5 means the PR is a
 Ticketless PR whose diff is not inert, or whose Inert diff verdict could not
 look: the script posted the head record and added no label, and you are halted
-with cause `human`. Exit 2 means a `gh` call or the invocation itself failed:
+with cause `human`. Exit 6 means a ticket PR whose diff is not inert, or whose
+Inert diff verdict could not look, came without a `--kill` in the
+`red: … ; baseline: …` grammar: the script wrote nothing. Exit 2 means a `gh` call or the invocation itself failed:
 report the stderr it printed. Every non-zero exit halts you, with cause `other`
 unless it is exit 5, with the receipt as evidence, and you do not run any of
 its steps by hand to get past it. A repo whose label list defines none of the

@@ -56,6 +56,10 @@ durable, and applies the label the merge bot waits on.
    only when its diff is an Inert diff: otherwise the script posts the
    `ready-to-merge-head:` record, adds no label and exits 5, the finisher
    halts `human`, and the maintainer's `ready-to-merge` is the merge.
+   A ticket PR whose diff is not inert, or whose verdict could not look,
+   is labelled only when the finisher passes its kill's evidence line with
+   `--kill`; without a well-formed one the script writes nothing and exits
+   6, and the finisher halts `other`.
 5. **Report** the label, every filed deferral's issue number, and any
    halt cause. Re-checks [Instruments](instruments.md) before acting on
    either read and again before adding the label.
