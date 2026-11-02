@@ -1100,7 +1100,6 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, queued
   const asc = (a, b) => a - b;
   const state = (n) => byPr.get(n);
   const conflictHeld = (st) => st !== undefined && st.conflictOpen;
-  const mergeHeldOn = (p) => conflictHeld(state(p.number));
   // The latest park on a queued PR whose head and body still match it, or
   // undefined: a new head or an edited body lifts every earlier park.
   const parkOn = (p) => {
@@ -1199,11 +1198,11 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, queued
     mergeQueue: queued.length,
     // A conflict hold lifts only once a fix-applier after it has SETTLED
     // `applied:`/`no-op` — never on dispatch alone.
-    mergeHeld: queued.filter(mergeHeldOn).length,
+    mergeHeld: queued.filter((p) => conflictHeld(state(p.number))).length,
     // Each queued PR no hold counts that a park still matches, `{pr, reason}`
     // ascending: the merge bot would only refuse it again.
     mergeParked: queued.flatMap((p) => {
-      const k = mergeHeldOn(p) ? undefined : parkOn(p);
+      const k = conflictHeld(state(p.number)) ? undefined : parkOn(p);
       return k === undefined ? [] : [{ pr: p.number, reason: k.reason }];
     }).sort((a, b) => a.pr - b.pr),
     // Finishers settled `labelled` on an open PR without the label.

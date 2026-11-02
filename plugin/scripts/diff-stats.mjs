@@ -46,7 +46,7 @@ const TEST_NAME_SHAPES = [
   /(?:^|\/)test_[^/]*$/i,
   /(?:^|\/)[^/]*[A-Za-z0-9]Tests?\.[^/.]+$/,
 ];
-export const isTestName = (p) => TEST_NAME_SHAPES.some((shape) => shape.test(p));
+const isTestName = (p) => TEST_NAME_SHAPES.some((shape) => shape.test(p));
 
 // Only a prose or config extension, or a conventional name, makes a file docs or
 // config — which those already do anywhere, so neither `docs/` nor `.github/` has
@@ -57,7 +57,7 @@ export const isTestName = (p) => TEST_NAME_SHAPES.some((shape) => shape.test(p))
 // claims a non-JS module named like `app.config.py`.
 export const isDocs = (p) => /\.(md|mdx|markdown|txt|rst|adoc)$/i.test(p) || /(^|\/)(README|CHANGELOG|LICENSE|CONTRIBUTING)(\.|$)/i.test(p);
 export const isMarkdown = (p) => /\.(md|markdown)$/i.test(p);
-export const isConfig = (p) =>
+const isConfig = (p) =>
   /\.(ya?ml|toml|ini|cfg|conf|json|json5|lock|env)$/i.test(p) ||
   /\.config\.[^/.]+$/i.test(p) ||
   /(^|\/)\.[a-z]+rc$/i.test(p);
