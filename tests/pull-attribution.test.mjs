@@ -808,6 +808,18 @@ test("parseFeatures refuses a ticket, or a non-blank parent, that is not an issu
   assert.deepEqual(rows.map((r) => [r.ticket, r.parent]), [["7", ""], ["10", ""], ["7", "3177"], ["10", "10"]]);
 });
 
+test("parseFeatures reads the named-path, title and version columns by name, and blank from a header written before them", () => {
+  const named = ["named_paths", "named_lines", "dirs", "title", "plugin_version"];
+  assert.deepEqual(FEATURE_COLUMNS.slice(FEATURE_COLUMNS.indexOf("parent") + 1), named, "appended after parent, in this order");
+  const values = { ticket: "7", chosen_cell: "slow-high", named_paths: "plugin/a.mjs docs/b.md:3-9", named_lines: "12 -", dirs: "2", title: "a title", plugin_version: "1.2.3" };
+  const text = (cols) => `${cols.join("\t")}\n${cols.map((c) => values[c] ?? "").join("\t")}\n`;
+  const [withThem] = parseFeatures(text(FEATURE_COLUMNS));
+  assert.deepEqual(named.map((c) => withThem[c]), named.map((c) => values[c]));
+  const [without] = parseFeatures(text(FEATURE_COLUMNS.filter((c) => !named.includes(c))));
+  assert.deepEqual(named.map((c) => without[c]), named.map(() => ""));
+  assert.deepEqual({ ...without, ...Object.fromEntries(named.map((c) => [c, withThem[c]])) }, withThem, "every other column reads the same");
+});
+
 test("admissibleRow: the cell's own definition at its level with a dispatch model on record, and nothing short of all three", () => {
   const row = { subagentType: "fleet-implementer-task-high", effort: "high", model: "m", dispatchModel: "m" };
   assert.equal(admissibleRow(row, "task-high"), true);

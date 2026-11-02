@@ -21,7 +21,9 @@ const row = (o) => ({
   age_days: "0", paths: "0", test_paths: "0", xrefs: "0", kind: "", objective: "cost", ...o,
 });
 const tsv = (rows, cols = FEATURE_COLUMNS) => [cols.join("\t"), ...rows.map((r) => cols.map((c) => r[c] ?? "").join("\t"))].join("\n") + "\n";
-const WITHOUT = FEATURE_COLUMNS.filter((c) => c !== "parent");
+// A corpus written before `parent` holds none of the columns after it either.
+const WITHOUT = FEATURE_COLUMNS.slice(0, FEATURE_COLUMNS.indexOf("parent"));
+const NAMED = ["named_paths", "named_lines", "dirs", "title", "plugin_version"];
 
 // Tickets 1 and 2 are Slices (one per form), 3 is none, 4 opens `Spec #N (…)` without the colon.
 const BODIES = {
@@ -37,7 +39,7 @@ test("fillParent adds the column to a corpus written without it and sets parent 
   const before = `# a comment line stays\n${tsv(ROWS, WITHOUT)}`;
   const { text, set, widened } = fillParent(before, PARENTS);
   assert.deepEqual([set, widened], [2, true]);
-  assert.equal(text, `# a comment line stays\n${tsv(ROWS.map((r) => ({ ...r, parent: PARENTS.get(r.ticket) })))}`);
+  assert.equal(text, `# a comment line stays\n${tsv(ROWS.map((r) => ({ ...r, parent: PARENTS.get(r.ticket) })), [...WITHOUT, "parent"])}`);
   assert.deepEqual(parseFeatures(text).map((r) => r.parent), ["3177", "2870", "", ""]);
   const again = fillParent(text, PARENTS);
   assert.deepEqual([again.text, again.set, again.widened], [text, 0, false], "a second run changes nothing");
@@ -62,6 +64,20 @@ test("fillParent leaves a ticket it has no answer for, and a row whose ticket is
 
 test("fillParent refuses a corpus that does not parse", () => {
   assert.throws(() => fillParent(`${FEATURE_COLUMNS.join("\t")}\nshort\trow\n`, PARENTS), /fields, expected/);
+});
+
+test("fillParent and slice-fill fill a corpus that carries the named-path columns as one that does not, leaving those columns as they were", () => {
+  const named = ROWS.map((r) => ({ ...r, named_paths: "plugin/a.mjs", named_lines: "3", dirs: "1", title: `Ticket ${r.ticket}`, plugin_version: "1.2.3" }));
+  for (const cols of [FEATURE_COLUMNS, FEATURE_COLUMNS.filter((c) => !NAMED.includes(c))]) {
+    const before = tsv(named, cols);
+    const { text, set, widened } = fillParent(before, PARENTS);
+    assert.deepEqual([set, widened], [2, false], cols.join());
+    assert.equal(text, tsv(named.map((r) => ({ ...r, parent: PARENTS.get(r.ticket) })), cols), cols.join());
+    const w = world(BODIES, before);
+    const r = w.run();
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(readFileSync(w.file, "utf8"), text, cols.join());
+  }
 });
 
 // Answers the batched GraphQL read: each `n<N>:issue(number:<N>)` alias from

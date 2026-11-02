@@ -65,7 +65,7 @@ const parsed = (w) => ({
   features: parseFeatures(featuresText(w)),
   prs: w.prs,
 });
-const featuresText = (w) => [FEATURE_COLUMNS.join("\t"), ...w.features.map((f) => FEATURE_COLUMNS.map((c) => f[c] ?? "").join("\t"))].join("\n") + "\n";
+const featuresText = (w, cols = FEATURE_COLUMNS) => [cols.join("\t"), ...w.features.map((f) => cols.map((c) => f[c] ?? "").join("\t"))].join("\n") + "\n";
 
 // `at(dir)` may replace the cwd and argv, and add env, for a run that needs the scratch dir's own paths.
 function runCli(w, args = ["--guard"], { features, at } = {}) {
@@ -135,6 +135,18 @@ test("--guard: a cell exactly 15 points worse than the baseline trips, exits 3 a
   assert.ok(!Number.isNaN(Date.parse(r.guard.computed_at)));
   assert.match(r.stdout, /^task-high\tclaude-opus-5\t20\t20\t20\t9\t0\.45\t5\t5\t0\t[^\t]*\t0\t0\t0\t0\ttripped$/m);
   assert.match(r.stdout, /^smol-high\t.*\tok$/m);
+});
+
+test("--guard: a features corpus with the named-path columns guards as one without them", () => {
+  const w = world();
+  addCell(w, "slow-high", MIN_N, 6, 10);
+  addCell(w, "task-high", MIN_N, 9, 5);
+  w.features = w.features.map((f) => ({ ...f, named_paths: "plugin/a.mjs docs/b.md", named_lines: "3 -", dirs: "2", title: "a title", plugin_version: "1.2.3" }));
+  const named = ["named_paths", "named_lines", "dirs", "title", "plugin_version"];
+  const verdict = (r) => ({ status: r.status, verdict: r.guard?.verdict, tripped: r.guard?.tripped, cells: r.guard?.cells, baseline: r.guard?.baseline });
+  const withThem = runCli(w);
+  assert.equal(withThem.status, 3, withThem.stderr);
+  assert.deepEqual(verdict(runCli(w, ["--guard"], { features: featuresText(w, FEATURE_COLUMNS.filter((c) => !named.includes(c))) })), verdict(withThem));
 });
 
 test("--guard: a cell at least as dear as the baseline trips on $ alone, at an equal fail rate", () => {

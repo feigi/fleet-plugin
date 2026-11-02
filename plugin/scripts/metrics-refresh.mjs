@@ -16,7 +16,10 @@
 // deletes the pending file. A crash between the write and the delete leaves
 // rows the next drain finds already there, so a second run changes nothing.
 // A corpus written before a column the pending file carries — one the row
-// grammar names — gains that column, blank on every row it already holds.
+// grammar names, `objective`, `parent`, `named_paths`, `named_lines`, `dirs`,
+// `title` or `plugin_version` — gains that column, blank on every row it
+// already holds. A pending file begun before one of them drains its rows
+// blank in it.
 // A pending file that is empty, or blank lines only, is removed with its own
 // line: an append created it and never wrote.
 // The drain takes no lock by design: it assumes only the run's controller
@@ -91,7 +94,7 @@ import { COLUMNS as MEMBER_COLUMNS, ENDINGS, isImplementer, parseTsv as parseMem
 import { blobId } from "./pr-cost.mjs";
 import { FEATURE_COLUMNS, parseFeatures } from "./pull-attribution.mjs";
 import { REPORT_STATUSES } from "./report-files.mjs";
-import { DEFAULT_TABLE, fitTable, readGuard, validateTable } from "./ticket-router.mjs";
+import { DEFAULT_TABLE, INSTALL_PACKAGE, fitTable, installVersion, readGuard, validateTable } from "./ticket-router.mjs";
 import { parseTierOutcomes } from "./tier-outcomes.mjs";
 
 const NAME = "metrics-refresh";
@@ -103,8 +106,6 @@ const TIERS = join("docs", "metrics", "tier-outcomes.tsv");
 const CORPUS = [MEMBERS, TIERS, FEATURES];
 const GUARD = join(".fleet", "cost-guard.json");
 const PREVIEW = join(".fleet", "router-preview.json");
-// The install's own package.json, whose `version` names the prior.
-const PACKAGE = fileURLToPath(new URL("../package.json", import.meta.url));
 // pr-cost.mjs --guard: 0 no cell tripped, 3 a cell tripped, 4 no verdict yet —
 // all three are verdicts its readers consume; anything else is a failure.
 const GUARD_VERDICT_EXITS = new Set([0, 3, 4]);
@@ -275,23 +276,12 @@ function costGuard(repo) {
   return g;
 }
 
-// The install's `package.json` `version`, or null when it names none or cannot be read:
-// the prior is named by it, and the fit does not need it.
-function installVersion(path) {
-  try {
-    const v = JSON.parse(readFileSync(path, "utf8"))?.version;
-    return typeof v === "string" ? v : null;
-  } catch {
-    return null;
-  }
-}
-
 // The Preview fit over `repo`'s working-tree TSVs and `written`, the guard file the
 // guard duty just wrote (parsed), with the router table at `tablePath` as its
 // prior, written to `.fleet/router-preview.json` through a temp file and a
 // rename. Throws on anything it cannot read, fit or write, before the rename, so
 // the old file stays as it was.
-export function writePreview(repo, written, { tablePath = DEFAULT_TABLE, packagePath = PACKAGE, now = new Date() } = {}) {
+export function writePreview(repo, written, { tablePath = DEFAULT_TABLE, packagePath = INSTALL_PACKAGE, now = new Date() } = {}) {
   const guard = readGuard(written);
   if (guard === null) throw new Error(`${GUARD} is not a guard the router reads`);
   let prior;

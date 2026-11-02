@@ -141,7 +141,7 @@ import { isCLI } from "./is-cli.mjs";
 import { LabelMapUnreadable, readLabelMap } from "./label-map.mjs";
 import { EXCLUDED_REASON, POLICY_CELL, memberTokens, parseRouting, premisesOf, pullEnded, tierValues } from "./ledger-grammar.mjs";
 import { sessionFromReceipt } from "./phase0-receipt.mjs";
-import { briefPaths, briefText, defang, outOfScope, strandedRuling, ticketText } from "./ticket-text.mjs";
+import { LINE_REF, briefPaths, briefText, defang, outOfScope, strandedRuling, ticketText } from "./ticket-text.mjs";
 
 const NAME = "pull";
 const SCRIPTS = dirname(fileURLToPath(import.meta.url));
@@ -251,8 +251,6 @@ export function issueRefs(section) {
 
 // ── the collision scan ───────────────────────────────────────────────────────
 
-// A brief path's trailing line reference, `:N` or `:N-M`.
-const LINE_REF = /:(\d+)(?:-(\d+))?$/;
 const MARKDOWN = /\.(md|markdown|mdx)$/i;
 // The byte each one-letter escape of a C-quoted diff path stands for.
 const ESC = { n: 10, t: 9, '"': 34, "\\": 92, a: 7, b: 8, f: 12, r: 13, v: 11 };
