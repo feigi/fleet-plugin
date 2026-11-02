@@ -120,7 +120,7 @@ Install step there as a claim does.
 
 ## Filesystem isolation is not stack isolation
 
-Private copy and test command solve different problems; conflating them is how second gets skipped: compose project name comes from environment, not working directory, so three agents on three snapshots still collide on one postgres. Symlinking installed dependencies in does not help. "I'm on my own copy" is exactly the intuition that skips command — say both, every time. Which command depends on audience: member in worktree uses `./agent-test`; specialist on snapshot does not, takes one `review-and-fix.md` hands out. Which runner the worktree holds decides why: the runner a claim writes is untracked, so a `git archive` snapshot never carries it; one the repository tracks does ride along, but no claim exported ports into it — its isolation is whatever that repository built, not one triple per snapshot.
+Private copy and test command solve different problems; conflating them is how second gets skipped: compose project name comes from environment, not working directory, so three agents on three snapshots still collide on one postgres. Observed: a probe returned `No test files found / No such container` and would have read as a test failure. Symlinking installed dependencies in does not help. "I'm on my own copy" is exactly the intuition that skips command — say both, every time. Which command depends on audience: member in worktree uses `./agent-test`; specialist on snapshot does not, takes one `review-and-fix.md` hands out. Which runner the worktree holds decides why: the runner a claim writes is untracked, so a `git archive` snapshot never carries it; one the repository tracks does ride along, but no claim exported ports into it — its isolation is whatever that repository built, not one triple per snapshot.
 
 ## Scratchpad paths need two levels — the member's own partition, then one directory per child it dispatches
 
@@ -261,6 +261,16 @@ where the controller itself runs from.
   chasing its own stalled run issued a `pkill -f` on its test file's name and
   killed a `node --test` over two test files that was not
   its own.
+
+Review specialists and refuters are covered too: every specialist prompt and
+every refuter prompt `review-core.mjs` dispatches carries the same sentence the
+three briefs do, from one constant, and so does the refuter prompt the
+fix-applier hands on. They carried none, and measured: the tests-dimension
+specialist of one PR's review ran `pkill -f 'node --test'`, and the shared test
+run of another PR's review was SIGTERMed 298.7 s into a command whose deadline
+was 3600 s — a cutoff that read as a cap until the specialist's own `pkill` was
+found. The run's output is the `Interrupted while running:` shape described
+below.
 
 Members report a stalled run to the controller instead of pattern-killing it,
 and the controller re-checks any measurement taken in the window.

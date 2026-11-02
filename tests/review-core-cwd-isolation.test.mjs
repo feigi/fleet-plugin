@@ -67,17 +67,17 @@ const specialist = promptRenderer({
   file: FILE,
   start: "`Review PR #${pr} (branch ${branch}) for: ",
   end: "label: `review:",
-  scope: ["pr", "branch", "d", "snap", "worktree", "stats", "sharedRunNote", "sharedRun", "failureOwner", "readRules", "usableDiff", "environmentNote", "copyRule"],
+  scope: ["pr", "branch", "d", "snap", "worktree", "stats", "sharedRunNote", "sharedRun", "failureOwner", "readRules", "usableDiff", "environmentNote", "copyRule", "PATTERN_KILL_RULE"],
   what: "review-core.mjs's specialist prompt (opening `Review PR #${pr} (branch ${branch}) for: `, labelled `review:`)",
-})(7, "feature/x", { key: "correctness", prompt: "does it do what it says" }, SNAP, "/repo/.worktrees/7-x", null, () => "SHARED RUN NOTE", {}, "correctness", () => "READ RULES", () => null, () => "TEST ENVIRONMENT", () => "COPY RULE");
+})(7, "feature/x", { key: "correctness", prompt: "does it do what it says" }, SNAP, "/repo/.worktrees/7-x", null, () => "SHARED RUN NOTE", {}, "correctness", () => "READ RULES", () => null, () => "TEST ENVIRONMENT", () => "COPY RULE", "PATTERN KILL RULE");
 
 const refuter = promptRenderer({
   file: FILE,
   start: "`Try to REFUTE this finding from PR #",
   end: "{ label: `verify:",
-  scope: ["pr", "f", "snap", "stats", "d", "i", "fi", "readRules", "usableDiff", "environmentNote", "testCmd", "KILL_RULES", "copyRule"],
+  scope: ["pr", "f", "snap", "stats", "d", "i", "fi", "readRules", "usableDiff", "environmentNote", "testCmd", "KILL_RULES", "copyRule", "PATTERN_KILL_RULE"],
   what: "review-core.mjs's refuter prompt (opening `Try to REFUTE this finding from PR #`, labelled `verify:`)",
-})(7, { claim: "the guard fails open", file: "a.js", line: 12, evidence: "line 12 has no else" }, SNAP, null, { key: "correctness" }, 0, 0, () => "READ RULES", () => null, () => "TEST ENVIRONMENT", "node --test", "KILL RULES", () => "COPY RULE");
+})(7, { claim: "the guard fails open", file: "a.js", line: 12, evidence: "line 12 has no else" }, SNAP, null, { key: "correctness" }, 0, 0, () => "READ RULES", () => null, () => "TEST ENVIRONMENT", "node --test", "KILL RULES", () => "COPY RULE", "PATTERN KILL RULE");
 
 const snapshot = promptRenderer({
   file: FILE,
