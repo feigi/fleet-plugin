@@ -23,6 +23,7 @@ import { encodeProjectDir } from "../plugin/scripts/member-record.mjs";
 import { COLUMNS } from "../plugin/scripts/tier-outcomes.mjs";
 import { scratchRoot } from "../plugin/scripts/fleet-dir.mjs";
 import { inertVerdict } from "../plugin/scripts/finisher-scope.mjs";
+import { commitAndPr } from "../plugin/scripts/closeout.mjs";
 
 const PLUGIN = fileURLToPath(new URL("../plugin/", import.meta.url));
 const REAL_SCRIPTS = join(PLUGIN, "scripts");
@@ -683,6 +684,23 @@ test("finish: nothing outside the allowlist is ever staged — a recipe, a trans
   assert.deepEqual(git(f.repo, "show", "--name-only", "--format=", BRANCH).split("\n").sort(), METRICS, "the metrics files alone");
   for (const rel of strays) assert.match(r.stdout, new RegExp(`not staged, not a run record isRunRecord\\(\\) allows: ${rel.replaceAll(".", "\\.")}`), rel);
   assert.equal(readFileSync(join(f.repo, "README"), "utf8"), "x\n", "the symlink's target is untouched");
+});
+
+test("commitAndPr switches back to main when the flow throws on its branch", () => {
+  const f = fixture();
+  git(f.repo, "config", "user.name", "t");
+  git(f.repo, "config", "user.email", "t@example.com");
+  mkdirSync(join(f.repo, "docs", "metrics", "runs", STAMP), { recursive: true });
+  writeFileSync(join(f.repo, "docs", "metrics", "runs", STAMP, "ledger.md"), "# ledger\n");
+  // The first save records the branch it cut; the second, after the push, is on the branch.
+  let saves = 0;
+  const save = () => {
+    if (++saves === 2) throw new Error("receipt write failed");
+  };
+  const state = { branch: null, pr: null, pin: null, rebase: null };
+  assert.throws(() => commitAndPr({ cwd: f.repo, given: "chore/x", stem: "chore/x-", title: "t", tsvs: [], rebase: false, state, save }), /receipt write failed/);
+  assert.equal(saves, 2, "the throw came from the save on the branch");
+  assert.equal(git(f.repo, "branch", "--show-current"), "main");
 });
 
 test("finish: the branch letter suffix increments past a dated name taken locally and one taken only on origin", () => {

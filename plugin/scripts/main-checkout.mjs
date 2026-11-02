@@ -56,15 +56,17 @@
 // Compared like any other path, the first append would hold every
 // dispatching row for the rest of the run, and clearing it with `--record`
 // after every ruling would certify whatever stray write landed beside it.
-// So `snapshot()` leaves exactly those three paths out, for the reason
-// instruments.sh leaves `docs/metrics/` out of its pin. The same holds for the
-// run records and review evidence the close-out and phase 0's catch-up copy
-// into `docs/metrics/runs/` and `docs/metrics/reviews/` and commit on a
-// branch, which appear in the work tree and leave it again when the checkout
-// switches back to main: a path run-records.mjs's isRunRecord() allows is left
-// out too. Named files and one allowlisted shape, not the directory: anything
-// else under `docs/metrics/` is still a stray write. The price: a member's
-// leaked write to one of those paths goes unseen.
+// So `snapshot()` leaves those three paths out, for the reason instruments.sh
+// leaves `docs/metrics/` out of its pin.
+// The same holds for the run records and review evidence the close-out and
+// phase 0's catch-up copy into `docs/metrics/runs/` and `docs/metrics/reviews/`
+// and commit on a branch, which appear in the work tree and leave it again
+// when the checkout switches back to main: a path run-records.mjs's
+// isRunRecord() allows is left out too, while it is the regular file with no
+// executable bit a commit carries. A symlink or an executable there, which
+// the commit refuses, is still audited. Named files and one allowlisted shape,
+// not the directory: anything else under `docs/metrics/` is still a stray
+// write. The price: a member's leaked write to one of those paths goes unseen.
 //
 // FOUR ANSWERS, worktree-audit.sh's three plus the baseline's own refusal:
 //   clean    — the porcelain entries and hashes equal the baseline's, and HEAD
@@ -129,12 +131,12 @@ import { join } from "node:path";
 import { isCLI } from "./is-cli.mjs";
 import { makeDie, defineFlags } from "./arg.mjs";
 import { gitEnv, mainCheckoutDirFromGitCommonDir } from "./git-env.mjs";
-import { isRunRecord } from "./run-records.mjs";
+import { isPlainFile, isRunRecord } from "./run-records.mjs";
 
 export const BASELINE_FILE = "main-checkout.sha";
 export const RECORD_COMMAND = "~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run main-checkout.mjs --record";
 const RUN_METRICS = new Set(["docs/metrics/tier-outcomes.tsv", "docs/metrics/member-outcomes.tsv", "docs/metrics/ticket-features.tsv"]);
-const isRunBookkeeping = (rel) => RUN_METRICS.has(rel) || isRunRecord(rel);
+const isRunBookkeeping = (root, rel) => RUN_METRICS.has(rel) || (isRunRecord(rel) && isPlainFile(join(root, rel)));
 // Any change to an entry's hash or to a line's format bumps VERSION: a
 // baseline an older plugin wrote then reads `outdated` (re-record) and one a
 // newer plugin wrote reads `newer`, never as a baseline this code wrote.
@@ -248,7 +250,7 @@ function nestedHash(abs, env) {
  * `--no-renames` so every entry names exactly one path.
  */
 export function snapshot(root, env = process.env) {
-  return entriesAt(root, env, isRunBookkeeping);
+  return entriesAt(root, env, (rel) => isRunBookkeeping(root, rel));
 }
 
 // `snapshot` of the repository at `root`, leaving out each path `skip` accepts.
@@ -260,8 +262,8 @@ function entriesAt(root, env, skip) {
     if (!line) continue;
     if (line.length < 4 || line[2] !== " ") return { ok: false, why: `git status printed an entry it does not document: ${JSON.stringify(line)}` };
     const rel = line.slice(3);
-    if (skip(rel)) continue;
     try {
+      if (skip(rel)) continue;
       entries.set(line, hashPath(root, rel, env));
     } catch (e) {
       return { ok: false, why: `cannot hash ${rel}: ${e?.code ?? e?.message ?? e}` };

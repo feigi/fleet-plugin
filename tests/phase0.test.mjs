@@ -327,6 +327,45 @@ test("catch-up: a run that never closed out has its ledger archive, receipt and 
   assert.deepEqual(order.slice(order.indexOf("rotate"), order.indexOf("rotate") + 3), ["rotate", "gh", "reclaim-scratch"], "the catch-up opens its PR after the rotation and before the reclaim");
 });
 
+// The identity a committing catch-up needs: a CI runner has none.
+const IDENTITY = { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.com", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.com" };
+
+test("catch-up: a run that closed out leaves its records to this run's close-out and opens no PR", () => {
+  const f = fixture();
+  const stamp = "2026-11-01T172207Z";
+  const fleet = join(f.repo, ".fleet");
+  mkdirSync(fleet, { recursive: true });
+  writeFileSync(join(fleet, `ledger.${stamp}.md`), "# Fleet run ledger\n");
+  writeFileSync(join(fleet, `phase0.${stamp}.json`), `${JSON.stringify({ run: null, session: "s", steps: {} })}\n`);
+  writeFileSync(join(fleet, `closeout.${stamp}.json`), "{}\n");
+  const r = f.run(null, { env: IDENTITY });
+  assert.equal(r.status, 0, r.err + r.stdout);
+  const step = f.receipt().steps["catch-up"];
+  assert.equal(step.status, "ok");
+  assert.match(step.output, /nothing to catch up: every run whose records main lacks closed out, so this run's close-out commits them$/);
+  const ghCalls = readFileSync(join(f.stubs, "gh.calls"), "utf8");
+  assert.equal(ghCalls.includes("pr create"), false, ghCalls);
+  assert.equal(git(f.repo, "branch", "--list", "chore/run-records-*"), "", "no branch cut");
+  assert.equal(git(f.repo, "branch", "--show-current"), "main");
+});
+
+test("catch-up: a PR that fails to open after the push names the pushed branch, never 'not committed'", () => {
+  const f = fixture();
+  const stamp = "2026-11-01T172207Z";
+  const fleet = join(f.repo, ".fleet");
+  mkdirSync(fleet, { recursive: true });
+  writeFileSync(join(fleet, `ledger.${stamp}.md`), "# Fleet run ledger\n");
+  writeFileSync(join(f.stubs, "gh.fail"), "");
+  f.run(null, { env: IDENTITY });
+  const step = f.receipt().steps["catch-up"];
+  assert.equal(step.status, "ok", step.output);
+  const m = /^pushed (chore\/run-records-\d{8}) at ([0-9a-f]{40}), but no PR is open for it: gh pr create failed: .*gh boom/ms.exec(step.output);
+  assert.ok(m, step.output);
+  assert.match(git(f.repo, "ls-remote", "--heads", "origin", m[1]), new RegExp(`^${m[2]}\\s`), "the branch named is on origin at the head named");
+  assert.equal(step.output.includes("not committed"), false, step.output);
+  assert.equal(git(f.repo, "branch", "--show-current"), "main");
+});
+
 test("every flag reaches the step that owns it", () => {
   const f = fixture();
   const spend = join(f.dir, "spend");
@@ -1105,7 +1144,7 @@ test("a same-session run after `closeout.mjs finish` starts at alarm and rotates
   // after the stop, which has no PR to merge here.
   const finished = readFileSync(f.receiptPath, "utf8");
   const at = new Date().toISOString();
-  const done = Object.fromEntries(["drain", "release", "tick", "scrape", "tier-outcomes", "metrics", "commit-and-pr", "merge"].map((n) => [n, { status: "ok", at, output: "" }]));
+  const done = Object.fromEntries(["drain", "release", "tick", "scrape", "tier-outcomes", "metrics", "gather", "commit-and-pr", "merge"].map((n) => [n, { status: "ok", at, output: "" }]));
   writeFileSync(join(f.repo, ".fleet", "closeout.json"), JSON.stringify({ reason: "wrap up", begun: at, steps: done }));
   const finish = spawnSync(process.execPath, [join(SCRIPTS, "closeout.mjs"), "finish", "--reason", "wrap up"], {
     cwd: f.repo, encoding: "utf8", env: { ...GIT_ENV, HOME: f.home, PATH: `${join(f.dir, "bin")}:${process.env.PATH}`, PH0_STUBS: f.stubs },

@@ -43,7 +43,9 @@
 //                   `phase0.<stamp>.json`, `closeout.<stamp>.json`) into
 //                   `docs/metrics/runs/<stamp>/` with its `plugin-version`, and
 //                   every review's `review.json` and Charges file under the
-//                   scratch root into `docs/metrics/reviews/<pr>/<run>/`. A
+//                   scratch root into `docs/metrics/reviews/<pr>/<run>/`. The
+//                   phase-0 receipt's `recipe` step output is withheld, since
+//                   a Recipe command can carry an environment assignment. A
 //                   run's own archives exist only once the next run has
 //                   rotated, so this commits the runs before it; a file main
 //                   already holds comes back byte for byte and adds nothing.
@@ -169,7 +171,7 @@ import { isCLI } from "./is-cli.mjs";
 import { CLOSEOUT_RECEIPT, RECEIPT, RECEIPT_HELD, memberTokens, rowPr, isOmpSessionDirName } from "./ledger-grammar.mjs";
 import { encodeProjectDir } from "./member-record.mjs";
 import { tickCaps } from "./phase0-receipt.mjs";
-import { RECORD_DIRS, gather, recordChanges } from "./run-records.mjs";
+import { RECORD_DIRS, gather, recordChanges, refusedLine } from "./run-records.mjs";
 
 const NAME = "closeout";
 const SCRIPTS = dirname(fileURLToPath(import.meta.url));
@@ -364,7 +366,7 @@ function stepGather({ fleetDir }) {
     return failed(`cannot name the scratch root: ${e.message}`);
   }
   try {
-    return ok(gather({ cwd: wt.cwd, fleetDir, scratch }).lines.join("\n"));
+    return ok(gather({ cwd: wt.cwd, fleetDir, scratch }).join("\n"));
   } catch (e) {
     return failed(`gather failed: ${e.message}`);
   }
@@ -433,41 +435,42 @@ function rebaseOntoMain(git) {
 }
 
 // Everything the commit flow does while the checkout is on its branch; the
-// caller switches back to main whatever this returns. `tsvs` are the metrics
-// files the commit carries beside the record files; `rebase` false skips the
-// fetch and the replay, for a caller whose branch was cut from an
-// `origin/main` it has just fetched and whose work tree may hold changes the
-// commit leaves out.
+// caller switches back to main whatever this returns or throws. `tsvs` are
+// the metrics files the commit carries beside the record files; `rebase`
+// false skips the fetch and the replay, for a caller whose branch was cut from
+// an `origin/main` it has just fetched and whose work tree may hold changes
+// the commit leaves out.
 function onBranch({ git, cwd, title, tsvs, rebase, state, save }) {
   const records = recordChanges(git, cwd);
   if (records.error) return failed(records.error);
-  const refusedLines = records.refused.map((p) => `not staged, not a run record isRunRecord() allows: ${p}`);
+  const refusedLines = records.refused.map(refusedLine);
+  const fail = (line) => failed([...refusedLines, line].join("\n"));
   if (records.allowed.length > 0) {
     const add = git(["add", "--", ...records.allowed]);
-    if (add.status !== 0) return failed([...refusedLines, `git add failed: ${detail(add)}`].join("\n"));
+    if (add.status !== 0) return fail(`git add failed: ${detail(add)}`);
   }
   const paths = [...tsvs, ...records.allowed];
   if (paths.length > 0) {
     const dirty = git(["status", "--porcelain", "--", ...paths]);
-    if (dirty.status !== 0) return failed([...refusedLines, `git status failed: ${detail(dirty)}`].join("\n"));
+    if (dirty.status !== 0) return fail(`git status failed: ${detail(dirty)}`);
     if (dirty.stdout !== "") {
       const commit = git(["commit", "-m", title, "--", ...paths]);
-      if (commit.status !== 0) return failed([...refusedLines, `git commit failed: ${detail(commit)}`].join("\n"));
+      if (commit.status !== 0) return fail(`git commit failed: ${detail(commit)}`);
     }
   }
   const rebased = rebase ? rebaseOntoMain(git) : { leftOpen: null };
-  if (rebased.error) return failed([...refusedLines, rebased.error].join("\n"));
+  if (rebased.error) return fail(rebased.error);
   const ahead = git(["rev-list", "--count", "origin/main..HEAD"]);
-  if (ahead.status !== 0) return failed([...refusedLines, `git rev-list --count origin/main..HEAD failed: ${detail(ahead)}`].join("\n"));
-  if (ahead.stdout === "0") return failed([...refusedLines, `nothing to commit: ${[...tsvs, ...RECORD_DIRS].join(", ")} are unchanged`].join("\n"));
+  if (ahead.status !== 0) return fail(`git rev-list --count origin/main..HEAD failed: ${detail(ahead)}`);
+  if (ahead.stdout === "0") return fail(`nothing to commit: ${[...tsvs, ...RECORD_DIRS].join(", ")} are unchanged`);
   const head = git(["rev-parse", "HEAD"]);
-  if (head.status !== 0) return failed([...refusedLines, `git rev-parse HEAD failed: ${detail(head)}`].join("\n"));
+  if (head.status !== 0) return fail(`git rev-parse HEAD failed: ${detail(head)}`);
 
   // The lease is the head this step last pushed, never what the fetch above
   // just read: an empty one expects the branch absent from origin.
   const lease = `--force-with-lease=refs/heads/${state.branch}:${state.pin ?? ""}`;
   const push = git(["push", "-u", lease, "origin", state.branch], NETWORK_TIMEOUT_MS);
-  if (push.status !== 0) return failed([...refusedLines, `git push failed: ${detail(push)}`].join("\n"));
+  if (push.status !== 0) return fail(`git push failed: ${detail(push)}`);
   state.pin = head.stdout;
   state.rebase = rebased.leftOpen;
   save();
@@ -475,10 +478,10 @@ function onBranch({ git, cwd, title, tsvs, rebase, state, save }) {
 
   if (state.pr !== null) return ok([...lines, `PR ${state.pr} already opened for ${state.branch}`].join("\n"));
   const counts = rowCounts(git, tsvs);
-  if (counts.error) return failed([...refusedLines, counts.error].join("\n"));
+  if (counts.error) return fail(counts.error);
   const body = `${title}\n\nRows changed:\n${counts.lines.join("\n")}\n`;
   const pr = run("gh", ["pr", "create", "--head", state.branch, "--title", title, "--label", "patch", "--body", body], { cwd, env: { GH_REPO: "" }, timeoutMs: NETWORK_TIMEOUT_MS });
-  if (pr.status !== 0) return failed([...refusedLines, `gh pr create failed: ${detail(pr)}`].join("\n"));
+  if (pr.status !== 0) return fail(`gh pr create failed: ${detail(pr)}`);
   state.pr = pr.stdout.split("\n").at(-1);
   save();
   return ok([...lines, `PR ${state.pr} opened on ${state.branch}`].join("\n"));
@@ -495,9 +498,9 @@ function workTree() {
  * checkout at `cwd`: switch to `state.branch`, or cut one (`given`, else
  * pickBranch() over `stem`) when it is null, stage and commit the allowed
  * record files and `tsvs` under `title`, rebase when `rebase` is true, push
- * with a lease, open the PR, and switch back to main. `state` carries
- * `{branch, pr, pin, rebase}` across calls and `save()` records it. The
- * result is a step's `{status, output}`.
+ * with a lease, open the PR, and switch back to main, a throw on the branch
+ * included. `state` carries `{branch, pr, pin, rebase}` across calls and
+ * `save()` records it. The result is a step's `{status, output}`.
  */
 export function commitAndPr({ cwd, given = null, stem, title, tsvs, rebase, state, save }) {
   const git = (args, timeoutMs) => run("git", args, { cwd, timeoutMs });
@@ -512,9 +515,13 @@ export function commitAndPr({ cwd, given = null, stem, title, tsvs, rebase, stat
     const back = git(["switch", state.branch]);
     if (back.status !== 0) return failed(`git switch ${state.branch} failed: ${detail(back)}`);
   }
-  const result = onBranch({ git, cwd, title, tsvs, rebase, state, save });
-  const main = git(["switch", "main"]);
-  if (main.status !== 0) return failed([result.status === "ok" ? null : result.output, `git switch main failed: ${detail(main)}`].filter(Boolean).join("\n"));
+  let result = null;
+  try {
+    result = onBranch({ git, cwd, title, tsvs, rebase, state, save });
+  } finally {
+    const main = git(["switch", "main"]);
+    if (main.status !== 0 && result !== null) result = failed([result.status === "ok" ? null : result.output, `git switch main failed: ${detail(main)}`].filter(Boolean).join("\n"));
+  }
   return result;
 }
 

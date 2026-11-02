@@ -134,13 +134,16 @@ before the commit.** The `gather` step of `closeout.mjs finish` copies, from
 and a `plugin-version` line from the version the phase-0 receipt recorded —
 and, from the scratch root, every review's `review.json` into
 `docs/metrics/reviews/<pr>/<run>/`, with each Charges file
-(`dispositions-fix-pr-<pr>[-x].json`) beside the review run it answers. A run's
-own archives exist only once the next run has rotated, so the records it
-carries are the earlier runs'; a file main already holds comes back byte for
-byte and adds nothing. A Charges file that names no review run is not
-gathered, and the step's output names it. A directory it cannot list or a
-file it cannot copy fails the step, so `commit-and-pr` stays pending: fix the
-cause and run `finish` again.
+(`dispositions-fix-pr-<pr>[-x].json`) beside the review run it answers. The
+phase-0 receipt goes in with its `recipe` step's output withheld, because that
+output is the Recipe's command lines and a command can carry an environment
+assignment; a phase-0 archive that cannot be read as JSON is not gathered, and
+the step's output names it. A run's own archives exist only once the next run
+has rotated, so the records it carries are the earlier runs'; a file main
+already holds comes back byte for byte and adds nothing. A Charges file that
+names no review run is not gathered, and the step's output names it. A
+directory it cannot list or a file it cannot copy fails the step, so
+`commit-and-pr` stays pending: fix the cause and run `finish` again.
 
 ## Commit the metrics files and open a PR
 

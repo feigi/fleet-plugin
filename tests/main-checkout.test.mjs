@@ -325,6 +325,19 @@ test("the run's own bookkeeping is not a stray write: the controller's metrics a
   assert.deepEqual(check(dir).changed, ["docs/metrics/stray.tsv", "tracked.txt"]);
 });
 
+test("a run record the commit carries is the run's own bookkeeping; a symlink or an executable at a record's name is still audited", (t) => {
+  const dir = repo(t);
+  record(dir);
+  const runs = join(dir, "docs", "metrics", "runs", "2026-11-01T172207Z");
+  mkdirSync(runs, { recursive: true });
+  writeFileSync(join(runs, "ledger.md"), "# ledger\n");
+  writeFileSync(join(runs, "closeout.json"), "{}\n");
+  assert.equal(check(dir).state, "clean", "the gather's plain copies held the run");
+  chmodSync(join(runs, "closeout.json"), 0o755);
+  symlinkSync("../../../../tracked.txt", join(runs, "phase0.json"));
+  assert.deepEqual(check(dir).changed, ["docs/metrics/runs/2026-11-01T172207Z/closeout.json", "docs/metrics/runs/2026-11-01T172207Z/phase0.json"]);
+});
+
 test("a write inside .worktrees/<x>/ is clean, and the check run from that worktree still answers for the main checkout", (t) => {
   const dir = repo(t);
   git(dir, "worktree", "add", "-q", "-b", "impl/1", join(dir, ".worktrees", "1-x"));

@@ -142,6 +142,8 @@ export function classifyEntry(path, status, oldMode, newMode) {
   if (mode !== null) return { class: null, why: mode };
   if (METRICS.includes(path)) return { class: "data", why: "run metrics file" };
   if (isRunRecord(path)) {
+    // No name isRunRecord() accepts is on the prompt surface today; the check
+    // stays so a record still has to pass it should either rule ever widen.
     const surface = promptSurface(path);
     return surface === null ? { class: "data", why: "run record or review evidence file" } : { class: null, why: surface };
   }

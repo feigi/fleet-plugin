@@ -397,16 +397,21 @@ every run.** The `catch-up` step copies every run archive in `.fleet/` — the
 previous run's, which the rotation has just filed, and any earlier one — into
 `docs/metrics/runs/<UTC stamp>/`, and every review's evidence under the
 scratch root into `docs/metrics/reviews/<pr>/<run>/`, the same gather the
-close-out runs (references/close-out.md). When main lacks any of those files,
-it commits them alone on a branch of their own in this checkout, pushes it,
-opens a PR and switches back to `main`; the metrics files' changes stay in
-the work tree, out of that commit. The PR is an Owned PR, so the fold-in below
-queues it. A run whose close-out never ran therefore loses nothing: its
-ledger, receipts and version reach main here, and its review evidence is
-still in scratch when the reclaim runs, which keeps a merged PR's evidence
-until main holds it. The step never stops the run but for a checkout it
-could not switch back to `main`; a commit it could not make is named in its
-output, and the close-out gathers those files again.
+close-out runs (references/close-out.md). When main lacks a record of a run
+that never closed out — no `.fleet/closeout.<UTC stamp>.json` beside its
+ledger archive — it commits every file main lacks alone on a branch of its own
+in this checkout, pushes it, opens a PR and switches back to `main`; the
+metrics files' changes stay in the work tree, out of that commit. The PR is an
+Owned PR, so the fold-in below queues it. A run that closed out leaves its
+records to this run's close-out, which gathers them again, so the step opens
+no second PR carrying the same files and its output says so. A run whose
+close-out never ran therefore loses nothing: its ledger, receipts and version
+reach main here, and its review evidence is still in scratch when the reclaim
+runs, which keeps a merged PR's evidence until main holds it. The step never
+stops the run but for a checkout it could not switch back to `main`; a commit
+it could not make is named in its output, with how far it got — a branch
+pushed with no PR open for it is named so — and the close-out gathers those
+files again.
 
 ## Reclaim scratch
 

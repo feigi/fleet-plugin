@@ -71,15 +71,21 @@
 //                 `.fleet/` (the previous run's, which the rotation has just
 //                 filed, and any earlier one) and every review evidence file
 //                 under the scratch root into `docs/metrics/runs/` and
-//                 `docs/metrics/reviews/`; when that leaves a file main does
-//                 not hold, closeout.mjs's commitAndPr() commits those files
+//                 `docs/metrics/reviews/`; when that leaves main lacking a
+//                 record of a run that never closed out — no
+//                 `closeout.<stamp>.json` beside its ledger archive —
+//                 closeout.mjs's commitAndPr() commits every file main lacks
 //                 alone on `chore/run-records-<UTC date>` (lettered while
 //                 taken), pushes it and opens a PR, then switches back to
-//                 main. Before the reclaim, so a close-out that never ran
-//                 loses nothing: the reclaim keeps a merged PR's evidence
-//                 until main holds it. Recorded, and never fails the run but
-//                 for a checkout it could not switch back to main; what it
-//                 could not commit, the close-out gathers again.
+//                 main. A run that closed out leaves its records to this
+//                 run's close-out, which gathers them again, so the catch-up
+//                 opens no second PR carrying the same files. Before the
+//                 reclaim, so a close-out that never ran loses nothing: the
+//                 reclaim keeps a merged PR's evidence until main holds it.
+//                 Recorded, and never fails the run but for a checkout it
+//                 could not switch back to main; what it could not commit,
+//                 the close-out gathers again, and its output says how far
+//                 a failed commit got — a branch pushed with no PR included.
 //   reclaim       `reclaim-scratch.mjs --root <scratch> --after-rotate --apply`,
 //                 then `reclaim-scratch.mjs --siblings --root <scratch> --apply`
 //                 for the other keys under the scratch parent, which runs
@@ -201,7 +207,7 @@ import { OBJECTIVES, RECEIPT, RECEIPT_HELD, archiveStamp, receiptArchiveName, ro
 import { ancestry, controllerOf, processSource, ProcUnreadable } from "./proc.mjs";
 import { IN_FLIGHT_DEFAULT, OBJECTIVE_DEFAULT } from "./phase0-receipt.mjs";
 import { readRecipe } from "./recipe-read.mjs";
-import { gather, recordChanges } from "./run-records.mjs";
+import { gather, recordChanges, refusedLine, unclosedRecords } from "./run-records.mjs";
 
 const NAME = "phase0";
 const SCRIPTS = dirname(fileURLToPath(import.meta.url));
@@ -386,29 +392,39 @@ function rotate(ctx) {
 }
 
 // The previous runs' archives and the review evidence in scratch, committed on
-// a branch of their own when main does not hold them yet. The work tree may
-// hold the metrics refresh's rows, which the commit leaves out, so the branch
-// is cut from the main the fast-forward just brought level and is not
-// rebased.
+// a branch of their own when main lacks a record of a run that never closed
+// out. A run that closed out leaves its records to the next close-out, this
+// run's, which gathers everything again, so committing them here too would
+// open a second PR carrying the same files. The work tree may hold the metrics
+// refresh's rows, which the commit leaves out, so the branch is cut from the
+// main the fast-forward just brought level and is not rebased.
 function catchUp({ cwd, fleetDir, scratch }) {
   let gathered;
   try {
-    gathered = gather({ cwd, fleetDir, scratch }).lines;
+    gathered = gather({ cwd, fleetDir, scratch });
   } catch (e) {
     return ok(`not gathered: ${e.message} — the close-out gathers them`);
   }
   const git = (args, timeoutMs) => run("git", args, { cwd, timeoutMs });
   const records = recordChanges(git, cwd);
   if (records.error) return ok([...gathered, `not committed: ${records.error} — the close-out commits them`].join("\n"));
+  const refused = records.refused.map(refusedLine);
   if (records.allowed.length === 0) {
-    return ok([...gathered, ...records.refused.map((p) => `not staged, not a run record isRunRecord() allows: ${p}`), "nothing to catch up: main holds every run record and review evidence file"].join("\n"));
+    return ok([...gathered, ...refused, "nothing to catch up: main holds every run record and review evidence file"].join("\n"));
+  }
+  if (unclosedRecords(fleetDir, records.allowed).length === 0) {
+    return ok([...gathered, ...refused, "nothing to catch up: every run whose records main lacks closed out, so this run's close-out commits them"].join("\n"));
   }
   const state = { branch: null, pr: null, pin: null, rebase: null };
   const result = commitAndPr({ cwd, stem: "chore/run-records-", title: "Run records: phase 0 catch-up", tsvs: [], rebase: false, state, save: () => {} });
   if (result.status === "ok") return ok([...gathered, result.output].join("\n"));
-  const head = run("git", ["symbolic-ref", "-q", "HEAD"], { cwd });
+  const head = git(["symbolic-ref", "-q", "HEAD"]);
   if (head.status === 0 && head.stdout === "refs/heads/main") {
-    return ok([...gathered, `not committed: ${result.output} — the close-out commits them`].join("\n"));
+    // How far the flow got before it failed, from what it recorded on the way.
+    const left = state.pin !== null
+      ? `pushed ${state.branch} at ${state.pin}, but no PR is open for it`
+      : state.branch !== null ? `not pushed; whatever was committed stays on the local branch ${state.branch}` : "not committed";
+    return ok([...gathered, `${left}: ${result.output} — the close-out commits them`].join("\n"));
   }
   return failed([...gathered, result.output, "the checkout is not back on main — switch it to main before the run goes on"].join("\n"));
 }
