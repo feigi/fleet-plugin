@@ -96,6 +96,14 @@ would anchor and contaminate the label.
    issue number, blank for a ticket that is no Slice; optional on read the
    same way. `slice-fill.mjs` sets it on the rows of a corpus written
    without it.*
+   *Amended (#4159): `named_paths named_lines dirs title plugin_version`
+   are appended after `parent` (25 columns), each optional on read the same
+   way. `named_paths` is the paths the brief names, space-separated as
+   named; `named_lines` one entry per path, aligned — the file's line
+   count, `dir` for a directory, `-` for a path that does not exist or lies
+   outside the checkout; `dirs` the number of distinct directories they
+   span (those three are blank when the brief names no path); `title` the
+   issue's title; `plugin_version` the install's `package.json` `version`.*
 2. **No `fleet-router` member.** `sizing_pre` on B Pulls comes from one
    `judge()` call in the controller's eval cell (measured: resolves to
    `anthropic/claude-haiku-4-5`, $0.0002, 0.6 s, one-hot probabilities ⇒
