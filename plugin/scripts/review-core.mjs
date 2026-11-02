@@ -199,6 +199,15 @@ export const EVIDENCE_LINE_RULE =
   "**Evidence line:** every kill and every valid red you claim carries one line in the claim's own free-text field: `red: <cmd> → exit N, fail K incl <test>; baseline: <cmd> → exit 0, <test> pass`. A failing-test finding filed off the review's shared run carries the `red:` half alone.";
 const KILL_RULES = [VALID_RED_RULE, NARROWED_RUN_RULE, KILL_RULE, EVIDENCE_LINE_RULE].join("\n\n");
 
+// The pattern-kill ban every specialist and refuter prompt carries, one source
+// for both dispatches. It is the implementer, fix-applier and finisher briefs'
+// own sentence, word for word: the review specialists carried none, and one
+// ran a machine-wide `pkill -f 'node --test'` that SIGTERMed another PR's
+// shared test run (run-team's references/isolation.md, "A pattern kill
+// reaches siblings").
+export const PATTERN_KILL_RULE =
+  "Never run `pkill -f` on a pattern: members share one process table, so a pattern such as a test file's name matches every member's run, not only yours. Clearing your own leftover process needs its PID; report a stalled run to the controller instead.";
+
 // --- Dimension catalog --------------------------------------------------
 // No dimension carries a `model`/`effort` field —
 // dispatch tier lives ONLY in each fleet-owned agent definition's own
@@ -1416,6 +1425,8 @@ ${sharedRunNote(sharedRun, failureOwner, d.key)}
 
 ${environmentNote(snap)}
 
+${PATTERN_KILL_RULE}
+
 Scratch files go in ${snap.runRoot}/${d.key}/ and nowhere else. Chain the
 directory change into the command, \`cd "$D" && git …\`, never
 \`cd "$D"; git …\`, so a failed \`cd\` cannot leave a \`git\` command running in the
@@ -1496,6 +1507,8 @@ decide it and nothing else:
 ${KILL_RULES}
 
 ${copyRule(snap)}
+
+${PATTERN_KILL_RULE}
 
 Abstain when your own check could produce neither a valid red nor a valid
 green: set \`inconclusive\` to true and name the runs in \`reason\`, each with

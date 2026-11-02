@@ -262,6 +262,15 @@ where the controller itself runs from.
   killed a `node --test` over two test files that was not
   its own.
 
+Review specialists and refuters are covered too: every specialist prompt and
+every refuter prompt `review-core.mjs` dispatches carries the same sentence the
+three briefs do, from one constant. They carried none, and measured: the
+tests-dimension specialist of one PR's review ran `pkill -f 'node --test'`, and
+the shared test run of another PR's review was SIGTERMed about five minutes
+into a command whose deadline was 3600 s — a cutoff that read as a cap until the
+specialist's own `pkill` was found. The run's output is the `Interrupted while
+running:` shape described below.
+
 Members report a stalled run to the controller instead of pattern-killing it,
 and the controller re-checks any measurement taken in the window.
 

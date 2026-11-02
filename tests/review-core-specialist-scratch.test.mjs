@@ -67,7 +67,7 @@ const TEMPLATE_END = "label: `review:";
 // they return is not under test here, and binding them keeps a render that
 // stops passing one from dropping a paragraph silently — it throws a
 // ReferenceError instead.
-const SCOPE = ["pr", "branch", "d", "snap", "worktree", "stats", "sharedRunNote", "sharedRun", "failureOwner", "readRules", "usableDiff", "environmentNote", "copyRule"];
+const SCOPE = ["pr", "branch", "d", "snap", "worktree", "stats", "sharedRunNote", "sharedRun", "failureOwner", "readRules", "usableDiff", "environmentNote", "copyRule", "PATTERN_KILL_RULE"];
 
 // `between` owns the bounded-slice extraction (and both failure messages);
 // only the backtick trim below is specific to a template literal and stays
@@ -97,6 +97,7 @@ const render = () =>
     () => null,
     () => "TEST ENVIRONMENT",
     () => "COPY RULE",
+    "PATTERN KILL RULE",
   );
 
 // The first of the two rules, in the prompt that was missing it. ONE
