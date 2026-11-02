@@ -177,6 +177,57 @@ test("(1) MERGED pr<M> and its dispositions files are removed, OPEN kept, CLOSED
   assert.equal(r.gh.length, 1, `expected one gh call for every number, got ${r.gh.length}`);
 });
 
+test("(1) a MERGED PR's review evidence is kept until origin/main holds it under docs/metrics/reviews/<M>/ — kept on a lookup that fails, removed once every file is there; a CLOSED PR's is not held", (t) => {
+  const f = fixture(t);
+  f.ledger();
+  f.states({ 41: PR("MERGED"), 42: PR("CLOSED") });
+  const run = "run-a1B2c3D4";
+  const charges = JSON.stringify({ run, entries: [] });
+  const review = f.file(`pr41/${run}/review.json`, 8);
+  const disp = f.file("dispositions-fix-pr-41.json", 8);
+  writeFileSync(disp, charges);
+  f.file(`pr42/${run}/review.json`);
+  writeFileSync(f.file("dispositions-fix-pr-42.json"), JSON.stringify({ run, entries: [] }));
+  const g = (...args) => {
+    const r = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: f.repo, env: GIT_ENV, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+  };
+  const onMain = (rels) => {
+    for (const [rel, text] of rels) {
+      mkdirSync(join(f.repo, dirname(rel)), { recursive: true });
+      writeFileSync(join(f.repo, rel), text);
+      g("add", rel);
+    }
+    g("commit", "-q", "--allow-empty", "-m", "close-out");
+    g("update-ref", "refs/remotes/origin/main", "HEAD");
+  };
+
+  // No origin/main at all: the lookup fails, and the evidence stays.
+  let r = f.run(["--root", f.root, "--apply"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(reasonOf(r.out.kept, join(f.root, "pr41")), /^PR #41 is MERGED, but whether origin\/main holds its review evidence cannot be told: git ls-tree/);
+  assert.match(reasonOf(r.out.kept, disp), /cannot be told/);
+  assert.ok(existsSync(review) && existsSync(disp));
+  assert.deepEqual(paths(r.out.removed), [join(f.root, "dispositions-fix-pr-42.json"), join(f.root, "pr42")], "a CLOSED PR keeps today's rule");
+
+  // origin/main holds none of it yet.
+  onMain([]);
+  r = f.run(["--root", f.root, "--apply"]);
+  assert.equal(reasonOf(r.out.kept, join(f.root, "pr41")), `PR #41 is MERGED, but origin/main does not hold its review evidence yet: docs/metrics/reviews/41/${run}/review.json`);
+  assert.equal(reasonOf(r.out.kept, disp), `PR #41 is MERGED, but origin/main does not hold its review evidence yet: docs/metrics/reviews/41/${run}/dispositions-fix-pr-41.json`);
+
+  // The review there, the Charges file not yet: only pr41/ goes.
+  onMain([[`docs/metrics/reviews/41/${run}/review.json`, "x"]]);
+  r = f.run(["--root", f.root, "--apply"]);
+  assert.deepEqual(paths(r.out.removed), [join(f.root, "pr41")]);
+  assert.ok(existsSync(disp), "the Charges file main does not hold yet stays");
+
+  onMain([[`docs/metrics/reviews/41/${run}/dispositions-fix-pr-41.json`, charges]]);
+  r = f.run(["--root", f.root, "--apply"]);
+  assert.deepEqual(paths(r.out.removed), [disp]);
+  assert.equal(r.out.failed.length, 0);
+});
+
 test("(1) more than 100 keyed numbers are asked of GitHub in batches of at most 100", (t) => {
   const f = fixture(t);
   f.ledger();

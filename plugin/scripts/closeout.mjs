@@ -38,13 +38,29 @@
 //                   The verdicts come from `tier-outcomes.mjs append`, which
 //                   works them out from the Charges; this script never writes one.
 //   metrics         `metrics-refresh.mjs`. Any non-zero exit is a failed step.
+//   gather          run-records.mjs's gather(): every run archive `ledger.mjs
+//                   rotate` left in `.fleet/` (`ledger.<stamp>.md`,
+//                   `phase0.<stamp>.json`, `closeout.<stamp>.json`) into
+//                   `docs/metrics/runs/<stamp>/` with its `plugin-version`, and
+//                   every review's `review.json` and Charges file under the
+//                   scratch root into `docs/metrics/reviews/<pr>/<run>/`. A
+//                   run's own archives exist only once the next run has
+//                   rotated, so this commits the runs before it; a file main
+//                   already holds comes back byte for byte and adds nothing.
+//                   A directory it cannot list or a file it cannot copy fails
+//                   the step.
 //   commit-and-pr   `git switch -c <branch>` (`--branch`, default
 //                   `chore/run-artifacts-<UTC date>`, suffixed `b`, `c`… while
-//                   that name exists locally or on origin), commit exactly the
-//                   three `docs/metrics/*.tsv` files, `git fetch origin`, `git
-//                   rebase origin/main`, push `-u` with a lease, `gh pr
-//                   create --label patch` with a body naming the reason and the
-//                   rows each file gained and lost, `git switch main`. The
+//                   that name exists locally or on origin), `git add` the
+//                   new and changed files under `docs/metrics/runs/` and
+//                   `docs/metrics/reviews/` that isRunRecord() allows, commit
+//                   exactly those and the three `docs/metrics/*.tsv` files,
+//                   `git fetch origin`, `git rebase origin/main`, push `-u`
+//                   with a lease, `gh pr
+//                   create --label patch` with a body naming the reason, the
+//                   rows each file gained and lost and the record files
+//                   added, `git switch main`. A file there that isRunRecord()
+//                   does not allow is never staged; the output names it. The
 //                   rebase is three-way, so rows `main` gained during the run
 //                   stay; one that conflicts or that git refuses is aborted, the
 //                   branch is pushed as it was, and the PR is opened all the
@@ -146,13 +162,14 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeDie, defineFlags } from "./arg.mjs";
-import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
+import { FleetDirUnresolvable, fleetFile, scratchRoot } from "./fleet-dir.mjs";
 import { inertVerdict } from "./finisher-scope.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { CLOSEOUT_RECEIPT, RECEIPT, RECEIPT_HELD, memberTokens, rowPr, isOmpSessionDirName } from "./ledger-grammar.mjs";
 import { encodeProjectDir } from "./member-record.mjs";
 import { tickCaps } from "./phase0-receipt.mjs";
+import { RECORD_DIRS, gather, recordChanges } from "./run-records.mjs";
 
 const NAME = "closeout";
 const SCRIPTS = dirname(fileURLToPath(import.meta.url));
@@ -334,12 +351,31 @@ function stepMetrics({ cwd }) {
   return r.status === 0 ? ok(r.stdout) : failed(`metrics-refresh.mjs failed: ${detail(r)}`);
 }
 
-// A name for the metrics branch: `--branch` as given, else the dated default,
+// Copies the run archives and the review evidence into the checkout, for the
+// commit step to stage.
+function stepGather({ fleetDir }) {
+  const wt = workTree();
+  if (wt.error) return failed(wt.error);
+  let scratch;
+  try {
+    scratch = scratchRoot({ cwd: wt.cwd });
+  } catch (e) {
+    if (!(e instanceof FleetDirUnresolvable)) throw e;
+    return failed(`cannot name the scratch root: ${e.message}`);
+  }
+  try {
+    return ok(gather({ cwd: wt.cwd, fleetDir, scratch }).lines.join("\n"));
+  } catch (e) {
+    return failed(`gather failed: ${e.message}`);
+  }
+}
+
+// A name for the branch: `--branch` as given, else `stem` and the UTC date,
 // lettered while the name is taken. A probe that fails to answer is no answer
 // at all, never "not taken".
-function pickBranch(git, given) {
+function pickBranch(git, given, stem) {
   if (given !== null) return { name: given };
-  const base = `chore/run-artifacts-${new Date().toISOString().slice(0, 10).replaceAll("-", "")}`;
+  const base = `${stem}${new Date().toISOString().slice(0, 10).replaceAll("-", "")}`;
   for (const suffix of ["", ..."bcdefghijklmnopqrstuvwxyz"]) {
     const name = base + suffix;
     const local = git(["show-ref", "--verify", "--quiet", `refs/heads/${name}`]);
@@ -351,11 +387,22 @@ function pickBranch(git, given) {
   return { error: `every lettered ${base} name is taken` };
 }
 
-// The rows each metrics file gained and lost on the branch, one TSV line a row.
-function rowCounts(git) {
-  const r = git(["diff", "--numstat", "origin/main...HEAD", "--", ...METRICS]);
-  if (r.status !== 0) return { error: `git diff --numstat failed: ${detail(r)}` };
-  return { lines: r.stdout.split("\n").filter(Boolean).map((l) => l.split("\t")).map(([added, removed, file]) => `- ${file}: +${added} -${removed}`) };
+// The rows each metrics file gained and lost on the branch, one TSV line a
+// row, then the record files it adds under each of RECORD_DIRS.
+function rowCounts(git, tsvs) {
+  const lines = [];
+  if (tsvs.length > 0) {
+    const r = git(["diff", "--numstat", "origin/main...HEAD", "--", ...tsvs]);
+    if (r.status !== 0) return { error: `git diff --numstat failed: ${detail(r)}` };
+    lines.push(...r.stdout.split("\n").filter(Boolean).map((l) => l.split("\t")).map(([added, removed, file]) => `- ${file}: +${added} -${removed}`));
+  }
+  for (const dir of RECORD_DIRS) {
+    const r = git(["diff", "--name-only", "--diff-filter=A", "origin/main...HEAD", "--", dir]);
+    if (r.status !== 0) return { error: `git diff --name-only -- ${dir} failed: ${detail(r)}` };
+    const added = r.stdout.split("\n").filter(Boolean).length;
+    if (added > 0) lines.push(`- ${dir}/: ${added} file(s) added`);
+  }
+  return { lines };
 }
 
 // Replays the branch's commit onto the `origin/main` just fetched, three-way,
@@ -385,42 +432,56 @@ function rebaseOntoMain(git) {
   return { leftOpen: `rebase refused: ${refused}` };
 }
 
-// Everything the step does while the checkout is on the metrics branch; the
-// caller switches back to main whatever this returns.
-function onBranch({ git, cwd, reason, receipt, save }) {
-  const dirty = git(["status", "--porcelain", "--", ...METRICS]);
-  if (dirty.status !== 0) return failed(`git status failed: ${detail(dirty)}`);
-  if (dirty.stdout !== "") {
-    const commit = git(["commit", "-m", `Closeout: ${reason}`, "--", ...METRICS]);
-    if (commit.status !== 0) return failed(`git commit failed: ${detail(commit)}`);
+// Everything the commit flow does while the checkout is on its branch; the
+// caller switches back to main whatever this returns. `tsvs` are the metrics
+// files the commit carries beside the record files; `rebase` false skips the
+// fetch and the replay, for a caller whose branch was cut from an
+// `origin/main` it has just fetched and whose work tree may hold changes the
+// commit leaves out.
+function onBranch({ git, cwd, title, tsvs, rebase, state, save }) {
+  const records = recordChanges(git, cwd);
+  if (records.error) return failed(records.error);
+  const refusedLines = records.refused.map((p) => `not staged, not a run record isRunRecord() allows: ${p}`);
+  if (records.allowed.length > 0) {
+    const add = git(["add", "--", ...records.allowed]);
+    if (add.status !== 0) return failed([...refusedLines, `git add failed: ${detail(add)}`].join("\n"));
   }
-  const rebased = rebaseOntoMain(git);
-  if (rebased.error) return failed(rebased.error);
+  const paths = [...tsvs, ...records.allowed];
+  if (paths.length > 0) {
+    const dirty = git(["status", "--porcelain", "--", ...paths]);
+    if (dirty.status !== 0) return failed([...refusedLines, `git status failed: ${detail(dirty)}`].join("\n"));
+    if (dirty.stdout !== "") {
+      const commit = git(["commit", "-m", title, "--", ...paths]);
+      if (commit.status !== 0) return failed([...refusedLines, `git commit failed: ${detail(commit)}`].join("\n"));
+    }
+  }
+  const rebased = rebase ? rebaseOntoMain(git) : { leftOpen: null };
+  if (rebased.error) return failed([...refusedLines, rebased.error].join("\n"));
   const ahead = git(["rev-list", "--count", "origin/main..HEAD"]);
-  if (ahead.status !== 0) return failed(`git rev-list --count origin/main..HEAD failed: ${detail(ahead)}`);
-  if (ahead.stdout === "0") return failed(`nothing to commit: ${METRICS.join(", ")} are unchanged`);
+  if (ahead.status !== 0) return failed([...refusedLines, `git rev-list --count origin/main..HEAD failed: ${detail(ahead)}`].join("\n"));
+  if (ahead.stdout === "0") return failed([...refusedLines, `nothing to commit: ${[...tsvs, ...RECORD_DIRS].join(", ")} are unchanged`].join("\n"));
   const head = git(["rev-parse", "HEAD"]);
-  if (head.status !== 0) return failed(`git rev-parse HEAD failed: ${detail(head)}`);
+  if (head.status !== 0) return failed([...refusedLines, `git rev-parse HEAD failed: ${detail(head)}`].join("\n"));
 
   // The lease is the head this step last pushed, never what the fetch above
   // just read: an empty one expects the branch absent from origin.
-  const lease = `--force-with-lease=refs/heads/${receipt.branch}:${receipt.pin ?? ""}`;
-  const push = git(["push", "-u", lease, "origin", receipt.branch], NETWORK_TIMEOUT_MS);
-  if (push.status !== 0) return failed(`git push failed: ${detail(push)}`);
-  receipt.pin = head.stdout;
-  receipt.rebase = rebased.leftOpen;
+  const lease = `--force-with-lease=refs/heads/${state.branch}:${state.pin ?? ""}`;
+  const push = git(["push", "-u", lease, "origin", state.branch], NETWORK_TIMEOUT_MS);
+  if (push.status !== 0) return failed([...refusedLines, `git push failed: ${detail(push)}`].join("\n"));
+  state.pin = head.stdout;
+  state.rebase = rebased.leftOpen;
   save();
-  const lines = [`pushed ${receipt.pin}`, ...(rebased.leftOpen === null ? [] : [rebased.leftOpen])];
+  const lines = [...refusedLines, `pushed ${state.pin}`, ...(rebased.leftOpen === null ? [] : [rebased.leftOpen])];
 
-  if (receipt.pr !== null) return ok([...lines, `PR ${receipt.pr} already opened for ${receipt.branch}`].join("\n"));
-  const counts = rowCounts(git);
-  if (counts.error) return failed(counts.error);
-  const body = `Closeout: ${reason}\n\nRows changed:\n${counts.lines.join("\n")}\n`;
-  const pr = run("gh", ["pr", "create", "--head", receipt.branch, "--title", `Closeout: ${reason}`, "--label", "patch", "--body", body], { cwd, env: { GH_REPO: "" }, timeoutMs: NETWORK_TIMEOUT_MS });
-  if (pr.status !== 0) return failed(`gh pr create failed: ${detail(pr)}`);
-  receipt.pr = pr.stdout.split("\n").at(-1);
+  if (state.pr !== null) return ok([...lines, `PR ${state.pr} already opened for ${state.branch}`].join("\n"));
+  const counts = rowCounts(git, tsvs);
+  if (counts.error) return failed([...refusedLines, counts.error].join("\n"));
+  const body = `${title}\n\nRows changed:\n${counts.lines.join("\n")}\n`;
+  const pr = run("gh", ["pr", "create", "--head", state.branch, "--title", title, "--label", "patch", "--body", body], { cwd, env: { GH_REPO: "" }, timeoutMs: NETWORK_TIMEOUT_MS });
+  if (pr.status !== 0) return failed([...refusedLines, `gh pr create failed: ${detail(pr)}`].join("\n"));
+  state.pr = pr.stdout.split("\n").at(-1);
   save();
-  return ok([...lines, `PR ${receipt.pr} opened on ${receipt.branch}`].join("\n"));
+  return ok([...lines, `PR ${state.pr} opened on ${state.branch}`].join("\n"));
 }
 
 // The work tree the command runs in, as `{ cwd }`, or `{ error }`.
@@ -429,27 +490,38 @@ function workTree() {
   return top.status === 0 ? { cwd: top.stdout } : { error: `not inside a git work tree: ${detail(top)}` };
 }
 
-function stepCommitAndPR({ reason, branch, receipt, save }) {
-  const wt = workTree();
-  if (wt.error) return failed(wt.error);
-  const { cwd } = wt;
+/**
+ * The commit flow the Close-out PR and phase 0's catch-up share, run in the
+ * checkout at `cwd`: switch to `state.branch`, or cut one (`given`, else
+ * pickBranch() over `stem`) when it is null, stage and commit the allowed
+ * record files and `tsvs` under `title`, rebase when `rebase` is true, push
+ * with a lease, open the PR, and switch back to main. `state` carries
+ * `{branch, pr, pin, rebase}` across calls and `save()` records it. The
+ * result is a step's `{status, output}`.
+ */
+export function commitAndPr({ cwd, given = null, stem, title, tsvs, rebase, state, save }) {
   const git = (args, timeoutMs) => run("git", args, { cwd, timeoutMs });
-
-  if (receipt.branch === null) {
-    const picked = pickBranch(git, branch);
+  if (state.branch === null) {
+    const picked = pickBranch(git, given, stem);
     if (picked.error) return failed(picked.error);
     const made = git(["switch", "-c", picked.name]);
     if (made.status !== 0) return failed(`git switch -c ${picked.name} failed: ${detail(made)}`);
-    receipt.branch = picked.name;
+    state.branch = picked.name;
     save();
   } else {
-    const back = git(["switch", receipt.branch]);
-    if (back.status !== 0) return failed(`git switch ${receipt.branch} failed: ${detail(back)}`);
+    const back = git(["switch", state.branch]);
+    if (back.status !== 0) return failed(`git switch ${state.branch} failed: ${detail(back)}`);
   }
-  const result = onBranch({ git, cwd, reason, receipt, save });
+  const result = onBranch({ git, cwd, title, tsvs, rebase, state, save });
   const main = git(["switch", "main"]);
   if (main.status !== 0) return failed([result.status === "ok" ? null : result.output, `git switch main failed: ${detail(main)}`].filter(Boolean).join("\n"));
   return result;
+}
+
+function stepCommitAndPR({ reason, branch, receipt, save }) {
+  const wt = workTree();
+  if (wt.error) return failed(wt.error);
+  return commitAndPr({ cwd: wt.cwd, given: branch, stem: "chore/run-artifacts-", title: `Closeout: ${reason}`, tsvs: METRICS, rebase: true, state: receipt, save });
 }
 
 // The receipt `phase0.mjs` resumes would otherwise outlive the run it describes.
@@ -619,6 +691,7 @@ const FINISH = {
   scrape: stepScrape,
   "tier-outcomes": stepTierOutcomes,
   metrics: stepMetrics,
+  gather: stepGather,
   "commit-and-pr": stepCommitAndPR,
   "phase0-receipt": stepPhase0Receipt,
   "heartbeat-stop": stepHeartbeatStop,

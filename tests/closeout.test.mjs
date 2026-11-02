@@ -13,7 +13,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
@@ -21,6 +21,8 @@ import { writeExecStub } from "./support/exec-stub.mjs";
 import { ref, prUrl } from "./support/queue-gh.mjs";
 import { encodeProjectDir } from "../plugin/scripts/member-record.mjs";
 import { COLUMNS } from "../plugin/scripts/tier-outcomes.mjs";
+import { scratchRoot } from "../plugin/scripts/fleet-dir.mjs";
+import { inertVerdict } from "../plugin/scripts/finisher-scope.mjs";
 
 const PLUGIN = fileURLToPath(new URL("../plugin/", import.meta.url));
 const REAL_SCRIPTS = join(PLUGIN, "scripts");
@@ -233,7 +235,7 @@ function fixture() {
 }
 
 const stepLines = (out) => out.filter((l) => l.startsWith("closeout: "));
-const FINISH_STEPS = ["tick", "scrape", "tier-outcomes", "metrics", "commit-and-pr", "phase0-receipt", "heartbeat-stop", "merge"];
+const FINISH_STEPS = ["tick", "scrape", "tier-outcomes", "metrics", "gather", "commit-and-pr", "phase0-receipt", "heartbeat-stop", "merge"];
 const BEGIN_STEPS = ["drain", "release"];
 const statusOf = (receipt, names) => Object.fromEntries(names.map((n) => [n, receipt.steps[n].status]));
 const allOk = (names) => Object.fromEntries(names.map((n) => [n, "ok"]));
@@ -429,7 +431,7 @@ test("finish: exits 3 and runs nothing after it unless the tick's last line is `
     assert.equal(r.status, 3, JSON.stringify(out) + r.err + r.stdout);
     assert.match(r.stdout, /^closeout: tick: failed$/m);
     assert.deepEqual(f.order(), ["fleet-tick"]);
-    assert.deepEqual(statusOf(f.receipt(), FINISH_STEPS), { tick: "failed", scrape: "pending", "tier-outcomes": "pending", metrics: "pending", "commit-and-pr": "pending", "phase0-receipt": "pending", "heartbeat-stop": "pending", merge: "pending" });
+    assert.deepEqual(statusOf(f.receipt(), FINISH_STEPS), { tick: "failed", scrape: "pending", "tier-outcomes": "pending", metrics: "pending", gather: "pending", "commit-and-pr": "pending", "phase0-receipt": "pending", "heartbeat-stop": "pending", merge: "pending" });
   }
   const f = fixture();
   f.control("fleet-tick", { exit: 1, err: "fleet-tick: cannot read the ledger\n" });
@@ -489,7 +491,7 @@ test("finish: exits 4 naming each reviewed= PR without a tier-outcomes row, and 
   assert.match(r.stdout, /^closeout: tier-outcomes: pending$/m);
   assert.deepEqual(f.order().filter((n) => n !== "gh"), ["fleet-tick", "member-outcomes"], "the metrics refresh and everything after it waits");
   assert.deepEqual(f.ghCalls().filter((l) => !l.startsWith("pr view ")), [], "the step only reads PRs; nothing was created or edited");
-  assert.deepEqual(statusOf(f.receipt(), FINISH_STEPS), { tick: "ok", scrape: "ok", "tier-outcomes": "pending", metrics: "pending", "commit-and-pr": "pending", "phase0-receipt": "pending", "heartbeat-stop": "pending", merge: "pending" });
+  assert.deepEqual(statusOf(f.receipt(), FINISH_STEPS), { tick: "ok", scrape: "ok", "tier-outcomes": "pending", metrics: "pending", gather: "pending", "commit-and-pr": "pending", "phase0-receipt": "pending", "heartbeat-stop": "pending", merge: "pending" });
 
   writeFileSync(join(f.repo, METRICS[2]), HEADER + [tierRow(20, 10), tierRow(23, 13), tierRow(30, 30)].join("\n") + "\n");
   const again = f.run("finish", ["--reason", "wrap up"]);
@@ -589,6 +591,98 @@ test("finish: the metrics branch carries one commit of exactly the three metrics
   for (const file of METRICS) assert.match(create[0], new RegExp(`- ${file.replaceAll(".", "\\.")}: \\+1 -0`), `${file} row count`);
   assert.equal(f.receipt().pr, "https://example.test/o/r/pull/7");
   assert.equal(f.receipt().branch, BRANCH);
+});
+
+// The archives `ledger.mjs rotate` leaves in `.fleet/` for one earlier run,
+// and one review's evidence in the case's scratch root, beside what neither
+// gathers: the run's recipe cache, its briefs, an archive of another name,
+// a member report and the review's snapshot.
+const STAMP = "2026-11-01T172207Z";
+const RUN_RUN = "run-a1B2c3D4";
+function earlierRun(f) {
+  writeFileSync(join(f.fleet, `ledger.${STAMP}.md`), "# Fleet run ledger\n");
+  writeFileSync(join(f.fleet, `phase0.${STAMP}.json`), `${JSON.stringify({ run: null, pluginVersion: "3.136.10", steps: {} })}\n`);
+  writeFileSync(join(f.fleet, `closeout.${STAMP}.json`), "{}\n");
+  writeFileSync(join(f.fleet, "ledger.2026-08-13-run442.md"), "# an old hand-named archive\n");
+  writeFileSync(join(f.fleet, "recipe.json"), "{\"test\":\"./agent-test\"}\n");
+  mkdirSync(join(f.fleet, `briefs.${STAMP}`));
+  writeFileSync(join(f.fleet, `briefs.${STAMP}`, "impl-1.md"), "a brief\n");
+  const scratch = scratchRoot({ cwd: f.repo, home: f.home });
+  mkdirSync(join(scratch, "pr41", RUN_RUN, "snapshot"), { recursive: true });
+  writeFileSync(join(scratch, "pr41", RUN_RUN, "review.json"), "{\"head\":\"abc\"}\n");
+  writeFileSync(join(scratch, "pr41", RUN_RUN, "snapshot", "x.mjs"), "export {};\n");
+  writeFileSync(join(scratch, "dispositions-fix-pr-41.json"), `${JSON.stringify({ run: RUN_RUN, entries: [] })}\n`);
+  writeFileSync(join(scratch, "dispositions-fix-pr-41-b.json"), `${JSON.stringify({ run: RUN_RUN, entries: [] })}\n`);
+  mkdirSync(join(scratch, "reports"));
+  writeFileSync(join(scratch, "reports", "impl-1.json"), "{}\n");
+}
+const GATHERED = [
+  `docs/metrics/reviews/41/${RUN_RUN}/dispositions-fix-pr-41-b.json`,
+  `docs/metrics/reviews/41/${RUN_RUN}/dispositions-fix-pr-41.json`,
+  `docs/metrics/reviews/41/${RUN_RUN}/review.json`,
+  `docs/metrics/runs/${STAMP}/closeout.json`,
+  `docs/metrics/runs/${STAMP}/ledger.md`,
+  `docs/metrics/runs/${STAMP}/phase0.json`,
+  `docs/metrics/runs/${STAMP}/plugin-version`,
+];
+
+test("finish: the gather and the commit carry an earlier run's records and a review's evidence as new files, the branch holds only docs/metrics/, and its diff is inert", () => {
+  const f = fixture();
+  earlierRun(f);
+  const r = f.run("finish", ["--reason", "wrap up"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.match(r.stdout, /closeout: gather: ok\n\s+4 run record file\(s\) from .*\n\s+3 review evidence file\(s\) from /);
+  assert.deepEqual(git(f.repo, "show", "--name-only", "--format=", BRANCH).split("\n").sort(), [...GATHERED, ...METRICS].sort());
+  assert.deepEqual(git(f.repo, "diff", "--name-only", `main...${BRANCH}`).split("\n").filter((p) => !p.startsWith("docs/metrics/")), [], "the branch carries docs/metrics/ alone");
+  assert.equal(git(f.repo, "show", `${BRANCH}:docs/metrics/runs/${STAMP}/plugin-version`), "3.136.10");
+  assert.equal(git(f.repo, "show", `${BRANCH}:docs/metrics/reviews/41/${RUN_RUN}/review.json`), "{\"head\":\"abc\"}");
+  assert.deepEqual(git(f.repo, "ls-tree", "-r", BRANCH, "--", "docs/metrics/").split("\n").map((l) => l.split(" ")[0]).filter((m) => m !== "100644"), [], "every file plain");
+  const verdict = inertVerdict({ worktree: f.repo, pin: f.receipt().pin });
+  assert.equal(verdict.verdict, "inert", JSON.stringify(verdict));
+  assert.equal(git(f.repo, "branch", "--show-current"), "main");
+  assert.equal(git(f.repo, "status", "--porcelain", "-uall"), "", "nothing gathered is left in main's work tree");
+  const create = f.ghCalls().find((l) => l.startsWith("pr create"));
+  assert.match(create, /- docs\/metrics\/runs\/: 4 file\(s\) added/);
+  assert.match(create, /- docs\/metrics\/reviews\/: 3 file\(s\) added/);
+});
+
+test("finish: a file main already holds is gathered again byte for byte and adds nothing to the commit", () => {
+  const f = fixture();
+  earlierRun(f);
+  mkdirSync(join(f.repo, "docs", "metrics", "runs", STAMP), { recursive: true });
+  writeFileSync(join(f.repo, `docs/metrics/runs/${STAMP}/ledger.md`), "# Fleet run ledger\n");
+  git(f.repo, "add", `docs/metrics/runs/${STAMP}/ledger.md`);
+  git(f.repo, "commit", "-q", "-m", "an earlier close-out");
+  git(f.repo, "push", "-q", "origin", "main");
+  const r = f.run("finish", ["--reason", "wrap up"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  const committed = git(f.repo, "show", "--name-only", "--format=", BRANCH).split("\n");
+  assert.equal(committed.includes(`docs/metrics/runs/${STAMP}/ledger.md`), false, "the ledger main holds is not committed again");
+  assert.equal(committed.includes(`docs/metrics/runs/${STAMP}/phase0.json`), true);
+});
+
+test("finish: nothing outside the allowlist is ever staged — a recipe, a transcript, a brief, a symlink and an executable under the record directories stay out and are named", () => {
+  const f = fixture();
+  const other = "2026-10-31T202750Z";
+  const strays = [
+    `docs/metrics/runs/${STAMP}/recipe.json`,
+    `docs/metrics/runs/${STAMP}/session.jsonl`,
+    `docs/metrics/runs/${STAMP}/briefs/impl-1.md`,
+    `docs/metrics/reviews/41/${RUN_RUN}/brief.md`,
+    `docs/metrics/runs/${other}/ledger.md`,
+    `docs/metrics/runs/${other}/phase0.json`,
+  ];
+  for (const rel of strays) {
+    mkdirSync(join(f.repo, rel, ".."), { recursive: true });
+    if (rel.endsWith("ledger.md")) symlinkSync("../../../../README", join(f.repo, rel));
+    else writeFileSync(join(f.repo, rel), "{}\n");
+  }
+  chmodSync(join(f.repo, `docs/metrics/runs/${other}/phase0.json`), 0o755);
+  const r = f.run("finish", ["--reason", "wrap up"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.deepEqual(git(f.repo, "show", "--name-only", "--format=", BRANCH).split("\n").sort(), METRICS, "the metrics files alone");
+  for (const rel of strays) assert.match(r.stdout, new RegExp(`not staged, not a run record isRunRecord\\(\\) allows: ${rel.replaceAll(".", "\\.")}`), rel);
+  assert.equal(readFileSync(join(f.repo, "README"), "utf8"), "x\n", "the symlink's target is untouched");
 });
 
 test("finish: the branch letter suffix increments past a dated name taken locally and one taken only on origin", () => {
@@ -896,7 +990,10 @@ test("finish: a failed gh pr merge is asked once in the call, and its own words 
   const f = fixture();
   f.control("gh-view", view("OPEN", "CLEAN"));
   f.control("gh-merge", { exit: 1, err: "GraphQL: Base branch was modified\n" });
-  const r = f.run("finish", ["--reason", "wrap up"], FAST);
+  // A call bound past FAST's: every step before the merge, the gather and the
+  // records commit included, counts against it, so under a loaded suite FAST
+  // can leave the step one poll.
+  const r = f.run("finish", ["--reason", "wrap up"], { env: { ...FAST.env, CLOSEOUT_CALL_MS: "15000" } });
   assert.equal(r.status, 4, r.err + r.stdout);
   assert.equal(f.calls("gh-merge").length, 1);
   assert.ok(f.calls("ci-state").length >= 2, "it polled again after the merge failed");
@@ -1109,7 +1206,7 @@ test("finish: a receipt that cannot be parsed is moved all the same, and no phas
   // The tick refuses to read it, so the step is reached through a receipt whose earlier steps are already ok;
   // the receipt names no PR for the merge step after it to merge, so that step is ok too.
   const at = new Date().toISOString();
-  const done = Object.fromEntries(["drain", "release", "tick", "scrape", "tier-outcomes", "metrics", "commit-and-pr", "merge"].map((n) => [n, { status: "ok", at, output: "" }]));
+  const done = Object.fromEntries(["drain", "release", "tick", "scrape", "tier-outcomes", "metrics", "gather", "commit-and-pr", "merge"].map((n) => [n, { status: "ok", at, output: "" }]));
   writeFileSync(f.receiptPath, JSON.stringify({ reason: "wrap up", begun: at, steps: done }));
   writeFileSync(join(f.fleet, "phase0.json"), "{not json");
   const r = f.run("finish", ["--reason", "wrap up"]);

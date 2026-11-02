@@ -2017,7 +2017,7 @@ const SCRIPT = fileURLToPath(new URL("../plugin/scripts/fleet-tick.mjs", import.
 // or transitive — and ledger.mjs with its own, because the tick reads the
 // ledger through `ledger.mjs read`. An unlisted sibling is a module-not-found
 // at startup: exit 1, a shape no case below expects.
-const SIBLING_MODULES = ["arg.mjs", "closing-refs.mjs", "fleet-dir.mjs", "fleet-state.mjs", "gh-aliased-read.mjs", "git-env.mjs", "is-cli.mjs", "label-map.mjs", "ledger.mjs", "ledger-grammar.mjs", "main-checkout.mjs", "owned-pr.mjs", "phase0-receipt.mjs", "pid-lock.mjs", "proc.mjs", "release-labels.mjs", "report-files.mjs", "report-schema.mjs", "ticketless.mjs"].map(
+const SIBLING_MODULES = ["arg.mjs", "closing-refs.mjs", "fleet-dir.mjs", "fleet-state.mjs", "gh-aliased-read.mjs", "git-env.mjs", "is-cli.mjs", "label-map.mjs", "ledger.mjs", "ledger-grammar.mjs", "main-checkout.mjs", "owned-pr.mjs", "phase0-receipt.mjs", "pid-lock.mjs", "proc.mjs", "release-labels.mjs", "report-files.mjs", "report-schema.mjs", "run-records.mjs", "ticketless.mjs"].map(
   (m) => [m, fileURLToPath(new URL(`../plugin/scripts/${m}`, import.meta.url))],
 );
 
@@ -2187,7 +2187,7 @@ printf '{"issue":%s,"taken":false,"hits":[],"unknown":[]}\\n' "$1"
 
 // phase0.mjs's steps, every one present as its receipt always carries them.
 const PHASE0_STEPS = ["alarm", "branch", "fast-forward", "pin", "baseline", "labels", "preflight", "ruleset", "tier-roles", "metrics",
-  "cockpit", "rotate", "reclaim", "evict", "recipe", "fold-in", "stranded", "shortlist"];
+  "cockpit", "rotate", "catch-up", "reclaim", "evict", "recipe", "fold-in", "stranded", "shortlist"];
 // A receipt in phase0.mjs's shape with every step `ok`; `steps` overrides
 // individual steps.
 const receiptOf = ({ run = null, session = "/s", steps = {} } = {}) => ({

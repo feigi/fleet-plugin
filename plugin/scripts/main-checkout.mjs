@@ -57,9 +57,14 @@
 // dispatching row for the rest of the run, and clearing it with `--record`
 // after every ruling would certify whatever stray write landed beside it.
 // So `snapshot()` leaves exactly those three paths out, for the reason
-// instruments.sh leaves `docs/metrics/` out of its pin. Three named files, not
-// the directory: anything else under `docs/metrics/` is still a stray write.
-// The price: a member's leaked write to one of those three files goes unseen.
+// instruments.sh leaves `docs/metrics/` out of its pin. The same holds for the
+// run records and review evidence the close-out and phase 0's catch-up copy
+// into `docs/metrics/runs/` and `docs/metrics/reviews/` and commit on a
+// branch, which appear in the work tree and leave it again when the checkout
+// switches back to main: a path run-records.mjs's isRunRecord() allows is left
+// out too. Named files and one allowlisted shape, not the directory: anything
+// else under `docs/metrics/` is still a stray write. The price: a member's
+// leaked write to one of those paths goes unseen.
 //
 // FOUR ANSWERS, worktree-audit.sh's three plus the baseline's own refusal:
 //   clean    — the porcelain entries and hashes equal the baseline's, and HEAD
@@ -124,10 +129,12 @@ import { join } from "node:path";
 import { isCLI } from "./is-cli.mjs";
 import { makeDie, defineFlags } from "./arg.mjs";
 import { gitEnv, mainCheckoutDirFromGitCommonDir } from "./git-env.mjs";
+import { isRunRecord } from "./run-records.mjs";
 
 export const BASELINE_FILE = "main-checkout.sha";
 export const RECORD_COMMAND = "~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run main-checkout.mjs --record";
-const RUN_BOOKKEEPING = new Set(["docs/metrics/tier-outcomes.tsv", "docs/metrics/member-outcomes.tsv", "docs/metrics/ticket-features.tsv"]);
+const RUN_METRICS = new Set(["docs/metrics/tier-outcomes.tsv", "docs/metrics/member-outcomes.tsv", "docs/metrics/ticket-features.tsv"]);
+const isRunBookkeeping = (rel) => RUN_METRICS.has(rel) || isRunRecord(rel);
 // Any change to an entry's hash or to a line's format bumps VERSION: a
 // baseline an older plugin wrote then reads `outdated` (re-record) and one a
 // newer plugin wrote reads `newer`, never as a baseline this code wrote.
@@ -209,11 +216,11 @@ const sha = (buf) => createHash("sha256").update(buf).digest("hex");
 // the hash where its status line would not — folded with its HEAD, so a
 // commit in it moves the hash too. A commitless repository's HEAD is the
 // branch it names. Nothing is left out: the run's bookkeeping is
-// `RUN_BOOKKEEPING`, the main checkout's named paths, not a nested
+// `isRunBookkeeping`, the main checkout's paths, not a nested
 // repository's. Any git that fails throws: `unknown`, never a hash that reads
 // clean.
 function nestedHash(abs, env) {
-  const now = entriesAt(abs, env, new Set());
+  const now = entriesAt(abs, env, () => false);
   if (!now.ok) throw new Error(now.why);
   let head = git("git rev-parse HEAD", ["rev-parse", "-q", "--verify", "HEAD^{commit}"], abs, env);
   if (!head.ok) {
@@ -241,10 +248,10 @@ function nestedHash(abs, env) {
  * `--no-renames` so every entry names exactly one path.
  */
 export function snapshot(root, env = process.env) {
-  return entriesAt(root, env, RUN_BOOKKEEPING);
+  return entriesAt(root, env, isRunBookkeeping);
 }
 
-// `snapshot` of the repository at `root`, leaving out the paths in `skip`.
+// `snapshot` of the repository at `root`, leaving out each path `skip` accepts.
 function entriesAt(root, env, skip) {
   const r = git("git status --porcelain -uall", ["--no-optional-locks", "status", "--porcelain", "-uall", "-z", "--no-renames"], root, env);
   if (!r.ok) return r;
@@ -253,7 +260,7 @@ function entriesAt(root, env, skip) {
     if (!line) continue;
     if (line.length < 4 || line[2] !== " ") return { ok: false, why: `git status printed an entry it does not document: ${JSON.stringify(line)}` };
     const rel = line.slice(3);
-    if (skip.has(rel)) continue;
+    if (skip(rel)) continue;
     try {
       entries.set(line, hashPath(root, rel, env));
     } catch (e) {

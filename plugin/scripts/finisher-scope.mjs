@@ -30,7 +30,11 @@
 //          CLAUDE.md or GEMINI.md, at any depth. A file directly in the root
 //          .out-of-scope/, spelled exactly so, is exempt from the dot rule
 //          alone
-//   data   one of the METRICS paths closeout.mjs names, and no other file
+//   data   one of the METRICS paths closeout.mjs names, or a run record or
+//          review evidence file run-records.mjs's isRunRecord() accepts — a
+//          path of the allowlisted shape under docs/metrics/runs/ or
+//          docs/metrics/reviews/ — that is also outside the prompt surface,
+//          and no other file
 //
 // Stdout is one JSON line:
 //
@@ -60,6 +64,7 @@ import { statSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { makeDie, defineFlags, writeAll } from "./arg.mjs";
 import { METRICS } from "./closeout.mjs";
+import { isRunRecord } from "./run-records.mjs";
 import { isDocs, isMarkdown, isTestDir } from "./diff-stats.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
@@ -136,6 +141,10 @@ export function classifyEntry(path, status, oldMode, newMode) {
   const mode = modeProblem(status, oldMode, newMode);
   if (mode !== null) return { class: null, why: mode };
   if (METRICS.includes(path)) return { class: "data", why: "run metrics file" };
+  if (isRunRecord(path)) {
+    const surface = promptSurface(path);
+    return surface === null ? { class: "data", why: "run record or review evidence file" } : { class: null, why: surface };
+  }
   if (isTestDir(path)) return { class: null, why: "under a test directory" };
   if (!isMarkdown(path)) return { class: null, why: isDocs(path) ? "docs, but not .md or .markdown" : "not prose or data" };
   const surface = promptSurface(path);

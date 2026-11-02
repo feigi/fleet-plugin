@@ -314,7 +314,10 @@ const COVERED_MJS = {
   // with GH_REPO empty however the parent's environment names a repository",
   // and in fleet-tick.test.mjs, "an inherited GIT_DIR or GH_REPO cannot
   // retarget the merged-PR review probe".
-  "reclaim-scratch.mjs": 1,
+  // The second, for `evidenceOnMain()`'s `ls-tree origin/main`, which decides
+  // whether a MERGED PR's review evidence is kept; an ambient GIT_DIR would read
+  // another repository's main.
+  "reclaim-scratch.mjs": 2,
   // ONE scrubbed env, in `run()`, behind every child the script starts: its
   // git reads (the worktree listing, each tree's status, its ignored paths,
   // HEAD's commit date), the `wt_op_state` shell, `derive-testcmd.sh` and the

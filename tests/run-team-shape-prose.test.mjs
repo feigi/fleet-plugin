@@ -465,7 +465,7 @@ const CHANGED = [
   ],
   [
     "`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run closeout.mjs finish --reason \"<reason>\"` — scrapes the run's member facts, checks the tier-outcomes rows, refreshes the metrics, commits the three metrics files and opens their PR, then records `fleet-heartbeat.mjs --stop` last, because every reader takes a recorded stop as the end of the run.",
-    "`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run closeout.mjs finish --reason \"<reason>\"` — scrapes the run's member facts, checks the tier-outcomes rows, refreshes the metrics, commits the three metrics files and opens their PR, sets the phase-0 receipt aside as `.fleet/phase0.previous.json`, records `fleet-heartbeat.mjs --stop`, because every reader takes a recorded stop as the end of the run, and then merges the Close-out PR."
+    "`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run closeout.mjs finish --reason \"<reason>\"` — scrapes the run's member facts, checks the tier-outcomes rows, refreshes the metrics, gathers the earlier runs' records and the review evidence, commits them with the three metrics files and opens their PR, sets the phase-0 receipt aside as `.fleet/phase0.previous.json`, records `fleet-heartbeat.mjs --stop`, because every reader takes a recorded stop as the end of the run, and then merges the Close-out PR."
   ],
   [
     "`heartbeat not beating, controller alive (pid N)`, or `(this session's earlier run)` — a controller that stopped beating and kept going.",

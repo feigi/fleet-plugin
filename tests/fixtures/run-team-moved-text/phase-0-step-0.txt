@@ -232,7 +232,7 @@
    tick, beat or ledger write, each of which writes a mark the fallback reads. Older
    archives, hand-named ones included, are left alone.
 
-   **Reclaim scratch straight after the rotation — every run.**
+   **Reclaim scratch straight after the catch-up — every run.**
    `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run reclaim-scratch.mjs --root <scratch>
    --after-rotate --apply`, `<scratch>` the path `scratch-root.mjs` prints,
    so a run that merges nothing still reclaims the previous run's leftovers

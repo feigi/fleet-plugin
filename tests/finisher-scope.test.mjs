@@ -208,6 +208,99 @@ test("exit 1: a metrics-looking file that is not one of the three METRICS paths 
   assert.equal(classes(r.out)["docs/metrics/Tier-outcomes-2.tsv"], null);
 });
 
+// --- run records and review evidence --------------------------------------------
+
+// The files the Close-out PR and phase 0's catch-up commit beside the METRICS
+// files, at the paths run-records.mjs gives them.
+const STAMP = "2026-11-01T172207Z";
+const RUN_DIR = `docs/metrics/runs/${STAMP}`;
+const REVIEW_DIR = "docs/metrics/reviews/4175/run-a1B2c3D4";
+const RECORDS = {
+  [`${RUN_DIR}/ledger.md`]: "# Fleet run ledger\n",
+  [`${RUN_DIR}/phase0.json`]: "{}\n",
+  [`${RUN_DIR}/closeout.json`]: "{}\n",
+  [`${RUN_DIR}/plugin-version`]: "3.136.10\n",
+  [`${REVIEW_DIR}/review.json`]: "{}\n",
+  [`${REVIEW_DIR}/dispositions-fix-pr-4175.json`]: "{}\n",
+  [`${REVIEW_DIR}/dispositions-fix-pr-4175-b.json`]: "{}\n",
+};
+const writeRecords = (wt) => {
+  for (const [rel, text] of Object.entries(RECORDS)) write(wt, rel, text);
+};
+
+test("exit 0: new run record and review evidence files, beside a METRICS file, are inert, every path data", () => {
+  const f = fixture();
+  const r = verdictFor(f, (wt) => {
+    writeRecords(wt);
+    write(wt, "docs/metrics/tier-outcomes.tsv", "y\n");
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.out.verdict, "inert");
+  assert.deepEqual(classes(r.out), {
+    ...Object.fromEntries(Object.keys(RECORDS).map((rel) => [rel, "data"])),
+    "docs/metrics/tier-outcomes.tsv": "data",
+  });
+});
+
+test("exit 1: the same files with a symlink or an executable bit among them are not inert", () => {
+  for (const [what, edit, rel, why] of [
+    ["symlink", (wt) => symlinkSync("review.json", join(wt, REVIEW_DIR, "dispositions-fix-pr-4175-c.json")), `${REVIEW_DIR}/dispositions-fix-pr-4175-c.json`, "symlink"],
+    ["executable", (wt) => chmodSync(join(wt, RUN_DIR, "ledger.md"), 0o755), `${RUN_DIR}/ledger.md`, "executable bit"],
+  ]) {
+    const f = fixture();
+    const r = verdictFor(f, (wt) => {
+      writeRecords(wt);
+      edit(wt);
+    });
+    assert.equal(r.status, 1, `${what}: ${r.stderr}`);
+    assert.equal(classes(r.out)[rel], null, what);
+    assert.equal(whys(r.out)[rel], why, what);
+  }
+});
+
+test("exit 1: recipe.json or a transcript is not data, under the record directories or as a record's name outside docs/metrics/", () => {
+  for (const rel of [
+    "recipe.json",
+    `${RUN_DIR}/recipe.json`,
+    `${REVIEW_DIR}/recipe.json`,
+    `${RUN_DIR}/session.jsonl`,
+    "docs/runs/2026-11-01T172207Z/phase0.json",
+    "metrics/reviews/4175/run-a1B2c3D4/review.json",
+  ]) {
+    const f = fixture();
+    const r = verdictFor(f, (wt) => {
+      writeRecords(wt);
+      write(wt, rel, "{}\n");
+    });
+    assert.equal(r.status, 1, `${rel}: ${r.stderr}`);
+    assert.equal(classes(r.out)[rel], null, rel);
+    assert.equal(classes(r.out)[`${RUN_DIR}/ledger.md`], "data", `${rel}: the records beside it are still data`);
+  }
+});
+
+test("exit 0: a brief or any other markdown under the record directories is not data: the prose rule judges it like any markdown", () => {
+  const f = fixture();
+  const brief = `${RUN_DIR}/briefs/impl-4175.md`;
+  const r = verdictFor(f, (wt) => write(wt, brief, "a brief\n"));
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(classes(r.out)[brief], "prose");
+});
+
+test("exit 1: a review file under another PR's number, a run root or stamp of another shape is not data", () => {
+  for (const rel of [
+    `${REVIEW_DIR}/dispositions-fix-pr-4176.json`,
+    "docs/metrics/reviews/4175/run-x/review.json",
+    "docs/metrics/reviews/4175/review.json",
+    "docs/metrics/runs/2026-11-01/phase0.json",
+    `${RUN_DIR}/nested/plugin-version`,
+  ]) {
+    const f = fixture();
+    const r = verdictFor(f, (wt) => write(wt, rel, "{}\n"));
+    assert.equal(r.status, 1, `${rel}: ${r.stderr}`);
+    assert.equal(classes(r.out)[rel], null, rel);
+  }
+});
+
 // --- exit 1: the prompt surface -----------------------------------------------
 
 test("exit 1: a markdown file under a skills, agents or commands directory is the prompt surface", () => {

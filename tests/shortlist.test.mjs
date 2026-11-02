@@ -57,6 +57,8 @@ const COPIED = ["shortlist.mjs", "candidates.mjs", "ledger.mjs", "ledger-grammar
   "owned-pr.mjs", "ticketless.mjs",
   // ledger.mjs reads a member's report for `settle --from-report`.
   "report-files.mjs", "report-schema.mjs",
+  // main-checkout.mjs leaves the run records out of its snapshot by their allowlist.
+  "run-records.mjs",
   // candidates.mjs resolves its roles through the Label map's reader.
   "label-map.mjs"];
 
