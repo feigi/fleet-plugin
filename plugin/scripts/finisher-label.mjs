@@ -89,6 +89,7 @@ import { inertVerdict } from "./finisher-scope.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { LABEL_LIST_ARGS, LABEL_LIST_LIMIT, releaseLabelsDefined, releaseLabelsIn } from "./release-labels.mjs";
 import { readLabelMap } from "./label-map.mjs";
+import { headRecordBody, newestHeadRecord } from "./ready-to-merge-head.mjs";
 import { ticketlessVerdict } from "./ticketless.mjs";
 
 const NAME = "finisher-label";
@@ -233,16 +234,11 @@ if (ticketless) receipt.inert = inertVerdict({ worktree: resolve(repo ?? "."), p
 // --- 2: the head record ----------------------------------------------------
 // The newest record wins, the way the merge bot reads it: a matching record
 // older than one naming another head is not the record the bot will act on.
-const RECORD = /^ready-to-merge-head: ([0-9a-f]{40})\s*$/;
-const records = first.comments
-  .map((c, i) => ({ i, at: c.createdAt, m: RECORD.exec(c.body) }))
-  .filter((c) => c.m !== null)
-  .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.i - b.i));
-const recorded = records.length > 0 && records[records.length - 1].m[1] === pin;
+const recorded = newestHeadRecord(first.comments) === pin;
 const labelled = firstLabels.includes(LABEL);
 
 if (!recorded) {
-  gh("comment", ["pr", "comment", String(pr), "--body", `ready-to-merge-head: ${pin}`]);
+  gh("comment", ["pr", "comment", String(pr), "--body", headRecordBody(pin)]);
   receipt.commented = true;
 }
 

@@ -14,13 +14,13 @@
 //
 // THE CEILING: these are presence pins on prose. They prove the rules are
 // stated where their reader reaches them; they cannot prove a merge bot obeys
-// them, and nothing here runs `gh`. The record filter is the one exception
-// below: it runs the fenced block's `-q` program through `jq`.
+// them, and nothing here runs `gh`. The record grammar is the one exception
+// below: it runs the shared reader against comment lists.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { execFileSync } from "node:child_process";
+import { headRecordBody, newestHeadRecord } from "../plugin/scripts/ready-to-merge-head.mjs";
 import { Pin } from "./support/prose-pin.mjs";
 import { memberPrompt } from "./support/render-brief.mjs";
 import { stripComments } from "./support/strip-comments.mjs";
@@ -29,14 +29,6 @@ const REPO = join(import.meta.dirname, "..", "plugin");
 const DOC = Pin.file(join(REPO, "commands", "run-merge-bot.md"));
 const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 const REVIEW_AND_FIX = Pin.file(join(REPO, "commands", "review-and-fix.md"));
-
-// The record filter goes through jq. Without it every filter case would fail
-// with a spawn error, which reads as a real red but proves nothing.
-try {
-  execFileSync("jq", ["--version"], { stdio: "ignore" });
-} catch {
-  throw new Error("jq is required to run the record filter; install it before running this suite");
-}
 
 // Bounded at both ends. Unbounded to EOF, `ready-to-merge`, `head` and
 // `finisher` each occur freely through the per-PR sequence and the watcher
@@ -98,64 +90,52 @@ test("the committer-date guard and the beforeCommit derivation are gone", () => 
   assert.doesNotMatch(s, /beforeCommit/);
 });
 
-// The shipped filter, run. A presence pin cannot tell a filter that reads the
-// newest record from one that reads the oldest, or one that a quoted record
-// inside a longer comment satisfies, so the fenced block's own `-q` program
-// goes through `jq` against comment lists shaped like `gh pr view --json
-// comments`. ACCEPT and REFUSE both: a filter that never answers passes every
-// refuse case.
-const recordFilter = () => {
-  const block = /```bash\n(gh pr view <pr> --json comments[\s\S]*?)```/.exec(labelledHead());
-  assert.ok(block, "no fenced `gh pr view <pr> --json comments` block reads the record");
-  const q = /-q '([\s\S]*?)'\n/.exec(block[1]);
-  assert.ok(q, "the record block carries no single-quoted -q program");
-  return q[1];
-};
-const readRecord = (comments) =>
-  execFileSync("jq", ["-r", recordFilter()], { input: JSON.stringify({ comments }), encoding: "utf8" }).trimEnd();
+// The record grammar is the shared definition finisher-label.mjs writes with
+// and labelled-head.mjs reads with, so it is run here against comment lists
+// shaped like `gh pr view --json comments`. A presence pin cannot tell a reader
+// that takes the newest record from one that takes the oldest, or one that a
+// quoted record inside a longer comment satisfies. ACCEPT and REFUSE both: a
+// reader that never answers passes every refuse case.
 const A = "a".repeat(40);
 const B = "b".repeat(40);
 
-test("the record filter reads the newest record's SHA", () => {
-  assert.equal(readRecord([{ createdAt: "2026-10-01T00:00:00Z", body: `ready-to-merge-head: ${A}` }]), A);
+test("the record grammar reads the newest record's SHA", () => {
+  assert.equal(newestHeadRecord([{ createdAt: "2026-10-01T00:00:00Z", body: `ready-to-merge-head: ${A}` }]), A);
   // Newest by createdAt, not by array position.
   assert.equal(
-    readRecord([
+    newestHeadRecord([
       { createdAt: "2026-10-02T00:00:00Z", body: `ready-to-merge-head: ${B}` },
       { createdAt: "2026-10-01T00:00:00Z", body: `ready-to-merge-head: ${A}` },
     ]),
     B,
   );
   // A trailing newline, CRLF or blank lines are still the whole body.
-  assert.equal(readRecord([{ createdAt: "2026-10-01T00:00:00Z", body: `ready-to-merge-head: ${A}\n` }]), A);
-  assert.equal(readRecord([{ createdAt: "2026-10-01T00:00:00Z", body: `ready-to-merge-head: ${A}\r\n\n` }]), A);
+  assert.equal(newestHeadRecord([{ createdAt: "2026-10-01T00:00:00Z", body: `ready-to-merge-head: ${A}\n` }]), A);
+  assert.equal(newestHeadRecord([{ createdAt: "2026-10-01T00:00:00Z", body: `ready-to-merge-head: ${A}\r\n\n` }]), A);
 });
 
-test("the record filter reads nothing from a comment that is not exactly a record", () => {
-  assert.equal(readRecord([]), "");
+test("the record grammar reads nothing from a comment that is not exactly a record", () => {
+  assert.equal(newestHeadRecord([]), null);
   // Each anchor is pinned by a fixture only IT rejects. One fixture carrying
   // both a prefix and a suffix is rejected by either anchor alone, so deleting
-  // `\A` or `\z` left every case green. A prefix with nothing after the SHA is
-  // what `\A` refuses; a suffix with nothing before the keyword is what `\z`
-  // refuses; the multi-line cases put the stray text on its own line. Measured
-  // on jq 1.7.1, `^` and `$` are string anchors too (`"x\nready"|test("^ready")`
-  // is false), so spelling the anchors `^`/`$` is no weaker and no fixture can
-  // tell the two spellings apart; deleting either anchor is what this catches.
-  const record = (body) => readRecord([{ createdAt: "2026-10-01T00:00:00Z", body }]);
-  assert.equal(record(`see: ready-to-merge-head: ${A}`), "");
-  assert.equal(record(`the bot read\nready-to-merge-head: ${A}`), "");
-  assert.equal(record(`ready-to-merge-head: ${A} trailing`), "");
-  assert.equal(record(`ready-to-merge-head: ${A}\nhere`), "");
-  assert.equal(record(`ready-to-merge-head: ${A}a`), "");
-  assert.equal(record(`ready-to-merge-head: ${A}\nready-to-merge-head: ${B}`), "");
-  assert.equal(record(`the bot read\nready-to-merge-head: ${A}\nhere`), "");
-  assert.equal(record(` ready-to-merge-head: ${A}`), "");
-  assert.equal(record(`ready-to-merge-head: ${"A".repeat(40)}`), "");
-  assert.equal(readRecord([{ createdAt: "2026-10-01T00:00:00Z", body: `ready-to-merge-head: ${A.slice(0, 12)}` }]), "");
-  assert.equal(readRecord([{ createdAt: "2026-10-01T00:00:00Z", body: "ready-to-merge-head: <sha>" }]), "");
+  // `^` or `$` left every case green. A prefix with nothing after the SHA is
+  // what `^` refuses; a suffix with nothing before the keyword is what `$`
+  // refuses; the multi-line cases put the stray text on its own line.
+  const record = (body) => newestHeadRecord([{ createdAt: "2026-10-01T00:00:00Z", body }]);
+  assert.equal(record(`see: ready-to-merge-head: ${A}`), null);
+  assert.equal(record(`the bot read\nready-to-merge-head: ${A}`), null);
+  assert.equal(record(`ready-to-merge-head: ${A} trailing`), null);
+  assert.equal(record(`ready-to-merge-head: ${A}\nhere`), null);
+  assert.equal(record(`ready-to-merge-head: ${A}a`), null);
+  assert.equal(record(`ready-to-merge-head: ${A}\nready-to-merge-head: ${B}`), null);
+  assert.equal(record(`the bot read\nready-to-merge-head: ${A}\nhere`), null);
+  assert.equal(record(` ready-to-merge-head: ${A}`), null);
+  assert.equal(record(`ready-to-merge-head: ${"A".repeat(40)}`), null);
+  assert.equal(newestHeadRecord([{ createdAt: "2026-10-01T00:00:00Z", body: `ready-to-merge-head: ${A.slice(0, 12)}` }]), null);
+  assert.equal(newestHeadRecord([{ createdAt: "2026-10-01T00:00:00Z", body: "ready-to-merge-head: <sha>" }]), null);
   // A non-record comment newer than the record does not hide it.
   assert.equal(
-    readRecord([
+    newestHeadRecord([
       { createdAt: "2026-10-01T00:00:00Z", body: `ready-to-merge-head: ${A}` },
       { createdAt: "2026-10-02T00:00:00Z", body: "LGTM" },
     ]),
@@ -163,43 +143,35 @@ test("the record filter reads nothing from a comment that is not exactly a recor
   );
 });
 
-test("without a record the timeline is the fallback, keyed on the three events that move a head", () => {
+test("the writer's body is a record the reader reads back", () => {
+  assert.equal(newestHeadRecord([{ createdAt: "2026-10-01T00:00:00Z", body: headRecordBody(A) }]), A);
+});
+
+// #4113: the bot ran the record query, saw `4a36a6dd…` for #3901 next to head
+// `79e031bf…`, read that as "no record", took the timeline fallback and
+// refused a head the gate would have carried. The comparison is now a command's
+// answer, so the prose names the command and tells the bot not to redo it. The
+// routes themselves are run in labelled-head.test.mjs.
+test("the labelled head names the command that decides the route, and the bot compares no SHAs", () => {
   const s = labelledHead();
-  assert.match(s, Pin.phrase("**No record — a hand-added label, or one applied before its labeller recorded a head — falls back to the timeline, which can refuse a moved head but never name the labelled one.**"));
+  assert.match(s, Pin.phrase("fleet-run labelled-head.mjs --pr <pr>"));
+  assert.match(s, Pin.phrase("you never compare the SHAs yourself"));
+  assert.match(s, Pin.phrase("**The route is the command's answer, not yours to re-derive:** a `record` that differs from `head` is route `gate`, never `timeline` — the `timeline` route is reached only when `record` is `null`."));
+  // The hand comparison's two operands are gone: the jq record query and the
+  // separate head read.
+  assert.doesNotMatch(s, /capture\(/);
+  assert.doesNotMatch(s, /headRefOid/);
+  assert.doesNotMatch(s, /sort_by/);
+});
+
+test("the timeline route is the fallback for a missing record only, and refuses only a moved head", () => {
+  const s = labelledHead();
+  assert.match(s, Pin.phrase("**Route `timeline` — no record, a hand-added label or one applied before its labeller recorded a head — falls back to the timeline, which can refuse a moved head but never name the labelled one.**"));
   assert.match(s, /issues\/<pr>\/timeline\?per_page=100/);
-  assert.match(s, /\.event == "labeled" and \.label\.name == env\.label/);
-  assert.match(s, /\.event == "committed" or \.event == "head_ref_force_pushed"/);
+  assert.match(s, Pin.phrase("`verdict` is `moved` when a `committed` or `head_ref_force_pushed` event follows the last `labeled` event for that string"));
 });
 
-// The timeline fallback's own `-q` program, run. The string reaches it through
-// the environment (`env.label`), so a string holding `'` cannot end the
-// single-quoted program; the fixture label below holds one.
-const timelineProgram = () => {
-  const block = /```bash\n(label="<ready-to-merge string>" gh api [\s\S]*?)```/.exec(labelledHead());
-  assert.ok(block, "no fenced block reads the timeline with the string in the environment");
-  const q = /-q '([\s\S]*?)'\n/.exec(block[1]);
-  assert.ok(q, "the timeline block carries no single-quoted -q program");
-  return q[1];
-};
-const readTimeline = (label, events) =>
-  execFileSync("jq", ["-r", timelineProgram()], { input: JSON.stringify(events), encoding: "utf8", env: { ...process.env, label } })
-    .trimEnd()
-    .split("\n")
-    .filter(Boolean);
-const TIMELINE = [
-  { event: "labeled", label: { name: "won't fix" } },
-  { event: "labeled", label: { name: "other" } },
-  { event: "committed", sha: A },
-  { event: "head_ref_force_pushed", sha: B },
-  { event: "commented" },
-];
-
-test("the timeline program prints the labeled line for a string holding an apostrophe, none for another label, and the commit and force-push lines", () => {
-  assert.deepEqual(readTimeline("won't fix", TIMELINE), ["labeled won't fix", `committed ${A}`, `head_ref_force_pushed ${B}`]);
-  assert.deepEqual(readTimeline("never-applied", TIMELINE), [`committed ${A}`, `head_ref_force_pushed ${B}`]);
-});
-
-test("the read's ordering constraint rides in the same sentence as its reason", () => {
+test("the timeline read's ordering constraint rides in the same sentence as its reason", () => {
   // The whole rule is WHEN. `gh pr update-branch` lands commits dated after the
   // label by construction — measured on this repo: #1090 (never rebased) lists
   // `labeled ready-to-merge` after its commits, #1091 (rebased by its merge
@@ -209,7 +181,7 @@ test("the read's ordering constraint rides in the same sentence as its reason", 
   // command it governs reds this.
   assert.match(
     labelledHead(),
-    Pin.phrase("Read it before `gh pr update-branch` too"),
+    Pin.phrase("Run the command before `gh pr update-branch`, on this route too"),
   );
   assert.match(
     labelledHead(),
@@ -237,7 +209,7 @@ test("a commit AFTER the last label line is what the refusal keys on", () => {
   assert.match(
     labelledHead(),
     Pin.phrase(
-      "A `committed` or `head_ref_force_pushed` line after the last `labeled ready-to-merge` means the head moved after the audit. **With no record, refuse:**",
+      "`verdict` is `moved` when a `committed` or `head_ref_force_pushed` event follows the last `labeled` event for that string, `after` listing those events as `<event> <sha>`; otherwise `clean`. **`moved` with no record → refuse:**",
     ),
   );
 });
@@ -248,9 +220,9 @@ test("a commit AFTER the last label line is what the refusal keys on", () => {
 // gives.
 test("a recorded head that is not the current head is handed to the gate, with the record as --pre", () => {
   const s = labelledHead();
-  assert.match(s, Pin.phrase("**A recorded head that is not the current head is not refused on sight — it may be a rebase-carry, and the merge gate decides.**"));
+  assert.match(s, Pin.phrase("**Route `gate` — the recorded head is not the current head — is not refused on sight: it may be a rebase-carry, and the merge gate decides.**"));
   assert.match(s, Pin.phrase("anything a push adds, drops or edits does not, whenever it was pushed and however its commits are dated"));
-  assert.match(s, Pin.phrase("run step 3's gate now, before step 1, with `--pre <labelled head>` and no `--post`. **`rebaseCarry` null → refuse:**"));
+  assert.match(s, Pin.phrase("run step 3's gate now, before step 1, with `--pre <record>` and no `--post`. **`rebaseCarry` null → refuse:**"));
   assert.match(s, Pin.phrase("step 1's `pre` must read `rebaseCarry.accepted` (any other head is a push since the proof — refuse with `head-moved-after-label-#<pr>`)"));
 });
 
@@ -270,12 +242,12 @@ test("the normal path — label applied, head unchanged — is stated as proceed
   assert.match(
     s,
     Pin.phrase(
-      "**A recorded head that is the current head (`gh pr view <pr> --json headRefOid -q .headRefOid`) is the normal case, and it proceeds untouched** — label applied, head unchanged, merge goes ahead exactly as it did before this gate existed",
+      "**Route `current` — the recorded head is the current head — is the normal case, and it proceeds untouched** — label applied, head unchanged, merge goes ahead exactly as it did before this gate existed",
     ),
   );
   // The record-less fallback keeps its own accept half: a hand-added label on
   // an unmoved head merges, as it always did.
-  assert.match(s, Pin.phrase("**Nothing after that label line is the normal case, and it proceeds untouched.**"));
+  assert.match(s, Pin.phrase("**`clean` is the normal case, and it proceeds untouched.**"));
 });
 
 // Step 3's comparison has an operand, and this section is the only place that
@@ -285,10 +257,7 @@ test("the normal path — label applied, head unchanged — is stated as proceed
 test("the pre-rebase head is recorded here, since step 3 compares against it and nothing rebuilds it", () => {
   const s = labelledHead();
   assert.match(s, Pin.phrase("Record the head before you rebase"));
-  // `phrase`, not a raw regex: this command sits in prose, not in a fenced
-  // block, so a hard-wrap can put a newline between any two of its words.
-  // Measured — the raw form reddened on a same-wording rewrap of the section.
-  assert.match(s, Pin.phrase("gh pr view <pr> --json headRefOid -q .headRefOid"));
+  assert.match(s, Pin.phrase("the `head` the command printed, read before anything moved it"));
   assert.match(s, Pin.phrase("on an already-current PR it is simply the head you merge"));
 });
 
@@ -425,7 +394,7 @@ test("every writer of ready-to-merge records the audited head before the label",
   assert.ok(record !== -1, "finisher-label.mjs posts no record");
   assert.ok(label !== -1, "finisher-label.mjs no longer adds the label");
   assert.ok(record < label, "finisher-label.mjs labels before it records the head");
-  assert.match(FINISHER_LABEL, /`ready-to-merge-head: \$\{pin\}`/, "finisher-label.mjs records something other than the audited head");
+  assert.match(FINISHER_LABEL, /headRecordBody\(pin\)/, "finisher-label.mjs records something other than the audited head");
   recordBeforeLabel(
     REVIEW_AND_FIX.between("6. Diff-check green", "**Bind green to the *run*", "review-and-fix.md step 6").text,
     "review-and-fix.md step 6",
