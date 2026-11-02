@@ -3115,9 +3115,18 @@ function heldSibling(t, stop) {
 /** Real git with stdio captured, so a rebase's `Stopped at` prose stays out of the test output. */
 const quietGit = (cwd, ...args) => execFileSync("git", args, { cwd, env: ENV, stdio: "pipe" });
 
-/** Stop `sib` mid-`rebase -i` at an `edit` on its tip commit. */
+/**
+ * Stop `sib` mid-`rebase -i` at an `edit` on its tip commit. The editor goes in
+ * as GIT_SEQUENCE_EDITOR in the spawned git's own env, never as `git -c`: an
+ * exported GIT_SEQUENCE_EDITOR outranks a `-c` editor setting, so the shell's
+ * editor, not this one, would be handed the todo list.
+ */
 const stopAtEditRebase = (sib) =>
-  quietGit(sib, "-c", "sequence.editor=sed -i.bak s/^pick/edit/", "rebase", "-i", "HEAD~1");
+  execFileSync("git", ["rebase", "-i", "HEAD~1"], {
+    cwd: sib,
+    env: { ...ENV, GIT_SEQUENCE_EDITOR: "sed -i.bak s/^pick/edit/" },
+    stdio: "pipe",
+  });
 
 /** The claim branch is still a local head. */
 const branchSurvives = (r, c, msg) =>
