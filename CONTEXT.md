@@ -39,7 +39,9 @@ _Avoid_: pin, required version, engines (bare)
 
 **Claim**:
 A ticket taken by a fleet member, represented by three artefacts together — a branch, a
-worktree, and the in-progress label on the issue.
+worktree, and the in-progress label on the issue. A claim's PR is opened from its branch;
+release and reap find the claim through that branch, and the implementer's settle refuses
+a PR from any other.
 _Avoid_: lock, reservation, assignment
 
 **Release**:
