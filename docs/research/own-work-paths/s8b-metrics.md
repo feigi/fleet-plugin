@@ -69,7 +69,7 @@ All citations are lines of `origin/main` 1a9692aa, relative to repo root.
 - Notes: `pulls` (this run's Pulls, `:925-926`) comes from the board's cards and is the only own-run input; the guard figures are not.
 
 ## Checked, own-only or config
-- `plugin/scripts/member-outcomes.mjs:327-334` — `verifyMainWithGit` spawns `sh verify-sha.sh main <sha>` (`plugin/scripts/verify-sha.sh:~28-31`: `git fetch --quiet origin main`, then `git merge-base --is-ancestor <sha> origin/main`); `<sha>` is the `bailDetail` of this member's own `fixed` bail report (`:294`); only `origin/main` content — config for this inventory.
+- `plugin/scripts/member-outcomes.mjs:327-334` — `verifyMainWithGit` spawns `sh verify-sha.sh main <sha>` (`plugin/scripts/verify-sha.sh:54-57`: `git fetch --quiet origin main`, then `:89`: `git merge-base --is-ancestor <sha> origin/main`); `<sha>` is the `bailDetail` of this member's own `fixed` bail report (`:294`); only `origin/main` content — config for this inventory.
 - `plugin/scripts/member-outcomes.mjs:249-264` — `endingOf` reads the member's own transcript signals (`openedPrs`, reports); no GitHub call.
 - `plugin/scripts/member-outcomes.mjs:412-531` — CLI scrape of `~/.omp/agent/sessions/<encoded cwd>/<session>` transcripts into `docs/metrics/member-outcomes.tsv`; host-local files, `pr` column taken from the member's own `gh pr create` output.
 - `plugin/scripts/member-record.mjs:211-260` and `:356-359`, `:447`, `:479` — `createdPrNumbers`/`openedPrs` parse PR numbers out of the member's OWN `gh pr create` transcript results; reads transcripts, runs no `gh`.
