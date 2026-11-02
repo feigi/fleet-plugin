@@ -189,3 +189,140 @@ test("release-ticket.sh still refuses a claim that carries work", (t) => {
   assert.match(receipt.blockers.join(" "), /commit\(s\) ahead/);
   assert.equal(f.git(f.w, "rev-parse", "--verify", "refs/heads/fix/42-slug").length, 40);
 });
+
+// #4166 — `git update-ref -d` (release-ticket.sh's delete, reap.sh's) removes
+// the ref and leaves `[branch "<b>"]` behind, and `git worktree add --no-track
+// -b <b>` does not clear it: a re-claim of the same name inherits an upstream
+// naming a remote ref that is gone, and reads `[gone]` from its first moment.
+// Most fixtures write the leftover by hand, the same two keys a `push -u`
+// leaves, so those cases do not depend on how a past run happened to push; the
+// end-to-end case pushes for real.
+
+/** What a released claim's `push -u` leaves behind once its ref is deleted. */
+const leaveUpstream = (git, w, branch) => {
+  git(w, "config", `branch.${branch}.remote`, "origin");
+  git(w, "config", `branch.${branch}.merge`, `refs/heads/${branch}`);
+};
+
+/** Every `branch.<name>.*` key in the repository's own config; "" when none. */
+const branchKeys = (f, branch) =>
+  spawnSync("git", ["-C", f.w, "config", "--local", "--name-only", "--get-regexp", `^branch\\.${branch}\\.`], {
+    env: f.env,
+    encoding: "utf8",
+  }).stdout;
+
+test("a re-claim of a released name inherits no upstream, and reap.sh leaves it alone", (t) => {
+  const f = fixture(t);
+  leaveUpstream(f.git, f.w, "fix/42-slug");
+  // A neighbour's section: the removal is scoped to the claimed name.
+  leaveUpstream(f.git, f.w, "fix/43-other");
+
+  const claim = sh(CLAIM, f.w, f.env, "42", "slug", "fix", "--apply");
+  assert.equal(claim.status, 0, claim.stdout + claim.stderr);
+
+  assert.equal(branchKeys(f, "fix/42-slug"), "");
+  assert.equal(track(f.git, f.w, "fix/42-slug"), "");
+  assert.match(branchKeys(f, "fix/43-other"), /branch\.fix\/43-other\.remote/);
+
+  const reaped = sh(REAP, f.w, f.env, "--apply");
+  assert.equal(reaped.status, 0, reaped.stdout + reaped.stderr);
+  assert.deepEqual(JSON.parse(reaped.stdout).reaped, []);
+  assert.equal(f.git(f.w, "rev-parse", "--verify", "refs/heads/fix/42-slug").length, 40);
+  assert.ok(worktreeNames(f.git(f.w, "worktree", "list", "--porcelain")).includes("42-slug"));
+});
+
+test("the default dry run of a claim leaves a released name's config alone", (t) => {
+  const f = fixture(t);
+  leaveUpstream(f.git, f.w, "fix/42-slug");
+  const dry = sh(CLAIM, f.w, f.env, "42", "slug", "fix");
+  assert.equal(dry.status, 0, dry.stdout + dry.stderr);
+  assert.match(dry.stderr, /would: git config --remove-section branch\.fix\/42-slug/);
+  assert.match(branchKeys(f, "fix/42-slug"), /branch\.fix\/42-slug\.merge/);
+});
+
+test("a claim whose leftover config cannot be removed refuses before anything is claimed", (t) => {
+  const f = fixture(t);
+  leaveUpstream(f.git, f.w, "fix/42-slug");
+  // A held config lock: `--remove-section` fails and the section stays.
+  writeFileSync(join(f.w, ".git", "config.lock"), "");
+  const claim = sh(CLAIM, f.w, f.env, "42", "slug", "fix", "--apply");
+  assert.notEqual(claim.status, 0, claim.stdout + claim.stderr);
+  assert.match(claim.stderr, /branch\.fix\/42-slug/);
+  rmSync(join(f.w, ".git", "config.lock"));
+  assert.equal(spawnSync("git", ["-C", f.w, "rev-parse", "--verify", "refs/heads/fix/42-slug"], { env: f.env }).status, 128);
+  assert.equal(worktreeNames(f.git(f.w, "worktree", "list", "--porcelain")).includes("42-slug"), false);
+});
+
+test("release-ticket.sh --apply removes the released branch's config section, and only that one", (t) => {
+  const f = fixture(t);
+  assert.equal(sh(CLAIM, f.w, f.env, "42", "slug", "fix", "--apply").status, 0);
+  leaveUpstream(f.git, f.w, "fix/42-slug");
+  leaveUpstream(f.git, f.w, "fix/43-other");
+
+  const rel = sh(RELEASE, f.w, f.env, "42", "slug", "fix", "--apply");
+  assert.equal(rel.status, 0, rel.stdout + rel.stderr);
+  assert.equal(
+    spawnSync("git", ["-C", f.w, "rev-parse", "--verify", "refs/heads/fix/42-slug"], { env: f.env }).status,
+    128,
+  );
+  assert.equal(branchKeys(f, "fix/42-slug"), "");
+  assert.match(branchKeys(f, "fix/43-other"), /branch\.fix\/43-other\.remote/);
+});
+
+test("release-ticket.sh --apply of a claim with no config section releases without a note", (t) => {
+  // The accepting case: a claim carries no upstream until its first push, so
+  // the section the removal reaches for is usually not there, and its failing
+  // to find one is not a fault.
+  const f = fixture(t);
+  assert.equal(sh(CLAIM, f.w, f.env, "42", "slug", "fix", "--apply").status, 0);
+  assert.equal(branchKeys(f, "fix/42-slug"), "");
+  const rel = sh(RELEASE, f.w, f.env, "42", "slug", "fix", "--apply");
+  assert.equal(rel.status, 0, rel.stdout + rel.stderr);
+  assert.doesNotMatch(rel.stderr, /config section/);
+});
+
+test("a claim pushed with -u, then released and re-claimed, reads clean end to end", (t) => {
+  // The ticket's own path: a real `push -u`, the remote branch gone, the ref
+  // released, then the same name claimed again.
+  const f = fixture(t);
+  assert.equal(sh(CLAIM, f.w, f.env, "42", "slug", "fix", "--apply").status, 0);
+  const wt = join(f.w, ".worktrees", "42-slug");
+  f.git(wt, "push", "-q", "-u", "origin", "HEAD");
+  f.git(f.w, "push", "-q", "origin", ":refs/heads/fix/42-slug");
+  f.git(f.w, "fetch", "-q", "--prune", "origin");
+  assert.equal(track(f.git, f.w, "fix/42-slug"), "[gone]");
+  const rel = sh(RELEASE, f.w, f.env, "42", "slug", "fix", "--apply");
+  assert.equal(rel.status, 0, rel.stdout + rel.stderr);
+
+  assert.equal(sh(CLAIM, f.w, f.env, "42", "slug", "fix", "--apply").status, 0);
+  assert.equal(track(f.git, f.w, "fix/42-slug"), "");
+  const reaped = sh(REAP, f.w, f.env, "--apply");
+  assert.equal(reaped.status, 0, reaped.stdout + reaped.stderr);
+  assert.deepEqual(JSON.parse(reaped.stdout).reaped, []);
+});
+
+test("release-ticket.sh --apply notes a config section it could not remove, and still releases", (t) => {
+  const f = fixture(t);
+  assert.equal(sh(CLAIM, f.w, f.env, "42", "slug", "fix", "--apply").status, 0);
+  leaveUpstream(f.git, f.w, "fix/42-slug");
+  writeFileSync(join(f.w, ".git", "config.lock"), "");
+  const rel = sh(RELEASE, f.w, f.env, "42", "slug", "fix", "--apply");
+  rmSync(join(f.w, ".git", "config.lock"));
+  assert.equal(rel.status, 0, rel.stdout + rel.stderr);
+  assert.match(rel.stderr, /fix\/42-slug deleted, but its branch config section was left/);
+  assert.equal(JSON.parse(rel.stdout.trim().split("\n").pop()).released, true);
+  assert.match(branchKeys(f, "fix/42-slug"), /\.remote/);
+});
+
+test("a repository with no branch.* keys at all claims and releases without a config note", (t) => {
+  // The key listing finds nothing at all and exits 1, which is not a fault:
+  // every other fixture keeps main's upstream, so its listing never comes up empty.
+  const f = fixture(t);
+  f.git(f.w, "config", "--remove-section", "branch.main");
+  assert.equal(spawnSync("git", ["-C", f.w, "config", "--local", "--get-regexp", "^branch\\."], { env: f.env }).status, 1);
+  const claim = sh(CLAIM, f.w, f.env, "42", "slug", "fix", "--apply");
+  assert.equal(claim.status, 0, claim.stdout + claim.stderr);
+  const rel = sh(RELEASE, f.w, f.env, "42", "slug", "fix", "--apply");
+  assert.equal(rel.status, 0, rel.stdout + rel.stderr);
+  assert.doesNotMatch(rel.stderr, /config section/);
+});
