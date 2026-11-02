@@ -1,0 +1,160 @@
+# own-work inventory — slice S8a (Close-out and the cockpit board)
+
+Snapshot: `origin/main` 1a9692aa. All paths relative to repo root. Files read in full or in every GitHub-touching region: closeout.mjs, close-out.md, board-gather.mjs, compute-board.mjs (the parts that consume gather()'s reads), board.mjs/board-server.mjs/board-common.mjs/gh-aliased-read.mjs/cockpit-lifetime.mjs/compute-spend.mjs/board.html (grepped for every gh/git/fetch/spawn path; see the lists at the end).
+
+Orientation (facts, used by several entries):
+- `closeout.mjs` runs every child through `run()` (`plugin/scripts/closeout.mjs:181-184`): `spawnSync` with `gitEnv(env)`, which scrubs GIT_DIR/GIT_WORK_TREE; the `gh` calls pass `env: { GH_REPO: "" }` (`:419`, `:488`, `:505`, `:599`) so gh resolves the repository from the cwd.
+- The Close-out receipt `.fleet/closeout.json` (`closeout.mjs:116-131`, host-local, per checkout) is the only record tying `finish` to its branch, pin and PR. It is invisible to other Instances.
+- The cockpit board has NO GitHub write anywhere in its files: `board-gather.mjs` runs only `gh issue list`, `gh pr list`, `gh api graphql` (merged/closed state), `gh repo view`, `gh api …/contents/docs/metrics`, and `ci-state.mjs --pr`. `board-server.mjs` spawns only `open`/`xdg-open` (`board-server.mjs:34-35`).
+
+---
+
+### S8a-1 Close-out branch name probe (local refs + `git ls-remote` for a name not yet made)
+- Where: `plugin/scripts/closeout.mjs:340-352` (`pickBranch`), `:345`, `:347`, `:438-444`; header `:41-44`
+- Kind: read-select
+- Does: for the default name `chore/run-artifacts-<UTC yyyymmdd>` (`:342`, `new Date().toISOString().slice(0, 10)`), then the same name suffixed `b`, `c`… `z` (`:343`), runs `git show-ref --verify --quiet refs/heads/<name>` (`:345`) and `git ls-remote --exit-code --heads origin <name>` (`:347`). The first name absent locally (status 1) and on origin (status 2) is taken (`:349`). A probe that fails to answer is an error, "never 'not taken'" (`:337-339`, `:346`, `:348`). `--branch <name>` given: used verbatim, NO probe (`:341`). Probe runs only while `receipt.branch === null` (`:438`).
+- Scope today: repo-wide (asks origin about every candidate name; the answer is about branches any Instance or person pushed)
+- Feeds / Selected by: Feeds `git switch -c <name>` (`closeout.mjs:441`), `receipt.branch` (`:443-444`, saved BEFORE any push), the push (`:407-408`) and `gh pr create --head` (`:419`). Selected by nothing upstream (the name is computed from the UTC date).
+- Exists because: so a second close-out the same UTC day does not reuse the first one's name ("suffixed `b`, `c`… while that name exists locally or on origin", header `:42-44`).
+- Own-work limit: it may only decide a name for a branch THIS Instance is about to create; it must never adopt, resume or probe-then-write onto an existing remote branch it did not create. When the probe cannot answer, stall (it already does: `:346`, `:348`).
+- Mark: branch; nearest mark today: head branch name (`chore/run-artifacts-<date>[letter]`); tells Instances apart under one gh user: no; under different gh users: no. The name carries a date and a first-free letter only. The letter is whatever was free at that moment, so it is not stable per Instance.
+- Notes: (a) two Instances closing out on the same UTC day both start at `chore/run-artifacts-<date>`; the probe only helps when the first has already pushed (check-then-act gap between `:347` and the push `:408`; the lease in S8a-2 is what refuses the loser). (b) After the loser's push is refused, `receipt.branch` is already saved (`:444`), so the next `finish` takes the `else` arm (`:445-447`, `git switch <receipt.branch>`) and never calls `pickBranch` again: it retries the same name with the same lease and is refused the same way. The step is `failed` (exit 3) until the receipt is removed or edited by hand. [INFERENCE from the code paths above; not run.] (c) 26 names per day, then `every lettered … name is taken` (`:351`).
+
+### S8a-2 Close-out branch push with a lease
+- Where: `plugin/scripts/closeout.mjs:405-413` (`onBranch`), header `:44-59`; `git fetch origin` `:367`; rebase `:369`
+- Kind: write
+- Does: `git push -u --force-with-lease=refs/heads/<receipt.branch>:<receipt.pin ?? ""> origin <receipt.branch>` (`:407-408`). The comment at `:405-406` says the lease is "the head this step last pushed, never what the fetch above just read: an empty one expects the branch absent from origin." First run: expects the ref ABSENT. Re-run: expects origin's branch at `receipt.pin`, the head this receipt last pushed (`:410`). A refused push fails the step (`:409`). It is preceded by `git fetch origin` (all branches, `:367`) and `git rebase origin/main` (`:369`); the rebase result `leftOpen` is recorded in `receipt.rebase` (`:411`).
+- Scope today: per-object from the receipt's own branch name (the name came from S8a-1 or `--branch`); precondition = lease (absent, or own last pin)
+- Feeds / Selected by: Selected by `receipt.branch` (`:443`) from S8a-1, or `--branch` (`:341`); `receipt.pin` is `git rev-parse HEAD` (`:402-403`, `:410`). Feeds S8a-3 and S8a-10 (`receipt.pin` is the merge pin).
+- Exists because: "a re-run pushes its rebased branch over the one it pushed before, and over nothing else: a branch someone else pushed to fails the step" (header `:53-56`).
+- Own-work limit: only targets this Instance's own Close-out branch. With ownership unknown (remote branch exists that this receipt did not push) it must stall. Today that is true for any name this Instance did not push first: the absent-lease refuses an existing ref and the pin-lease refuses a ref that moved.
+- Mark: branch; nearest mark today: head branch name; tells Instances apart under one gh user: no (the lease compares sha, not owner; two Instances can never hold the same pin, so the lease is what keeps them apart); under different gh users: no (the pusher's login is not checked).
+- Notes: the push lands on `refs/heads/chore/run-artifacts-…` only; `git push` here has no `--delete`. `git fetch origin` (`:367`) updates every `refs/remotes/origin/*` but only `origin/main` is read afterward (`:356`, `:369`, `:399`, and `finisher-scope.mjs:174-180` via S8a-10); other Instances' branches are fetched, not judged.
+
+### S8a-3 Open the Close-out PR
+- Where: `plugin/scripts/closeout.mjs:415-423`
+- Kind: write
+- Does: `gh pr create --head <receipt.branch> --title "Closeout: <reason>" --label patch --body "Closeout: <reason>\n\nRows changed:\n- docs/metrics/<f>.tsv: +<added> -<removed>…"` (`:416-419`, `:418` is the body), run from the main checkout with `GH_REPO: ""`. The PR's URL (last stdout line) is stored in `receipt.pr` (`:421`). Guarded only by the host-local receipt: `if (receipt.pr !== null) return ok(... already opened ...)` (`:415`). The step makes no GitHub read for an existing PR on that head.
+- Scope today: per-object from own branch (S8a-2); precondition = the receipt's `pr` is null (host-local), and gh refusing a second PR for one head
+- Feeds / Selected by: Selected by `receipt.branch` (S8a-1/-2). Feeds the merge step S8a-10 (`receipt.pr`, `:542`), and the cockpit's `readCloseoutPr` (`board-gather.mjs:834-842`, see Checked list).
+- Exists because: the metrics files "reach `main` through the same review as ticket work rather than being lost" (`plugin/skills/run-team/references/close-out.md:138-139`).
+- Own-work limit: only targets this Instance's own Close-out branch. If a PR already exists for the head (receipt lost, or a name another Instance took) gh's refusal fails the step (`:420`); it must stay a stall, never adopt a found PR.
+- Mark: PR; what the PR carries today: author login (the pusher's gh user); head branch `chore/run-artifacts-<yyyymmdd>[letter]`; label `patch` (hard-coded literal at `:419`, not read from the Label map; state/release, not owner); title `Closeout: <reason>`; body `Closeout: <reason>\n\nRows changed:\n- <file>: +<n> -<n>` ; commit message `Closeout: <reason>` (`:394`); NO `Closes #N`, no run, member, session or ledger token, no Instance part. `<reason>` is controller free text ("name the trigger", `close-out.md:38`). Tells Instances apart under one gh user: no; under different gh users: yes (author login only).
+- Notes: this PR is, to any other Instance sharing the gh user, an ordinary Owned PR with no closing reference: the close-out text says "An Owned PR still open when the run ends is one phase 0's fold-in queues for review next run, however it is named" (`close-out.md:137-138`), so another Instance's phase 0 / tick under the same login would be eligible to adopt and review it. The branch is cut from whatever HEAD the main checkout is on (`git switch -c`, `:441`) and then rebased onto `origin/main` (`:369`). Two Instances' Close-out PRs both rewrite the same three `docs/metrics/*.tsv` files (`:161`), so the later rebase may conflict; that case is by design "left open" for the next run (`:361-365`, `:553`).
+
+### S8a-4 The `tick` step's run-over gate counts every open PR in the repository
+- Where: `plugin/scripts/closeout.mjs:287-294` (`stepTick`), `:162`; the count is in `plugin/scripts/fleet-tick.mjs:1716` (`gh pr list --state open --limit PR_LIMIT`), `:2298` (`const prs = openPrs()`), `:2422` (`const over = run.draining !== null && prs.length === 0 && run.implLive === 0`)
+- Kind: read-select
+- Does: runs `fleet-tick.mjs` with the bound from `.fleet/phase0.json` (`closeout.mjs:288-290`) and fails the step unless the tick's last line starts `ACTION: run over` (`:292-293`). The tick prints that line only when no open PR exists (`prs.length === 0`) and no implementer is live (`fleet-tick.mjs:2422-2423`). `openPrs()` returns every open PR with an `owned` flag attached (`fleet-tick.mjs:1749-1755`), but `over` tests `prs.length` and does not use `owned`. [Read from code; the tick's own slice owns its other reads.]
+- Scope today: repo-wide (all open PRs, any author, any Instance; `die`s when exactly PR_LIMIT come back, `fleet-tick.mjs:1745-1746`)
+- Feeds / Selected by: Feeds `finish`'s first step; nothing after it (scrape, metrics, commit-and-pr, merge) runs while the tick step is `failed` (`closeout.mjs:645`, `:637-647`).
+- Exists because: "`finish` closes the run once the tick says it is over" (header `:10-12`); close-out.md:18-19: `ACTION: run over` "once the run is draining with no open PR and no live implementer."
+- Own-work limit: "no open PR" would have to mean no open PR of THIS Instance's own (its Owned PRs); a PR another Instance or a person has open must not hold this Instance's close-out open. Today it stalls this Instance's `finish` with exit 3 for as long as any other open PR exists.
+- Mark: PR; nearest mark today: author login (`isOwnedPr(p, login)` sets `owned`, `fleet-tick.mjs:1751`) — not applied at `:2422`; tells Instances apart under one gh user: no; under different gh users: yes.
+- Notes: this is a stall, not a collision. It also means the close-out of an Instance that shares a repository with a still-open foreign PR cannot reach `commit-and-pr`, so its metrics rows never reach main until that PR closes. [INFERENCE for the consequence; the gate's code is cited.] The tick in this repo may differ in other subcommands; only the run-over expression was read here.
+
+### S8a-5 Cockpit pool: every `ready-for-agent` issue in the repository
+- Where: `plugin/scripts/board-gather.mjs:1199-1200`, `:160`, `:1214-1221`; consumed in `plugin/scripts/compute-board.mjs:751-759`, `:774-782`, `:558-564`, `:575-579`
+- Kind: read-inform
+- Does: `gh issue list --label <roles["ready-for-agent"]> --state open --limit 100 --json number,title,labels` (`POOL_LIMIT = 100`, `:160`; the label string from the Label map via `readLabelMap`, `:1192`). No `--author`, no `--assignee`, no exclusion of `in-progress`. Each returned issue with no ledger row of this checkout becomes a POOL card (`compute-board.mjs:751-759`; the only filters are the ticket's own ledger row, `:752`, and a `wayfinder:` label prefix, `:753`). `queue.pool`/`supply` is the card count, `"<n>+"` when the read hit the limit (`:782`).
+- Scope today: label-wide (all open issues carrying the role label, repo-wide)
+- Feeds / Selected by: Feeds the POOL column and `queue.pool` (`compute-board.mjs:774-799`), the stall line's "pool supply" (`:563-564`), the `capNotice` (`:577`). It acts on nothing.
+- Exists because: the pool is "the pool's ONLY source" (`board-gather.mjs:1209-1210`); its emptiness is how the board tells "no work" from an outage.
+- Own-work limit: to count only this Instance's own work it would have to exclude tickets another Instance holds (an issue that carries `in-progress` and has no row in THIS checkout's ledger is another Instance's claim, or a stranded one, and today cannot be told apart). Pool supply that no Instance could claim is still shown as supply.
+- Mark: issue; nearest mark today: in-progress label (present on the returned `labels`, `labelsOf(i)` `:1220`, but never read for exclusion); tells Instances apart under one gh user: no; under different gh users: no.
+- Notes: `claim-ticket.sh` adds `in-progress` and does not remove `ready-for-agent` (`plugin/scripts/claim-ticket.sh:285-286`, the only label write found there), so a ticket another Instance claimed keeps showing as a POOL card here until its issue stops carrying the role label for some other reason. The ledger-derived "claimed"/in-flight figure is own-only: `compute-board.mjs:529-533` ("the same population the `in-progress` label marks, arrived at from the ledger instead of from a label query") and `:562`. Only the pool side reads the label query. A read cut at 100 is displayed as `n+` and the notice names that POOL "may be missing tickets" (`:577`).
+
+### S8a-6 Cockpit open-PR list: every open PR in the repository
+- Where: `plugin/scripts/board-gather.mjs:1223-1224`, `:161`, `:1240-1253`; consumed in `plugin/scripts/compute-board.mjs:659`, `:671`, `:698-700`, `:714`, `:868`, `:575-579`; `board-gather.mjs:1264`
+- Kind: read-inform
+- Does: `gh pr list --state open --limit 100 --json number,state,labels,title,headRefOid` (`OPEN_PR_LIMIT = 100`, `:161`). No `--author`, no `--head`, no label filter. Every row is kept (`withNumber` only drops rows with no number). Use of the list: (1) `prByNum` gives a ledger row its PR's state/labels/headRefOid (`compute-board.mjs:659`, `:714`); (2) `unqueued` = open PRs lacking the `ready-to-merge` label, for `latestFinisherAttempts` (`:698-700`); (3) `foldLedger(..., new Set(prs.map(number)))` — the open set for the tick's fold (`:671`); (4) `mergedReadPrs` asks the merged-state read only about row PRs ABSENT from this list (`:610-620`, called at `board-gather.mjs:1264`); (5) `openPrs.numbers` for the Cell evidence "records-not-on-main" check (`compute-board.mjs:868`, `compute-cell-evidence.mjs:815-820`); (6) S8a-7's CI loop runs over it (`board-gather.mjs:1278`).
+- Scope today: repo-wide (all open PRs, any author, any Instance)
+- Feeds / Selected by: Feeds the cards of this checkout's ledger rows and the notices above. A PR with no row becomes no card.
+- Exists because: the open list is how a row PR is placed as REVIEW/READY rather than MERGED; it drops "a PR the moment it merges" (`board-gather.mjs:1255-1257`).
+- Own-work limit: only PRs this Instance owns (its rows' PRs, plus its Close-out PR) are needed; PRs of other Instances or people are read, counted against the 100-row cap and discarded.
+- Mark: PR; nearest mark today: none read here (no `author` field requested; the field list is `number,state,labels,title,headRefOid`); the row↔PR tie is the host-local ledger; tells Instances apart under one gh user: no; under different gh users: no (not requested).
+- Notes: surprise: other Instances' open PRs count toward `OPEN_PR_LIMIT`, and a read that returns exactly 100 is reported as capped; in that case "a PR past it shows REVIEW with CI unknown whatever its real label and run say" (`compute-board.mjs:572-573`, `:578`). So volume of another Instance's work can hide this Instance's own PR from its own board (which end of the list is cut is gh's ordering; not read here). [INFERENCE for the ordering.]
+
+### S8a-7 Cockpit CI read for every open PR in the repository
+- Where: `plugin/scripts/board-gather.mjs:1278-1281`, `:275-276` (`runCiState`), `:354-409` (`mapCi`); the per-PR gh reads are in `plugin/scripts/ci-state.mjs:461` (graphql), `:744` (`gh run list --branch <branch> --workflow … --limit 30`), `:832` (`gh run view`), `:896` (compare)
+- Kind: read-inform
+- Does: for every `p` in the open-PR list of S8a-6, spawns `node ci-state.mjs --pr <p.number> --quiet` one at a time (`:1278-1281`; "a fan of 40 at once is a rate-limit", `:1270-1277`). The result is stored in `ci[p.number]`. On a failed read the previous board's value for that PR is carried (`prevCi`, `:1268`, `:1280`).
+- Scope today: repo-wide (the PR set is the repo-wide open list), per-object from S8a-6 for each spawn
+- Feeds / Selected by: Selected by S8a-6 (`board-gather.mjs:1278`). Feeds `ci[p.pr]` for a ledger row's card only (`compute-board.mjs:723`, `ciState`); `compute-board.mjs` has no other reader of `ci` (seen: `:657`, `:723`). So the CI of a PR with no row in this checkout is read and never shown. [Grep found these two uses only.]
+- Exists because: the card's red-CI flag; "ci-state's verdict already excludes behind-count staleness" (`board-gather.mjs:361`).
+- Own-work limit: only PRs in this Instance's ledger rows (and its Close-out PR) need a CI read.
+- Mark: PR; nearest mark today: none (the ledger row is the host-local tie); tells Instances apart under one gh user: no; under different gh users: no.
+- Notes: the cockpit re-gathers every `interval`, default 15 s (`board.mjs:249`: `interval ?? argInterval() ?? 15`; also `board-gather.mjs:354-356`), so each cockpit issues one `gh issue list`, one `gh pr list`, one `ci-state` spawn (several gh calls each) per open PR in the repository, plus the carried `modelRoles`/`docs/metrics` reads once a minute, on every tick. Each Instance's cockpit does this for the whole repository's open PRs, against one gh user's rate limit when the user is shared. [The per-tick gh-call count of `ci-state.mjs` is another slice's; only the entry points are cited.]
+
+### S8a-8 Instruction: release the claims `begin` refused, by hand
+- Where: `plugin/skills/run-team/references/close-out.md:11-16` (`begin` selects a claim with no PR…; "A claim it refuses prints `NEED hand-release #<N> <blocker>`: that refusal is the finding, so run `worktree-audit.sh` and decide by hand… release the rest by hand and run `begin` again."); the script side is `plugin/scripts/closeout.mjs:248-283`
+- Kind: instruction-write
+- Does: tells the controller to release by hand any claim `closeout.mjs begin` could not release. The script's own write is `release-ticket.sh <N> impl-<N> implementer --apply` (`closeout.mjs:270`; script internals are another slice), then `ledger.mjs settle <member>=released` (`:277`).
+- Scope today: per-object from host-local ledger rows. The script selects only ledger rows with no PR and a live or `bailed` `impl-` token (`closeout.mjs:265-269`, `rowPr`, `memberTokens`), `ticket = members[0].number` (`:269`). The instruction's "release the rest by hand" names no selection beyond that `NEED` list.
+- Feeds / Selected by: Selected by `ledger.mjs read` rows (`closeout.mjs:249-257`), the checkout's own ledger; for the hand release by the `NEED hand-release #<N>` lines (`:272`, `:278`).
+- Exists because: a drain must not leave a claim (the `in-progress` label and its branch) behind: `begin`'s `release` step (`closeout.mjs:21-23`).
+- Own-work limit: only claims this Instance's ledger shows it dispatched. A claim with no row in this checkout's ledger is not one this Instance may release, however stranded it looks on GitHub; `begin` never looks at GitHub for such claims and the prose does not tell the controller to.
+- Mark: issue; nearest mark today: in-progress label; tells Instances apart under one gh user: no; under different gh users: no. The tie to this Instance is the local ledger row (invisible to other Instances).
+- Notes: `begin` is idempotent and re-selects the same claims every run, so "a claim you keep leaves `begin` at exit 4 on every run" (`close-out.md:14-16`).
+
+### S8a-9 Instruction: `finish` pushes and opens the metrics PR; a `left open` PR belongs to the next run
+- Where: `plugin/skills/run-team/references/close-out.md:20-27` (runs `closeout.mjs finish`; "A PR it names `left open` is the next run's: you never label or merge it."), `:129-142` ("Commit the metrics files and open a PR — at end of run. The branch name is the repository's choice… An Owned PR still open when the run ends is one phase 0's fold-in queues for review next run, however it is named")
+- Kind: instruction-write
+- Does: tells the controller to run `finish` (whose writes are S8a-2, S8a-3, S8a-10) and, in the manual form, to "make the commit on a branch in the main checkout, switch back to `main`… never `--record` while on that branch". It leaves the branch name "the repository's choice". It also states that the next run's Fold-in adopts the still-open PR "however it is named".
+- Scope today: per-object from own branch/PR (`finish`'s receipt); the sentence about the next run's fold-in concerns an Owned PR (author login), not an Instance
+- Feeds / Selected by: the instruction feeds S8a-1..3 and S8a-10. No selecting read in the instruction itself.
+- Exists because: "Stranding a data row loses it: `member-outcomes.tsv` is regenerated from harness transcripts the fleet does not own" (`close-out.md:140-142`).
+- Own-work limit: the controller labels or merges only the Close-out PR it opened; "you never label or merge" a `left open` one is the existing stall statement and has to stay. Which Owned PR a LATER run's phase 0 adopts is the fold-in slice's question: here its only rule is "Owned PR", i.e. the author login.
+- Mark: PR/branch; nearest mark today: author login and head branch name; tells Instances apart under one gh user: no; under different gh users: yes (author login).
+- Notes: `close-out.md:62-69` also tells the controller to scrape EVERY omp session directory of this cwd, because "any other session sharing this cwd — a second terminal, a second controller run — can hold a newer transcript than yours". That is about host-local session transcripts, not GitHub: out of scope, kept in the Checked list.
+
+### S8a-10 Merge the Close-out PR
+- Where: `plugin/scripts/closeout.mjs:541-612` (`stepMerge`), the write at `:599`; reads `:488` (`readPr`), `:505` (`readCi`)
+- Kind: write
+- Does: `gh pr merge <n> --merge --match-head-commit <receipt.pin>` (`:599`), at most once per `finish` call (`asked`, `:581`, `:597`), after `inertVerdict({ worktree, pin })` is `inert` (`:566-570`, a local `git diff-tree` against `refs/remotes/origin/main`, `finisher-scope.mjs:12`, `:174-180`), `gh pr view <n> --json state,headRefOid,mergeStateStatus` and `ci-state.mjs --pr <n> --declare-no-ci` agree: state OPEN, `headRefOid === receipt.pin` (`:587`), CI green with `prHead === receipt.pin` (`:594`), `mergeStateStatus` CLEAN or HAS_HOOKS (`:537`, `:596`). MERGED or CLOSED seen first ends the step without a merge (`:585-586`). Never arms auto-merge, never `--delete-branch` (header `:104-108`).
+- Scope today: per-object from `receipt.pr` (the URL `gh pr create` printed, `:421`; number parsed by `PR_NUMBER`, `:535`, `:542`); precondition = `--match-head-commit` pin
+- Feeds / Selected by: Selected by S8a-3's `receipt.pr` and S8a-2's `receipt.pin`. Feeds the receipt's `mergeOutcome` (`:545-547`).
+- Exists because: "GitHub keeps auto-merge armed across pushes by anyone with write access, and every member pushes with the maintainer's credentials" (header `:104-106`); the pin is how a push by anyone else stops the merge.
+- Own-work limit: only targets this Instance's own Close-out PR (recorded in its receipt); a head moved off the pin, BEHIND/DIRTY, a failed check, or a PR some other actor already merged/closed is left alone (`:585-588`, `:591`, `:594-595`). That is the existing stall.
+- Mark: PR; nearest mark today: head branch name + author login; tells Instances apart under one gh user: no; under different gh users: yes.
+- Notes: nothing in this step reads or removes another PR's label, and it labels nothing (the PR carries `patch`, S8a-3). It cannot tell that another Instance's merge bot or finisher (same gh user) acted on the PR first; it can only notice the result: MERGED/CLOSED (`:585-586`) or a moved head (`:587`). `gh pr merge` with `--match-head-commit` fails when the head moved, but a merge by another actor at the same head is indistinguishable from this one. [INFERENCE for the same-head race; cited lines are what the code checks.]
+
+---
+
+## Checked, own-only or config
+- `plugin/scripts/closeout.mjs:231-234` — `ledger.mjs drain` (host-local ledger marker, no GitHub).
+- `plugin/scripts/closeout.mjs:248-283` — `release-ticket.sh <N> impl-<N> implementer --apply` (GitHub write: drops `in-progress`, deletes the claim branch; internals are another slice's) and `ledger.mjs settle`. Target N comes only from this checkout's ledger rows with no PR and a live/`bailed` `impl-` token (`:265-269`): own-keyed claim recorded by this Instance. Instruction side is S8a-8.
+- `plugin/scripts/closeout.mjs:297-322` — `stepScrape`: `member-outcomes.mjs` over `~/.omp/agent/sessions/<encoded cwd>/*` (host-local transcripts; no GitHub).
+- `plugin/scripts/closeout.mjs:324-330` — `tier-outcomes.mjs check --live` (its own `gh pr view <n> --json closingIssuesReferences,url` per PR, `tier-outcomes.mjs:510-531`, is per-object from the ledger's reviewed PRs; the `NEED tier-outcomes append <n>` lines come from ledger tokens). Internals are another slice's.
+- `plugin/scripts/closeout.mjs:332-335` — `metrics-refresh.mjs` (local files, `pr-cost.mjs --guard`; no GitHub read in this file).
+- `plugin/scripts/closeout.mjs:356`, `:369`, `:399` — `git diff --numstat origin/main...HEAD`, `git rebase origin/main`, `git rev-list --count origin/main..HEAD`: `origin/main` content, config. `:367` `git fetch origin` (see S8a-2 Notes).
+- `plugin/scripts/closeout.mjs:371-385` — `git diff --diff-filter=U`, `rebase --abort`: local git state of this branch.
+- `plugin/scripts/closeout.mjs:391-396`, `:428`, `:441`, `:446`, `:450` — local `git status/commit/switch/rev-parse` on this Instance's own work tree and own branch.
+- `plugin/scripts/closeout.mjs:461-478` — `.fleet/phase0.json` → `.fleet/phase0.previous.json` (host-local).
+- `plugin/scripts/closeout.mjs:480-483` — `fleet-heartbeat.mjs --stop` (host-local state file; no GitHub in this call).
+- `plugin/scripts/closeout.mjs:487-498` — `gh pr view <n> --json state,headRefOid,mergeStateStatus`, `n` = own Close-out PR from `receipt.pr` (per-object, recorded when created).
+- `plugin/scripts/closeout.mjs:504-519` — `ci-state.mjs --pr <n> --declare-no-ci` for the same own PR (its internals are S7ReviewCI's).
+- `plugin/scripts/closeout.mjs:566` — `inertVerdict` (`finisher-scope.mjs:12`, `:174-183`): local `git diff-tree` from the merge base with `refs/remotes/origin/main` to the own pin; config.
+- `plugin/scripts/closeout.mjs:659-678` — `reopen`: `ledger.mjs undrain`, host-local.
+- `plugin/scripts/board-gather.mjs:196-220` (`readStates`, called `:1265`) — one `gh api graphql … pullRequest(number:N){state} issue(number:N){state}` for the PR numbers `mergedReadPrs()` (`compute-board.mjs:610-620`) and `issuesOfPrs()` (`:628-634`) return: PRs/issues named by THIS checkout's ledger rows, absent from the open list. Per-object from ledger rows, so own, EXCEPT that a row that a phase-0 Fold-in adopted for a PR this Instance did not create reads the same way (the Fold-in slice decides who writes such rows; not read here). Reads state only, never writes.
+- `plugin/scripts/board-gather.mjs:1286-1292` — `gh repo view --json nameWithOwner,url`: repository identity, config.
+- `plugin/scripts/board-gather.mjs:973-991` (`readMainMetrics`, carried `:1356-1358`, `:1053-1061`) — `gh api --hostname <host> repos/<owner>/<name>/contents/docs/metrics`: blob ids of main's `docs/metrics` directory, `origin/main` content, config. Its comparison with this Instance's local guard/preview TSVs drives the "records-not-on-main" alert (`compute-cell-evidence.mjs:829-885`): another Instance merging its own Close-out PR changes main's blobs, so this alert can fire or clear because of another Instance's close-out. The alert's wording about "the close-out's PR #n" uses only this Instance's own receipt (below).
+- `plugin/scripts/board-gather.mjs:834-842` (`readCloseoutPr`, called `:1346`) — reads `.fleet/closeout.json` `pr`/`steps.commit-and-pr.at`; no GitHub call. Its number is checked against the open list S8a-6 in `compute-cell-evidence.mjs:812-820`. Own: the receipt of this checkout.
+- `plugin/scripts/board-gather.mjs:895-901` (`readMetricsStep`), `:952-955` (`readObjective`), `:1173` (`ledger.mjs … read`), `:1192` (`readLabelMap`, local Label map file; config), `:1303-1308`, `:1327-1331`, `:1343-1353` — local files (ledger, receipts, state file, guard, preview, router table, agents, package.json); no GitHub. `omp config get modelRoles` (`:1005-1007`) — omp config, no GitHub.
+- `plugin/scripts/board-gather.mjs:416-` (`readSpendDir`, `gatherSpend`, `readOmpSpend`, `readHeldImplementers`, `readStampedImplementers`) — host-local omp session transcripts read through the receipt's session or `--spend-dir`; no GitHub.
+- `plugin/scripts/board.mjs:249`, `:292-311`, `:338-` (`boardTick`) — default 15 s interval; calls `gather()`; writes `.fleet/board.json` atomically (host-local). Its gh load is S8a-5..7.
+- `plugin/scripts/board-server.mjs:34-38` — spawns `open`/`xdg-open` for the URL; no GitHub. The cockpit's own "instance" in `resolveCockpitInstance` (`board.mjs:291`) names a workspace/port, not a fleet Instance; host-local.
+- `plugin/scripts/gh-aliased-read.mjs:56-104` — wrapper: `gh api graphql` with `n<N>:<field>(number:N)` aliases in batches of 100, numbers supplied by the caller, repository = cwd's (`GH_REPO: ""`, `:63`). Not called from any file in this slice; call sites (entries belong to their slices): `plugin/scripts/fleet-tick.mjs:1937` (`pullRequest{state}`), `plugin/scripts/reclaim-scratch.mjs:320` (`issueOrPullRequest{…state}`), `plugin/scripts/slice-fill.mjs:89` (`issue{body}`).
+- `plugin/scripts/board-common.mjs:73-87` — `execRead`: async `execFile` wrapper that reads no GitHub itself; its `gh` call sites are the board-gather lines above.
+- `plugin/skills/run-team/references/close-out.md:44-69` — the scrape instruction: every session directory of this cwd, host-local transcripts (the stated reason is a second controller session on the same cwd); no GitHub.
+- `plugin/skills/run-team/references/close-out.md:102-125` — metrics refresh (local files, `.fleet/cost-guard.json`); `:144-152` the phase-0 receipt move (host-local); `:154-156` undrain (`closeout.mjs reopen`, host-local).
+
+## Files with no GitHub access
+- `plugin/scripts/board-server.mjs` (spawns only the browser opener; serves `board.json` over HTTP, line 8-9 header says it calls no `gh`)
+- `plugin/scripts/board.mjs` (composition and tick loop; every gh child is spawned in `board-gather.mjs`)
+- `plugin/scripts/board.html` (browser page; only `fetch("/board.json")` at line 868 from the local cockpit server; renders the POOL column and `queue` the model built from S8a-5..7)
+- `plugin/scripts/board-common.mjs` (warn-once and `execRead` helper)
+- `plugin/scripts/compute-board.mjs` (pure model: no I/O; it consumes gather()'s `issues`/`prs`/`ci`, see S8a-5..7)
+- `plugin/scripts/compute-spend.mjs` (pure spend/role classification over omp transcripts)
+- `plugin/scripts/cockpit-lifetime.mjs` (process-table verdict for the cockpit's lifetime; no GitHub)
+- `plugin/scripts/gh-aliased-read.mjs` has GitHub access but no call site in this slice's files: see the Checked list (entries live with its callers).
