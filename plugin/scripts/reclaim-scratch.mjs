@@ -9,12 +9,11 @@
 //   reclaim-scratch.mjs --siblings --root <abs> [--apply]
 //
 // Dry run by default; `--apply` removes. `--root` is required, an absolute
-// path to an existing directory, and in every mode it must be this
-// workspace's own scratch root (the path scratch-root.mjs prints, computed
-// from the cwd): the controller passes that path. The root sweep and
-// `--siblings` refuse any other, dry run included, before reading anything
-// under it; `--pr` mode reads no ledger and asks GitHub nothing, and does not
-// check it.
+// path to an existing directory, and the root sweep and `--siblings` require
+// it to be this workspace's own scratch root (the path scratch-root.mjs
+// prints, computed from the cwd): the controller passes that path. Both
+// refuse any other, dry run included, before reading anything under it;
+// `--pr` mode reads no ledger and asks GitHub nothing, and does not check it.
 //
 // The root sweep reads the ledger, the claim worktrees and GitHub of the
 // repository the cwd is in, so another workspace's key judged there would be
@@ -552,19 +551,18 @@ function main() {
   }
   if (pr === null) {
     // Only this workspace's own scratch root: the header says why, per pass.
+    const [judges, why] = siblings
+      ? ["--siblings judges the keys beside", "--siblings judges the keys beside the live one"]
+      : ["the root sweep judges", "the root sweep judges entries against this workspace's ledger, worktrees and GitHub repository"];
     let own;
     try {
       own = scratchRoot();
     } catch (e) {
-      die(siblings
-        ? `--siblings judges the keys beside this workspace's scratch root, which could not be resolved: ${e.message}`
-        : `the root sweep judges this workspace's scratch root, which could not be resolved: ${e.message}`);
+      if (!(e instanceof FleetDirUnresolvable)) throw e;
+      die(`${judges} this workspace's scratch root, which could not be resolved: ${e.message}`);
     }
-    if (root !== own) {
-      die(siblings
-        ? `--siblings judges the keys beside the live one: --root must be this workspace's scratch root ${own}, got ${root}`
-        : `the root sweep judges entries against this workspace's ledger, worktrees and GitHub repository: --root must be this workspace's scratch root ${own}, got ${root}`);
-    }
+    if (!isAbsolute(own)) die(`${judges} this workspace's scratch root, which could not be resolved: ${own} is not absolute, so HOME is empty or relative`);
+    if (root !== own) die(`${why}: --root must be this workspace's scratch root ${own}, got ${root}`);
   }
 
   const now = Date.now();
