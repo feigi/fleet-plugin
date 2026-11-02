@@ -48,9 +48,11 @@
 // Exit status: the entrypoint's own, with a child killed by signal N read as
 // 128+N. 2 is a refusal of this script's own (usage, a malformed variable, a
 // slot directory it cannot create); 75 is an expired wait, having launched
-// nothing, with `suite-slot: no slot after <n>s` on stderr. On acquisition it
-// prints `SUITE_SLOT_WAIT_MS=<n>` to stderr — the milliseconds the wait took,
-// a few at most when a slot was free.
+// nothing, with `suite-slot: no slot after <n>s` on stderr. A full run that
+// finds every slot held prints `suite-slot: waiting up to <n>s for a slot` to
+// stderr once, before it first sleeps; a cap of 0 never sleeps and prints none.
+// On acquisition it prints `SUITE_SLOT_WAIT_MS=<n>` to stderr — the
+// milliseconds the wait took, a few at most when a slot was free.
 //
 // A waiter cycles the slots every 2 s. While the entrypoint runs, SIGTERM,
 // SIGINT and SIGHUP are forwarded to it and the wrapper exits when it does.
@@ -165,12 +167,17 @@ function wedges(held) {
 const started = Date.now();
 const held = [];
 let slotPath = pass(held);
+let announced = false;
 while (slotPath === null) {
   const left = waitMs - (Date.now() - started);
   if (left <= 0) {
     const detail = wedges(held).map((l) => `\n${NAME}: ${l}`).join("");
     writeAll(2, `${NAME}: no slot after ${waitMs / 1000}s${detail}\n`);
     process.exit(EXIT_NO_SLOT);
+  }
+  if (!announced) {
+    writeAll(2, `${NAME}: waiting up to ${waitMs / 1000}s for a slot\n`);
+    announced = true;
   }
   await new Promise((r) => setTimeout(r, Math.min(CYCLE_MS, left)));
   slotPath = pass(held);
