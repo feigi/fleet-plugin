@@ -1335,6 +1335,7 @@ if [ "$apply" = false ]; then
   [ "$has_label" = true ] && echo "    would: gh issue edit $issue --remove-label $in_progress" >&2
   [ -n "$wt" ] && printf '    would: git worktree remove %s\n' "$wt" >&2
   [ "$has_branch" = true ] && echo "    would: git update-ref -d refs/heads/$branch <its current tip>" >&2
+  [ "$has_branch" = true ] && echo "    would: git config --remove-section branch.$branch — if one is left behind" >&2
   if [ "$closed_pr" = true ]; then
     echo "    PR states on $branch:$pr_seen" >&2
     echo "    would: git push origin --delete refs/heads/$branch (origin read at $remote_sha)" >&2
@@ -1476,6 +1477,18 @@ else
         ;;
       *) halt "$branch $wt_restore_why — branch restored, not deleted" ;;
     esac
+
+    # The `[branch "$branch"]` config section, which `git update-ref -d` leaves
+    # behind and `git branch -D` would have removed with the ref. Left, a later
+    # claim of the same name inherits the upstream and reads `[gone]` at once,
+    # and reap.sh then removes the live claim (claim-ticket.sh clears it too;
+    # this is the deleter cleaning up after itself, as reap.sh's delete does).
+    # The ref is already gone and the release otherwise complete, so a section
+    # that stays is a note and never a halt — the housekeeping `git worktree
+    # prune` below is the same shape. A claim that never pushed has no section,
+    # and that is not a fault: `wt_clear_branch_config` tells the two apart.
+    wt_clear_branch_config "$branch" ||
+      echo "$NAME: $branch deleted, but its branch config section was left: $wt_err" >&2
     done_branch=true
   fi
 

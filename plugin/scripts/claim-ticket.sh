@@ -276,12 +276,26 @@ in_progress=$(node "$script_dir/label-map.mjs" show in-progress) \
 
 if [ "$apply" = false ]; then
   echo "$NAME: DRY RUN — nothing created. Pass --apply to act." >&2
+  printf '    would: git config --remove-section branch.%s — if one is left under that name\n' "$branch" >&2
   echo "    would: gh issue edit $issue --add-label $in_progress" >&2
   printf '    would: git worktree add --no-track %s -b %s origin/main\n' "$wt" "$branch" >&2
   printf '    would: (cd %s && %s)\n' "$wt" "$install" >&2
   printf '    would: write %s and add it to .git/info/exclude — skipped if %s is\n' "$runner" "$runner" >&2
   printf '      already present, a repo-local runner checked out with the worktree\n' >&2
 else
+  # The branch does not exist yet (refused above), so any `[branch "$branch"]`
+  # config under its name is a leftover from an earlier branch of that name:
+  # `git update-ref -d` removes a ref and nothing else, and `git worktree add
+  # --no-track -b` does not clear what is there. Left in place, the new branch
+  # inherits the old upstream — a remote ref that no longer exists — and reads
+  # `[gone]` from its first moment, which is what reap.sh selects on. Before
+  # the label, for the reason the stamp is derived before it: a refusal here
+  # has nothing to clean up. A section that cannot be removed is a refusal,
+  # since claiming past it is the defect.
+  printf '$ git config --remove-section branch.%s\n' "$branch" >&2
+  wt_clear_branch_config "$branch" ||
+    die "could not remove the leftover config of branch.$branch — $wt_err"
+
   echo "\$ gh issue edit $issue --add-label $in_progress" >&2
   gh issue edit "$issue" --add-label "$in_progress" >/dev/null || die "could not label issue $issue"
 
