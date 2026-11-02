@@ -150,8 +150,6 @@ function main() {
       + "every fleet-run answer above came from that checkout, not from an installed release.\n",
     );
   }
-
-  process.exit(0);
 }
 
 main();

@@ -136,10 +136,7 @@ if [ "$grep_rc" -gt 1 ]; then
   echo "::error::install-and-smoke: the Package-entry path grep itself failed (rc $grep_rc) — its stderr is above"
   fail=1
 fi
-NAMED_PATHS=""
-if [ -n "$NAMED" ]; then
-  NAMED_PATHS="$(sed -E "s#^${ENTRY_RE}##" <<<"$NAMED" | sort -u)"
-fi
+NAMED_PATHS="$(sed -E "s#^${ENTRY_RE}##" <<<"$NAMED" | sort -u)"
 if ! grep -qxF 'scripts/fleet-run' <<<"$NAMED_PATHS"; then
   echo "::error::install-and-smoke: no prose names the Resolver under the Package entry — the grep itself broke, not the prose"
   fail=1
@@ -164,10 +161,7 @@ if [ "$grep_rc" -gt 1 ]; then
   echo "::error::install-and-smoke: the callsite grep itself failed (rc $grep_rc) — its stderr is above"
   fail=1
 fi
-SCRIPT_NAMES=""
-if [ -n "$CALLSITES" ]; then
-  SCRIPT_NAMES="$(sed -E "s#^${ENTRY_RE}scripts/fleet-run[[:space:]]+##" <<<"$CALLSITES" | sort -u)"
-fi
+SCRIPT_NAMES="$(sed -E "s#^${ENTRY_RE}scripts/fleet-run[[:space:]]+##" <<<"$CALLSITES" | sort -u)"
 if [ -z "$SCRIPT_NAMES" ]; then
   echo "::error::install-and-smoke: no fleet-run callsites found — the grep itself broke, not the callsites"
   fail=1
