@@ -42,12 +42,14 @@ const ENV = {
 };
 
 const git = (cwd, ...args) => execFileSync("git", args, { cwd, env: ENV, encoding: "utf8" }).trim();
-const commit = (cwd, msg, file = `${msg}.txt`) => {
-  writeFileSync(join(cwd, file), `${msg}\n`);
+// A commit whose file holds exactly `text`; `commit` writes a one-line file of its message.
+const commitText = (cwd, file, text, msg) => {
+  writeFileSync(join(cwd, file), text);
   git(cwd, "add", file);
   git(cwd, "commit", "-q", "-m", msg);
   return git(cwd, "rev-parse", "HEAD");
 };
+const commit = (cwd, msg, file = `${msg}.txt`) => commitText(cwd, file, `${msg}\n`, msg);
 
 // The baseline fixture. `root` is realpath'd once, before any path is derived
 // from it: macOS reaches a tmpdir as /var/... and git reports /private/var/...,
@@ -716,6 +718,271 @@ test("stray: a remote tip holding every parent patch of a merge commit does not 
   assert.equal(r.out.evidence.remote.sha, f.mergePin);
   assert.equal(r.out.cause, "stray", JSON.stringify(r.out.evidence));
   assert.equal(r.out.evidence.remote.carries, false);
+});
+
+// --- The content test --------------------------------------------------------------
+// A patch id ignores line numbers and whitespace, so the patch test alone reads a
+// range clean whose content the pin lacks. `git merge-tree` against the pin says what
+// merging the worktree into it would change.
+
+// A file of two identical blocks, each with a line of its own: the same change to either
+// block has the same lines around it, so it is one patch by id.
+const twoBlocks = (first, second) => ["a", "b", "c", first, "e", "f", "g", "a", "b", "c", second, "e", "f", "g", ""].join("\n");
+
+// The pin and the worktree's own commit are siblings on one base that holds
+// `blocks.txt`. The pin is pushed and the remote branch is at it; the commit is not.
+function siblings(pinText, ownText) {
+  const f = fixture();
+  const base = commitText(f.w, "blocks.txt", twoBlocks("TARGET", "TARGET"), "blocks");
+  git(f.w, "push", "-q", "origin", "main");
+  git(f.wt, "reset", "-q", "--hard", base);
+  f.pin = commitText(f.wt, "blocks.txt", pinText, "pin");
+  git(f.wt, "push", "-q", "--force", "origin", "feat");
+  git(f.wt, "reset", "-q", "--hard", base);
+  f.own = commitText(f.wt, "blocks.txt", ownText, "own");
+  return f;
+}
+
+const cherryLines = (r) => r.out.evidence.cherry.listing.split("\n").filter((l) => l !== "");
+const treeOf = (f, rev) => git(f.w, "rev-parse", `${rev}^{tree}`);
+
+test("stray: the pin's change made at another place in the file is a patch the pin carries and content it lacks", () => {
+  const f = siblings(twoBlocks("NEW", "TARGET"), twoBlocks("TARGET", "NEW"));
+  const r = std(f);
+  assert.equal(r.status, 1, r.stderr);
+  assert.equal(r.out.cause, "stray");
+  assert.equal(r.out.head, f.own);
+  assert.match(r.out.evidence.reflog, /HEAD@\{0\}: commit: own/);
+  assert.deepEqual(cherryLines(r), [`- ${f.own}`], "the patch test reads the commit as the pin's own");
+  assert.equal(r.out.evidence.cherry.merges, 0);
+  assert.deepEqual(r.out.evidence.remote, { ref: "refs/heads/feat", sha: f.pin, carries: false });
+  const { tree, conflict, paths } = r.out.evidence.content;
+  assert.equal(conflict, false);
+  assert.deepEqual(paths, ["blocks.txt"]);
+  assert.equal(git(f.w, "show", `${tree}:blocks.txt`), twoBlocks("NEW", "NEW").trim(), "the tree is what merging the worktree into the pin makes");
+});
+
+test("stray: a commit that differs from a pin commit by whitespace alone conflicts with it", () => {
+  const f = siblings(twoBlocks("NEW", "TARGET"), twoBlocks("  NEW", "TARGET"));
+  const r = std(f);
+  assert.equal(r.status, 1, r.stderr);
+  assert.equal(r.out.cause, "stray");
+  assert.deepEqual(cherryLines(r), [`- ${f.own}`], "the patch test reads the commit as the pin's own");
+  assert.equal(r.out.evidence.remote.carries, false);
+  assert.match(r.out.evidence.content.tree, /^[0-9a-f]{40}$/);
+  assert.equal(r.out.evidence.content.conflict, true);
+  assert.deepEqual(r.out.evidence.content.paths, ["blocks.txt"]);
+});
+
+test("the content read leaves HEAD, every ref and the worktree as they were, a conflict's read included", () => {
+  const f = siblings(twoBlocks("NEW", "TARGET"), twoBlocks("  NEW", "TARGET"));
+  const state = () => [git(f.wt, "rev-parse", "HEAD"), git(f.wt, "for-each-ref"), git(f.wt, "status", "--porcelain", "-uall")].join("\n--\n");
+  const before = state();
+  const r = std(f);
+  assert.equal(r.status, 1, r.stderr);
+  assert.equal(r.out.evidence.content.conflict, true, "the read that wrote the most");
+  assert.equal(state(), before);
+});
+
+test("stray: a commit that undoes a change the pin carries reads clean by content, and only its + line halts it", () => {
+  const f = supersededByRebase();
+  git(f.w, "fetch", "-q", "origin");
+  // The worktree is still at the pre-rebase head, and takes `late` back out.
+  git(f.wt, "revert", "--no-commit", "HEAD");
+  git(f.wt, "commit", "-q", "-m", "undo late");
+  const undo = git(f.wt, "rev-parse", "HEAD");
+  const r = auditAt(f, f.rebased);
+  assert.equal(r.status, 1, r.stderr);
+  assert.equal(r.out.cause, "stray");
+  assert.equal(r.out.head, undo);
+  assert.match(r.out.evidence.cherry.listing, new RegExp(`^\\+ ${undo}$`, "m"));
+  assert.deepEqual(r.out.evidence.content, { tree: treeOf(f, f.rebased), conflict: false, paths: [] });
+  assert.deepEqual(r.out.evidence.remote, { ref: "refs/heads/feat", sha: f.rebased, carries: false });
+});
+
+test("exit 0: main also editing the PR's file, outside the three lines around the PR's change, is still a superseded worktree", () => {
+  const f = fixture();
+  const numbered = (edits = {}) => Array.from({ length: 20 }, (_, i) => edits[i + 1] ?? `line ${i + 1}`).concat("").join("\n");
+  const base = commitText(f.w, "big.txt", numbered(), "big");
+  git(f.w, "push", "-q", "origin", "main");
+  git(f.wt, "reset", "-q", "--hard", base);
+  const mine = commitText(f.wt, "big.txt", numbered({ 3: "PR" }), "pr change");
+  git(f.wt, "push", "-q", "--force", "origin", "feat");
+  // A server-side rebase onto a main that edited the same file, far from the PR's change.
+  const o = otherClone(f);
+  git(o, "checkout", "-q", "main");
+  commitText(o, "big.txt", numbered({ 15: "MAIN" }), "main edit");
+  git(o, "push", "-q", "origin", "main");
+  git(o, "checkout", "-q", "feat");
+  git(o, "rebase", "-q", "origin/main");
+  git(o, "push", "-q", "--force", "origin", "feat");
+  const rebased = git(o, "rev-parse", "HEAD");
+  git(f.w, "fetch", "-q", "origin");
+  const r = auditAt(f, rebased);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.out.cause, null);
+  assert.equal(r.out.head, mine);
+  assert.deepEqual(cherryLines(r).map((l) => l[0]), ["-"], "the patch test reads the rebased commit as the pin's own");
+  assert.deepEqual(r.out.evidence.content, { tree: treeOf(f, rebased), conflict: false, paths: [] });
+  assert.equal(r.out.evidence.remote, undefined, "nothing is unique, so the remote is never asked");
+});
+
+test("exit 0: a commit that differs from the pin's only in its message is the one read the two tests leave clean", () => {
+  const f = fixture();
+  git(f.wt, "commit", "-q", "--amend", "-m", "work, reworded");
+  const r = std(f);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.out.cause, null);
+  assert.notEqual(r.out.head, f.pin);
+  assert.match(r.out.evidence.reflog, /HEAD@\{0\}: commit \(amend\): work, reworded/);
+  assert.deepEqual(cherryLines(r).map((l) => l[0]), ["-"]);
+  assert.deepEqual(r.out.evidence.content, { tree: treeOf(f, f.pin), conflict: false, paths: [] });
+});
+
+test("stray: a reworded copy of a pin commit whose lines the pin changes again conflicts, a false halt the content test accepts", () => {
+  const f = fixture();
+  const base = commitText(f.w, "blocks.txt", twoBlocks("TARGET", "TARGET"), "blocks");
+  git(f.w, "push", "-q", "origin", "main");
+  git(f.wt, "reset", "-q", "--hard", base);
+  commitText(f.wt, "blocks.txt", twoBlocks("NEW", "TARGET"), "edit");
+  f.pin = commitText(f.wt, "blocks.txt", twoBlocks("NEWER", "TARGET"), "edit again");
+  git(f.wt, "push", "-q", "--force", "origin", "feat");
+  git(f.wt, "reset", "-q", "--hard", base);
+  const own = commitText(f.wt, "blocks.txt", twoBlocks("NEW", "TARGET"), "edit, reworded");
+  const r = std(f);
+  assert.equal(r.status, 1, r.stderr);
+  assert.equal(r.out.cause, "stray");
+  assert.deepEqual(cherryLines(r), [`- ${own}`], "the patch test reads the commit as the pin's own");
+  assert.equal(r.out.evidence.content.conflict, true);
+  assert.deepEqual(r.out.evidence.content.paths, ["blocks.txt"]);
+});
+
+test("stray: a merge commit whose content the pin already holds is still unique, the merge rule of the patch test standing", () => {
+  const f = fixture();
+  git(f.wt, "checkout", "-q", "-b", "side", "origin/main");
+  commit(f.wt, "s");
+  git(f.wt, "checkout", "-q", "feat");
+  git(f.wt, "cherry-pick", "side");
+  const pin = git(f.wt, "rev-parse", "HEAD");
+  git(f.wt, "reset", "-q", "--hard", f.pin);
+  git(f.wt, "merge", "-q", "--no-ff", "--no-commit", "side");
+  git(f.wt, "commit", "-q", "-m", "merge side");
+  const r = auditAt(f, pin);
+  assert.equal(r.status, 1, r.stderr);
+  assert.equal(r.out.cause, "stray");
+  assert.match(r.out.evidence.reflog, /HEAD@\{0\}: commit \(merge\)/);
+  assert.equal(r.out.evidence.cherry.merges, 1);
+  assert.doesNotMatch(r.out.evidence.cherry.listing, /^\+/m, "the patch test finds the merge commit alone");
+  assert.deepEqual(r.out.evidence.content, { tree: treeOf(f, pin), conflict: false, paths: [] }, "the content test finds nothing");
+});
+
+test("exit 2: a worktree re-rooted onto an unrelated history has nothing to merge, whatever its patches say", () => {
+  const f = fixture();
+  // The same two patches on a new root: the patch test reads every one as the pin's own.
+  git(f.wt, "checkout", "-q", "--orphan", "rerooted");
+  git(f.wt, "rm", "-rfq", ".");
+  commitText(f.wt, "root.txt", "root\n", "root, again");
+  commitText(f.wt, "work.txt", "work\n", "work, again");
+  const listing = git(f.wt, "cherry", f.pin, "HEAD").split("\n");
+  assert.equal(listing.length, 2, "fixture: every commit of the new history is listed");
+  assert.ok(listing.every((l) => l.startsWith("- ")), "fixture: the patch test reads the range clean");
+  const r = std(f);
+  assert.equal(r.status, 2, r.stderr);
+  assert.equal(r.out.cause, null);
+  assert.match(r.out.evidence.reflog, /HEAD@\{0\}: commit: work, again/);
+  assert.match(r.out.evidence.error, /^merge-tree: git merge-tree --write-tree [0-9a-f]{40} HEAD failed: .*unrelated histories/);
+  assert.equal(r.out.evidence.content, undefined);
+  assert.match(r.stderr, /^\nfinisher-audit: merge-tree: /);
+});
+
+// A git on PATH that answers a `merge-tree` the way `body` says, and everything
+// else for real. The body sees the real git as `$real` and this directory as `$d`.
+function mergeTreeStub(f, body) {
+  const bin = join(f.root, "bin");
+  mkdirSync(bin);
+  const real = execFileSync("sh", ["-c", "command -v git"], { env: ENV, encoding: "utf8" }).trim();
+  writeExecStub(
+    join(bin, "git"),
+    `#!/bin/sh
+d="\${0%/*}"
+real="${real}"
+case " $* " in
+*" merge-tree "*)
+${body}
+  ;;
+esac
+exec "$real" "$@"
+`,
+  );
+  return { PATH: `${bin}:${ENV.PATH}` };
+}
+
+test("exit 2: a merge-tree that exits 1 with no tree id is a failed read, never a conflict", () => {
+  const f = pastPin();
+  const env = mergeTreeStub(f, `  echo "merge-tree: x - not something we can merge" >&2; exit 1`);
+  const r = std(f, [], { env });
+  assert.equal(r.status, 2, r.stderr);
+  assert.equal(r.out.cause, null);
+  assert.match(r.out.evidence.error, /^merge-tree: git merge-tree --write-tree [0-9a-f]{40} HEAD failed: merge-tree: x - not something we can merge$/);
+  assert.equal(r.out.evidence.content, undefined);
+});
+
+test("exit 2: a merge-tree killed by a signal is a failed read", () => {
+  const f = pastPin();
+  const r = std(f, [], { env: mergeTreeStub(f, "  kill -KILL $$") });
+  assert.equal(r.status, 2, r.stderr);
+  assert.equal(r.out.cause, null);
+  assert.match(r.out.evidence.error, /^merge-tree: git merge-tree /);
+});
+
+test("exit 2: a merge-tree that prints a tree id and then exits 128 is a failed read, never a conflict", () => {
+  const f = pastPin();
+  const r = std(f, [], { env: mergeTreeStub(f, `  "$real" "$@"; exit 128`) });
+  assert.equal(r.status, 2, r.stderr);
+  assert.equal(r.out.cause, null);
+  assert.match(r.out.evidence.error, /^merge-tree: git merge-tree --write-tree [0-9a-f]{40} HEAD failed: exit 128$/);
+});
+
+test("exit 2: a merge-tree whose first line is a tree id with characters after it is a failed read", () => {
+  for (const line of ["0123456789abcdef0123456789abcdef01234567a", "0123456789abcdef0123456789abcdef01234567 extra"]) {
+    const f = pastPin();
+    const r = std(f, [], { env: mergeTreeStub(f, `  echo "${line}"; exit 0`) });
+    assert.equal(r.status, 2, r.stderr);
+    assert.equal(r.out.cause, null);
+    assert.match(r.out.evidence.error, /^merge-tree: git merge-tree --write-tree [0-9a-f]{40} HEAD failed: no tree id on stdout$/);
+  }
+});
+
+test("exit 2: a merge-tree that fails at the remote's call is a failed read too, though the pin's call found something", () => {
+  const f = pastPin();
+  const env = mergeTreeStub(f, `  echo x >> "$d/n"
+  if [ "$(wc -l < "$d/n")" -ge 2 ]; then echo "fatal: no" >&2; exit 128; fi`);
+  const r = std(f, [], { env });
+  assert.equal(r.status, 2, r.stderr);
+  assert.equal(r.out.cause, null);
+  assert.equal(r.out.evidence.remote.sha, f.pin, "the failure is the second call's, the remote's");
+  assert.match(r.out.evidence.error, /^merge-tree: git merge-tree --write-tree [0-9a-f]{40} HEAD failed: fatal: no$/);
+});
+
+test("stray: a merge that conflicts is a finding even where its tree is the pin's own, as git leaves it for a file one side deleted", () => {
+  const f = supersededByRebase();
+  git(f.w, "fetch", "-q", "origin");
+  // The real merge-tree answers here with the pin's tree and exit 0; the stub gives that
+  // tree the exit a conflict carries.
+  const env = mergeTreeStub(f, `  "$real" "$@"; exit 1`);
+  const r = std({ ...f, pin: f.rebased }, [], { env });
+  assert.equal(r.status, 1, r.stderr);
+  assert.equal(r.out.cause, "stray");
+  assert.deepEqual(r.out.evidence.content, { tree: treeOf(f, f.rebased), conflict: true, paths: [] });
+});
+
+test("past-pin: the content evidence is the pin's read, and the remote's read adds none", () => {
+  const f = pastPin();
+  git(f.wt, "push", "-q", "origin", "feat");
+  const r = std(f);
+  assert.equal(r.out.cause, "past-pin");
+  assert.deepEqual(r.out.evidence.content, { tree: treeOf(f, f.late), conflict: false, paths: ["late.txt"] });
+  assert.deepEqual(Object.keys(r.out.evidence.remote), ["ref", "sha", "carries"]);
 });
 
 test("other: a move that is neither a rebase nor a commit halts with both status reads, the reflog line and both SHAs", () => {

@@ -342,27 +342,44 @@ A re-review at the same head is a run of its own, so the earlier round's verdict
 
 A worktree whose head differs from the pin because a remote rebase superseded
 it is not a halt. When the newest reflog move is a `commit`, duty 1 tests
-whether `pin..HEAD` holds anything the pin lacks: `git cherry <pin> HEAD`
-prints no `+` line and the range holds no merge commit. A worktree that holds
+whether `pin..HEAD` holds anything the pin lacks, and a range holds nothing
+only when both of two tests find nothing. By patch: `git cherry <pin> HEAD`
+prints no `+` line and the range holds no merge commit. By content: `git
+merge-tree --write-tree <pin> HEAD` exits 0 and makes the pin's own tree, so
+merging the worktree into the pin changes nothing. A worktree that holds
 nothing the pin lacks exits 0, because refreshing it would lose nothing — the
 commits it holds are already in the pin, rebased. Only a range that does hold
 something is a halt: `past-pin` when the branch's remote ref carries it,
-`stray` otherwise. The test is by patch, so it has two limits. `git
-cherry` never lists a merge commit, so a merge in the range counts as unique
-whatever its parents carry. And patch ids ignore whitespace, so a local commit
-that differs from a pushed one only in whitespace reads clean; it stays behind
-in the owned worktree and never reaches the merge. A newest move that is a
-`reset` or a `rebase` stays `rebase`, even when `pin..HEAD` would test clean.
+`stray` otherwise. Neither test is enough alone. `git cherry` never lists a
+merge commit, so a merge in the range counts as unique whatever its parents
+carry, and a patch id ignores line numbers and whitespace, so by patch alone a
+commit that makes the pin's change at another place in the file, or that
+differs from a pin commit by whitespace alone, reads clean though the pin
+lacks its content. By content alone, a commit that after a server-side rebase
+undoes a change the pin carries reads clean, since merging it into the pin
+changes nothing. A merge that conflicts is a range that holds something, not a
+failure; a `merge-tree` that could not read at all, on unrelated histories for
+one, is exit 2 with the failed read named in `evidence.error`. Both tests
+compare changes, never commit messages, so a commit that differs from the
+pin's only in its message reads clean — unless the pin changes its lines again
+after it: merging the two then conflicts, a false halt the content test
+accepts. A newest move that is a `reset` or a `rebase` stays `rebase`, even
+when `pin..HEAD` would test clean.
 
 A `stray` halt is a commit the branch's remote ref is not shown to carry — the
 ref lacks it or is absent, or the read could not tell — so nothing pushes it and
 nothing re-reviews it. Read the patches off `evidence.cherry` (`+` for a patch
-the pin lacks; `merges` counts merge commits, which the listing never shows)
+the pin lacks; `merges` counts merge commits, which the listing never shows),
+what the worktree would add to the pin off `evidence.content` (`tree` is the
+merge's result, so `git diff <pin> <tree>` shows it; `conflict` true: the two
+did not merge; `paths`: the files where `tree` differs from the pin's tree),
 and `evidence.remote` (`carries` false: the ref lacks it; `sha` null: the ref is
 absent; `carries` null: the read could not be told, and `error` says why). A
-pushed stray is a head no reviewer read: record its review by hand with
-`ledger.mjs review <M>`, under the next runner letter as for a `past-pin`
-re-review below, before any finisher is dispatched.
+commit that undoes something the pin carries reads clean by content (`paths`
+empty) and only its `+` line catches it, so a `+` beside empty `paths` is not
+by itself safe to discard. A pushed stray is a head no reviewer read: record
+its review by hand with `ledger.mjs review <M>`, under the next runner letter
+as for a `past-pin` re-review below, before any finisher is dispatched.
 
 A `human` halt is a Ticketless PR whose diff is not inert: the maintainer adds
 `ready-to-merge` at the pinned head, which the merge bot merges off the

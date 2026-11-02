@@ -89,30 +89,58 @@
 //       replay, so each of those is an unpaired line.
 //     - a `commit` entry, amend and merge commits included: a member kept
 //       working after the dispatch, or a remote rebase superseded this worktree.
-//       A range holds nothing unique when `git cherry <upstream> HEAD` prints no
-//       `+` line and `git rev-list --merges --count <upstream>..HEAD` is 0: `git
-//       cherry` never lists a merge commit, so a merge's own content is
-//       invisible to it. Evidence: `commit`, `git log -1 --format='%h %s'`.
+//       A range holds nothing unique only when two tests both find nothing. By
+//       patch: `git cherry <upstream> HEAD` prints no `+` line and `git
+//       rev-list --merges --count <upstream>..HEAD` is 0 - `git cherry` never
+//       lists a merge commit, so a merge's own content is invisible to it, and
+//       a merge in the range counts as unique. By content: `git merge-tree
+//       --write-tree <upstream> HEAD` exits 0 and the tree id on the first line
+//       of its stdout is `<upstream>`'s own tree. Neither test is enough alone.
+//       A patch id ignores line numbers and whitespace, so by patch alone a
+//       commit that makes the pin's change at another place in the file, the
+//       same lines around it, or that differs from a pin commit by whitespace
+//       alone, reads clean though the pin lacks its content. By content alone,
+//       a commit that after a server-side rebase undoes a change the pin
+//       carries reads clean: merging it into the pin changes nothing, and only
+//       its `+` line catches it. Both tests compare changes, never commit
+//       messages, so a commit that differs from the pin's only in its message
+//       reads clean - unless the pin changes its lines again after it: merging
+//       the two then conflicts, a false halt the content test accepts.
+//       `merge-tree` is read by its exit code and that first line. Exit 0 with
+//       a tree id is clean or not by the comparison above. Exit 1 with a tree
+//       id there is a conflict, which is a finding, never a failure. Anything
+//       else is a failed read: exit 1 with no tree id (git also exits 1 on a
+//       revision it cannot merge), exit 128 (on unrelated histories, for one),
+//       a signal or a spawn error. A failed read is exit 2, `evidence.error`
+//       naming it, as a failed `git cherry` read is, at either call below.
+//       Evidence: `commit`, `git log -1 --format='%h %s'`; `cherry` =
+//       `{listing, merges}`; and `evidence.content` = `{tree, conflict, paths}`,
+//       on every verdict here, clean or not: the merge-tree read against the
+//       pin. `tree` is the merge's tree id, so `git diff <pin> <tree>` shows
+//       what the worktree would add, `conflict` is a boolean, and `paths` lists
+//       the files where `tree` differs from the pin's tree, none when it is
+//       clean.
 //         . `pin..HEAD` holds nothing unique: the worktree holds nothing the pin
 //           lacks and refreshing it loses nothing. `cause` null, exit 0, `head`
-//           the worktree's HEAD, `cherry` = `{listing, merges}` the read that
-//           settled it.
+//           the worktree's HEAD, `cherry` and `content` the reads that settled
+//           it.
 //         . otherwise the branch is read, `git ls-remote origin
 //           refs/heads/<branch>` - the branch being the row's, and the full ref
 //           name so a branch named like the tail of another ref matches only
-//           itself - and `<remote sha>..HEAD` is tested the same way. Nothing
-//           unique there: `past-pin`, a member's commit past the pin that a
-//           reviewer can reach. Anything else: `stray`, a commit the branch's
-//           remote ref is not shown to carry - the ref lacks it or is absent,
-//           or the read could not tell. Evidence adds `cherry` and `remote` =
-//           `{ref, sha, carries, error?}`. `carries` is true or false, and null
-//           when it could not be told: a failed read, a timeout, a detached HEAD
-//           with no branch to ask about, or a remote SHA the object store lacks.
-//           An absent ref is `sha` null, `carries` false. The remote is asked
+//           itself - and `<remote sha>..HEAD` is tested the same way, both
+//           tests against the remote's SHA and its own tree, not the pin's.
+//           Nothing unique there: `past-pin`, a member's commit past the pin
+//           that a reviewer can reach. Anything else: `stray`, a commit the
+//           branch's remote ref is not shown to carry - the ref lacks it or is
+//           absent, or the read could not tell. Evidence adds `remote` =
+//           `{ref, sha, carries, error?}`; the remote's own reads record
+//           `carries` alone. `carries` is true or false, and null when it could
+//           not be told: a failed read, a timeout, a detached HEAD with no
+//           branch to ask about, or a remote SHA the object store lacks. An
+//           absent ref is `sha` null, `carries` false. The remote is asked
 //           rather than the PR object, whose head lags a ref move.
 //         Nothing is fetched: a pin the object store lacks fails the `git
-//         cherry` read, exit 2. The patch test ignores whitespace, so a local
-//         commit that differs from a pushed one only in whitespace reads clean.
+//         cherry` read, exit 2.
 //     - anything else, an empty reflog included: `other`. Evidence: both status
 //       reads (the step-2 read and one after the reflog), the reflog line at
 //       the move, and both SHAs. A cause nobody has named yet is still a cause
@@ -225,11 +253,12 @@ function run(cmd, args, options = {}) {
 
 // A git call inside the worktree. A call that could not run, was killed or
 // exited non-zero stops the audit at exit 2 unless the caller asked to read the
-// failure itself (`soft`).
+// failure itself (`soft`), which then carries the exit status and the stdout
+// the call left.
 function git(step, args, { soft = false, timeout } = {}) {
   const r = run("git", ["-C", realpath, ...args], timeout === undefined ? {} : { timeout });
   if (r.error || r.signal || r.status !== 0) {
-    if (soft) return { ok: false, out: "", error: (r.error?.message ?? r.stderr ?? "").trim() || `exit ${r.status ?? r.signal}` };
+    if (soft) return { ok: false, status: r.status, out: r.stdout ?? "", error: (r.error?.message ?? r.stderr ?? "").trim() || `exit ${r.status ?? r.signal}` };
     const why = r.error?.message ?? (r.signal ? `killed by ${r.signal}` : (r.stderr ?? "").trim() || `exit ${r.status}`);
     fail(`${step}: git ${args.join(" ")} failed: ${why}`);
   }
@@ -259,15 +288,47 @@ function remoteState(branch, head) {
   return { state: r.sha === head ? "pushed" : "differs", ref: r.ref, sha: r.sha };
 }
 
-// What `HEAD` holds that `upstream` lacks, by patch: `git cherry` prints `+` for
-// a commit whose patch `upstream` does not carry, `-` for one it does. It never
-// lists a merge commit, so a merge's own content is invisible to it and a merge
-// in the range counts as unique. An `upstream` the object store lacks fails the
-// read, exit 2.
+// The tree id `git merge-tree --write-tree` prints first.
+const TREE_ID = /^[0-9a-f]{40}$/;
+
+// What merging `HEAD` into `upstream` makes, read by `git merge-tree`'s exit
+// code and the tree id on the first line of its stdout: exit 0 is a merge that
+// went through, exit 1 with a tree id a conflict, which is a finding. Exit 1
+// with no tree id is git refusing a revision it cannot merge, so the exit code
+// alone cannot tell a conflict from it. That, exit 128 (unrelated histories
+// among its causes), a signal and a spawn error are reads that failed: exit 2.
+// The merge's tree and blob objects are written to the object store; no ref and
+// no file of the worktree moves.
+function mergeInto(upstream) {
+  const args = ["merge-tree", "--write-tree", upstream, "HEAD"];
+  const merge = git("merge-tree", args, { soft: true });
+  const tree = merge.out.split("\n")[0];
+  if (!TREE_ID.test(tree) || (!merge.ok && merge.status !== 1)) {
+    fail(`merge-tree: git ${args.join(" ")} failed: ${merge.error ?? "no tree id on stdout"}`);
+  }
+  return { tree, conflict: !merge.ok };
+}
+
+// The paths where `tree` differs from `upstream`'s own tree, none for a tree
+// that is its own.
+function changedPaths(upstream, tree) {
+  return git("paths", ["diff-tree", "-r", "--name-only", "-z", `${upstream}^{tree}`, tree]).out.split("\0").filter((p) => p !== "");
+}
+
+// What `HEAD` holds that `upstream` lacks, by two tests, either of which finds
+// it. By patch: `git cherry` prints `+` for a commit whose patch `upstream` does
+// not carry, `-` for one it does. It never lists a merge commit, so a merge's
+// own content is invisible to it and a merge in the range counts as unique. By
+// content: merging `HEAD` into `upstream` conflicts or makes a tree other than
+// `upstream`'s own. An `upstream` the object store lacks fails the read, exit
+// 2, and so does a merge that could not be read.
 function uniqueIn(upstream) {
   const listing = git("cherry", ["cherry", upstream, "HEAD"]).out;
   const merges = Number(git("merges", ["rev-list", "--merges", "--count", `${upstream}..HEAD`]).out.trim());
-  return { listing, merges, unique: merges > 0 || listing.split("\n").some((l) => l.startsWith("+")) };
+  const merged = mergeInto(upstream);
+  const content = { ...merged, paths: changedPaths(upstream, merged.tree) };
+  const unique = merges > 0 || listing.split("\n").some((l) => l.startsWith("+")) || content.conflict || content.paths.length > 0;
+  return { listing, merges, content, unique };
 }
 
 // `git range-diff` prints one line per pairing, `<n>:  <sha> <marker> <m>:  <sha>
@@ -349,10 +410,12 @@ if (/^(reset|rebase)\b/.test(subject)) {
 
 if (/^commit\b/.test(subject)) {
   evidence.commit = git("log", ["log", "-1", "--format=%h %s"]).out.trim();
-  const { unique, ...cherry } = uniqueIn(pin);
+  const { unique, content, ...cherry } = uniqueIn(pin);
   evidence.cherry = cherry;
-  // Nothing in pin..HEAD the pin lacks: a remote rebase superseded this
-  // worktree, or it sits behind the pin. Refreshing it loses nothing.
+  evidence.content = content;
+  // Nothing in pin..HEAD the pin lacks, by patch or by content: a remote rebase
+  // superseded this worktree, or it sits behind the pin. Refreshing it loses
+  // nothing.
   if (!unique) finish(0);
   const remote = remoteRef(row.branch);
   evidence.remote = { ref: remote.ref, sha: remote.sha, carries: null };
