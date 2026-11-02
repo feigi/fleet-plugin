@@ -442,8 +442,10 @@ keep() {
 # silent (measured on this exact shape).
 #
 # The capture is `probe`, over any command; `git_probe` is `probe git`.
-# pr_load's gh call below is the one other caller: its stdout fields are
-# refnames, numbers, object ids and fixed words, none of which can hold 0x02.
+# pr_load's gh call below is a caller too: its stdout fields are refnames,
+# numbers, object ids and fixed words, none of which can hold 0x02. So are the
+# pair test's `pq_ids`, which prints `git patch-id`'s hex pairs and nothing
+# else, and its `pq_marked`, which prints object ids and nothing else.
 gp_sep=$(printf '\002')
 probe() {
   gp_raw=$(
@@ -998,6 +1000,141 @@ EOF
   return 1
 }
 
+# THE PAIR TEST. `git cherry` reads a commit as merged when $base carries a
+# commit with the same patch id, and a patch id ignores where in a file the
+# change sits and any whitespace in it. So a commit making a merged change
+# again at another place in the same file — the second of two identical
+# blocks — or differing from a merged commit only in whitespace reads `-`
+# although no other ref holds it. Measured, git 2.54.0 (Apple Git-157): a
+# claim's first commit squash-merged, its second, never pushed, making the
+# same change in the file's identical second block — `git cherry` prints `-`
+# for both.
+#
+# So where no line reads `+`, the tip is merged only when every commit in
+# $base_rev..tip also pairs: some commit M on $base carries its patch id
+# (`git patch-id --stable`), and `git merge-tree --write-tree --merge-base=C^
+# M^ C` writes exactly M's tree — C replayed onto M's parent is M. Anything
+# less is a KEEP with its reason: a merge commit in the range (`git cherry`
+# skips merges, so what a merge itself changes is read by nothing), a commit
+# no M carries the patch id of (an empty commit has none: a false keep, and a
+# harmless one), a replay that differs from or conflicts with every such M,
+# and any probe that fails. A `+` is not this test's: it keeps, or goes to the
+# second proof above, unchanged.
+#
+# M is looked for among the commits on $base that `git rev-list
+# --cherry-mark` marks `=` against this tip, so the diffs this script reads
+# are those commits' and the tip's own, never all of $base since the fork.
+# That listing itself still names every commit on $base since the fork, and
+# `probe` splits its capture with `${…#*sep}`, which bash 3.2 — macOS /bin/sh
+# — runs in time that grows faster than the capture: measured, doubling a
+# 1600-line capture took `probe` from 3.9s to 18.7s, and on a fork 3200
+# commits behind a dry run took 6.2s with the whole listing through `probe`
+# and 0.4s with the `=` ids alone, same payload. So
+# `pq_marked` keeps the listing to itself and prints only the `=` lines' ids,
+# and what reaches `probe` grows with the merged commits alone.
+# Safe for `probe`'s separator: rev-list and rev-parse print object ids and
+# fixed marks; merge-tree under `--no-messages --name-only` prints a tree id
+# and, on a conflict, the conflicted paths C-quoted (`"we\002ird"`, measured,
+# under core.quotePath false too); and `pq_ids` keeps the diff text, which can
+# hold any byte, to itself and prints only `git patch-id`'s hex pairs. Both of
+# its pipes read a variable, never git, so the status each returns is git's.
+# `pq_marked`'s pipe reads a variable too, and git's own status is taken
+# before it runs.
+# `merge-tree --write-tree` writes the trees it merges into the object store,
+# on a dry run too; it moves and deletes nothing.
+pq_ids() {
+  pq_d=$(printf '%s\n' "$1" | git diff-tree --stdin -p) || return
+  printf '%s\n' "$pq_d" | git patch-id --stable
+}
+pq_marked() {
+  pq_l=$(git rev-list --cherry-mark --left-only --no-merges "$1") || return
+  printf '%s\n' "$pq_l" | sed -n 's/^=//p'
+}
+
+# Returns 0 when every commit on tip $1 that $base_rev lacks pairs, and 1 with
+# the reason in $pq_why when one does not or a probe fails.
+pair_test() {
+  if ! git_probe rev-list --parents "$base_rev..$1"; then
+    pq_why="pair test failed — cannot list the commits $base lacks$(gp_why)"
+    return 1
+  fi
+  pq_cs=
+  while read -r pq_c pq_p pq_more; do
+    [ -n "$pq_c" ] || continue
+    if [ -n "$pq_more" ]; then
+      pq_why="commit $pq_c is a merge, and git cherry does not read what a merge itself changes"
+      return 1
+    elif [ -z "$pq_p" ]; then
+      pq_why="commit $pq_c has no parent to replay it from"
+      return 1
+    fi
+    pq_cs=${pq_cs:+$pq_cs
+}$pq_c
+  done <<EOF
+$gp_out
+EOF
+  [ -n "$pq_cs" ] || return 0
+
+  if ! probe pq_marked "$base_rev...$1"; then
+    pq_why="pair test failed — cannot list the commits on $base to pair with$(gp_why)"
+    return 1
+  fi
+  pq_ms=$gp_out
+  pq_mids=
+  if [ -n "$pq_ms" ]; then
+    if ! probe pq_ids "$pq_ms"; then
+      pq_why="pair test failed — cannot compute the patch ids of the commits on $base$(gp_why)"
+      return 1
+    fi
+    pq_mids=$gp_out
+  fi
+  if ! probe pq_ids "$pq_cs"; then
+    pq_why="pair test failed — cannot compute the patch ids of the commits $base lacks$(gp_why)"
+    return 1
+  fi
+  pq_cids=$gp_out
+
+  for pq_c in $pq_cs; do
+    pq_id=
+    while read -r pq_i pq_o; do
+      [ "$pq_o" != "$pq_c" ] || pq_id=$pq_i
+    done <<EOF
+$pq_cids
+EOF
+    pq_with=
+    if [ -n "$pq_id" ]; then
+      while read -r pq_i pq_o; do
+        [ "$pq_i" != "$pq_id" ] || pq_with="$pq_with $pq_o"
+      done <<EOF
+$pq_mids
+EOF
+    fi
+    if [ -z "$pq_with" ]; then
+      pq_why="commit $pq_c reads patch-equivalent, but no commit on $base carries its patch id"
+      return 1
+    fi
+    for pq_m in $pq_with; do
+      if ! git_probe rev-parse --verify "$pq_m^{tree}"; then
+        pq_why="pair test failed — cannot read the tree of $pq_m$(gp_why)"
+        return 1
+      fi
+      pq_mt=$gp_out
+      if git_probe merge-tree --write-tree --no-messages --name-only --merge-base="$pq_c^" "$pq_m^" "$pq_c"; then
+        [ "$gp_out" != "$pq_mt" ] || continue 2
+      elif [ "$gp_rc" -ne 1 ]; then
+        pq_why="pair test failed — cannot replay commit $pq_c onto $pq_m^$(gp_why)"
+        return 1
+      fi
+    done
+    case "$pq_with" in
+      *" "*" "*) pq_why="commit $pq_c reads patch-equivalent but is not identical to any of the merged commits$pq_with" ;;
+      *) pq_why="commit $pq_c reads patch-equivalent but is not identical to the merged commit$pq_with" ;;
+    esac
+    return 1
+  done
+  return 0
+}
+
 # %(upstream:track) emits exactly [gone] as its own field — nothing to
 # pattern-match, and no -v/-vv trap.
 #
@@ -1170,21 +1307,22 @@ for b in $gone_branches $nu_branches; do
   # verdict a genuinely clean cherry produces, so "merged" is indistinguishable
   # from "the probe could not answer". An unmerged branch is never the ambiguous
   # one: its `+` line makes grep exit 0 and always keeps. Of the checks that
-  # must pass before the delete, this is the only one that asks whether `$tip`
-  # is merged — the worktree checks below and the `worktree remove` refusal
-  # can each keep the branch, but none of them looks at its commits, and the
-  # compare-and-swap refuses a ref that moved off `$tip`, never a `$tip` that
-  # is unmerged — so an unanswerable probe must KEEP, the same fail-closed
-  # shape the worktree `status` check below already uses.
+  # must pass before the delete, this and the pair test after it are the only
+  # ones that ask whether `$tip` is merged — the worktree checks below and the
+  # `worktree remove` refusal can each keep the branch, but none of them looks
+  # at its commits, and the compare-and-swap refuses a ref that moved off
+  # `$tip`, never a `$tip` that is unmerged — so an unanswerable probe must
+  # KEEP, the same fail-closed shape the worktree `status` check below already
+  # uses.
   # `refs/heads/$b`, never a bare `$b`, where the tip is read above. Restoring
   # the bare name makes a branch that shares its name with a tag ambiguous AS A
   # REV again, and git resolves an ambiguous one by preferring refs/tags/ over
   # refs/heads/ (measured, git 2.50.1 Apple Git-155). This probe would then
   # answer about the TAG's commit while the delete below removes the BRANCH —
   # and a tag sitting on a merged commit reports clean for a branch whose
-  # commits exist nowhere else. No other check before the delete asks whether
-  # those commits are merged, so that reads straight through to destroying
-  # them: measured on a fixture, the enumeration fix alone turned a branch
+  # commits exist nowhere else. No other check before the delete then asked
+  # whether those commits are merged, so that read straight through to
+  # destroying them: measured on a fixture, the enumeration fix alone turned a branch
   # this script currently KEEPS into `REAPED`, at exit 0, with an empty
   # kept[]. Qualifying changes nothing for an ordinary branch — both spellings
   # name the same commit — and it is the same key the worktree lookup below
@@ -1198,8 +1336,8 @@ for b in $gone_branches $nu_branches; do
   # existed nowhere else REAPED at exit 0 with an empty kept[]. The
   # qualification is built at the top of the file, where its own comment
   # records why the accept-list beside it is what makes prefixing sound. Being
-  # the only merge check bounds what ELSE could catch an unmerged branch, not
-  # whether this check itself can be wrong — which is why BOTH revs it
+  # one of only two merge checks bounds what ELSE could catch an unmerged
+  # branch, not whether this check itself can be wrong — which is why BOTH revs it
   # consumes are qualified.
   elif ! cherry=$(git cherry "$base_rev" "$tip" 2>&1); then
     keep "$b" "cherry probe failed — cannot tell if merged: $(printf '%s' "$cherry" | tr '\n' ' ')"
@@ -1215,7 +1353,7 @@ for b in $gone_branches $nu_branches; do
   # exists for: taking it is not the same as READING it. grep answers three
   # ways, and the `if` once had two arms — an rc 2 scan that never
   # examined `$cherry` fell into the merged arm, and no check between here and
-  # the delete below asks whether the branch is merged. So the deletion went
+  # the delete below then asked whether the branch is merged. So the deletion went
   # ahead on a merge status no tool had established. `grep_probe` splits the two
   # questions; the answers are ruled on here, in the order that makes the
   # unanswerable case fail CLOSED like every other could-not-check in this
@@ -1241,6 +1379,11 @@ for b in $gone_branches $nu_branches; do
       keep "$b" "unmerged commits — $pr_why"
       continue
     fi
+  # No `+`: merged only if every commit the tip holds and $base lacks pairs
+  # with one $base carries — the pair test, its header above the loop.
+  elif ! pair_test "$tip"; then
+    keep "$b" "$pq_why"
+    continue
   fi
 
   # The listing is read per branch, through worktree.sh's `wt_counts`, which
@@ -1904,6 +2047,11 @@ else
       continue
     elif [ "$gq_rc" -eq 0 ]; then
       keep "" "worktree $wt holds commits that exist nowhere else"
+      continue
+    # No `+`: the pair test, as in the branch sweep; its header is above that
+    # sweep's loop.
+    elif ! pair_test "$head"; then
+      keep "" "worktree $wt — $pq_why"
       continue
     fi
 

@@ -28,6 +28,14 @@ longer holds — reap.sh selects a branch with no upstream when origin has no
 branch of its name and the merged-PR tie accounts for its tip, by equality when
 the tip is already on the base; no delete guard reads upstream config, and
 "nothing is lost" still holds.
+Amended by #4185: in both of `reap.sh`'s sweeps, a tip whose commits all read
+`-` from `git cherry` is merged only when each commit C pairs — some commit M
+on the base carries C's `git patch-id --stable`, and `git merge-tree
+--write-tree --merge-base=C^ M^ C` writes exactly M's tree. A patch id ignores
+position and whitespace, so a commit repeating a merged change elsewhere in a
+file read `-` while no other ref held it. A merge commit in the range, an
+unpaired commit or a failed probe keeps, with its reason; the second proof,
+the holder check, the compare-and-swap and `wt_recheck_delete` are unchanged.
 
 ## Context
 
