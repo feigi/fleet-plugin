@@ -60,6 +60,10 @@ included: its brief states the content rule (`docs/metrics/` files and nothing
 else) and names no branch. `chore/run-artifacts-<date>` is the Close-out PR's
 name.
 
+A fleet ticket's brief asks for no PR shared with another ticket. Two tickets
+that must ship in one PR are one ticket: one brief covers both, and the other
+is closed pointing at it.
+
 ## ADR amendments
 
 An accepted ADR's body stays as ruled. A later change that falsifies or closes
