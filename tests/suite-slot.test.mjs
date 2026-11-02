@@ -28,7 +28,7 @@ function run(host, entrypoint, args = [], env = {}) {
 }
 
 // The wrapper left running: `done` settles when it exits, with what it
-// printed. `stdout()` is what has arrived so far.
+// printed. `stdout()` and `stderr()` are what has arrived so far.
 function launch(host, entrypoint, args = [], env = {}) {
   const child = spawn(process.execPath, [SUITE_SLOT, entrypoint, ...args], { env: host.env(env), stdio: ["ignore", "pipe", "pipe"] });
   let out = "";
@@ -36,7 +36,7 @@ function launch(host, entrypoint, args = [], env = {}) {
   child.stdout.on("data", (d) => (out += d));
   child.stderr.on("data", (d) => (err += d));
   const done = new Promise((resolve) => child.on("close", (status, signal) => resolve({ status, signal, stdout: out, stderr: err })));
-  return { child, done, stdout: () => out };
+  return { child, done, stdout: () => out, stderr: () => err };
 }
 
 const until = async (fn, what, ms = 10_000) => {
@@ -49,6 +49,9 @@ const until = async (fn, what, ms = 10_000) => {
 
 const waitMs = (stderr) => Number(/^SUITE_SLOT_WAIT_MS=(\d+)$/m.exec(stderr)?.[1]);
 
+// What a full run that found every slot held prints once, before it sleeps.
+const WAITING = /^suite-slot: waiting up to \d+s for a slot$/m;
+
 test("a full run takes one slot stamped with the wrapper's pid, prints its wait, and releases it", () => {
   const host = slotHome();
   const r = run(host, 'cat "$FLEET_SUITE_SLOT"; echo; ls "$(dirname "$FLEET_SUITE_SLOT")"');
@@ -58,6 +61,7 @@ test("a full run takes one slot stamped with the wrapper's pid, prints its wait,
   assert.deepEqual(listing, ["1.lock"]);
   // A free slot is taken on the first pass, well inside one 2 s cycle.
   assert.ok(waitMs(r.stderr) < 1000, `a free slot reports a wait of almost nothing: ${r.stderr}`);
+  assert.doesNotMatch(r.stderr, WAITING, "a run that found a free slot announced a wait");
   assert.deepEqual(readdirSync(host.slots), [], "the slot outlived the run");
 });
 
@@ -107,13 +111,16 @@ test("a third full run waits for a slot and takes it when one is freed", async (
   const mark = join(tempDir("slot-third-"), "ran");
   holdSlots(host, 2);
   const third = launch(host, 'touch "$MARK"; echo RAN', [], { FLEET_SUITE_WAIT_S: "30", MARK: mark });
+  await until(() => WAITING.test(third.stderr()), "the third run to start waiting");
+  const seen = Date.now();
   await new Promise((r) => setTimeout(r, 500));
   assert.equal(existsSync(mark), false, "the third run started with both slots held");
+  const freed = Date.now();
   rmSync(host.lock(2));
   const r = await third.done;
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout, "RAN\n");
-  assert.ok(waitMs(r.stderr) >= 400, `the wait it reports does not cover the time it spent waiting: ${r.stderr}`);
+  assert.ok(waitMs(r.stderr) >= freed - seen, `the wait it reports does not cover the time it spent waiting: ${r.stderr}`);
 });
 
 test("a wait that outlasts the cap exits 75 naming the wait, having launched nothing", () => {
@@ -257,7 +264,7 @@ test("SIGTERM to a waiting wrapper ends it at once, launching nothing", async ()
   holdSlots(host, 2);
   const waiting = launch(host, 'touch "$MARK"', [], { FLEET_SUITE_WAIT_S: "30", MARK: mark });
   try {
-    await new Promise((r) => setTimeout(r, 400));
+    await until(() => WAITING.test(waiting.stderr()), "the wrapper to start waiting");
     waiting.child.kill("SIGTERM");
     const r = await Promise.race([waiting.done, new Promise((res) => setTimeout(() => res("hung"), 10_000))]);
     assert.notEqual(r, "hung", "a waiting wrapper outlived SIGTERM");
