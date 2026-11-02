@@ -11,14 +11,18 @@
 //
 //   dispositions-ok=fix-pr-<M>[-x]:<run>        every rule below held
 //   dispositions-mismatch=fix-pr-<M>[-x]:<run>  at least one entry broke one
-//   dispositions-escalate=fix-pr-<M>[-x]:<run>  a human rules: either every rule held
-//                                               but a critical or important finding
-//                                               was deferred `remedy-outside-diff`,
-//                                               or a rule broke and an earlier
-//                                               fix-applier's record on the same
-//                                               review already had
+//   dispositions-escalate=fix-pr-<M>[-x]:<run>  the maintainer answers: either every
+//                                               rule held but a critical or important
+//                                               finding was deferred
+//                                               `remedy-outside-diff`, or a rule broke
+//                                               and an earlier fix-applier's record on
+//                                               the same review already had
 //   dispositions-unchecked=fix-pr-<M>[-x]:<run> no rule broke, but where a deferral was
 //                                               filed could not be read
+//   escalation-answer=<run>:<bucket>[<index>]:upheld|sent-back
+//                                               the maintainer's answer to one escalated
+//                                               finding, written by --uphold and
+//                                               --send-back and by nothing else
 //
 // `<run>` is the review's own run, so a verdict on one review never answers
 // a later one — a second review at the same head included.
@@ -95,6 +99,7 @@
 //     is escalated rather than passed: the verdict is `escalate`, and the
 //     output names each such finding. A `suggestion` passes as `ok`. A record
 //     that also breaks a rule is a `mismatch`, its escalations printed too.
+//     The maintainer's answers (below) clear an escalation.
 //   - Refuter evidence: a suggestion — an `unverified` finding no refuter
 //     was dispatched against (`refutersDispatched` zero or absent) — needs
 //     `verdictPath` when it is in scope, by the presumption above or by its
@@ -156,12 +161,41 @@
 // never ok, and never a mismatch, since the record broke nothing. Run the
 // check again once `gh` answers.
 //
+// Escalation answers: the maintainer answers an escalated finding `upheld` —
+// the deferral stands — or `sent-back` — the finding is applied in this PR.
+// `--uphold <list>` and `--send-back <list>`, each a comma-separated list of
+// `<bucket>[<index>]` as the output prints it, record the answers for the
+// escalated member, `--member fix-pr-<M>[-x]`, in one write that adds
+// `escalation-answer=<run>:<bucket>[<index>]:upheld|sent-back` per finding to
+// the PR's row and replaces the escalate with the verdict the record then
+// earns: `ok` — `unchecked` when a filing could not be read — with every
+// finding upheld; `mismatch`, or `escalate` when an earlier fix-applier's
+// record on the same review already failed, with any sent back. A send-back
+// is a failure like any other. `<run>` is the review whose escalation the
+// answer settles, so an answer on one review answers nothing on a later one.
+//
+// Every record judged against a review reads that review's answers off the
+// PR's rows, whether or not the run records any: an upheld finding is no
+// escalation, and an entry that defers a sent-back finding is a violation
+// whatever its reason. Running the check again with no answer flags therefore
+// reproduces the verdict and its violations.
+//
+// A run that records answers refuses — exit 2, the cause named, the ledger
+// byte-identical — unless: a ledger is in use; the PR's current dispositions
+// verdict on its latest review is an escalate naming the member; no
+// fix-applier on the PR is live; the record, judged with the answers already
+// on the row, breaks no rule; every listed finding is one the record escalates,
+// none listed twice or both ways; and every escalation of the record has an
+// answer. A record that breaks a rule has no outside-diff escalate to answer:
+// a second failure on one review clears only with a new review.
+//
 // Exit status: 0 ok; 1 mismatch, escalate or unchecked; 2 nothing judged and
-// nothing written — a bad flag, no valid Label map (the message names
-// `label-map.mjs ensure`), an unreadable or malformed review file, a
-// record file that exists but cannot be read, a git or ledger failure. A
-// missing or unparseable RECORD is judged, not refused: the fix-applier wrote
-// nothing a reader can use, so every finding it had to cover is dropped.
+// nothing written — a bad flag, an answer the run refuses to record, no valid
+// Label map (the message names `label-map.mjs ensure`), an unreadable or
+// malformed review file, a record file that exists but cannot be read, a git
+// or ledger failure. A missing or unparseable RECORD is judged, not refused:
+// the fix-applier wrote nothing a reader can use, so every finding it had to
+// cover is dropped.
 //
 // Without a ledger the record is judged all the same and the exit status is
 // the whole verdict: no token is written, no row is read, and `token` in the
@@ -189,7 +223,7 @@ import { isCLI } from "./is-cli.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { readLabelMap } from "./label-map.mjs";
-import { parseMember, memberTokens, rowNums, dispositionsToken, firstReview, prTokens } from "./ledger-grammar.mjs";
+import { parseMember, memberTokens, rowNums, dispositionsToken, escalationAnswerToken, escalationAnswers, firstReview, prTokens } from "./ledger-grammar.mjs";
 import { deriveRun, LedgerError } from "./fleet-tick.mjs";
 import { VERDICT_SCHEMA } from "./review-core.mjs";
 
@@ -212,6 +246,8 @@ export const ALLOWED_DEFER = Object.freeze(["false-rationale", "mutual-exclusion
 const COVERED = ["survived", "unverified"];
 const BUCKETS = [...COVERED, "refuted"];
 const ENUMS = { scope: ["in", "out"], claimKind: ["behavior", "shape"], disposition: ["apply", "defer"] };
+// The rule an entry breaks when it defers a finding the maintainer sent back.
+const SENT_BACK = "sent back to be applied in this PR — the maintainer answered this finding's escalation, and this entry defers it; a deferral is a mismatch whatever its reason";
 
 // A Charge: what a finding that stands on a PR's first review says about the
 // work as submitted. `none` names one of CHARGE_REASONS; no other Charge does.
@@ -491,10 +527,15 @@ function chargeProblem(e, { inScope, required }) {
  * `charges` is whether the record answers the PR's first review (firstReview()
  * in ledger-grammar.mjs), where every entry whose finding stands carries a
  * Charge; a Charge an entry carries anywhere is judged all the same.
+ * `answers` is the maintainer's escalation answers for the review's run
+ * (escalationAnswers() in ledger-grammar.mjs): a finding's address,
+ * `<bucket>[<index>]`, to `upheld` or `sent-back`. An upheld finding is no
+ * escalation, and an entry that defers a sent-back finding is a violation
+ * whatever its reason.
  * `review` must pass reviewProblem() — a bucket missing or holding a
  * non-object is a TypeError here, not a violation.
  */
-export function checkDispositions({ review, record, recordProblem = null, run = null, touched, diffFiles = null, roots = [], filing = null, charges = false }) {
+export function checkDispositions({ review, record, recordProblem = null, run = null, touched, diffFiles = null, roots = [], filing = null, charges = false, answers = new Map() }) {
   const violations = [];
   const escalations = [];
   const unchecked = [];
@@ -552,6 +593,13 @@ export function checkDispositions({ review, record, recordProblem = null, run = 
     const inScope = presumed !== null || e.scope === "in";
     const charge = chargeProblem(e, { inScope, required: charges && stands(bucket, e) });
     if (charge !== null) at(bucket, index, charge);
+    // The maintainer sent this finding back to be applied in this PR: an entry
+    // that defers it breaks that answer whatever its reason, so nothing else
+    // about the deferral is judged.
+    if (e.disposition === "defer" && answers.get(key) === "sent-back") {
+      at(bucket, index, SENT_BACK);
+      return;
+    }
     if (bucket === "refuted" && !e.reason?.trim()) {
       at(bucket, index, "a reversed refutation names its evidence in reason, and this one names none");
       return;
@@ -610,7 +658,7 @@ export function checkDispositions({ review, record, recordProblem = null, run = 
           return;
         }
         const severity = finding.severity;
-        if (severity !== "suggestion") escalations.push({ bucket, index, severity: severity ?? null, files: outside });
+        if (severity !== "suggestion" && answers.get(key) !== "upheld") escalations.push({ bucket, index, severity: severity ?? null, files: outside });
       }
     }
     // Where the deferral must be filed. `claimKind` is trusted, never judged.
@@ -648,7 +696,7 @@ export function formatViolation({ bucket, index, rule }) {
 }
 
 export function formatEscalation({ bucket, index, severity, files }) {
-  return `${bucket}[${index}]: a ${severity ?? "severity-less"} finding deferred remedy-outside-diff, its remedy in ${files.join(", ")} — a human rules`;
+  return `${bucket}[${index}]: a ${severity ?? "severity-less"} finding deferred remedy-outside-diff, its remedy in ${files.join(", ")} — the maintainer answers`;
 }
 
 // The row text with `token` in place of every verdict the same member wrote
@@ -688,7 +736,7 @@ export function failedBefore(rows, pr, member, run) {
 
 const die = makeDie(NAME);
 const { arg, has, sweep, stray } = defineFlags(die, {
-  flags: { member: "value", scratch: "value", repo: "value", ledger: "value", "no-ledger": "bool", review: "value" },
+  flags: { member: "value", scratch: "value", repo: "value", ledger: "value", "no-ledger": "bool", review: "value", uphold: "value", "send-back": "value" },
 });
 
 // The one git primitive. An ambient GIT_DIR or GIT_WORK_TREE — a hook, a
@@ -834,8 +882,31 @@ function readJson(path) {
   return JSON.parse(readFileSync(path, "utf8"));
 }
 
+// A finding's address as the check prints it: its bucket and its position in
+// that bucket of the review file.
+const ADDRESS = new RegExp(`^(${BUCKETS.join("|")})\\[(0|[1-9][0-9]*)\\]$`);
+
+// The findings a `--uphold` or `--send-back` list names, each `<bucket>[<index>]`
+// — or null when the flag is absent. A second occurrence of the flag would be
+// read by nothing, so it is refused rather than dropped.
+function addressList(flag) {
+  const raw = arg(flag);
+  if (raw === null) return null;
+  if (process.argv.filter((a) => a === `--${flag}`).length > 1) die(`--${flag} is given twice — name every finding in one comma-separated list`);
+  const list = raw.split(",").map((a) => a.trim());
+  const bad = list.find((a) => !ADDRESS.test(a));
+  if (bad !== undefined) die(`--${flag} names ${JSON.stringify(bad)}, which is no <bucket>[<index>] — a bucket is ${BUCKETS.join(", ")}, an index a whole number from 0`);
+  return list;
+}
+
+// Addresses in the record's own order: by bucket, then by index.
+const byAddress = (a, b) => {
+  const [x, y] = [a, b].map((s) => ADDRESS.exec(s));
+  return BUCKETS.indexOf(x[1]) - BUCKETS.indexOf(y[1]) || Number(x[2]) - Number(y[2]);
+};
+
 function main() {
-  const usage = "usage: dispositions-check.mjs --member fix-pr-<M>[-x] --scratch <dir> [--repo <path>] [--ledger <path> | --no-ledger --review <path>]";
+  const usage = "usage: dispositions-check.mjs --member fix-pr-<M>[-x] --scratch <dir> [--repo <path>] [--ledger <path> | --no-ledger --review <path>] [--uphold <list>] [--send-back <list>]";
   const name = arg("member");
   const scratch = arg("scratch");
   if (!name || !scratch) die(usage);
@@ -845,9 +916,25 @@ function main() {
   if (member === null || member.family !== "fix-pr") die(`'${name}' is not a fix-applier — expected fix-pr-<M>, a -b, -c … suffix allowed`);
   const pr = member.number;
   const repo = arg("repo") ?? process.cwd();
+  // The maintainer's answers, when this run records them: `--uphold` and
+  // `--send-back`, each a list of the escalated findings answered that way.
+  // Told before anything is read, since a list that cannot be one is a usage error.
+  const uphold = addressList("uphold");
+  const sendBack = addressList("send-back");
+  const listed = new Map();
+  for (const [flag, list, answer] of [["--uphold", uphold, "upheld"], ["--send-back", sendBack, "sent-back"]]) {
+    for (const a of list ?? []) {
+      if (listed.has(a)) die(listed.get(a) === answer ? `${flag} lists ${a} twice` : `${a} is listed in both --uphold and --send-back — a finding is answered one way`);
+      listed.set(a, answer);
+    }
+  }
+  const recording = listed.size > 0;
   const standalone = has("no-ledger");
   if (standalone && arg("ledger") !== null) die("--no-ledger and --ledger contradict: name one");
   const ledgerFile = standalone ? null : ledgerInUse(arg("ledger"), repo);
+  if (recording && ledgerFile === null) {
+    die(`${uphold !== null ? "--uphold" : "--send-back"} records the maintainer's answer on the ledger row, and no ledger is in use — run it for the escalated member where the run's ledger is`);
+  }
   // Without a ledger nothing names the review the record answers, so `--review`
   // must; with one, the latest `reviewed=` already does. Both are usage errors,
   // so they are told before the Label map, the ledger or the tracker is read.
@@ -870,7 +957,7 @@ function main() {
   // same per-PR fold `ledger.mjs dispatch` gates the finisher by, so the check
   // and the gate never judge two different reviews. Without one it is the
   // `--review` path the checks above required.
-  let data = null, row = null, run = null, charges = false, reviewPath;
+  let data = null, row = null, run = null, charges = false, reviewPath, answers = new Map();
   if (ledgerFile === null) {
     reviewPath = arg("review");
   } else {
@@ -889,9 +976,30 @@ function main() {
     }
     if (latest === undefined) die(`PR #${pr} has no reviewed= on the ledger — no review for ${member.name}'s record to answer`);
     run = latest.run;
+    // Answers clear the escalate they answer and nothing else: the PR's current
+    // verdict on this review must be that escalate, and no fix-applier on the PR
+    // may be working — its landing would answer the review in its own right.
+    if (recording) {
+      const current = latest.dispositions;
+      if (current === null || current.verdict !== "escalate" || current.member !== member.name) {
+        die(`PR #${pr}'s current dispositions verdict on review ${run} is ${current === null ? "none" : `${current.verdict} from ${current.member}`}, not an escalate from ${member.name} — escalation answers clear the escalate they answer, and nothing else`);
+      }
+      if (latest.fixLive.length > 0) {
+        die(`${latest.fixLive.join(", ")} still live on PR #${pr} — a fix-applier answering review ${run} has not settled, so the answers wait: settle it, then record them`);
+      }
+    }
+    // Every record judged against this review reads the answers recorded for it.
+    // A token that only looks like one answers nothing, and says so.
+    const tokens = prTokens(data.rows, pr);
+    answers = escalationAnswers(tokens, run);
+    for (const t of tokens) {
+      if (t.startsWith("escalation-answer=") && escalationAnswerToken(t) === null) {
+        console.error(`${NAME}: ignoring malformed token ${t} on PR #${pr}'s row — it answers nothing`);
+      }
+    }
     // Charges are required only on the record answering the PR's first
     // review; this record answers `run`, so `run` counts as answered.
-    charges = firstReview(prTokens(data.rows, pr), [run])?.run === run;
+    charges = firstReview(tokens, [run])?.run === run;
     reviewPath = join(scratch, `pr${pr}`, run, "review.json");
   }
   let review;
@@ -937,17 +1045,44 @@ function main() {
   const diffFiles = git(repo, ["diff", "--no-color", "--no-ext-diff", "--no-renames", "--name-only", "-z", base, head],
     `list the files of ${base}..${head}`).split("\0").filter(Boolean);
 
-  const { violations, escalations, unchecked } = checkDispositions({
-    review, record, recordProblem, run, touched: touchedLines(diff), diffFiles, roots: [review.snapshot, top], charges,
-    filing: { pr, roles, issue: issueReader(repo), verdict: verdictReader(scratch, pr) },
+  const touched = touchedLines(diff);
+  const filing = { pr, roles, issue: issueReader(repo), verdict: verdictReader(scratch, pr) };
+  const judge = (answered) => checkDispositions({
+    review, record, recordProblem, run, touched, diffFiles, roots: [review.snapshot, top], charges, answers: answered, filing,
   });
+  let judged = judge(answers);
+  let recorded = [];
+  if (recording) {
+    // The answers go on the row only when they answer exactly what the record
+    // escalates, judged with the answers already there. A record that breaks a
+    // rule has no outside-diff escalate to answer; a finding the record does not
+    // escalate, or an escalated one left unanswered, makes an answer that
+    // settles nothing.
+    if (judged.violations.length > 0) {
+      die(`${member.name}'s record breaks a rule, so its escalate is no outside-diff one: the maintainer's answers clear an escalate whose record breaks none. A broken rule is a mismatch, and after an earlier failure on review ${run} a second failure, which only a new review of the PR clears — run the check without --uphold and --send-back to judge it. It breaks:\n`
+        + judged.violations.map((v) => `  ${member.name}: ${formatViolation(v)}`).join("\n"));
+    }
+    const open = judged.escalations.map((x) => `${x.bucket}[${x.index}]`).sort(byAddress);
+    for (const a of [...listed.keys()].sort(byAddress)) {
+      if (!open.includes(a)) die(`${a} is not one of ${member.name}'s escalated findings${open.length > 0 ? ` (${open.join(", ")})` : " — its record escalates none"}`);
+    }
+    const unanswered = open.filter((a) => !listed.has(a));
+    if (unanswered.length > 0) {
+      die(`${member.name}'s record escalates ${open.join(", ")}, and ${unanswered.join(", ")} ${unanswered.length === 1 ? "has" : "have"} no answer — every escalated finding is answered in one run, with --uphold or --send-back`);
+    }
+    answers = new Map([...answers, ...listed]);
+    judged = judge(answers);
+    recorded = open.map((a) => [a, listed.get(a)]);
+  }
+  const { violations, escalations, unchecked } = judged;
   // No ledger, no row: the exit status below is the verdict, and with no
   // earlier fix-applier's verdict to count, a broken rule is always a
   // mismatch.
   // A mismatch an earlier fix-applier already drew on this review makes this
-  // one the second: it is written as an escalate, which no fix-applier answers.
-  // A broken rule outranks an escalation, and an escalation a filing the
-  // tracker could not answer.
+  // one the second: it is written as an escalate, which only a new review of
+  // the PR clears. A finding the maintainer sent back counts as a broken rule
+  // like any other, here and in failedBefore(). A broken rule outranks an
+  // escalation, and an escalation a filing the tracker could not answer.
   const secondMismatch = violations.length > 0 && data !== null && failedBefore(data.rows, pr, member, run);
   const verdict = violations.length > 0 ? (secondMismatch ? "escalate" : "mismatch")
     : escalations.length > 0 ? "escalate" : unchecked.length > 0 ? "unchecked" : "ok";
@@ -957,9 +1092,13 @@ function main() {
     const key = row.split(/\s/)[0];
     if (!/^#[0-9]+$/.test(key)) die(`the row carrying ${member.name} has no #<n> key for \`ledger.mjs row\` to rewrite it by: ${row}`);
     const text = row.slice(key.length).trim();
-    const updated = withVerdict(text, token);
+    const answerTokens = recorded.map(([a, answer]) => `escalation-answer=${run}:${a}:${answer}`);
+    const updated = withVerdict([text, ...answerTokens].join(" · "), token);
     if (updated === text) console.error(`    ${member.name}: row ${key} already carries ${token} — not written again`);
-    else runLedger(ledgerFile, ["row", key, updated], `write ${token} onto row ${key}`);
+    else runLedger(ledgerFile, ["row", key, updated], `write ${recorded.length > 0 ? `the escalation answers and ${token}` : token} onto row ${key}`);
+  }
+  if (recorded.length > 0) {
+    console.error(`${member.name}: recorded the maintainer's escalation answers on review ${run} — ${recorded.map(([a, answer]) => `${a} ${answer === "sent-back" ? "sent back" : answer}`).join(", ")}`);
   }
 
   for (const v of violations) console.error(`${member.name}: ${formatViolation(v)}`);

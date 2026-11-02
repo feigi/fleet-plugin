@@ -1345,11 +1345,15 @@ test("a finisher is refused while its PR sits on a conflict hold no fix-applier 
   assert.deepEqual(read().dispatched, ["finisher-pr-40=failed", "finisher-pr-40-b"]);
 });
 
-test("a finisher is refused on a dispositions escalate, naming it, and nothing retries it", (t) => {
-  const { ok, read, refused, put } = fixture(t);
+test("a finisher is refused on a dispositions escalate, naming it and the two ways it clears", (t) => {
+  const { cli, read, refused, put } = fixture(t);
   put("10", gateRow("1/0/0", `dispositions-escalate=fix-pr-40:${GATE_RUN}`));
   refused(["dispatch", "40", "finisher-pr-40"],
-    /finisher-pr-40: dispositions escalate — fix-pr-40 deferred .*review run-Gate0001 gets no finisher and no retry; dispositions-check\.mjs --member fix-pr-40/);
+    /finisher-pr-40: dispositions escalate — fix-pr-40 deferred .*review run-Gate0001 gets no finisher until the escalate clears\./);
+  const said = cli("dispatch", "40", "finisher-pr-40").stderr;
+  assert.match(said, /An outside-diff deferral clears when the maintainer's escalation answers are recorded with dispositions-check\.mjs --member fix-pr-40 --scratch <scratch> --uphold '<list>' --send-back '<list>'; a second mismatch clears only with a new review of the PR\./);
+  assert.match(said, /dispositions-check\.mjs --member fix-pr-40 --scratch <scratch> alone names each escalated finding or violating entry by bucket and index/);
+  assert.doesNotMatch(said, /no retry/);
   assert.deepEqual(read().dispatched, []);
   const l = read();
   const run = deriveRun({ rows: l.rows, dispatched: l.dispatched, drain: null },

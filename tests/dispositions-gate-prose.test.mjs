@@ -26,6 +26,7 @@ const REPO = join(import.meta.dirname, "..", "plugin");
 const REVIEW_AND_FIX = Pin.file(join(REPO, "commands", "review-and-fix.md"));
 const SKILL = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 const CHECK = Pin.file(join(REPO, "scripts", "dispositions-check.mjs"));
+const ESCALATION = Pin.file(join(REPO, "skills", "run-team", "references", "dispositions-escalation.md"));
 
 // Step 2's record paragraph: one line, bounded by step 3's opener.
 const recordStep = () =>
@@ -85,10 +86,7 @@ test("the gate says what each refusal asks of the controller", () => {
     "`dispositions mismatch` — no finisher: the tick prints `DISPATCH fix-pr PR#<M>` for it, and the next-suffix fix-applier answers it",
   ));
   assert.match(s, Pin.phrase(
-    "`dispositions escalate` — no finisher, no retry and no further fix-applier: either a `critical` or `important` finding was deferred `remedy-outside-diff`, or a second mismatch was drawn on one review, and only a human can rule on either.",
-  ));
-  assert.match(s, Pin.phrase(
-    "Post the check's output, which names each escalated finding or violating entry, with `gh pr comment <M>`, and flag the PR for a human; re-running the check reprints it. Dispatch no fix-applier and no finisher for that review, and expect no `fix-due` row for it",
+    "`dispositions escalate` — no finisher, no `fix-due` row: a finding above `suggestion` deferred `remedy-outside-diff` clears with the maintainer's answers, a second mismatch only with a new review (**Dispositions escalation**).",
   ));
   assert.match(s, Pin.phrase(
     "it refuses too while a fix-applier on the PR is still live, verdict or not** — `fix-pr-<M>[-x] still live`: settle it, run the check for it, then dispatch again.",
@@ -108,9 +106,83 @@ test("a mismatch is retried once by the next suffix, whose prompt carries the vi
   assert.match(brief, Pin.phrase(`The mismatched member's record is \`${retry["mismatched-record"]}\``));
   assert.match(brief, Pin.phrase(`each naming a bucket, an index and a rule: ${retry.violations}`));
   assert.match(s, Pin.phrase(
-    "A second failure on the same review is written as `dispositions-escalate=fix-pr-<M>-b:<run>` in place of a mismatch: the tick prints no `DISPATCH fix-pr` for it, `dispatch` refuses the finisher naming `dispositions escalate`",
+    "A second failure on the same review is written as `dispositions-escalate=fix-pr-<M>-b:<run>` in place of a mismatch: the tick prints no `DISPATCH fix-pr` for it. Post the check's output with `gh pr comment <M>`. A second failure is flagged for a human. A new review of the PR counts again from none.",
   ));
-  assert.match(s, Pin.phrase("A new review of the PR counts again from none."));
+});
+
+test("an escalate whose check printed no violations is the maintainer's to answer, and the answers are recorded through the check", () => {
+  const s = SKILL.paragraph("`DISPATCH fix-pr PR#<M>` on a dispositions mismatch", "run-team/SKILL.md", "### The main-gain hit", { emphasisTolerant: true }).text;
+  assert.match(s, Pin.phrase(
+    "An escalate whose check printed no violations is the maintainer's to answer instead, one yes/no per escalated finding: yes upholds the deferral, no sends it back to be applied in this PR.",
+  ));
+  assert.match(s, Pin.phrase(
+    "With every finding explicitly answered this session, record them with `dispositions-check.mjs` `--uphold` and `--send-back`: `ok` gets the finisher, `mismatch` the tick's retry, `escalate` is a second failure. See references/dispositions-escalation.md.",
+  ));
+  // The flags the prose names are the ones the check takes, and its header names the token they write.
+  const header = CHECK.stripGutter("//").text;
+  assert.match(header, Pin.phrase("escalation-answer=<run>:<bucket>[<index>]:upheld|sent-back"));
+  assert.match(header, Pin.phrase("`--uphold <list>` and `--send-back <list>`, each a comma-separated list of `<bucket>[<index>]`"));
+});
+
+test("the escalation reference has the controller ask one yes/no per finding, record nothing before every one is answered, and run the check, the ruled lines and the comment in that order", () => {
+  const s = ESCALATION.text;
+  assert.match(s, Pin.phrase(
+    "Then put one message to the maintainer, with one yes/no for each escalated finding.",
+  ));
+  assert.match(s, Pin.phrase("its address, `<bucket>[<index>]` as the check printed it, its severity and its claim, read from `<scratch>/pr<M>/<run>/review.json`;"));
+  assert.match(s, Pin.phrase("its remedy files, as the check printed them;"));
+  assert.match(s, Pin.phrase("the issue it was filed to and the fix-applier's reason, read from the escalated member's record `<scratch>/dispositions-<member>.json`."));
+  assert.match(s, Pin.phrase("Yes means upheld: the deferral stands. No means sent back: the finding is applied in this PR."));
+  assert.match(s, Pin.phrase("Record nothing until every finding has an answer, and nothing without the maintainer's explicit answer in this session."));
+  assert.match(s, Pin.phrase("Run `dispositions-check.mjs --member <member> --scratch <scratch> --uphold '<list>' --send-back '<list>'`"));
+  assert.match(s, Pin.phrase("Record one line per finding: `ledger.mjs ruled <M> \"escalation answer <bucket>[<index>]: upheld|sent back — <reason>\"`, the maintainer's reason."));
+  assert.match(s, Pin.phrase("Post one PR comment under the escalate comment, quoting the answers."));
+  assert.ok(s.indexOf("Run `dispositions-check.mjs") < s.indexOf("Record one line per finding") && s.indexOf("Record one line per finding") < s.indexOf("Post one PR comment"));
+});
+
+test("the escalation reference says what each verdict of the answers earns, and what any other answer is", () => {
+  const s = ESCALATION.text;
+  assert.match(s, Pin.phrase("`ok`: dispatch the finisher, as for any `ok`."));
+  assert.match(s, Pin.phrase("`mismatch`: a sent-back finding is a broken rule, so the tick prints `DISPATCH fix-pr PR#<M>` and the retry runs as any mismatch's does."));
+  assert.match(s, Pin.phrase(
+    "deferring a sent-back finding again, for any reason, is a second failure, and applying it while deferring an upheld one `remedy-outside-diff` passes.",
+  ));
+  assert.match(s, Pin.phrase(
+    "`escalate`: an earlier fix-applier on the review had already failed, so the send-back is the second failure. Comment, flag the PR for a human, and a new review of the PR counts again from none.",
+  ));
+  assert.match(s, Pin.phrase("An escalate whose check printed violations is a second mismatch on one review: no answer clears it, you comment and flag the PR for a human, and a new review of the PR counts again from none."));
+  assert.match(s, Pin.phrase("Record `ledger.mjs ruled <M> <decision>` and carry it out."));
+});
+
+test("review-and-fix.md step 2 says a critical or important outside-diff deferral goes to the maintainer, and the finisher waits for the answer", () => {
+  assert.match(recordStep(), Pin.phrase(
+    "A `critical` or `important` finding deferred for it goes to the maintainer instead of passing: the script exits 1 with verdict `escalate`, `ledger.mjs dispatch` refuses the PR's finisher until answered; a `suggestion` deferred for it passes.",
+  ));
+});
+
+// A sentence of the runbook, the command or the grammar comment that speaks of an
+// escalate and says it gets no retry or no further fix-applier, or that only a
+// human rules on it: the maintainer's answers clear an outside-diff one, and a
+// sent-back finding's mismatch gets the retry. The finisher-halt table's
+// `**Escalate**` rows are a different escalation, and no part of it.
+const STALE_ESCALATE = /\bno retry\b|no further fix-applier|nothing retries|only a human|a human rules|a hold only a human/i;
+const staleEscalate = (text) => Pin.sentences(text.replace(/\s+/g, " ")).filter((x) => /\bescalat/i.test(x) && STALE_ESCALATE.test(x) && !x.includes("**Escalate**"));
+
+test("no sentence of the runbook, the command or the grammar says an escalate gets no retry or no further fix-applier, or that only a human rules on it", () => {
+  const files = [
+    join(REPO, "skills", "run-team", "SKILL.md"), join(REPO, "skills", "run-team", "references", "dispositions-escalation.md"),
+    join(REPO, "commands", "review-and-fix.md"), join(REPO, "scripts", "ledger-grammar.mjs"),
+  ];
+  for (const file of files) {
+    const text = readFileSync(file, "utf8").replace(/^\s*\/\/ ?/gm, "");
+    assert.deepEqual(staleEscalate(text), [], `${file} still says an escalate is no one's but a human's, or gets no retry`);
+  }
+  // The control: the matcher catches the sentences this change removed.
+  assert.equal(staleEscalate("`dispositions escalate` — no finisher, no retry and no further fix-applier. Another sentence.").length, 1);
+  assert.equal(staleEscalate("An escalate goes to a human and nothing retries it; a suggestion passes.").length, 1);
+  assert.equal(staleEscalate("The grammar calls an escalate a hold only a human answers.").length, 1);
+  assert.equal(staleEscalate("An escalate is the maintainer's to answer. A sent-back finding's mismatch gets the retry.").length, 0);
+  assert.equal(staleEscalate("| `human` | **Escalate** — no retry. A Ticketless PR.").length, 0, "a finisher halt's escalation is another one");
 });
 
 test("a reversed refutation reaches the ledger from the disposition record", () => {

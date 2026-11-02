@@ -268,22 +268,56 @@ export const prTokens = (rows, pr) => streams(rows).get(pr) ?? [];
 // dispositions-check.mjs's verdict on a review fix-applier's disposition
 // record: `dispositions-ok=fix-pr-<M>[-x]:<run>`,
 // `dispositions-mismatch=…`, `dispositions-escalate=…` (a critical or
-// important deferral, or a second mismatch on one review, that a human rules
-// on) or `dispositions-unchecked=…` (no rule broke, but where a deferral was
-// filed could not be read), `<run>` the run of the review the record
-// answers, as its `reviewed=` names it. `ledger.mjs dispatch` refuses a
-// finisher on anything but an ok. A
-// mismatch returns the PR to fixDue for one retry; an escalate is a hold only
-// a human answers, so the tick never re-offers the PR for it; an unchecked is
-// answered by running the check again, so the tick never offers a
-// fix-applier for it either. A token outside this shape is no verdict at all,
-// which the gate reads as unchecked: fail closed.
+// important deferral, or a second mismatch on one review, that the
+// maintainer answers) or `dispositions-unchecked=…` (no rule broke, but where
+// a deferral was filed could not be read), `<run>` the run of the review the
+// record answers, as its `reviewed=` names it. `ledger.mjs dispatch` refuses a
+// finisher on anything but an ok. A mismatch returns the PR to fixDue for one
+// retry. An escalate clears one of two ways: the maintainer's escalation
+// answers, recorded through dispositions-check.mjs, replace an escalate over
+// a deferral outside the PR's diff with the verdict they give, and a second
+// mismatch on one review clears only when a new review of the PR counts again
+// from none. An unchecked is answered by running the check again, so the tick
+// offers no fix-applier for it. A token outside this shape is no verdict at
+// all, which the gate reads as unchecked: fail closed.
 export function dispositionsToken(tok) {
   const m = /^dispositions-(ok|mismatch|escalate|unchecked)=([^:\s]+):(run-[A-Za-z0-9]{8})$/i.exec(tok);
   if (!m) return null;
   const member = parseMember(m[2]);
   if (member === null || member.family !== "fix-pr") return null;
   return { verdict: m[1].toLowerCase(), member, run: m[3] };
+}
+
+// The maintainer's answer to one finding a fix-applier's record escalated, as
+// dispositions-check.mjs writes it onto the PR's row, and the only writer:
+// `escalation-answer=<run>:<bucket>[<index>]:upheld` (the deferral stands) or
+// `…:sent-back` (the finding is applied in this PR). `<run>` is the run of the
+// review whose escalation it answers, as its `reviewed=` names it, and
+// `<bucket>[<index>]` the finding's address as the check prints it. It is no
+// dispositions verdict and no member, so neither dispositionsToken() nor
+// parseToken() claims it, and a token outside this shape answers nothing.
+const ESCALATION_ANSWER = /^escalation-answer=(run-[A-Za-z0-9]{8}):(survived|unverified|refuted)\[(0|[1-9][0-9]*)\]:(upheld|sent-back)$/;
+export function escalationAnswerToken(tok) {
+  const m = typeof tok === "string" ? ESCALATION_ANSWER.exec(tok) : null;
+  return m === null ? null : { run: m[1], bucket: m[2], index: Number(m[3]), answer: m[4] };
+}
+
+/**
+ * The answers `tokens` (prTokens()) carry for review `run`: a Map from a
+ * finding's address, `<bucket>[<index>]`, to `upheld` or `sent-back`. An answer
+ * recorded against another run counts for nothing, so a new review starts
+ * from none. A finding carrying both answers reads as sent back — the stricter
+ * reading, as currentDispositions() reads one fix-applier's two verdicts.
+ */
+export function escalationAnswers(tokens, run) {
+  const answers = new Map();
+  for (const tok of tokens) {
+    const a = escalationAnswerToken(tok);
+    if (a === null || a.run !== run) continue;
+    const address = `${a.bucket}[${a.index}]`;
+    if (answers.get(address) !== "sent-back") answers.set(address, a.answer);
+  }
+  return answers;
 }
 
 /**

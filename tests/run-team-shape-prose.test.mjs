@@ -679,6 +679,21 @@ const CHANGED = [
     "``` #<t1> impl-<t1>=PR#<p1> → PR#<p1> → MERGED 73b356de #<t2> impl-<t2>=PR#<p2> → PR#<p2> · fix-pr-<p2> · ports=16<t2> · ruled:6-applies · held-behind:#<t3> #<t3> impl-<t3> · tier=task-high #<t4> excluded · behind-pr:#<p2> #<t5> excluded · behind-issue:#<t3> ```",
     "``` #<t1> impl-<t1>=PR#<p1> → PR#<p1> → MERGED 73b356de #<t2> impl-<t2>=PR#<p2> → PR#<p2> · fix-pr-<p2> · ports=16<t2> · ruled:6-applies #<t3> impl-<t3> · tier=task-high #<t4> excluded · behind-pr:#<p2> #<t5> excluded · behind-issue:#<t3> ```",
   ],
+  // A dispositions escalate whose check printed no violations clears with the
+  // maintainer's answers (#4030): the gate clause names both exits, and the
+  // reference carries what the controller posts and asks.
+  [
+    "`dispositions escalate` — no finisher, no retry and no further fix-applier: either a `critical` or `important` finding was deferred `remedy-outside-diff`, or a second mismatch was drawn on one review, and only a human can rule on either.",
+    "`dispositions escalate` — no finisher, no `fix-due` row: a finding above `suggestion` deferred `remedy-outside-diff` clears with the maintainer's answers, a second mismatch only with a new review (**Dispositions escalation**).",
+  ],
+  [
+    "Post the check's output, which names each escalated finding or violating entry, with `gh pr comment <M>`, and flag the PR for a human; re-running the check reprints it.",
+    "Post the check's output with `gh pr comment <M>`: it names each escalated finding, and re-running the check for the escalated member reprints it.",
+  ],
+  [
+    "A second failure on the same review is written as `dispositions-escalate=fix-pr-<M>-b:<run>` in place of a mismatch: the tick prints no `DISPATCH fix-pr` for it, `dispatch` refuses the finisher naming `dispositions escalate`, and you post the check's output with `gh pr comment <M>` and flag the PR for a human.",
+    "A second failure on the same review is written as `dispositions-escalate=fix-pr-<M>-b:<run>` in place of a mismatch: the tick prints no `DISPATCH fix-pr` for it.",
+  ],
 ];
 
 // Sentences deleted outright, each named with what stands in its place.
@@ -803,6 +818,12 @@ const DELETED = [
   ["The exemption belongs to the run that authors the PR and does not outlive it: one still open when the run ends is a PR a prior run left open, which phase 0 folds into the next run's review queue as ticket work — and a PR is not exempt from being wrong, only from waiting on a reviewer no phase of this run will ever dispatch against it.", "references/close-out.md's End of run step 3: a PR finish leaves open is the next run's"],
   // The merge bot holds no PR behind a lower one (#4029).
   ["| Merge bot hits the hold rule | Report `held-behind-#<lower>`, PR stays queued |", "nothing: the merge bot holds no PR behind a lower one"],
+  // A dispositions escalate whose check printed no violations clears with the
+  // maintainer's answers (#4030).
+  [
+    "Dispatch no fix-applier and no finisher for that review, and expect no `fix-due` row for it; a new review of the PR starts the check again.",
+    "the gate clause's `no finisher, no fix-due row` and **Dispositions escalation**'s exits: the maintainer's answers clear an outside-diff escalate, and after a second failure a new review of the PR counts again from none",
+  ],
 ];
 
 const oldSentences = () => counted(sentencesOf(readFileSync(FIXTURE, "utf8")));

@@ -17,7 +17,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deriveRun } from "../plugin/scripts/fleet-tick.mjs";
 import {
-  touchedLines, checkDispositions, withVerdict, repoPath, formatViolation, failedBefore, verdictProblem, recordTitle, FILING_ROWS,
+  touchedLines, checkDispositions, withVerdict, repoPath, formatViolation, formatEscalation, failedBefore, verdictProblem, recordTitle, FILING_ROWS,
 } from "../plugin/scripts/dispositions-check.mjs";
 import { rendering } from "./support/rendered-brief.mjs";
 import { ref, prUrl } from "./support/queue-gh.mjs";
@@ -937,7 +937,7 @@ const H40 = "abc1234abc1234abc1234abc1234abc1234abcde";
 // `ready-for-agent` one — and `verdicts` the refuter verdicts by path.
 const coreRun = (entries, {
   head = H40, reviewHead = H40, survived = [{ file: "src/a.js", line: 5 }], unverified = [], record, diffFiles = ["src/a.js"],
-  issues = {}, verdicts = {}, charges = false, roles = IDENTITY,
+  issues = {}, verdicts = {}, charges = false, roles = IDENTITY, answers = new Map(),
 } = {}) => checkDispositions({
   review: { head: reviewHead, survived, unverified, refuted: [{ file: "src/b.js", line: 1 }] },
   record: record === undefined ? { head, entries } : record,
@@ -949,7 +949,7 @@ const coreRun = (entries, {
     issue: (n) => issues[n] ?? { state: "OPEN", title: "a deferred finding", labels: ["ready-for-agent"] },
     verdict: (p) => verdicts[p] ?? { problem: "names no file that exists" },
   },
-  charges,
+  charges, answers,
 });
 const core = (entries, opts) => coreRun(entries, opts).violations.map(formatViolation);
 const applied = { bucket: "survived", index: 0, scope: "in", claimKind: "behavior", disposition: "apply" };
@@ -1080,7 +1080,7 @@ test("a critical or important finding deferred remedy-outside-diff writes dispos
     assert.deepEqual(r.json.violations, []);
     assert.deepEqual(r.json.escalations, [{ bucket: "survived", index: 0, severity, files: ["src/b.js"] }]);
     assert.equal(r.json.token, `dispositions-escalate=fix-pr-40:${f.run}`);
-    assert.match(r.stderr, new RegExp(`^fix-pr-40: survived\\[0\\]: a ${severity} finding deferred remedy-outside-diff, its remedy in src/b\\.js — a human rules$`, "m"));
+    assert.match(r.stderr, new RegExp(`^fix-pr-40: survived\\[0\\]: a ${severity} finding deferred remedy-outside-diff, its remedy in src/b\\.js — the maintainer answers$`, "m"));
     assert.ok(f.row().includes(`dispositions-escalate=fix-pr-40:${f.run}`), f.row());
 
     const before = readFileSync(join(f.dir, "ledger.md"), "utf8");
@@ -1140,7 +1140,7 @@ test("a record that breaks a rule is a mismatch even when it also escalates, and
   assert.equal(r.json.token, `dispositions-mismatch=fix-pr-40:${f.run}`);
 });
 
-test("an escalation outranks an issue gh cannot read: the verdict is escalate, a human rules, and the unread issue is still reported", (t) => {
+test("an escalation outranks an issue gh cannot read: the verdict is escalate, the maintainer answers, and the unread issue is still reported", (t) => {
   const f = fixture(t);
   withSeverity(f, "critical");
   deferOutside(f, ["src/b.js"]);
@@ -1196,6 +1196,501 @@ test("withVerdict replaces an escalation with the same member's later verdict fo
   const ok = "dispositions-ok=fix-pr-40:run-Rv40Aa01";
   assert.equal(withVerdict(`impl-10=PR#40 · ${esc}`, ok), `impl-10=PR#40 · ${ok}`);
   assert.equal(withVerdict(`impl-10=PR#40 · ${ok}`, esc), `impl-10=PR#40 · ${esc}`);
+});
+
+// ---------------------------------------------------------------------------
+// The maintainer's escalation answers, as the pure core reads them: `answers`
+// maps a finding's address, `<bucket>[<index>]`, to `upheld` or `sent-back`.
+// ---------------------------------------------------------------------------
+
+// survived[0], deferred remedy-outside-diff with its remedy in a file the diff lacks.
+const outsideDiff = { bucket: "survived", index: 0, scope: "in", claimKind: "behavior", disposition: "defer", reason: "remedy-outside-diff", remedyFiles: ["src/b.js"], issue: 81 };
+const SENT_BACK = /^survived\[0\]: .*sent back to be applied in this PR/;
+const answered = (...pairs) => new Map(pairs);
+
+test("formatEscalation names the finding, its severity and its remedy files, and ends with the maintainer answering", () => {
+  assert.equal(formatEscalation({ bucket: "survived", index: 0, severity: "critical", files: ["src/b.js", "src/c.js"] }),
+    "survived[0]: a critical finding deferred remedy-outside-diff, its remedy in src/b.js, src/c.js — the maintainer answers");
+  assert.equal(formatEscalation({ bucket: "unverified", index: 2, severity: null, files: ["src/b.js"] }),
+    "unverified[2]: a severity-less finding deferred remedy-outside-diff, its remedy in src/b.js — the maintainer answers");
+});
+
+test("checkDispositions: an upheld finding is no escalation, and an answer to another finding leaves this one escalated", () => {
+  const survived = [{ file: "src/a.js", line: 5, severity: "important" }, { file: "src/a.js", line: 30, severity: "critical" }];
+  const second = { ...outsideDiff, index: 1 };
+  const unanswered = coreRun([outsideDiff, second], { survived });
+  assert.deepEqual(unanswered.escalations.map((x) => `${x.bucket}[${x.index}]`), ["survived[0]", "survived[1]"], "control: unanswered, both escalate");
+  const one = coreRun([outsideDiff, second], { survived, answers: answered(["survived[0]", "upheld"]) });
+  assert.deepEqual(one.violations, []);
+  assert.deepEqual(one.escalations, [{ bucket: "survived", index: 1, severity: "critical", files: ["src/b.js"] }]);
+  const both = coreRun([outsideDiff, second], { survived, answers: answered(["survived[0]", "upheld"], ["survived[1]", "upheld"]) });
+  assert.deepEqual([both.violations, both.escalations, both.unchecked], [[], [], []]);
+});
+
+test("checkDispositions: an unverified finding's escalation is answered by its own address", () => {
+  const entry = { ...outsideDiff, bucket: "unverified", verdictPath: "/scratch/pr40/fix-Ab12Cd34/1/verdict.json" };
+  const opts = { survived: [], unverified: [{ file: "src/a.js", line: 5, severity: "important" }], verdicts: { [entry.verdictPath]: { refuted: false } } };
+  assert.deepEqual(coreRun([entry], opts).escalations.map((x) => `${x.bucket}[${x.index}]`), ["unverified[0]"], "control");
+  assert.equal(coreRun([entry], { ...opts, answers: answered(["survived[0]", "upheld"]) }).escalations.length, 1, "another bucket's address answers nothing");
+  const upheld = coreRun([entry], { ...opts, answers: answered(["unverified[0]", "upheld"]) });
+  assert.deepEqual([upheld.violations, upheld.escalations], [[], []]);
+  const back = coreRun([entry], { ...opts, answers: answered(["unverified[0]", "sent-back"]) });
+  assert.equal(back.violations.length, 1);
+  assert.match(formatViolation(back.violations[0]), /^unverified\[0\]: .*sent back to be applied in this PR/);
+  assert.deepEqual(back.escalations, []);
+});
+
+test("checkDispositions: an entry that defers a sent-back finding is one violation whatever its reason, and escalates nothing", () => {
+  const sentBack = answered(["survived[0]", "sent-back"]);
+  for (const more of [
+    {},
+    { remedyFiles: ["src/a.js"] },
+    { remedyFiles: [] },
+    { issue: undefined },
+    { reason: "mutual-exclusion" },
+    { reason: "remedy-worse" },
+    { reason: "false-rationale" },
+    { reason: "outside-ticket-files" },
+    { reason: "" },
+    { reason: undefined },
+    { scope: "out" },
+  ]) {
+    const r = coreRun([{ ...outsideDiff, ...more }], { answers: sentBack });
+    const said = JSON.stringify(more);
+    assert.equal(r.violations.length, 1, `${said}: ${r.violations.map(formatViolation).join(" | ")}`);
+    assert.match(formatViolation(r.violations[0]), SENT_BACK, said);
+    assert.deepEqual(r.escalations, [], said);
+  }
+});
+
+test("checkDispositions: a sent-back finding the entry applies passes, and an answer excuses no other rule", () => {
+  const sentBack = answered(["survived[0]", "sent-back"]);
+  const upheld = answered(["survived[0]", "upheld"]);
+  assert.deepEqual(core([{ ...outsideDiff, disposition: "apply" }], { answers: sentBack }), [], "applied: the maintainer's answer is met");
+  assert.deepEqual(coreRun([{ ...outsideDiff, disposition: "apply" }], { answers: sentBack }).escalations, []);
+  // An upheld deferral is still held to every rule a deferral is held to.
+  assert.match(core([{ ...outsideDiff, remedyFiles: ["src/a.js"] }], { answers: upheld })[0], /^survived\[0\]: reason remedy-outside-diff needs a remedy file absent from the PR's diff/);
+  assert.match(core([{ ...outsideDiff, issue: undefined }], { answers: upheld })[0], /^survived\[0\]: filing row 1 .* names none/);
+  assert.match(core([{ ...outsideDiff, reason: "outside-ticket-files" }], { answers: upheld })[0], /^survived\[0\]: an in-scope survived finding deferred with reason "outside-ticket-files"/);
+  // And an answer to a finding the record applies, or answers no deferral of, changes nothing.
+  assert.deepEqual(core([{ ...outsideDiff, disposition: "apply" }], { answers: upheld }), []);
+  assert.deepEqual(core([{ ...outsideDiff, reason: "mutual-exclusion" }], { answers: upheld }), []);
+  // An answer to a finding the review does not hold is read by no entry.
+  assert.deepEqual(coreRun([outsideDiff], { answers: answered(["survived[7]", "sent-back"]) }).violations, []);
+});
+
+// ---------------------------------------------------------------------------
+// Recording the answers: `--uphold` and `--send-back` on the escalated
+// member's run. src/b.js is outside the fixture PR's diff and both survivors
+// are `important`, so a deferral with its remedy there escalates each of them.
+// ---------------------------------------------------------------------------
+
+const ledgerText = (f) => readFileSync(join(f.dir, "ledger.md"), "utf8");
+const OUTSIDE = { disposition: "defer", reason: "remedy-outside-diff", issue: 81, remedyFiles: ["src/b.js"] };
+// A record that breaks no rule and escalates survived[0] and survived[1].
+// `second` overrides survived[1]'s entry: what the member does with it.
+const deferBothOutside = (f, member = "fix-pr-40", second = {}) => {
+  const entries = f.baseEntries();
+  entries[0] = f.entry("survived", 0, OUTSIDE);
+  entries[1] = f.entry("survived", 1, { ...OUTSIDE, ...second });
+  f.writeRecord(entries, f.head, member);
+};
+const recordAnswers = (f, flags, member = "fix-pr-40") => f.check(member, cleanEnv(), SCRIPT, flags);
+// The check's refusal: exit 2, the cause named on stderr, the ledger byte-identical.
+const refusedAnswers = (f, flags, cause, member = "fix-pr-40") => {
+  const before = ledgerText(f);
+  const r = recordAnswers(f, flags, member);
+  assert.equal(r.status, 2, `expected a refusal, got exit ${r.status}\n${r.stdout}${r.stderr}`);
+  assert.match(r.stderr, cause);
+  assert.equal(ledgerText(f), before, "a refused answer leaves the ledger byte-identical");
+  return r;
+};
+const violationLines = (r) => r.stderr.split("\n").filter((l) => /^fix-pr-40(-[a-z])?: (?:(?:survived|unverified|refuted)\[\d+\]|record): /.test(l));
+
+test("--uphold writes the answer and dispositions-ok in place of the escalate, exits 0, and the finisher then dispatches", (t) => {
+  const f = fixture(t);
+  deferOutside(f, ["src/b.js"]);
+  escalated(f.check());
+  assert.ok(f.row().includes(`dispositions-escalate=fix-pr-40:${f.run}`), f.row());
+  assert.equal(f.ledgerCli("dispatch", "40", "finisher-pr-40").status, 2, "control: the escalate refuses the finisher");
+  const r = recordAnswers(f, ["--uphold", "survived[0]"]);
+  okVerdict(r);
+  assert.equal(r.json.token, `dispositions-ok=fix-pr-40:${f.run}`);
+  assert.deepEqual([r.json.violations, r.json.escalations, r.json.unchecked], [[], [], []]);
+  assert.match(r.stderr, /^fix-pr-40: recorded the maintainer's escalation answers on review run-Rv40Aa01 — survived\[0\] upheld$/m);
+  const row = f.row();
+  assert.ok(row.includes(`escalation-answer=${f.run}:survived[0]:upheld`), row);
+  assert.ok(row.includes(`dispositions-ok=fix-pr-40:${f.run}`), row);
+  assert.equal(row.match(/dispositions-/g).length, 1, "the escalate is replaced, not kept beside the ok");
+  assert.doesNotMatch(row, /·\s+·/, "no doubled separator is left behind");
+  assert.equal(f.okLedger("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
+});
+
+test("--send-back writes the answer and dispositions-mismatch, exits 1 naming the finding, and the tick offers the retry", (t) => {
+  const f = fixture(t);
+  deferOutside(f, ["src/b.js"]);
+  escalated(f.check());
+  assert.deepEqual(fixDueFor(f), [], "control: an escalate is never fix-due");
+  const r = recordAnswers(f, ["--send-back", "survived[0]"]);
+  mismatch(r, /^fix-pr-40: survived\[0\]: sent back to be applied in this PR/m);
+  assert.deepEqual(r.json.violations.map((v) => [v.bucket, v.index]), [["survived", 0]]);
+  assert.deepEqual(r.json.escalations, []);
+  assert.equal(r.json.token, `dispositions-mismatch=fix-pr-40:${f.run}`);
+  const row = f.row();
+  assert.ok(row.includes(`escalation-answer=${f.run}:survived[0]:sent-back`), row);
+  assert.ok(row.includes(`dispositions-mismatch=fix-pr-40:${f.run}`), row);
+  assert.doesNotMatch(row, /dispositions-escalate/);
+  assert.deepEqual(fixDueFor(f), [40], "the tick prints DISPATCH fix-pr for it");
+  const d = f.ledgerCli("dispatch", "40", "finisher-pr-40");
+  assert.equal(d.status, 2);
+  assert.match(d.stderr, /finisher-pr-40: dispositions mismatch — fix-pr-40's/);
+});
+
+test("a mixed answer writes each finding's answer and a mismatch with a violation for the sent-back finding only", (t) => {
+  const f = fixture(t);
+  deferBothOutside(f);
+  const e = f.check();
+  escalated(e);
+  assert.deepEqual(e.json.escalations.map((x) => `${x.bucket}[${x.index}]`), ["survived[0]", "survived[1]"]);
+  const r = recordAnswers(f, ["--uphold", "survived[0]", "--send-back", "survived[1]"]);
+  mismatch(r, /^fix-pr-40: survived\[1\]: sent back to be applied in this PR/m);
+  assert.deepEqual(r.json.violations.map((v) => [v.bucket, v.index]), [["survived", 1]]);
+  assert.deepEqual(r.json.escalations, []);
+  assert.doesNotMatch(r.stderr, /^fix-pr-40: survived\[0\]:/m, "the upheld finding is neither a violation nor an escalation");
+  const row = f.row();
+  assert.ok(row.includes(`escalation-answer=${f.run}:survived[0]:upheld · escalation-answer=${f.run}:survived[1]:sent-back`), row);
+  assert.ok(row.endsWith(` · dispositions-mismatch=fix-pr-40:${f.run}`), row);
+  assert.deepEqual(fixDueFor(f), [40]);
+});
+
+test("a retry record is judged with the answers: deferring the sent-back finding again, for any reason, is the second failure; applying it and deferring the upheld one passes", (t) => {
+  for (const [what, second, verdict] of [
+    ["the same deferral again", {}, "escalate"],
+    ["another reason", { reason: "mutual-exclusion", remedyFiles: undefined }, "escalate"],
+    ["applied", { disposition: "apply", reason: undefined, issue: undefined, remedyFiles: undefined }, "ok"],
+  ]) {
+    const f = fixture(t);
+    deferBothOutside(f);
+    escalated(f.check());
+    mismatch(recordAnswers(f, ["--uphold", "survived[0]", "--send-back", "survived[1]"]));
+    retry(f);
+    // survived[0], upheld, is deferred remedy-outside-diff again; survived[1], sent back, as the case says.
+    deferBothOutside(f, "fix-pr-40-b", second);
+    const r = f.check("fix-pr-40-b");
+    assert.equal(r.json.verdict, verdict, `${what}: ${r.stderr}`);
+    assert.equal(r.json.token, `dispositions-${verdict}=fix-pr-40-b:${f.run}`, what);
+    assert.deepEqual(r.json.escalations, [], `${what}: the upheld finding escalates no more`);
+    if (verdict === "ok") {
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(f.okLedger("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher", what);
+    } else {
+      assert.equal(r.status, 1, r.stderr);
+      assert.deepEqual(r.json.violations.map((v) => [v.bucket, v.index]), [["survived", 1]], what);
+      assert.match(r.stderr, /^fix-pr-40-b: survived\[1\]: sent back to be applied in this PR/m, what);
+      assert.equal(f.ledgerCli("dispatch", "40", "finisher-pr-40").status, 2, what);
+      assert.deepEqual(fixDueFor(f), [], `${what}: a second failure is never fix-due`);
+    }
+  }
+});
+
+test("sending a finding back after an earlier fix-applier's mismatch on the review writes dispositions-escalate, and upholding it does not", (t) => {
+  for (const [flags, verdict] of [[["--uphold", "survived[0]", "--send-back", "survived[1]"], "escalate"], [["--uphold", "survived[0],survived[1]"], "ok"]]) {
+    const f = fixture(t);
+    f.writeRecord(badRecord(f));
+    mismatch(f.check());
+    retry(f);
+    deferBothOutside(f, "fix-pr-40-b");
+    const e = f.check("fix-pr-40-b");
+    escalated(e);
+    assert.deepEqual(e.json.violations, [], "the retry's record breaks no rule: an outside-diff escalate, though the first fix-applier failed");
+    const r = recordAnswers(f, flags, "fix-pr-40-b");
+    assert.equal(r.json.verdict, verdict, r.stderr);
+    assert.equal(r.json.token, `dispositions-${verdict}=fix-pr-40-b:${f.run}`);
+    const row = f.row();
+    assert.ok(row.includes(`dispositions-mismatch=fix-pr-40:${f.run}`), "the first fix-applier's verdict is kept");
+    assert.equal(row.match(/dispositions-(escalate|ok)=fix-pr-40-b/g).length, 1, row);
+    if (verdict === "escalate") {
+      assert.equal(r.status, 1);
+      assert.match(r.stderr, /^fix-pr-40-b: survived\[1\]: sent back to be applied in this PR/m);
+      assert.match(r.stderr, /an earlier fix-applier's record on review run-Rv40Aa01 already failed this check/);
+      assert.equal(f.ledgerCli("dispatch", "40", "finisher-pr-40").status, 2);
+      assert.deepEqual(fixDueFor(f), [], "a second failure is never fix-due");
+    } else {
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(f.okLedger("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
+    }
+  }
+});
+
+test("running the check again with no answer flags reproduces the verdict, its violation lines and the payload, and writes nothing", (t) => {
+  for (const flags of [["--uphold", "survived[0]"], ["--send-back", "survived[0]"]]) {
+    const f = fixture(t);
+    deferOutside(f, ["src/b.js"]);
+    escalated(f.check());
+    const first = recordAnswers(f, flags);
+    const before = ledgerText(f);
+    const again = f.check();
+    assert.equal(again.status, first.status, flags.join(" "));
+    assert.deepEqual(again.json, first.json, flags.join(" "));
+    assert.deepEqual(violationLines(again), violationLines(first), flags.join(" "));
+    assert.equal(violationLines(again).length, flags[0] === "--send-back" ? 1 : 0);
+    assert.match(again.stderr, /row #10 already carries dispositions-(ok|mismatch)=fix-pr-40:run-Rv40Aa01 — not written again/);
+    assert.equal(ledgerText(f), before, "a re-run writes nothing");
+  }
+});
+
+test("an answer to one review answers none of a later one: the same deferral of the same finding escalates again", (t) => {
+  const f = fixture(t);
+  deferOutside(f, ["src/b.js"]);
+  escalated(f.check());
+  okVerdict(recordAnswers(f, ["--uphold", "survived[0]"]));
+  const round2 = "run-Rv40Bb02";
+  mkdirSync(join(f.scratch, "pr40", round2));
+  writeFileSync(join(f.scratch, "pr40", round2, "review.json"), JSON.stringify(f.review));
+  f.okLedger("review", "40", "review=member:review-pr-40-b", `reviewed=${f.head}:2/1/1:${round2}`);
+  const entries = f.baseEntries();
+  entries[0] = f.entry("survived", 0, OUTSIDE);
+  f.writeRecord(entries, f.head, "fix-pr-40", round2);
+  const r = f.check();
+  escalated(r);
+  assert.equal(r.json.token, `dispositions-escalate=fix-pr-40:${round2}`);
+  assert.deepEqual(r.json.escalations.map((x) => `${x.bucket}[${x.index}]`), ["survived[0]"]);
+  assert.ok(f.row().includes(`escalation-answer=${f.run}:survived[0]:upheld`), "the earlier review's answer stays where it was written");
+  // The later review's escalation takes its own answer, beside the first.
+  okVerdict(recordAnswers(f, ["--uphold", "survived[0]"]));
+  const row = f.row();
+  assert.ok(row.includes(`escalation-answer=${round2}:survived[0]:upheld`), row);
+  assert.ok(row.includes(`escalation-answer=${f.run}:survived[0]:upheld`), row);
+  assert.ok(row.includes(`dispositions-ok=fix-pr-40:${round2}`), row);
+});
+
+test("with every escalated finding upheld but a filing the tracker cannot read, the verdict is unchecked, and re-running once gh answers reads the answer and passes", (t) => {
+  const f = fixture(t);
+  deferOutside(f, ["src/b.js"]);
+  const entries = JSON.parse(readFileSync(f.recordPath(), "utf8")).entries;
+  entries[2] = { ...entries[2], issue: 404 };
+  f.writeRecord(entries);
+  escalated(f.check());
+  const r = recordAnswers(f, ["--uphold", "survived[0]"]);
+  assert.equal(r.status, 1, r.stderr);
+  assert.equal(r.json.verdict, "unchecked");
+  assert.equal(r.json.token, `dispositions-unchecked=fix-pr-40:${f.run}`);
+  assert.match(r.stderr, /unverified\[0\]: where it was filed is unchecked — #404 could not be read through gh/);
+  assert.ok(f.row().includes(`escalation-answer=${f.run}:survived[0]:upheld`), f.row());
+  assert.equal(f.ledgerCli("dispatch", "40", "finisher-pr-40").status, 2);
+  f.setIssues({ 404: openIssue("needs-triage") });
+  okVerdict(f.check());
+  assert.equal(f.okLedger("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
+});
+
+test("a run whose escalated verdict names another member, or no escalate, or a record that has since broken a rule, is refused with the ledger untouched", (t) => {
+  const f = fixture(t);
+  // No verdict at all: the check never ran.
+  deferBothOutside(f);
+  refusedAnswers(f, ["--uphold", "survived[0],survived[1]"], /PR #40's current dispositions verdict on review run-Rv40Aa01 is none, not an escalate from fix-pr-40/);
+  // An ok is no escalate.
+  const g = fixture(t);
+  g.writeRecord(g.baseEntries());
+  okVerdict(g.check());
+  refusedAnswers(g, ["--uphold", "survived[0]"], /current dispositions verdict on review run-Rv40Aa01 is ok from fix-pr-40, not an escalate from fix-pr-40/);
+  // A mismatch is no escalate.
+  const h = fixture(t);
+  h.writeRecord(badRecord(h));
+  mismatch(h.check());
+  refusedAnswers(h, ["--uphold", "survived[0]"], /is mismatch from fix-pr-40, not an escalate from fix-pr-40/);
+  // The escalate is another member's: fix-pr-40-b's ok is the current verdict.
+  const i = fixture(t);
+  deferBothOutside(i);
+  escalated(i.check());
+  retry(i);
+  i.writeRecord(i.baseEntries(), i.head, "fix-pr-40-b");
+  okVerdict(i.check("fix-pr-40-b"));
+  refusedAnswers(i, ["--uphold", "survived[0],survived[1]"], /is ok from fix-pr-40-b, not an escalate from fix-pr-40/);
+  // The escalate names fix-pr-40-b, and the member given is fix-pr-40.
+  const j = fixture(t);
+  retry(j);
+  deferBothOutside(j, "fix-pr-40-b");
+  escalated(j.check("fix-pr-40-b"));
+  j.writeRecord(j.baseEntries());
+  refusedAnswers(j, ["--uphold", "survived[0]"], /is escalate from fix-pr-40-b, not an escalate from fix-pr-40/);
+});
+
+test("an escalated member's answers are refused while a fix-applier on the PR is live, naming it", (t) => {
+  const f = fixture(t);
+  deferBothOutside(f);
+  escalated(f.check());
+  f.okLedger("dispatch", "40", "fix-pr-40-b");
+  refusedAnswers(f, ["--uphold", "survived[0],survived[1]"], /fix-pr-40-b still live on PR #40/);
+  f.okLedger("settle", "fix-pr-40-b", `applied:${f.head.slice(0, 7)}`);
+  // The control: settled, the same call is judged — and the escalate is now fix-pr-40's, with fix-pr-40-b answering nothing.
+  const r = recordAnswers(f, ["--uphold", "survived[0],survived[1]"]);
+  okVerdict(r);
+});
+
+test("a record that breaks a rule is refused: its escalate is not an outside-diff one, and the violations are named", (t) => {
+  const f = fixture(t);
+  deferBothOutside(f);
+  escalated(f.check());
+  const rec = JSON.parse(readFileSync(f.recordPath(), "utf8"));
+  f.writeRecord(rec.entries.filter((e) => !(e.bucket === "survived" && e.index === 1)));
+  const r = refusedAnswers(f, ["--uphold", "survived[0]"], /fix-pr-40's record breaks a rule/);
+  assert.match(r.stderr, /survived\[1\]: no entry — a finding with no entry is a dropped finding/);
+});
+
+test("a finding the record does not escalate is refused, naming what it does escalate", (t) => {
+  const f = fixture(t);
+  deferOutside(f, ["src/b.js"]);
+  escalated(f.check());
+  refusedAnswers(f, ["--uphold", "survived[1]"], /survived\[1\] is not one of fix-pr-40's escalated findings \(survived\[0\]\)/);
+  refusedAnswers(f, ["--uphold", "survived[0]", "--send-back", "unverified[0]"], /unverified\[0\] is not one of fix-pr-40's escalated findings \(survived\[0\]\)/);
+  refusedAnswers(f, ["--send-back", "refuted[0]"], /refuted\[0\] is not one of fix-pr-40's escalated findings/);
+  refusedAnswers(f, ["--uphold", "survived[9]"], /survived\[9\] is not one of fix-pr-40's escalated findings/);
+  // A record that has since stopped escalating has nothing to answer.
+  f.writeRecord(f.baseEntries());
+  refusedAnswers(f, ["--uphold", "survived[0]"], /survived\[0\] is not one of fix-pr-40's escalated findings — its record escalates none/);
+});
+
+test("a finding listed twice, answered both ways, or a flag given twice is refused", (t) => {
+  const f = fixture(t);
+  deferBothOutside(f);
+  escalated(f.check());
+  refusedAnswers(f, ["--uphold", "survived[0],survived[0]"], /--uphold lists survived\[0\] twice/);
+  refusedAnswers(f, ["--uphold", "survived[0]", "--send-back", "survived[1],survived[1]"], /--send-back lists survived\[1\] twice/);
+  refusedAnswers(f, ["--uphold", "survived[0]", "--send-back", "survived[0],survived[1]"], /survived\[0\] is listed in both --uphold and --send-back/);
+  refusedAnswers(f, ["--uphold", "survived[0]", "--uphold", "survived[1]"], /--uphold is given twice/);
+  refusedAnswers(f, ["--send-back", "survived[0]", "--uphold", "survived[1]", "--send-back", "survived[1]"], /--send-back is given twice/);
+});
+
+test("a list that is no comma-separated <bucket>[<index>] is refused, with no value or an empty one included", (t) => {
+  const f = fixture(t);
+  deferBothOutside(f);
+  escalated(f.check());
+  for (const bad of ["survived", "survived[]", "survived[01]", "survived[-1]", "survived[1.5]", "survived[x]", "fixed[0]", "Survived[0]", "survived[0],", ",survived[0]", "survived[0],,survived[1]", "survived[0] survived[1]"]) {
+    refusedAnswers(f, ["--uphold", bad], /--uphold names .*, which is no <bucket>\[<index>\]/);
+  }
+  refusedAnswers(f, ["--send-back"], /--send-back needs a value/);
+  refusedAnswers(f, ["--uphold", ""], /--uphold needs a value/);
+  refusedAnswers(f, ["--uphold=survived[0]"], /--uphold needs a space-separated value/);
+  // The accepting half: whitespace around a comma is no part of an address.
+  const ok = recordAnswers(f, ["--uphold", " survived[0] , survived[1] "]);
+  okVerdict(ok);
+});
+
+test("every escalated finding must be answered in the one run, and the refusal names the unanswered", (t) => {
+  const f = fixture(t);
+  deferBothOutside(f);
+  escalated(f.check());
+  refusedAnswers(f, ["--uphold", "survived[0]"], /fix-pr-40's record escalates survived\[0\], survived\[1\], and survived\[1\] has no answer/);
+  refusedAnswers(f, ["--send-back", "survived[1]"], /survived\[0\] has no answer/);
+  refusedAnswers(f, ["--send-back", "survived[0]"], /survived\[1\] has no answer/);
+});
+
+test("a ledger write that fails while recording answers names the answers it carried, exits 2 and leaves the ledger byte-identical", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root writes every directory");
+  const f = fixture(t);
+  deferOutside(f, ["src/b.js"]);
+  escalated(f.check());
+  const before = ledgerText(f);
+  chmodSync(f.dir, 0o555);
+  let r;
+  try {
+    r = recordAnswers(f, ["--uphold", "survived[0]"]);
+  } finally {
+    chmodSync(f.dir, 0o755);
+  }
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /could not write the escalation answers and dispositions-ok=fix-pr-40:run-Rv40Aa01 onto row #/);
+  assert.equal(ledgerText(f), before);
+});
+
+test("a later member's answers keep the answers an earlier member recorded on the same review", (t) => {
+  const f = fixture(t);
+  f.writeReview({ ...f.review, counts: { ...f.review.counts, survived: 3 }, survived: [...f.review.survived, { severity: "important", file: "src/a.js", line: 13, claim: "c", evidence: "e" }] });
+  const first = f.baseEntries();
+  first[0] = f.entry("survived", 0, OUTSIDE);
+  first[1] = f.entry("survived", 1, OUTSIDE);
+  first.splice(2, 0, f.entry("survived", 2));
+  f.writeRecord(first);
+  escalated(f.check());
+  mismatch(recordAnswers(f, ["--uphold", "survived[0]", "--send-back", "survived[1]"]));
+  retry(f);
+  // The retry applies the sent-back survived[1], defers the upheld survived[0]
+  // again, and escalates survived[2], which nobody has answered yet.
+  const second = f.baseEntries();
+  second[0] = f.entry("survived", 0, OUTSIDE);
+  second[1] = f.entry("survived", 1);
+  second.splice(2, 0, f.entry("survived", 2, OUTSIDE));
+  f.writeRecord(second, f.head, "fix-pr-40-b");
+  const e = f.check("fix-pr-40-b");
+  escalated(e);
+  assert.deepEqual(e.json.escalations.map((x) => `${x.bucket}[${x.index}]`), ["survived[2]"]);
+  const r = recordAnswers(f, ["--uphold", "survived[2]"], "fix-pr-40-b");
+  okVerdict(r);
+  assert.ok(f.row().includes(`dispositions-ok=fix-pr-40-b:${f.run}`), f.row());
+});
+
+test("a malformed escalation-answer token on the row answers nothing and is named on stderr", (t) => {
+  const f = fixture(t);
+  deferOutside(f, ["src/b.js"]);
+  escalated(f.check());
+  const bad = `escalation-answer=${f.run}:survived[0]:Sent-Back`;
+  const p = join(f.dir, "ledger.md");
+  writeFileSync(p, ledgerText(f).split("\n").map((l) => (l.includes("dispositions-escalate=") ? `${l} · ${bad}` : l)).join("\n"));
+  const r = f.check();
+  escalated(r);
+  assert.match(r.stderr, new RegExp(`^dispositions-check: ignoring malformed token ${bad.replace(/[[\]]/g, "\\$&")} on PR #40's row — it answers nothing$`, "m"));
+  // Control: a well-formed answer on the row is read and never named.
+  const clean = fixture(t);
+  deferOutside(clean, ["src/b.js"]);
+  escalated(clean.check());
+  okVerdict(recordAnswers(clean, ["--uphold", "survived[0]"]));
+  const again = clean.check();
+  okVerdict(again);
+  assert.doesNotMatch(again.stderr, /ignoring malformed token/);
+});
+
+test("the answer flags refuse with no ledger: standalone, --no-ledger, or a --ledger naming no file — and no ledger is touched", (t) => {
+  const f = fixture(t);
+  const own = seedOwnLedger(f);
+  const ownBefore = readFileSync(own, "utf8");
+  const before = ledgerText(f);
+  deferOutside(f, ["src/b.js"]);
+  for (const extra of [["--no-ledger", "--review", f.reviewPath], ["--no-ledger"], ["--review", f.reviewPath, "--ledger", join(f.dir, "absent", "ledger.md")]]) {
+    for (const flags of [["--uphold", "survived[0]"], ["--send-back", "survived[0]"]]) {
+      const r = standalone(f, ...extra, ...flags);
+      assert.equal(r.status, 2, `${extra.join(" ")} ${flags.join(" ")}: ${r.stdout}${r.stderr}`);
+      assert.match(r.stderr, new RegExp(`${flags[0]} records the maintainer's answer on the ledger row, and no ledger is in use`));
+      assert.equal(readFileSync(own, "utf8"), ownBefore);
+      assert.equal(ledgerText(f), before);
+    }
+  }
+  assert.equal(existsSync(join(f.dir, "absent")), false);
+});
+
+test("with no ledger an escalating record exits 1, prints the escalation, and writes nothing", (t) => {
+  const f = fixture(t);
+  const own = seedOwnLedger(f);
+  const ownBefore = readFileSync(own, "utf8");
+  withSeverity(f, "critical");
+  deferOutside(f, ["src/b.js"]);
+  const r = standalone(f, "--no-ledger", "--review", f.reviewPath);
+  escalated(r);
+  assert.equal(r.json.token, null);
+  assert.match(r.stderr, /^fix-pr-40: survived\[0\]: a critical finding deferred remedy-outside-diff, its remedy in src\/b\.js — the maintainer answers$/m);
+  assert.equal(readFileSync(own, "utf8"), ownBefore);
+});
+
+test("a retry that applies every sent-back finding passes its first check, which reads the answers already on the row", (t) => {
+  const f = fixture(t);
+  deferBothOutside(f);
+  escalated(f.check());
+  mismatch(recordAnswers(f, ["--send-back", "survived[0],survived[1]"]));
+  retry(f);
+  // The retry applies both sent-back findings: the answers are met, and fix-pr-40-b is judged ok on its first check.
+  const entries = f.baseEntries();
+  f.writeRecord(entries, f.head, "fix-pr-40-b");
+  okVerdict(f.check("fix-pr-40-b"));
+  assert.equal(f.okLedger("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
 });
 
 // ---------------------------------------------------------------------------

@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { parseMember, parseToken, memberTokens, rowPr, premisesOf, nextMergeBot, nextRetry, liveOnLedger, settledOnLedger, retiredOnLedger, isRetirable, readRetired, escapeText, unescapeText, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell, REVIEW, isReviewToken, parseDispatchedEntry, dispatchedEntry, memberRole, firstReview, prTokens, ledgerSection, ROUTED, ROUTING_REASONS, parseRouting, formatRouting, routedEntry, parseRoutedEntry } from "../plugin/scripts/ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, rowPr, premisesOf, nextMergeBot, nextRetry, liveOnLedger, settledOnLedger, retiredOnLedger, isRetirable, readRetired, escapeText, unescapeText, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell, REVIEW, isReviewToken, parseDispatchedEntry, dispatchedEntry, memberRole, firstReview, prTokens, ledgerSection, ROUTED, ROUTING_REASONS, parseRouting, formatRouting, routedEntry, parseRoutedEntry, dispositionsToken, escalationAnswerToken, escalationAnswers } from "../plugin/scripts/ledger-grammar.mjs";
 
 // Every outcome word the spec names, per family, verbatim — the must-ACCEPT
 // half. A parser that refused everything would pass every refusal below.
@@ -728,4 +728,92 @@ test("an old row carrying route= still reads its members and cell, and is no Rou
   assert.equal(expectedDefinition(old), "fleet-implementer-task-high");
   assert.equal(parseRouting(old), null);
   assert.equal(parseRoutedEntry(old), null);
+});
+
+// ---------------------------------------------------------------------------
+// `escalation-answer=<run>:<bucket>[<index>]:upheld|sent-back`: the maintainer's
+// answer to one escalated finding, which dispositions-check.mjs alone writes.
+// ---------------------------------------------------------------------------
+
+const ANSWER_RUN = "run-Rv40Aa01";
+
+test("escalationAnswerToken reads the run, the finding's address and the answer", () => {
+  assert.deepEqual(escalationAnswerToken(`escalation-answer=${ANSWER_RUN}:survived[0]:upheld`),
+    { run: ANSWER_RUN, bucket: "survived", index: 0, answer: "upheld" });
+  assert.deepEqual(escalationAnswerToken(`escalation-answer=${ANSWER_RUN}:unverified[12]:sent-back`),
+    { run: ANSWER_RUN, bucket: "unverified", index: 12, answer: "sent-back" });
+  assert.deepEqual(escalationAnswerToken(`escalation-answer=${ANSWER_RUN}:refuted[3]:upheld`)?.bucket, "refuted");
+});
+
+test("escalationAnswerToken refuses anything that is not one whole answer", () => {
+  for (const bad of [
+    `escalation-answer=${ANSWER_RUN}:survived[0]`,
+    `escalation-answer=${ANSWER_RUN}:survived[0]:`,
+    `escalation-answer=${ANSWER_RUN}:survived[0]:waived`,
+    `escalation-answer=${ANSWER_RUN}:survived[0]:Upheld`,
+    `escalation-answer=${ANSWER_RUN}:survived[0]:upheld:sent-back`,
+    `escalation-answer=${ANSWER_RUN}:survived[0]:sent back`,
+    `escalation-answer=${ANSWER_RUN}:fixed[0]:upheld`,
+    `escalation-answer=${ANSWER_RUN}:survived[]:upheld`,
+    `escalation-answer=${ANSWER_RUN}:survived[-1]:upheld`,
+    `escalation-answer=${ANSWER_RUN}:survived[01]:upheld`,
+    `escalation-answer=${ANSWER_RUN}:survived[1.5]:upheld`,
+    `escalation-answer=${ANSWER_RUN}:survived0:upheld`,
+    `escalation-answer=run-Rv40Aa0:survived[0]:upheld`,
+    `escalation-answer=run-Rv40Aa012:survived[0]:upheld`,
+    `escalation-answer=Rv40Aa01:survived[0]:upheld`,
+    `escalation-answer=RUN-Rv40Aa01:survived[0]:upheld`,
+    `escalation-answer=:survived[0]:upheld`,
+    `escalation-answers=${ANSWER_RUN}:survived[0]:upheld`,
+    `escalation-answer:${ANSWER_RUN}:survived[0]:upheld`,
+    ` escalation-answer=${ANSWER_RUN}:survived[0]:upheld`,
+    `${ANSWER_RUN}:survived[0]:upheld`,
+    "", "·", "reviewed=abc1234:1/0/0:run-Rv40Aa01", "fix-pr-40", null,
+  ]) {
+    assert.equal(escalationAnswerToken(bad), null, String(bad));
+  }
+});
+
+test("escalationAnswerToken reads only a string, never what a value stringifies to", () => {
+  const answer = `escalation-answer=${ANSWER_RUN}:survived[0]:upheld`;
+  assert.notEqual(escalationAnswerToken(answer), null, "control: the same text as a string is an answer");
+  assert.equal(escalationAnswerToken({ toString: () => answer }), null);
+  assert.equal(escalationAnswerToken(new String(answer)), null);
+});
+
+test("an escalation answer is no dispositions verdict, and a verdict is no answer", () => {
+  const answer = `escalation-answer=${ANSWER_RUN}:survived[0]:upheld`;
+  assert.equal(dispositionsToken(answer), null);
+  assert.equal(dispositionsToken(`escalation-answer=fix-pr-40:${ANSWER_RUN}`), null);
+  for (const verdict of ["ok", "mismatch", "escalate", "unchecked"]) {
+    assert.notEqual(dispositionsToken(`dispositions-${verdict}=fix-pr-40:${ANSWER_RUN}`), null, verdict);
+    assert.equal(escalationAnswerToken(`dispositions-${verdict}=fix-pr-40:${ANSWER_RUN}`), null, verdict);
+  }
+  assert.equal(parseToken(answer), null, "nor is it a member");
+});
+
+test("escalationAnswers maps each finding's address to its answer for one run, and answers on another run count for nothing", () => {
+  const tokens = [
+    "impl-10=PR#40", `reviewed=abc1234:2/1/1:${ANSWER_RUN}`,
+    `escalation-answer=${ANSWER_RUN}:survived[0]:upheld`,
+    `escalation-answer=${ANSWER_RUN}:survived[1]:sent-back`,
+    "escalation-answer=run-Rv40Bb02:survived[0]:sent-back",
+    "escalation-answer=run-Rv40Bb02:survived[2]:upheld",
+    `escalation-answer=${ANSWER_RUN}:survived[x]:upheld`,
+    `dispositions-ok=fix-pr-40:${ANSWER_RUN}`,
+  ];
+  const mine = escalationAnswers(tokens, ANSWER_RUN);
+  assert.ok(mine instanceof Map);
+  assert.deepEqual([...mine], [["survived[0]", "upheld"], ["survived[1]", "sent-back"]]);
+  assert.deepEqual([...escalationAnswers(tokens, "run-Rv40Bb02")], [["survived[0]", "sent-back"], ["survived[2]", "upheld"]]);
+  assert.equal(escalationAnswers(tokens, "run-Rv40Cc03").size, 0);
+  assert.equal(escalationAnswers([], ANSWER_RUN).size, 0);
+});
+
+test("a finding carrying both answers for one run reads as sent back, whichever token comes first", () => {
+  const up = `escalation-answer=${ANSWER_RUN}:survived[0]:upheld`;
+  const back = `escalation-answer=${ANSWER_RUN}:survived[0]:sent-back`;
+  assert.equal(escalationAnswers([up, back], ANSWER_RUN).get("survived[0]"), "sent-back");
+  assert.equal(escalationAnswers([back, up], ANSWER_RUN).get("survived[0]"), "sent-back");
+  assert.equal(escalationAnswers([up, up], ANSWER_RUN).get("survived[0]"), "upheld");
 });
