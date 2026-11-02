@@ -1455,8 +1455,9 @@ else
     # update-ref, authorized by the `ahead` and `git cherry` guards above,
     # this recount, and the worktree check above — and carrying its own
     # compare-and-swap on $tip on top, which `-D` never had. reap.sh asks
-    # whether its own [gone] branches are merged with `git cherry` alone — no
-    # `ahead` count, no recount — so not this pairing, though it too
+    # whether its own [gone] branches are merged with `git cherry` and a pair
+    # test that replays each commit onto the one it matches — no `ahead`
+    # count, no recount — so not this pairing, though it too
     # re-checks the worktree with `wt_holding` before its own compare-and-swap
     # delete. `-d` measures against HEAD and the branch's upstream, and a
     # claim has no upstream until its first push (claim-ticket.sh passes

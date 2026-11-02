@@ -5796,3 +5796,218 @@ test("a reaped no-upstream branch whose config section holds a key and cannot be
   assert.match(json.warnings[0].note, /^branch config section was left: .*could not lock config file/);
   assert.equal(branchExists(w, b), false);
 });
+
+// The pair test (#4185). `git cherry` reads a commit as merged when $base
+// carries one with the same patch id, and a patch id ignores where in a file
+// the change sits and any whitespace in it — so a commit repeating a merged
+// change at another place, or differing from one only in whitespace, reads
+// `-` while no other ref holds it. Every fixture below is real history: git
+// computes the patch ids, and the cases that must REAP sit beside the ones
+// that must keep.
+
+// Two identical blocks, each padded so a change at the same offset in either
+// carries the same diff context and so the same patch id. Line BLOCK1 is the
+// first block's `c`, line BLOCK2 the second's; line 1 is outside both.
+const TWIN_BLOCK = ["pad", "pad", "pad", "a", "b", "c", "d", "e", "pad", "pad", "pad"];
+const TWIN = ["top", ...TWIN_BLOCK, ...TWIN_BLOCK, "end"];
+const BLOCK1 = 7;
+const BLOCK2 = 18;
+
+/** Seeds `twin.txt` on main and pushes it. */
+function seedTwin(w) {
+  writeFileSync(join(w, "twin.txt"), TWIN.join("\n") + "\n");
+  git(w, "add", "twin.txt");
+  git(w, "commit", "-q", "-m", "seed twin");
+  git(w, "push", "-q", "origin", "main");
+}
+
+/** Sets line `n` of `twin.txt` in `dir` and commits it; returns the commit. */
+function twinEdit(dir, n, text, msg) {
+  setLine(join(dir, "twin.txt"), n, text);
+  git(dir, "commit", "-q", "-am", msg);
+  return git(dir, "rev-parse", "HEAD");
+}
+
+/** A claim worktree under `.worktrees/` on a new branch `name`, cut from main. */
+function twinClaim(w, name) {
+  const wt = join(w, ".worktrees", name.replace(/\//g, "-"));
+  git(w, "worktree", "add", "-q", wt, "-b", name, "main");
+  return wt;
+}
+
+/**
+ * Ends the claim the way each sweep meets it. Both delete the remote branch
+ * and prune. `branch` leaves the local branch `[gone]` and attached in its
+ * worktree; `branchless` detaches the worktree and deletes the local branch,
+ * so the worktree's HEAD is the only thing holding the tip.
+ */
+function endTwinClaim(w, wt, name, sweep) {
+  git(w, "push", "-q", "origin", "main");
+  git(w, "push", "-q", "origin", "--delete", name);
+  git(w, "fetch", "-q", "--prune", "origin");
+  if (sweep === "branchless") {
+    git(wt, "checkout", "-q", "--detach");
+    git(w, "branch", "-D", name);
+  }
+  const tip = git(wt, "rev-parse", "HEAD");
+  assert.doesNotMatch(git(w, "cherry", "origin/main", tip), /^\+/m, "fixture: git cherry must read every commit on the claim as merged");
+  return tip;
+}
+
+/** Asserts `sweep` kept the claim whole under `--apply`, with a reason matching `why`. */
+function assertTwinKept(w, wt, name, sweep, tip, run, why) {
+  const { code, json, stderr } = run;
+  assert.equal(code, 0, stderr);
+  assert.deepEqual(json.reaped, []);
+  assert.deepEqual(json.worktreesRemoved, []);
+  assert.equal(json.kept.length, 1, JSON.stringify(json.kept));
+  if (sweep === "branch") {
+    assert.equal(json.kept[0].branch, name);
+    assert.match(json.kept[0].reason, why);
+    assert.equal(git(w, "rev-parse", `refs/heads/${name}`), tip, "the branch survives at its tip");
+  } else {
+    assert.equal(json.kept[0].branch, null);
+    assert.ok(json.kept[0].reason.startsWith(`worktree ${wt} — `), json.kept[0].reason);
+    assert.match(json.kept[0].reason.slice(`worktree ${wt} — `.length), why);
+  }
+  assert.equal(existsSync(wt), true, "the worktree survives");
+  assert.equal(git(wt, "rev-parse", "HEAD"), tip, "the worktree still holds the tip");
+}
+
+/** Asserts `sweep` reaped the claim under `--apply`. */
+function assertTwinReaped(w, wt, name, sweep, run) {
+  const { code, json, stderr } = run;
+  assert.equal(code, 0, stderr);
+  assert.deepEqual(json.kept, []);
+  assert.deepEqual(json.worktreesRemoved, [wt]);
+  assert.deepEqual(json.reaped, sweep === "branch" ? [name] : []);
+  assert.equal(existsSync(wt), false, "the worktree is removed");
+  if (sweep === "branch") assert.equal(branchExists(w, name), false, "the branch is deleted");
+}
+
+const notIdentical = (c, m) => new RegExp(`^commit ${c} reads patch-equivalent but is not identical to the merged commit ${m}$`);
+
+for (const sweep of ["branch", "branchless"]) {
+  test(`a commit repeating a squash-merged change in the file's other identical block is kept by the ${sweep} sweep (#4185)`, (t) => {
+    // The ticket's repro: a single-commit claim squash-merged, and a second,
+    // unpushed commit making the same change in the identical second block.
+    // Both read `-`, and nothing but this branch holds the second.
+    const w = repo(t);
+    seedTwin(w);
+    const name = "feature/twin";
+    const wt = twinClaim(w, name);
+    const pushed = twinEdit(wt, BLOCK1, "C", "block 1");
+    git(wt, "push", "-q", "-u", "origin", name);
+    twinEdit(wt, BLOCK2, "C", "block 2, never pushed");
+    git(w, "merge", "-q", "--squash", pushed);
+    git(w, "commit", "-q", "-m", "squash block 1");
+    const squash = git(w, "rev-parse", "HEAD");
+    const tip = endTwinClaim(w, wt, name, sweep);
+
+    // The default dry run first: it reads the same verdict the apply acts on.
+    assertTwinKept(w, wt, name, sweep, tip, runReap(w, []), notIdentical(tip, squash));
+    assertTwinKept(w, wt, name, sweep, tip, runReap(w, ["--apply"]), notIdentical(tip, squash));
+  });
+
+  test(`a commit changing only the other block, where main carries the first, is kept by the ${sweep} sweep (#4185)`, (t) => {
+    const w = repo(t);
+    seedTwin(w);
+    const name = "feature/other-block";
+    const wt = twinClaim(w, name);
+    twinEdit(wt, BLOCK2, "C", "block 2");
+    git(wt, "push", "-q", "-u", "origin", name);
+    const landed = twinEdit(w, BLOCK1, "C", "block 1 on main");
+    const tip = endTwinClaim(w, wt, name, sweep);
+
+    assertTwinKept(w, wt, name, sweep, tip, runReap(w, ["--apply"]), notIdentical(tip, landed));
+  });
+
+  test(`a whitespace-only twin of a merged commit is kept by the ${sweep} sweep (#4185)`, (t) => {
+    const w = repo(t);
+    seedTwin(w);
+    const name = "feature/whitespace";
+    const wt = twinClaim(w, name);
+    twinEdit(wt, BLOCK1, "C   ", "block 1, trailing blanks");
+    git(wt, "push", "-q", "-u", "origin", name);
+    const landed = twinEdit(w, BLOCK1, "C", "block 1 on main");
+    const tip = endTwinClaim(w, wt, name, sweep);
+
+    assertTwinKept(w, wt, name, sweep, tip, runReap(w, ["--apply"]), notIdentical(tip, landed));
+  });
+
+  test(`a rebase-merged claim is still reaped by the ${sweep} sweep after main edits the same line again (#4185)`, (t) => {
+    // What the pair test must ACCEPT. Main moves first, outside the claim's
+    // diff context, so the rebased commits keep their patch ids; both claim
+    // commits carry the SAME patch id, so each has two candidates on main and
+    // pairs with only one of them. The later edit of the very line the claim
+    // changed is what a net-tree comparison would trip on.
+    const w = repo(t);
+    seedTwin(w);
+    const name = "feature/rebased";
+    const wt = twinClaim(w, name);
+    const c1 = twinEdit(wt, BLOCK1, "C", "block 1");
+    const c2 = twinEdit(wt, BLOCK2, "C", "block 2");
+    git(wt, "push", "-q", "-u", "origin", name);
+    twinEdit(w, 1, "TOP", "main moves");
+    git(w, "cherry-pick", c1, c2);
+    twinEdit(w, BLOCK1, "C, edited again", "main edits the claim's line");
+    endTwinClaim(w, wt, name, sweep);
+
+    assertTwinReaped(w, wt, name, sweep, runReap(w, ["--apply"]));
+  });
+
+  test(`a squash-merged claim is still reaped by the ${sweep} sweep after main edits the same line again (#4185)`, (t) => {
+    const w = repo(t);
+    seedTwin(w);
+    const name = "feature/squashed";
+    const wt = twinClaim(w, name);
+    const c1 = twinEdit(wt, BLOCK1, "C", "block 1");
+    git(wt, "push", "-q", "-u", "origin", name);
+    twinEdit(w, 1, "TOP", "main moves");
+    git(w, "merge", "-q", "--squash", c1);
+    git(w, "commit", "-q", "-m", "squash block 1");
+    twinEdit(w, BLOCK1, "C, edited again", "main edits the claim's line");
+    endTwinClaim(w, wt, name, sweep);
+
+    assertTwinReaped(w, wt, name, sweep, runReap(w, ["--apply"]));
+  });
+
+  test(`a merge commit on the claim is kept by the ${sweep} sweep, with a reason (#4185)`, (t) => {
+    // `git cherry` skips merges, so what a merge itself changes is read by
+    // nothing; the claim's one ordinary commit is merged and reads `-`.
+    const w = repo(t);
+    seedTwin(w);
+    const name = "feature/merged-main";
+    const wt = twinClaim(w, name);
+    const c1 = twinEdit(wt, BLOCK1, "C", "block 1");
+    git(wt, "push", "-q", "-u", "origin", name);
+    twinEdit(w, 1, "TOP", "main moves");
+    git(wt, "merge", "-q", "--no-ff", "-m", "merge main into the claim", "main");
+    git(w, "cherry-pick", c1);
+    const tip = endTwinClaim(w, wt, name, sweep);
+
+    assertTwinKept(w, wt, name, sweep, tip, runReap(w, ["--apply"]),
+      new RegExp(`^commit ${tip} is a merge, and git cherry does not read what a merge itself changes$`));
+  });
+
+  test(`a pair test whose replay fails is kept by the ${sweep} sweep with git's own words (#4185)`, (t) => {
+    // The same rebase-merged claim the reap above takes, with only
+    // `merge-tree` failing: an unanswerable probe authorizes nothing.
+    const w = repo(t);
+    seedTwin(w);
+    const name = "feature/replay-fails";
+    const wt = twinClaim(w, name);
+    const c1 = twinEdit(wt, BLOCK1, "C", "block 1");
+    git(wt, "push", "-q", "-u", "origin", name);
+    twinEdit(w, 1, "TOP", "main moves");
+    git(w, "cherry-pick", c1);
+    const landed = git(w, "rev-parse", "HEAD");
+    const tip = endTwinClaim(w, wt, name, sweep);
+    const bin = failOnlyShim(t, `[ "$1" = merge-tree ]`, ["fatal: unable to read tree (deadbeef)"], 128);
+
+    const run = runReap(w, ["--apply"], withShim(bin));
+    assertShimFired(bin, "the replay must have been the probe that failed", new RegExp(`^merge-tree --write-tree --no-messages --name-only --merge-base=\\S+ ${landed}\\^ ${tip}$`, "m"));
+    assertTwinKept(w, wt, name, sweep, tip, run,
+      new RegExp(`^pair test failed — cannot replay commit ${tip} onto ${landed}\\^: fatal: unable to read tree \\(deadbeef\\)$`));
+  });
+}

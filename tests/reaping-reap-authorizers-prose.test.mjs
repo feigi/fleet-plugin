@@ -3,7 +3,9 @@
 // delete on a second thing too: a fresh worktree check (`wt_holding`) over a
 // listing re-read right before it, which keeps a `[gone]` branch the cherry
 // check cleared whenever a worktree holds it or cannot be resolved. A sentence
-// naming the cherry check as the only authorizer is false as written.
+// naming the cherry check as the only authorizer is false as written. Since
+// #4185 the pair test authorizes it too: a branch whose commits all read `-`
+// is reaped only when every one of them pairs with a commit on the base.
 //
 // The reap-side twin of reaping-release-authorizers-prose.test.mjs, which pins
 // the release section's authorizer list. Kept apart so each section's pin can
@@ -77,6 +79,11 @@ test("reaping.md: the reap delete's authorizer clause still names the cherry che
   assert.match(Pin.unemphasized(deleteBullet()), Pin.phrase("authorized by that cherry check"));
 });
 
+test("reaping.md: the reap delete's authorizer clause names the pair test (#4185)", () => {
+  assert.match(Pin.unemphasized(authorizers()), Pin.phrase("the pair test above"),
+    "reaping.md's reap section names what authorizes the `update-ref` delete but not the pair test — reap.sh keeps a branch whose `-` commits do not all pair");
+});
+
 // reap.sh's executable lines, comments and `echo` diagnostics dropped. The
 // check's name and the delete command both recur in comments: an indexOf over
 // the raw text lands on either and reads as the code, so a real delete moved
@@ -99,4 +106,10 @@ test("reap.sh: the worktree check the prose names sits before the delete", () =>
   const check = liveLineOf(/^\s*if\s+wt_holding\s+"refs\/heads\/\$b"/, "runs wt_holding on the branch");
   const del = liveLineOf(/^\s*if\s+!\s+err=\$\(git\s+update-ref\s+--no-deref\s+-d\s+"refs\/heads\/\$b"\s+"\$tip"/, "runs `git update-ref -d` on the branch at its tip");
   assert.ok(check < del, "reap.sh runs its worktree check after the delete, not before it");
+});
+
+test("reap.sh: the pair test the prose names sits before the delete (#4185)", () => {
+  const check = liveLineOf(/^\s*elif\s+!\s+pair_test\s+"\$tip";\s+then/, "runs pair_test on the branch's tip");
+  const del = liveLineOf(/^\s*if\s+!\s+err=\$\(git\s+update-ref\s+--no-deref\s+-d\s+"refs\/heads\/\$b"\s+"\$tip"/, "runs `git update-ref -d` on the branch at its tip");
+  assert.ok(check < del, "reap.sh runs its pair test after the delete, not before it");
 });

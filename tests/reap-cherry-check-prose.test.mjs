@@ -1,10 +1,11 @@
 // reap.sh's branch sweep runs more checks than `git cherry` before its
 // `git update-ref --no-deref -d`: the worktree registry and listing checks,
 // the dirty check, the `worktree remove` refusal and the `wt_holding` re-read
-// can each keep the branch. The cherry check is the only one of them that
-// asks whether the tip is merged, so a comment saying the delete is
-// "authorized by this check and by nothing else" is false as written. The
-// component doc said reap deletes with `-D`; it deletes with `update-ref -d`.
+// can each keep the branch. The cherry check and the pair test after it are
+// the only ones that ask whether the tip is merged (the pair test since
+// #4185), so a comment saying the delete is "authorized by this check and by
+// nothing else" is false as written. The component doc said reap deletes with
+// `-D`; it deletes with `update-ref -d`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
@@ -47,11 +48,18 @@ test("reap.sh: the cherry-probe comment does not quote the retired \"By nothing 
 
 test("reap.sh: the cherry comments still say why an unanswerable probe must keep", () => {
   // Input the pins above must ACCEPT: the fail-closed argument the old
-  // sentence carried survives, restated as what makes the cherry check
-  // unique — it is the only check that asks whether the tip is merged.
-  assert.match(probeComment(), Pin.phrase("this is the only one that asks whether `$tip` is merged"));
+  // sentence carried survives, restated as what makes the cherry check and
+  // the pair test unique — the only checks that ask whether the tip is merged.
+  assert.match(probeComment(), Pin.phrase("this and the pair test after it are the only ones that ask whether `$tip` is merged"));
   assert.match(probeComment(), Pin.phrase("never a `$tip` that is unmerged — so an unanswerable probe must KEEP"));
-  assert.match(scanComment(), Pin.phrase("no check between here and the delete below asks whether the branch is merged"));
+  assert.match(scanComment(), Pin.phrase("no check between here and the delete below then asked whether the branch is merged"));
+});
+
+test("reap.sh: the cherry comments do not call the cherry check the only merge check (#4185)", () => {
+  // The pair test asks too, on every branch no `+` line keeps.
+  assert.doesNotMatch(probeComment(), Pin.phrase("this is the only one that asks whether `$tip` is merged"));
+  assert.doesNotMatch(probeComment(), Pin.phrase("Being the only merge check"));
+  assert.doesNotMatch(scanComment(), Pin.phrase("no check between here and the delete below asks whether the branch is merged"));
 });
 
 const reapStep = () =>
