@@ -1,6 +1,6 @@
 # Close-out: what each metrics step does and why
 
-`closeout.mjs finish` runs the scrape, the tier-outcomes check, the metrics refresh, the commit of the metrics files, and the phase-0 receipt move, and SKILL.md's **End of run** says how to drive it. This file is how each of those works, for the controller to read when a step refuses, and how `closeout.mjs reopen` undoes a drain. The verdict rules — what `closed_own_ticket` and `minted_false_claim` mean, and that a value not in hand is left blank — stay in SKILL.md under **Guard: accumulate per PR**, because the controller still rules them.
+`closeout.mjs finish` runs the scrape, the tier-outcomes check, the metrics refresh, the gather of the run records and the review evidence, the commit of the metrics and record files, and the phase-0 receipt move, and SKILL.md's **End of run** says how to drive it. This file is how each of those works, for the controller to read when a step refuses, and how `closeout.mjs reopen` undoes a drain. The verdict rules — what `closed_own_ticket` and `minted_false_claim` mean, and that a value not in hand is left blank — stay in SKILL.md under **Guard: accumulate per PR**, because the controller still rules them.
 
 - **The run ends, or the maintainer says drain** → `fleet-event.mjs drain --reason "<reason>"`
   first (below). The marker is on disk, so the tick
@@ -19,7 +19,8 @@
      once the run is draining with no open PR and no live implementer.
   3. `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run closeout.mjs finish --reason "<reason>"` — scrapes
      the run's member facts, checks the tier-outcomes rows, refreshes the
-     metrics, commits the three metrics files and opens their PR, sets the
+     metrics, gathers the earlier runs' records and the review evidence,
+     commits them with the three metrics files and opens their PR, sets the
      phase-0 receipt aside as `.fleet/phase0.previous.json`, records
      `fleet-heartbeat.mjs --stop`, because every reader takes a recorded stop
      as the end of the run, and then merges the Close-out PR. On `NEED
@@ -124,6 +125,26 @@ the cause and run `finish` again — the pending file stays in `.fleet/` and the
 next run's phase-0 pass drains it — and never commit the metrics files with a
 drain that failed claiming the corpus is complete.
 
+## Gather the run records and the review evidence
+
+**Gather the run records and the review evidence after the metrics refresh,
+before the commit.** The `gather` step of `closeout.mjs finish` copies, from
+`.fleet/`, every run archive `ledger.mjs rotate` left there into
+`docs/metrics/runs/<UTC stamp>/` — `ledger.md`, `phase0.json`, `closeout.json`,
+and a `plugin-version` line from the version the phase-0 receipt recorded —
+and, from the scratch root, every review's `review.json` into
+`docs/metrics/reviews/<pr>/<run>/`, with each Charges file
+(`dispositions-fix-pr-<pr>[-x].json`) beside the review run it answers. The
+phase-0 receipt goes in with its `recipe` step's output withheld, because that
+output is the Recipe's command lines and a command can carry an environment
+assignment; a phase-0 archive that cannot be read as JSON is not gathered, and
+the step's output names it. A run's own archives exist only once the next run
+has rotated, so the records it carries are the earlier runs'; a file main
+already holds comes back byte for byte and adds nothing. A Charges file that
+names no review run is not gathered, and the step's output names it. A
+directory it cannot list or a file it cannot copy fails the step, so
+`commit-and-pr` stays pending: fix the cause and run `finish` again.
+
 ## Commit the metrics files and open a PR
 
 The metrics files are the run's own artifacts and none commits itself. Carry
@@ -140,6 +161,14 @@ fold-in queues for review next run, however it is named, so the files reach
 a data row loses it: `member-outcomes.tsv` is regenerated from harness
 transcripts the fleet does not own, so re-running the scrape later is worth
 only what the harness still holds.
+
+The commit carries the run records and the review evidence beside the three
+metrics files, because a review's evidence is deleted from scratch once its PR
+has merged and main holds it, and a run's ledger and receipts otherwise stay on
+one machine. Only the files `isRunRecord()` in `run-records.mjs` allows are
+staged: the shapes above, regular files with no executable bit. Anything else
+under `docs/metrics/runs/` or `docs/metrics/reviews/` — a recipe, a transcript,
+a brief — is left out of the commit, and the step's output names it.
 
 ## Move the phase-0 receipt
 

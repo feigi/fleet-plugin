@@ -32,7 +32,7 @@ into one free implementer slot, the moment it frees (phase 1).
 
 `phase0.mjs` runs the start sequence in
 its fixed order — alarm, branch, fast-forward, pin, baseline, labels, preflight, ruleset,
-tier-roles, metrics, cockpit, rotate, reclaim, evict, recipe, fold-in, stranded,
+tier-roles, metrics, cockpit, rotate, catch-up, reclaim, evict, recipe, fold-in, stranded,
 shortlist — prints one `phase0: <step>: <status>` line per step with the
 `NEED` lines last, and records each step in `.fleet/phase0.json`, which the
 tick reads: it prints `PHASE0-INCOMPLETE` and holds every dispatching row
@@ -79,6 +79,8 @@ yourself. The baseline records the root it
 certified beside the digest, and every later check — yours, a finisher's, the
 merge gate's own leg — compares it with the live root and refuses when they
 differ. Never dispatch a member into a run whose phase-0 pin refused.
+`phase0.mjs` records the version the pin wrote into the receipt as
+`pluginVersion`, so the run's archived receipt says which plugin it ran.
 
 ## Record the main-checkout baseline
 
@@ -388,13 +390,39 @@ archives, hand-named ones included, are left alone.
 Before the rotation, `phase0.mjs` puts the held-aside receipt (`phase0.previous.json`) back at `phase0.json`, which `ledger.mjs rotate` then files as `phase0.<UTC stamp>.json`.
 `ledger.mjs rotate` archives the run's two receipts with the ledger, under the ledger archive's own stamp: `.fleet/phase0.<UTC stamp>.json` and `.fleet/closeout.<UTC stamp>.json` beside `.fleet/ledger.<UTC stamp>.md`.
 
+## Catch up the run records
+
+**Catch up the run records straight after the rotation, before the reclaim —
+every run.** The `catch-up` step copies every run archive in `.fleet/` — the
+previous run's, which the rotation has just filed, and any earlier one — into
+`docs/metrics/runs/<UTC stamp>/`, and every review's evidence under the
+scratch root into `docs/metrics/reviews/<pr>/<run>/`, the same gather the
+close-out runs (references/close-out.md). When main lacks a record of a run
+that never closed out — no `.fleet/closeout.<UTC stamp>.json` beside its
+ledger archive — it commits every file main lacks alone on a branch of its own
+in this checkout, pushes it, opens a PR and switches back to `main`; the
+metrics files' changes stay in the work tree, out of that commit. The PR is an
+Owned PR, so the fold-in below queues it. A run that closed out leaves its
+records to this run's close-out, which gathers them again, so the step opens
+no second PR carrying the same files and its output says so. A run whose
+close-out never ran therefore loses nothing: its ledger, receipts and version
+reach main here, and its review evidence is still in scratch when the reclaim
+runs, which keeps a merged PR's evidence until main holds it. The step never
+stops the run but for a checkout it could not switch back to `main`; a commit
+it could not make is named in its output, with how far it got — a branch
+pushed with no PR open for it is named so — and the close-out gathers those
+files again.
+
 ## Reclaim scratch
 
-**Reclaim scratch straight after the rotation — every run.**
+**Reclaim scratch straight after the catch-up — every run.**
 `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run reclaim-scratch.mjs --root <scratch>
 --after-rotate --apply`, `<scratch>` the path `scratch-root.mjs` prints,
 so a run that merges nothing still reclaims the previous run's leftovers
 (`reclaim-scratch.mjs`'s header says what it removes).
+A merged PR's `pr<pr>/` and Charges files that hold review evidence stay
+until `origin/main` holds that evidence under `docs/metrics/reviews/<pr>/`,
+and a lookup that cannot answer keeps them.
 `--after-rotate` goes on this call always and on no other: rotate leaves
 no ledger behind when it carried nothing, and the flag reads that absence
 as "no live token" — rotate's own verdict — where without it the script

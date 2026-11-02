@@ -34,7 +34,16 @@
 //            of them: a bot's token names no PR, and GitHub reads MERGED
 //            while the bot is still writing under pr<M>/merge-bot-<n>/. An
 //            OPEN PR's pr<M>/ is kept whole except its run-* roots, which
-//            follow the --pr rule below.
+//            follow the --pr rule below. A MERGED PR's entry that holds
+//            review evidence — a `<run>/review.json` under pr<M>/, or a
+//            Charges file naming its run — is also kept until origin/main
+//            holds every file of it where run-records.mjs's reviewTargets()
+//            puts it, under docs/metrics/reviews/<M>/: the Close-out PR
+//            carries it there. `git ls-tree origin/main` in the checkout the
+//            ledger sits in answers that, once per sweep; a lookup that fails,
+//            or evidence that cannot be read, keeps the entry with that
+//            reason. A CLOSED PR gets no Ruling, and its entries keep the
+//            rule above.
 //   impl-<N>/
 //            removed when issue #N is CLOSED, or OPEN with no live
 //            impl-<N>[-x] token, no claim worktree standing, and idle past
@@ -121,6 +130,7 @@ import { gitEnv } from "./git-env.mjs";
 import { ghAliasedRead, how } from "./gh-aliased-read.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { liveOnLedger, parseMember, REVIEWER } from "./ledger-grammar.mjs";
+import { REVIEWS_DIR, reviewTargets } from "./run-records.mjs";
 
 const NAME = "reclaim-scratch";
 const die = makeDie(NAME);
@@ -269,6 +279,16 @@ function worktreeListing(checkout) {
   }
 }
 
+// The paths origin/main holds under REVIEWS_DIR, as `{paths}`, or `{unknown}`
+// naming why the checkout could not say. A missing origin/main is an unknown.
+function evidenceOnMain(checkout) {
+  const r = spawnSync("git", ["ls-tree", "-r", "-z", "--name-only", "--full-tree", "origin/main", "--", `${REVIEWS_DIR}/`], {
+    cwd: checkout, encoding: "utf8", maxBuffer: MAX_BUFFER, timeout: GH_TIMEOUT_MS, env: gitEnv(),
+  });
+  if (r.error || r.status !== 0) return { unknown: `git ls-tree origin/main -- ${REVIEWS_DIR}/ failed (${how(r)})` };
+  return { paths: new Set(r.stdout.split("\0").filter(Boolean)) };
+}
+
 // Whether a claim worktree stands for issue `n`: a listed worktree directly under
 // `.worktrees/` whose directory name names `n` as a whole segment, and whose
 // directory is still there. `{stands}` is true or false; `{unknown}`
@@ -329,7 +349,7 @@ function githubStates(numbers) {
 }
 
 // The root sweep's verdicts: `{remove: [{path, reason}], kept: [{path, reason}]}`.
-function judgeRoot(root, names, live, now, listing) {
+function judgeRoot(root, names, live, now, listing, checkout) {
   const cutoff = now - RETENTION_MS;
   const remove = [];
   const kept = [];
@@ -342,6 +362,22 @@ function judgeRoot(root, names, live, now, listing) {
     return r !== null && Number(r[1]) === n;
   });
   const implHolder = (n) => liveMembers.find((m) => m.family === "impl" && m.number === n)?.name;
+  // Why a MERGED PR's entry is kept for its review evidence, or null when it
+  // holds none origin/main lacks. origin/main is read once, on first need.
+  let onMain = null;
+  const evidenceHold = (path, name, n) => {
+    let found;
+    try {
+      found = reviewTargets(path, name);
+    } catch (e) {
+      return `PR #${n} is MERGED, and its review evidence cannot be read: ${e.code ?? e.message}`;
+    }
+    if (found.targets.length === 0) return null;
+    onMain ??= evidenceOnMain(checkout);
+    if (onMain.unknown !== undefined) return `PR #${n} is MERGED, but whether origin/main holds its review evidence cannot be told: ${onMain.unknown}`;
+    const missing = found.targets.filter((t) => !onMain.paths.has(t.to)).map((t) => t.to);
+    return missing.length === 0 ? null : `PR #${n} is MERGED, but origin/main does not hold its review evidence yet: ${missing.join(", ")}`;
+  };
 
   const byAge = (path, name, young) => {
     const holder = live.find((t) => name.includes(t));
@@ -437,7 +473,12 @@ function judgeRoot(root, names, live, now, listing) {
         continue;
       }
       const holder = prHolder(n);
-      if (holder !== undefined) kept.push({ path, reason: `PR #${n} is ${s.state}, but live ${holder} names it` });
+      if (holder !== undefined) {
+        kept.push({ path, reason: `PR #${n} is ${s.state}, but live ${holder} names it` });
+        continue;
+      }
+      const held = s.state === "MERGED" ? evidenceHold(path, name, n) : null;
+      if (held !== null) kept.push({ path, reason: held });
       else remove.push({ path, reason: `PR #${n} is ${s.state}` });
       continue;
     }
@@ -600,7 +641,7 @@ function main() {
       die(`could not list --root ${root}: ${e.message}`);
     }
     const listing = worktreeListing(found.checkout);
-    ({ remove, kept } = judgeRoot(root, names, live, now, listing));
+    ({ remove, kept } = judgeRoot(root, names, live, now, listing, found.checkout));
   }
 
   const removed = [];

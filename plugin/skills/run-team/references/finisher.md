@@ -222,7 +222,7 @@ not rely on that.
 **The acceptance mutation runs unless `finisher-scope.mjs` says the diff is inert.**
 A mutation that loosens a regex, deletes a guard or flips a reset has nothing to
 kill in a diff made only of Markdown prose (`.md` or `.markdown` outside the
-prompt surface) or only of the run-metrics files. The finisher does not decide
+prompt surface) or only of the run-metrics files, run records and review evidence. The finisher does not decide
 that by reading the diff: the script reads it, and only its exit 0 skips the
 mutation. An exit 1 is not overridden, and an exit 2 is never read as a 0.
 

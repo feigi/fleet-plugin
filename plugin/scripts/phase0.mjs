@@ -18,9 +18,9 @@
 // worktree refuses: the checks below judge the checkout the controller reads
 // its rules from). The steps, each a named entry in the receipt, run in
 // this order because the order is the point — the pin is recorded after the
-// fast-forward, the rotation comes before the fold-in, the scratch
-// reclaim straight after the rotation, the metrics refresh before the first
-// Pull is routed:
+// fast-forward, the rotation comes before the fold-in, the catch-up straight
+// after the rotation and the scratch reclaim straight after the catch-up, the
+// metrics refresh before the first Pull is routed:
 //
 //   alarm         `~/.fleet/alarm/<pid>.json` names this omp's pid and start time
 //                 and this `.fleet/`. Missing, malformed or mismatched, or no omp
@@ -38,6 +38,8 @@
 //   pin           `instruments.sh --pin`, which certifies the Install root; the
 //                 ok line names its kind, root and version. A linked
 //                 checkout refuses: a fleet run executes an installed package.
+//                 The `version=` line the pin writes to
+//                 `.fleet/instruments.sha` is the receipt's `pluginVersion`.
 //   baseline      `main-checkout.mjs --record`; its refusals fail the step.
 //   labels        `label-map.mjs ensure`, the Label map derivation step. Exit 0
 //                 is ok, its output the map ensure printed. Exit 3 is pending,
@@ -65,6 +67,25 @@
 //   cockpit       `board.mjs serve --open` launched detached, `--spend-dir`
 //                 passed through. Recorded; never fails the run.
 //   rotate        `ledger.mjs rotate`. Exit 2 is a refusal and fails the step.
+//   catch-up      run-records.mjs's gather() copies every run archive in
+//                 `.fleet/` (the previous run's, which the rotation has just
+//                 filed, and any earlier one) and every review evidence file
+//                 under the scratch root into `docs/metrics/runs/` and
+//                 `docs/metrics/reviews/`; when that leaves main lacking a
+//                 record of a run that never closed out — no
+//                 `closeout.<stamp>.json` beside its ledger archive —
+//                 closeout.mjs's commitAndPr() commits every file main lacks
+//                 alone on `chore/run-records-<UTC date>` (lettered while
+//                 taken), pushes it and opens a PR, then switches back to
+//                 main. A run that closed out leaves its records to this
+//                 run's close-out, which gathers them again, so the catch-up
+//                 opens no second PR carrying the same files. Before the
+//                 reclaim, so a close-out that never ran loses nothing: the
+//                 reclaim keeps a merged PR's evidence until main holds it.
+//                 Recorded, and never fails the run but for a checkout it
+//                 could not switch back to main; what it could not commit,
+//                 the close-out gathers again, and its output says how far
+//                 a failed commit got — a branch pushed with no PR included.
 //   reclaim       `reclaim-scratch.mjs --root <scratch> --after-rotate --apply`,
 //                 then `reclaim-scratch.mjs --siblings --root <scratch> --apply`
 //                 for the other keys under the scratch parent, which runs
@@ -102,7 +123,7 @@
 // THE RECEIPT is `.fleet/phase0.json` (resolved through fleet-dir.mjs, so a
 // worktree and the main checkout name one file):
 //
-//   { run, session, scratch, inFlight, objective,
+//   { run, session, scratch, inFlight, objective, pluginVersion,
 //     steps: { <name>: { status, at, output } } }
 //
 // `status` is ok, pending, failed, drift or unanswered; `at` an ISO time;
@@ -119,6 +140,8 @@
 // default when it records none — and a resume whose `--objective` names the
 // other one exits 2 naming both, leaving the receipt as it was. A resumed
 // receipt recording a value that is not an Objective exits 3 naming it.
+// `pluginVersion` is the version the pin recorded, null when it recorded
+// none; a resumed receipt keeps it.
 //
 // RESUMABLE. A re-run reads the receipt. It continues it — skipping every `ok`
 // step but `alarm` and re-running the rest — only when its `run` equals the
@@ -173,6 +196,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeDie, defineFlags, isDigits } from "./arg.mjs";
 import { alarmFile } from "./controller-alarm.mjs";
+import { commitAndPr } from "./closeout.mjs";
 import { ownClosingIssues } from "./closing-refs.mjs";
 import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { readState, stateFileIn } from "./fleet-state.mjs";
@@ -183,6 +207,7 @@ import { OBJECTIVES, RECEIPT, RECEIPT_HELD, archiveStamp, receiptArchiveName, ro
 import { ancestry, controllerOf, processSource, ProcUnreadable } from "./proc.mjs";
 import { IN_FLIGHT_DEFAULT, OBJECTIVE_DEFAULT } from "./phase0-receipt.mjs";
 import { readRecipe } from "./recipe-read.mjs";
+import { gather, recordChanges, refusedLine, unclosedRecords } from "./run-records.mjs";
 
 const NAME = "phase0";
 const SCRIPTS = dirname(fileURLToPath(import.meta.url));
@@ -249,12 +274,26 @@ function fastForward({ cwd }) {
   return ok(`fast-forwarded ${behind} commits to origin/main`);
 }
 
-function pin({ cwd }) {
+function pin({ cwd, fleetDir, receipt }) {
   const r = sh("instruments.sh", ["--pin"], { cwd });
   if (r.status !== 0) return refusal("instruments.sh --pin failed:", r);
+  receipt.pluginVersion = pinnedVersion(fleetDir);
   // `instruments: pinned <digest> over <kind> <root> (version <v>)`
   const m = /^instruments: pinned [0-9a-f]+ over (.+)$/m.exec(r.stderr);
   return ok(`instruments pinned: ${m ? m[1] : r.stderr || "?"}`);
+}
+
+// The `version=` line of the pin `instruments.sh --pin` just wrote, or null
+// when it wrote none or the file cannot be read.
+function pinnedVersion(fleetDir) {
+  let text;
+  try {
+    text = readFileSync(join(fleetDir, "instruments.sha"), "utf8");
+  } catch {
+    return null;
+  }
+  const m = /^version=(\S+)$/m.exec(text);
+  return m === null ? null : m[1];
 }
 
 function baseline({ cwd }) {
@@ -350,6 +389,44 @@ function rotate(ctx) {
   // What rotate says on stderr is the only account of rows it did not carry
   // and a receipt it could not archive.
   return ok([head, ...lines(r.stderr).map((l) => l.trim())].join("\n"));
+}
+
+// The previous runs' archives and the review evidence in scratch, committed on
+// a branch of their own when main lacks a record of a run that never closed
+// out. A run that closed out leaves its records to the next close-out, this
+// run's, which gathers everything again, so committing them here too would
+// open a second PR carrying the same files. The work tree may hold the metrics
+// refresh's rows, which the commit leaves out, so the branch is cut from the
+// main the fast-forward just brought level and is not rebased.
+function catchUp({ cwd, fleetDir, scratch }) {
+  let gathered;
+  try {
+    gathered = gather({ cwd, fleetDir, scratch });
+  } catch (e) {
+    return ok(`not gathered: ${e.message} — the close-out gathers them`);
+  }
+  const git = (args, timeoutMs) => run("git", args, { cwd, timeoutMs });
+  const records = recordChanges(git, cwd);
+  if (records.error) return ok([...gathered, `not committed: ${records.error} — the close-out commits them`].join("\n"));
+  const refused = records.refused.map(refusedLine);
+  if (records.allowed.length === 0) {
+    return ok([...gathered, ...refused, "nothing to catch up: main holds every run record and review evidence file"].join("\n"));
+  }
+  if (unclosedRecords(fleetDir, records.allowed).length === 0) {
+    return ok([...gathered, ...refused, "nothing to catch up: every run whose records main lacks closed out, so this run's close-out commits them"].join("\n"));
+  }
+  const state = { branch: null, pr: null, pin: null, rebase: null };
+  const result = commitAndPr({ cwd, stem: "chore/run-records-", title: "Run records: phase 0 catch-up", tsvs: [], rebase: false, state, save: () => {} });
+  if (result.status === "ok") return ok([...gathered, result.output].join("\n"));
+  const head = git(["symbolic-ref", "-q", "HEAD"]);
+  if (head.status === 0 && head.stdout === "refs/heads/main") {
+    // How far the flow got before it failed, from what it recorded on the way.
+    const left = state.pin !== null
+      ? `pushed ${state.branch} at ${state.pin}, but no PR is open for it`
+      : state.branch !== null ? `not pushed; whatever was committed stays on the local branch ${state.branch}` : "not committed";
+    return ok([...gathered, `${left}: ${result.output} — the close-out commits them`].join("\n"));
+  }
+  return failed([...gathered, result.output, "the checkout is not back on main — switch it to main before the run goes on"].join("\n"));
 }
 
 function reclaim({ cwd, scratch }) {
@@ -549,7 +626,7 @@ function alarm({ fleetDir }) {
 const STEPS = {
   "alarm": alarm, "branch": branch, "fast-forward": fastForward, "pin": pin, "baseline": baseline, "labels": labels,
   "preflight": preflight, "ruleset": ruleset, "tier-roles": tierRoles, "metrics": metrics, "cockpit": cockpit, "rotate": rotate,
-  "reclaim": reclaim, "evict": evict, "recipe": recipe, "fold-in": foldIn, "stranded": stranded, "shortlist": shortlist,
+  "catch-up": catchUp, "reclaim": reclaim, "evict": evict, "recipe": recipe, "fold-in": foldIn, "stranded": stranded, "shortlist": shortlist,
 };
 
 const STEP_NAMES = Object.keys(STEPS);
@@ -705,7 +782,8 @@ function main() {
     renameSync(receiptPath, held);
   }
 
-  const receipt = { run: resumed ? previous.run : null, session, scratch, inFlight, objective, steps: {} };
+  const pluginVersion = resumed && typeof previous.pluginVersion === "string" ? previous.pluginVersion : null;
+  const receipt = { run: resumed ? previous.run : null, session, scratch, inFlight, objective, pluginVersion, steps: {} };
   for (const name of STEP_NAMES) {
     // `alarm` checks the omp running this invocation, so its `ok` is never carried.
     const was = resumed && name !== "alarm" ? previous.steps[name] : undefined;

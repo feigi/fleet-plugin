@@ -292,6 +292,7 @@ test("phase-0.md has one heading per moved step, in the order phase0.mjs runs th
     "## Drain the pending ticket-features rows and refresh the cost guard",
     "## Launch the cockpit",
     "## Rotate the ledger",
+    "## Catch up the run records",
     "## Reclaim scratch",
     "## Evict idle claim trees",
     "## Derive the Recipe",
@@ -305,6 +306,7 @@ test("close-out.md has one heading per moved metrics step, then one for undoing 
   assert.deepEqual(CLOSE_OUT.split("\n").filter((l) => /^## /.test(l)), [
     "## Scrape the member facts and check the tier rows",
     "## Drain the pending ticket-features rows and refresh the cost guard",
+    "## Gather the run records and the review evidence",
     "## Commit the metrics files and open a PR",
     "## Move the phase-0 receipt",
     "## Undo a drain",
