@@ -933,6 +933,17 @@ test("deriveRun: the fix-failed count reads each member once, off its merged rec
   assert.deepEqual([closed.fixEscalate, closed.fixFailed.map((e) => e.pr)], [[], [21]]);
 });
 
+test("deriveRun: a bare fix-applier copy after a later review counts no failure since that review", () => {
+  // Each member's settled copy sits before the new `reviewed=`; the bare copies
+  // after it are placed by those, so the review restarts the count.
+  const head = "fix-pr-21=failed · fix-pr-21-b=failed · review=wf:x reviewed=def5678:1/0/0:run-def5678r";
+  const bare = failedAt(`${head} · fix-pr-21 · fix-pr-21-b`);
+  assert.deepEqual([bare.fixDue, bare.fixFailed], [[21], []]);
+  // One real failure since the review, beside a bare copy, is re-offered.
+  const one = failedAt(`${head} · fix-pr-21-b · fix-pr-21-c=failed`);
+  assert.deepEqual([one.fixDue, one.fixEscalate, one.fixFailed], [[21], [], []]);
+});
+
 test("deriveRun: review is due on open PRs that close an issue and carry no review token, oldest first", () => {
   const r = run({
     rows: [

@@ -73,11 +73,14 @@ The full text of each row `fleet-tick.mjs` prints and what it asks of the contro
   neither count nor restart the count, and a landed one restarts it. The row
   prints in place of `DISPATCH fix-pr PR#<M>`, its detail naming the counted
   members, and `ledger.mjs dispatch` refuses a third fix-applier of any kind
-  on M, a hand-dispatched red-check fixer included; handle that refusal as the
-  row. Dispatch no fix-applier for M. Comment on the PR once — read its
-  comments for the first line before posting, since the row repeats and the
-  comment does not. Its first line is `**Two fix-appliers failed on this PR
-  since its latest review; the fleet dispatches no third.**`; then each
+  on M, a hand-dispatched red-check fixer included. It refuses one on any PR
+  whose count reaches two, even one owed no fix-applier, for which no row
+  prints — two failed red-check fixers after a review with nothing to fix.
+  Handle that refusal as the row. Dispatch no fix-applier for M. Comment on
+  the PR once — read its comments for the first line before posting, since
+  the row repeats and the comment does not. Its first line is `**Two
+  fix-appliers failed on this PR since its latest review; the fleet
+  dispatches no third.**`; then each
   counted member with what its report says (`confirmation`, and `testRun`
   when not null), or `no report`; then: a new review hands the PR back, and a
   draft PR is skipped by the next run. Tell the maintainer. On their word,

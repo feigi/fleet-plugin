@@ -857,7 +857,7 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
     // CONFLICT line off, since it may be pushing to the branch right now.
     const st = (pr !== null && byPr.get(pr)) || {
       inFlight: false, reviewedAny: false, survived: 0, unverified: 0, reviewFixed: false,
-      fixMembers: new Set(), fixLanded: new Set(), conflictLanded: new Set(), fixFailed: [],
+      fixMembers: new Set(), fixLanded: new Set(), conflictLanded: new Set(), fixFailed: new Set(),
       conflictOpen: false, reviewedHead: null, reviewedRun: null, pastPinHalt: false, dispositions: [], workers: new Set(),
       finishers: new Set(), parked: [],
     };
@@ -920,7 +920,7 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
               st.conflictLanded.add(t.name);
             } else st.reviewFixed = true;
           }
-          if (o === "failed" && placed && !st.fixFailed.includes(t.name)) st.fixFailed.push(t.name);
+          if (o === "failed" && placed) st.fixFailed.add(t.name);
         }
         if (t.family === "finisher-pr" && t.number === pr) st.finishers.add(t.name);
         if (t.family === "finisher-pr" && t.number === pr
@@ -946,7 +946,7 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
         if (!m && lenient) {
           malformed.add(i);
           latestFinisher = null;
-          Object.assign(st, { inFlight: false, reviewedAny: true, reviewFixed: false, pastPinHalt: false, fixFailed: [] });
+          Object.assign(st, { inFlight: false, reviewedAny: true, reviewFixed: false, pastPinHalt: false, fixFailed: new Set() });
           continue;
         }
         if (!m && REVIEWED_RUNLESS.test(tok)) {
@@ -957,7 +957,7 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
         latestFinisher = null;
         Object.assign(st, {
           inFlight: false, reviewedAny: true, survived: Number(m[2]), unverified: Number(m[4]), reviewFixed: false,
-          reviewedHead: m[1].toLowerCase(), reviewedRun: m[5], pastPinHalt: false, fixFailed: [],
+          reviewedHead: m[1].toLowerCase(), reviewedRun: m[5], pastPinHalt: false, fixFailed: new Set(),
         });
       } else if (labelOffMember(tok) === null) {
         if (!lenient) throw new LedgerError(`${where}: '${tok}' is not label-off=<finisher-pr member> — fix the row with \`ledger.mjs row\``);
@@ -1156,7 +1156,7 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, queued
   // suffix sorts after that of every one on the PR that landed: a landed one
   // restarts the count, of any kind. Two of them and the fleet dispatches no
   // third fix-applier to the PR until a new review restarts it.
-  const fixFailures = (st) => st.fixFailed.filter((n) => {
+  const fixFailures = (st) => [...st.fixFailed].filter((n) => {
     const retry = parseMember(n).retry ?? "";
     return ![...st.fixLanded].some((l) => (parseMember(l).retry ?? "") >= retry);
   });
@@ -1171,6 +1171,10 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, queued
   const fixOwed = ([n, st]) => open.has(n)
     && (((st.survived > 0 || st.unverified > 0) && !st.reviewFixed) || conflictHeld(st) || mismatchDue(st))
     && !fixRunning(st) && !st.inFlight;
+  // The PRs owed a fix-applier, split below by `fixEscalated` into `fixDue`
+  // and `fixEscalate`, as `conflicting` is into `conflicts` and
+  // `conflictEscalate`.
+  const owed = [...byPr.entries()].filter(fixOwed);
   // A `review=` token with no `reviewed=` after it reads as in flight, and the
   // ledger alone never says otherwise: a review whose own `reviewed=` write
   // never landed stays in flight after its PR merges, counting as a review unit
@@ -1210,11 +1214,11 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, queued
     // Each PR a fix-applier is owed on (`fixOwed`), unless two fix-appliers
     // have settled `failed` on it since its latest review with none landed
     // after them: that PR is `fixEscalate`'s instead.
-    fixDue: [...byPr.entries()].filter((e) => fixOwed(e) && !fixEscalated(e[1])).map(([n]) => n).sort(asc),
+    fixDue: owed.filter(([, st]) => !fixEscalated(st)).map(([n]) => n).sort(asc),
     // Each PR a fix-applier would be owed on but for two `failed` since its
     // latest review, `{pr, members}` ascending, `members` the counted ones:
     // the reviewers row escalates it, dispatching nothing.
-    fixEscalate: [...byPr.entries()].filter((e) => fixOwed(e) && fixEscalated(e[1]))
+    fixEscalate: owed.filter(([, st]) => fixEscalated(st))
       .map(([n, st]) => ({ pr: n, members: fixFailures(st) })).sort((a, b) => a.pr - b.pr),
     // Every PR, open or not, with two `failed` fix-appliers counted, `{pr,
     // members}` ascending — the one reading of the count: `ledger.mjs
