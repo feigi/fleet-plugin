@@ -96,7 +96,7 @@ test("the exit vocabulary: 0 alone is clean, 1 names a cause from the ledger's v
   const text = causeText();
   assert.match(
     text,
-    Pin.phrase("Exit 0, with `cause` null, is the only code that means the worktree holds nothing your pin lacks: it sits at your pin, or it differs from it only by commits whose patches your pin already carries."),
+    Pin.phrase("Exit 0, with `cause` null, is the only code that means the worktree holds nothing your pin lacks: it sits at your pin, or it differs from it only by commits whose changes your pin already holds, by patch and by content."),
     "the block no longer says exit 0 with a null cause is the only result that leaves nothing the pin lacks — a finisher can read any other code as a pass",
   );
   assert.match(

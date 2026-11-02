@@ -29,12 +29,12 @@ worktree's row, reads whether the tree is dirty, compares the worktree's
 `HEAD` to your pin, and when the head differs derives the cause from the
 reflog. Exit 0, with `cause` null, is the only code that means the worktree
 holds nothing your pin lacks: it sits at your pin, or it differs from it only
-by commits whose patches your pin already carries. Exit 1 means `cause` is
-non-null: you are halted, and `cause` is the word you name — `live-editor`,
-`rebase`, `past-pin`, `stray`, `unreadable`, `missing`, `absent` or `other`,
-and `other` is a cause too, not a gap. Exit 2 means the script could not look:
-you are halted with cause `other`, with the line it printed on stderr as the
-evidence.
+by commits whose changes your pin already holds, by patch and by content.
+Exit 1 means `cause` is non-null: you are halted, and `cause` is the word you
+name — `live-editor`, `rebase`, `past-pin`, `stray`, `unreadable`, `missing`,
+`absent` or `other`, and `other` is a cause too, not a gap. Exit 2 means the
+script could not look: you are halted with cause `other`, with the line it
+printed on stderr as the evidence.
 
 The pin is the SHA you were dispatched against, never `PR headRefOid`: a
 member that kept working and pushed after the pin matches the branch tip on a
