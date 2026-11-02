@@ -464,8 +464,9 @@ straight after its reclaim, and reports it on an `APPLIED evict:` or
 worktree evict.mjs marked, naming
 `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run evict.mjs --restore <tree> --apply`: run it, then render
 again. It runs the Install step in the tree as a claim does and refuses as a
-claim does. A refused restore leaves the tree evicted: dispatch nothing into
-it, report the restore's message, and the row comes up again on the next wake.
+claim does, except that an exit 126 or 127 names no cause. A refused restore
+leaves the tree evicted: dispatch nothing into it, report the restore's
+message, and the row comes up again on the next wake.
 `render review-runner` and `render finisher` do not refuse: neither member runs
 code in the claim tree.
 

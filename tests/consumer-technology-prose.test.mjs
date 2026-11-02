@@ -120,7 +120,8 @@ test("the research note marks the Node-only consumer rows superseded by the Reci
 
 test("review-and-fix step 3 reads the standalone testCmd off the Recipe cache and derives when there is none", () => {
   const step = REVIEW_AND_FIX.bullet("3. **Run `checkCmd` and `testCmd` before you commit**", "\n4. **", "review-and-fix.md step 3").text;
-  assert.match(step, Pin.phrase("the repo's own Check step and Test entrypoint**, read off the repo's Recipe cache (`derive-testcmd.sh <repo> check` prints the first, `derive-testcmd.sh <repo> test` the second)"));
+  // Which tree it reads from, at which ref, and what each refusal does is standalone-recipe-read-prose.test.mjs's.
+  assert.match(step, Pin.phrase("the repo's own Check step and Test entrypoint**, read off the repo's Recipe cache from"));
   assert.match(step, Pin.phrase("run the Recipe derivation step first"));
   assert.doesNotMatch(step, /node --test/, "step 3 names this repository's own test command again");
 });

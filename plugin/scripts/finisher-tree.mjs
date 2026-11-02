@@ -25,8 +25,9 @@
 //     `derive-testcmd.sh <tree> install --at origin/main`, run in the tree
 //     through `sh -c` with `CI` unset, no timeout, under no suite slot, with a
 //     clean `git status --porcelain -uall` required before it and after it. 126
-//     or 127 is a Recipe that no longer runs, any other non-zero exit a failed
-//     install, and a change to the tree an Install step that changed it.
+//     or 127 is an Install step that did not run, its cause not established,
+//     any other non-zero exit a failed install, and a change to the tree an
+//     Install step that changed it.
 //
 // Stdout is one JSON line, the receipt, whatever happened after the arguments
 // parsed:

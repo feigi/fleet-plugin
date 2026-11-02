@@ -65,15 +65,19 @@
 // RESTORE. `--restore <abs tree>` runs the Install step in an evicted tree as
 // claim-ticket.sh runs it after `worktree add`: the command `derive-testcmd.sh
 // <tree> install --at origin/main` prints, through `sh -c` in the tree with `CI` unset. Exit 126
-// or 127 refuses as a Recipe that no longer runs, any other non-zero as a
-// failed install, and a `git status --porcelain -uall` that is not empty
-// after it as an Install step that changed the tree — each with the claim's
-// own words. A status that is not empty BEFORE it refuses in words of its
-// own, before anything runs: that change is no Install step's. Only once the
-// status after it is empty does it write the restore time (RESTORED) and then
-// remove the mark; every refusal leaves the mark. A tree with no mark refuses:
-// there is nothing to restore. Without `--apply` it runs nothing and prints
-// the command it would run. Prints
+// or 127 refuses as an Install step that did not run, its cause not
+// established, any other non-zero as a failed install, and a `git status
+// --porcelain -uall` that is not empty after it as an Install step that
+// changed the tree — each with the claim's own words, but for the 126 or 127,
+// which names no cause: only the command's first word was probed, and a path
+// in it only against origin/main, so the tree's own change, a tree behind
+// origin/main or a later word of the command can each produce it. A status
+// that is not empty BEFORE it refuses in words of its own, before anything
+// runs: that change is no Install step's. Only once the status after it is
+// empty does it write the restore time (RESTORED) and then remove the mark;
+// every refusal leaves the mark. A tree with no mark refuses: there is
+// nothing to restore. Without `--apply` it runs nothing and prints the
+// command it would run. Prints
 // `{"applied","worktree","install"}`; exit 0 restored (or would), 2 refused.
 //
 // That install sequence is `installIn()`, exported: finisher-tree.mjs runs the
@@ -104,9 +108,14 @@ export const isIdle = (now, last) => now - last >= IDLE_MS;
 const RUNNER = "agent-test";
 const GIT_TIMEOUT_MS = 30_000;
 const MAX_BUFFER = 64 * 1024 * 1024;
-// claim-ticket.sh's `rederive`, word for word: a restore refuses as the claim
-// does.
+// claim-ticket.sh's `rederive`, word for word. The refusals that send their
+// reader to the derivation keep it: an Install step that could not be started
+// and one that changed the tree. An exit 126 or 127 does not.
 export const REDERIVE = "the Recipe cache is invalid; run the Recipe derivation step (run-team phase 0, before the first claim) to re-derive it";
+// What an exit 126 or 127 says instead: the shell's "cannot execute" or "not
+// found", with no cause. The command's first word was probed, and a path in it
+// against origin/main alone.
+const NOT_ESTABLISHED = "the cause is not established: only the command's first word was checked, and a path in it only against origin/main, so the tree's own change, a tree behind origin/main, or a later word of the command could each produce this exit";
 // worktree.sh's `wt_op_state`, sourced: `$wt_op` names the operation in
 // progress, empty for none; a non-zero exit is an admin dir it cannot read.
 const OP_STATE = '. "$1" || exit 3; wt_op_state "$2" || exit 1; printf "%s" "$wt_op"';
@@ -389,8 +398,8 @@ function sweep({ afterRotate, apply }) {
  * runs it: the one sequence a restore and the finisher's tree share. `{install}`
  * when it ran and left the tree clean (or, without `apply`, would run); else
  * `{refusal: {kind, message, install, exit}}`, `message` the claim's own words
- * and `exit` the Install step's exit status, null when it never produced one.
- * `kind` is one of:
+ * but for an exit 126 or 127, which names no cause, and `exit` the Install
+ * step's exit status, null when it never produced one. `kind` is one of:
  *   derive         derive-testcmd.sh would not name the Install step
  *   status-before  the tree state could not be read before the Install step
  *   dirty-before   the tree was not clean before it: nothing ran
@@ -426,7 +435,7 @@ export function installIn(tree, apply, { verb = "restore", retry = true } = {}) 
   if (r.error) return refuse("not-run", `the Install step '${install}' did not run in ${tree} (${how(r)}) — ${REDERIVE}`, install);
   if (r.signal) return refuse("failed", `install failed in ${tree} (${how(r)})`, install);
   if (r.status === 126 || r.status === 127) {
-    return refuse("not-run", `the Install step '${install}' did not run in ${tree} (exit ${r.status}: not executable or not found) — ${REDERIVE}`, install, r.status);
+    return refuse("not-run", `the Install step '${install}' did not run in ${tree} (exit ${r.status}: not executable or not found) — ${NOT_ESTABLISHED}`, install, r.status);
   }
   if (r.status !== 0) return refuse("failed", `install failed in ${tree} (exit ${r.status})`, install, r.status);
   const status = git(tree, ["status", "--porcelain", "-uall"]);

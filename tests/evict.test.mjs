@@ -381,11 +381,9 @@ test("--restore without --apply runs nothing and names the command", (t) => {
   assert.ok(existsSync(f.mark(wt)));
 });
 
-test("a restore whose install fails, does not run, or dirties the tree refuses with the claim's words and leaves the mark", (t) => {
+test("a restore whose install fails or dirties the tree refuses with the claim's words and leaves the mark", (t) => {
   const cases = [
     [{ INSTALL_EXIT: "1" }, (wt) => `install failed in ${wt} (exit 1)`],
-    [{ INSTALL_EXIT: "127" }, (wt) => `the Install step 'sh install.sh' did not run in ${wt} (exit 127: not executable or not found) — ${REDERIVE}`],
-    [{ INSTALL_EXIT: "126" }, (wt) => `the Install step 'sh install.sh' did not run in ${wt} (exit 126: not executable or not found) — ${REDERIVE}`],
     [{ INSTALL_DIRTY: "1" }, (wt) => `the Install step 'sh install.sh' changed the tree in ${wt} (first:  M tracked.txt) — ${REDERIVE}`],
   ];
   for (const [env, said] of cases) {
@@ -397,6 +395,29 @@ test("a restore whose install fails, does not run, or dirties the tree refuses w
     assert.equal(r.stdout, "");
     assert.equal(r.stderr, `\nevict: ${said(wt)}\n`);
     assert.ok(existsSync(f.mark(wt)), `${JSON.stringify(env)} took the mark`);
+    assert.equal(existsSync(join(f.admin(wt), RESTORED)), false);
+  }
+});
+
+// 126 is the shell's "cannot execute" and 127 its "not found"; neither says
+// why. The Install step's leading word was probed only against origin/main, so
+// the tree's own change, a tree behind origin/main and a later word of the
+// command can each produce them, and a re-derivation proves the same Recipe
+// on origin/main again.
+test("a restore whose install exits 126 or 127 refuses naming no cause, sends nobody to re-derive, and leaves the mark", (t) => {
+  const cause = "the cause is not established: only the command's first word was checked, and a path in it only against origin/main, so the tree's own change, a tree behind origin/main, or a later word of the command could each produce this exit";
+  for (const code of ["127", "126"]) {
+    const { f, wt } = evicted(t);
+
+    const r = f.run(["--restore", wt, "--apply"], { env: { INSTALL_EXIT: code } });
+
+    assert.equal(r.status, 2, code);
+    assert.equal(r.stdout, "");
+    assert.equal(r.stderr, `\nevict: the Install step 'sh install.sh' did not run in ${wt} (exit ${code}: not executable or not found) — ${cause}\n`);
+    for (const blamed of [REDERIVE, "Recipe cache is invalid", "Recipe derivation", "re-derive"]) {
+      assert.equal(r.stderr.includes(blamed), false, `exit ${code} still says "${blamed}"`);
+    }
+    assert.ok(existsSync(f.mark(wt)), `exit ${code} took the mark`);
     assert.equal(existsSync(join(f.admin(wt), RESTORED)), false);
   }
 });
