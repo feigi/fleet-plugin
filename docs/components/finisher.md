@@ -28,7 +28,10 @@ durable, and applies the label the merge bot waits on.
    differs from the pin but holds nothing the pin lacks, because a remote
    rebase superseded it, is clean; a commit the pin lacks that the branch's
    remote ref is not shown to carry — the ref lacks it or is absent, or the
-   read could not tell — is a `stray` halt.
+   read could not tell — is a `stray` halt. The test for what a worktree holds
+   that a revision lacks is
+   [`unique-in-upstream.mjs`](../../plugin/scripts/unique-in-upstream.mjs),
+   shared with the [Merge bot](merge-bot.md).
 3. **Confirm durable homes.** A deferral of a finding in the review's
    result is judged by the `dispositions-ok` verdict
    [`ledger.mjs`](../../plugin/scripts/ledger.mjs) `dispatch` required

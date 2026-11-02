@@ -20,7 +20,13 @@ lifetime is one **Pass**.
    instead, and cleared only once a
    fix-applier dispatched against it settles as landed. The controller
    records the same token when the tick prints `CONFLICT PR#<M>` for a PR
-   no live merge bot owns.
+   no live merge bot owns. A worktree of the PR's branch is read before the
+   merge, never after, by
+   [`unique-in-upstream.mjs`](../../plugin/scripts/unique-in-upstream.mjs)
+   against `origin/<branch>`: on this path `unique: true` is a report and
+   never a halt, and on the local-rebase fallback it is the
+   `worktree-diverged-#<pr>` stop. The [Finisher](finisher.md)'s audit uses
+   the same verdict.
 4. **Gate twice:** [`merge-gate.mjs`](../../plugin/scripts/merge-gate.mjs)
    (a read-only conjunction of [Instruments](instruments.md), `gh pr
    view`, the main-gain check

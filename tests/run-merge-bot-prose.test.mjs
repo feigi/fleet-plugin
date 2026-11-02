@@ -322,8 +322,8 @@ test("step 1 falls back to a local, unpushed rebase when the server-side path ca
 // the other never sees) before writing this: origin/<branch> reads `-`
 // (nothing unique), origin/main reads `+` on the identical stale HEAD.
 test("step 1 names the correct upstream for proving a post-rebase worktree stale but safe", () => {
-  assert.match(step1(), /`git cherry origin\/<branch> HEAD`/);
-  assert.match(step1(), /\*\*not\*\* `git cherry origin\/main HEAD`/);
+  assert.match(step1(), /read it against `origin\/<branch>` from the worktree/);
+  assert.match(step1(), /\*\*not\*\* against `origin\/main`/);
 });
 
 // #447. The probe above told the bot to run `git cherry` and then stopped:
@@ -341,7 +341,7 @@ test("step 1 names the correct upstream for proving a post-rebase worktree stale
 test("step 1's staleness probe carries its ordering constraint in the same sentence as the command", () => {
   assert.match(
     step1(),
-    /run `git cherry origin\/<branch> HEAD` from the worktree \*\*before the merge, never after\*\*/,
+    /read it against `origin\/<branch>` from the worktree \*\*before the merge, never after\*\*/,
   );
   // the reason, without which the constraint is an unexplained rule
   assert.match(step1(), /step 4 deletes the remote branch once the PR lands/);
@@ -371,8 +371,26 @@ test("step 1 answers a `+` on the server-side path, with the structural reason",
 // once an unpushed commit was added). Pinned to the rule, not to the shape of
 // either listing: `+` is the signal, its absence is clean.
 test("step 1 defines the probe's clean answer by the absence of `+`, not by silence", () => {
-  assert.match(step1(), /The clean answer is the absence of a `\+`, not the absence of output/);
-  assert.match(step1(), /one that has fetched reads `-` for every rebased commit\. Both are clean/);
+  assert.match(step1(), /the clean answer is `"unique": false`, not the absence of output/);
+  assert.match(step1(), /one that has fetched reads `-` for every rebased commit\. Both are `unique: false`/);
+});
+
+// Both reads count, and the prose says why: the patch read alone passes an
+// unpushed commit that repeats a carried change elsewhere in the file, and the
+// tree comparison alone passes a revert of a carried change.
+test("step 1 says why the verdict counts both the `+` and the tree comparison", () => {
+  assert.match(step1(), /The `\+` alone misses an unpushed commit that repeats a change the branch carries at another place in the file, or differs from it by whitespace alone/);
+  assert.match(step1(), /the tree comparison alone misses a commit that reverts a change the branch carries, which only the `\+` catches/);
+  assert.match(step1(), /Exit 2 is no verdict — the read failed and the error is named — so report the worktree as unread, never as clean/);
+});
+
+// No raw `git cherry origin/<branch> HEAD` instruction is left for a bot to run
+// by hand, at either site: both name the script's verdict instead.
+test("no raw `git cherry origin/<branch> HEAD` hand instruction remains, and both sites run the script", () => {
+  assert.doesNotMatch(DOC.text, /run `git cherry/);
+  assert.doesNotMatch(DOC.text, /`git cherry origin\/<branch> HEAD` from the worktree/);
+  assert.match(step1(), /unique-in-upstream\.mjs --worktree <worktree> --upstream origin\/<branch>/);
+  assert.match(fallbackBlock(), /unique-in-upstream\.mjs --worktree <worktree> --upstream origin\/<branch>/);
 });
 
 // The other half of (b), and the one that costs real work if it rots: the new
@@ -632,7 +650,7 @@ test("the fallback says the PR-object compare fails open too, and that a re-read
 //   - no `Equal`-is-unreachable clause, and the surviving mismatch can still
 //     be let through as equal, which is #1512's own defect restored one
 //     paragraph later than where it was removed.
-const reRead = () => DOC.paragraph("**Unequal → `git fetch origin`", "run-merge-bot.md's fallback bounded re-read", "**Ahead or behind is `git cherry").text;
+const reRead = () => DOC.paragraph("**Unequal → `git fetch origin`", "run-merge-bot.md's fallback bounded re-read", "**Ahead or behind is the `unique` verdict").text;
 
 test("a mismatch is re-read exactly once, then refused rather than waited out", () => {
   assert.match(reRead(), Pin.phrase("`git fetch origin` and read the ref once more"));
@@ -659,9 +677,21 @@ test("a mismatch is re-read exactly once, then refused rather than waited out", 
 const armRouting = () => DOC.paragraph("**Ahead or behind is", "run-merge-bot.md's fallback arm discriminator", "- **Equal** → proceed.").text;
 
 test("which arm a surviving mismatch takes is decided by patch equivalence, not by the sha compare", () => {
-  assert.match(armRouting(), Pin.phrase("`git cherry origin/<branch> HEAD` from the worktree"));
+  assert.match(armRouting(), Pin.phrase("Ahead or behind is the `unique` verdict of"));
+  assert.match(armRouting(), Pin.phrase("unique-in-upstream.mjs --worktree <worktree> --upstream origin/<branch>"));
   assert.match(armRouting(), Pin.phrase("not the sha compare"));
-  assert.match(armRouting(), Pin.phrase("a `+` → ahead; no `+` → behind"));
+  assert.match(armRouting(), Pin.phrase("`\"unique\": true` → ahead; `\"unique\": false` → behind"));
+});
+
+// The verdict is the script's, never a raw `git cherry` line: a patch id ignores
+// position and whitespace, so the `-` an unpushed commit repeating a carried
+// change reads would let it past the STOP. And a read that failed is no
+// "behind": exit 2 takes the STOP, so an unread worktree never proceeds as clean.
+test("the fallback's verdict is the script's, a failed read takes the STOP, and no raw cherry line decides", () => {
+  assert.match(armRouting(), Pin.phrase("the verdict is not a raw `git cherry` line"));
+  assert.match(armRouting(), Pin.phrase("reads `-` there and the STOP would not fire"));
+  assert.match(armRouting(), Pin.phrase("Exit 2 is no verdict"));
+  assert.match(armRouting(), Pin.phrase("and is not behind: take the STOP, report `worktree-diverged-#<pr>` and quote the error"));
 });
 
 // #1038's AC-4 is a property of the whole block, not of the two sentences that
