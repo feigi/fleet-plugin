@@ -442,10 +442,10 @@ keep() {
 # silent (measured on this exact shape).
 #
 # The capture is `probe`, over any command; `git_probe` is `probe git`.
-# pr_load's gh call below is one other caller: its stdout fields are
-# refnames, numbers, object ids and fixed words, none of which can hold 0x02.
-# The pair test's `pq_ids` is the other: it prints `git patch-id`'s hex pairs
-# and nothing else.
+# pr_load's gh call below is a caller too: its stdout fields are refnames,
+# numbers, object ids and fixed words, none of which can hold 0x02. So are the
+# pair test's `pq_ids`, which prints `git patch-id`'s hex pairs and nothing
+# else, and its `pq_marked`, which prints object ids and nothing else.
 gp_sep=$(printf '\002')
 probe() {
   gp_raw=$(
@@ -1024,17 +1024,31 @@ EOF
 # M is looked for among the commits on $base that `git rev-list
 # --cherry-mark` marks `=` against this tip, so the diffs this script reads
 # are those commits' and the tip's own, never all of $base since the fork.
+# That listing itself still names every commit on $base since the fork, and
+# `probe` splits its capture with `${…#*sep}`, which bash 3.2 — macOS /bin/sh
+# — runs in time that grows faster than the capture: measured, doubling a
+# 1600-line capture took `probe` from 3.9s to 18.7s, and on a fork 3200
+# commits behind a dry run took 6.2s with the whole listing through `probe`
+# and 0.4s with the `=` ids alone, same payload. So
+# `pq_marked` keeps the listing to itself and prints only the `=` lines' ids,
+# and what reaches `probe` grows with the merged commits alone.
 # Safe for `probe`'s separator: rev-list and rev-parse print object ids and
 # fixed marks; merge-tree under `--no-messages --name-only` prints a tree id
 # and, on a conflict, the conflicted paths C-quoted (`"we\002ird"`, measured,
 # under core.quotePath false too); and `pq_ids` keeps the diff text, which can
 # hold any byte, to itself and prints only `git patch-id`'s hex pairs. Both of
 # its pipes read a variable, never git, so the status each returns is git's.
+# `pq_marked`'s pipe reads a variable too, and git's own status is taken
+# before it runs.
 # `merge-tree --write-tree` writes the trees it merges into the object store,
 # on a dry run too; it moves and deletes nothing.
 pq_ids() {
   pq_d=$(printf '%s\n' "$1" | git diff-tree --stdin -p) || return
   printf '%s\n' "$pq_d" | git patch-id --stable
+}
+pq_marked() {
+  pq_l=$(git rev-list --cherry-mark --left-only --no-merges "$1") || return
+  printf '%s\n' "$pq_l" | sed -n 's/^=//p'
 }
 
 # Returns 0 when every commit on tip $1 that $base_rev lacks pairs, and 1 with
@@ -1045,7 +1059,6 @@ pair_test() {
     return 1
   fi
   pq_cs=
-  pq_pairs=
   while read -r pq_c pq_p pq_more; do
     [ -n "$pq_c" ] || continue
     if [ -n "$pq_more" ]; then
@@ -1057,25 +1070,16 @@ pair_test() {
     fi
     pq_cs=${pq_cs:+$pq_cs
 }$pq_c
-    pq_pairs="$pq_pairs $pq_c:$pq_p"
   done <<EOF
 $gp_out
 EOF
   [ -n "$pq_cs" ] || return 0
 
-  if ! git_probe rev-list --cherry-mark --left-only --no-merges "$base_rev...$1"; then
+  if ! probe pq_marked "$base_rev...$1"; then
     pq_why="pair test failed — cannot list the commits on $base to pair with$(gp_why)"
     return 1
   fi
-  pq_ms=
-  while read -r pq_m; do
-    case "$pq_m" in
-      =*) pq_ms=${pq_ms:+$pq_ms
-}${pq_m#=} ;;
-    esac
-  done <<EOF
-$gp_out
-EOF
+  pq_ms=$gp_out
   pq_mids=
   if [ -n "$pq_ms" ]; then
     if ! probe pq_ids "$pq_ms"; then
@@ -1090,9 +1094,7 @@ EOF
   fi
   pq_cids=$gp_out
 
-  for pq_cp in $pq_pairs; do
-    pq_c=${pq_cp%:*}
-    pq_p=${pq_cp#*:}
+  for pq_c in $pq_cs; do
     pq_id=
     while read -r pq_i pq_o; do
       [ "$pq_o" != "$pq_c" ] || pq_id=$pq_i
@@ -1111,30 +1113,24 @@ EOF
       pq_why="commit $pq_c reads patch-equivalent, but no commit on $base carries its patch id"
       return 1
     fi
-    pq_ok=false
     for pq_m in $pq_with; do
       if ! git_probe rev-parse --verify "$pq_m^{tree}"; then
         pq_why="pair test failed — cannot read the tree of $pq_m$(gp_why)"
         return 1
       fi
       pq_mt=$gp_out
-      if git_probe merge-tree --write-tree --no-messages --name-only --merge-base="$pq_p" "$pq_m^" "$pq_c"; then
-        if [ "$gp_out" = "$pq_mt" ]; then
-          pq_ok=true
-          break
-        fi
+      if git_probe merge-tree --write-tree --no-messages --name-only --merge-base="$pq_c^" "$pq_m^" "$pq_c"; then
+        [ "$gp_out" != "$pq_mt" ] || continue 2
       elif [ "$gp_rc" -ne 1 ]; then
         pq_why="pair test failed — cannot replay commit $pq_c onto $pq_m^$(gp_why)"
         return 1
       fi
     done
-    if [ "$pq_ok" = false ]; then
-      case "$pq_with" in
-        *" "*" "*) pq_why="commit $pq_c reads patch-equivalent but is not identical to any of the merged commits$pq_with" ;;
-        *) pq_why="commit $pq_c reads patch-equivalent but is not identical to the merged commit$pq_with" ;;
-      esac
-      return 1
-    fi
+    case "$pq_with" in
+      *" "*" "*) pq_why="commit $pq_c reads patch-equivalent but is not identical to any of the merged commits$pq_with" ;;
+      *) pq_why="commit $pq_c reads patch-equivalent but is not identical to the merged commit$pq_with" ;;
+    esac
+    return 1
   done
   return 0
 }

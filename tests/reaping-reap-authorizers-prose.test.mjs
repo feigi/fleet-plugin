@@ -100,16 +100,20 @@ const liveLineOf = (re, what) => {
   return hits[0];
 };
 
+// The branch delete every ordering pin below measures against, spelled once
+// so no pin's copy of the pattern can drift from another's.
+const deleteLine = () => liveLineOf(/^\s*if\s+!\s+err=\$\(git\s+update-ref\s+--no-deref\s+-d\s+"refs\/heads\/\$b"\s+"\$tip"/, "runs `git update-ref -d` on the branch at its tip");
+
 test("reap.sh: the worktree check the prose names sits before the delete", () => {
   // The prose names a check the script runs; pin that the script still does,
   // and runs it before the delete, so the prose cannot outlive the check.
   const check = liveLineOf(/^\s*if\s+wt_holding\s+"refs\/heads\/\$b"/, "runs wt_holding on the branch");
-  const del = liveLineOf(/^\s*if\s+!\s+err=\$\(git\s+update-ref\s+--no-deref\s+-d\s+"refs\/heads\/\$b"\s+"\$tip"/, "runs `git update-ref -d` on the branch at its tip");
+  const del = deleteLine();
   assert.ok(check < del, "reap.sh runs its worktree check after the delete, not before it");
 });
 
 test("reap.sh: the pair test the prose names sits before the delete (#4185)", () => {
   const check = liveLineOf(/^\s*elif\s+!\s+pair_test\s+"\$tip";\s+then/, "runs pair_test on the branch's tip");
-  const del = liveLineOf(/^\s*if\s+!\s+err=\$\(git\s+update-ref\s+--no-deref\s+-d\s+"refs\/heads\/\$b"\s+"\$tip"/, "runs `git update-ref -d` on the branch at its tip");
+  const del = deleteLine();
   assert.ok(check < del, "reap.sh runs its pair test after the delete, not before it");
 });

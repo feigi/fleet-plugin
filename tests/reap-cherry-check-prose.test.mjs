@@ -56,7 +56,8 @@ test("reap.sh: the cherry comments still say why an unanswerable probe must keep
 });
 
 test("reap.sh: the cherry comments do not call the cherry check the only merge check (#4185)", () => {
-  // The pair test asks too, on every branch no `+` line keeps.
+  // The pair test asks too, on every [gone] branch whose `git cherry` prints
+  // no `+` line.
   assert.doesNotMatch(probeComment(), Pin.phrase("this is the only one that asks whether `$tip` is merged"));
   assert.doesNotMatch(probeComment(), Pin.phrase("Being the only merge check"));
   assert.doesNotMatch(scanComment(), Pin.phrase("no check between here and the delete below asks whether the branch is merged"));

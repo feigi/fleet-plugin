@@ -6010,4 +6010,47 @@ for (const sweep of ["branch", "branchless"]) {
     assertTwinKept(w, wt, name, sweep, tip, run,
       new RegExp(`^pair test failed — cannot replay commit ${tip} onto ${landed}\\^: fatal: unable to read tree \\(deadbeef\\)$`));
   });
+
+  test(`a pair test that cannot compute the tip's own patch ids is kept by the ${sweep} sweep with git's own words (#4185)`, (t) => {
+    // The same rebase-merged claim, with only the tip-side `diff-tree`
+    // failing: the base-side call runs first and passes, and the shim fails
+    // the call after it, so the reason must name the commits $base lacks.
+    const w = repo(t);
+    seedTwin(w);
+    const name = "feature/tip-ids-fail";
+    const wt = twinClaim(w, name);
+    const c1 = twinEdit(wt, BLOCK1, "C", "block 1");
+    git(wt, "push", "-q", "-u", "origin", name);
+    twinEdit(w, 1, "TOP", "main moves");
+    git(w, "cherry-pick", c1);
+    const tip = endTwinClaim(w, wt, name, sweep);
+    const bin = failOnlyShim(t, `[ "$1" = diff-tree ] && { [ -e "$0.passed" ] || { : > "$0.passed"; false; }; }`, ["fatal: bad object deadbeef"], 128);
+
+    const run = runReap(w, ["--apply"], withShim(bin));
+    assert.equal(existsSync(join(bin, "git.passed")), true, "the base-side diff-tree must have run before the one that failed");
+    assertShimFired(bin, "the tip-side diff-tree must have been the probe that failed", /^diff-tree --stdin -p$/m);
+    assertTwinKept(w, wt, name, sweep, tip, run,
+      /^pair test failed — cannot compute the patch ids of the commits origin\/main lacks: fatal: bad object deadbeef$/);
+  });
+
+  test(`a commit whose patch id no commit on the base carries is kept by the ${sweep} sweep, with a reason (#4185)`, (t) => {
+    // `git cherry` reads the claim's commit `-`, and the `=` listing the pair
+    // test pairs from answers with no commit at all, so no candidate carries
+    // the commit's patch id.
+    const w = repo(t);
+    seedTwin(w);
+    const name = "feature/no-candidate";
+    const wt = twinClaim(w, name);
+    const c1 = twinEdit(wt, BLOCK1, "C", "block 1");
+    git(wt, "push", "-q", "-u", "origin", name);
+    twinEdit(w, 1, "TOP", "main moves");
+    git(w, "cherry-pick", c1);
+    const tip = endTwinClaim(w, wt, name, sweep);
+    const bin = failOnlyShim(t, `[ "$1" = rev-list ] && [ "$2" = --cherry-mark ]`, [], 0);
+
+    const run = runReap(w, ["--apply"], withShim(bin));
+    assertShimFired(bin, "the `=` listing must have been the probe that answered empty", new RegExp(`^rev-list --cherry-mark --left-only --no-merges \\S+\\.\\.\\.${tip}$`, "m"));
+    assertTwinKept(w, wt, name, sweep, tip, run,
+      new RegExp(`^commit ${tip} reads patch-equivalent, but no commit on origin/main carries its patch id$`));
+  });
 }
