@@ -1585,6 +1585,70 @@ test("every escalated finding must be answered in the one run, and the refusal n
   refusedAnswers(f, ["--send-back", "survived[0]"], /survived\[1\] has no answer/);
 });
 
+test("a ledger write that fails while recording answers names the answers it carried, exits 2 and leaves the ledger byte-identical", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root writes every directory");
+  const f = fixture(t);
+  deferOutside(f, ["src/b.js"]);
+  escalated(f.check());
+  const before = ledgerText(f);
+  chmodSync(f.dir, 0o555);
+  let r;
+  try {
+    r = recordAnswers(f, ["--uphold", "survived[0]"]);
+  } finally {
+    chmodSync(f.dir, 0o755);
+  }
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /could not write the escalation answers and dispositions-ok=fix-pr-40:run-Rv40Aa01 onto row #/);
+  assert.equal(ledgerText(f), before);
+});
+
+test("a later member's answers keep the answers an earlier member recorded on the same review", (t) => {
+  const f = fixture(t);
+  f.writeReview({ ...f.review, counts: { ...f.review.counts, survived: 3 }, survived: [...f.review.survived, { severity: "important", file: "src/a.js", line: 13, claim: "c", evidence: "e" }] });
+  const first = f.baseEntries();
+  first[0] = f.entry("survived", 0, OUTSIDE);
+  first[1] = f.entry("survived", 1, OUTSIDE);
+  first.splice(2, 0, f.entry("survived", 2));
+  f.writeRecord(first);
+  escalated(f.check());
+  mismatch(recordAnswers(f, ["--uphold", "survived[0]", "--send-back", "survived[1]"]));
+  retry(f);
+  // The retry applies the sent-back survived[1], defers the upheld survived[0]
+  // again, and escalates survived[2], which nobody has answered yet.
+  const second = f.baseEntries();
+  second[0] = f.entry("survived", 0, OUTSIDE);
+  second[1] = f.entry("survived", 1);
+  second.splice(2, 0, f.entry("survived", 2, OUTSIDE));
+  f.writeRecord(second, f.head, "fix-pr-40-b");
+  const e = f.check("fix-pr-40-b");
+  escalated(e);
+  assert.deepEqual(e.json.escalations.map((x) => `${x.bucket}[${x.index}]`), ["survived[2]"]);
+  const r = recordAnswers(f, ["--uphold", "survived[2]"], "fix-pr-40-b");
+  okVerdict(r);
+  assert.ok(f.row().includes(`dispositions-ok=fix-pr-40-b:${f.run}`), f.row());
+});
+
+test("a malformed escalation-answer token on the row answers nothing and is named on stderr", (t) => {
+  const f = fixture(t);
+  deferOutside(f, ["src/b.js"]);
+  escalated(f.check());
+  const bad = `escalation-answer=${f.run}:survived[0]:Sent-Back`;
+  const p = join(f.dir, "ledger.md");
+  writeFileSync(p, ledgerText(f).split("\n").map((l) => (l.includes("dispositions-escalate=") ? `${l} · ${bad}` : l)).join("\n"));
+  const r = f.check();
+  escalated(r);
+  assert.match(r.stderr, new RegExp(`^dispositions-check: ignoring malformed token ${bad.replace(/[[\]]/g, "\\$&")} on PR #40's row — it answers nothing$`, "m"));
+  // Control: a well-formed answer on the row is read and never named.
+  const clean = fixture(t);
+  deferOutside(clean, ["src/b.js"]);
+  escalated(clean.check());
+  okVerdict(recordAnswers(clean, ["--uphold", "survived[0]"]));
+  const again = clean.check();
+  okVerdict(again);
+  assert.doesNotMatch(again.stderr, /ignoring malformed token/);
+});
+
 test("the answer flags refuse with no ledger: standalone, --no-ledger, or a --ledger naming no file — and no ledger is touched", (t) => {
   const f = fixture(t);
   const own = seedOwnLedger(f);

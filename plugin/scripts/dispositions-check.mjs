@@ -223,7 +223,7 @@ import { isCLI } from "./is-cli.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { readLabelMap } from "./label-map.mjs";
-import { parseMember, memberTokens, rowNums, dispositionsToken, escalationAnswers, firstReview, prTokens } from "./ledger-grammar.mjs";
+import { parseMember, memberTokens, rowNums, dispositionsToken, escalationAnswerToken, escalationAnswers, firstReview, prTokens } from "./ledger-grammar.mjs";
 import { deriveRun, LedgerError } from "./fleet-tick.mjs";
 import { VERDICT_SCHEMA } from "./review-core.mjs";
 
@@ -716,13 +716,6 @@ export function withVerdict(rowText, token) {
   return folded === "" ? token : `${folded} · ${token}`;
 }
 
-// The row text with each of `tokens` — escalation answers — appended as
-// ` · <token>`, the way `ledger.mjs token` appends one.
-export function withAnswers(rowText, tokens) {
-  const text = String(rowText).trim();
-  return tokens.length === 0 ? text : `${text} · ${tokens.join(" · ")}`;
-}
-
 // Whether a fix-applier on PR `pr` with a lower retry suffix than `member`
 // already has a mismatch or escalate on the ledger for review `run` — on any
 // row that resolves to the PR, since a row can be split. An unchecked verdict
@@ -996,10 +989,17 @@ function main() {
       }
     }
     // Every record judged against this review reads the answers recorded for it.
-    answers = escalationAnswers(prTokens(data.rows, pr), run);
+    // A token that only looks like one answers nothing, and says so.
+    const tokens = prTokens(data.rows, pr);
+    answers = escalationAnswers(tokens, run);
+    for (const t of tokens) {
+      if (t.startsWith("escalation-answer=") && escalationAnswerToken(t) === null) {
+        console.error(`${NAME}: ignoring malformed token ${t} on PR #${pr}'s row — it answers nothing`);
+      }
+    }
     // Charges are required only on the record answering the PR's first
     // review; this record answers `run`, so `run` counts as answered.
-    charges = firstReview(prTokens(data.rows, pr), [run])?.run === run;
+    charges = firstReview(tokens, [run])?.run === run;
     reviewPath = join(scratch, `pr${pr}`, run, "review.json");
   }
   let review;
@@ -1072,7 +1072,7 @@ function main() {
     }
     answers = new Map([...answers, ...listed]);
     judged = judge(answers);
-    recorded = [...listed].sort(([a], [b]) => byAddress(a, b));
+    recorded = open.map((a) => [a, listed.get(a)]);
   }
   const { violations, escalations, unchecked } = judged;
   // No ledger, no row: the exit status below is the verdict, and with no
@@ -1092,9 +1092,10 @@ function main() {
     const key = row.split(/\s/)[0];
     if (!/^#[0-9]+$/.test(key)) die(`the row carrying ${member.name} has no #<n> key for \`ledger.mjs row\` to rewrite it by: ${row}`);
     const text = row.slice(key.length).trim();
-    const updated = withVerdict(withAnswers(text, recorded.map(([a, answer]) => `escalation-answer=${run}:${a}:${answer}`)), token);
+    const answerTokens = recorded.map(([a, answer]) => `escalation-answer=${run}:${a}:${answer}`);
+    const updated = withVerdict([text, ...answerTokens].join(" · "), token);
     if (updated === text) console.error(`    ${member.name}: row ${key} already carries ${token} — not written again`);
-    else runLedger(ledgerFile, ["row", key, updated], `write ${token} onto row ${key}`);
+    else runLedger(ledgerFile, ["row", key, updated], `write ${recorded.length > 0 ? `the escalation answers and ${token}` : token} onto row ${key}`);
   }
   if (recorded.length > 0) {
     console.error(`${member.name}: recorded the maintainer's escalation answers on review ${run} — ${recorded.map(([a, answer]) => `${a} ${answer === "sent-back" ? "sent back" : answer}`).join(", ")}`);

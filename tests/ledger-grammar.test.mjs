@@ -774,6 +774,13 @@ test("escalationAnswerToken refuses anything that is not one whole answer", () =
   }
 });
 
+test("escalationAnswerToken reads only a string, never what a value stringifies to", () => {
+  const answer = `escalation-answer=${ANSWER_RUN}:survived[0]:upheld`;
+  assert.notEqual(escalationAnswerToken(answer), null, "control: the same text as a string is an answer");
+  assert.equal(escalationAnswerToken({ toString: () => answer }), null);
+  assert.equal(escalationAnswerToken(new String(answer)), null);
+});
+
 test("an escalation answer is no dispositions verdict, and a verdict is no answer", () => {
   const answer = `escalation-answer=${ANSWER_RUN}:survived[0]:upheld`;
   assert.equal(dispositionsToken(answer), null);
