@@ -14,7 +14,7 @@ supported ([ADR 0009](adr/0009-supported-platforms-are-macos-linux-wsl.md)). All
 | Binary | Floor | Check |
 |---|---|---|
 | `node` | `>=20.11.0` | `node -v` |
-| `git` | `>= 2.38` | `git --version` |
+| `git` | `>= 2.40` | `git --version` |
 | `gh` | `>= 2.94.0` | `gh --version` |
 | `jq` | any | `jq --version` |
 | `python3` | any 3.x | `python3 -c 'import json'` |
