@@ -35,7 +35,7 @@
 //
 // What this file does NOT pin: per-site behaviour, or that EVERY git-naming
 // line in a COVERED file individually reaches `gitEnv(`. That lives in each
-// file's own test file, behaviourally — ledger.test.mjs, pr-overlap.test.mjs,
+// file's own test file, behaviourally — ledger.test.mjs,
 // repo-root.test.mjs, staleness.test.mjs — where a mutation
 // that deletes any ONE of a multi-site file's scrub calls (repo-root.mjs
 // carries three separate ones) reds exactly the fixture built for that site
@@ -155,8 +155,6 @@ const COVERED_MJS = {
   // named git call sites (`rev-parse --show-toplevel`, then three `-C root`
   // calls) — one scrub for the whole set.
   "staleness.mjs": 1,
-  // ONE spawn primitive, `trackedBasenameCounts()`'s own `git ls-files -z`.
-  "pr-overlap.mjs": 1,
   // ONE git-invoking primitive, the step-2 probe `rev-parse --resolve-git-dir`
   // in resolveWorkspace(), scrubbed with `gitEnv()`. The count is 2 because
   // countGitEnvCalls() also matches the export's own `gitEnv(` declaration.

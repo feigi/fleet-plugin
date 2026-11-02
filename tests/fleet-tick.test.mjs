@@ -20,7 +20,7 @@ const state = (over = {}) => ({
   heads: [], supply: 0, shortlistStatus: "ok", refresh: null, dropped: [], pulls: new Map(),
   reviewsLive: 0, fixLive: 0, fixDue: [], reviewDue: [], unlabelled: [], conflicts: [], conflictEscalate: [],
   prClosed: [], prUnchecked: [],
-  mergeBotLive: 0, mergeQueue: 0, mergeHeld: 0, mergeConflictHeld: 0, mergeParked: [],
+  mergeBotLive: 0, mergeQueue: 0, mergeHeld: 0, mergeParked: [],
   mainCheckout: { state: "clean" }, phase0: { held: false, line: null, session: null },
   ...over,
 });
@@ -1096,15 +1096,15 @@ test("deriveRun: a label-off naming no finisher-pr member refuses the ledger, na
     assert.throws(() => run({ rows: [`${LABELLED} ${tok}`] }, [pr(40, [], [10])]), (e) => e.message.includes(`'${tok}'`), tok);
   }
 });
-test("deriveRun: merge holds are held-behind rows whose premise PR is still open", () => {
+test("deriveRun: a held-behind word on a row holds no merge, its lower PR open or not", () => {
   const r = run({
     rows: [
       "#10 impl-10=PR#40 → PR#40 · held-behind:#38",
-      "#11 impl-11=PR#41 → PR#41 · held-behind:#39",
+      "#11 impl-11=PR#41 → PR#41 · held-behind-#39",
     ],
   }, [pr(38), pr(40, ["ready-to-merge"]), pr(41, ["ready-to-merge"])]);
   assert.equal(r.mergeQueue, 2);
-  assert.equal(r.mergeHeld, 1, "#39 is no longer open, so #41's hold has lifted");
+  assert.equal(r.mergeHeld, 0, "#38 is still open, and #40 is not held behind it");
 });
 
 // #2064: merge-bot's `conflict-hold:#<pr>` — a conflict its local-rebase
@@ -1136,15 +1136,12 @@ test("deriveRun: a conflict hold is fix-due until a fix-applier after it lands, 
 test("deriveRun: a queued PR under a conflict hold is merge-held until its fix-applier SETTLES — dispatch alone does not lift it", () => {
   const at = (tail) => run({ rows: [HOLD_ROW(40, tail)] }, [pr(40, ["ready-to-merge"])]);
   const held = at("conflict-hold:#40");
-  assert.deepEqual([held.fixDue, held.mergeQueue, held.mergeHeld, held.mergeConflictHeld], [[40], 1, 1, 1]);
+  assert.deepEqual([held.fixDue, held.mergeQueue, held.mergeHeld], [[40], 1, 1]);
   const working = at("conflict-hold:#40 · fix-pr-40");
   assert.deepEqual(working.fixDue, [], "a live fix-applier is not re-offered");
   assert.equal(working.mergeHeld, 1, "…and the merge bot does not re-select a PR still being fixed");
   const landed = at("conflict-hold:#40 · fix-pr-40=applied:def5678");
-  assert.deepEqual([landed.fixDue, landed.mergeHeld, landed.mergeConflictHeld], [[], 0, 0]);
-  // Both sources on one PR count it once.
-  const both = run({ rows: [HOLD_ROW(40, "held-behind:#38 · conflict-hold:#40")] }, [pr(38), pr(40, ["ready-to-merge"])]);
-  assert.equal(both.mergeHeld, 1);
+  assert.deepEqual([landed.fixDue, landed.mergeHeld], [[], 0]);
 });
 
 // #3608: the park `fleet-event.mjs merge-bot-report` writes off a main-gain
@@ -1200,7 +1197,7 @@ test("deriveRun: a park never blocks the queue once its PR is unlabelled, merged
   assert.deepEqual(run({ rows: [PARK_ROW(40)] }, [pr(40)]).mergeParked, [], "no label, not queued");
   const gone = run({ rows: [PARK_ROW(40)] }, [pr(41, ["ready-to-merge"])]);
   assert.deepEqual([gone.mergeQueue, gone.mergeParked], [1, []], "a merged or closed PR leaves the open list and the queue");
-  const both = run({ rows: [PARK_ROW(40, `held-behind:#38 · ${PARK}`)] }, [pr(38), pr(40, ["ready-to-merge"])]);
+  const both = run({ rows: [PARK_ROW(40, `conflict-hold:#40 · ${PARK}`)] }, [pr(40, ["ready-to-merge"])]);
   assert.deepEqual([both.mergeQueue, both.mergeHeld, both.mergeParked], [1, 1, []]);
   const mixed = run({ rows: [PARK_ROW(40)] }, [pr(40, ["ready-to-merge"]), pr(41, ["ready-to-merge"])]);
   assert.deepEqual([mixed.mergeQueue, mixed.mergeHeld, mixed.mergeParked], [2, 0, [{ pr: 40, reason: MG }]]);
@@ -1209,7 +1206,7 @@ test("deriveRun: a park never blocks the queue once its PR is unlabelled, merged
 test("deriveRun: a conflict hold with a live review= in flight is not re-offered either — the merge hold still counts it", () => {
   const r = run({ rows: ["#10 impl-10=PR#350 → PR#350 · conflict-hold:#350 review=wf:x"] }, [pr(350, ["ready-to-merge"])]);
   assert.deepEqual(r.fixDue, [], "a review already running claims the row the same as a live fix-applier does");
-  assert.deepEqual([r.mergeQueue, r.mergeHeld, r.mergeConflictHeld], [1, 1, 1]);
+  assert.deepEqual([r.mergeQueue, r.mergeHeld], [1, 1]);
 });
 
 test("deriveRun: a fix-applier settled in ## Dispatched clears a conflict hold even if a later row rewrite drops the =outcome suffix back to bare", () => {
@@ -1217,14 +1214,14 @@ test("deriveRun: a fix-applier settled in ## Dispatched clears a conflict hold e
     rows: [HOLD_ROW(40, "conflict-hold:#40 · fix-pr-40")],
     dispatched: ["fix-pr-40=applied:def5678"],
   }, [pr(40, ["ready-to-merge"])]);
-  assert.deepEqual([r.fixDue, r.mergeHeld, r.mergeConflictHeld], [[], 0, 0],
+  assert.deepEqual([r.fixDue, r.mergeHeld], [[], 0],
     "the member settled in ## Dispatched, not the row's own stale bare copy");
 });
 
 test("deriveRun: a redundant re-hold on an already-unresolved conflict does not re-offer the PR to a second fix-applier while the first is live", () => {
   const r = run({ rows: [HOLD_ROW(40, "conflict-hold:#40 · fix-pr-40 · conflict-hold:#40")] }, [pr(40, ["ready-to-merge"])]);
   assert.deepEqual(r.fixDue, [], "a live fix-applier working the first hold is not re-offered by a duplicate hold token");
-  assert.deepEqual([r.mergeHeld, r.mergeConflictHeld], [1, 1], "still held — the duplicate hold changes nothing about the merge gate");
+  assert.equal(r.mergeHeld, 1, "still held — the duplicate hold changes nothing about the merge gate");
 });
 
 // #2328: a fix-applier dispatched on an unresolved hold is the conflict one —
@@ -1495,7 +1492,7 @@ test("deriveRun: a settled stray of a PR-bound member on another PR's row does n
 test("deriveRun: a conflict hold is read in either spelling and on a PR-keyed row", () => {
   assert.deepEqual(run({ rows: [HOLD_ROW(40, "conflict-hold-#40")] }, [pr(40)]).fixDue, [40]);
   assert.deepEqual(run({ rows: ["#350 review=wf:x reviewed=abc1234:0/1/0:run-abc1234r · conflict-hold:#350"] }, [pr(350)]).fixDue, [350]);
-  // `held-behind` rows and prose that merely mentions a conflict are not holds.
+  // Prose that merely mentions a conflict is not a hold.
   const prose = run({ rows: [HOLD_ROW(40, "(conflict vs #38, resolved by rebase-pr-40) merge-conflict-resolved:ef82065a")] }, [pr(40, ["ready-to-merge"])]);
   assert.deepEqual([prose.fixDue, prose.mergeHeld], [[], 0]);
 });
@@ -1800,11 +1797,10 @@ test("deriveRun: a newest impl settled blocked, bailed, released, or PR#M with P
   }
 });
 
-test("deriveRun: held and halted PRs count — conflict-hold, held-behind, halted:past-pin, dispositions-escalate, finisher failed, finisher killed", () => {
+test("deriveRun: held and halted PRs count — conflict-hold, halted:past-pin, dispositions-escalate, finisher failed, finisher killed", () => {
   const rowWith = (tail) => `#10 impl-10=PR#40 → PR#40 · reviewed=abc1234:0/0/0:run-abc1234r · ${tail}`;
   for (const [what, tail, extra] of [
     ["conflict-hold", "conflict-hold:#40", {}],
-    ["held-behind", "held-behind:#38", {}],
     ["halted:past-pin", "finisher-pr-40=halted:past-pin", {}],
     ["dispositions-escalate", "fix-pr-40=applied:def5678 · dispositions-escalate=fix-pr-40:run-abc1234r", {}],
     ["finisher failed", "finisher-pr-40=failed", {}],
@@ -2459,20 +2455,18 @@ test("CLI: drain holds the implementer row, stops refreshing, and keeps the revi
   assert.match(r.stdout, /^merge-bot {4}0\/1 → DISPATCH merge-bot /m);
 });
 
-test("CLI: merge-bot liveness and holds come off the ledger", () => {
+test("CLI: merge-bot liveness comes off the ledger, and a held-behind word on a queued PR's row holds nothing while its lower PR is open", () => {
   const prs = [pr(38), pr(40, ["ready-to-merge"])];
   const live = runCli([], { ledger: { dispatched: ["merge-bot-1"] }, shortlist: shortlistText([]), prs });
   assert.match(live.stdout, /^merge-bot {4}1\/1 → AT CAP/m);
-  const held = runCli([], {
-    ledger: { rows: ["#10 impl-10=PR#40 → PR#40 · held-behind:#38"], dispatched: ["merge-bot-1=done"] },
-    shortlist: shortlistText([]), prs,
-  });
-  assert.match(held.stdout, /^merge-bot {4}0\/1 → HOLD {3}\(merge-queue=1 held=1/m);
-  const lifted = runCli([], {
-    ledger: { rows: ["#10 impl-10=PR#40 → PR#40 · held-behind:#38"], dispatched: ["merge-bot-1=done"] },
-    shortlist: shortlistText([]), prs: [pr(40, ["ready-to-merge"])],
-  });
-  assert.match(lifted.stdout, /^merge-bot {4}0\/1 → DISPATCH merge-bot {3}\(merge-queue=1 held=0\)/m);
+  for (const word of ["held-behind:#38", "held-behind-#38"]) {
+    const r = runCli([], {
+      ledger: { rows: [`#10 impl-10=PR#40 → PR#40 · ${word}`], dispatched: ["merge-bot-1=done"] },
+      shortlist: shortlistText([]), prs,
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /^merge-bot {4}0\/1 → DISPATCH merge-bot {3}\(merge-queue=1 held=0\)$/m, word);
+  }
 });
 
 // A merge bot's settle records each refusal as a `## Ruled` line, and the
@@ -2513,20 +2507,6 @@ test("CLI: a main-gain park holds the merge-bot row until the PR's head or body 
     /^merge-bot {4}0\/1 → DISPATCH merge-bot {3}\(merge-queue=1 held=0\)$/m, "an edited body lifts the park");
 });
 
-test("CLI: a merge hold accepts both the held-behind:#M and held-behind-#M spellings", () => {
-  const colon = runCli([], {
-    ledger: { rows: ["#10 impl-10=PR#40 → PR#40 · held-behind:#38"], dispatched: ["merge-bot-1=done"] },
-    shortlist: shortlistText([]), prs: [pr(38), pr(40, ["ready-to-merge"])],
-  });
-  assert.match(colon.stdout, /^merge-bot {4}0\/1 → HOLD {3}\(merge-queue=1 held=1/m);
-  const hyphen = runCli([], {
-    ledger: { rows: ["#11 impl-11=PR#41 → PR#41 · held-behind-#38"], dispatched: ["merge-bot-1=done"] },
-    shortlist: shortlistText([]), prs: [pr(38), pr(41, ["ready-to-merge"])],
-  });
-  assert.match(hyphen.stdout, /^merge-bot {4}0\/1 → HOLD {3}\(merge-queue=1 held=1/m,
-    "run-merge-bot.md's own documented report format (#38) must be recognized too");
-});
-
 test("CLI: a conflict hold prints DISPATCH fix-pr and holds the merge bot until the fix-applier settles", () => {
   const tick = (tail, dispatched) => runCli([], {
     ledger: { rows: [`#10 impl-10=PR#40 → PR#40 · reviewed=abc1234:0/2/0:run-abc1234r · ${tail}`], dispatched: ["merge-bot-1=done", ...dispatched] },
@@ -2534,7 +2514,7 @@ test("CLI: a conflict hold prints DISPATCH fix-pr and holds the merge bot until 
   }).stdout;
   const held = tick("conflict-hold:#40", []);
   assert.match(held, /^reviewers +0\/2 → DISPATCH fix-pr PR#40 /m);
-  assert.match(held, /^merge-bot {4}0\/1 → HOLD {3}\(merge-queue=1 held=1 — every queued candidate is held behind a lower PR or on a merge conflict no fix-pr has cleared\)$/m);
+  assert.match(held, /^merge-bot {4}0\/1 → HOLD {3}\(merge-queue=1 held=1 — every queued candidate is held on a merge conflict no fix-pr has cleared\)$/m);
   const working = tick("conflict-hold:#40 · fix-pr-40", ["fix-pr-40"]);
   assert.doesNotMatch(working, /DISPATCH fix-pr/);
   assert.match(working, /^merge-bot {4}0\/1 → HOLD {3}\(merge-queue=1 held=1/m);
@@ -4211,10 +4191,10 @@ test("CLI: --fold-unchanged does not fold when the rows change, even with nothin
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const path = join(dir, "heartbeat.json");
   runCli(["--fold-unchanged", "--state", path], IDLE);
-  // A queued candidate, held behind a lower PR: still nothing to act on.
+  // A queued candidate, parked on a main-gain refusal: still nothing to act on.
   const held = {
-    ...IDLE, ledger: { rows: ["#10 impl-10=PR#40 → PR#40 · held-behind:#38 · tier-ok=impl-10:fleet-implementer"] },
-    prs: [pr(38, [], [], HEAD_B, "MERGEABLE", "", { author: { login: "stranger" } }), pr(40, ["ready-to-merge"])],
+    ...IDLE, ledger: { rows: [`#10 impl-10=PR#40 → PR#40 · ${PARK} · tier-ok=impl-10:fleet-implementer`] },
+    prs: [pr(40, ["ready-to-merge"])],
   };
   const second = runCli(["--fold-unchanged", "--state", path], held);
   assert.match(second.stdout, /^merge-bot {4}0\/1 → HOLD\b/m);
@@ -5144,7 +5124,7 @@ const validReport = (name) => {
   if (/^impl-/.test(name)) return { member: name, outcome: "pr", pr: 5, head: SHA40, branch: "b", sizing: null, bailCause: null, bailDetail: null, confirmation: [] };
   if (/^fix-pr-/.test(name)) return { member: name, outcome: "no-op", head: SHA40, branch: "b", applied: [], deferred: [], filed: [], unrecorded: [], dispositionsRecord: null, testRun: null, confirmation: [] };
   if (/^finisher-pr-/.test(name)) return { member: name, outcome: "labelled", cause: null, evidence: null, pin: SHA40, labelsReadBack: [], kill: null, filed: [], unrecorded: [], confirmation: [] };
-  if (/^merge-bot-/.test(name)) return { member: name, merged: [], held: [], conflictHold: [], refused: [], branchKept: [] };
+  if (/^merge-bot-/.test(name)) return { member: name, merged: [], conflictHold: [], refused: [], branchKept: [] };
   return { member: name };
 };
 // A scratch root of its own holding `<root>/reports/<name>.json` for each

@@ -669,6 +669,16 @@ const CHANGED = [
     "A missing or unreadable `.fleet/cost-guard.json` routes the default cell only (`REASON=guard-missing`), burn-in included, and `REASON` other than `ok` goes on the row as `route=<REASON>`, nowhere else.",
     "On the ledger the whole line, `REASON` with it, is the Pull's `## Routed` entry; a row carries no `route=` (an older row's `route=<REASON>` still reads).",
   ],
+  // The merge bot holds no PR behind a lower one (#4029): a merge hold is a
+  // conflict hold, and the example row carries no held-behind token.
+  [
+    "`HOLD (…)` — the row is held and says why: draining, a tier mismatch, an unchecked tier, the In-flight bound reached (`HOLD (in-flight <n>/<B>)` — nothing to do unless its detail names a replacement to dispatch, else a merge brings n below B), or every queued merge candidate held behind a lower PR or on a conflict hold no fix-applier has cleared.",
+    "`HOLD (…)` — the row is held and says why: draining, a tier mismatch, an unchecked tier, the In-flight bound reached (`HOLD (in-flight <n>/<B>)` — nothing to do unless its detail names a replacement to dispatch, else a merge brings n below B), or every queued merge candidate held on a conflict hold no fix-applier has cleared.",
+  ],
+  [
+    "``` #<t1> impl-<t1>=PR#<p1> → PR#<p1> → MERGED 73b356de #<t2> impl-<t2>=PR#<p2> → PR#<p2> · fix-pr-<p2> · ports=16<t2> · ruled:6-applies · held-behind:#<t3> #<t3> impl-<t3> · tier=task-high #<t4> excluded · behind-pr:#<p2> #<t5> excluded · behind-issue:#<t3> ```",
+    "``` #<t1> impl-<t1>=PR#<p1> → PR#<p1> → MERGED 73b356de #<t2> impl-<t2>=PR#<p2> → PR#<p2> · fix-pr-<p2> · ports=16<t2> · ruled:6-applies #<t3> impl-<t3> · tier=task-high #<t4> excluded · behind-pr:#<p2> #<t5> excluded · behind-issue:#<t3> ```",
+  ],
 ];
 
 // Sentences deleted outright, each named with what stands in its place.
@@ -790,7 +800,9 @@ const DELETED = [
   // The Close-out PR's exemption: closeout.mjs finish merges that PR itself.
   ["**The run's own artifact PR is exempt, and it is exempt because this invariant does not reach it:** what the line forbids is a fleet member signing off its own ticket work, which presupposes an issue, an implementer, a `review-pr` run and a finisher, and the metrics PR you author has none of them.", "nothing: closeout.mjs finish merges the Close-out PR"],
   ["Label and merge that one yourself instead of re-deriving a blocker from this line and stranding the rows behind it.", "nothing: closeout.mjs finish merges the Close-out PR"],
-  ["The exemption belongs to the run that authors the PR and does not outlive it: one still open when the run ends is a PR a prior run left open, which phase 0 folds into the next run's review queue as ticket work — and a PR is not exempt from being wrong, only from waiting on a reviewer no phase of this run will ever dispatch against it.", "references/close-out.md's End of run step 3: a PR finish leaves open is the next run's"]
+  ["The exemption belongs to the run that authors the PR and does not outlive it: one still open when the run ends is a PR a prior run left open, which phase 0 folds into the next run's review queue as ticket work — and a PR is not exempt from being wrong, only from waiting on a reviewer no phase of this run will ever dispatch against it.", "references/close-out.md's End of run step 3: a PR finish leaves open is the next run's"],
+  // The merge bot holds no PR behind a lower one (#4029).
+  ["| Merge bot hits the hold rule | Report `held-behind-#<lower>`, PR stays queued |", "nothing: the merge bot holds no PR behind a lower one"],
 ];
 
 const oldSentences = () => counted(sentencesOf(readFileSync(FIXTURE, "utf8")));

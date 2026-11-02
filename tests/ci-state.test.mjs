@@ -1536,9 +1536,7 @@ test("the numeric shape board.mjs sends is accepted, and the payload names its P
 // NUMBER, so `!pr` is true for a zero the caller plainly GAVE, and this file's
 // own usage die above would then answer it with "--pr is required" instead of
 // letting gh answer as no such PR. Companion to arg.test.mjs's identical row
-// for diff-stats.mjs and pr-overlap.mjs's own for `--a`/`--b` — #878's own
-// comment names all three callers as sharing this contract, and only
-// diff-stats.mjs had this row before.
+// for diff-stats.mjs, which had this row first.
 //
 // `strictEqual`, same reason as the "42" test above: a payload reading `pr`
 // back as the string "0" would satisfy a loose check while breaking every

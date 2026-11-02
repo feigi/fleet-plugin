@@ -704,7 +704,7 @@ const MEASURED_IMPL = (member) => ({
   member, outcome: "pr", pr: 5, head: HEX, branch: "b",
   sizing: { verdict: "light", signal: "one file", ranBeforePr: true }, bailCause: null, bailDetail: null, confirmation: [],
 });
-const EMPTY_BOT = (member) => ({ member, merged: [], held: [], conflictHold: [], refused: [], branchKept: [] });
+const EMPTY_BOT = (member) => ({ member, merged: [], conflictHold: [], refused: [], branchKept: [] });
 const putReport = (scratch, member, body) => {
   mkdirSync(join(scratch, "reports"), { recursive: true });
   writeFileSync(join(scratch, "reports", `${member}.json`), typeof body === "string" ? body : JSON.stringify(body));

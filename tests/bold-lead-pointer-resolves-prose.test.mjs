@@ -291,7 +291,7 @@ const tied = cites.flatMap((c) => c.names.map((name) => ({ ...c, name })));
 
 // Measured when #3627 was implemented; bump only when a cite or tied name is
 // genuinely retired from the tree, never to silence a red.
-const PINNED_CITES = 34;
+const PINNED_CITES = 29;
 const PINNED_TIED_NAMES = 9;
 
 test("every cite of a run-team file in a script comment or command file is still recognised", () => {

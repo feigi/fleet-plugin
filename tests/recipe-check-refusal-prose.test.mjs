@@ -83,6 +83,6 @@ test("run-team's Failure handling rows for a blocked implementer and a fix-appli
   const blocked = skill.between("| Implementer blocked or ambiguous *mid-implementation* |", "| `review-pr` workflow throws", "the implementer-blocked row").text;
   assert.match(blocked, Pin.phrase("the ticket is not In flight and waits for a human;"));
   assert.match(blocked, Pin.phrase("its `NEED derive-recipe` is phase 0's mid-run trigger"));
-  const failed = skill.between("| Reviewer, fix-applier or red-check fixer cannot reach green |", "| Merge bot hits the hold rule |", "the cannot-reach-green row").text;
+  const failed = skill.between("| Reviewer, fix-applier or red-check fixer cannot reach green |", "| Merge bot finds the worktree ahead of the PR head", "the cannot-reach-green row").text;
   assert.match(failed, Pin.phrase("the last two settle `failed`; a wake's `NEED derive-recipe` is phase 0's mid-run trigger"));
 });
