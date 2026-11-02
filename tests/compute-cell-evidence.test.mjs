@@ -193,6 +193,18 @@ test("no cost guard: with no receipt, it says so; a receipt whose metrics step h
     ["no metrics refresh has run in the receipts here"]);
 });
 
+test("no cost guard: a metrics step whose at is no time has not run, and a dated step beside it is the one quoted", () => {
+  const why = "pr-cost.mjs --guard exited 1: pr-cost: untimed";
+  const dated = step("failed", "2026-10-28T08:00:00.000Z", "metrics-refresh: cost guard failed: dated");
+  for (const at of ["garbage", "", null, undefined]) {
+    const untimed = step("failed", at, `metrics-refresh: cost guard failed: ${why}`);
+    assert.deepEqual(noGuardNotes({ phase0: untimed, closeout: null }), ["no metrics refresh has run in the receipts here"], `phase 0 at ${JSON.stringify(at)}`);
+    assert.deepEqual(noGuardNotes({ phase0: null, closeout: untimed }), ["no metrics refresh has run in the receipts here"], `close-out at ${JSON.stringify(at)}`);
+    assert.deepEqual(noGuardNotes({ phase0: untimed, closeout: dated }), ["failed at 2026-10-28 08:00Z: dated"], `untimed phase 0 at ${JSON.stringify(at)}`);
+    assert.deepEqual(noGuardNotes({ phase0: dated, closeout: untimed }), ["failed at 2026-10-28 08:00Z: dated"], `untimed close-out at ${JSON.stringify(at)}`);
+  }
+});
+
 test("no cost guard: a refresh that succeeded and left no guard is quoted as it ran", () => {
   const phase0 = step("ok", "2026-10-28T08:00:00.000Z", "metrics-refresh.mjs ran\nmetrics-refresh: cost guard: verdict ok, pr-cost.mjs exit 0; .fleet/cost-guard.json computed 2026-10-28T08:00:00.000Z");
   assert.deepEqual(noGuardNotes({ phase0, closeout: null }), ["ran at 2026-10-28 08:00Z: verdict ok, pr-cost.mjs exit 0; .fleet/cost-guard.json computed 2026-10-28T08:00:00.000Z"]);
@@ -1036,4 +1048,16 @@ test("evidence favours: with no fit read, the failed refit is the side's one lab
 test("evidence favours: a fit whose computed_at is no time counts as not after the step, so the label shows", () => {
   const p = favours({ receipts: { phase0: failedAt("2026-10-28T08:00:00.000Z"), closeout: null }, preview: PREVIEW({ computed_at: "garbage" }) });
   assert.deepEqual(favoursOf(p).labels, [REFIT]);
+});
+
+test("evidence favours: a step whose at is no time has not run, so its failed line is no refit label and a dated step beside it is the newest", () => {
+  const untimedOut = refitOut("ENOSPC: no space left on device");
+  for (const at of ["garbage", "", null, undefined]) {
+    const untimed = failedAt(at, untimedOut);
+    assert.deepEqual(favoursOf(favours({ receipts: { phase0: untimed, closeout: null } })).labels, [], `phase 0 at ${JSON.stringify(at)}`);
+    assert.deepEqual(favoursOf(favours({ receipts: { phase0: null, closeout: untimed } })).labels, [], `close-out at ${JSON.stringify(at)}`);
+    const dated = failedAt("2026-10-28T08:00:00.000Z");
+    assert.deepEqual(favoursOf(favours({ receipts: { phase0: untimed, closeout: dated } })).labels, [REFIT], `untimed phase 0 at ${JSON.stringify(at)}`);
+    assert.deepEqual(favoursOf(favours({ receipts: { phase0: dated, closeout: untimed } })).labels, [REFIT], `untimed close-out at ${JSON.stringify(at)}`);
+  }
 });
