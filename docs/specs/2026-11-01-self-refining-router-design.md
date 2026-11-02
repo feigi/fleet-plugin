@@ -1,12 +1,12 @@
 # A self-refining Router: tickets group onto Cells, learned per repository
 
 Date: 2026-11-01
-Status: decided on map #4118 ("A self-refining grouping of tickets onto Cells, learned from each repository's own evidence"), 2026-11-01; accepted as ADR 0037; sliced in § 6 for the controller to file as `needs-triage` issues once the maintainer has reviewed this spec.
+Status: decided on map #4118 ("A self-refining grouping of tickets onto Cells, learned from each repository's own evidence"), 2026-11-01; accepted as ADR 0037; sliced in § 6; the slices are filed as `needs-triage` issues #4237–#4247 (PR #4236).
 Map: [A self-refining grouping of tickets onto Cells, learned from each repository's own evidence](https://github.com/feigi/fleet-plugin/issues/4118) (feigi/fleet-plugin#4118). Decision tickets: § 1.
 ADR: `docs/adr/0037-each-repository-routes-by-its-own-fit-tickets-group-by-evidence.md`.
 Amends: `docs/adr/0016-per-ticket-model-effort-routing.md` (decisions 1, 2 and 4, and its Guard section's retire condition and cumulative baseline); `docs/adr/0013-automatic-supply-relabel-by-cause.md` § 6's draw; `docs/specs/2026-09-28-model-effort-router-design.md` (R2–R5, § 5); `docs/specs/2026-10-27-cockpit-tabs-design.md` (§ 4–§ 5, the two-sided policy rows). Each is amended by its own slice (§ 6, slice S11), which writes the notes under the changed text.
 Relates to: ADR 0034 and `CONTEXT.md` (**Inert diff**, **Ticketless PR**); [Router numbers you can trust, plus a cost-or-speed choice](https://github.com/feigi/fleet-plugin/issues/3673) (figures per Cell generation, the quality floor, the adoption rule, the run's Objective: all hold here).
-Research: the eleven notes under `docs/research/` — `consumer-burn-in`, `cell-grid`, `fit-cadence`, `stratum-split`, `router-noise`, `router-inputs`, `self-refining-routing`, `fail-rate-drift`, `split-gate`, `split-looks`, `run-artifacts` — collected in draft PR [docs(research): the research behind the Router grouping map](https://github.com/feigi/fleet-plugin/pull/4172). Until that PR merges they are on branch `docs/research-map-4118`; § 4 cites each figure by its path.
+Research: the eleven notes under `docs/research/` — `consumer-burn-in`, `cell-grid`, `fit-cadence`, `stratum-split`, `router-noise`, `router-inputs`, `self-refining-routing`, `fail-rate-drift`, `split-gate`, `split-looks`, `run-artifacts` — collected in [docs(research): the research behind the Router grouping map](https://github.com/feigi/fleet-plugin/pull/4172) (merged); § 4 cites each figure by its path.
 Base tree: `origin/main` `b848c23a` (2026-11-01). Line numbers below are read against that tree and drift; re-grep before editing. Tickets quoted for their own line numbers read `e5040b9a`, which this tree has moved past by 22 commits; every number cited here was re-read at `b848c23a`.
 
 Cells are model roles paired with a thinking level. No model name is written into a Cell token, a definition or this spec: the model behind a role is data, kept per Cell generation.
@@ -266,59 +266,59 @@ What no note measured, and so what this spec does not claim:
 
 ## 6. Proposed slices
 
-Not filed. The controller files each as a `needs-triage` issue with a `Part of` line naming map #4118, ordered by native blocked-by links, after the maintainer reviews this spec. #4159, #4175 and #4176 are filed already and are blockers or companions, not slices.
+Filed as `needs-triage` issues, each with a `Part of #4118` line, ordered by native blocked-by links (the table at the end of this section). #4159, #4175 and #4176 were filed earlier and are blockers or companions, not slices. The issue number follows each slice's name.
 
-**S1. A tree-shaped table, read by `route`.**
+**S1 (#4237). A tree-shaped table, read by `route`.**
 - *Scope:* the table gains a tree of splits with a `cost` and a `speed` row on each node; `validateTable` accepts it; `route` walks the tree on the ticket's dispatch-time inputs, falls back to the node's row for a missing input, and prints the group's rule path in the Routing's `STRATUM`; `ruleStratum`, `HEAVY_BRIEF_CHARS`, `HEAVY_CRITERIA` and `STRATA` retire; the board card's Cell line prints the group's rule; the starting table is the one-node tree.
 - *Acceptance:* a one-node tree routes every ticket as `*` does today; a two-leaf fixture routes each side by its own row; a ticket missing the split's input follows the node's row; `ledger.mjs` refuses a malformed Routing line; `tests/ticket-router.test.mjs` and the board card tests are green with `ruleStratum` gone.
 - *Blocked by:* none.
 
-**S2. A definition for every Cell the grid can reach.**
+**S2 (#4238). A definition for every Cell the grid can reach.**
 - *Scope:* one `plugin/agents/fleet-implementer-<cell>.agent.md` for each of the 15 Cells (10 are missing), byte-identical bodies, `model: "@<role>:<level>"`; the Cell lists in the cockpit, the docs and the tests; `tier-roles.mjs --check` refuses a definition whose level the role's catalog does not list.
 - *Acceptance:* every Cell of 3 roles × `low`–`max` has a definition; `tier-roles.mjs --check` is green; the cockpit lists 15 Cells; the body-identity test covers all of them.
 - *Blocked by:* none.
 
-**S3. The phase-0 Fit routes the run.**
+**S3 (#4239). The phase-0 Fit routes the run.**
 - *Scope:* `metrics-refresh.mjs` writes the Fit, `.fleet/router-fit.json`, in place of the Preview fit: temp file and rename, the guard it used and each TSV's blob id recorded, a `fit: failed — <why>` line on failure that leaves the old file; `route` reads the Fit beside `--guard`, else the starting table, with a `REASON` naming the fallback; run-team's route call, phase-0 and close-out prose describe the Fit. One Fit per run.
 - *Acceptance:* a fixture run computes a Fit at phase 0 and its next `route` call uses it; a Fit that throws leaves the previous file, and the run routes by it; with no Fit file ever, by the starting table; a deleted guard still means `slow-high` with no draw; the Fit file is untracked; the recorded blob ids recompute the same Fit once the rows are on a commit.
 - *Blocked by:* S1.
 
-**S4. Burn-in over the starting Cells, with no stages.**
+**S4 (#4240). Burn-in over the starting Cells, with no stages.**
 - *Scope:* `STAGE2` and the `stage` field retire; `burn_in` is judged over the starting Cells only; a Cell added by exploration does not re-enter it; a role's model change re-enters it (unchanged).
 - *Acceptance:* a Fit with the three starting Cells at 20 merged each has `burn_in: false` whatever Cells exploration has added; `slow-medium` and `task-max` are never drawn by burn-in; a model change on a role restores burn-in for that Cell.
 - *Blocked by:* S1.
 
-**S5. Exploration in each group, and the assignment probability.**
+**S5 (#4241). Exploration in each group, and the assignment probability.**
 - *Scope:* the after-burn-in draw is uniform over the group's exploration Cells (§ 2.6), runnable and untripped; each Pull records its assignment probability in a new optional ticket-features column, written by `route` (§ 2.12 item 4); `FEATURE_COLUMNS` and the pending-file header handling take the column.
 - *Acceptance:* for `task-high` the candidates are `task-xhigh`, `task-medium`, `slow-medium` and `smol-xhigh`; a Cell the install cannot run is never a candidate; chain heads never explore and record probability 1 for the policy Cell; a burn-in Pull records 1 over the number of untripped starting Cells; an old pending file with no such column still appends.
 - *Blocked by:* S1, S2, S4.
 
-**S6. Time-matched comparisons for the rows, the floor and the guard.**
+**S6 (#4242). Time-matched comparisons for the rows, the floor and the guard.**
 - *Scope:* `judge`'s ranges and `underFloor`'s comparison are computed over the stretches (§ 2.5) in which both Cells were drawn, then pooled; `pr-cost.mjs`'s trip comparison uses the same function; the Cell generation rule is unchanged; the version cut applies once #4159's column exists.
 - *Acceptance:* on this repository's record `smol-high` is compared with `slow-high` only over the weeks both were drawn and reproduces a fail-rate gap near the 28 points [3.1, 50.0] the notes report; a shift added to every Cell at once leaves every verdict unchanged; a Cell that ran in one stretch is never judged against a base from other stretches.
 - *Blocked by:* S1 (and #4159 for the version cut).
 
-**S7. The split gate.**
+**S7 (#4243). The split gate.**
 - *Scope:* the tree search over the recorded inputs (§ 2.4): the shuffled null and the off-policy lower bound, with each Pull's recorded probability, both required; depth 2 at most; 20 merged PRs per candidate Cell on each side; standing after two consecutive Fits on the same input(s); merging back on one failure; the previous Fit's passes read from the last Fit file; a split judged on `cost`, both rows kept per group; the quality floor per row.
 - *Acceptance:* on this repository's 268 Pulls nothing splits; on a seeded fixture with a real flip worth 6.5% the split stands by the 37th run of 17 Pulls in 80% of histories; on a no-effect fixture no more than 15% of histories hold a chance split at some run and 1% at the end (the measured rates of `docs/research/split-looks.md`, with the ranges the notes give); a Fit that failed counts as no look.
 - *Blocked by:* S3, S5, S6.
 
-**S8. The stopping rule retires.**
+**S8 (#4244). The stopping rule retires.**
 - *Scope:* the hook's duty 2 and the `Withdraw exploration cell` issue, `stoppingRule` and its tests, the `SKILL.md` paragraph and description; `CONTEXT.md` **Admissible row** drops its `stoppingRule` clause and `tests/citation-sweep-prose.test.mjs`'s `stoppingRule` pin goes with it; open withdrawal issues are left to the maintainer.
 - *Acceptance:* the hook runs two duties; no code or doc names `stoppingRule`; the citation-sweep test is green.
 - *Blocked by:* none.
 
-**S9. This repository routes as a consumer.**
+**S9 (#4245). This repository routes as a consumer.**
 - *Scope:* `router-table.json` reduces to the starting table; the hook's re-fit duty, `FIT_BRANCH`, CI's "Router table check" and its test, `fit`, `--check`, `--due`, `FIT_EVERY_MERGED`, `mergedSince` and the read-from-git helpers retire; `run-team-local`'s `SKILL.md` and description; the day-one test support's header comment; the controller retires [#4066](https://github.com/feigi/fleet-plugin/issues/4066).
 - *Acceptance:* no `chore/router-fit-*` PR can open; CI has no router step; `route` with no Fit routes by the starting table; `tests/ticket-router.test.mjs`'s shipped-table validity test passes on the starting table; nothing in the repository reads `fitted_commit`.
 - *Blocked by:* S3, S4.
 
-**S10. One cockpit view of the Fit.**
+**S10 (#4246). One cockpit view of the Fit.**
 - *Scope:* the Cell evidence tab shows the tree of groups and each Cell with every candidate's verdict and range, burn-in progress (merged PRs per Cell against 20), what each group is exploring, the Cells the guard has tripped, the model-change notice and a failed-Fit flag; the two-sided policy rows, `behindMain`, the consumer footnote, the checkout-table read and the Preview-fit reader retire.
 - *Acceptance:* the tab reads `.fleet/router-fit.json` and the guard only; a failed Fit shows the flag and the last good Fit's rows; a consumer sees no sentence that its runs reach routing "only through its cost guard"; the card tests and the tab's tests are green.
 - *Blocked by:* S3, S5.
 
-**S11. Amend the specs the design supersedes.**
+**S11 (#4247). Amend the specs the design supersedes.**
 - *Scope:* notes under the changed text in the router spec (R2–R6, § 5) and the cockpit tabs spec (§ 4–§ 5), and in `docs/components/tier-routing.md`, each pointing here.
 - *Acceptance:* every sentence this spec supersedes carries a note naming it; no sentence still says the table changes only through a reviewed PR.
 - *Blocked by:* S9, S10.
@@ -327,14 +327,14 @@ Not filed. The controller files each as a `needs-triage` issue with a `Part of` 
 
 | Slice | Blocked by |
 |---|---|
-| S1 | — |
-| S2 | — |
-| S3 | S1 |
-| S4 | S1 |
-| S5 | S1, S2, S4 |
-| S6 | S1 (and #4159 for the version cut) |
-| S7 | S3, S5, S6 |
-| S8 | — |
-| S9 | S3, S4 |
-| S10 | S3, S5 |
-| S11 | S9, S10 |
+| S1 (#4237) | — |
+| S2 (#4238) | — |
+| S3 (#4239) | S1 |
+| S4 (#4240) | S1 |
+| S5 (#4241) | S1, S2, S4 |
+| S6 (#4242) | S1 (and #4159 for the version cut) |
+| S7 (#4243) | S3, S5, S6 |
+| S8 (#4244) | — |
+| S9 (#4245) | S3, S4 |
+| S10 (#4246) | S3, S5 |
+| S11 (#4247) | S9, S10 |
