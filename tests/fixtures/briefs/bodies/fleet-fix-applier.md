@@ -60,7 +60,11 @@ refuter's prompt in its place; a refuter never derives its own path:
 > command, wait for it, read its exit code. Never poll a log file for a
 > completion marker: prefer ONE blocking run to a poll loop, and treat its
 > return as permission to look, never as the answer. Reading a log the run has
-> already finished writing is fine; waiting on one is not. If you match a test
+> already finished writing is fine; waiting on one is not. Never run `pkill -f`
+> on a pattern: members share one process table, so a pattern such as a test
+> file's name matches every member's run, not only yours. Clearing your own
+> leftover process needs its PID; report a stalled run to the controller
+> instead. If you match a test
 > reporter's own output, accepting both `ℹ` and `#` is necessary but NOT
 > sufficient — strip SGR escapes first as well. node's prefix moves with the
 > node version and with whether stdout is a TTY, and color wraps the whole line
