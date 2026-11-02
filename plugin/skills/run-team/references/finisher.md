@@ -361,8 +361,10 @@ changes nothing. A merge that conflicts is a range that holds something, not a
 failure; a `merge-tree` that could not read at all, on unrelated histories for
 one, is exit 2 with the failed read named in `evidence.error`. Both tests
 compare changes, never commit messages, so a commit that differs from the
-pin's only in its message reads clean. A newest move that is a `reset` or a
-`rebase` stays `rebase`, even when `pin..HEAD` would test clean.
+pin's only in its message reads clean — unless the pin changes its lines again
+after it: merging the two then conflicts, a false halt the content test
+accepts. A newest move that is a `reset` or a `rebase` stays `rebase`, even
+when `pin..HEAD` would test clean.
 
 A `stray` halt is a commit the branch's remote ref is not shown to carry — the
 ref lacks it or is absent, or the read could not tell — so nothing pushes it and

@@ -42,12 +42,14 @@ const ENV = {
 };
 
 const git = (cwd, ...args) => execFileSync("git", args, { cwd, env: ENV, encoding: "utf8" }).trim();
-const commit = (cwd, msg, file = `${msg}.txt`) => {
-  writeFileSync(join(cwd, file), `${msg}\n`);
+// A commit whose file holds exactly `text`; `commit` writes a one-line file of its message.
+const commitText = (cwd, file, text, msg) => {
+  writeFileSync(join(cwd, file), text);
   git(cwd, "add", file);
   git(cwd, "commit", "-q", "-m", msg);
   return git(cwd, "rev-parse", "HEAD");
 };
+const commit = (cwd, msg, file = `${msg}.txt`) => commitText(cwd, file, `${msg}\n`, msg);
 
 // The baseline fixture. `root` is realpath'd once, before any path is derived
 // from it: macOS reaches a tmpdir as /var/... and git reports /private/var/...,
@@ -723,14 +725,6 @@ test("stray: a remote tip holding every parent patch of a merge commit does not 
 // range clean whose content the pin lacks. `git merge-tree` against the pin says what
 // merging the worktree into it would change.
 
-// A commit whose file holds exactly `text`, which `commit`'s one-line files cannot make.
-const commitText = (cwd, file, text, msg) => {
-  writeFileSync(join(cwd, file), text);
-  git(cwd, "add", file);
-  git(cwd, "commit", "-q", "-m", msg);
-  return git(cwd, "rev-parse", "HEAD");
-};
-
 // A file of two identical blocks, each with a line of its own: the same change to either
 // block has the same lines around it, so it is one patch by id.
 const twoBlocks = (first, second) => ["a", "b", "c", first, "e", "f", "g", "a", "b", "c", second, "e", "f", "g", ""].join("\n");
@@ -845,6 +839,24 @@ test("exit 0: a commit that differs from the pin's only in its message is the on
   assert.deepEqual(r.out.evidence.content, { tree: treeOf(f, f.pin), conflict: false, paths: [] });
 });
 
+test("stray: a reworded copy of a pin commit whose lines the pin changes again conflicts, a false halt the content test accepts", () => {
+  const f = fixture();
+  const base = commitText(f.w, "blocks.txt", twoBlocks("TARGET", "TARGET"), "blocks");
+  git(f.w, "push", "-q", "origin", "main");
+  git(f.wt, "reset", "-q", "--hard", base);
+  commitText(f.wt, "blocks.txt", twoBlocks("NEW", "TARGET"), "edit");
+  f.pin = commitText(f.wt, "blocks.txt", twoBlocks("NEWER", "TARGET"), "edit again");
+  git(f.wt, "push", "-q", "--force", "origin", "feat");
+  git(f.wt, "reset", "-q", "--hard", base);
+  const own = commitText(f.wt, "blocks.txt", twoBlocks("NEW", "TARGET"), "edit, reworded");
+  const r = std(f);
+  assert.equal(r.status, 1, r.stderr);
+  assert.equal(r.out.cause, "stray");
+  assert.deepEqual(cherryLines(r), [`- ${own}`], "the patch test reads the commit as the pin's own");
+  assert.equal(r.out.evidence.content.conflict, true);
+  assert.deepEqual(r.out.evidence.content.paths, ["blocks.txt"]);
+});
+
 test("stray: a merge commit whose content the pin already holds is still unique, the merge rule of the patch test standing", () => {
   const f = fixture();
   git(f.wt, "checkout", "-q", "-b", "side", "origin/main");
@@ -921,6 +933,24 @@ test("exit 2: a merge-tree killed by a signal is a failed read", () => {
   assert.equal(r.status, 2, r.stderr);
   assert.equal(r.out.cause, null);
   assert.match(r.out.evidence.error, /^merge-tree: git merge-tree /);
+});
+
+test("exit 2: a merge-tree that prints a tree id and then exits 128 is a failed read, never a conflict", () => {
+  const f = pastPin();
+  const r = std(f, [], { env: mergeTreeStub(f, `  "$real" "$@"; exit 128`) });
+  assert.equal(r.status, 2, r.stderr);
+  assert.equal(r.out.cause, null);
+  assert.match(r.out.evidence.error, /^merge-tree: git merge-tree --write-tree [0-9a-f]{40} HEAD failed: exit 128$/);
+});
+
+test("exit 2: a merge-tree whose first line is a tree id with characters after it is a failed read", () => {
+  for (const line of ["0123456789abcdef0123456789abcdef01234567a", "0123456789abcdef0123456789abcdef01234567 extra"]) {
+    const f = pastPin();
+    const r = std(f, [], { env: mergeTreeStub(f, `  echo "${line}"; exit 0`) });
+    assert.equal(r.status, 2, r.stderr);
+    assert.equal(r.out.cause, null);
+    assert.match(r.out.evidence.error, /^merge-tree: git merge-tree --write-tree [0-9a-f]{40} HEAD failed: no tree id on stdout$/);
+  }
 });
 
 test("exit 2: a merge-tree that fails at the remote's call is a failed read too, though the pin's call found something", () => {

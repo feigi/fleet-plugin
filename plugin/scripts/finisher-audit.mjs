@@ -104,7 +104,8 @@
 //       carries reads clean: merging it into the pin changes nothing, and only
 //       its `+` line catches it. Both tests compare changes, never commit
 //       messages, so a commit that differs from the pin's only in its message
-//       reads clean.
+//       reads clean - unless the pin changes its lines again after it: merging
+//       the two then conflicts, a false halt the content test accepts.
 //       `merge-tree` is read by its exit code and that first line. Exit 0 with
 //       a tree id is clean or not by the comparison above. Exit 1 with a tree
 //       id there is a conflict, which is a finding, never a failure. Anything
@@ -324,9 +325,9 @@ function changedPaths(upstream, tree) {
 function uniqueIn(upstream) {
   const listing = git("cherry", ["cherry", upstream, "HEAD"]).out;
   const merges = Number(git("merges", ["rev-list", "--merges", "--count", `${upstream}..HEAD`]).out.trim());
-  const content = mergeInto(upstream);
-  const upstreamTree = git("tree", ["rev-parse", `${upstream}^{tree}`]).out.trim();
-  const unique = merges > 0 || listing.split("\n").some((l) => l.startsWith("+")) || content.conflict || content.tree !== upstreamTree;
+  const merged = mergeInto(upstream);
+  const content = { ...merged, paths: changedPaths(upstream, merged.tree) };
+  const unique = merges > 0 || listing.split("\n").some((l) => l.startsWith("+")) || content.conflict || content.paths.length > 0;
   return { listing, merges, content, unique };
 }
 
@@ -411,7 +412,7 @@ if (/^commit\b/.test(subject)) {
   evidence.commit = git("log", ["log", "-1", "--format=%h %s"]).out.trim();
   const { unique, content, ...cherry } = uniqueIn(pin);
   evidence.cherry = cherry;
-  evidence.content = { ...content, paths: changedPaths(pin, content.tree) };
+  evidence.content = content;
   // Nothing in pin..HEAD the pin lacks, by patch or by content: a remote rebase
   // superseded this worktree, or it sits behind the pin. Refreshing it loses
   // nothing.
