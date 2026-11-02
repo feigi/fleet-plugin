@@ -140,3 +140,14 @@ test("an unlistable nested subdirectory makes the digest UNAVAILABLE, never a sh
     chmodSync(sub, 0o755);
   }
 });
+
+test("an unrecognized argument exits 2, names the argument on stderr, and prints nothing on stdout", () => {
+  const { home } = fakeInstall();
+  const r = spawnSync(process.execPath, [PROVENANCE, "--bogus"], {
+    encoding: "utf8",
+    env: { HOME: home, PATH: process.env.PATH },
+  });
+  assert.equal(r.status, 2, `status ${r.status}: ${r.stdout}${r.stderr}`);
+  assert.match(r.stderr, /fleet-provenance: unrecognized argument --bogus/);
+  assert.equal(r.stdout, "");
+});
