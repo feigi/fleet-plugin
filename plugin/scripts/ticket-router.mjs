@@ -14,11 +14,11 @@
 //     REASON=<reason>`,
 //     routing by the objective's row set, and appends the Pull's
 //     ticket-features row to the pending TSV (by default
-//     `ticket-features.pending.tsv` beside `--guard`, in the run's `.fleet/`),
-//     the paths its brief names looked up under the working directory, the
-//     checkout. Exit 0 on
-//     every data degradation — a missing or unreadable issue, sizing or guard
-//     file degrades the line, never the exit. Exit 2 only on a usage error or
+//     `ticket-features.pending.tsv` beside `--guard`, in the run's `.fleet/`).
+//     The paths its brief names are looked up under the working directory,
+//     the checkout, for `named_lines`. Exit 0 on every data degradation — a
+//     missing or unreadable issue, sizing or guard file degrades the line,
+//     never the exit. Exit 2 only on a usage error or
 //     an unreadable/invalid table: the caller does not dispatch then. With no
 //     `--session`, the session is the one the phase-0 receipt
 //     `.fleet/phase0.json` records, and with no `--objective` the objective
@@ -157,25 +157,29 @@ export function issueMetrics(issue, now = Date.now()) {
   };
 }
 
-// Whether `abs` is `root` or lies below it.
+// Whether `abs` is `root` or lies below it. Posix `relative` resolves both
+// first and never answers with an absolute path.
 function within(root, abs) {
   const r = relative(root, abs);
-  return r !== ".." && !r.startsWith(`..${sep}`) && !isAbsolute(r);
+  return r !== ".." && !r.startsWith(`..${sep}`);
 }
 
 // One `named_lines` entry: a line reference dropped, the path resolved against
-// `root`. One that is absolute, starts with `~` or lies outside `root` — as
-// spelled, or once its symlinks are followed — is `-` and never read; so is one
-// that does not exist or is neither a file nor a directory.
+// `root`, absolute, whose realpath is `realRoot`. One that is absolute, starts
+// with `~` or lies outside `root` — as spelled, or once its symlinks are
+// followed — is `-` and never read; so is one that does not exist, a file
+// named with a trailing `/`, or one that is neither a file nor a directory.
 function lineEntry(token, root, realRoot) {
   const t = token.replace(LINE_REF, "");
-  if (isAbsolute(t) || t.startsWith("~") || realRoot === null) return "-";
+  if (isAbsolute(t) || t.startsWith("~")) return "-";
   const at = join(root, t);
-  if (!within(root, resolve(at))) return "-";
+  if (!within(root, at)) return "-";
   try {
     const real = realpathSync(at);
     if (!within(realRoot, real)) return "-";
-    const st = statSync(real);
+    // `at`, not `real`: realpath drops a trailing `/`, which stat keeps, so a
+    // file named as a directory is ENOTDIR here.
+    const st = statSync(at);
     if (st.isDirectory()) return "dir";
     if (!st.isFile()) return "-";
     const bytes = readFileSync(real);
@@ -195,9 +199,13 @@ function lineEntry(token, root, realRoot) {
  */
 export function namedLines(named, root) {
   if (named === "") return "";
-  let realRoot = null;
-  try { realRoot = realpathSync(root); } catch { /* every path reads `-` */ }
-  return named.split(" ").map((p) => lineEntry(p, resolve(root), realRoot)).join(" ");
+  const paths = named.split(" ");
+  let realRoot;
+  // A root that cannot be resolved — null when the CLI's working directory is
+  // gone — reads every path `-`.
+  try { realRoot = realpathSync(root); } catch { return paths.map(() => "-").join(" "); }
+  const abs = resolve(root);
+  return paths.map((p) => lineEntry(p, abs, realRoot)).join(" ");
 }
 
 /**
@@ -368,9 +376,9 @@ export function route({
 
   const metrics = issueMetrics(issue, now);
   if (metrics === null) degrade("no-issue-json");
-  const blank = Object.fromEntries([
-    "brief_chars", "criteria", "comments", "age_days", "paths", "test_paths", "xrefs", "kind", "parent", "named_paths", "named_lines", "dirs", "title",
-  ].map((c) => [c, ""]));
+  const blank = Object.fromEntries(FEATURE_COLUMNS
+    .slice(FEATURE_COLUMNS.indexOf("brief_chars"), FEATURE_COLUMNS.indexOf("plugin_version"))
+    .filter((c) => c !== "objective").map((c) => [c, ""]));
   const m = metrics === null ? blank : { ...metrics, named_lines: namedLines(metrics.named_paths, root) };
   const ruleS = ruleStratum(m);
 
@@ -831,9 +839,17 @@ function main() {
     } else if (!OBJECTIVES.includes(objective)) {
       die(`--objective ${objective} is not ${OBJECTIVES.join(" or ")}`);
     }
+    // A working directory removed under the run, or an install `package.json`
+    // with no readable version, degrades the row and warns, never the exit.
+    let root = null;
+    try { root = process.cwd(); } catch (e) {
+      process.stderr.write(`${NAME}: WARNING cannot resolve the working directory: ${e.message} — every named path reads \`-\`\n`);
+    }
+    const version = installVersion();
+    if (version === null) process.stderr.write(`${NAME}: WARNING ${INSTALL_PACKAGE} names no readable version — plugin_version is blank\n`);
     const { line, row } = route({
       session, ticket: Number(ticket), arm, implRow: Number(implRowArg), chainHead: F.has("chain-head"),
-      issue: readJson(issuePath), sizing: readJson(F.arg("sizing")), guard: readGuard(readJson(guardPath)), table, objective,
+      issue: readJson(issuePath), sizing: readJson(F.arg("sizing")), guard: readGuard(readJson(guardPath)), table, objective, root, version,
     });
     const pending = F.arg("pending") ?? join(dirname(guardPath), "ticket-features.pending.tsv");
     // The header decision and the append are not atomic and take no lock. That is

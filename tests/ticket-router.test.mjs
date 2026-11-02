@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { cpSync, mkdtempSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -831,6 +831,31 @@ test("route: a path outside the checkout — `..`, absolute, `~`, or through a s
   }
 });
 
+test("route: a path spelled outside the checkout is `-` even where a symlink there leads back inside it", (t) => {
+  const { base, root } = checkout(t);
+  writeFileSync(join(root, "plugin", "scripts", "a.mjs"), "one\ntwo\n");
+  symlinkSync(join(root, "plugin", "scripts", "a.mjs"), join(base, "sib"));
+  symlinkSync(join(root, "plugin"), join(base, "sibdir"));
+  assert.equal(rowAt(root, "`../sib` `../sibdir/scripts/a.mjs` `../sibdir` `plugin/scripts/a.mjs`").named_lines, "- - - 2");
+});
+
+test("route: a file named with a trailing `/` is `-`, not its line count", (t) => {
+  const { root } = checkout(t);
+  writeFileSync(join(root, "plugin", "scripts", "a.mjs"), "1\n2\n3\n");
+  assert.equal(rowAt(root, "`plugin/scripts/a.mjs/` `plugin/scripts/a.mjs`").named_lines, "- 3");
+});
+
+test("route: a FIFO inside the checkout is recorded `-` and never opened", (t) => {
+  const { root } = checkout(t);
+  const fifo = join(root, "plugin", "scripts", "pipe.fifo");
+  const made = spawnSync("mkfifo", [fifo]);
+  if (made.status !== 0) return t.skip("mkfifo unavailable");
+  // A writer that holds the FIFO's data for any reader that opens it: opened, the FIFO reads `2`; never opened, the writer stays blocked until killed.
+  const writer = spawn("sh", ["-c", 'printf "one\\ntwo\\n" > "$1"', "sh", fifo], { stdio: "ignore" });
+  t.after(() => writer.kill("SIGKILL"));
+  assert.equal(rowAt(root, "`plugin/scripts/pipe.fifo`").named_lines, "-");
+});
+
 test("route: run with no root, the CLI looks the brief's paths up under its working directory", (t) => {
   const p = world(t, { issueJson: issue({ body: "Change `plugin/scripts/a.mjs` and `docs/b.md`." }) });
   mkdirSync(join(p.dir, "plugin", "scripts"), { recursive: true });
@@ -841,6 +866,51 @@ test("route: run with no root, the CLI looks the brief's paths up under its work
   const [row] = parseFeatures(readFileSync(p.pending, "utf8"));
   assert.deepEqual([row.named_paths, row.named_lines, row.dirs], ["plugin/scripts/a.mjs docs/b.md", "4 -", "2"]);
   assert.equal(row.plugin_version, installVersion());
+});
+
+test("route: a working directory removed under the CLI warns and reads every named path `-`, exit 0", (t) => {
+  const p = world(t, { issueJson: issue({ body: "Change `plugin/scripts/a.mjs`." }) });
+  const gone = join(p.dir, "gone");
+  mkdirSync(gone);
+  const r = spawnSync("sh", ["-c", 'cd "$1" && rmdir "$1" && shift && exec "$@"', "sh", gone, process.execPath, SCRIPT, "route", "--session", SESSION,
+    "--objective", "cost", "--ticket", "42", "--arm", "A", "--impl-row", "3", "--issue", p.issue, "--guard", p.guard, "--table", p.table, "--pending", p.pending],
+  { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^POLICY=.* REASON=ok$/m);
+  assert.match(r.stderr, /WARNING cannot resolve the working directory/);
+  const [row] = parseFeatures(readFileSync(p.pending, "utf8"));
+  assert.equal(row.named_lines, "-");
+});
+
+test("route: an install package.json with no readable version warns and leaves plugin_version blank, exit 0", (t) => {
+  const p = world(t);
+  const install = join(p.dir, "install");
+  cpSync(dirname(SCRIPT), join(install, "scripts"), { recursive: true });
+  const args = ["route", "--session", SESSION, "--objective", "cost", "--ticket", "42", "--arm", "A", "--impl-row", "3",
+    "--issue", p.issue, "--guard", p.guard, "--table", p.table, "--pending", p.pending];
+  const run = (pkg) => {
+    writeFileSync(join(install, "package.json"), pkg);
+    const r = spawnSync(process.execPath, [join(install, "scripts", "ticket-router.mjs"), ...args], { encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    return { stderr: r.stderr, row: parseFeatures(readFileSync(p.pending, "utf8")).at(-1) };
+  };
+  const ok = run('{"version":"1.2.3"}');
+  assert.equal(ok.row.plugin_version, "1.2.3");
+  assert.doesNotMatch(ok.stderr, /WARNING/);
+  const bad = run("{oops");
+  assert.equal(bad.row.plugin_version, "");
+  assert.match(bad.stderr, /WARNING .*package\.json names no readable version/);
+});
+
+test("installVersion: a string version comes back; a numeric, missing, unparseable or unreadable one is null", () => {
+  const dir = tempDir("router-version-");
+  const at = (name, text) => { const p = join(dir, name); writeFileSync(p, text); return p; };
+  assert.equal(installVersion(at("string.json", '{"version":"1.2.3"}')), "1.2.3");
+  assert.equal(installVersion(at("number.json", '{"version":3}')), null);
+  assert.equal(installVersion(at("missing.json", "{}")), null);
+  assert.equal(installVersion(at("nul.json", "null")), null);
+  assert.equal(installVersion(at("bad.json", "{not json")), null);
+  assert.equal(installVersion(join(dir, "absent.json")), null);
 });
 
 test("route: a title holding a tab, a newline or a carriage return lands as one field, and the row parses at the header's width", (t) => {

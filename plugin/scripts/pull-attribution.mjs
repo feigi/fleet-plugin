@@ -104,7 +104,7 @@ export const FEATURE_COLUMNS = Object.freeze([
   "paths", "test_paths", "xrefs", "kind", "objective", "parent",
   "named_paths", "named_lines", "dirs", "title", "plugin_version",
 ]);
-export const OPTIONAL_COLUMNS = new Set(["objective", "parent", "named_paths", "named_lines", "dirs", "title", "plugin_version"]);
+export const OPTIONAL_COLUMNS = new Set(FEATURE_COLUMNS.slice(FEATURE_COLUMNS.indexOf("objective")));
 
 // The quality floor's margin, in points of fail rate.
 export const TRIP_POINTS = 15;
