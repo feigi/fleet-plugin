@@ -897,9 +897,10 @@ test("ensure: a cache that exists and cannot be read is exit 2 and never written
   const before = readFileSync(file, "utf8");
   chmodSync(file, 0o000);
   const entries = fleetEntries(ws);
+  const g = rig([...LABEL_ROLES, "mine"]);
   let r;
   try {
-    r = ensure(ws, [...LABEL_ROLES, "mine"]);
+    r = spawnSync(process.execPath, [SCRIPT, "ensure"], { cwd: ws, env: g.env, encoding: "utf8" });
   } finally {
     chmodSync(file, 0o600);
   }
@@ -908,6 +909,7 @@ test("ensure: a cache that exists and cannot be read is exit 2 and never written
   assert.match(r.stderr, unreadableDerivation("EACCES"));
   assert.equal(readFileSync(file, "utf8"), before);
   assert.deepEqual(fleetEntries(ws), entries);
+  assert.deepEqual(g.calls(), []);
 });
 
 test("ensure outside a repository is exit 2 and never calls gh; a triage-label path that is not a file is exit 2", () => {
@@ -1384,6 +1386,8 @@ test("set: gh failing, no repository or an unreadable cache is exit 2, nothing w
 // `ensure` and `set` refuse every cache that exists and cannot be read with
 // the reader's own refusal — the resolved path, the errno, the filesystem
 // fault and its repair — then `nothing written`, before any label is created.
+// `gh` fails here: the refusal comes before `gh` is asked, so a `gh` that
+// cannot answer does not hide it.
 for (const [name, code, leave, listable] of UNREADABLE) {
   for (const verb of ["ensure", "set"]) {
     test(`${verb} refuses ${name}: exit 2, naming the cache path, ${code} as a filesystem fault and its repair; nothing written`, (t) => {
@@ -1391,14 +1395,14 @@ for (const [name, code, leave, listable] of UNREADABLE) {
       const ws = repo();
       leave(ws);
       const entries = listable ? fleetEntries(ws) : null;
-      const g = setRig(LABEL_ROLES);
+      const g = rig(LABEL_ROLES, { fail: true });
       const r = verb === "ensure" ? ensureRun(ws, g) : setRun(ws, g, "--accept-suggestions", "--create");
       assert.equal(r.status, 2, r.stdout + r.stderr);
       assert.equal(r.stdout, "");
       assert.match(r.stderr, unreadableDerivation(code));
       assert.ok(r.stderr.includes(join(ws, ".fleet", LABEL_MAP_FILE)), r.stderr);
       assert.doesNotMatch(r.stderr, /undefined/);
-      assert.deepEqual(g.calls(), [LIST]);
+      assert.deepEqual(g.calls(), []);
       if (listable) assert.deepEqual(fleetEntries(ws), entries);
     });
   }

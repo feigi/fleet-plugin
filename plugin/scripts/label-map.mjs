@@ -583,12 +583,13 @@ export function deriveLabelMap({ table, live, cache, answers = new Map() }) {
   return { kind: "certain", roles: certain, origin };
 }
 
-// The three inputs of a derivation, read the same way for `ensure` and `set`:
-// the table, the live label list and the cache (null when absent or not
-// parsing, which is derived again).
+// The three inputs of a derivation, read the same way for `ensure` and `set`,
+// in this order: the table, the cache (null when absent or not parsing, which
+// is derived again) and the live label list. A local fault is named before the
+// network is asked, so a `gh` failure cannot hide it and its refusal never
+// waits on `gh`.
 function readDerivationInputs(cwd) {
   const { top, table } = readTriageTable({ cwd });
-  const live = readLiveLabels({ cwd: top });
   let cache = null;
   try {
     cache = loadCache(fleetFile(LABEL_MAP_FILE, { cwd }));
@@ -599,6 +600,7 @@ function readDerivationInputs(cwd) {
     // refusal is the reader's own, naming the errno and the repair.
     if (e.cause) throw new LabelMapUnavailable(`${e.message}; nothing written`);
   }
+  const live = readLiveLabels({ cwd: top });
   return { top, table, live, cache };
 }
 
