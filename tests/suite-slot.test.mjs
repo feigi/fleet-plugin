@@ -39,10 +39,12 @@ function launch(host, entrypoint, args = [], env = {}) {
   return { child, done, stdout: () => out, stderr: () => err };
 }
 
+// `what` may be a function, read only on timeout, so the message can carry
+// what the waited-on process printed by then.
 const until = async (fn, what, ms = 10_000) => {
   const t0 = Date.now();
   while (!fn()) {
-    if (Date.now() - t0 > ms) assert.fail(`timed out waiting for ${what}`);
+    if (Date.now() - t0 > ms) assert.fail(`timed out waiting for ${typeof what === "function" ? what() : what}`);
     await new Promise((r) => setTimeout(r, 25));
   }
 };
@@ -111,7 +113,8 @@ test("a third full run waits for a slot and takes it when one is freed", async (
   const mark = join(tempDir("slot-third-"), "ran");
   holdSlots(host, 2);
   const third = launch(host, 'touch "$MARK"; echo RAN', [], { FLEET_SUITE_WAIT_S: "30", MARK: mark });
-  await until(() => WAITING.test(third.stderr()), "the third run to start waiting");
+  await until(() => WAITING.test(third.stderr()), () => `the third run to start waiting; its stderr: ${third.stderr()}`);
+  assert.match(third.stderr(), /^suite-slot: waiting up to 30s for a slot$/m, "the waiting line does not name the cap in seconds");
   const seen = Date.now();
   await new Promise((r) => setTimeout(r, 500));
   assert.equal(existsSync(mark), false, "the third run started with both slots held");
@@ -264,7 +267,7 @@ test("SIGTERM to a waiting wrapper ends it at once, launching nothing", async ()
   holdSlots(host, 2);
   const waiting = launch(host, 'touch "$MARK"', [], { FLEET_SUITE_WAIT_S: "30", MARK: mark });
   try {
-    await until(() => WAITING.test(waiting.stderr()), "the wrapper to start waiting");
+    await until(() => WAITING.test(waiting.stderr()), () => `the wrapper to start waiting; its stderr: ${waiting.stderr()}`);
     waiting.child.kill("SIGTERM");
     const r = await Promise.race([waiting.done, new Promise((res) => setTimeout(() => res("hung"), 10_000))]);
     assert.notEqual(r, "hung", "a waiting wrapper outlived SIGTERM");
