@@ -90,7 +90,7 @@ function sites() {
 
 test("every command in shipped prose that takes a role string parses with an apostrophe-bearing string spliced in", () => {
   const all = sites();
-  assert.ok(all.length >= 11, `found only ${all.length} commands holding a role placeholder`);
+  assert.ok(all.length >= 10, `found only ${all.length} commands holding a role placeholder`);
   assert.deepEqual(report(all), []);
 });
 

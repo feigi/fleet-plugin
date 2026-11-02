@@ -11,6 +11,7 @@
 // nothing, so a read demanded of them would be a false refusal.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
 import { memberPrompt } from "./support/render-brief.mjs";
@@ -88,15 +89,16 @@ test("run-merge-bot.md reads ready-to-merge before selection; a refusal holds no
   assert.match(section, Pin.phrase("**The top-level invocation** prints what `show` printed and stops. It writes no report."));
   // Before selection: the section sits above the first step that selects.
   assert.ok(doc.indexOf("## The Label map") < doc.indexOf("\n## Order\n"), "the read sits after selection begins");
-  // The one string serves both polls and the timeline comparison.
+  // The one string serves the polls; the timeline comparison reads it itself, inside labelled-head.mjs.
   assert.match(doc, Pin.phrase('gh pr list --state open --label "<ready-to-merge string>" --limit 200 --json number'));
   assert.match(doc, Pin.phrase('label="<ready-to-merge string>"'));
   assert.match(doc, Pin.phrase('poll() { gh pr list --state open --label "$label" --limit "$cap"'), "the Monitor's poll no longer passes the string `show` printed");
-  assert.match(doc, Pin.phrase('label="<ready-to-merge string>" gh api "repos/{owner}/{repo}/issues/<pr>/timeline?per_page=100"'), "the timeline read hands the string to jq through the environment");
-  assert.match(doc, Pin.phrase('.event == "labeled" and .label.name == env.label'));
+  assert.match(doc, Pin.phrase("`label` the Label map's string for `ready-to-merge`"), "the timeline verdict no longer says which string it keys on");
   // Quoted or bare, a role name after `--label` is the role typed where the mapped string goes; the head record's prefix is not a label.
   assert.doesNotMatch(doc, /--label\s+"?ready-to-merge\b(?!-head)/, "a poll types the role name where the mapped string goes");
   assert.doesNotMatch(doc, /\.label\.name == "ready-to-merge"/, "the timeline comparison types the role name where the mapped string goes");
+  // The timeline comparison is the command's: it keys on the string the Label map gives, never on a typed one.
+  assert.match(readFileSync(join(PLUGIN, "scripts", "labelled-head.mjs"), "utf8"), /readLabelMap\(.*\)\["ready-to-merge"\]/, "labelled-head.mjs no longer reads the string from the Label map");
 });
 
 test("run-merge-bot.md carries the head-record sentence in the paragraph that defines the record", () => {
@@ -104,7 +106,8 @@ test("run-merge-bot.md carries the head-record sentence in the paragraph that de
   assert.match(para, Pin.phrase("The prefix `ready-to-merge-head:` is not a label: type it as written, whatever string the Label map gives `ready-to-merge`."));
   // The record itself stays as it was written: the prefix and the parse are fixed.
   assert.match(para, Pin.phrase("posts a PR comment whose whole body is `ready-to-merge-head: <sha>`, naming the head it audited, immediately before the label"));
-  assert.match(MERGE_BOT_DOC.text, /capture\("\\\\Aready-to-merge-head: \(\?<sha>\[0-9a-f\]\{40\}\)\\\\s\*\\\\z"\)/, "the jq that parses the record changed");
+  // The parse is not the doc's any more: the command reads it with the grammar finisher-label.mjs writes.
+  assert.doesNotMatch(MERGE_BOT_DOC.text, /capture\(/, "the doc carries a record parse of its own again");
 });
 
 test("the merge bot's agent definition and brief say a refusal's final line adds what show printed", () => {
