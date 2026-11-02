@@ -256,7 +256,7 @@ const why = receipt.inert.verdict === "unknown" ? `its diff could not be read ($
 // checked for its two halves, each non-blank, on one line (`.` stops at a newline).
 const EVIDENCE = /^red:(.*?); baseline:(.*)$/;
 const evidence = (s) => {
-  const m = s === null ? null : EVIDENCE.exec(s);
+  const m = EVIDENCE.exec(s ?? "");
   return m !== null && m[1].trim() !== "" && m[2].trim() !== "";
 };
 if (!ticketless && receipt.inert.exit !== 0) {

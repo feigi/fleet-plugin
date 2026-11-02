@@ -77,9 +77,9 @@ function git(cwd, ...args) {
 // (`roles` merged over the identity map; null for no map) and an
 // `origin/main` to take a pin's merge base against. `outs` and `fails` are
 // keyed by the stub's call keys. The baseline is a ticket PR with one release
-// label, a `--kill` claim, and a read-back that carries the label. `commit(files)` makes a commit
-// holding `files` (path → text) on top of origin/main and answers its SHA,
-// the pin of a case about the diff.
+// label, a `--kill` claim, and a read-back that carries the label.
+// `commit(files)` makes a commit holding `files` (path → text) on top of
+// origin/main and answers its SHA, the pin of a case about the diff.
 function rig({ outs = {}, fails = {}, closes = [5], rows = [], roles = {} } = {}) {
   const dir = tempDir("finisher-label-");
   const bin = join(dir, "bin");
@@ -390,7 +390,7 @@ test("exit 0: a ticket PR whose diff is not inert is labelled on a well-formed -
   assert.equal("killGiven" in r.out, false, "killGiven is an exit-6 field");
 });
 
-for (const bad of ["", "   ", "killed it", "red: x", "baseline: node --test → exit 0, x pass", "red: ; baseline: x", "red: x; baseline: ", `${KILL}\nmore`]) {
+for (const bad of ["", "   ", "killed it", "killed it. red: x; baseline: y", "red: x", "baseline: node --test → exit 0, x pass", "red: ; baseline: x", "red: x; baseline: ", `${KILL}\nmore`]) {
   test(`exit 6: a malformed --kill ${JSON.stringify(bad)} is refused like a missing one`, () => {
     const t = rig();
     const r = t.run(["--pr", "42", "--pin", t.commit(NOT_INERT), "--kill", bad]);
