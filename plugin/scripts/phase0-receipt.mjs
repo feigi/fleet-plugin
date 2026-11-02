@@ -76,7 +76,7 @@ export function readRunReceipt(opts) {
 // With no recorded session the remedy is the eval-cell run: phase0.mjs falls
 // back to PI_ARTIFACTS_DIR, which the bash tool's environment carries none of.
 const phase0Command = (session) => session
-  ? `~/.fleet/bin/fleet-run phase0.mjs --session ${session}`
+  ? `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run phase0.mjs --session ${session}`
   : "phase0.mjs from a Python eval cell in the main checkout, without --session (run-team SKILL.md phase 0 step 0)";
 
 /**

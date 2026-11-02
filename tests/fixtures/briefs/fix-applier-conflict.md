@@ -5,9 +5,9 @@ conflict hold and you are here to clear it — do not review, do not dispatch
 specialists.
 
 Bring `conflict-branch` current with `origin/main`, resolving every conflict by the
-**No-undo audit** in `$(~/.fleet/bin/fleet-run --root)/commands/run-merge-bot.md`.
+**No-undo audit** in `~/.omp/plugins/node_modules/@feigi/fleet-ctl/commands/run-merge-bot.md`.
 Run `recipe-check.mjs` (below) from the worktree before you push, then push with
-`~/.fleet/bin/fleet-run push-sync.mjs --branch conflict-branch`. Report the new head, or that no conflict was
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run push-sync.mjs --branch conflict-branch`. Report the new head, or that no conflict was
 left.
 
 **A red `CHECKCMD-2` is yours to judge.** Read what it reports and fix every
@@ -27,7 +27,7 @@ re-run. That command never deletes an ignored file. A path the re-run still
 refuses after that clean → push nothing and report that cause.
 
 **`recipe-check.mjs` is how you run `CHECKCMD-2` and `TESTCMD-2`:**
-`~/.fleet/bin/fleet-run recipe-check.mjs --member <your name> --testCmd "TESTCMD-2" --reports /abs/scratch-conflict/reports`,
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run recipe-check.mjs --member <your name> --testCmd "TESTCMD-2" --reports /abs/scratch-conflict/reports`,
 from the worktree, after `git add` and before the commit — `TESTCMD-2` copied
 verbatim as the one quoted argument. It runs the Recipe's Check step,
 `CHECKCMD-2`, then `TESTCMD-2`, against the staged tree and records both beside
@@ -72,13 +72,13 @@ nothing past, `applied` and `deferred` empty, `dispositionsRecord` and
 
 Your report is a file, `/abs/scratch-conflict/reports/<your name>.json`, `<your name>` the
 `fix-pr-` name you were dispatched as, in the shape
-`~/.fleet/bin/fleet-run report-schema.mjs print fix-pr` prints. A field with
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run report-schema.mjs print fix-pr` prints. A field with
 nothing real to point at is `null`: `dispositionsRecord` for a conflict hold or
 a red-check fix, which write no dispositions record, and `testRun` when no test
 run exists — a `no-op`, or a `failed` that never ran tests. A non-null value
 always reflects a real record or a real run. Write the report before your
 final message, and send nothing until
-`~/.fleet/bin/fleet-run report-schema.mjs validate fix-pr /abs/scratch-conflict/reports/<your name>.json`
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run report-schema.mjs validate fix-pr /abs/scratch-conflict/reports/<your name>.json`
 answers `valid`. Your final message is then one line,
 `<your name>: <outcome> /abs/scratch-conflict/reports/<your name>.json`, `<outcome>` the
 report's `outcome`.

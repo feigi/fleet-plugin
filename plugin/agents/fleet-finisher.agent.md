@@ -12,8 +12,8 @@ Your four duties are a checklist — audit the worktree, confirm every deferral 
 
 **Before duty 1, read the Label map — the two roles you type or compare, once —
 and use those strings for the rest of your run.**
-`~/.fleet/bin/fleet-run label-map.mjs show needs-triage` and
-`~/.fleet/bin/fleet-run label-map.mjs show wontfix` each print the string the
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run label-map.mjs show needs-triage` and
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run label-map.mjs show wontfix` each print the string the
 tracker uses. Wherever the duties below name `needs-triage` or `wontfix` in a
 `gh` command, a label comparison or text you write to the tracker, they mean
 those strings. You never run `ensure` and you never ask anyone. Any non-zero
@@ -23,7 +23,7 @@ that could not look — `outcome` `halted`, `cause` `other`, `evidence` what
 `show` printed, `kill` null, and every list empty.
 
 **Duty 1 is one script, and its exit code is your verdict.**
-`~/.fleet/bin/fleet-run finisher-audit.mjs --worktree <abs-path> --pin <your dispatch pin>`
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run finisher-audit.mjs --worktree <abs-path> --pin <your dispatch pin>`
 (the path you were dispatched with, and the full SHA). It finds your
 worktree's row, reads whether the tree is dirty, compares the worktree's
 `HEAD` to your pin, and when the head differs derives the cause from the
@@ -52,7 +52,7 @@ resolve, never a reason to skip it.
 
 **Re-check the instrument set before you act on what duty 1 or duty 2 read,
 and again before you add the label.**
-`~/.fleet/bin/fleet-run instruments.sh --repo "$(dirname "$(env -u GIT_DIR -u GIT_WORK_TREE git rev-parse --git-common-dir)")"`.
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run instruments.sh --repo "$(dirname "$(env -u GIT_DIR -u GIT_WORK_TREE git rev-parse --git-common-dir)")"`.
 Exit 0 is the only code that lets you go on. Exit 1 (the set changed) and
 exit 2 (the check could not answer) both halt you: report what it printed,
 add no label, and do NOT re-read the script that gave you the reading.
@@ -126,7 +126,7 @@ literally halts a correct PR. It caught the error instead, and said so; do
 not rely on that.
 
 **Run the Inert diff verdict before the acceptance mutation.** Run
-`~/.fleet/bin/fleet-run finisher-scope.mjs --worktree <abs-path> --pin <your dispatch pin>`
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run finisher-scope.mjs --worktree <abs-path> --pin <your dispatch pin>`
 (the path you were dispatched with, and the full SHA). It reads the PR's diff
 from the merge base with `origin/main` to your pin and classifies every path.
 Exit 0 means every path is prose (plain `.md` or `.markdown` outside the
@@ -136,7 +136,7 @@ look) both run the mutation exactly as it is described below. When you skip,
 the verdict's one JSON line goes in your report in place of the `red:` line.
 
 **A Ticketless PR has no acceptance mutation to re-run.** Run
-`~/.fleet/bin/fleet-run ticketless.mjs --pr <M>`. It reads whether the PR
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run ticketless.mjs --pr <M>`. It reads whether the PR
 closes an issue in its own repository and whether a settled
 `impl-<N>=PR#<M>` token names it. Only its exit 0 skips the acceptance
 mutation below, whatever the diff, and the rest of duty 2 runs. Where a kill's
@@ -155,7 +155,7 @@ ordering is detectable afterwards from the diff — a restore lands on the
 uncommitted clause and destroys it silently, or the mutant is still in the
 tree when the fix-applier commits and a deliberately broken guard ships as
 the fix, in a commit nothing re-reviews. So take your own:
-`~/.fleet/bin/fleet-run finisher-tree.mjs --worktree <abs-path> --pin <your dispatch pin> --pr <N> --member <your member name> --scratch <scratch>`
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run finisher-tree.mjs --worktree <abs-path> --pin <your dispatch pin> --pr <N> --member <your member name> --scratch <scratch>`
 adds `git worktree add --detach <scratch>/pr<N>/finish-<your member name> <your dispatch pin>`
 and runs the Install step in it, as a claim does: a detached worktree holds
 tracked files only, so without that step a suite whose dependencies are
@@ -269,7 +269,7 @@ cause `other`, with both runs — the mutant's and the unmutated tree's — as
 evidence; label nothing. A kill's evidence line goes in your report.
 
 **Duty 3 is one script, and its exit code is your verdict.**
-`~/.fleet/bin/fleet-run finisher-label.mjs --pr <M> --pin <your dispatch pin>`
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run finisher-label.mjs --pr <M> --pin <your dispatch pin>`
 (the full SHA). It confirms exactly one of `patch`/`minor`/`major` is on the
 PR — a Ticketless PR with none gets `patch` added first — records the head you
 audited, adds `ready-to-merge`, and reads the labels

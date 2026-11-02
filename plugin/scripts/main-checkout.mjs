@@ -126,7 +126,7 @@ import { makeDie, defineFlags } from "./arg.mjs";
 import { gitEnv, mainCheckoutDirFromGitCommonDir } from "./git-env.mjs";
 
 export const BASELINE_FILE = "main-checkout.sha";
-export const RECORD_COMMAND = "~/.fleet/bin/fleet-run main-checkout.mjs --record";
+export const RECORD_COMMAND = "~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run main-checkout.mjs --record";
 const RUN_BOOKKEEPING = new Set(["docs/metrics/tier-outcomes.tsv", "docs/metrics/member-outcomes.tsv", "docs/metrics/ticket-features.tsv"]);
 // Any change to an entry's hash or to a line's format bumps VERSION: a
 // baseline an older plugin wrote then reads `outdated` (re-record) and one a

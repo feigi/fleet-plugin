@@ -249,7 +249,7 @@ const mkRow = (role, actual, target, detail) => (action, { acts = false, extra =
 // `<file>` does — one batch file, one entry per held member, the shape under
 // **The batch file is a JSON array, one entry per dispatched member** in
 // run-team/references/tick-rows.md.
-const tierCheckStep = (members, session) => "run ~/.fleet/bin/fleet-run tier-check.mjs --batch <file> with "
+const tierCheckStep = (members, session) => "run ~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run tier-check.mjs --batch <file> with "
   + JSON.stringify(members.map((member) => (session ? { member } : { member, session: "<session>" })));
 
 // A mismatch clears when the next attempt on the ticket is dispatched at its
@@ -442,9 +442,9 @@ function reviewers(s) {
   // turns a record-only line into a HOLD.
   const conflictRows = [];
   if (s.conflicts.length) {
-    const record = s.conflicts.map((n) => `~/.fleet/bin/fleet-run ledger.mjs row <key> "<text> · conflict-hold:#${n} (conflict: mergeable=CONFLICTING)" on the row naming PR#${n}`);
+    const record = s.conflicts.map((n) => `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run ledger.mjs row <key> "<text> · conflict-hold:#${n} (conflict: mergeable=CONFLICTING)" on the row naming PR#${n}`);
     conflictRows.push(row(`CONFLICT ${prs(s.conflicts)}`,
-      { acts: true, extra: `GitHub reads CONFLICTING; ~/.fleet/bin/fleet-run ledger.mjs read, then ${record.join("; ")}` }));
+      { acts: true, extra: `GitHub reads CONFLICTING; ~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run ledger.mjs read, then ${record.join("; ")}` }));
   }
   if (s.conflictEscalate.length) {
     conflictRows.push(row(`ESCALATE conflict ${prs(s.conflictEscalate)}`,

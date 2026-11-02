@@ -846,7 +846,7 @@ test("a baseline commit an amend and gc pruned is its own unknown: examine HEAD 
   assert.match(said, new RegExp(`^MAIN-CHECKOUT-UNKNOWN baseline commit ${recorded.slice(0, 7)} is missing from this repository`));
   assert.match(said, /examine HEAD against origin\/main FIRST/);
   assert.match(said, /resolve any stray paths/);
-  assert.match(said, /re-record with ~\/\.fleet\/bin\/fleet-run main-checkout\.mjs --record \(it overwrites, it does not compare\)/);
+  assert.match(said, /re-record with ~\/\.omp\/plugins\/node_modules\/@feigi\/fleet-ctl\/scripts\/fleet-run main-checkout\.mjs --record \(it overwrites, it does not compare\)/);
   assert.doesNotMatch(said, /NEVER re-baseline/);
   const cli = spawnSync(process.execPath, [SCRIPT, "--check"], { cwd: dir, encoding: "utf8" });
   assert.equal(cli.status, 2, "exit 2, like every other unknown");

@@ -12,7 +12,7 @@ decided; nothing is cached on a guess.
 Your dispatch prompt gives you `<repo>` (the repository's main checkout, an
 absolute path) and `<scratch>` (a directory that is yours alone, an absolute
 path; standalone, with no dispatcher, it is `<root>/derive-recipe/` with
-`<root>` what `~/.fleet/bin/fleet-run scratch-root.mjs` prints). Read files
+`<root>` what `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run scratch-root.mjs` prints). Read files
 under `<repo>`; write only under `<scratch>`. **Never edit, create or delete a
 file under `<repo>`, and never write `.fleet/recipe.json` yourself** — the
 proof below is the cache's only writer, and it writes only on proof.
@@ -119,7 +119,7 @@ script creates and removes; `<repo>`'s own tree is never touched.
 
 **First run, to see the output** — no proof flags:
 
-    ~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --check '<check>' --test '<test>' --covered '<covered>' --uncovered '<uncovered>'
+    ~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run recipe-prove.mjs <repo> --install '<install>' --check '<check>' --test '<test>' --covered '<covered>' --uncovered '<uncovered>'
 
 It exits 1 with `NOT PROVEN — no proof given` once every command ran, and
 names the Test entrypoint's output file (`test output: <path>`). Any other
@@ -132,7 +132,7 @@ and revise.
   text off that summary line, as printed, into `--count-line`, and the number
   of tests that ran into `--test-count`:
 
-      ~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --check '<check>' --test '<test>' --covered '<covered>' --uncovered '<uncovered>' \
+      ~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run recipe-prove.mjs <repo> --install '<install>' --check '<check>' --test '<test>' --covered '<covered>' --uncovered '<uncovered>' \
         --count-line '<literal text of the count line>' --test-count <n>
 
   The number is the tests that ran — never the skipped, the failed, or a
@@ -150,7 +150,7 @@ and revise.
   must change a tracked file; the script runs it in the throwaway worktree,
   requires the suite to go red, and discards the worktree after:
 
-      ~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --check '<check>' --test '<test>' --covered '<covered>' --uncovered '<uncovered>' \
+      ~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run recipe-prove.mjs <repo> --install '<install>' --check '<check>' --test '<test>' --covered '<covered>' --uncovered '<uncovered>' \
         --mutate '<shell command that breaks one test>' --mutation '<one line: what it breaks>'
 
 **The Check step's own proof** — when `--check` is not `true`, the Check step
@@ -159,7 +159,7 @@ must run green on `origin/main`, and one mutation must turn it red. Give
 `--check true`. Both proofs ride in one run: the Test entrypoint's proof flags
 from above, and these:
 
-    ~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --check '<check>' --test '<test>' --covered '<covered>' --uncovered '<uncovered>' \
+    ~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run recipe-prove.mjs <repo> --install '<install>' --check '<check>' --test '<test>' --covered '<covered>' --uncovered '<uncovered>' \
       --check-mutate '<shell command that breaks one file the Check step reads>' --check-mutation '<one line: what it breaks>' \
       <the Test entrypoint's proof flags>
 

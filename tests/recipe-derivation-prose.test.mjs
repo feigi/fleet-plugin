@@ -79,7 +79,7 @@ test("every refusal naming the Recipe derivation step names one that phase 0 car
 
 test("the deriver is told never to write the cache itself, and to prove through recipe-prove.mjs", () => {
   assert.match(DERIVER, Pin.phrase("never write `.fleet/recipe.json` yourself"));
-  assert.match(DERIVER, Pin.phrase("~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --check '<check>' --test '<test>'"));
+  assert.match(DERIVER, Pin.phrase("~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run recipe-prove.mjs <repo> --install '<install>' --check '<check>' --test '<test>'"));
   assert.match(DERIVER, Pin.phrase("A count of 0 is a failed proof, never a pass."));
   assert.match(DERIVER, Pin.phrase("requires the suite to go red"));
 });
@@ -114,7 +114,7 @@ test("the deriver is told the coverage rule, the widest-invocation fallback, and
   assert.match(DERIVER, Pin.phrase("When no single invocation covers every qualifying step, take the widest one and list every qualifying step it leaves out; that is never a reason to report `RECIPE NOT PROVEN`."));
   assert.match(DERIVER, Pin.phrase("A test step or a non-test step that needs a running service is always listed too, with that reason, whether or not the service is up while you derive; so is a test step that needs another OS."));
   assert.doesNotMatch(DERIVER, /on\s+this\s+host|this\s+host\s+lacks/, "the deriver's coverage is host-relative again");
-  assert.match(DERIVER, Pin.phrase("~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --check '<check>' --test '<test>' --covered '<covered>' --uncovered '<uncovered>'"));
+  assert.match(DERIVER, Pin.phrase("~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run recipe-prove.mjs <repo> --install '<install>' --check '<check>' --test '<test>' --covered '<covered>' --uncovered '<uncovered>'"));
   assert.doesNotMatch(DERIVER, /the whole suite, the way CI runs it/);
 });
 

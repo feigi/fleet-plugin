@@ -5,7 +5,7 @@
 //   report-schema.mjs print <family>
 //   report-schema.mjs validate <family> <file>
 //
-// Reached through the Resolver: `~/.fleet/bin/fleet-run report-schema.mjs ...`.
+// Reached through the Resolver: `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run report-schema.mjs ...`.
 // <family> is one of `impl`, `fix-pr`, `finisher`, `merge-bot`. The review
 // runner is not a family here: its report already has a shape of its own.
 //

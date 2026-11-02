@@ -69,7 +69,7 @@ const RETIRED_RULES = [
   "Give the finisher this verbatim",
   "Give it the cause block below, verbatim",
   "Tell every implementer, fix-applier and finisher, in its brief, in one line",
-  "Tell it to read `$(~/.fleet/bin/fleet-run --root)/commands/run-merge-bot.md`",
+  "Tell it to read `~/.omp/plugins/node_modules/@feigi/fleet-ctl/commands/run-merge-bot.md`",
   "Put the standing CI facts in that prompt",
   "Its prompt takes the prompt below's",
   "A pattern kill reaches siblings — say so in the dispatch prompt",

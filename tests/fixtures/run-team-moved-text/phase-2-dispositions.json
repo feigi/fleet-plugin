@@ -159,7 +159,7 @@
       "scripts/ledger.mjs's header: `dispatch` records before the call"
     ],
     [
-      "The brief carries the PR, the worktree, the dispatch pin, `<testCmd>` and the scratch root: `~/.fleet/bin/fleet-run dispatch-prompt.mjs render finisher --kind <fresh|repair> --member finisher-pr-<pr#> --pr <pr#> --pin <sha> --worktree <abs-path> --testCmd <testCmd> --scratch <scratch>`, which `ledger.mjs dispatch <pr#> finisher-pr-<pr#>` records.",
+      "The brief carries the PR, the worktree, the dispatch pin, `<testCmd>` and the scratch root: `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run dispatch-prompt.mjs render finisher --kind <fresh|repair> --member finisher-pr-<pr#> --pr <pr#> --pin <sha> --worktree <abs-path> --testCmd <testCmd> --scratch <scratch>`, which `ledger.mjs dispatch <pr#> finisher-pr-<pr#>` records.",
       "scripts/dispatch-prompt.mjs's header: `render finisher`"
     ],
     [
@@ -171,11 +171,11 @@
       "references/pull.md's `dispatch` refusal, which names a member with no brief rendered for its role and the `dispatch-prompt.mjs render` command to run first"
     ],
     [
-      "Its body (`agents/fleet-merge-bot.agent.md`) tells it to read `$(~/.fleet/bin/fleet-run --root)/commands/run-merge-bot.md` and run **one** pass — drain the queue, re-evaluating after each merge, hold a 15-minute grace for late labels, then report once and exit — and that you dispatched it, which is what makes it hold that grace instead of arming its own watcher.",
+      "Its body (`agents/fleet-merge-bot.agent.md`) tells it to read `~/.omp/plugins/node_modules/@feigi/fleet-ctl/commands/run-merge-bot.md` and run **one** pass — drain the queue, re-evaluating after each merge, hold a 15-minute grace for late labels, then report once and exit — and that you dispatched it, which is what makes it hold that grace instead of arming its own watcher.",
       "agents/fleet-merge-bot.agent.md"
     ],
     [
-      "Its brief is `~/.fleet/bin/fleet-run dispatch-prompt.mjs render merge-bot --member merge-bot-<n> --n <n> --scratch <scratch>`, `<scratch>` the absolute `scratch-root.mjs` output: the bot writes only under `<scratch>/pr<N>/merge-bot-<n>/`.",
+      "Its brief is `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run dispatch-prompt.mjs render merge-bot --member merge-bot-<n> --n <n> --scratch <scratch>`, `<scratch>` the absolute `scratch-root.mjs` output: the bot writes only under `<scratch>/pr<N>/merge-bot-<n>/`.",
       "references/tick-rows.md, the `DISPATCH merge-bot` row: the `<scratch>` its brief takes is the absolute `scratch-root.mjs` output"
     ],
     [
@@ -203,7 +203,7 @@
       "SKILL: **The tier check.** bullet under Dispatching the Pull's member; tests/tier-check.test.mjs"
     ],
     [
-      "By hand it is `~/.fleet/bin/fleet-run tier-check.mjs --batch <path-to-batch.json>`, which judges the implementer just dispatched on the ledger's terms.",
+      "By hand it is `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run tier-check.mjs --batch <path-to-batch.json>`, which judges the implementer just dispatched on the ledger's terms.",
       "tier-check.mjs (tests/tier-check.test.mjs)"
     ],
     [
@@ -219,7 +219,7 @@
       "tier-roles.mjs (tests/tier-roles.test.mjs)"
     ],
     [
-      "Before the run's first dispatch run `~/.fleet/bin/fleet-run tier-roles.mjs --check --in-flight <B>`, `<B>` the run's In-flight bound (phase 0's `tier-roles` step runs it); exit 1 names every definition whose `model:` is not a route, every unset `modelRoles.<role>` a definition needs, every definition whose `:<level>` its role's target does not run at (omp's model catalog — omp would clamp it silently), except an implementer definition whose cell the router never selects (not in `router-table.json`'s `cells` or `rows` values, and not the policy cell), which is a notice and never stops the run; every `task.agentModelOverrides` entry that would shadow a fleet definition, and an `--agents` directory holding no `*.agent.md` definition, prints the exact remedy, and **stops the run** before any member is dispatched — the fleet reads that config and never writes it.",
+      "Before the run's first dispatch run `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run tier-roles.mjs --check --in-flight <B>`, `<B>` the run's In-flight bound (phase 0's `tier-roles` step runs it); exit 1 names every definition whose `model:` is not a route, every unset `modelRoles.<role>` a definition needs, every definition whose `:<level>` its role's target does not run at (omp's model catalog — omp would clamp it silently), except an implementer definition whose cell the router never selects (not in `router-table.json`'s `cells` or `rows` values, and not the policy cell), which is a notice and never stops the run; every `task.agentModelOverrides` entry that would shadow a fleet definition, and an `--agents` directory holding no `*.agent.md` definition, prints the exact remedy, and **stops the run** before any member is dispatched — the fleet reads that config and never writes it.",
       "Phase 0 tier-roles step (SKILL); tier-roles.mjs (tests/tier-roles.test.mjs)"
     ],
     [
@@ -263,7 +263,7 @@
       "ledger.mjs append (tests/ledger.test.mjs)"
     ],
     [
-      "a `task` member named `review-pr-<pr#>`, agent `fleet-review-runner`, its prompt the five args `pr`, `branch`, `worktree`, `testCmd` and `scratch` — it loads `review-eval.mjs` through the Resolver (`~/.fleet/bin/fleet-run --path review-eval.mjs`), awaits `runReviewOnOmp` in its own kernel, writes the result file into the review's own run root and reports its path and `reviewed=` token; record `review=member:review-pr-<pr#>` on the PR's row before the dispatch call.",
+      "a `task` member named `review-pr-<pr#>`, agent `fleet-review-runner`, its prompt the five args `pr`, `branch`, `worktree`, `testCmd` and `scratch` — it loads `review-eval.mjs` through the Resolver (`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run --path review-eval.mjs`), awaits `runReviewOnOmp` in its own kernel, writes the result file into the review's own run root and reports its path and `reviewed=` token; record `review=member:review-pr-<pr#>` on the PR's row before the dispatch call.",
       "SKILL: **The reviewer.** bullet under Dispatching the members a wake names"
     ],
     [
@@ -311,7 +311,7 @@
       "SKILL: red-check fixer bullet under Dispatching the members a wake names"
     ],
     [
-      "**Where `testCmd` comes from:** the repository's Test entrypoint, out of the Recipe cache phase 0's Recipe derivation step proved — `~/.fleet/bin/fleet-run derive-testcmd.sh .",
+      "**Where `testCmd` comes from:** the repository's Test entrypoint, out of the Recipe cache phase 0's Recipe derivation step proved — `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run derive-testcmd.sh .",
       "SKILL: phase 0 Recipe derivation step; scripts/derive-testcmd.sh"
     ],
     [

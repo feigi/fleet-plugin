@@ -37,7 +37,7 @@ const script = (extra) => ({
 // The one command line the test-run prompt hands its agent, run the way that
 // agent is told to: once, in the foreground, through a POSIX shell. The counts
 // come from the log the block wrote, as the agent is told to read them. The
-// block reaches the suite-slot wrapper through `~/.fleet/bin/fleet-run`, so it
+// block reaches the suite-slot wrapper through `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run`, so it
 // runs under a host of its own (`slotHome()`), never the real `~/.fleet`.
 function runBlock(prompt, env) {
   const block = prompt.split("\n").find((l) => /^ {4}\{ cd /.test(l));

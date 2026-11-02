@@ -7,7 +7,7 @@
 //
 // Run from the member's worktree, after `git add` and before the commit and
 // push, and again after any content change or rebase. Reached through the
-// Resolver: `~/.fleet/bin/fleet-run recipe-check.mjs ...`.
+// Resolver: `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run recipe-check.mjs ...`.
 //
 // `--member` is the `impl-<N>[-x]` or `fix-pr-<M>[-x]` name the member was
 // dispatched as. `--testCmd` is the Test entrypoint exactly as the member was

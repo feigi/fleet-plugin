@@ -1,8 +1,8 @@
 // The Provenance check (ADR 0021): which install kind the Install root is,
 // its recorded version, the scripts/ digest over the whole file set under
-// `<Install root>/scripts`, Resolver drift, and the exit contract (0 clean,
-// 1 drift, 2 nothing to resolve). Driven through the real CLI —
-// fleet-provenance reads `os.homedir()` directly and `process.exit()`s.
+// `<Install root>/scripts`, and the exit contract (0 the package entry
+// resolves, 2 it does not). Driven through the real CLI — fleet-provenance
+// reads `os.homedir()` directly and `process.exit()`s.
 //
 // Every fixture's env is built from scratch (never `...process.env`), so
 // these tests are deterministic regardless of the box they run on.
@@ -34,8 +34,7 @@ function writePayload(payload) {
   return sub;
 }
 
-// An install of the given kind, with the Resolver placed byte-identical to
-// the installed copy so drift never decides the exit code:
+// An install of the given kind:
 //   marketplace — node_modules entry symlinked into omp's plugin cache;
 //   npm         — node_modules entry a real directory (what npm unpacks);
 //   link        — node_modules entry symlinked to a checkout elsewhere.
@@ -54,19 +53,18 @@ function fakeInstall(kind = "marketplace") {
     sub = writePayload(payload);
     symlinkSync(payload, entry);
   }
-  mkdirSync(join(home, ".fleet", "bin"), { recursive: true });
-  writeFileSync(join(home, ".fleet", "bin", "fleet-run"), "resolver\n");
   return { home, sub };
 }
 
 const NOTICE = /NOTICE: Install root is a linked checkout/;
 
 for (const [kind, expected] of [["npm", "npm-install"], ["marketplace", "marketplace-install"]]) {
-  test(`a ${kind}-shaped install reports kind ${expected}, exit 0, no linked-checkout NOTICE`, () => {
+  test(`a ${kind}-shaped install with nothing placed reports kind ${expected}, no drift line, exit 0, no linked-checkout NOTICE`, () => {
     const { home } = fakeInstall(kind);
     const r = runProvenance(home);
     assert.equal(r.status, 0, `expected success, got status ${r.status}: ${r.stdout}${r.stderr}`);
     assert.match(r.stdout, new RegExp(`^fleet-provenance: kind: ${expected}$`, "m"));
+    assert.doesNotMatch(r.stdout, /Resolver drift/);
     assert.doesNotMatch(r.stdout, NOTICE);
   });
 }
@@ -97,12 +95,17 @@ test("no node_modules/@feigi/fleet-ctl entry: exit 2, stderr names the missing p
   assert.equal(r.stdout, "");
 });
 
-test("a placed Resolver that differs from the installed copy refuses as drift, exit 1", () => {
+// A Resolver copy an earlier release placed at `~/.fleet/bin/fleet-run` is
+// left on boxes that upgraded: nothing compares it any more, so a copy that
+// differs from the installed one must not fail the check.
+test("a leftover ~/.fleet/bin/fleet-run that differs from the installed copy is not read: no drift line, exit 0", () => {
   const { home } = fakeInstall("npm");
+  mkdirSync(join(home, ".fleet", "bin"), { recursive: true });
   writeFileSync(join(home, ".fleet", "bin", "fleet-run"), "stale resolver\n");
   const r = runProvenance(home);
-  assert.equal(r.status, 1, `expected drift to fail the check, got status ${r.status}: ${r.stdout}`);
-  assert.match(r.stdout, /Resolver drift: REFUSED/);
+  assert.equal(r.status, 0, `expected success, got status ${r.status}: ${r.stdout}${r.stderr}`);
+  assert.match(r.stdout, /^fleet-provenance: kind: npm-install$/m);
+  assert.doesNotMatch(r.stdout, /Resolver drift/);
 });
 
 test("a readable nested subdirectory, dotfiles included, is digested with the rest of scripts/", () => {
@@ -117,6 +120,7 @@ test("an empty scripts/ makes the digest UNAVAILABLE rather than certifying noth
   const entry = join(home, ".omp", "plugins", "node_modules", "@feigi", "fleet-ctl");
   mkdirSync(join(entry, "scripts"), { recursive: true });
   const r = runProvenance(home);
+  assert.equal(r.status, 0, `the package entry resolves, so an unavailable digest is reported, not a failure: status ${r.status}: ${r.stdout}${r.stderr}`);
   assert.match(r.stdout, /scripts\/ digest: UNAVAILABLE — no files under .*scripts — refusing to certify an empty set/);
   assert.doesNotMatch(r.stdout, /scripts\/ digest: sha256/);
 });

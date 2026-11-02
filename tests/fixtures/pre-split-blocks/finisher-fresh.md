@@ -1,6 +1,6 @@
 **Re-check the instrument set before you act on what duty 1 or duty 2 read,
 and again before you add the label.**
-`~/.fleet/bin/fleet-run instruments.sh --repo "$(dirname "$(env -u GIT_DIR -u GIT_WORK_TREE git rev-parse --git-common-dir)")"`.
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run instruments.sh --repo "$(dirname "$(env -u GIT_DIR -u GIT_WORK_TREE git rev-parse --git-common-dir)")"`.
 Exit 0 is the only code that lets you go on. Exit 1 (the set changed) and
 exit 2 (the check could not answer) both halt you: report what it printed,
 add no label, and do NOT re-read the script that gave you the reading.
@@ -82,7 +82,7 @@ cause `other`, with both runs — the mutant's and the unmutated tree's — as
 evidence; label nothing. A kill's evidence line goes in your report.
 
 **Duty 3 is one script, and its exit code is your verdict.**
-`~/.fleet/bin/fleet-run finisher-label.mjs --pr <M> --pin <your dispatch pin>`
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run finisher-label.mjs --pr <M> --pin <your dispatch pin>`
 (the full SHA). It confirms exactly one of `patch`/`minor`/`major` is on the
 PR, records the head you audited, adds `ready-to-merge`, and reads the labels
 back. Exit 0 is the only code that means the label is on. Exit 3 means the PR
@@ -97,7 +97,7 @@ receipt, the JSON line it printed, in your report as printed: it is what tells
 the controller the label is on.
 
 **Duty 1 is one script, and its exit code is your verdict.**
-`~/.fleet/bin/fleet-run finisher-audit.mjs --worktree <abs-path> --pin <your dispatch pin>`
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run finisher-audit.mjs --worktree <abs-path> --pin <your dispatch pin>`
 (the path you were dispatched with, and the full SHA). It finds your
 worktree's row, reads whether the tree is dirty, compares the worktree's
 `HEAD` to your pin, and when the head differs derives the cause from the

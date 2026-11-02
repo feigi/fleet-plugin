@@ -8,7 +8,7 @@
   replacement controller too — and keeps the review, fix-applier and merge rows
   firing until the open PRs merge. The drain starts the end of the run; it does
   not end it. **End of run**, in this order:
-  1. `~/.fleet/bin/fleet-run fleet-event.mjs drain --reason "<reason>"` — runs
+  1. `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run fleet-event.mjs drain --reason "<reason>"` — runs
      `closeout.mjs begin --reason "<reason>"` (references/reaping.md), then the tick. A claim it refuses prints `NEED hand-release #<N> <blocker>`: that
      refusal is the finding, so run `worktree-audit.sh` and decide by hand.
      `begin` selects a claim with no PR and a live or `bailed` implementer token
@@ -17,7 +17,7 @@
   2. Act on the review, fix-applier and merge rows until the tick prints
      `ACTION: run over → fleet-heartbeat.mjs --stop "<reason>"`, which it does
      once the run is draining with no open PR and no live implementer.
-  3. `~/.fleet/bin/fleet-run closeout.mjs finish --reason "<reason>"` — scrapes
+  3. `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run closeout.mjs finish --reason "<reason>"` — scrapes
      the run's member facts, checks the tier-outcomes rows, refreshes the
      metrics, commits the three metrics files and opens their PR, sets the
      phase-0 receipt aside as `.fleet/phase0.previous.json`, records
@@ -83,7 +83,7 @@ re-dispatched picks the new transcript up. **Never hand-edit
 role classifier changes, and a hand-entered value would not survive that. The
 verdict for a PR goes to `tier-outcomes.tsv` through `tier-outcomes.mjs
 append`, as above. Once both files hold this run's rows, and before either is
-committed, run `~/.fleet/bin/fleet-run tier-outcomes.mjs check --live`. Exit 1
+committed, run `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run tier-outcomes.mjs check --live`. Exit 1
 names each row whose `tier` disagrees with the one implementer the member facts
 say ran for its ticket: correct that row's `tier` to the short name it prints,
 or blank it and say why in `note`. Exit 1 also names the PRs of the case where
@@ -103,7 +103,7 @@ issue number among the reasons — comes before that PR's WARNING and says why.
 
 **Drain the pending ticket-features rows and refresh the cost guard, after
 the member-outcomes scrape and every `tier-outcomes.mjs append`, before the
-metrics files are committed.** `~/.fleet/bin/fleet-run metrics-refresh.mjs`
+metrics files are committed.** `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run metrics-refresh.mjs`
 moves `.fleet/ticket-features.pending.tsv` — the row the router script
 appended for each Pull at dispatch — into `docs/metrics/ticket-features.tsv`,
 deduped on `session`+`agent`, so this run's own rows are in the file that gets
@@ -153,4 +153,4 @@ The step can refuse in each of these ways:
 
 ## Undo a drain
 
-**Undrain only when the maintainer asks, and never a drain that budget or context exhaustion caused.** `~/.fleet/bin/fleet-run fleet-event.mjs undrain --reason "<reason>"` runs `closeout.mjs reopen --reason "<reason>"`, then the tick, as `drain` does. `reopen` refuses (exit 2) once any `finish` step in `.fleet/closeout.json` is `ok`, because the tick and what follows it have already acted; a `finish` whose `tick` failed blocks nothing. Otherwise it puts `begin`'s `drain` and `release` steps back to pending and clears `begun`, then runs `ledger.mjs undrain "<reason>"`, which clears the marker, so the next `begin` drains and releases again. With no marker set it refuses (exit 2). A ledger drained by a bare `ledger.mjs drain`, with no receipt, is only undrained. A claim `begin` released stays released: its ticket goes back to the queue and is dispatched under the next free name (`impl-<N>-b`), because `ledger.mjs dispatch` refuses a name already dispatched this session.
+**Undrain only when the maintainer asks, and never a drain that budget or context exhaustion caused.** `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run fleet-event.mjs undrain --reason "<reason>"` runs `closeout.mjs reopen --reason "<reason>"`, then the tick, as `drain` does. `reopen` refuses (exit 2) once any `finish` step in `.fleet/closeout.json` is `ok`, because the tick and what follows it have already acted; a `finish` whose `tick` failed blocks nothing. Otherwise it puts `begin`'s `drain` and `release` steps back to pending and clears `begun`, then runs `ledger.mjs undrain "<reason>"`, which clears the marker, so the next `begin` drains and releases again. With no marker set it refuses (exit 2). A ledger drained by a bare `ledger.mjs drain`, with no receipt, is only undrained. A claim `begin` released stays released: its ticket goes back to the queue and is dispatched under the next free name (`impl-<N>-b`), because `ledger.mjs dispatch` refuses a name already dispatched this session.

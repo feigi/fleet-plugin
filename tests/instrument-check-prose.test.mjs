@@ -252,6 +252,6 @@ test("the path the prose tells the controller to run is a real executable", () =
   // held one element or none and `size === 1` was "the name appears somewhere"
   // wearing a cross-site consistency check's clothes.
   const SH = "scripts/instruments.sh";
-  assert.match(RUN_TEAM.text, Pin.phrase("~/.fleet/bin/fleet-run instruments.sh"), "the prose stopped naming the instrument check through the Resolver");
+  assert.match(RUN_TEAM.text, Pin.phrase("~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run instruments.sh"), "the prose stopped naming the instrument check through the Resolver");
   accessSync(join(REPO, SH), constants.X_OK);
 });
