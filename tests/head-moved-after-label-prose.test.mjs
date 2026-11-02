@@ -431,3 +431,19 @@ test("requirements §3.4 binds the label to the net change and names the carry",
   assert.match(s, Pin.phrase("a proven rebase-carry"));
   assert.match(s, Pin.phrase("Any other push after (a review fix, a conflict resolution, an edited commit) makes bot halt with `head-moved-after-label-#<pr>`"));
 });
+
+// §1.1 is HARD, and `proveCarry` in merge-gate.mjs runs `git merge-tree
+// --write-tree --merge-base=<base>`. `--merge-base` arrived in git 2.40.0
+// (#4184), so a floor below it declares a git on which that option is unknown.
+// A floor at or above 2.40 is no fault: only a lower one is refused here.
+test("requirements §1.1 declares a git floor of at least 2.40, where `git merge-tree` gained `--merge-base`", () => {
+  const REQ = Pin.file(join(import.meta.dirname, "..", "docs", "requirements.md"));
+  const row = REQ.between("| `git` |", "| `gh` |", "requirements.md §1.1").text;
+  const floor = /`>=\s*(\d+)\.(\d+)/.exec(row);
+  assert.ok(floor, `requirements.md §1.1's git row no longer states a \`>= <major>.<minor>\` floor: ${row.trim()}`);
+  const [major, minor] = [Number(floor[1]), Number(floor[2])];
+  assert.ok(
+    major > 2 || (major === 2 && minor >= 40),
+    `requirements.md §1.1 declares git >= ${major}.${minor}, below the 2.40 where \`git merge-tree\` gained \`--merge-base\`, which the carry proof runs`,
+  );
+});
