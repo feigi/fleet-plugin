@@ -1986,9 +1986,12 @@ function dispositionsRefusal(pr, review) {
   }
   if (v.verdict === "escalate") {
     return `dispositions escalate — ${v.member} deferred a finding above suggestion severity because its remedy lies outside the PR's diff, `
-      + "or its record drew a second mismatch on this review; either needs a human's ruling: "
-      + `review ${review.run} gets no finisher and no retry; dispositions-check.mjs --member ${v.member} `
-      + "--scratch <scratch> names each escalated finding or violating entry by bucket and index, for the PR comment that hands it to a human";
+      + `or its record drew a second mismatch on this review: review ${review.run} gets no finisher until the escalate clears. `
+      + "An outside-diff deferral clears when the maintainer's escalation answers are recorded with "
+      + `dispositions-check.mjs --member ${v.member} --scratch <scratch> --uphold '<list>' --send-back '<list>'; `
+      + "a second mismatch clears only with a new review of the PR. "
+      + `dispositions-check.mjs --member ${v.member} --scratch <scratch> alone names each escalated finding or violating entry by bucket and index, `
+      + "for the PR comment that hands it to the maintainer";
   }
   return null;
 }

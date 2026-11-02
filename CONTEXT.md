@@ -783,6 +783,13 @@ Ruling is given by hand. The Router counts a ticket as merged only through its
 Ruling; a decision on an issue, or a reply owed to a member, is not one.
 _Avoid_: verdict row, tier outcome
 
+**Escalation answer**:
+The maintainer's answer to one critical, important or severity-less finding that
+a fix-applier deferred `remedy-outside-diff` on a record that broke no rule:
+*upheld* (the deferral stands) or *sent back* (apply it in this PR). It answers
+one review; a new review counts from none.
+_Avoid_: ruling, waiver, override, ack
+
 **Charge**:
 The fix-applier's reading of one finding that stands on a PR's first review: a
 finding that survived its verifiers and was not deferred `false-rationale`, or

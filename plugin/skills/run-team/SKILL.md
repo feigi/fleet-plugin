@@ -611,14 +611,9 @@ answers that one: the check's stderr names it, and the record's issue number
 needs correcting); the tick offers no fix-applier for it. `dispositions
 mismatch` — no finisher: the tick prints `DISPATCH fix-pr PR#<M>` for it, and
 the next-suffix fix-applier answers it (**Then dispatch a fix-applier**).
-`dispositions escalate` — no finisher, no
-retry and no further fix-applier: either a `critical` or `important` finding was
-deferred `remedy-outside-diff`, or a second mismatch was drawn on one review, and
-only a human can rule on either. Post the check's output, which names each
-escalated finding or violating entry, with `gh pr comment <M>`, and flag the PR
-for a human; re-running the check reprints it. Dispatch no fix-applier and no
-finisher for that review, and expect no `fix-due` row for it; a new
-review of the PR starts the check again. **On any PR with a
+`dispositions escalate` — no finisher, no `fix-due` row: a finding above
+`suggestion` deferred `remedy-outside-diff` clears with the maintainer's answers,
+a second mismatch only with a new review (**Dispositions escalation**). **On any PR with a
 returned review, `0/<n>/0` included, it refuses too while a fix-applier on the
 PR is still live, verdict or not** —
 `fix-pr-<M>[-x] still live`: settle it, run the check for it, then dispatch
@@ -783,9 +778,14 @@ re-run the check for the mismatched member to reprint them. It writes its own
 record, and when it reports you run the check for it exactly as for the first
 one. `ok` ends it. A second failure on the same review is written as
 `dispositions-escalate=fix-pr-<M>-b:<run>` in place of a mismatch: the tick
-prints no `DISPATCH fix-pr` for it, `dispatch` refuses the finisher naming
-`dispositions escalate`, and you post the check's output with `gh pr comment <M>`
-and flag the PR for a human. A new review of the PR counts again from none.
+prints no `DISPATCH fix-pr` for it. Post the check's output with
+`gh pr comment <M>`. A second failure is flagged for a human. A new review of
+the PR counts again from none. An escalate whose check printed no violations is
+the maintainer's to answer instead, one yes/no per escalated finding: yes upholds
+the deferral, no sends it back to be applied in this PR. With every finding
+explicitly answered this session, record them with `dispositions-check.mjs`
+`--uphold` and `--send-back`: `ok` gets the finisher, `mismatch` the tick's
+retry, `escalate` is a second failure. See references/dispositions-escalation.md.
 
 ### The main-gain hit
 

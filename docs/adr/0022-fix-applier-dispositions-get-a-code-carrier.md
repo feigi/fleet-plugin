@@ -63,6 +63,11 @@ as filing it `needs-triage`; and Context's ADR 0001 bar, "filed
 label rule in place of ADR 0001's bar. An open issue labelled
 `ready-for-agent` still answers a `needs-triage` row, since triage already
 promoted it.
+Amended by #4030 (ruled 2026-11-02 by the maintainer, from a grilling
+session): a Decision 4 escalate clears once the maintainer's escalation
+answers are recorded through the dispositions check; an upheld finding
+passes, and a sent-back finding is a mismatch that gets the mismatch retry;
+Decision 9's escalate still needs a new review.
 
 ## Context
 
