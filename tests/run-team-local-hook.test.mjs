@@ -76,7 +76,7 @@ const membersTsv = (rows) => `# ${MEMBER_COLUMNS.join("\t")}\n${rows.length ? fo
 const tiersTsv = (rows) => `# ${TIER_COLUMNS.join("\t")}\n${rows.map((r) => `${formatRow(r)}\n`).join("")}`;
 const unjudged = { cell: "slow-high", reason: "unjudged", cells: {}, pairs: [] };
 const routerTable = (over = {}) => ({
-  window_start: null, fitted_commit: null, n_rows: 0, stage: 1, cells: [...STAGE1], burn_in: true,
+  window_start: null, fitted_commit: null, n_rows: 0, stage: 1, cells: [...STAGE1], burn_in: true, splits: {},
   rows: { cost: { "*": "slow-high" }, speed: { "*": "slow-high" } }, classifier: { b: null, tau: null }, estimates: {},
   reasons: { cost: { "*": unjudged }, speed: { "*": unjudged } }, guard: { tripped: [], n: {} }, ...over,
 });

@@ -331,7 +331,7 @@ test("a phase 0 over fixture records writes router-preview.json beside the fresh
   assert.equal(preview.tsv_blobs["docs/metrics/tier-outcomes.tsv"], git(f.repo, ["hash-object", "docs/metrics/tier-outcomes.tsv"]));
   assert.deepEqual(preview.prior, {
     fitted_commit: SHIPPED.fitted_commit, version: INSTALLED_VERSION, stage: SHIPPED.stage, cells: SHIPPED.cells,
-    classifier: SHIPPED.classifier, window_start: SHIPPED.window_start,
+    classifier: SHIPPED.classifier, splits: SHIPPED.splits, window_start: SHIPPED.window_start,
   });
   assert.equal(validateTable(preview.table) instanceof Error, false, "the cockpit reads it through validateTable");
   assert.equal(preview.table.fitted_commit, null, "never committed: no commit names it");

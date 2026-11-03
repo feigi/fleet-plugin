@@ -38,7 +38,6 @@ import { latestFinisherAttempts, foldLedger, pastPinDue } from "./fleet-tick.mjs
 import { computeCellEvidence } from "./compute-cell-evidence.mjs";
 import { admissibleRow, lastSegment } from "./pull-attribution.mjs";
 import { dispatchModel } from "./member-outcomes.mjs";
-import { HEAVY_BRIEF_CHARS, HEAVY_CRITERIA } from "./ticket-router.mjs";
 import { implementerCell, modelsEqual } from "./tier-roles.mjs";
 
 // A ledger row is freeform, controller-authored text. Two example shapes:
@@ -315,7 +314,6 @@ const isBadge = (flag) => flag === "excluded" || flag.startsWith("excluded:");
 const NOT_ON_RECORD = "not on record";
 const part = (text, o = {}) => ({ text, dim: false, href: null, sep: " · ", ...o });
 const hole = (o = {}) => part(NOT_ON_RECORD, { dim: true, ...o });
-const grouped = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 
 // A transcript's member record, as gather() keeps it, put the way the figures
 // read an implementer row (member-outcomes.mjs): its definition, its level
@@ -368,14 +366,14 @@ function reasonWords(r, table) {
   }
 }
 
-// The Stratum and the numbers that set it: a Slice's parent sets it, ahead of the brief's numbers.
+// The Stratum — the group's rule path — with what is known of how the Pull came by it: the sizing label arm B gave
+// it, no brief read, no sizing, or the Slice it is a part of. Else the rule path alone.
 function stratumWords(r) {
   if (r.sized !== null) return `${r.stratum}: sized ${r.sized}`;
   if (r.brief === null) return `${r.stratum}: no brief read`;
   if (r.reason === "no-sizing") return `${r.stratum}: no sizing`;
   if (r.parent !== null) return `${r.stratum}: Slice of #${r.parent}`;
-  const past = (n, at) => `${n > at ? "past" : "not past"} ${grouped(at)}`;
-  return `${r.stratum}: ${grouped(r.brief)} chars (${past(r.brief, HEAVY_BRIEF_CHARS)}), ${r.criteria} criteria (${past(r.criteria, HEAVY_CRITERIA)})`;
+  return r.stratum;
 }
 
 // "<model> · <level>" off a dispatch record, holes where it carries none.
@@ -452,7 +450,7 @@ export function cellLine({ row, issue, routed = [], agents = {}, members = new M
     targets.push({ cell: rescue.at, generation: gen });
   }
 
-  // Line 2: the Stratum with its numbers, then the model and level of the
+  // Line 2: the Stratum, the group's rule path, then the model and level of the
   // Pull's first implementer at its Cell.
   const shown = recs[firstAdmissible === -1 ? 0 : firstAdmissible];
   const stratum = [routing !== null ? part(stratumWords(routing), { sep: "" }) : hole({ sep: "" }), ...modelParts(shown, " · ")];

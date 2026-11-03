@@ -882,14 +882,30 @@ export function drawCell({ session, ticket, policyCell, cells }) {
 // this order, `-` for none:
 //   POLICY    the policy row's Cell        CELL      the Pull's Cell
 //   DRAW      k/K of the draw              BY        burn-in | every-5th
-//   STRATUM   light | heavy | unknown      BRIEF     the brief's chars
+//   STRATUM   the group's rule path        BRIEF     the brief's chars
 //   CRITERIA  the criteria count           PARENT    a Slice's parent issue
 //   SIZED     arm B's sizing label         OBJECTIVE cost | speed
 //   TRIPPED   the guard's tripped Cells    REASON    the first thing that went wrong
 // DRAW and BY are `-` together (no draw); so are BRIEF and CRITERIA (no issue
 // read), and PARENT is `-` with them. A line written before PARENT was a part
 // carries none, and reads as `PARENT=-`.
-export const STRATA = Object.freeze(["light", "heavy", "unknown"]);
+//
+// STRATUM names the group the Pull was routed to — the router table's node the
+// walk ended at — by its rule path. `*` is the root, the group of every ticket
+// before any split; any other path is the tests taken from the root, in order,
+// joined by `&`. A test is the input a split reads, then `>` or `<=` and a
+// number (`brief_chars>4047`, `brief_chars<=4047`), or `=` or `!=` and a
+// ticket kind (`kind=bug`, `kind!=bug`): `brief_chars>4047&kind=bug`. A path
+// holds no whitespace, so it is one word of the line, and it is the key the
+// table's rows, estimates and reasons name the group by. A line filed before the
+// table was a tree carries `light`, `heavy` or `unknown`: a ledger is append-only
+// and outlives an upgrade, so those words still read, and the router writes none.
+const RULE_TEST = "[a-z][a-z_]*(?:(?:>|<=)(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?|!?=[a-z]+)";
+const RULE_PATH = new RegExp(`^(?:\\*|${RULE_TEST}(?:&${RULE_TEST})*)$`);
+const FILED_STRATA = Object.freeze(["light", "heavy", "unknown"]);
+
+/** Whether `x` is a rule path: `*`, or one or more tests joined by `&`. */
+export const isRulePath = (x) => typeof x === "string" && RULE_PATH.test(x);
 // What a run asks the router to minimise. phase0.mjs records the run's in its
 // receipt, and every Routing names the one it routed by.
 export const OBJECTIVES = Object.freeze(["cost", "speed"]);
@@ -929,7 +945,7 @@ export function parseRouting(line) {
     cell: CELL.test(v.CELL) ? v.CELL : undefined,
     draw: v.DRAW === "-" ? null : d === null ? undefined : { k: Number(d[1]), K: Number(d[2]) },
     by: opt(v.BY, (x) => DRAWN_BY.includes(x)),
-    stratum: STRATA.includes(v.STRATUM) ? v.STRATUM : undefined,
+    stratum: isRulePath(v.STRATUM) || FILED_STRATA.includes(v.STRATUM) ? v.STRATUM : undefined,
     brief: count(v.BRIEF),
     criteria: count(v.CRITERIA),
     parent: v.PARENT === "-" ? null : ISSUE.test(v.PARENT) && Number.isSafeInteger(Number(v.PARENT)) ? Number(v.PARENT) : undefined,

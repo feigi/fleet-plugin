@@ -502,23 +502,32 @@ const INSTALL = { name: "@feigi/fleet-ctl", version: "3.104.0", repository: "git
 const HERE = "https://github.com/feigi/fleet-plugin";
 const FIVE = ["slow-high", "task-high", "smol-high", "slow-medium", "task-max"];
 
-// A table fitted on 198 Pulls, in stage 2, short of the two effort Cells: heavy has a row of its own.
+// The tree a fitted table holds here: the root splits on the brief's length, with a group on each side of the cut.
+const ABOVE = "brief_chars>4047";
+const BELOW = "brief_chars<=4047";
+const SPLITS = { "*": { input: "brief_chars", cut: 4047 } };
+const UNJUDGED = { cell: "slow-high", reason: "unjudged", cells: {}, pairs: [] };
+
+// A table fitted on 198 Pulls, in stage 2, short of the two effort Cells: the group above the cut has a row of its own.
 const FITTED = (o = {}) => ({
   window_start: "2026-10-03", fitted_commit: "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d", n_rows: 198, stage: 2, cells: FIVE, burn_in: true,
-  rows: { cost: { "*": "slow-high", heavy: "task-high" }, speed: { "*": "slow-high", heavy: "task-high" } },
+  splits: SPLITS,
+  rows: { cost: { "*": "slow-high", [ABOVE]: "task-high", [BELOW]: "slow-high" }, speed: { "*": "slow-high", [ABOVE]: "task-high", [BELOW]: "slow-high" } },
   classifier: { b: null, tau: null },
   estimates: {
     "*": { "slow-high": { generation: "claude-opus-5", merged: 69 }, "task-high": { generation: "claude-sonnet-5-5", merged: 60 }, "smol-high": { generation: "claude-haiku-5-5", merged: 12 } },
-    heavy: { "slow-high": { generation: "claude-opus-5", merged: 40 }, "task-high": { generation: "claude-sonnet-5-5", merged: 31 } },
+    [ABOVE]: { "slow-high": { generation: "claude-opus-5", merged: 40 }, "task-high": { generation: "claude-sonnet-5-5", merged: 31 } },
   },
   reasons: {
     cost: {
       "*": { cell: "slow-high", reason: "no-qualifier", cells: { "task-high": { verdict: "not-reliably-cheaper", range: [-1.25, 0.5] }, "smol-high": { verdict: "too-few", range: null } }, pairs: [] },
-      heavy: { cell: "task-high", reason: "sole-qualifier", cells: { "task-high": { verdict: "qualifies", range: [-4.2, -1.1] } }, pairs: [] },
+      [ABOVE]: { cell: "task-high", reason: "sole-qualifier", cells: { "task-high": { verdict: "qualifies", range: [-4.2, -1.1] } }, pairs: [] },
+      [BELOW]: UNJUDGED,
     },
     speed: {
       "*": { cell: "slow-high", reason: "no-qualifier", cells: { "task-high": { verdict: "not-reliably-faster", range: [-12, 3.25] } }, pairs: [] },
-      heavy: { cell: "task-high", reason: "unjudged", cells: {}, pairs: [] },
+      [ABOVE]: { cell: "task-high", reason: "unjudged", cells: {}, pairs: [] },
+      [BELOW]: UNJUDGED,
     },
   },
   guard: { tripped: [], n: { "slow-high": 69, "task-high": 69, "smol-high": 32, "slow-medium": 0, "task-max": 0 } },
@@ -640,8 +649,8 @@ test("no cost guard: every Pull runs at slow-high, whatever the table says, and 
     const s = sideOf(p);
     assert.equal(s.heading, "no cost guard: every Pull runs at slow-high, the default Cell");
     assert.equal(s.dispatch, "slow-high only");
-    const heavy = lineOf(p, "cost", "heavy").sides[0];
-    assert.deepEqual([heavy.cell, heavy.held, heavy.dispatch], ["slow-high", "task-high held: no cost guard", null]);
+    const above = lineOf(p, "cost", ABOVE).sides[0];
+    assert.deepEqual([above.cell, above.held, above.dispatch], ["slow-high", "task-high held: no cost guard", null]);
   }
 });
 
@@ -656,51 +665,54 @@ test("verdict none holds nothing back: the table is the dispatch", () => {
   const p = policy({ guard: none, table: FITTED({ burn_in: false }) });
   assert.equal(sideOf(p).heading, null, "no burn-in, no guard heading");
   assert.equal(sideOf(p).dispatch, "the row's Cell; every 5th Pull drawn over the rest");
-  assert.equal(lineOf(p, "cost", "heavy").sides[0].cell, "task-high");
+  assert.equal(lineOf(p, "cost", ABOVE).sides[0].cell, "task-high");
 });
 
 test("per-row exceptions: a tripped row Cell replaced by slow-high shows on its row, the shared dispatch in the heading", () => {
   const tripped = guardOk(TODAY().guard.cells, { verdict: "tripped", tripped: ["task-high"] });
   const p = policy({ guard: tripped, table: FITTED({ burn_in: false }) });
   assert.equal(sideOf(p).dispatch, "the row's Cell; every 5th Pull drawn over the rest");
-  const heavy = lineOf(p, "cost", "heavy").sides[0];
-  assert.deepEqual([heavy.cell, heavy.held, heavy.dispatch], ["slow-high", "task-high tripped", "slow-high, the row's task-high tripped; every 5th Pull drawn over the rest"]);
+  const above = lineOf(p, "cost", ABOVE).sides[0];
+  assert.deepEqual([above.cell, above.held, above.dispatch], ["slow-high", "task-high tripped", "slow-high, the row's task-high tripped; every 5th Pull drawn over the rest"]);
   const star = lineOf(p, "cost", "*").sides[0];
   assert.equal(star.dispatch, null, "a row that dispatches like the rest names no dispatch of its own");
-  assert.equal(lineOf(p, "speed", "heavy").sides[0].dispatch, heavy.dispatch, "under both Objectives");
+  assert.equal(lineOf(p, "speed", ABOVE).sides[0].dispatch, above.dispatch, "under both Objectives");
 });
 
 test("per-row exceptions in burn-in: a tripped row Cell keeps the draw and names what the policy Cell became", () => {
   const tripped = guardOk(TODAY().guard.cells, { verdict: "tripped", tripped: ["task-high"] });
   const p = policy({ guard: tripped, table: FITTED() });
   assert.equal(sideOf(p).dispatch, "drawn over 4 Cells: slow-high, smol-high, slow-medium, task-max");
-  assert.equal(lineOf(p, "cost", "heavy").sides[0].dispatch, "drawn over 4 Cells: slow-high, smol-high, slow-medium, task-max; the row's task-high tripped, so its policy Cell is slow-high");
+  assert.equal(lineOf(p, "cost", ABOVE).sides[0].dispatch, "drawn over 4 Cells: slow-high, smol-high, slow-medium, task-max; the row's task-high tripped, so its policy Cell is slow-high");
 });
 
-test("collapsed Strata: one with no row on any side is one line under its Objective; one with a row of its own keeps it", () => {
-  const p = policy({ table: FITTED() });
+test("the lines are the root, then each group a side holds a row for: one for a one-node tree, three for a two-leaf tree", () => {
+  const one = policy();
+  const two = policy({ table: FITTED() });
   for (const o of ["cost", "speed"]) {
-    assert.deepEqual(p.objectives.find((x) => x.objective === o).lines.map((l) => l.stratum), ["*", "light", "heavy", "unknown"], o);
-    assert.equal(lineOf(p, o, "light").collapsed, "light: no row, follows *", o);
-    assert.equal(lineOf(p, o, "unknown").collapsed, "unknown: no row, follows *", o);
-    assert.equal(lineOf(p, o, "heavy").collapsed, undefined, o);
-    assert.equal(lineOf(p, o, "heavy").sides[0].cell, "task-high", o);
+    assert.deepEqual(one.objectives.find((x) => x.objective === o).lines.map((l) => l.stratum), ["*"], `${o}: a one-node tree has its one line`);
+    assert.deepEqual(two.objectives.find((x) => x.objective === o).lines.map((l) => l.stratum), ["*", ABOVE, BELOW], o);
+    assert.equal(lineOf(two, o, ABOVE).sides[0].cell, "task-high", o);
+    assert.equal(lineOf(two, o, BELOW).sides[0].cell, "slow-high", o);
+    assert.equal(lineOf(two, o, BELOW).sides[0].reason, "unjudged", o);
   }
 });
 
-test("collapsing and keeping rows across two sides: a Stratum only one side lacks keeps its row, and that side reads 'no row of its own: follows *'", () => {
+test("two sides with different trees: a group only one side holds keeps its line, and the side lacking it reads 'no row of its own: follows *'", () => {
   const side = (title, rows) => ({ title, source: { text: title, check: null }, heading: null, footnotes: [], rows });
   const entry = (cell) => ({ cell, held: null, reason: "r", dispatch: "d", candidates: [] });
   const none = { cost: { "*": entry("slow-high") }, speed: { "*": entry("slow-high") } };
-  const left = { cost: { "*": entry("slow-high"), heavy: entry("task-high") }, speed: { "*": entry("slow-high") } };
+  const left = { cost: { "*": entry("slow-high"), [ABOVE]: entry("task-high") }, speed: { "*": entry("slow-high") } };
   const v = policyRowsView({ sides: [side("a", left), side("b", none)] });
   const line = (o, s) => v.objectives.find((x) => x.objective === o).lines.find((l) => l.stratum === s);
-  assert.equal(line("cost", "light").collapsed, "light: no row on either side, follows *");
-  assert.equal(line("speed", "heavy").collapsed, "heavy: no row on either side, follows *");
-  assert.equal(line("cost", "heavy").collapsed, undefined);
-  assert.equal(line("cost", "heavy").sides[0].cell, "task-high");
-  assert.deepEqual(line("cost", "heavy").sides[1], { follows: "no row of its own: follows *" });
+  assert.deepEqual(v.objectives.map((x) => x.lines.map((l) => l.stratum)), [["*", ABOVE], ["*"]], "a group is a line of the Objective whose rows hold it");
+  assert.equal(line("cost", ABOVE).sides[0].cell, "task-high");
+  assert.deepEqual(line("cost", ABOVE).sides[1], { follows: "no row of its own: follows *" });
   assert.deepEqual(line("cost", "*").sides.map((s) => s.cell), ["slow-high", "slow-high"]);
+  const right = policyRowsView({ sides: [side("b", none), side("a", left)] });
+  assert.deepEqual(right.objectives[0].lines.map((l) => l.stratum), ["*", ABOVE], "whichever side holds it");
+  const both = policyRowsView({ sides: [side("a", left), side("c", { cost: { "*": entry("slow-high"), [BELOW]: entry("slow-high") }, speed: none.speed })] });
+  assert.deepEqual(both.objectives[0].lines.map((l) => l.stratum), ["*", ABOVE, BELOW], "the groups of both sides, the first side's first");
 });
 
 test("the live run's Objective is marked, and between runs nothing is", () => {
@@ -715,10 +727,10 @@ test("each candidate shows its n, verdict and 95% interval, in dollars under cos
     ["task-high", 60, "not-reliably-cheaper", "95% interval [−$1.25, $0.50]"],
     ["smol-high", 12, "too-few", "no 95% interval"],
   ]);
-  assert.equal(lineOf(p, "cost", "heavy").sides[0].candidates[0].interval, "95% interval [−$4.20, −$1.10]");
+  assert.equal(lineOf(p, "cost", ABOVE).sides[0].candidates[0].interval, "95% interval [−$4.20, −$1.10]");
   assert.equal(lineOf(p, "speed", "*").sides[0].candidates[0].interval, "95% interval [−12.0 min, 3.3 min]");
   assert.equal(lineOf(p, "cost", "*").sides[0].reason, "no-qualifier");
-  assert.equal(lineOf(p, "speed", "heavy").sides[0].reason, "unjudged");
+  assert.equal(lineOf(p, "speed", ABOVE).sides[0].reason, "unjudged");
 });
 
 test("a candidate whose estimate carries no count shows its n as not checked, never a measured-looking 0", () => {
@@ -769,17 +781,17 @@ test("model names: an unset model role, or modelRoles never read, reads not chec
   assert.equal(sideOf(policy({ table: FITTED(), modelRoles: null })).modelLine, null, "a check that cannot run is not a difference");
 });
 
-test("every row, collapsed or not, has an anchor and a link, in every state", () => {
+test("every row has an anchor and a link, in every state", () => {
   const states = {
-    "unfitted": policy(),
-    "fitted": policy({ table: FITTED() }),
-    "no guard": policy({ guard: { status: "missing" } }),
-    "no table": policy({ table: null }),
-    "no install": policy({ install: null, repoUrl: null }),
+    "unfitted": [policy(), 2],
+    "fitted": [policy({ table: FITTED() }), 6],
+    "no guard": [policy({ guard: { status: "missing" } }), 2],
+    "no table": [policy({ table: null }), 2],
+    "no install": [policy({ install: null, repoUrl: null }), 2],
   };
-  for (const [name, p] of Object.entries(states)) {
+  for (const [name, [p, n]] of Object.entries(states)) {
     const lines = p.objectives.flatMap((o) => o.lines.map((l) => [o.objective, l]));
-    assert.equal(lines.length, 8, name);
+    assert.equal(lines.length, n, name);
     for (const [o, l] of lines) {
       assert.equal(l.anchor, `cells-row-${o}-${l.stratum}`, name);
       assert.equal(l.href, `#cells/row/${o}/${l.stratum}`, name);
@@ -804,22 +816,23 @@ test("computeCellEvidence with none of the policy inputs reads as no table, no i
 // -- policy rows: what the evidence favours --------------------------------------
 
 const BLOBS = { "docs/metrics/member-outcomes.tsv": "e08ea9cd", "docs/metrics/ticket-features.tsv": "12b5a98e", "docs/metrics/tier-outcomes.tsv": "18b6a980" };
-const PRIOR = { fitted_commit: SHIPPED.fitted_commit, version: "3.104.0", stage: SHIPPED.stage, cells: SHIPPED.cells, classifier: SHIPPED.classifier, window_start: SHIPPED.window_start };
+const PRIOR = { fitted_commit: SHIPPED.fitted_commit, version: "3.104.0", stage: SHIPPED.stage, cells: SHIPPED.cells, classifier: SHIPPED.classifier, window_start: SHIPPED.window_start, splits: SHIPPED.splits };
 // A Preview fit the shape today's records fit to: 235 Pulls, stage 2 with the two
 // effort Cells added at 0 merged PRs, task-high on every row it fitted.
 const TASK = (verdict) => ({ cell: "task-high", reason: "sole-qualifier", cells: { "task-high": { verdict, range: [-3.1, -0.4] }, "smol-high": { verdict: "under-floor", range: null } }, pairs: [] });
 const FIT = (o = {}) => ({
   window_start: "2026-10-03", fitted_commit: null, n_rows: 235, stage: 2, cells: FIVE, burn_in: true,
-  rows: { cost: { "*": "task-high", light: "task-high", heavy: "task-high" }, speed: { "*": "task-high", light: "task-high", heavy: "task-high" } },
+  splits: SPLITS,
+  rows: { cost: { "*": "task-high", [ABOVE]: "task-high", [BELOW]: "task-high" }, speed: { "*": "task-high", [ABOVE]: "task-high", [BELOW]: "task-high" } },
   classifier: { b: null, tau: null },
   estimates: {
     "*": { "slow-high": { generation: "claude-opus-5", merged: 69 }, "task-high": { generation: "claude-sonnet-5-5", merged: 69 }, "smol-high": { generation: "claude-haiku-5-5", merged: 32 } },
-    light: { "task-high": { generation: "claude-sonnet-5-5", merged: 40 } },
-    heavy: { "task-high": { generation: "claude-sonnet-5-5", merged: 29 } },
+    [BELOW]: { "task-high": { generation: "claude-sonnet-5-5", merged: 40 } },
+    [ABOVE]: { "task-high": { generation: "claude-sonnet-5-5", merged: 29 } },
   },
   reasons: {
-    cost: { "*": TASK("qualifies"), light: TASK("qualifies"), heavy: TASK("qualifies") },
-    speed: { "*": TASK("qualifies"), light: TASK("qualifies"), heavy: TASK("qualifies") },
+    cost: { "*": TASK("qualifies"), [ABOVE]: TASK("qualifies"), [BELOW]: TASK("qualifies") },
+    speed: { "*": TASK("qualifies"), [ABOVE]: TASK("qualifies"), [BELOW]: TASK("qualifies") },
   },
   guard: { tripped: [], n: { "slow-high": 69, "smol-high": 32, "task-high": 69 } },
   ...o,
@@ -844,7 +857,8 @@ test("today's records: the Preview fit reads stage 2 with slow-medium and task-m
   assert.equal(s.heading, "stage 2: slow-medium and task-max have 0 of the 20 merged PRs each needs", "present tense: the workspace's own counts");
   assert.deepEqual(s.labels, [], "fitted beside this guard, on its records, against the installed table");
   for (const o of ["cost", "speed"]) {
-    for (const stratum of ["*", "light", "heavy"]) {
+    assert.deepEqual(p.objectives.find((x) => x.objective === o).lines.map((l) => l.stratum), ["*", ABOVE, BELOW], `${o}: the root, then the groups of the fit's tree`);
+    for (const stratum of ["*", ABOVE, BELOW]) {
       const [now, fav] = lineOf(p, o, stratum).sides;
       assert.equal(fav.cell, "task-high", `${o}/${stratum}`);
       assert.equal(fav.reason, "sole-qualifier", `${o}/${stratum}`);
@@ -853,17 +867,16 @@ test("today's records: the Preview fit reads stage 2 with slow-medium and task-m
       if (stratum === "*") assert.equal(now.cell, "slow-high");
       else assert.deepEqual(now, { follows: "no row of its own: follows *" }, "routes now has no row of its own there, and keeps the line");
     }
-    assert.equal(lineOf(p, o, "unknown").collapsed, "unknown: no row on either side, follows *");
   }
-  assert.equal(lineOf(p, "cost", "light").sides[1].candidates[0].n, 40, "each row's candidates carry that row's own n");
+  assert.equal(lineOf(p, "cost", BELOW).sides[1].candidates[0].n, 40, "each row's candidates carry that row's own n");
 });
 
 test("≠ routes now is marked only where the two Cells differ, the Cell routes now gives a row it has none of its own for included", () => {
-  const slow = { cost: { "*": "slow-high", light: "slow-high" }, speed: { "*": "slow-high", light: "task-high" } };
+  const slow = { cost: { "*": "slow-high", [BELOW]: "slow-high" }, speed: { "*": "slow-high", [BELOW]: "task-high" } };
   const p = favours({ preview: PREVIEW({ table: FIT({ rows: slow }) }) });
   assert.equal(lineOf(p, "cost", "*").sides[1].differs, null);
-  assert.equal(lineOf(p, "cost", "light").sides[1].differs, null, "routes now follows * there, which is slow-high too");
-  assert.equal(lineOf(p, "speed", "light").sides[1].differs, "≠ routes now");
+  assert.equal(lineOf(p, "cost", BELOW).sides[1].differs, null, "routes now follows * there, which is slow-high too");
+  assert.equal(lineOf(p, "speed", BELOW).sides[1].differs, "≠ routes now");
   for (const e of Object.values(lineOf(p, "cost", "*").sides[0])) assert.notEqual(e, "≠ routes now", "routes now carries no mark");
 });
 
@@ -893,7 +906,7 @@ test("evidence favours states: no cost guard, before the first Preview fit, and 
     assert.deepEqual(s.footnotes, [], name);
     assert.equal(s.dispatch, null, name);
     assert.deepEqual(lineOf(p, "cost", "*").sides[1], { empty: true }, name);
-    assert.equal(lineOf(p, "cost", "light").collapsed, "light: no row, follows *", `${name}: an empty column holds no row back from collapsing`);
+    assert.deepEqual(p.objectives.map((o) => o.lines.map((l) => l.stratum)), [["*"], ["*"]], `${name}: an empty column adds no line: routes now's rows are the lines`);
   }
   assert.equal(favoursOf(favours({ guard: { status: "missing" } })).heading, "no Preview fit: it is written only beside a cost guard", "a Preview fit on disk with no guard is not laid out");
 });
@@ -919,9 +932,9 @@ test("heading label: fitted on other records fires only when the two files' tsv_
   assert.deepEqual(favoursOf(favours()).labels, []);
 });
 
-test("heading label: fitted against another prior fires on stage, cells or classifier, and on window_start only when the guard gave none", () => {
+test("heading label: fitted against another prior fires on stage, cells, classifier or splits, and on window_start only when the guard gave none", () => {
   const label = "fitted against 3.104.0 · never fitted; the next phase 0 refits";
-  for (const [field, value] of [["stage", 2], ["cells", ["slow-high", "task-high"]], ["classifier", { b: "haiku", tau: 0.7 }]]) {
+  for (const [field, value] of [["stage", 2], ["cells", ["slow-high", "task-high"]], ["classifier", { b: "haiku", tau: 0.7 }], ["splits", SPLITS]]) {
     assert.deepEqual(favoursOf(favours({ preview: PREVIEW({ prior: { ...PRIOR, [field]: value } }) })).labels, [label], field);
   }
   const windowed = PREVIEW({ prior: { ...PRIOR, window_start: "2026-09-01" } });
@@ -943,13 +956,15 @@ test("heading label: a release changing only fitted_commit and version raises no
   assert.deepEqual(favoursOf(favours({ table: null })).labels, ["fitted against the installed table: not checked: no router table read"]);
 });
 
-test("no installed table: no row is marked ≠ routes now, and a Stratum the Preview fit has no row for keeps its line beside routes now's unread", () => {
+test("no installed table: no row is marked ≠ routes now, and a group the Preview fit has a row for keeps its line beside routes now's unread", () => {
   const p = favours({ table: null });
   for (const o of ["cost", "speed"]) {
-    for (const stratum of ["*", "light", "heavy"]) assert.equal(lineOf(p, o, stratum).sides[1].differs, null, `${o}/${stratum}: nothing to differ from`);
-    const line = lineOf(p, o, "unknown");
-    assert.equal(line.collapsed, undefined, `${o}: routes now's rows are not known, so its unknown row may exist`);
-    assert.deepEqual(line.sides, [{ unread: "router table not read" }, { follows: "no row of its own: follows *" }], o);
+    assert.deepEqual(p.objectives.find((x) => x.objective === o).lines.map((l) => l.stratum), ["*", ABOVE, BELOW], o);
+    for (const stratum of ["*", ABOVE, BELOW]) {
+      assert.deepEqual(lineOf(p, o, stratum).sides[0], { unread: "router table not read" }, `${o}/${stratum}`);
+      assert.equal(lineOf(p, o, stratum).sides[1].differs, null, `${o}/${stratum}: nothing to differ from`);
+    }
+    assert.equal(lineOf(p, o, ABOVE).sides[1].cell, "task-high", o);
   }
 });
 
@@ -962,7 +977,7 @@ test("the guard-against-fit n footnote shows when both read the same files and a
     const cands = lineOf(p, o, "*").sides[1].candidates;
     assert.deepEqual(cands.map((c) => [c.cell, c.n, c.nMark]), [["task-high", 67, "¹"], ["smol-high", 32, null]], o);
   }
-  assert.equal(lineOf(p, "cost", "light").sides[1].candidates[0].nMark, null, "a Stratum's n is not the guard's Cell-wide count");
+  assert.equal(lineOf(p, "cost", BELOW).sides[1].candidates[0].nMark, null, "a group's n is not the guard's Cell-wide count");
 
   const other = favours({ preview: PREVIEW({ table: FIT({ estimates: est(67) }), tsv_blobs: { ...BLOBS, "docs/metrics/tier-outcomes.tsv": "d59dc49b" } }) });
   assert.deepEqual(favoursOf(other).footnotes, [], "other files: the counts need not agree");

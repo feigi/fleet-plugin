@@ -12,9 +12,11 @@ import { identityRoles } from "./support/label-map-seed.mjs";
 const says = (parts) => parts.map((p) => `${p.sep}${p.dim ? `_${p.text}_` : p.text}${p.href ? `<${p.href}>` : ""}`).join("");
 const lines = (l) => l.lines.map(says);
 
-// A Routing line; every part `route` prints, defaulted to a not-drawn heavy cost Pull.
+// A group's rule path, as `route` prints it in STRATUM: past a cut on the brief's length.
+const RULE = "brief_chars>4047";
+// A Routing line; every part `route` prints, defaulted to a not-drawn cost Pull in the group above the cut.
 const routing = (o = {}) => formatRouting({
-  policy: "slow-high", cell: "slow-high", draw: null, by: null, stratum: "heavy", brief: 9658, criteria: 8, parent: null,
+  policy: "slow-high", cell: "slow-high", draw: null, by: null, stratum: RULE, brief: 9658, criteria: 8, parent: null,
   sized: null, objective: "cost", tripped: [], reason: "ok", ...o,
 });
 // An implementer's member record, as gather() keeps it.
@@ -31,11 +33,11 @@ const drawn = (o = {}) => cellLine({
   members: members({ "impl-3747": rec("smol-high") }),
 });
 
-test("cellLine: the spec's example reads Cell · why, then Stratum with its numbers · model · level", () => {
+test("cellLine: the spec's example reads Cell · why, then the group's rule path · model · level", () => {
   const l = drawn();
   assert.deepEqual(lines(l), [
     "smol-high<#cells/smol-high@claude-haiku-5-5> · drawn 2 of 3: burn-in",
-    "heavy: 9,658 chars (past 3,483), 8 criteria (past 5) · claude-haiku-5-5 · high",
+    "brief_chars>4047 · claude-haiku-5-5 · high",
   ]);
   assert.equal(l.cell, "smol-high");
   assert.equal(l.generation, "claude-haiku-5-5");
@@ -59,27 +61,28 @@ const undrawn = (o = {}, table = null, cell = "slow-high") => cellLine({
 });
 
 test("cellLine: not drawn, ok, reads the policy row, linked to it", () => {
-  assert.equal(lines(undrawn())[0], "slow-high<#cells/slow-high@claude-haiku-5-5> · cost row, heavy<#cells/row/cost/heavy>");
-  assert.equal(lines(undrawn({ objective: "speed", stratum: "light", brief: 900, criteria: 2 }))[0],
-    "slow-high<#cells/slow-high@claude-haiku-5-5> · speed row, light<#cells/row/speed/light>");
+  assert.equal(lines(undrawn())[0], `slow-high<#cells/slow-high@claude-haiku-5-5> · cost row, ${RULE}<#cells/row/cost/${RULE}>`);
+  assert.equal(lines(undrawn({ objective: "speed", stratum: "*", brief: 900, criteria: 2 }))[0],
+    "slow-high<#cells/slow-high@claude-haiku-5-5> · speed row, *<#cells/row/speed/*>");
 });
 
-test("cellLine: not drawn, ok, follows * only off a table that has no row for the Stratum", () => {
+test("cellLine: not drawn, ok, follows * only off a table that has no row for the group", () => {
   const star = { rows: { cost: { "*": "slow-high" }, speed: { "*": "slow-high" } } };
-  const heavy = { rows: { cost: { "*": "slow-high", heavy: "slow-high" }, speed: { "*": "slow-high" } } };
-  assert.equal(lines(undrawn({}, star))[0], "slow-high<#cells/slow-high@claude-haiku-5-5> · cost row, heavy<#cells/row/cost/*> · follows *");
-  assert.equal(lines(undrawn({}, heavy))[0], "slow-high<#cells/slow-high@claude-haiku-5-5> · cost row, heavy<#cells/row/cost/heavy>");
-  assert.equal(lines(undrawn({}, null))[0], "slow-high<#cells/slow-high@claude-haiku-5-5> · cost row, heavy<#cells/row/cost/heavy>", "no table read: nothing guessed");
+  const ruled = { rows: { cost: { "*": "slow-high", [RULE]: "slow-high" }, speed: { "*": "slow-high" } } };
+  assert.equal(lines(undrawn({}, star))[0], `slow-high<#cells/slow-high@claude-haiku-5-5> · cost row, ${RULE}<#cells/row/cost/*> · follows *`);
+  assert.equal(lines(undrawn({}, ruled))[0], `slow-high<#cells/slow-high@claude-haiku-5-5> · cost row, ${RULE}<#cells/row/cost/${RULE}>`);
+  assert.equal(lines(undrawn({}, null))[0], `slow-high<#cells/slow-high@claude-haiku-5-5> · cost row, ${RULE}<#cells/row/cost/${RULE}>`, "no table read: nothing guessed");
+  assert.equal(lines(undrawn({ stratum: "*" }, star))[0], "slow-high<#cells/slow-high@claude-haiku-5-5> · cost row, *<#cells/row/cost/*>", "the root has its own row");
 });
 
 test("cellLine: the policy row's Cell tripped reads the default Cell, naming the tripped Cell", () => {
   assert.equal(lines(undrawn({ reason: "table-cell-tripped", tripped: ["task-high"] }))[0],
-    "slow-high<#cells/slow-high@claude-haiku-5-5> · cost row's task-high tripped: default Cell<#cells/row/cost/heavy>");
+    `slow-high<#cells/slow-high@claude-haiku-5-5> · cost row's task-high tripped: default Cell<#cells/row/cost/${RULE}>`);
   assert.equal(lines(undrawn({ reason: "table-cell-tripped", tripped: ["smol-high", "task-high"] }))[0],
-    "slow-high<#cells/slow-high@claude-haiku-5-5> · cost row's Cell (one of smol-high, task-high) tripped: default Cell<#cells/row/cost/heavy>",
+    `slow-high<#cells/slow-high@claude-haiku-5-5> · cost row's Cell (one of smol-high, task-high) tripped: default Cell<#cells/row/cost/${RULE}>`,
     "two tripped: the row's is not on record, so neither is named as it");
   assert.equal(lines(drawn({ reason: "table-cell-tripped", tripped: ["task-high"] }))[0],
-    "smol-high<#cells/smol-high@claude-haiku-5-5> · drawn 2 of 3: burn-in · cost row's task-high tripped<#cells/row/cost/heavy>",
+    `smol-high<#cells/smol-high@claude-haiku-5-5> · drawn 2 of 3: burn-in · cost row's task-high tripped<#cells/row/cost/${RULE}>`,
     "drawn: the draw, then the reason, and no default Cell");
 });
 
@@ -89,14 +92,14 @@ test("cellLine: no guard, and no Cell left to draw", () => {
     "slow-high<#cells/slow-high@claude-haiku-5-5> · every other Cell tripped: no draw");
 });
 
-test("cellLine: an issue unread when routed, and no sizing, read the Stratum unknown", () => {
-  assert.deepEqual(lines(undrawn({ reason: "no-issue-json", stratum: "unknown", brief: null, criteria: null })), [
+test("cellLine: an issue unread when routed, and no sizing, read the root `*` with what is missing", () => {
+  assert.deepEqual(lines(undrawn({ reason: "no-issue-json", stratum: "*", brief: null, criteria: null })), [
     "slow-high<#cells/slow-high@claude-haiku-5-5> · issue unreadable when routed",
-    "unknown: no brief read · claude-haiku-5-5 · high",
+    "*: no brief read · claude-haiku-5-5 · high",
   ]);
-  assert.deepEqual(lines(undrawn({ reason: "no-sizing", stratum: "unknown" })), [
+  assert.deepEqual(lines(undrawn({ reason: "no-sizing", stratum: "*" })), [
     "slow-high<#cells/slow-high@claude-haiku-5-5> · no sizing",
-    "unknown: no sizing · claude-haiku-5-5 · high",
+    "*: no sizing · claude-haiku-5-5 · high",
   ]);
 });
 
@@ -111,38 +114,52 @@ test("cellLine: a reason the card has no words for, and an entry that is no Rout
 
 // -- the Stratum ------------------------------------------------------------
 
-test("cellLine: the Stratum's numbers say which side of each threshold they sit", () => {
-  assert.equal(lines(undrawn({ stratum: "light", brief: 1200, criteria: 2 }))[1], "light: 1,200 chars (not past 3,483), 2 criteria (not past 5) · claude-haiku-5-5 · high");
-  assert.equal(lines(undrawn({ stratum: "heavy", brief: 13638, criteria: 11 }))[1], "heavy: 13,638 chars (past 3,483), 11 criteria (past 5) · claude-haiku-5-5 · high");
-  assert.equal(lines(undrawn({ stratum: "heavy", brief: 3483, criteria: 6 }))[1], "heavy: 3,483 chars (not past 3,483), 6 criteria (past 5) · claude-haiku-5-5 · high");
+test("cellLine: the Stratum is the group's rule path, and no brief length is set against a threshold", () => {
+  for (const [stratum, brief, criteria] of [["*", 1200, 2], [RULE, 13638, 11], ["brief_chars<=4047", 1200, 2], ["brief_chars>4047&kind=bug", 9000, 0], ["kind!=bug", 400, 6]]) {
+    const words = lines(undrawn({ stratum, brief, criteria }))[1];
+    assert.equal(words, `${stratum} · claude-haiku-5-5 · high`);
+    assert.doesNotMatch(words, /past|chars \(|criteria|\d,\d{3}/, "the brief's numbers are not on the line");
+  }
 });
 
 test("cellLine: under arm B the Stratum reads its sizing label", () => {
-  assert.equal(lines(undrawn({ stratum: "heavy", sized: "heavy" }))[1], "heavy: sized heavy · claude-haiku-5-5 · high");
+  assert.equal(lines(undrawn({ stratum: RULE, sized: "heavy" }))[1], `${RULE}: sized heavy · claude-haiku-5-5 · high`);
 });
 
-test("cellLine: a Slice's Stratum names its parent, not the brief's numbers", () => {
-  assert.equal(lines(undrawn({ stratum: "heavy", brief: 400, criteria: 1, parent: 3177 }))[1], "heavy: Slice of #3177 · claude-haiku-5-5 · high");
-  assert.equal(lines(undrawn({ stratum: "light", brief: 400, criteria: 1, sized: "light", parent: 3177 }))[1], "light: sized light · claude-haiku-5-5 · high", "arm B's label still stands for its Pull");
-  const old = `impl-9 ${routing({ stratum: "light", brief: 400, criteria: 1 }).replace(" PARENT=-", "")}`;
+test("cellLine: a Slice's line names its parent after the Stratum, and arm B's label still stands for its Pull", () => {
+  assert.equal(lines(undrawn({ stratum: "*", brief: 400, criteria: 1, parent: 3177 }))[1], "*: Slice of #3177 · claude-haiku-5-5 · high");
+  assert.equal(lines(undrawn({ stratum: "parent>0", brief: 400, criteria: 1, sized: "light", parent: 3177 }))[1], "parent>0: sized light · claude-haiku-5-5 · high", "arm B's label still stands for its Pull");
+  const old = `impl-9 ${routing({ stratum: "*", brief: 400, criteria: 1 }).replace(" PARENT=-", "")}`;
   assert.equal(lines(cellLine({ row: "#9 impl-9", issue: 9, routed: [old], members: members({ "impl-9": rec("slow-high") }) }))[1],
-    "light: 400 chars (not past 3,483), 1 criteria (not past 5) · claude-haiku-5-5 · high", "an entry written before PARENT reads by its numbers");
+    "* · claude-haiku-5-5 · high", "an entry written before PARENT reads the same");
+});
+
+test("cellLine: a Routing filed before the tree reads its old word as the Stratum, and that group has no row to link to", () => {
+  const rows = { rows: { cost: { "*": "slow-high" }, speed: { "*": "slow-high" } } };
+  for (const stratum of ["light", "heavy", "unknown"]) {
+    const l = undrawn({ stratum }, rows);
+    assert.deepEqual(lines(l), [
+      `slow-high<#cells/slow-high@claude-haiku-5-5> · cost row, ${stratum}<#cells/row/cost/*> · follows *`,
+      `${stratum} · claude-haiku-5-5 · high`,
+    ], stratum);
+  }
+  assert.equal(lines(undrawn({ stratum: "unknown", brief: null, criteria: null, reason: "no-issue-json" }))[1], "unknown: no brief read · claude-haiku-5-5 · high");
 });
 
 // -- the model -----------------------------------------------------------------
 
 test("cellLine: a last turn on another model adds fell back to it", () => {
   const l = cellLine({ row: "#9 impl-9", issue: 9, routed: [`impl-9 ${routing()}`], members: members({ "impl-9": rec("slow-high", { model: "claude-opus-5", last: "claude-sonnet-5" }) }) });
-  assert.equal(lines(l)[1], "heavy: 9,658 chars (past 3,483), 8 criteria (past 5) · claude-opus-5 · high · fell back to claude-sonnet-5");
+  assert.equal(lines(l)[1], `${RULE} · claude-opus-5 · high · fell back to claude-sonnet-5`);
   assert.equal(l.generation, "claude-opus-5", "the generation is the dispatch model, not the last turn's");
 });
 
 test("cellLine: no transcript reads the model not on record, and the link goes to the Cell's entry", () => {
   const l = cellLine({ row: "#9 impl-9", issue: 9, routed: [`impl-9 ${routing()}`] });
-  assert.deepEqual(lines(l), ["slow-high<#cells/slow-high> · cost row, heavy<#cells/row/cost/heavy>", "heavy: 9,658 chars (past 3,483), 8 criteria (past 5) · _not on record_"]);
+  assert.deepEqual(lines(l), [`slow-high<#cells/slow-high> · cost row, ${RULE}<#cells/row/cost/${RULE}>`, `${RULE} · _not on record_`]);
   assert.equal(l.mark, null, "nothing says it ran off its Cell");
   const noLevel = cellLine({ row: "#9 impl-9", issue: 9, routed: [`impl-9 ${routing()}`], members: members({ "impl-9": rec("slow-high", { thinking: "-" }) }) });
-  assert.equal(lines(noLevel)[1], "heavy: 9,658 chars (past 3,483), 8 criteria (past 5) · claude-haiku-5-5 · _not on record_");
+  assert.equal(lines(noLevel)[1], `${RULE} · claude-haiku-5-5 · _not on record_`);
 });
 
 // -- rows written before the Routing --------------------------------------------
@@ -260,7 +277,7 @@ test("cellLine: a later implementer at another Cell is a rescue: its Cell and it
     members: members({ "impl-4": rec("smol-high"), "impl-4-b": rec("slow-high", { model: "claude-opus-5" }) }),
   });
   assert.equal(lines(l)[0], "smol-high<#cells/smol-high@claude-haiku-5-5> · drawn 2 of 3: burn-in · rescue at slow-high<#cells/slow-high@claude-opus-5> claude-opus-5 · high");
-  assert.equal(lines(l)[1], "heavy: 9,658 chars (past 3,483), 8 criteria (past 5) · claude-haiku-5-5 · high", "the model is the Pull's first implementer's");
+  assert.equal(lines(l)[1], `${RULE} · claude-haiku-5-5 · high`, "the model is the Pull's first implementer's");
   assert.equal(l.mark, null);
   assert.deepEqual(l.targets, [{ cell: "smol-high", generation: "claude-haiku-5-5" }, { cell: "slow-high", generation: "claude-opus-5" }]);
 

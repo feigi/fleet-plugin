@@ -111,7 +111,7 @@
   .ce-row { display:grid; gap:12px; border-top:1px solid var(--line); padding:6px 0; font-size:12px; }
   .ce-row a { color:var(--blue); text-decoration:none; }
   .ce-cand { color:var(--dim); margin-left:10px; }
-  .ce-stratum { font-weight:600; }
+  .ce-stratum { font-weight:600; overflow-wrap:anywhere; }
   .ce-obj { margin-top:10px; }
   .ce.flash { animation:flash 1.2s ease-out 1; }
   .spend-wrap { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
@@ -172,7 +172,7 @@ function boardTitle(repo) { return repo ? `${TITLE} — ${repo}` : TITLE; }
 // Every hash the page draws is a tab (`#board`, `#cells`, `#tokens`), a card on
 // the Board (`#board/<issue>`, the issue number as a string) or a place on Cell
 // evidence: a section (`#cells/rows`, `#cells/guard`, `#cells/declared`), a policy
-// row (`#cells/row/<objective>/<stratum>`, the stratum `*` or one of the three), a
+// row (`#cells/row/<objective>/<stratum>`, the stratum `*` or a group's rule path), a
 // Cell (`#cells/<cell>`) or one of its generations (`#cells/<cell>@<generation>`).
 // Anything else — no hash, a tab the page does not have, a target the tab does
 // not have — lands on Board's top, or the named tab's top, never on a blank
@@ -182,8 +182,13 @@ function routeHash(hash) {
   if (tab === "board") return { tab, target: more.length === 0 && /^[1-9]\d*$/.test(target) ? target : null };
   if (tab === "cells") {
     if (target === "row") {
-      const [objective, stratum] = more;
-      const ok = more.length === 2 && /^(cost|speed)$/.test(objective) && /^(\*|light|heavy|unknown)$/.test(stratum);
+      // The stratum is a rule path, as the ledger grammar reads one: `*`, or tests joined by `&`, each an input
+      // and a comparison. A browser hands a fragment back percent-encoded, `<` and `>` among what it encodes.
+      const [objective, encoded] = more;
+      let stratum = "";
+      try { stratum = decodeURIComponent(encoded ?? ""); } catch { /* an escape that decodes to nothing names no row */ }
+      const test = "[a-z][a-z_]*(?:(?:>|<=)(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?|!?=[a-z]+)";
+      const ok = more.length === 2 && /^(cost|speed)$/.test(objective) && new RegExp(`^(?:\\*|${test}(?:&${test})*)$`).test(stratum);
       return { tab, target: ok ? `row/${objective}/${stratum}` : null };
     }
     const place = /^(rows|guard|declared|(slow|task|smol)-(minimal|low|medium|high|xhigh|max)(@[^\s/@]+)?)$/;
@@ -494,16 +499,11 @@ function cePolicyCell(s, href) {
   return box;
 }
 
-// One line of the policy rows: a Stratum's row across every side, or the one
-// line a Stratum with no row of its own collapses to. Either way it is a place
+// One line of the policy rows: a group's row across every side. It is a place
 // `#cells/row/<objective>/<stratum>` lands on.
 function cePolicyLine(line) {
   const box = ceBox("div", "ce-row", line.anchor);
-  if (line.collapsed) {
-    box.append(el("span", "ce-dim", line.collapsed));
-    return box;
-  }
-  box.style.gridTemplateColumns = `6em repeat(${line.sides.length}, minmax(0, 1fr))`;
+  box.style.gridTemplateColumns = `10em repeat(${line.sides.length}, minmax(0, 1fr))`;
   box.append(el("span", "ce-stratum", line.stratum));
   for (const s of line.sides) box.append(cePolicyCell(s, line.href));
   return box;
@@ -890,7 +890,10 @@ function boot() {
   document.addEventListener("click", (e) => {
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     const a = e.target.closest?.('a[href^="#"]');
-    if (a && a.getAttribute("href") === location.hash) { e.preventDefault(); applyHash(); }
+    // The browser hands the open hash back percent-encoded, `<` and `>` among what it encodes; a link has its own as spelled.
+    let open = location.hash;
+    try { open = decodeURI(open); } catch { /* an escape that decodes to nothing is no link's hash */ }
+    if (a && a.getAttribute("href") === open) { e.preventDefault(); applyHash(); }
   });
   applyHash();
   poll();

@@ -3945,7 +3945,8 @@ test("a new row at the Pull's row step and a re-Pull over a settled implementer 
 // The Pull's row step writes the row and its Routing in one `row --routing`
 // call: the line is filed verbatim in `## Routed` after the Pull's first
 // implementer's name, once, and never on the row.
-const ROUTING = "POLICY=slow-high CELL=smol-high DRAW=2/3 BY=burn-in STRATUM=heavy BRIEF=9658 CRITERIA=8 SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok";
+const ROUTING = "POLICY=slow-high CELL=smol-high DRAW=2/3 BY=burn-in STRATUM=brief_chars>4047 BRIEF=9658 CRITERIA=8 SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok";
+// A Routing filed before the router table was a tree names its group by one of three words, and files as it did.
 const UNDRAWN = "POLICY=task-high CELL=task-high DRAW=- BY=- STRATUM=heavy BRIEF=4000 CRITERIA=2 SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=table-cell-tripped";
 const routedOf = (bytes) => /\n## Routed\n\n((?:- .*\n)*)/.exec(bytes)?.[1].trimEnd().split("\n") ?? [];
 
@@ -3976,6 +3977,11 @@ test("row --routing refuses a line that is not a Routing, a different second Rou
     ROUTING.replace("REASON=ok", "REASON=explore"),
     ROUTING.replace("BY=burn-in", "BY=-"),
     `${ROUTING} extra`,
+    // A STRATUM that is no rule path and none of the words filed before the tree: a bare word, empty, or with whitespace in it.
+    ROUTING.replace("STRATUM=brief_chars>4047", "STRATUM=medium"),
+    ROUTING.replace("STRATUM=brief_chars>4047", "STRATUM="),
+    ROUTING.replace("STRATUM=brief_chars>4047", "STRATUM=brief_chars> 4047"),
+    ROUTING.replace("STRATUM=brief_chars>4047", "STRATUM=brief_chars>4047&"),
   ]) {
     refused(["row", "3747", "impl-3747 · tier=smol-high", "--routing", bad], /is not a Routing line/);
   }

@@ -1,5 +1,6 @@
 // The day-one router table — plugin/scripts/router-table.json as it was before
-// any fit (stage 1, burn-in, every row slow-high) — as a frozen literal.
+// any fit (stage 1, burn-in, every row slow-high, the one-node tree: no split) —
+// as a frozen literal.
 //
 // Tests that need the table's contents read this, never the shipped file: a
 // re-fit PR moves the shipped table, and a test pinned to it would fail that
@@ -28,6 +29,7 @@ export const DAY_ONE_TABLE = deepFreeze({
   stage: 1,
   cells: ["slow-high", "task-high", "smol-high"],
   burn_in: true,
+  splits: {},
   rows: { cost: { "*": "slow-high" }, speed: { "*": "slow-high" } },
   classifier: { b: null, tau: null },
   estimates: {},

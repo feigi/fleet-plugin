@@ -432,15 +432,15 @@ test("gather: the Tokens window bounds the spend alone: an implementer transcrip
   assert.equal(line.lines[1].map((p) => p.sep + p.text).join(""), "not on record · claude-opus-5 · high · fell back to claude-sonnet-5");
 });
 
-test("gather: hands the installed router table to the board, so a policy row with no row for its Stratum reads 'follows *'", async (t) => {
+test("gather: hands the installed router table to the board, so a policy row with no row for its group reads 'follows *'", async (t) => {
   const w = cardsWorkspace(t, { routed: [`impl-3862 ${formatRouting({
-    policy: "slow-high", cell: "slow-high", draw: null, by: null, stratum: "heavy", brief: 9658, criteria: 8, parent: null, sized: null, objective: "cost", tripped: [], reason: "ok",
+    policy: "slow-high", cell: "slow-high", draw: null, by: null, stratum: "brief_chars>4047", brief: 9658, criteria: 8, parent: null, sized: null, objective: "cost", tripped: [], reason: "ok",
   })}`] });
   writeFileSync(join(w.stateDir, RECEIPT), JSON.stringify({ ...receipt({}), session: w.session }));
   const r = await quiet(() => gather({ ...w.opts, spendDir: receiptSpendDir(w.stateDir) }));
   assert.deepEqual(r.routerTable, readRouterTable(SCRIPTS));
   const line = computeBoard(r).tickets.find((x) => x.issue === 3862).cellLine;
-  assert.equal(line.lines[0].map((p) => p.sep + p.text).join(""), "slow-high · cost row, heavy · follows *");
+  assert.equal(line.lines[0].map((p) => p.sep + p.text).join(""), "slow-high · cost row, brief_chars>4047 · follows *");
 });
 
 // -- a carried row's implementer, in the session its entry's session= names -----------------
