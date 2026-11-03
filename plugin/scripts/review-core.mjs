@@ -1012,11 +1012,13 @@ function standaloneScratchRoot() {
  * run root of this PR, it evicts every tree in that run root: the snapshot and
  * each specialist's and refuter's copy lose every path git ignores in them,
  * and nothing restores them. The run root's other files stay, review.json
- * among them. A failed eviction is logged and never changes what the review
- * returns or throws.
+ * among them. A failed eviction, and a reported run root it refuses to touch,
+ * are logged; neither, nor a log that throws, changes what the review returns
+ * or throws. A snapshot step that reported no run root evicts nothing and
+ * logs nothing.
  */
 export async function runReview(host, args) {
-  const run = { scratch: null, pr: null, runRoot: null };
+  const run = { partition: null, runRoot: null };
   try {
     return await reviewRun(host, args, run);
   } finally {
@@ -1025,12 +1027,13 @@ export async function runReview(host, args) {
 }
 
 // A reported run root eviction may touch: this PR's partition of the scratch
-// root, a slash, `run-` and the eight `mktemp` characters, and nothing after —
-// so no `..` segment, no trailing slash, no other directory. It must also be a
-// real directory, not a symlink.
-function evictableRunRoot(runRoot, scratch, pr) {
-  const partition = posix.join(scratch, `pr${pr}`);
-  if (typeof runRoot !== "string" || !runRoot.startsWith(`${partition}/`)) return false;
+// root — the very string the snapshot step's `mktemp` template starts with, so
+// a scratch spelled with a trailing slash or a `./` segment still matches — a
+// slash, `run-` and the eight `mktemp` characters, and nothing after — so no
+// `..` segment, no trailing slash, no other directory. It must also be a real
+// directory, not a symlink.
+function evictableRunRoot(runRoot, partition) {
+  if (!runRoot.startsWith(`${partition}/`)) return false;
   if (!/^run-[A-Za-z0-9]{8}$/.test(runRoot.slice(partition.length + 1))) return false;
   try {
     return lstatSync(partition).isDirectory() && lstatSync(runRoot).isDirectory();
@@ -1039,13 +1042,26 @@ function evictableRunRoot(runRoot, scratch, pr) {
   }
 }
 
-function evictRunRoot(log, { scratch, pr, runRoot }) {
+// `run.runRoot` is set only once `run.partition` is, so a run root implies a
+// partition.
+function evictRunRoot(log, { partition, runRoot }) {
+  const say = (m) => {
+    try {
+      log(m);
+    } catch {
+      // The review's own outcome stands whatever the log sink does.
+    }
+  };
+  if (runRoot === null) return;
   try {
-    if (scratch === null || !evictableRunRoot(runRoot, scratch, pr)) return;
+    if (!evictableRunRoot(runRoot, partition)) {
+      say(`no eviction at the end of the review: the reported run root ${runRoot} is not a real directory named run- and eight characters directly in ${partition}`);
+      return;
+    }
     const done = evictTrees(runRoot, { apply: true });
-    for (const f of done.failed) log(`eviction at the end of the review failed in ${f.path}: ${f.error}`);
+    for (const f of done.failed) say(`eviction at the end of the review failed in ${f.path}: ${f.error}`);
   } catch (e) {
-    log(`eviction at the end of the review failed in ${runRoot}: ${e?.message ?? e}`);
+    say(`eviction at the end of the review failed in ${runRoot}: ${e?.message ?? e}`);
   }
 }
 
@@ -1115,8 +1131,7 @@ async function reviewRun(host, args, run) {
     const rootRefusal = scratchRootRefusal(scratch);
     if (rootRefusal !== null) throw new Error(`review-pr: args.scratch: ${rootRefusal}`);
   }
-  run.scratch = scratch;
-  run.pr = pr;
+  run.partition = runRootParent;
 
   const explicitDimensions = resolveDimensions(A.dimensions, DEFAULT_DIMENSIONS);
 

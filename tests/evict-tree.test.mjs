@@ -73,3 +73,15 @@ test("a directory with nothing under it, and one that does not exist, evict noth
   assert.deepEqual(evictTrees(join(dir, "empty"), { apply: true }), { evicted: [], failed: [] });
   assert.deepEqual(evictTrees(join(dir, "gone"), { apply: true }), { evicted: [], failed: [] });
 });
+
+test("a directory git lists as ignored is named once, whole, even when git also lists an ignored directory inside it", (t) => {
+  const dir = base(t);
+  // A directory holding nothing but an ignored one that carries its own
+  // .gitignore: git lists both `deps/` and `deps/node_modules/`.
+  const tree = makeTree(join(dir, "snapshot"), { installed: ["deps/node_modules/pkg/index.js", "deps/node_modules/.gitignore"] });
+
+  const r = evictTrees(tree, { apply: true });
+
+  assert.deepEqual(r, { evicted: [{ path: tree, ignored: ["deps/"] }], failed: [] });
+  assert.ok(!existsSync(join(tree, "deps")));
+});

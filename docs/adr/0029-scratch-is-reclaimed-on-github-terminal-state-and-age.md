@@ -18,6 +18,8 @@ taken again just before removal; it asks GitHub nothing, and the root sweep
 never judges `checkout-path`. Amended by #4076: decision 7's `--pr <N>` also
 evicts the trees in each run root of the PR that it keeps, still with no
 ledger and no `gh`, and a review evicts its own run root's trees when it ends.
+Decision 7's removal sequence keeps its single copy, now in `evict-tree.mjs`
+rather than the script, and every removal and eviction goes through it.
 
 ## Context
 

@@ -686,6 +686,8 @@ function main() {
 
   const now = Date.now();
   let ledger = null;
+  // `--pr` mode's evictions; null in every other mode.
+  let evicted = null;
   let remove;
   let kept = [];
   const failed = [];
@@ -696,6 +698,13 @@ function main() {
     } catch (e) {
       remove = [];
       failed.push({ path: parent, error: e.message });
+    }
+    // `--pr` mode also evicts the trees in every run root it keeps.
+    evicted = [];
+    for (const run of kept) {
+      const done = evictTrees(run.path, { apply });
+      for (const t of done.evicted) evicted.push({ path: t.path, reason: "a tree in a kept review run root", ignored: t.ignored });
+      failed.push(...done.failed);
     }
   } else if (siblings) {
     if (apply) {
@@ -724,16 +733,6 @@ function main() {
     }
     const listing = worktreeListing(found.checkout);
     ({ remove, kept } = judgeRoot(root, names, live, now, listing, found.checkout));
-  }
-  // `--pr` mode also evicts the trees in every run root it keeps.
-  let evicted = null;
-  if (pr !== null) {
-    evicted = [];
-    for (const run of kept) {
-      const done = evictTrees(run.path, { apply });
-      for (const t of done.evicted) evicted.push({ path: t.path, reason: "a tree in a kept review run root", ignored: t.ignored });
-      failed.push(...done.failed);
-    }
   }
 
   const removed = [];

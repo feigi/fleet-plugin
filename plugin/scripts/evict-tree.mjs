@@ -109,7 +109,8 @@ function isTree(dir) {
  * `evicted` is `[{path, ignored}]` for each tree that held ignored paths — in a
  * dry run, what `apply` would remove — and a tree holding none is in neither.
  * `failed` is `[{path, error}]`: a tree whose ignored paths cannot be listed or
- * all removed, or a directory that cannot be read. Best-effort: the walk goes on.
+ * all removed, or a directory whose listing fails for any reason but its being
+ * gone, not a directory, or unreadable. Best-effort: the walk goes on.
  */
 export function evictTrees(root, { apply }) {
   const evicted = [];
@@ -142,7 +143,6 @@ export function evictTrees(root, { apply }) {
       if (!["ENOENT", "ENOTDIR", "EACCES", "EPERM"].includes(e.code)) failed.push({ path: dir, error: `cannot list it (${e.code ?? e.message})` });
       continue;
     }
-    entries.sort((a, b) => (a.name < b.name ? 1 : a.name > b.name ? -1 : 0));
     for (const e of entries) {
       if (e.name === ".git" || !e.isDirectory()) continue;
       const path = join(dir, e.name);

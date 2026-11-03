@@ -197,13 +197,52 @@ test("a run root the snapshot report names that is not run- and eight characters
   };
   for (const [name, make] of Object.entries(cases)) {
     let made;
-    const { host } = hostFor(() => {
+    const { host, logs } = hostFor(() => {
       made = make();
       return { ...SNAP, runRoot: made.run, path: join(made.run, "snapshot-abc123") };
     }, null);
     await runReview(host, { ...ARGS, scratch }).catch(() => {});
     assert.ok(existsSync(installed(made.tree)), `${name}: a run root of that shape was evicted`);
+    const said = logs.filter((m) => m.startsWith("no eviction at the end of the review: the reported run root "));
+    assert.equal(said.length, 1, `${name}: the refused run root was not logged once, got ${JSON.stringify(logs)}`);
   }
+});
+
+// The snapshot step builds its `mktemp` template from the scratch exactly as
+// given, so a trailing slash or a `./` segment reaches the reported run root
+// and the snapshot path under it.
+test("a scratch spelled with a trailing slash or a ./ segment still has its reported run root evicted", async (t) => {
+  const { dir, scratch } = scratchDir(t);
+  for (const [spelled, name] of [[`${scratch}/`, "run-slash111"], [`${dir}/./scratch`, "run-dotseg11"]]) {
+    const run = `${spelled}/pr7/${name}`;
+    let built;
+    const { host, logs } = hostFor(() => { built = buildRunRoot(run); }, { ...SNAP, runRoot: run, path: `${run}/snapshot-abc123` });
+
+    const result = await runReview(host, { ...ARGS, scratch: spelled });
+
+    assert.equal(result.head, "abc123", spelled);
+    for (const tree of built.trees) assert.ok(!existsSync(join(tree, "node_modules")), `${spelled}: ${tree} kept its installed directory`);
+    assert.deepEqual(logs.filter((m) => /eviction/.test(m)), [], spelled);
+  }
+});
+
+test("a log that throws on an eviction line changes nothing the review returns", async (t) => {
+  const { scratch } = scratchDir(t);
+  const own = join(scratch, "pr7");
+  const results = [];
+  for (const [name, throws] of [["run-abcd12", false], ["run-wxyz98", true]]) {
+    // A name of another length: the run root is refused, and that is logged.
+    const run = join(own, name);
+    const { host } = hostFor(() => { makeTree(join(run, "snapshot-abc123")); }, { ...SNAP, runRoot: run, path: join(run, "snapshot-abc123") });
+    const log = host.log;
+    host.log = (m) => {
+      if (throws && /eviction/.test(m)) throw new Error("log sink closed");
+      log(m);
+    };
+    const result = await runReview(host, { ...ARGS, scratch });
+    results.push(JSON.stringify(result).replaceAll(name, "<run>"));
+  }
+  assert.equal(results[1], results[0], "a throwing log changed what the review returned");
 });
 
 test("a failed eviction at the end of the review is logged and changes nothing the review returns", { skip: process.getuid?.() === 0 && "root ignores the read-only parent" }, async (t) => {
