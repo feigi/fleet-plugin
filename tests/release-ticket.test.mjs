@@ -47,6 +47,11 @@ const ENV = {
   GIT_COMMITTER_EMAIL: "t@example.com",
   GIT_CONFIG_GLOBAL: "/dev/null",
   GIT_CONFIG_SYSTEM: "/dev/null",
+  // A non-stopping editor, exported on every run: it outranks a `-c` editor
+  // setting, so a fixture that has to stop a rebase must pass its own editor in
+  // the spawned env (`stopAtEditRebase`). Pinned here, a fixture that relies on
+  // `-c` never stops, on every run, not only under a shell that exports one.
+  GIT_SEQUENCE_EDITOR: "true",
 };
 
 // Every fixture below that reaches its condition through `chmod` rests on the
@@ -3118,8 +3123,8 @@ const quietGit = (cwd, ...args) => execFileSync("git", args, { cwd, env: ENV, st
 /**
  * Stop `sib` mid-`rebase -i` at an `edit` on its tip commit. The editor goes in
  * as GIT_SEQUENCE_EDITOR in the spawned git's own env, never as `git -c`: an
- * exported GIT_SEQUENCE_EDITOR outranks a `-c` editor setting, so the shell's
- * editor, not this one, would be handed the todo list.
+ * exported GIT_SEQUENCE_EDITOR outranks a `-c` editor setting, so the one
+ * already in the env (ENV pins one), not this one, would be handed the todo list.
  */
 const stopAtEditRebase = (sib) =>
   execFileSync("git", ["rebase", "-i", "HEAD~1"], {
@@ -3178,6 +3183,7 @@ test("a sibling mid-rebase of a DIFFERENT branch does not hold this claim's rele
   const sib = join(r.w, "..", "other-wt");
   git(r.w, "worktree", "add", "-q", sib, "-b", "other", "origin/main");
   stopAtEditRebase(sib);
+  assert.ok(existsSync(join(git(sib, "rev-parse", "--absolute-git-dir"), "rebase-merge")), "fixture: the rebase must really be stopped");
 
   const { code, json, stderr } = release(r, c);
   assert.equal(code, 0, stderr);
