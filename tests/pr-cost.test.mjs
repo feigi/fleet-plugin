@@ -13,10 +13,10 @@ import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import { SEARCH_STUB_SRC, fillerPrs, searchesOf } from "./support/gh-pr-search.mjs";
 import { COLUMNS as MEMBER_COLUMNS, formatTsv, parseTsv as parseMemberTsv } from "../plugin/scripts/member-outcomes.mjs";
 import { COLUMNS as TIER_COLUMNS, formatRow, parseTierOutcomes } from "../plugin/scripts/tier-outcomes.mjs";
-import { computeReport, trips, guardFile, formatReport, crossCheck, blobId, readPrs, PrListIncomplete, WINDOW_START, MIN_N } from "../plugin/scripts/pr-cost.mjs";
+import { computeReport, trips, guardFile, formatReport, crossCheck, blobId, readPrs, PrListIncomplete, STAGE_1, WINDOW_START, MIN_N } from "../plugin/scripts/pr-cost.mjs";
 import { FEATURE_COLUMNS, parseFeatures } from "../plugin/scripts/pull-attribution.mjs";
 import { readCostGuard, routerRows } from "../plugin/scripts/fleet-tick.mjs";
-import { readGuard } from "../plugin/scripts/ticket-router.mjs";
+import { STARTING_CELLS, readGuard } from "../plugin/scripts/ticket-router.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/pr-cost.mjs", import.meta.url));
 const DAY = WINDOW_START;
@@ -448,6 +448,10 @@ test("the retire condition holds once every non-default stage-1 cell has tripped
   assert.equal(computeReport({ ...parsed(w), routerTable: sets({ "*": "slow-high", light: "task-high" }) }).retire, false);
   assert.equal(computeReport({ ...parsed(w), routerTable: sets({ "*": "slow-high" }, { "*": "slow-high", light: "task-high" }) }).retire, false, "a speed row alone adopting a cell keeps it too");
   assert.equal(computeReport({ ...parsed(w), routerTable: sets({ "*": "slow-high" }) }).retire, true, "every row of both sets at the default is no adoption");
+});
+
+test("the guard's retire test covers the Cells burn-in covers: the two scripts import nothing of each other, so one list in each is pinned to the other", () => {
+  assert.deepEqual(STAGE_1, STARTING_CELLS);
 });
 
 test("trips() takes the 15-point margin in counts, so 3 of 20 is exactly the margin", () => {

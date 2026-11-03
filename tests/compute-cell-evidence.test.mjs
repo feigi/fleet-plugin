@@ -520,9 +520,9 @@ const BELOW = "brief_chars<=4047";
 const SPLITS = { "*": { input: "brief_chars", cut: 4047 } };
 const UNJUDGED = { cell: "slow-high", reason: "unjudged", cells: {}, pairs: [] };
 
-// A table fitted on 198 Pulls, in stage 2, short of the two effort Cells: the group above the cut has a row of its own.
+// A table fitted on 198 Pulls, in burn-in with smol-high short of its 20 merged PRs and the two effort Cells held at 0: the group above the cut has a row of its own.
 const FITTED = (o = {}) => ({
-  window_start: "2026-10-03", fitted_commit: "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d", n_rows: 198, stage: 2, cells: FIVE, burn_in: true,
+  window_start: "2026-10-03", fitted_commit: "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d", n_rows: 198, cells: FIVE, burn_in: true,
   splits: SPLITS,
   rows: { cost: { "*": "slow-high", [ABOVE]: "task-high", [BELOW]: "slow-high" }, speed: { "*": "slow-high", [ABOVE]: "task-high", [BELOW]: "slow-high" } },
   classifier: { b: null, tau: null },
@@ -542,7 +542,7 @@ const FITTED = (o = {}) => ({
       [BELOW]: UNJUDGED,
     },
   },
-  guard: { tripped: [], n: { "slow-high": 69, "task-high": 69, "smol-high": 32, "slow-medium": 0, "task-max": 0 } },
+  guard: { tripped: [], n: { "slow-high": 69, "task-high": 69, "smol-high": 7, "slow-medium": 0, "task-max": 0 } },
   ...o,
 });
 const policy = (o = {}) => computeCellEvidence({ guard: TODAY(), receipts: NO_RECEIPTS, agents: AGENTS, modelRoles: ROLES, table: SHIPPED, install: INSTALL, repoUrl: HERE, ...o }).policy;
@@ -594,7 +594,7 @@ test("an install naming no repository reads another repository's runs, and the c
     assert.equal(s.source.check, "not checked: the install names no repository");
     assert.equal(s.footnotes.length, 1);
   }
-  assert.equal(sideOf(policy({ install: { ...INSTALL, repository: null }, table: FITTED() })).heading.split(":")[0], "stage 2 at its fit on another repository's runs");
+  assert.equal(sideOf(policy({ install: { ...INSTALL, repository: null }, table: FITTED() })).heading.split(":")[0], "burn-in at its fit on another repository's runs");
 });
 
 test("a workspace whose repository is not known is not compared", () => {
@@ -636,16 +636,17 @@ test("repoIdentity drops a ref pin and a www. host, and refuses a relative path"
 
 test("burn-in, fitted: the counts are the table's own, past tense, naming whose runs; a consumer adds what ends it", () => {
   const here = sideOf(policy({ table: FITTED() }));
-  assert.equal(here.heading, "stage 2 at its fit on feigi/fleet-plugin's runs: slow-medium and task-max had 0 of the 20 merged PRs each needs; every Pull drawn over 5 Cells");
+  assert.equal(here.heading, "burn-in at its fit on feigi/fleet-plugin's runs: smol-high had 7 of the 20 merged PRs it needs; every Pull drawn over 3 Cells");
   const consumer = sideOf(policy({ table: FITTED(), repoUrl: "https://ghe.example.com/acme/widgets" }));
   assert.equal(consumer.heading, `${here.heading}; it ends with a later fit, reaching this install with a plugin release`);
 });
 
-test("burn-in, fitted: Cells short by different counts are each named, one short is 'it needs'", () => {
-  const n = { "slow-high": 69, "task-high": 69, "smol-high": 32, "slow-medium": 3, "task-max": 0 };
-  assert.match(sideOf(policy({ table: FITTED({ guard: { tripped: [], n } }) })).heading, /: slow-medium had 3 and task-max had 0 of the 20 merged PRs each needs;/);
-  const one = { ...n, "slow-medium": 20, "task-max": 20, "smol-high": 7 };
-  assert.match(sideOf(policy({ table: FITTED({ stage: 1, guard: { tripped: [], n: one } }) })).heading, /^stage 1 at its fit on .*: smol-high had 7 of the 20 merged PRs it needs;/);
+test("burn-in, fitted: starting Cells short by different counts are each named, one short is 'it needs', and no other Cell is named", () => {
+  const n = { "slow-high": 69, "task-high": 12, "smol-high": 3, "slow-medium": 0, "task-max": 0 };
+  const heading = (guard) => sideOf(policy({ table: FITTED({ guard }) })).heading;
+  assert.match(heading({ tripped: [], n }), /: task-high had 12 and smol-high had 3 of the 20 merged PRs each needs;/);
+  assert.doesNotMatch(heading({ tripped: [], n }), /slow-medium|task-max/, "a Cell beyond the starting ones is no part of burn-in");
+  assert.match(heading({ tripped: [], n: { ...n, "task-high": 69 } }), /^burn-in at its fit on .*: smol-high had 3 of the 20 merged PRs it needs;/);
 });
 
 test("K counts the Cells the draw uses under the guard: a tripped Cell is not one, and none left is no draw", () => {
@@ -691,11 +692,11 @@ test("per-row exceptions: a tripped row Cell replaced by slow-high shows on its 
   assert.equal(lineOf(p, "speed", ABOVE).sides[0].dispatch, above.dispatch, "under both Objectives");
 });
 
-test("per-row exceptions in burn-in: a tripped row Cell keeps the draw and names what the policy Cell became", () => {
+test("per-row exceptions in burn-in: a tripped row Cell keeps the draw and names what the policy Cell became, and the draw is the starting Cells alone", () => {
   const tripped = guardOk(TODAY().guard.cells, { verdict: "tripped", tripped: ["task-high"] });
   const p = policy({ guard: tripped, table: FITTED() });
-  assert.equal(sideOf(p).dispatch, "drawn over 4 Cells: slow-high, smol-high, slow-medium, task-max");
-  assert.equal(lineOf(p, "cost", ABOVE).sides[0].dispatch, "drawn over 4 Cells: slow-high, smol-high, slow-medium, task-max; the row's task-high tripped, so its policy Cell is slow-high");
+  assert.equal(sideOf(p).dispatch, "drawn over 2 Cells: slow-high, smol-high", "slow-medium and task-max are Cells of the table, and burn-in draws neither");
+  assert.equal(lineOf(p, "cost", ABOVE).sides[0].dispatch, "drawn over 2 Cells: slow-high, smol-high; the row's task-high tripped, so its policy Cell is slow-high");
 });
 
 test("the lines are the root, then each group a side holds a row for: one for a one-node tree, three for a two-leaf tree", () => {
@@ -828,12 +829,12 @@ test("computeCellEvidence with none of the policy inputs reads as no table, no i
 // -- policy rows: what the evidence favours --------------------------------------
 
 const BLOBS = { "docs/metrics/member-outcomes.tsv": "e08ea9cd", "docs/metrics/ticket-features.tsv": "12b5a98e", "docs/metrics/tier-outcomes.tsv": "18b6a980" };
-const PRIOR = { fitted_commit: SHIPPED.fitted_commit, version: "3.104.0", stage: SHIPPED.stage, cells: SHIPPED.cells, classifier: SHIPPED.classifier, window_start: SHIPPED.window_start, splits: SHIPPED.splits };
-// A Fit the shape today's records fit to: 235 Pulls, stage 2 with the two
-// effort Cells added at 0 merged PRs, task-high on every row it fitted.
+const PRIOR = { fitted_commit: SHIPPED.fitted_commit, version: "3.104.0", cells: SHIPPED.cells, classifier: SHIPPED.classifier, window_start: SHIPPED.window_start, splits: SHIPPED.splits };
+// A Fit the shape today's records fit to: 235 Pulls, every starting Cell past its 20 merged PRs and so out of
+// burn-in, task-high on every row it fitted.
 const TASK = (verdict) => ({ cell: "task-high", reason: "sole-qualifier", cells: { "task-high": { verdict, range: [-3.1, -0.4] }, "smol-high": { verdict: "under-floor", range: null } }, pairs: [] });
 const FIT = (o = {}) => ({
-  window_start: "2026-10-03", fitted_commit: null, n_rows: 235, stage: 2, cells: FIVE, burn_in: true,
+  window_start: "2026-10-03", fitted_commit: null, n_rows: 235, cells: SHIPPED.cells, burn_in: false,
   splits: SPLITS,
   rows: { cost: { "*": "task-high", [ABOVE]: "task-high", [BELOW]: "task-high" }, speed: { "*": "task-high", [ABOVE]: "task-high", [BELOW]: "task-high" } },
   classifier: { b: null, tau: null },
@@ -862,11 +863,11 @@ test("evidence favours sits beside routes now, on the right", () => {
   assert.deepEqual(favours().sides.map((s) => s.title), ["routes now", "evidence favours"]);
 });
 
-test("today's records: the Fit reads stage 2 with slow-medium and task-max at 0 of 20, task-high on every fitted row, each marked ≠ routes now", () => {
+test("today's records: the Fit is out of burn-in, task-high on every fitted row, each marked ≠ routes now", () => {
   const p = favours();
   const s = favoursOf(p);
   assert.equal(s.source.text, "Fit · this repository's runs · computed 2026-10-26 19:17Z · 235 Pulls");
-  assert.equal(s.heading, "stage 2: slow-medium and task-max have 0 of the 20 merged PRs each needs", "present tense: the workspace's own counts");
+  assert.equal(s.heading, null, "every starting Cell has its 20 merged PRs: no burn-in heading");
   assert.deepEqual(s.labels, [], "fitted beside this guard, on its records, against the installed table");
   for (const o of ["cost", "speed"]) {
     assert.deepEqual(p.objectives.find((x) => x.objective === o).lines.map((l) => l.stratum), ["*", ABOVE, BELOW], `${o}: the root, then the groups of the fit's tree`);
@@ -923,12 +924,16 @@ test("evidence favours states: no cost guard, before the first Fit, and a Fit th
   assert.equal(favoursOf(favours({ guard: { status: "missing" } })).heading, "no Fit: it is written only beside a cost guard", "a Fit on disk with no guard is not laid out");
 });
 
-test("a Fit out of burn-in has no burn-in heading; a single short Cell, or Cells short by different counts, are worded each", () => {
-  assert.equal(favoursOf(favours({ fit: FIT_READ({ table: FIT({ burn_in: false, guard: { tripped: [], n: Object.fromEntries(FIVE.map((c) => [c, 20])) } }) }) })).heading, null);
-  const one = FIT({ guard: { tripped: [], n: { "slow-high": 69, "task-high": 69, "smol-high": 32, "slow-medium": 20 } } });
-  assert.equal(favoursOf(favours({ fit: FIT_READ({ table: one }) })).heading, "stage 2: task-max has 0 of the 20 merged PRs it needs");
-  const two = FIT({ guard: { tripped: [], n: { "slow-high": 69, "task-high": 69, "smol-high": 32, "slow-medium": 3 } } });
-  assert.equal(favoursOf(favours({ fit: FIT_READ({ table: two }) })).heading, "stage 2: slow-medium has 3 and task-max has 0 of the 20 merged PRs each needs");
+test("a Fit out of burn-in has no burn-in heading; a single short starting Cell, or ones short by different counts, are worded each, and no other Cell is named", () => {
+  const heading = (table) => favoursOf(favours({ fit: FIT_READ({ table }) })).heading;
+  assert.equal(heading(FIT()), null);
+  const one = FIT({ burn_in: true, guard: { tripped: [], n: { "slow-high": 69, "task-high": 69, "smol-high": 7 } } });
+  assert.equal(heading(one), "burn-in: smol-high has 7 of the 20 merged PRs it needs");
+  const two = FIT({ burn_in: true, guard: { tripped: [], n: { "slow-high": 69, "task-high": 12, "smol-high": 3 } } });
+  assert.equal(heading(two), "burn-in: task-high has 12 and smol-high has 3 of the 20 merged PRs each needs");
+  // A Cell beyond the starting ones, short of MIN_N, is no part of burn-in: the heading never names it.
+  const beyond = FIT({ cells: FIVE, burn_in: true, guard: { tripped: [], n: { "slow-high": 69, "task-high": 69, "smol-high": 7, "slow-medium": 0, "task-max": 0 } } });
+  assert.equal(heading(beyond), "burn-in: smol-high has 7 of the 20 merged PRs it needs");
 });
 
 test("heading label: fitted beside another guard fires only when guard_computed_at differs from the guard's computed_at", () => {
@@ -944,19 +949,21 @@ test("heading label: fitted on other records fires only when the two files' tsv_
   assert.deepEqual(favoursOf(favours()).labels, []);
 });
 
-test("heading label: fitted against another prior fires on stage, cells, classifier or splits, and on window_start only when the guard gave none", () => {
+test("heading label: fitted against another prior fires on cells, classifier or splits, and on window_start only when the guard gave none", () => {
   const label = "fitted against 3.104.0 · never fitted; the next phase 0 refits";
-  for (const [field, value] of [["stage", 2], ["cells", ["slow-high", "task-high"]], ["classifier", { b: "haiku", tau: 0.7 }], ["splits", SPLITS]]) {
+  for (const [field, value] of [["cells", ["slow-high", "task-high"]], ["classifier", { b: "haiku", tau: 0.7 }], ["splits", SPLITS]]) {
     assert.deepEqual(favoursOf(favours({ fit: FIT_READ({ prior: { ...PRIOR, [field]: value } }) })).labels, [label], field);
   }
   const windowed = FIT_READ({ prior: { ...PRIOR, window_start: "2026-09-01" } });
   assert.deepEqual(favoursOf(favours({ fit: windowed })).labels, [], "the guard gave a window_start, so the prior's was not read");
   assert.deepEqual(favoursOf(favours({ fit: windowed, guard: BESIDE({ window_start: null }) })).labels, [label]);
-  const fitted = FIT_READ({ prior: { ...PRIOR, stage: 2, fitted_commit: "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d", version: "0.0.0" } });
+  // A prior whose cells differ from the installed table's, so the label shows whatever else the prior says.
+  const OTHER = { cells: ["slow-high", "task-high"] };
+  const fitted = FIT_READ({ prior: { ...PRIOR, ...OTHER, fitted_commit: "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d", version: "0.0.0" } });
   assert.deepEqual(favoursOf(favours({ fit: fitted })).labels, ["fitted against linked checkout · fitted at 1a2b3c4; the next phase 0 refits"]);
-  const unfitted = FIT_READ({ prior: { ...PRIOR, stage: 2, fitted_commit: "" } });
+  const unfitted = FIT_READ({ prior: { ...PRIOR, ...OTHER, fitted_commit: "" } });
   assert.deepEqual(favoursOf(favours({ fit: unfitted })).labels, [label], "an empty fitted_commit was never fitted");
-  const unversioned = FIT_READ({ prior: { ...PRIOR, stage: 2, version: 7 } });
+  const unversioned = FIT_READ({ prior: { ...PRIOR, ...OTHER, version: 7 } });
   assert.deepEqual(favoursOf(favours({ fit: unversioned })).labels, ["fitted against no version · never fitted; the next phase 0 refits"], "a version that is not a string is none");
   assert.deepEqual(favoursOf(favours({ fit: FIT_READ({ prior: null }) })).labels.length, 1, "a prior the file lacks is not the installed table");
 });
@@ -1023,7 +1030,7 @@ test("refitFailure reads the reason off the failed fit line, found anywhere in a
   assert.equal(refitFailure(refitOut()), EISDIR);
   assert.equal(refitFailure("metrics-refresh.mjs failed: metrics-refresh: fit: failed —   spaced out  \r\nnext"), "spaced out");
   assert.equal(refitFailure("metrics-refresh: fit: skipped, no guard written — .fleet/router-fit.json left as it is"), null);
-  assert.equal(refitFailure("metrics-refresh: fit: fitted 235 Pulls, stage 2, in burn-in; .fleet/router-fit.json computed 2026-10-28T08:00:00.000Z"), null);
+  assert.equal(refitFailure("metrics-refresh: fit: fitted 235 Pulls, in burn-in; .fleet/router-fit.json computed 2026-10-28T08:00:00.000Z"), null);
   assert.equal(refitFailure(""), null);
   assert.equal(refitFailure(null), null);
 });
@@ -1037,7 +1044,7 @@ test("evidence favours: a fit older than the newest step that failed its refit s
 
 test("evidence favours: no refit label when the newest step that tried a refit has no failed line, a fit came after it, there is no receipt, or no guard", () => {
   const older = failedAt("2026-10-28T08:00:00.000Z");
-  const newer = step("ok", "2026-10-28T10:00:00.000Z", "metrics-refresh: cost guard: verdict none\nmetrics-refresh: fit: fitted 235 Pulls, stage 2, in burn-in");
+  const newer = step("ok", "2026-10-28T10:00:00.000Z", "metrics-refresh: cost guard: verdict none\nmetrics-refresh: fit: fitted 235 Pulls, in burn-in");
   assert.deepEqual(favoursOf(favours({ receipts: { phase0: older, closeout: newer } })).labels, [], "the older step's failed line is not the newest refit");
   const tie = { phase0: step("ok", "2026-10-28T08:00:00.000Z", "metrics-refresh: fit: fitted 235 Pulls"), closeout: older };
   assert.deepEqual(favoursOf(favours({ receipts: tie })).labels, [], "on equal times, phase 0's step is the newest");

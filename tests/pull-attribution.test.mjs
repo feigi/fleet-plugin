@@ -43,7 +43,7 @@ const parsed = (w) => ({
   features: parseFeatures([FEATURE_COLUMNS.join("\t"), ...w.features.map((f) => FEATURE_COLUMNS.map((c) => f[c] ?? "").join("\t"))].join("\n")),
 });
 const prior = {
-  window_start: null, fitted_commit: null, n_rows: 0, stage: 1, cells: ["slow-high", "task-high", "smol-high"], burn_in: true, splits: {},
+  window_start: null, fitted_commit: null, n_rows: 0, cells: ["slow-high", "task-high", "smol-high"], burn_in: true, splits: {},
   rows: { "*": "slow-high" }, classifier: { b: null, tau: null }, estimates: {}, guard: { tripped: [], n: {} },
 };
 // The prior with one split, where the old light/heavy rule drew its line on the criteria count: five or fewer is `criteria<=5`.
@@ -967,19 +967,23 @@ test("underFloor compares counts: 3 of 20 over the baseline is exactly 15 points
   assert.equal(underFloor({ claims: 20, failed: 2 }, { claims: 30, failed: 3 }), false);
 });
 
-test("a model change re-enters burn-in: 3 merged on B after 30 on A is the guard's n, neither adopted nor tripped", () => {
+test("a model change re-enters burn-in: 3 merged on B after 30 on A is the guard's n, neither adopted nor tripped, and 20 merged on B end it again", () => {
   const w = world();
   baseline(w);
   addPulls(w, { cell: "task-high", model: "model-t", count: 20, usd: 9 });
   addPulls(w, { cell: "smol-high", model: "model-a", count: 30, usd: 2, fails: 30 });
+  assert.equal(guarded(w).table.burn_in, false, "every starting Cell has its MIN_N merged PRs on its model: burn-in is over");
   addPulls(w, { cell: "smol-high", model: "model-b", count: 3, usd: 2, session: SESSION2 });
   const { report, guard, table } = guarded(w);
   assert.equal(guardFile(report, "t").cells.find((c) => c.cell === "smol-high").n, 3);
   assert.equal(guard.n["smol-high"], 3);
   assert.deepEqual(report.tripped, [], "A's failures do not trip B, and B is short of MIN_N");
   assert.equal(table.rows.cost["*"], "slow-high", "B is short of MIN_N, so nothing adopts it");
-  assert.equal(table.burn_in, true);
-  assert.equal(table.stage, 1);
+  assert.equal(table.burn_in, true, "the new generation starts at 0 merged PRs, so burn-in is back");
+  addPulls(w, { cell: "smol-high", model: "model-b", count: 16, usd: 2, session: SESSION2 });
+  assert.equal(guarded(w).table.burn_in, true, "19 merged on B: one short");
+  addPulls(w, { cell: "smol-high", model: "model-b", count: 1, usd: 2, session: SESSION2 });
+  assert.equal(guarded(w).table.burn_in, false, "20 merged on B end it again, whatever A holds");
 });
 
 test("a baseline model change below MIN_N leaves the guard without a verdict and every fitted row the policy cell", () => {

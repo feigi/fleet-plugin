@@ -1002,13 +1002,13 @@ const fitRead = (o = {}) => ({
   status: "ok",
   fit: {
     computed_at: "2026-10-26T19:17:40.000Z", guard_computed_at: "2026-10-26T19:17:33.000Z", tsv_blobs: { "docs/metrics/tier-outcomes.tsv": "18b6a980" },
-    prior: { fitted_commit: null, version: "3.104.0", stage: 1, cells: SHIPPED_TABLE.cells, classifier: SHIPPED_TABLE.classifier, splits: SHIPPED_TABLE.splits, window_start: null },
+    prior: { fitted_commit: null, version: "3.104.0", cells: SHIPPED_TABLE.cells, classifier: SHIPPED_TABLE.classifier, splits: SHIPPED_TABLE.splits, window_start: null },
     table: {
-      ...SHIPPED_TABLE, n_rows: 235, stage: 2, cells: ["slow-high", "task-high", "smol-high", "slow-medium", "task-max"], burn_in: true,
+      ...SHIPPED_TABLE, n_rows: 235, cells: ["slow-high", "task-high", "smol-high", "slow-medium", "task-max"], burn_in: true,
       rows: { cost: { "*": "task-high" }, speed: { "*": "task-high" } },
       reasons: { cost: { "*": fitReason }, speed: { "*": fitReason } },
       estimates: { "*": { "task-high": { generation: "claude-sonnet-5-5", merged: 67 } } },
-      guard: { tripped: [], n: { "slow-high": 69, "task-high": 69, "smol-high": 32 } },
+      guard: { tripped: [], n: { "slow-high": 69, "task-high": 69, "smol-high": 12 } },
     },
     ...o,
   },
@@ -1021,7 +1021,7 @@ test("evidence favours is drawn beside routes now: its source, its burn-in headi
   const rows = document.getElementById("cells-rows");
   const text = textOf(rows).replace(/\s+/g, " ");
   for (const words of ["evidence favours", "Fit · this repository's runs · computed 2026-10-26 19:17Z · 235 Pulls",
-    "stage 2: slow-medium and task-max have 0 of the 20 merged PRs each needs", "task-high ≠ routes now", "task-high · n 67¹ · qualifies · 95% interval [−$3.10, −$0.40]"]) {
+    "burn-in: smol-high has 12 of the 20 merged PRs it needs", "task-high ≠ routes now", "task-high · n 67¹ · qualifies · 95% interval [−$3.10, −$0.40]"]) {
     assert.ok(text.includes(words), `the rows do not draw ${JSON.stringify(words)}`);
   }
   const row = document.getElementById("cells-row-cost-*");

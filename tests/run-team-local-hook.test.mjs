@@ -20,7 +20,7 @@ import { FIT_EVERY_MERGED } from "../plugin/scripts/ticket-router.mjs";
 const HOOK = fileURLToPath(new URL("../.omp/skills/run-team-local/hook.mjs", import.meta.url));
 const DAY = WINDOW_START;
 const SESSION = "2026-10-03T10-00-00-000Z_01a00000-0000-7000-8000-000000000000";
-const STAGE1 = ["slow-high", "task-high", "smol-high"];
+const STARTING = ["slow-high", "task-high", "smol-high"];
 const FEATURES = join("docs", "metrics", "ticket-features.tsv");
 const GUARD = join(".fleet", "cost-guard.json");
 const TABLE = join("plugin", "scripts", "router-table.json");
@@ -75,7 +75,7 @@ const membersTsv = (rows) => `# ${MEMBER_COLUMNS.join("\t")}\n${rows.length ? fo
 const tiersTsv = (rows) => `# ${TIER_COLUMNS.join("\t")}\n${rows.map((r) => `${formatRow(r)}\n`).join("")}`;
 const unjudged = { cell: "slow-high", reason: "unjudged", cells: {}, pairs: [] };
 const routerTable = (over = {}) => ({
-  window_start: null, fitted_commit: null, n_rows: 0, stage: 1, cells: [...STAGE1], burn_in: true, splits: {},
+  window_start: null, fitted_commit: null, n_rows: 0, cells: [...STARTING], burn_in: true, splits: {},
   rows: { cost: { "*": "slow-high" }, speed: { "*": "slow-high" } }, classifier: { b: null, tau: null }, estimates: {},
   reasons: { cost: { "*": unjudged }, speed: { "*": unjudged } }, guard: { tripped: [], n: {} }, ...over,
 });
@@ -113,7 +113,7 @@ function write(root, rel, text) {
 
 // `fitted`: the rows an earlier commit of main holds, the commit the table
 // records as `fitted_commit`.
-function fixture({ rows = corpus(), table = routerTable(), cells = STAGE1, fitted = null, gh = {} } = {}) {
+function fixture({ rows = corpus(), table = routerTable(), cells = STARTING, fitted = null, gh = {} } = {}) {
   const root = tempDir("run-team-local-");
   const origin = join(root, "origin.git");
   const seed = join(root, "seed");
@@ -187,7 +187,7 @@ test("drift notice: names a cell whose last admissible row ran another model tha
     member({ agent: "impl-5", run_date: "2026-10-01", session: "s5", model: "claude-haiku-4-5", effort: "high", subagentType: "fleet-implementer-smol-high" }),
     member({ agent: "impl-6", run_date: "2026-10-09", session: "s6", model: "claude-haiku-3", effort: "high", subagentType: "task" }),
   );
-  const f = fixture({ rows, cells: [...STAGE1, "smol-max"] });
+  const f = fixture({ rows, cells: [...STARTING, "smol-max"] });
   const r = f.run(["--dry-run"]);
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.stdout.split("\n").filter((l) => l.startsWith("tier-roles: notice: ")), [

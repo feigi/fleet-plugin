@@ -449,7 +449,9 @@ is an Exploration Pull, and the router draws its cell: `k = 1 +
 (sha256("<session>\t<ticket>")[0:8] mod K)` over the routing table's
 `cells` minus the policy cell, in token order. Under either Objective that
 policy cell is the `cost` row set's, so the draw is the same under both. While the table's `burn_in` is
-true every Pull draws, over every cell, the policy cell included. An
+true every Pull draws, over the starting cells (the three models at `high`) the
+guard has not tripped, the policy cell included; a cell the table lists beyond
+them is never drawn. An
 Exploration Pull records `tier=<cell>` in the row, and a replacement inherits the row's tier —
 written at the Pull's row step, ahead of `ledger.mjs dispatch`, which reads it
 and prints `fleet-implementer-<cell>` as the `agent` to dispatch. A Pull the
