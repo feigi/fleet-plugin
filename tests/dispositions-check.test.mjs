@@ -27,7 +27,8 @@ import { LABEL_ROLES } from "../plugin/scripts/label-map.mjs";
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/dispositions-check.mjs", import.meta.url));
 const LEDGER = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
 
-// The `gh` stub: `issue view <n> --json labels,state,title` (or `--json title`)
+// The `gh` stub: `issue view <n> --json labels,state,title` (or `--json title`,
+// or `--json title,labels`)
 // answered from FAKE_GH_ISSUES, an issue it does not hold answered the way gh
 // answers one that does not exist. `pr view <n> --json closingIssuesReferences,url`
 // answered from FAKE_GH_PRS, a PR it does not hold with no references, in
@@ -52,7 +53,7 @@ if (argv.length === 5 && cmd === "pr" && sub === "view" && flag === "--json" && 
   process.stdout.write(JSON.stringify({ labels: (prs[n]?.labels ?? ["patch"]).map((name) => ({ name })) }));
   process.exit(0);
 }
-if (argv.length !== 5 || cmd !== "issue" || sub !== "view" || flag !== "--json" || (fields !== "labels,state,title" && fields !== "title")) {
+if (argv.length !== 5 || cmd !== "issue" || sub !== "view" || flag !== "--json" || (fields !== "labels,state,title" && fields !== "title" && fields !== "title,labels")) {
   process.stderr.write("gh stub: unexpected call " + JSON.stringify(argv) + "\\n");
   process.exit(2);
 }

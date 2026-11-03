@@ -2108,14 +2108,26 @@ function checkReaders(where) {
       die(`${where}: could not look — gh pr view ${pr} --json ${fields} answered ${e.message}; nothing written`);
     }
   };
-  // The title of issue `n`, as `gh issue view <n> --json title` answers it.
-  const issueTitle = (n) => {
-    const what = `gh issue view ${n} --json title`;
-    const { r, v } = lookJson(what, ["issue", "view", String(n), "--json", "title"]);
+  // `labels` as the list of the label names it holds, or null when it is
+  // anything but a list of named labels.
+  const namedLabels = (labels) => {
+    if (!Array.isArray(labels) || !labels.every((l) => l !== null && typeof l === "object" && typeof l.name === "string")) return null;
+    return labels.map((l) => l.name);
+  };
+  // Issue `n`'s title and label names, as `gh issue view <n> --json
+  // title,labels` answers them. An answer without a string title, or without a
+  // list of named labels, could not look.
+  const issueRead = (n) => {
+    const what = `gh issue view ${n} --json title,labels`;
+    const { r, v } = lookJson(what, ["issue", "view", String(n), "--json", "title,labels"]);
     if (v === null || typeof v !== "object" || typeof v.title !== "string") {
       die(`${where}: could not look — ${what} printed no title: ${cause(r.stdout)}; nothing written`);
     }
-    return v.title;
+    const labels = namedLabels(v.labels);
+    if (labels === null) {
+      die(`${where}: could not look — ${what} printed no list of named labels: ${cause(r.stdout)}; nothing written`);
+    }
+    return { title: v.title, labels };
   };
   // The label names gh answers `args` with, `list` taking the label list off
   // the parsed answer. A read that fails, or answers anything but a list of
@@ -2124,37 +2136,52 @@ function checkReaders(where) {
     const what = `gh ${args.join(" ")}`;
     const lead = `could not read ${whose} labels`;
     const { r, v } = lookJson(what, args, lead);
-    const labels = list(v);
-    if (!Array.isArray(labels) || !labels.every((l) => l !== null && typeof l === "object" && typeof l.name === "string")) {
+    const labels = namedLabels(list(v));
+    if (labels === null) {
       die(`${where}: ${lead} — ${what} printed no list of named labels: ${cause(r.stdout)}; nothing written`);
     }
-    return labels.map((l) => l.name);
+    return labels;
   };
   // PR `pr`'s label names, and the names of the labels its repository defines.
   const prLabels = (pr) => labelNames(`PR #${pr}'s`, ["pr", "view", String(pr), "--json", "labels"], (v) => v?.labels);
   const repoLabels = () => labelNames("the repository's", LABEL_LIST_ARGS, (v) => v);
-  return { repoDir, look, verifyShaOf, prView, prViewClosing, issueTitle, prLabels, repoLabels };
+  // Issue `n`'s label names, as `gh issue view <n> --json labels` answers them.
+  const issueLabels = (n) => labelNames(`issue #${n}'s`, ["issue", "view", String(n), "--json", "labels"], (v) => v?.labels);
+  // Of `numbers`, a PR's closing references in its own repository, those not
+  // in `own` — the PR's own tickets — whose issue carries the in-progress Label
+  // role's string: tickets another claim holds. `labelsOf(n)` is issue n's
+  // label names. The map is read only when a reference is not the PR's own, so
+  // a single-ticket PR needs none; one that cannot be read is exit 2.
+  const claimedElsewhere = (numbers, own, labelsOf) => {
+    const others = numbers.filter((n) => !own.includes(n));
+    if (others.length === 0) return [];
+    const inProgress = roleLabel(repoDir(), "in-progress", where);
+    return others.filter((n) => labelsOf(n).includes(inProgress));
+  };
+  return { repoDir, look, verifyShaOf, prView, prViewClosing, issueRead, prLabels, repoLabels, issueLabels, claimedElsewhere };
 }
 
 // The finisher gate's closing-reference checks for the PR `member` finishes,
 // read off the PR's closingIssuesReferences in its own repository — a
 // reference into another repository closes no issue here, whatever its
-// number — and the titles of the issues they name; its second argument is
-// rulingOf()'s answer, which let the PR through. Check 1, when a settled
-// implementer's token names the PR: each ticket it names is closed by the
-// body when the PR's ruling is closed_own_ticket=yes, and is not when the
+// number — and the titles and labels of the issues they name; its second
+// argument is rulingOf()'s answer, which let the PR through. Check 1, when a
+// settled implementer's token names the PR: each ticket it names is closed by
+// the body when the PR's ruling is closed_own_ticket=yes, and is not when the
 // ruling is no. Check 2, for every PR: no reference may be the
 // suggestion-band record of this PR's review — an issue whose title, trimmed,
-// is recordTitle(), as dispositions-check.mjs finds the record. Returns
-// `{refs, failures}`: the issue numbers the PR closes, its own
-// suggestion-band record aside — that one is a failure here, not a ticket —
-// and one line per failure. A read the checks need dies, naming the read,
-// and writes nothing.
+// is recordTitle(), as dispositions-check.mjs finds the record. Check 3, for
+// every PR, Ticketless ones included: no reference besides the PR's own
+// tickets may be a ticket another claim holds, its issue carrying the Label
+// map's in-progress string (claimedElsewhere()). Returns `{refs, failures}`:
+// the issue numbers the PR closes, its own suggestion-band record aside —
+// that one is a failure here, not a ticket — and one line per failure. A read
+// the checks need dies, naming the read, and writes nothing.
 async function closingRefusals(member, { tickets, ruling, tsv }) {
   const pr = member.number;
   const where = `dispatch ${member.name}`;
   const { recordTitle } = await import("./dispositions-check.mjs");
-  const { prViewClosing, issueTitle } = checkReaders(where);
+  const { prViewClosing, issueRead, claimedElsewhere } = checkReaders(where);
   const refs = prViewClosing(pr, "closingIssuesReferences,url").numbers;
   const failures = [];
   if (tickets.length > 0) {
@@ -2173,9 +2200,18 @@ async function closingRefusals(member, { tickets, ruling, tsv }) {
   }
   const own = recordTitle(pr);
   const closed = [];
+  const labels = new Map();
   for (const n of refs) {
-    if (issueTitle(n).trim() === own) failures.push(`PR #${pr} closes #${n}, its own suggestion-band record — rephrase the mention as "Refs #${n}" or "issue #${n}"`);
-    else closed.push(n);
+    const issue = issueRead(n);
+    if (issue.title.trim() === own) {
+      failures.push(`PR #${pr} closes #${n}, its own suggestion-band record — rephrase the mention as "Refs #${n}" or "issue #${n}"`);
+    } else {
+      closed.push(n);
+      labels.set(n, issue.labels);
+    }
+  }
+  for (const n of claimedElsewhere(closed, tickets, (m) => labels.get(m))) {
+    failures.push(`PR #${pr} closes #${n}, which another claim holds — rephrase it as "Refs #${n}"`);
   }
   return { refs: closed, failures };
 }
@@ -2220,16 +2256,23 @@ function labelRefusal(member, tickets, refs) {
 }
 
 // The tracker's string for the `ready-to-merge` Label role, off the Label map
-// of the repository `dir` belongs to (label-map.mjs). Only the paths that
-// compare or list that label read it — `dispatch merge-bot`'s queueSnapshot(),
-// `dispatch finisher-pr-M`'s labelRefusal() and settle --from-report's
-// finisher and merge-bot checks — so every other verb runs with no map at all.
-// A map that cannot be read, or no repository to find one in, is exit 2 under
-// `where`, carrying the reader's message (an absent or invalid map's names
-// `label-map.mjs ensure`); nothing written.
+// of the repository `dir` belongs to: roleLabel()'s answer for that role. Only
+// the paths that compare or list that label read it — `dispatch merge-bot`'s
+// queueSnapshot(), `dispatch finisher-pr-M`'s labelRefusal() and settle
+// --from-report's finisher and merge-bot checks — so every other verb runs
+// with no map at all.
 function readyLabel(dir, where) {
+  return roleLabel(dir, "ready-to-merge", where);
+}
+
+// The tracker's string for the Label role `role`, off the Label map of the
+// repository `dir` belongs to (label-map.mjs). A map that cannot be read, or no
+// repository to find one in, is exit 2 under `where`, carrying the reader's
+// message (an absent or invalid map's names `label-map.mjs ensure`); nothing
+// written.
+function roleLabel(dir, role, where) {
   try {
-    return readLabelMap({ cwd: dir })["ready-to-merge"];
+    return readLabelMap({ cwd: dir })[role];
   } catch (e) {
     if (!(e instanceof LabelMapUnreadable) && !(e instanceof FleetDirUnresolvable)) throw e;
     die(`${where}: ${e.message}; nothing written`);
@@ -2707,8 +2750,10 @@ function recordFiled(id, subject) {
 //
 //   impl-N=PR#M               verify-sha.sh <branch> <head> exits 0; PR M
 //                             reads OPEN and its closingIssuesReferences in its
-//                             own repository name N; its head branch is
-//                             implementer/N-impl-N;
+//                             own repository name N; no other closing
+//                             reference there is a ticket another claim holds,
+//                             its issue carrying in-progress; its head branch
+//                             is implementer/N-impl-N;
 //                             the Check-step record (below) holds for <head>
 //   impl-N=bailed             bailCause is not null; the receipt names it.
 //                             report-schema.mjs already refuses a bail that
@@ -2739,7 +2784,9 @@ function recordFiled(id, subject) {
 // by readyLabel() only when one of the two checks runs: on a finisher's
 // `labelled`, and on a merge bot's report that leaves a PR queued at dispatch
 // without a verdict. Outside settle, `dispatch finisher-pr-M` reads it too,
-// to refuse a finisher onto a labelled PR (labelRefusal()).
+// to refuse a finisher onto a labelled PR (labelRefusal()). `in-progress` in
+// the `impl-N=PR#M` row is the Label map's string for that role, read by
+// roleLabel() only when the PR closes a ticket besides N.
 //
 // THE CHECK-STEP RECORD, for `impl-N=PR#M` and `fix-pr-M=applied:<head>`:
 // recipe-check.mjs writes `<reports>/<member>.check.json` on the member's
@@ -2835,7 +2882,7 @@ async function runSettleFromReport() {
   if (report.member !== member) invalid(`$.member: ${JSON.stringify(report.member)} is not ${member}`);
 
   // The gh and git reads this check makes, shared with the finisher gate.
-  const { repoDir, look, verifyShaOf, prView, prViewClosing } = checkReaders(where);
+  const { repoDir, look, verifyShaOf, prView, prViewClosing, issueLabels, claimedElsewhere } = checkReaders(where);
   // origin's head of `branch`, or null when origin has no such branch.
   const remoteHead = (branch) => {
     const ref = `refs/heads/${branch}`;
@@ -2893,6 +2940,10 @@ async function runSettleFromReport() {
       const { view: pr, numbers } = prViewClosing(report.pr, "state,closingIssuesReferences,url,headRefName");
       check(`PR #${report.pr} reads OPEN`, pr.state === "OPEN");
       check(`PR #${report.pr} closes #${live.number}`, numbers.includes(live.number));
+      // The claim's own ticket is the token's: a replacement impl-N-x holds
+      // the same claim as impl-N, so it is never refused for #N.
+      const held = claimedElsewhere(numbers, [live.number], issueLabels);
+      check(`PR #${report.pr} closes no ticket another claim holds (in-progress: ${held.length === 0 ? "none" : held.map((n) => `#${n}`).join(", ")})`, held.length === 0);
       // The claim's branch comes from the ticket: the Pull claims with member
       // impl-N, so its branch is implementer/N-impl-N, and close-out releases
       // impl-N. Never from the settling member's name or its report: a
