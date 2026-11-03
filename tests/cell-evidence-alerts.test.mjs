@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
@@ -8,7 +8,7 @@ import { computeCellEvidence } from "../plugin/scripts/compute-cell-evidence.mjs
 import { costGuardFault, readCostGuard } from "../plugin/scripts/fleet-tick.mjs";
 import { parseGuard, readGuard } from "../plugin/scripts/ticket-router.mjs";
 import {
-  MAIN_METRICS_EVERY_MS, carryMainMetrics, readCheckoutTable, readCloseoutPr, readGuardJson, readMainMetrics,
+  MAIN_METRICS_EVERY_MS, carryMainMetrics, readCloseoutPr, readGuardJson, readMainMetrics,
 } from "../plugin/scripts/board-gather.mjs";
 import { CLOSEOUT_RECEIPT } from "../plugin/scripts/ledger-grammar.mjs";
 import { DAY_ONE_TABLE } from "./support/day-one-router-table.mjs";
@@ -17,9 +17,8 @@ import { DAY_ONE_TABLE } from "./support/day-one-router-table.mjs";
 // guard readers disagree), the checks that cannot run and are never alerts, and
 // the reads that feed them.
 
-// The day-one table, not plugin/scripts/router-table.json: a re-fit moves the shipped one.
+// The day-one table, not plugin/scripts/router-table.json: the starting table every repository begins from.
 const SHIPPED = DAY_ONE_TABLE;
-const INSTALL = { name: "@feigi/fleet-ctl", version: "3.104.0", repository: "git+https://github.com/feigi/fleet-plugin.git", error: null };
 const HERE = "https://github.com/feigi/fleet-plugin";
 const AGENTS = { list: [], error: null };
 const TIER = "docs/metrics/tier-outcomes.tsv";
@@ -46,7 +45,7 @@ const ROLES = { value: { slow: "anthropic/claude-opus-5:high", task: "anthropic/
 const build = (o = {}) => {
   const json = o.guardJson ?? guardJson();
   return computeCellEvidence({
-    guard: accepted(json), guardJson: json, receipts: { phase0: null, closeout: null }, agents: AGENTS, modelRoles: ROLES, table: SHIPPED, install: INSTALL, repoUrl: HERE,
+    guard: accepted(json), guardJson: json, receipts: { phase0: null, closeout: null }, agents: AGENTS, modelRoles: ROLES, table: SHIPPED,
     mainMetrics: MAIN(), openPrs: { numbers: [], capped: false }, ...o,
   });
 };
@@ -115,6 +114,12 @@ test("a Fit fitted beside an earlier guard is not compared: a close-out's guard,
   const merged = { mainMetrics: read({ [MEMBERS]: MEMBERS_ID, [TIER]: GUARD_TIER }), closeoutPr: { number: 9, at: COMPUTED }, openPrs: { numbers: [], capped: false } };
   assert.deepEqual(ids(build({ fit: fit(phase0), ...merged })), [], "the guard on main, the Fit phase 0's");
   assert.deepEqual(ids(build({ fit: fit(COMPUTED), ...merged })), ["records-not-on-main"], "the same Fit fitted beside this guard is compared");
+});
+
+test("a Fit beside this guard that names no blob ids of its own is not compared: the guard's records alone decide", () => {
+  const fit = { status: "ok", fit: { computed_at: "2026-10-26T19:17:40.000Z", guard_computed_at: COMPUTED, tsv_blobs: null, table: SHIPPED } };
+  assert.deepEqual(ids(build({ fit, mainMetrics: read({ [MEMBERS]: MEMBERS_ID, [TIER]: GUARD_TIER }) })), [], "the guard's records on main");
+  assert.deepEqual(build({ fit }).alerts[0].lines, [`${TIER}: the guard read 9df10b12; main holds 84123e74`], "the guard behind main, the Fit not named");
 });
 
 test("a file main lacks is a difference: main holds none", () => {
@@ -256,40 +261,6 @@ test("every alert holds at once: three, in the order records, no Ruling, readers
   assert.deepEqual(ids(ce), ["records-not-on-main", "merged-with-no-ruling", "guard-readers-disagree"]);
 });
 
-// -- installed table behind main's ----------------------------------------------
-
-const fitted = (o = {}) => ({ ...SHIPPED, fitted_commit: "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d", n_rows: 198, ...o });
-const routesNow = (ce) => ce.policy.sides[0];
-
-test("this repository only: the checkout's table fitted where the installed one is not reads 'main's table is fitted at X on N Pulls; this install routes by Y until the plugin is updated'", () => {
-  const behind = build({ mainMetrics: null, checkoutTable: { status: "ok", table: fitted() } });
-  assert.deepEqual(routesNow(behind).labels, ["main's table is fitted at 1a2b3c4 on 198 Pulls; this install routes by a table never fitted until the plugin is updated"]);
-  const older = build({ mainMetrics: null, table: fitted({ fitted_commit: "9999999aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", n_rows: 150 }), checkoutTable: { status: "ok", table: fitted() } });
-  assert.deepEqual(routesNow(older).labels, ["main's table is fitted at 1a2b3c4 on 198 Pulls; this install routes by 9999999 until the plugin is updated"]);
-  const rows = build({ mainMetrics: null, table: fitted(), checkoutTable: { status: "ok", table: fitted({ n_rows: 199 }) } });
-  assert.equal(routesNow(rows).labels.length, 1, "the same commit on another count of Pulls differs");
-});
-
-test("the label clears when the install catches up, and today (both never fitted) there is none", () => {
-  assert.deepEqual(routesNow(build({ mainMetrics: null, table: fitted(), checkoutTable: { status: "ok", table: fitted() } })).labels, []);
-  assert.deepEqual(routesNow(build({ mainMetrics: null, checkoutTable: { status: "ok", table: SHIPPED } })).labels, []);
-  assert.equal(ids(build({ mainMetrics: null, checkoutTable: { status: "ok", table: fitted() } })).length, 0, "a label is not an alert");
-});
-
-test("a consumer, whose install names another repository, is never compared, whatever its checkout holds", () => {
-  const ce = build({ mainMetrics: null, repoUrl: "https://ghe.example.com/acme/widgets", checkoutTable: { status: "ok", table: fitted() } });
-  assert.deepEqual(routesNow(ce).labels, []);
-  assert.equal(routesNow(ce).source.check, null);
-  const gone = build({ mainMetrics: null, repoUrl: "https://ghe.example.com/acme/widgets", checkoutTable: { status: "missing" } });
-  assert.equal(routesNow(gone).source.check, null, "no table in a consumer's checkout is not a gap");
-});
-
-test("this repository with a checkout table that cannot be compared says 'not checked'", () => {
-  assert.equal(routesNow(build({ mainMetrics: null, checkoutTable: { status: "missing" } })).source.check, "not checked: this checkout holds no plugin/scripts/router-table.json");
-  assert.equal(routesNow(build({ mainMetrics: null, checkoutTable: { status: "unreadable", why: "not JSON" } })).source.check, "not checked: this checkout's router table was not read: not JSON");
-  assert.equal(routesNow(build({ mainMetrics: null, checkoutTable: null })).source.check, null, "nothing read, nothing said");
-});
-
 // -- gather's reads ----------------------------------------------------------------
 
 test("readGuardJson: the guard as parsed, null when missing or unparseable", () => {
@@ -317,23 +288,6 @@ test("readCloseoutPr: the number off `gh pr create`'s url and the commit step's 
   assert.deepEqual(readCloseoutPr(dir), { number: 9, at: null });
   writeFileSync(join(dir, CLOSEOUT_RECEIPT), "{");
   assert.equal(readCloseoutPr(dir), null);
-});
-
-test("readCheckoutTable: the table under the workspace, missing for a checkout with none, unreadable for one that is refused", () => {
-  const root = tempDir("alerts-checkout-");
-  const stateDir = join(root, ".fleet");
-  mkdirSync(stateDir);
-  assert.deepEqual(readCheckoutTable(stateDir), { status: "missing" });
-  mkdirSync(join(root, "plugin", "scripts"), { recursive: true });
-  const file = join(root, "plugin", "scripts", "router-table.json");
-  writeFileSync(file, JSON.stringify(SHIPPED));
-  const ok = readCheckoutTable(stateDir);
-  assert.equal(ok.status, "ok");
-  assert.equal(ok.table.n_rows, SHIPPED.n_rows);
-  writeFileSync(file, "{");
-  assert.deepEqual(readCheckoutTable(stateDir), { status: "unreadable", why: "not JSON" });
-  writeFileSync(file, JSON.stringify({ ...SHIPPED, burn_in: "x" }));
-  assert.equal(readCheckoutTable(stateDir).status, "unreadable");
 });
 
 // A `gh` that records its argv and answers as the body says; `say` swaps the body.

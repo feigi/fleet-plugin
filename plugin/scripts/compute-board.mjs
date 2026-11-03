@@ -858,8 +858,8 @@ export function computeBoard(inputs) {
     // The Cell evidence tab's model (compute-cell-evidence.mjs), built from the
     // guard (through the tick's reader, and as parsed, for the readers alert),
     // the receipts' metrics steps and the close-out's PR beside the open PRs, the
-    // definitions, the installed router table and package and the checkout's, the
-    // live run's Objective and the carried `modelRoles` and `docs/metrics` reads
+    // definitions, the Fit, the starting router table, the live run's Objective
+    // and the carried `modelRoles`, model catalog and `docs/metrics` reads
     // gather() answered, and this run's Pulls: each card's
     // Cell line, booked As-routed to its Cell. A caller that read none of them
     // (every hand-built input in this suite) gets the tab's no-guard state:
@@ -876,17 +876,18 @@ export function computeBoard(inputs) {
       openPrs: inputs.prsOk === false ? null : { numbers: (inputs.prs ?? []).map((p) => p.number), capped: inputs.prsCapped === true },
       agents: inputs.agents,
       modelRoles: inputs.modelRoles,
+      catalog: inputs.catalog,
       mainMetrics: inputs.mainMetrics,
       table: inputs.routerTable,
-      checkoutTable: inputs.checkoutTable,
-      install: inputs.install,
-      repoUrl: inputs.repoUrl,
       objective: inputs.objective,
       pulls: tickets.filter((t) => t.cellLine).map((t) => ({ issue: t.issue, cell: t.cellLine.cell, mark: t.cellLine.mark, targets: t.cellLine.targets })),
     }),
     // The `omp config get modelRoles` read, carried tick to tick the way `ci`
     // and `repo` are: `{ value, readAt, error }`, read at most once a minute.
     modelRoles: inputs.modelRoles ?? null,
+    // The `omp models` catalog read, carried the same way: `{ value: { models },
+    // readAt, error }`, read at most once a minute.
+    catalog: inputs.catalog ?? null,
     // The `docs/metrics` contents call, carried the same way: `{ value: { blobs },
     // readAt, error }`, main's blob id by path, read at most once a minute.
     mainMetrics: inputs.mainMetrics ?? null,

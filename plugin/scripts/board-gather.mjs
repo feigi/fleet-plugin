@@ -36,7 +36,6 @@ import { RECEIPT, RECEIPT_HELD, CLOSEOUT_RECEIPT, OBJECTIVES, isOmpSessionDirNam
 import { lastSegment } from "./pull-attribution.mjs";
 import { NAME, warnOnce, execRead } from "./board-common.mjs";
 import { mergedReadPrs, issuesOfPrs } from "./compute-board.mjs";
-import { repoIdentity } from "./compute-cell-evidence.mjs";
 import { readCostGuard } from "./fleet-tick.mjs";
 import { parseFrontmatter } from "./tier-roles.mjs";
 import { isImplementer } from "./member-outcomes.mjs";
@@ -841,30 +840,15 @@ export function readCloseoutPr(stateDir) {
   return { number: Number(number), at: typeof at === "string" ? at : null };
 }
 
-// The checkout's own router table, `plugin/scripts/router-table.json` under the
-// workspace (the directory `stateDir` is in), as the installed one is read:
-// `{ status: "ok", table }`, `{ status: "missing" }` (no such file: a consumer's
-// checkout) or `{ status: "unreadable", why }`. Never warns: the installed
-// table's read does, and a consumer is not at fault for lacking this file.
-export function readCheckoutTable(stateDir) {
-  let text;
-  try {
-    text = readFileSync(join(dirname(stateDir), "plugin", "scripts", "router-table.json"), "utf8");
-  } catch (e) {
-    return e.code === "ENOENT" ? { status: "missing" } : { status: "unreadable", why: e.code ?? e.message };
-  }
-  let table;
-  try { table = validateTable(JSON.parse(text)); } catch { return { status: "unreadable", why: "not JSON" }; }
-  return table instanceof Error ? { status: "unreadable", why: table.message } : { status: "ok", table };
-}
-
 // The Fit metrics-refresh.mjs writes beside the guard,
 // `.fleet/router-fit.json`: `{ status: "ok", fit }`, `{ status: "missing" }`
-// or `{ status: "unreadable", why }`. Its `table` is read through `validateTable`,
-// as the installed one is, and its `n_rows`, which `validateTable` does not check
-// and the tab prints, must be a count; `computed_at` and `guard_computed_at` must
-// be strings, and `tsv_blobs` and `prior` objects, their values checked where the
-// tab reads them.
+// or `{ status: "unreadable", why }`. It is read as `route` reads it
+// (ticket-router.mjs's readFitBeside): the Fit is read whenever its `table`
+// passes `validateTable`, so the tab never says the starting table routes while
+// `route` routes by the Fit. The fields only the tab reads decide nothing:
+// `computed_at` and `guard_computed_at` are null where they are no string and
+// `tsv_blobs` null where it is no object, and the tab says each is not checked,
+// as it says of an `n_rows` that is no count.
 export function readFitFile(stateDir) {
   let text;
   try {
@@ -875,16 +859,10 @@ export function readFitFile(stateDir) {
   let p;
   try { p = JSON.parse(text); } catch { return { status: "unreadable", why: "not JSON" }; }
   if (!isJsonObject(p)) return { status: "unreadable", why: "not a JSON object" };
-  for (const key of ["computed_at", "guard_computed_at"]) {
-    if (typeof p[key] !== "string") return { status: "unreadable", why: `\`${key}\` is not a string` };
-  }
-  for (const key of ["tsv_blobs", "prior"]) {
-    if (!isJsonObject(p[key])) return { status: "unreadable", why: `\`${key}\` is not an object` };
-  }
   const table = validateTable(p.table);
   if (table instanceof Error) return { status: "unreadable", why: table.message };
-  if (!Number.isInteger(table.n_rows) || table.n_rows < 0) return { status: "unreadable", why: "router table: `n_rows` is not a count" };
-  return { status: "ok", fit: { computed_at: p.computed_at, guard_computed_at: p.guard_computed_at, tsv_blobs: p.tsv_blobs, prior: p.prior, table } };
+  const stringOrNull = (v) => (typeof v === "string" ? v : null);
+  return { status: "ok", fit: { computed_at: stringOrNull(p.computed_at), guard_computed_at: stringOrNull(p.guard_computed_at), tsv_blobs: isJsonObject(p.tsv_blobs) ? p.tsv_blobs : null, table } };
 }
 
 // A receipt's `metrics` step, `{ status, at, output }`, or null: no receipt, one
@@ -921,29 +899,6 @@ export function readAgents(scriptDir) {
     }
   }
   return { list, error: null };
-}
-
-// The install's own `package.json`, `../package.json` from the script's
-// directory: `{ name, version, repository, error }`, `repository` the url its
-// field names (the field is a string or `{ url }`), null where it names none.
-// A file that cannot be read or parsed is `error`, with the rest null: the tab
-// words an install it cannot name, never a guess.
-export function readInstall(scriptDir) {
-  const file = join(scriptDir, "..", "package.json");
-  let pkg;
-  try {
-    pkg = JSON.parse(readFileSync(file, "utf8"));
-  } catch (e) {
-    return { name: null, version: null, repository: null, error: `${file}: ${e instanceof SyntaxError ? "not JSON" : (e.code ?? e.message)}` };
-  }
-  if (!isJsonObject(pkg)) return { name: null, version: null, repository: null, error: `${file}: not a JSON object` };
-  const repo = isJsonObject(pkg.repository) ? pkg.repository.url : pkg.repository;
-  return {
-    name: typeof pkg.name === "string" ? pkg.name : null,
-    version: typeof pkg.version === "string" ? pkg.version : null,
-    repository: typeof repo === "string" ? repo : null,
-    error: null,
-  };
 }
 
 // The live run's Objective, off the phase-0 receipt in the workspace's `.fleet`
@@ -999,19 +954,27 @@ export const MODEL_ROLES_EVERY_MS = 60_000;
 // `omp` would otherwise hold every tick after it, not just this tab's.
 export const MODEL_ROLES_TIMEOUT_MS = 10_000;
 
+// One `omp <argv>` whose stdout is JSON, in the cockpit's own environment:
+// `{ ok: true, cmd, json }` with the command in words and what it printed, or
+// `{ ok: false, why }`. Each reader adds only its own shape check.
+async function readOmpJson(argv, timeout) {
+  const cmd = `omp ${argv.join(" ")}`;
+  const r = await execRead("omp", argv, { timeout });
+  if (r.error) {
+    const how = r.code ?? (r.signal ? `killed by ${r.signal}` : `exit ${r.status}`);
+    return { ok: false, why: `${cmd} failed (${how})` };
+  }
+  try { return { ok: true, cmd, json: JSON.parse(r.stdout) }; } catch { return { ok: false, why: `${cmd} printed non-JSON` }; }
+}
+
 // `omp config get modelRoles --json`, in the cockpit's own environment, which can
 // differ from the controller's. `{ ok: true, value }` with the record, or
 // `{ ok: false, why }`.
 export async function readModelRoles(timeout = MODEL_ROLES_TIMEOUT_MS) {
-  const argv = ["config", "get", "modelRoles", "--json"];
-  const r = await execRead("omp", argv, { timeout });
-  if (r.error) {
-    const how = r.code ?? (r.signal ? `killed by ${r.signal}` : `exit ${r.status}`);
-    return { ok: false, why: `omp ${argv.join(" ")} failed (${how})` };
-  }
-  let value;
-  try { value = JSON.parse(r.stdout)?.value; } catch { return { ok: false, why: `omp ${argv.join(" ")} printed non-JSON` }; }
-  if (!isJsonObject(value)) return { ok: false, why: `omp ${argv.join(" ")} printed no modelRoles record` };
+  const r = await readOmpJson(["config", "get", "modelRoles", "--json"], timeout);
+  if (!r.ok) return r;
+  const value = r.json?.value;
+  if (!isJsonObject(value)) return { ok: false, why: `${r.cmd} printed no modelRoles record` };
   return { ok: true, value };
 }
 
@@ -1044,6 +1007,59 @@ const NO_READ = Object.freeze({ value: null, readAt: null, error: null });
 // success or a failure, is a minute old or more.
 export async function carryModelRoles(carried, now, read = readModelRoles) {
   return carry(heldRead(carried) ?? NO_READ, now, read, MODEL_ROLES_EVERY_MS);
+}
+
+// `omp models --json`, omp's model catalog, in the cockpit's own environment:
+// `{ ok: true, value }` with `{ models: [{ selector, thinking }] }` — every
+// listed model that has a selector, in the catalog's order, so a role's model
+// matches the entry route's own catalog read matches it to; `thinking` the
+// efforts it runs at, what a role's ladder is read off for the exploration
+// Cells, or null where it names none, and nothing else, so the carried read
+// stays small — or `{ ok: false, why }`, also for a list in which no model names
+// its efforts: a catalog with no ladder in it is a read that failed, never an
+// install whose exploration Cells are all tripped.
+export async function readCatalog(timeout = MODEL_ROLES_TIMEOUT_MS) {
+  const r = await readOmpJson(["models", "--json"], timeout);
+  if (!r.ok) return r;
+  if (!isJsonObject(r.json) || !Array.isArray(r.json.models)) return { ok: false, why: `${r.cmd} printed no model list` };
+  const models = r.json.models
+    .filter((m) => isJsonObject(m) && typeof m.selector === "string")
+    .map((m) => ({ selector: m.selector, thinking: Array.isArray(m.thinking) ? m.thinking.filter((t) => typeof t === "string") : null }));
+  if (r.json.models.length > 0 && !models.some((m) => m.thinking !== null)) return { ok: false, why: `${r.cmd} printed no model with a thinking list` };
+  return { ok: true, value: { models } };
+}
+
+// The carried model catalog read, the same way as `modelRoles`.
+export async function carryCatalog(carried, now, read = readCatalog) {
+  return carry(heldRead(carried) ?? NO_READ, now, read, MODEL_ROLES_EVERY_MS);
+}
+
+// A repository's host and `owner/name` off its url — `gh repo view`'s, or any
+// shape a `package.json` `repository` takes: an npm shorthand, a scp-style
+// address or a URL — or null when it names none. A `#ref` pin and a `www.` host
+// name the same repository; a segment of dots only names none.
+export function repoIdentity(url) {
+  if (typeof url !== "string") return null;
+  const s = url.trim().replace(/^git\+/, "").replace(/#.*$/, "");
+  let host;
+  let path;
+  const short = /^(github|gitlab|bitbucket):([^/\s]+\/[^/\s]+)$/.exec(s);
+  const scp = /^[^@/\s]+@([^:/\s]+):(.+)$/.exec(s);
+  if (short) {
+    host = `${short[1]}.${short[1] === "bitbucket" ? "org" : "com"}`;
+    path = short[2];
+  } else if (scp) {
+    [, host, path] = scp;
+  } else if (/^[\w.-]+\/[\w.-]+$/.test(s)) {
+    host = "github.com";
+    path = s;
+  } else {
+    try { ({ hostname: host, pathname: path } = new URL(s)); } catch { return null; }
+  }
+  const [owner, rest] = path.split("/").filter(Boolean);
+  const name = rest?.replace(/\.git$/, "");
+  if (!host || !owner || !name || /^\.+$/.test(owner) || /^\.+$/.test(name)) return null;
+  return { host: host.toLowerCase().replace(/^www\./, ""), name: `${owner}/${name}` };
 }
 
 // The carried `docs/metrics` contents call, the same way: `value` is `{ blobs }`,
@@ -1089,7 +1105,7 @@ export async function carryMainMetrics(carried, now, repoUrl, read = readMainMet
 // `stateDir` is the workspace's `.fleet` directory, where the cost guard and the
 // receipts the Cell evidence tab reads live. Null, as with `stateFile`, says no
 // caller named one: that tab is then built from no guard and no receipt, and the
-// cockpit's `omp` is not asked for `modelRoles`.
+// cockpit's `omp` is not asked for `modelRoles` or its model catalog.
 //
 // `cwd` is the checkout whose Label map is read, once per gather, through
 // label-map.mjs's reader; it defaults to this process's cwd, where every `gh`
@@ -1335,29 +1351,28 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, stateDir 
   const now = Date.now();
   const stallOwnerOf = isStalled(assessBeat({ beat, ticked, acted, controller, now })) ? stallOwner(controller, NAME) : null;
   // The Cell evidence tab's inputs. Every file again on every tick, nothing
-  // cached, the rule of every read here; the one exception is `modelRoles`, one
-  // child spawn, carried from the previous board and read again at most once a
-  // minute. `stateDir` is the workspace's `.fleet`: a caller that names none names
-  // no workspace, so it reads none of the workspace's records and spawns no `omp`
-  // either (a guard that reads as missing, no receipts, the read carried as it was).
+  // cached, the rule of every read here; the exceptions are `modelRoles` and the
+  // model catalog, one child spawn each, carried from the previous board and read
+  // again at most once a minute. `stateDir` is the workspace's `.fleet`: a caller
+  // that names none names no workspace, so it reads none of the workspace's
+  // records and spawns no `omp` either (a guard that reads as missing, no
+  // receipts, the reads carried as they were).
   const guard = stateDir === null ? { status: "missing" } : readGuardFile(stateDir);
   const guardJson = stateDir === null ? null : readGuardJson(stateDir);
   const fit = stateDir === null ? { status: "missing" } : readFitFile(stateDir);
   const closeoutPr = stateDir === null ? null : readCloseoutPr(stateDir);
-  const checkoutTable = stateDir === null ? { status: "missing" } : readCheckoutTable(stateDir);
   const receipts = stateDir === null
     ? { phase0: null, closeout: null }
     : { phase0: readMetricsStep(join(stateDir, RECEIPT)), closeout: readMetricsStep(join(stateDir, CLOSEOUT_RECEIPT)) };
   const agents = readAgents(scriptDir);
-  const install = readInstall(scriptDir);
   const objective = stateDir === null ? null : readObjective(stateDir);
   // Read side by side: each has its own 10 s timeout, and one after the other a
-  // tick on which both hang would stall twice as long.
-  const [modelRoles, mainMetrics] = stateDir === null
-    ? [heldRead(prev?.modelRoles), null]
-    : await Promise.all([carryModelRoles(prev?.modelRoles, now), carryMainMetrics(prev?.mainMetrics, now, repoUrl)]);
+  // tick on which every one hangs would stall once for each.
+  const [modelRoles, catalog, mainMetrics] = stateDir === null
+    ? [heldRead(prev?.modelRoles), heldRead(prev?.catalog), null]
+    : await Promise.all([carryModelRoles(prev?.modelRoles, now), carryCatalog(prev?.catalog, now), carryMainMetrics(prev?.mainMetrics, now, repoUrl)]);
   return { ledger, issues, prs, merged, closed, closedIssues, ci, prev, repo, repoUrl, workspace, port, spend, beat, ticked, acted, controller, stallOwner: stallOwnerOf, poolOk,
     roles, labelMapError,
-    poolCapped, prsOk, prsCapped, guard, guardJson, fit, receipts, closeoutPr, agents, modelRoles, mainMetrics, install, objective, implementers: [...implementers.values()], routerTable, checkoutTable,
+    poolCapped, prsOk, prsCapped, guard, guardJson, fit, receipts, closeoutPr, agents, modelRoles, catalog, mainMetrics, objective, implementers: [...implementers.values()], routerTable,
     now, interval };
 }

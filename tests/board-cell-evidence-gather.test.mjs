@@ -6,10 +6,11 @@ import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { dayOneScripts } from "./support/day-one-router-table.mjs";
 import {
-  MODEL_ROLES_EVERY_MS, MODEL_ROLES_TIMEOUT_MS, carryModelRoles, gather, readAgents, readGuardFile, readMetricsStep, readModelRoles,
-  readHeldImplementers, readInstall, readObjective, readFitFile, readRouterTable, receiptSpendDir,
+  MODEL_ROLES_EVERY_MS, MODEL_ROLES_TIMEOUT_MS, carryCatalog, carryModelRoles, gather, readAgents, readCatalog, readGuardFile, readMetricsStep, readModelRoles,
+  readHeldImplementers, readObjective, readFitFile, readRouterTable, receiptSpendDir, repoIdentity,
 } from "../plugin/scripts/board-gather.mjs";
 import { writeFit } from "../plugin/scripts/metrics-refresh.mjs";
+import { readFitBeside } from "../plugin/scripts/ticket-router.mjs";
 import { FEATURE_COLUMNS } from "../plugin/scripts/pull-attribution.mjs";
 import { COLUMNS as MEMBER_COLUMNS } from "../plugin/scripts/member-outcomes.mjs";
 import { COLUMNS as TIER_COLUMNS } from "../plugin/scripts/tier-outcomes.mjs";
@@ -20,9 +21,25 @@ import { identityRoles, seededRepo } from "./support/label-map-seed.mjs";
 
 // What gather() reads for the Cell evidence tab: the guard through the tick's
 // reader, the Fit beside it, the receipts' `metrics` steps, the installed
-// definitions and `modelRoles`, which is read at most once a minute and carried in board.json.
+// definitions, `modelRoles` and omp's model catalog, the last two read at most
+// once a minute and carried in board.json.
 
 const ROLES = { slow: "anthropic/claude-opus-5:high", task: "anthropic/claude-sonnet-5-5:high", smol: "anthropic/claude-haiku-5-5:auto" };
+// omp's model catalog as `omp models --json` prints it: every field beside a model's selector and efforts is dropped.
+const CATALOG = { models: [
+  { selector: "anthropic/claude-opus-5", thinking: ["low", "medium", "high", "xhigh", "max"], name: "Claude Opus 5" },
+  { selector: "anthropic/claude-sonnet-5-5", thinking: ["low", "medium", "high", "xhigh", "max"] },
+  { selector: "anthropic/claude-haiku-5-5", thinking: ["low", "medium", "high", "xhigh", 3, null] },
+  { selector: "openai/gpt-x", thinking: null },
+] };
+// What readCatalog keeps of it: every model, in its order, so a role's model matches the entry route's own
+// read matches it to — a model naming no efforts stays, with `thinking` null — and only the efforts that are words.
+const CATALOG_READ = { models: [
+  { selector: "anthropic/claude-opus-5", thinking: ["low", "medium", "high", "xhigh", "max"] },
+  { selector: "anthropic/claude-sonnet-5-5", thinking: ["low", "medium", "high", "xhigh", "max"] },
+  { selector: "anthropic/claude-haiku-5-5", thinking: ["low", "medium", "high", "xhigh"] },
+  { selector: "openai/gpt-x", thinking: null },
+] };
 
 // -- carryModelRoles: at most one read a minute ------------------------------------------
 
@@ -139,6 +156,50 @@ test("readModelRoles: an omp that never answers is killed at the timeout and is 
   });
 });
 
+// -- readCatalog: `omp models --json`, carried as modelRoles is -----------------------------
+
+test("readCatalog: asks omp for its models and keeps each listed model's selector and efforts", async (t) => {
+  await withOmp(t, `echo "$@" > "$(dirname "$0")/argv"\necho '${JSON.stringify(CATALOG)}'`, async (bin) => {
+    assert.deepEqual(await readCatalog(), { ok: true, value: CATALOG_READ });
+    assert.equal(readFileSync(join(bin, "argv"), "utf8").trim(), "models --json");
+  });
+});
+
+test("readCatalog: a failing omp, non-JSON and an answer with no model list are each a failed read with their own why", async (t) => {
+  await withOmp(t, "exit 3", async () => {
+    assert.deepEqual(await readCatalog(), { ok: false, why: "omp models --json failed (exit 3)" });
+  });
+  await withOmp(t, "echo not json", async () => {
+    assert.deepEqual(await readCatalog(), { ok: false, why: "omp models --json printed non-JSON" });
+  });
+  for (const out of ["null", "[]", "{}", '{"models":3}']) {
+    await withOmp(t, `echo '${out}'`, async () => {
+      assert.deepEqual(await readCatalog(), { ok: false, why: "omp models --json printed no model list" }, out);
+    });
+  }
+});
+
+test("readCatalog: a list in which no model names its efforts is a failed read, never a catalog with no ladder in it", async (t) => {
+  await withOmp(t, `echo '{"models":[{"selector":"a/b","thinking":null},{"selector":"c/d"},{"thinking":["low"]}]}'`, async () => {
+    assert.deepEqual(await readCatalog(), { ok: false, why: "omp models --json printed no model with a thinking list" });
+  });
+  await withOmp(t, `echo '{"models":[{"selector":"a/b","thinking":null},{"selector":"c/d","thinking":["low"]}]}'`, async () => {
+    assert.deepEqual(await readCatalog(), { ok: true, value: { models: [{ selector: "a/b", thinking: null }, { selector: "c/d", thinking: ["low"] }] } }, "one ladder is enough");
+  });
+});
+
+test("carryCatalog: read at most once a minute, a failure keeping the carried value", async () => {
+  const { read, calls } = reader({ ok: true, value: CATALOG_READ }, { ok: false, why: "omp models --json failed (exit 1)" });
+  const first = await carryCatalog(null, NOW, read);
+  assert.deepEqual(first, { value: CATALOG_READ, readAt: NOW, error: null });
+  assert.deepEqual(await carryCatalog(first, NOW + 59_999, read), first);
+  assert.equal(calls.length, 1);
+  const failed = await carryCatalog(first, NOW + 60_000, read);
+  assert.deepEqual(failed, { value: CATALOG_READ, readAt: NOW, error: { at: NOW + 60_000, message: "omp models --json failed (exit 1)" } });
+  const fresh = reader({ ok: true, value: CATALOG_READ });
+  assert.deepEqual(await carryCatalog({ value: 3, readAt: NOW, error: null }, NOW, fresh.read), { value: CATALOG_READ, readAt: NOW, error: null }, "a carried value nobody validated is read again");
+});
+
 // -- the guard, the receipts and the definitions -------------------------------------------
 
 const GUARD = {
@@ -201,33 +262,51 @@ test("readFitFile: reads what metrics-refresh writes; a missing file is missing;
   const stateDir = join(dir, ".fleet");
   assert.deepEqual(readFitFile(stateDir), { status: "missing" });
   const written = writtenFit(dir);
-  // The tab reads every field but the guard the Fit used, which route does not read either.
-  const { guard: _used, ...read } = written;
+  // The tab reads every field but the guard the Fit used, which route does not read either, and the prior.
+  const { guard: _used, prior, ...read } = written;
   assert.deepEqual(readFitFile(stateDir), { status: "ok", fit: read });
+  writeFileSync(join(stateDir, "router-fit.json"), JSON.stringify({ ...written, prior: null }));
+  assert.equal(readFitFile(stateDir).status, "ok", "a Fit with no prior is read: the tab never reads it");
+  assert.equal(typeof prior, "object");
   const path = join(stateDir, "router-fit.json");
   for (const [text, why] of [
     ["{ nope", "not JSON"],
     ["[]", "not a JSON object"],
-    [JSON.stringify({ ...written, guard_computed_at: null }), "`guard_computed_at` is not a string"],
-    [JSON.stringify({ ...written, tsv_blobs: [] }), "`tsv_blobs` is not an object"],
-    [JSON.stringify({ ...written, prior: null }), "`prior` is not an object"],
     [JSON.stringify({ ...written, table: { ...written.table, burn_in: "no" } }), "router table: `burn_in` is not a boolean"],
-    [JSON.stringify({ ...written, table: { ...written.table, n_rows: undefined } }), "router table: `n_rows` is not a count"],
-    [JSON.stringify({ ...written, table: { ...written.table, n_rows: "235" } }), "router table: `n_rows` is not a count"],
   ]) {
     writeFileSync(path, text);
     assert.deepEqual(readFitFile(stateDir), { status: "unreadable", why }, text);
+    assert.notEqual(readFitBeside(join(stateDir, "cost-guard.json")).fallback, null, `route falls back too: ${text}`);
   }
   const dirState = join(tempDir("cell-evidence-fit-dir-"), ".fleet");
   mkdirSync(join(dirState, "router-fit.json"), { recursive: true });
   assert.deepEqual(readFitFile(dirState), { status: "unreadable", why: "EISDIR" }, "a read error is named by its code");
 });
 
+test("readFitFile: a Fit route routes by is read, whatever the fields only the tab reads hold; each of those reads null", () => {
+  const dir = tempDir("cell-evidence-fit-fields-");
+  const stateDir = join(dir, ".fleet");
+  const written = writtenFit(dir);
+  const { guard: _used, prior: _prior, ...read } = written;
+  const path = join(stateDir, "router-fit.json");
+  for (const [text, fit] of [
+    [JSON.stringify({ ...written, computed_at: 3 }), { ...read, computed_at: null }],
+    [JSON.stringify({ ...written, guard_computed_at: null }), { ...read, guard_computed_at: null }],
+    [JSON.stringify({ ...written, tsv_blobs: [] }), { ...read, tsv_blobs: null }],
+    [JSON.stringify({ table: written.table }), { computed_at: null, guard_computed_at: null, tsv_blobs: null, table: written.table }],
+    [JSON.stringify({ ...written, table: { ...written.table, n_rows: "235" } }), { ...read, table: { ...written.table, n_rows: "235" } }],
+  ]) {
+    writeFileSync(path, text);
+    assert.equal(readFitBeside(join(stateDir, "cost-guard.json")).fallback, null, `route routes by this Fit: ${text}`);
+    assert.deepEqual(readFitFile(stateDir), { status: "ok", fit }, text);
+  }
+});
+
 // -- gather(): the whole read, and the board it makes --------------------------------------------
 
 // A cockpit workspace in a temp repository seeded with the identity Label map:
 // `.fleet/` with a guard and a phase-0 receipt, an installed `agents/` beside
-// `scripts/`, and a stub `omp` that counts its spawns.
+// `scripts/`, and a stub `omp` that counts its spawns and answers `models` with the catalog.
 function workspace(t, { guard = GUARD, ompBody = null } = {}) {
   const root = seededRepo("cell-evidence-gather-");
   const stateDir = join(root, ".fleet");
@@ -238,7 +317,7 @@ function workspace(t, { guard = GUARD, ompBody = null } = {}) {
   writeFileSync(join(stateDir, RECEIPT), JSON.stringify(receipt({ metrics: { status: "ok", at: "2026-10-28T08:00:00.000Z", output: "metrics-refresh: cost guard: verdict ok" } })));
   writeFileSync(join(root, "agents", "fleet-finisher.agent.md"), '---\nname: fleet-finisher\nmodel: "@slow:high"\n---\n');
   const calls = join(root, "omp-calls");
-  writeExecStub(join(bin, "omp"), ompBody ?? `#!/bin/sh\necho x >> "${calls}"\necho '{"value":${JSON.stringify(ROLES)}}'\n`);
+  writeExecStub(join(bin, "omp"), ompBody ?? `#!/bin/sh\necho "$1" >> "${calls}"\nif [ "$1" = models ]; then echo '${JSON.stringify(CATALOG)}'; else echo '{"value":${JSON.stringify(ROLES)}}'; fi\n`);
   // Every other read degrades: this is about the Cell evidence reads.
   writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
   const saved = process.env.PATH;
@@ -254,16 +333,18 @@ async function quiet(fn) {
   try { return await fn(); } finally { process.stderr.write = write; }
 }
 
-test("gather: reads the guard, the receipts, the definitions and modelRoles, and the board built from them draws the tab's model", async (t) => {
+test("gather: reads the guard, the receipts, the definitions, modelRoles and the catalog, and the board built from them draws the tab's model", async (t) => {
   const w = workspace(t);
   const r = await quiet(() => gather(w.opts));
   assert.equal(r.guard.status, "ok");
   assert.deepEqual(r.receipts, { phase0: { status: "ok", at: "2026-10-28T08:00:00.000Z", output: "metrics-refresh: cost guard: verdict ok" }, closeout: null });
   assert.deepEqual(r.agents, { list: [{ file: "fleet-finisher.agent.md", model: '"@slow:high"' }], error: null });
   assert.deepEqual(r.modelRoles, { value: ROLES, readAt: r.now, error: null });
+  assert.deepEqual(r.catalog, { value: CATALOG_READ, readAt: r.now, error: null });
 
   const board = computeBoard(r);
   assert.deepEqual(board.modelRoles, r.modelRoles, "the carried read rides board.json");
+  assert.deepEqual(board.catalog, r.catalog, "and so does the catalog's");
   assert.equal(board.cellEvidence.guard.heading, "trips nothing");
   assert.equal(board.cellEvidence.guard.cells.length, CELLS.length);
   assert.equal(board.cellEvidence.guard.cells[0].figures.merged.text, "40 ≥ 20 ✓");
@@ -272,30 +353,31 @@ test("gather: reads the guard, the receipts, the definitions and modelRoles, and
   JSON.stringify(board);
 });
 
-test("gather: reads the Fit in the state directory every tick, and the board lays it out as what the evidence favours", async (t) => {
+test("gather: reads the Fit in the state directory every tick, and the board lays it out as the Fit that routes", async (t) => {
   const w = workspace(t);
   const before = await quiet(() => gather(w.opts));
   assert.deepEqual(before.fit, { status: "missing" });
-  assert.equal(computeBoard(before).cellEvidence.policy.sides[1].heading, "no Fit yet: the next phase 0 writes one");
+  assert.equal(computeBoard(before).cellEvidence.policy.source.text, "starting table · no Fit yet: the next phase 0 writes one");
   writtenFit(w.root);
   const r = await quiet(() => gather(w.opts));
   assert.equal(r.fit.status, "ok");
-  const s = computeBoard(r).cellEvidence.policy.sides[1];
-  assert.equal(s.title, "evidence favours");
-  assert.equal(s.source.text, "Fit · this repository's runs · computed 2026-10-28 08:00Z · 0 Pulls");
-  assert.equal(s.heading, "burn-in: slow-high, task-high and smol-high have 0 of the 20 merged PRs each needs");
+  const p = computeBoard(r).cellEvidence.policy;
+  assert.equal(p.title, "The Fit that routes this run");
+  assert.equal(p.source.text, "Fit · computed 2026-10-28 08:00Z · 0 Pulls");
+  assert.equal(p.burnIn.heading, "burn-in: 0 of 3 starting Cells have the 20 merged PRs each needs");
   const { stateDir, ...rest } = w.opts;
   assert.deepEqual((await quiet(() => gather(rest))).fit, { status: "missing" }, "no state directory, no workspace's records read");
 });
 
-test("gather: modelRoles is read once, then carried tick to tick through board.json, not read again within the minute", async (t) => {
+test("gather: modelRoles and the catalog are read once each, then carried tick to tick through board.json, not read again within the minute", async (t) => {
   const w = workspace(t);
   const first = await quiet(() => gather(w.opts));
-  assert.equal(w.spawns(), 1);
+  assert.equal(w.spawns(), 2);
   writeFileSync(w.opts.prevFile, JSON.stringify(computeBoard(first)));
   const second = await quiet(() => gather(w.opts));
-  assert.equal(w.spawns(), 1, "the second tick spawned no omp");
+  assert.equal(w.spawns(), 2, "the second tick spawned no omp");
   assert.deepEqual(second.modelRoles, first.modelRoles);
+  assert.deepEqual(second.catalog, first.catalog);
 });
 
 test("gather: a failing omp keeps the carried value and the board shows 'as read at <time>; reading fails: <why>'", async (t) => {
@@ -601,38 +683,7 @@ test("readRouterTable: the installed table when validateTable accepts it, else n
   assert.equal(stderrOf(() => readRouterTable(dir)).err, "", "the same fault is said once");
 });
 
-// -- the policy rows' reads: the install's package.json and the live run's Objective --------------
-
-test("readInstall: the install's own package.json, ../package.json from the script's directory, with its repository's url", () => {
-  const root = tempDir("cell-evidence-install-");
-  const scripts = join(root, "scripts");
-  mkdirSync(scripts);
-  const put = (pkg) => writeFileSync(join(root, "package.json"), typeof pkg === "string" ? pkg : JSON.stringify(pkg));
-  put({ name: "@feigi/fleet-ctl", version: "3.104.0", repository: { type: "git", url: "git+https://github.com/feigi/fleet-plugin.git", directory: "plugin" } });
-  assert.deepEqual(readInstall(scripts), { name: "@feigi/fleet-ctl", version: "3.104.0", repository: "git+https://github.com/feigi/fleet-plugin.git", error: null });
-  put({ name: "x", version: "1.0.0", repository: "github:feigi/fleet-plugin" });
-  assert.equal(readInstall(scripts).repository, "github:feigi/fleet-plugin", "the string form");
-  put({ name: "x", version: "1.0.0" });
-  assert.deepEqual(readInstall(scripts), { name: "x", version: "1.0.0", repository: null, error: null }, "a package naming no repository");
-  put({ name: 3, version: null, repository: { directory: "plugin" } });
-  assert.deepEqual(readInstall(scripts), { name: null, version: null, repository: null, error: null });
-  for (const repository of [null, [], ["git+https://github.com/feigi/fleet-plugin.git"], 3]) {
-    put({ name: "x", version: "1.0.0", repository });
-    assert.deepEqual(readInstall(scripts), { name: "x", version: "1.0.0", repository: null, error: null }, `a repository field of ${JSON.stringify(repository)} names none`);
-  }
-});
-
-test("readInstall: a package.json that is missing, not JSON or not an object is an error, with nothing guessed", () => {
-  const root = tempDir("cell-evidence-install-");
-  const scripts = join(root, "scripts");
-  mkdirSync(scripts);
-  assert.match(readInstall(scripts).error, /package\.json: ENOENT$/);
-  writeFileSync(join(root, "package.json"), "{ nope");
-  assert.match(readInstall(scripts).error, /package\.json: not JSON$/);
-  writeFileSync(join(root, "package.json"), "[1]");
-  assert.match(readInstall(scripts).error, /package\.json: not a JSON object$/);
-  for (const r of [readInstall(scripts)]) assert.deepEqual([r.name, r.version, r.repository], [null, null, null]);
-});
+// -- the view's reads: the live run's Objective, and no table of the checkout's -------------------
 
 test("readObjective: the live run's Objective off phase0.json, and null between runs or when it records none", () => {
   const dir = tempDir("cell-evidence-objective-");
@@ -649,24 +700,48 @@ test("readObjective: the live run's Objective off phase0.json, and null between 
   assert.equal(readObjective(dir), null);
 });
 
-test("gather: hands the install and the live Objective to the board, whose policy rows read them", async (t) => {
+test("gather: hands the live Objective to the board, and reads no router table of the checkout's, which the board never lays out", async (t) => {
   const w = workspace(t);
-  writeFileSync(join(w.root, "package.json"), JSON.stringify({ name: "@feigi/fleet-ctl", version: "3.104.0", repository: { url: "git+https://github.com/feigi/fleet-plugin.git" } }));
   writeFileSync(join(w.stateDir, RECEIPT), JSON.stringify({ ...receipt({}), objective: "speed" }));
+  const bare = await quiet(() => gather(w.opts));
+  mkdirSync(join(w.root, "plugin", "scripts"), { recursive: true });
+  writeFileSync(join(w.root, "plugin", "scripts", "router-table.json"), JSON.stringify(readRouterTable(SCRIPTS)));
   const r = await quiet(() => gather(w.opts));
-  assert.deepEqual(r.install, { name: "@feigi/fleet-ctl", version: "3.104.0", repository: "git+https://github.com/feigi/fleet-plugin.git", error: null });
   assert.equal(r.objective, "speed");
+  assert.equal(Object.hasOwn(r, "checkoutTable"), false);
+  assert.equal(Object.hasOwn(r, "install"), false);
   const policy = computeBoard(r).cellEvidence.policy;
+  assert.deepEqual(policy, computeBoard(bare).cellEvidence.policy, "a checkout holding a router table changes nothing in the view");
   assert.deepEqual(policy.objectives.map((o) => [o.objective, o.live]), [["cost", false], ["speed", true]]);
-  assert.equal(policy.sides[0].source.text.split(" · ")[0], "feigi/fleet-plugin's runs", "the workspace's repository is unknown here, so it is never 'this repository's'");
-  assert.equal(policy.sides[0].source.check, "not checked: this workspace's repository is not known");
-  assert.equal(policy.sides[0].heading, "no router table read: the rows are not known", "this workspace's scripts directory holds no router-table.json");
+  assert.equal(policy.source.check, "not checked: no starting table read", "this workspace's scripts directory holds no router-table.json");
 });
 
 test("gather: a caller that names no state directory reads no Objective", async (t) => {
   const w = workspace(t);
   const r = await quiet(() => gather({ ...w.opts, stateDir: null }));
   assert.equal(r.objective, null);
+});
+
+test("repoIdentity reads the shapes a package.json repository takes", () => {
+  const want = { host: "github.com", name: "feigi/fleet-plugin" };
+  for (const u of ["git+https://github.com/feigi/fleet-plugin.git", "https://github.com/feigi/fleet-plugin", "https://github.com/feigi/fleet-plugin/", "git://github.com/feigi/fleet-plugin.git",
+    "git@github.com:feigi/fleet-plugin.git", "ssh://git@github.com/feigi/fleet-plugin.git", "github:feigi/fleet-plugin", "feigi/fleet-plugin", "https://github.com/feigi/fleet-plugin/tree/main/plugin"]) {
+    assert.deepEqual(repoIdentity(u), want, u);
+  }
+  assert.deepEqual(repoIdentity("git+ssh://git@ghe.example.com/acme/widgets.git"), { host: "ghe.example.com", name: "acme/widgets" });
+  assert.deepEqual(repoIdentity("git@GitHub.com:feigi/fleet-plugin.git"), want, "an scp host compares without case");
+  assert.deepEqual(repoIdentity("gitlab:acme/widgets"), { host: "gitlab.com", name: "acme/widgets" });
+  assert.deepEqual(repoIdentity("bitbucket:acme/widgets"), { host: "bitbucket.org", name: "acme/widgets" });
+  assert.deepEqual(repoIdentity("bitbucket:acme/widgets"), repoIdentity("https://bitbucket.org/acme/widgets"), "the bitbucket shorthand is bitbucket.org's");
+  for (const u of [null, undefined, 3, "", "nope", "https://github.com/owner"]) assert.equal(repoIdentity(u), null, String(u));
+});
+
+test("repoIdentity drops a ref pin and a www. host, and refuses a relative path", () => {
+  const want = { host: "github.com", name: "feigi/fleet-plugin" };
+  for (const u of ["github:feigi/fleet-plugin#main", "feigi/fleet-plugin#main", "git+https://github.com/feigi/fleet-plugin.git#v1", "git@github.com:feigi/fleet-plugin.git#v1", "https://www.github.com/feigi/fleet-plugin"]) {
+    assert.deepEqual(repoIdentity(u), want, u);
+  }
+  for (const u of ["../x", "./x", "x/..", "https://github.com/o/.git"]) assert.equal(repoIdentity(u), null, u);
 });
 
 // -- records not on main: the contents call, through the whole read --------------------------------
@@ -767,7 +842,7 @@ test("gather: a caller that names no state directory reads nothing of main's and
   const r = await quiet(() => gather({ ...w.opts, stateDir: null }));
   assert.equal(r.mainMetrics, null);
   assert.equal(r.closeoutPr, null);
-  assert.deepEqual(r.checkoutTable, { status: "missing" });
+  assert.equal(Object.hasOwn(r, "checkoutTable"), false);
   assert.ok(!calls().some((c) => c.startsWith("api")));
   assert.deepEqual(computeBoard(r).cellEvidence.alerts, []);
 });
