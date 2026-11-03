@@ -299,7 +299,7 @@ numbers and function context and a text file's blob ids, and the labelled head
 merges onto the moved head's own merge base into exactly the moved head's tree.
 `merge-gate.mjs` proves it from git objects in the
 main checkout and accepts the head with the label kept, naming both SHAs in
-`rebaseCarry`; any head it cannot prove is `head-moved-after-label` (ADR 0024).
+`rebaseCarry`; any head it cannot prove is `head-moved-after-label` (ADR 0024), which takes the label off.
 _Avoid_: clean rebase, patch-equivalent, same patch
 
 ### Finisher scope

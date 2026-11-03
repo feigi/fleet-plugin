@@ -156,12 +156,15 @@ const state = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath, "
 const item = (state[noun][n] ??= { labels: [], comments: [] });
 const values = (flag) => args.flatMap((a, i) => (a === flag ? [args[i + 1]] : []));
 if (verb === "view") {
-  process.stdout.write(JSON.stringify({ labels: item.labels.map((name) => ({ name })), comments: item.comments.map((body) => ({ body })), state: item.state ?? "OPEN" }));
+  // A comment is a body or {body, createdAt}; a body gets the stamp of its position.
+  const comments = item.comments.map((c, i) => (typeof c === "string" ? { body: c, createdAt: new Date(1.8e12 + i * 1000).toISOString() } : c));
+  process.stdout.write(JSON.stringify({ labels: item.labels.map((name) => ({ name })), comments, state: item.state ?? "OPEN", headRefOid: item.head ?? "a".repeat(40) }));
 } else if (verb === "close") {
   item.state = "CLOSED";
   for (const body of values("--comment")) item.comments.push(body);
 } else if (verb === "edit") {
-  item.labels = item.labels.filter((l) => !values("--remove-label").includes(l));
+  // A sticky item keeps its labels whatever is removed, as a removal GitHub did not apply.
+  if (!item.sticky) item.labels = item.labels.filter((l) => !values("--remove-label").includes(l));
   for (const l of values("--add-label")) if (!item.labels.includes(l)) item.labels.push(l);
 } else if (verb === "comment") {
   item.comments.push(values("--body")[0]);
@@ -1068,7 +1071,7 @@ function gateReading(f, over = {}) {
     : JSON.stringify({ pr: 89, verdict: "blocked", reason: MG, head: HEAD, bodyDigest: bodyDigest(BODY), ...over }));
 }
 
-test("merge-bot-report parks a main-gain-removed refusal at the head and body digest its gate reading refused, reads no gh, ignores every other reason, then settles and ticks; a second run writes nothing", () => {
+test("merge-bot-report parks a main-gain-removed refusal at the head and body digest its gate reading refused, reads no gh, ignores every other reason but head-moved-after-label, then settles and ticks; a second run writes nothing", () => {
   const f = fixture({ rows: ["#412 impl-412=PR#88", "#413 impl-413=PR#89", "#414 impl-414=PR#90"], dispatched: ["merge-bot-1"] });
   f.setGh({ issue: {}, pr: { 89: { labels: ["ready-to-merge"], comments: [] } } });
   f.report(mergeBotReport("merge-bot-1", [
@@ -1122,6 +1125,290 @@ test("merge-bot-report whose gate reading cannot bind a main-gain park prints a 
     assert.ok(r.stdout.includes(`NEED park PR #89 ${MG} — the gate reading ${gateReadingPath(f)} ${why}`), r.stdout);
     assert.deepEqual(writes(r.order), [`settle merge-bot-1 --from-report --reports ${join(f.scratch, "reports")}`], why);
     assert.deepEqual(f.rows(), ["#413 impl-413=PR#89"], why);
+  }
+});
+
+// ── merge-bot-report: head-moved-after-label ends the label ──────────────────
+
+const MOVED = "head-moved-after-label";
+const READY = "ready-to-merge";
+const LABELLED_ROW = "#413 impl-413=PR#89 · finisher-pr-89=labelled";
+const record = (head, createdAt = "2026-10-01T00:00:00Z") => ({ body: `ready-to-merge-head: ${head}`, createdAt });
+// The comment the take-off posts, for the bot, the recorded head and the PR's head.
+const movedComment = (recorded, head = HEAD, bot = "merge-bot-1") =>
+  `**${bot} refused this PR \`${MOVED}\`; \`${READY}\` came off for a fresh finisher.**\n\n- recorded head: ${recorded}\n- PR head: ${head}`;
+const tokensOf = (f) => f.rows().join("\n").split(/\s+/).filter((w) => w.startsWith("label-off="));
+
+// A fixture with PR 89 labelled and `item` merged over its gh state, the
+// refusal reported and the settle controlled.
+function movedFixture({ rows = [LABELLED_ROW], item = {}, labels = {} } = {}) {
+  const f = fixture({ rows, dispatched: ["merge-bot-1"], labels });
+  f.setGh({ issue: {}, pr: { 89: { labels: [READY, "patch"], comments: [record(HEAD_B)], head: HEAD, ...item } } });
+  f.report(mergeBotReport("merge-bot-1", [{ pr: 89, reason: MOVED }]));
+  f.control("settle", { "merge-bot-1": { outcome: "done" } });
+  return f;
+}
+
+test("merge-bot-report refusing a labelled PR head-moved-after-label writes label-off= naming the attempt that settled labelled, takes the label off, comments once, then settles; a second run writes nothing", () => {
+  const f = movedFixture();
+  const first = f.run(["merge-bot-report", "merge-bot-1"]);
+  assert.equal(first.status, 0, first.err + first.stdout);
+  assert.deepEqual(first.order, [
+    "gh pr view 89",
+    "ledger token 89 label-off=finisher-pr-89",
+    "gh pr edit 89",
+    "gh pr view 89",
+    "gh pr comment 89",
+    `settle merge-bot-1 --from-report --reports ${join(f.scratch, "reports")}`,
+    TICK,
+  ], "the token lands before the removal, the comment after it, the settle last");
+  assert.deepEqual(f.rows(), [`${LABELLED_ROW} · label-off=finisher-pr-89`]);
+  assert.deepEqual(f.gh().pr[89].labels, ["patch"], "only the ready-to-merge label comes off");
+  assert.deepEqual(f.gh().pr[89].comments.slice(1), [movedComment(HEAD_B)]);
+  const edit = f.ghCalls().find((c) => c.args[1] === "edit");
+  assert.deepEqual(edit.args, ["pr", "edit", "89", "--remove-label", READY]);
+
+  const ledger = f.ledger();
+  const second = f.run(["merge-bot-report", "merge-bot-1"]);
+  assert.equal(second.status, 0, second.err + second.stdout);
+  assert.deepEqual(writes(second.order), [], "nothing is written again");
+  assert.equal(f.ledger(), ledger);
+  assert.equal(f.gh().pr[89].comments.length, 2);
+});
+
+test("merge-bot-report replayed after its bot settled leaves a label put back by hand since the take-off", () => {
+  const f = movedFixture();
+  assert.equal(f.run(["merge-bot-report", "merge-bot-1"]).status, 0);
+  const state = f.gh();
+  state.pr[89].labels = [READY, "patch"];
+  f.setGh(state);
+  const again = f.run(["merge-bot-report", "merge-bot-1"]);
+  assert.equal(again.status, 0, again.err + again.stdout);
+  assert.deepEqual(f.gh().pr[89].labels, [READY, "patch"]);
+  assert.ok(!again.order.includes("gh pr edit 89"), again.order.join("\n"));
+  assert.deepEqual(tokensOf(f), ["label-off=finisher-pr-89"]);
+});
+
+test("merge-bot-report takes the Label map's string off, not the role's name", () => {
+  const f = movedFixture({ labels: { "ready-to-merge": "queue ok" }, item: { labels: ["queue ok", "patch"] } });
+  const r = f.run(["merge-bot-report", "merge-bot-1"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.deepEqual(f.gh().pr[89].labels, ["patch"]);
+  assert.deepEqual(f.ghCalls().find((c) => c.args[1] === "edit").args, ["pr", "edit", "89", "--remove-label", "queue ok"]);
+  assert.ok(f.gh().pr[89].comments.at(-1).includes("`queue ok` came off"), f.gh().pr[89].comments.at(-1));
+});
+
+test("merge-bot-report writes no token, removal or comment for a PR that is not open, carries no label, or whose newest record names its head, and still settles", () => {
+  for (const [why, item] of [
+    ["not open", { state: "CLOSED" }],
+    ["merged", { state: "MERGED" }],
+    ["no label", { labels: ["patch"] }],
+    ["its newest record names its head", { comments: [record(HEAD_B, "2026-10-01T00:00:00Z"), record(HEAD, "2026-10-02T00:00:00Z")] }],
+  ]) {
+    const f = movedFixture({ item });
+    const r = f.run(["merge-bot-report", "merge-bot-1"]);
+    assert.equal(r.status, 0, `${why}: ${r.err}${r.stdout}`);
+    assert.deepEqual(writes(r.order), [`settle merge-bot-1 --from-report --reports ${join(f.scratch, "reports")}`], why);
+    assert.deepEqual(f.rows(), [LABELLED_ROW], why);
+    assert.deepEqual(f.gh().pr[89].labels, item.labels ?? [READY, "patch"], why);
+    assert.equal(f.gh().pr[89].comments.length, (item.comments ?? [0]).length, why);
+  }
+});
+
+test("merge-bot-report takes the label off a PR whose newest record names another head, and says there is none when there is none", () => {
+  const none = movedFixture({ item: { comments: ["a plain comment"] } });
+  const r = none.run(["merge-bot-report", "merge-bot-1"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.deepEqual(none.gh().pr[89].labels, ["patch"]);
+  assert.equal(none.gh().pr[89].comments.at(-1), movedComment("none recorded"));
+  // The newest record decides, not the oldest: an older record naming the
+  // head is covered by a newer one that does not.
+  const newer = movedFixture({ item: { comments: [record(HEAD, "2026-10-01T00:00:00Z"), record(HEAD_B, "2026-10-02T00:00:00Z")] } });
+  assert.equal(newer.run(["merge-bot-report", "merge-bot-1"]).status, 0);
+  assert.deepEqual(newer.gh().pr[89].labels, ["patch"]);
+  assert.equal(newer.gh().pr[89].comments.at(-1), movedComment(HEAD_B));
+});
+
+test("merge-bot-report takes the label off a PR whose rows hold no attempt that settled labelled, writing no token", () => {
+  for (const rows of [["#413 impl-413=PR#89"], ["#413 impl-413=PR#89 · finisher-pr-89=halted:past-pin"]]) {
+    const f = movedFixture({ rows });
+    const r = f.run(["merge-bot-report", "merge-bot-1"]);
+    assert.equal(r.status, 0, r.err + r.stdout);
+    assert.deepEqual(f.rows(), rows);
+    assert.ok(!r.order.some((l) => l.startsWith("ledger token")), r.order.join("\n"));
+    assert.deepEqual(f.gh().pr[89].labels, ["patch"]);
+    assert.equal(f.gh().pr[89].comments.length, 2);
+  }
+});
+
+test("merge-bot-report writes no second label-off= when a token already names the labelled attempt, and names a later labelled attempt the token does not", () => {
+  const named = movedFixture({ rows: [`${LABELLED_ROW} · label-off=finisher-pr-89`] });
+  assert.equal(named.run(["merge-bot-report", "merge-bot-1"]).status, 0);
+  assert.deepEqual(tokensOf(named), ["label-off=finisher-pr-89"]);
+  assert.deepEqual(named.gh().pr[89].labels, ["patch"], "the label still comes off");
+
+  const later = movedFixture({ rows: ["#413 impl-413=PR#89 · finisher-pr-89=labelled · label-off=finisher-pr-89 · finisher-pr-89-b=labelled"] });
+  assert.equal(later.run(["merge-bot-report", "merge-bot-1"]).status, 0);
+  assert.deepEqual(tokensOf(later), ["label-off=finisher-pr-89", "label-off=finisher-pr-89-b"]);
+});
+
+test("two labelled attempts with no label-off= between them: the take-off names the later one", () => {
+  const f = movedFixture({ rows: ["#413 impl-413=PR#89 · finisher-pr-89=labelled · finisher-pr-89-b=labelled"] });
+  const r = f.run(["merge-bot-report", "merge-bot-1"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.deepEqual(tokensOf(f), ["label-off=finisher-pr-89-b"]);
+});
+
+test("a labelled finisher followed by a halted:past-pin attempt: the take-off names the labelled attempt", () => {
+  const f = movedFixture({ rows: ["#413 impl-413=PR#89 · finisher-pr-89=labelled · finisher-pr-89-b=halted:past-pin"] });
+  const r = f.run(["merge-bot-report", "merge-bot-1"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.deepEqual(tokensOf(f), ["label-off=finisher-pr-89"]);
+  assert.deepEqual(f.gh().pr[89].labels, ["patch"]);
+});
+
+test("merge-bot-report posts no second comment when the PR already carries it, though it takes the label off", () => {
+  const f = movedFixture({ item: { comments: [record(HEAD_B), movedComment(HEAD_B)] } });
+  const r = f.run(["merge-bot-report", "merge-bot-1"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.deepEqual(f.gh().pr[89].labels, ["patch"]);
+  assert.equal(f.gh().pr[89].comments.length, 2);
+  assert.ok(!r.order.includes("gh pr comment 89"), r.order.join("\n"));
+});
+
+test("a failed removal is a NEED naming fleet-event.mjs label-off, the token already written and the report still settled; running the command removes the label and writes no second token", () => {
+  const f = movedFixture();
+  writeFileSync(join(f.stubs, "gh-fail.json"), JSON.stringify(["pr edit"]));
+  const first = f.run(["merge-bot-report", "merge-bot-1"]);
+  assert.equal(first.status, 4, first.err + first.stdout);
+  assert.ok(first.stdout.includes("NEED label-off PR #89 — gh pr edit failed: gh boom; run fleet-event.mjs label-off 89 again"), first.stdout);
+  assert.deepEqual(tokensOf(f), ["label-off=finisher-pr-89"], "the token lands before the removal");
+  assert.deepEqual(f.gh().pr[89].labels, [READY, "patch"]);
+  assert.ok(!first.order.includes("gh pr comment 89"), "no comment says the label came off when it did not");
+  assert.ok(first.order.includes(`settle merge-bot-1 --from-report --reports ${join(f.scratch, "reports")}`));
+
+  rmSync(join(f.stubs, "gh-fail.json"));
+  const again = f.run(["label-off", "89"]);
+  assert.equal(again.status, 0, again.err + again.stdout);
+  assert.deepEqual(f.gh().pr[89].labels, ["patch"]);
+  assert.deepEqual(tokensOf(f), ["label-off=finisher-pr-89"], "a re-run adds no second token");
+});
+
+test("merge-bot-report: a take-off comment that fails to post is a NEED carrying its text, since a re-run finds the label off and posts nothing", () => {
+  const f = movedFixture();
+  writeFileSync(join(f.stubs, "gh-fail.json"), JSON.stringify(["pr comment"]));
+  const first = f.run(["merge-bot-report", "merge-bot-1"]);
+  assert.equal(first.status, 4, first.err + first.stdout);
+  assert.ok(first.stdout.includes(`NEED ${MOVED} comment #89 — gh pr comment failed: gh boom; the label is already off, so no re-run posts it: `
+    + `comment it by hand — merge-bot-1 refused this PR \`${MOVED}\`; \`${READY}\` came off for a fresh finisher (recorded head: ${HEAD_B}; PR head: ${HEAD})`), first.stdout);
+  assert.deepEqual(f.gh().pr[89].labels, ["patch"]);
+
+  rmSync(join(f.stubs, "gh-fail.json"));
+  const again = f.run(["merge-bot-report", "merge-bot-1"]);
+  assert.equal(again.status, 0, again.err + again.stdout);
+  assert.ok(!again.order.includes("gh pr comment 89"), again.order.join("\n"));
+  assert.deepEqual(f.gh().pr[89].comments, [record(HEAD_B)], "only the NEED ever carried the comment's text");
+});
+
+test("a take-off while the PR's latest finisher attempt is still live is a NEED to run label-off again once it settles; run then, it names that attempt", () => {
+  const f = movedFixture({ rows: ["#413 impl-413=PR#89 · finisher-pr-89"] });
+  const first = f.run(["merge-bot-report", "merge-bot-1"]);
+  assert.equal(first.status, 4, first.err + first.stdout);
+  assert.ok(first.stdout.includes("NEED label-off PR #89 — finisher-pr-89 is still live, so no label-off= names it; once it settles, run fleet-event.mjs label-off 89 again"), first.stdout);
+  assert.deepEqual(tokensOf(f), []);
+  assert.deepEqual(f.gh().pr[89].labels, ["patch"]);
+  assert.ok(first.order.includes(`settle merge-bot-1 --from-report --reports ${join(f.scratch, "reports")}`));
+
+  writeFileSync(join(f.fleet, "ledger.md"), ledgerText({ rows: [LABELLED_ROW], dispatched: ["merge-bot-1=done"] }));
+  const again = f.run(["label-off", "89"]);
+  assert.equal(again.status, 0, again.err + again.stdout);
+  assert.ok(!again.stdout.includes("NEED"), again.stdout);
+  assert.deepEqual(tokensOf(f), ["label-off=finisher-pr-89"]);
+});
+
+test("label-off is a NEED when the read-back still carries the label", () => {
+  const f = fixture({ rows: [LABELLED_ROW] });
+  f.setGh({ issue: {}, pr: { 89: { labels: [READY, "patch"], comments: [], sticky: true } } });
+  const r = f.run(["label-off", "89"]);
+  assert.equal(r.status, 4, r.err + r.stdout);
+  assert.ok(r.stdout.includes(`NEED label-off PR #89 — it still carries ${READY} after the removal; run fleet-event.mjs label-off 89 again`), r.stdout);
+  assert.deepEqual(r.order.slice(0, 4), ["ledger token 89 label-off=finisher-pr-89", "gh pr edit 89", "gh pr view 89", TICK]);
+});
+
+test("label-off whose label-off= token the ledger refuses is a NEED naming the command, the label left on; run again, it writes the token and takes the label off", () => {
+  const f = fixture({ rows: [LABELLED_ROW] });
+  f.setGh({ issue: {}, pr: { 89: { labels: [READY, "patch"], comments: [] } } });
+  chmodSync(f.fleet, 0o555);
+  let first;
+  try {
+    first = f.run(["label-off", "89"]);
+  } finally {
+    chmodSync(f.fleet, 0o755);
+  }
+  assert.equal(first.status, 2, first.err + first.stdout);
+  assert.ok(first.stdout.includes(`NEED label-off PR #89 — the ledger refused label-off=finisher-pr-89, so ${READY} is left on; run fleet-event.mjs label-off 89 again`), first.stdout);
+  assert.ok(!first.order.includes("gh pr edit 89"), first.order.join("\n"));
+  assert.deepEqual(f.gh().pr[89].labels, [READY, "patch"]);
+
+  const again = f.run(["label-off", "89"]);
+  assert.equal(again.status, 0, again.err + again.stdout);
+  assert.deepEqual(tokensOf(f), ["label-off=finisher-pr-89"]);
+  assert.deepEqual(f.gh().pr[89].labels, ["patch"]);
+});
+
+test("merge-bot-report with a PR it cannot read is a NEED, writing nothing but the settle", () => {
+  const f = movedFixture();
+  writeFileSync(join(f.stubs, "gh-fail.json"), JSON.stringify(["pr view"]));
+  const r = f.run(["merge-bot-report", "merge-bot-1"]);
+  assert.equal(r.status, 4, r.err + r.stdout);
+  assert.ok(r.stdout.includes("NEED take-off PR #89 head-moved-after-label — if it is open and labelled, run fleet-event.mjs label-off 89 — gh pr view 89 did not answer a PR (gh boom)"), r.stdout);
+  assert.deepEqual(writes(r.order), [`settle merge-bot-1 --from-report --reports ${join(f.scratch, "reports")}`]);
+  assert.deepEqual(f.rows(), [LABELLED_ROW]);
+});
+
+test("merge-bot-report reads and writes nothing for a refusal of any other reason", () => {
+  for (const reason of ["behind:2", "ci:failure", "label-pulled", "ci-wait-timeout", "main-gain-unanswerable", "head-moved-after-label-#89"]) {
+    const f = movedFixture();
+    f.report(mergeBotReport("merge-bot-1", [{ pr: 89, reason }]));
+    const r = f.run(["merge-bot-report", "merge-bot-1"]);
+    assert.equal(r.status, 0, `${reason}: ${r.err}${r.stdout}`);
+    assert.deepEqual(f.ghCalls(), [], reason);
+    assert.deepEqual(f.rows(), [LABELLED_ROW], reason);
+  }
+});
+
+// ── label-off ────────────────────────────────────────────────────────────────
+
+test("label-off writes the token before it removes the label, comments nothing, and ticks; a second run writes no second token", () => {
+  const f = fixture({ rows: [LABELLED_ROW] });
+  f.setGh({ issue: {}, pr: { 89: { labels: [READY, "patch"], comments: [] } } });
+  const first = f.run(["label-off", "89"]);
+  assert.equal(first.status, 0, first.err + first.stdout);
+  assert.deepEqual(first.order, ["ledger token 89 label-off=finisher-pr-89", "gh pr edit 89", "gh pr view 89", TICK]);
+  assert.match(eventLine(first), /^event: label-off: #89 label-off=finisher-pr-89; #89 ready-to-merge taken off$/);
+  assert.deepEqual(f.gh().pr[89].labels, ["patch"]);
+  assert.deepEqual(f.gh().pr[89].comments, []);
+
+  const second = f.run(["label-off", "89"]);
+  assert.equal(second.status, 0, second.err + second.stdout);
+  assert.deepEqual(tokensOf(f), ["label-off=finisher-pr-89"]);
+});
+
+test("label-off takes the label off unconditionally: a PR that is closed, or whose record names its head, loses it too", () => {
+  const f = fixture({ rows: ["#413 impl-413=PR#89"] });
+  f.setGh({ issue: {}, pr: { 89: { labels: [READY], comments: [record(HEAD)], head: HEAD, state: "CLOSED" } } });
+  const r = f.run(["label-off", "89"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.deepEqual(f.gh().pr[89].labels, []);
+  assert.deepEqual(f.rows(), ["#413 impl-413=PR#89"], "no attempt settled labelled, so no token");
+});
+
+test("label-off takes one PR number only and refuses anything else", () => {
+  const f = fixture({ rows: [LABELLED_ROW] });
+  for (const args of [["label-off"], ["label-off", "x"], ["label-off", "89", "90"]]) {
+    const r = f.run(args);
+    assert.equal(r.status, 2, args.join(" "));
+    assert.deepEqual(writes(r.order), [], args.join(" "));
   }
 });
 

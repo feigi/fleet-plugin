@@ -346,10 +346,10 @@ const labelRecovery = () =>
 const labelRecoveryWhy = () =>
   FINISHER_REFERENCE.section("## Take the label off before you approve any push", "references/finisher.md").text;
 
-test("the recovery removes the label before approving, and says why messaging the bot is not the stop", () => {
+test("the recovery takes the label off with one command before approving, and says why messaging the bot is not the stop", () => {
   const s = labelRecovery();
-  assert.match(s, Pin.phrase("then remove the label (`gh pr edit <pr> --remove-label \"<ready-to-merge string>\"`"));
-  assert.match(s, Pin.phrase("the string `show ready-to-merge` prints), then approve"));
+  assert.match(s, Pin.phrase("Run `fleet-event.mjs label-off <pr>` first: it writes `label-off=<the attempt that settled labelled>` onto the PR's row, removes the label and reads the PR's labels back, then approve"));
+  assert.doesNotMatch(s, /gh pr edit/);
   assert.match(s, Pin.phrase("dispatch a **fresh** finisher against the new head"));
   assert.match(s, Pin.phrase("See references/finisher.md."));
   const why = labelRecoveryWhy();
@@ -412,7 +412,8 @@ test("the failure table carries the head-moved outcome and its response", () => 
   const s = failureTable();
   assert.match(s, Pin.phrase("Merge bot finds the head moved after `ready-to-merge` was applied"));
   assert.match(s, Pin.phrase("a proven rebase-carry keeps the label — the bot proceeds and reports `rebase-carry-#<pr>`"));
-  assert.match(s, Pin.phrase("Any other move is `head-moved-after-label-#<pr>`, PR stays queued, label untouched"));
+  assert.match(s, Pin.phrase("Any other move is `head-moved-after-label-#<pr>`: the bot leaves the label alone, and its report's settle takes it off (`label-off=` on the row, then one PR comment). Dispatch a **fresh** finisher against the new head"));
+  assert.doesNotMatch(s, Pin.phrase("`head-moved-after-label-#<pr>`, PR stays queued, label untouched"));
 });
 
 test("the report vocabulary includes head-moved-after-label and rebase-carry", () => {
@@ -446,4 +447,21 @@ test("requirements §1.1 declares a git floor of at least 2.40, where `git merge
     major > 2 || (major === 2 && minor >= 40),
     `requirements.md §1.1 declares git >= ${major}.${minor}, below the 2.40 where \`git merge-tree\` gained \`--merge-base\`, which the carry proof runs`,
   );
+});
+
+// The refusal ends the label, so no shipped file may still say it stays: the
+// bot leaves the label alone, and its report's settle takes it off before the
+// fresh finisher. Each site names that settle.
+test("every site that sends a fresh finisher after a head-moved refusal says the report's settle takes the label off", () => {
+  const s = labelledHead();
+  assert.match(s, Pin.phrase("your report's settle takes it off before the fresh finisher"));
+  assert.match(s, Pin.phrase("the label left where it is for your report's settle to take off"));
+  assert.match(DOC.text, Pin.phrase("the label left for your report's settle to take off, the same verdict"));
+  assert.match(DOC.text, Pin.phrase("the bot leaves the label, and its report's settle takes it off before that finisher"));
+  const lifecycle = Pin.file(join(REPO, "skills", "run-team", "references", "member-lifecycle.md"));
+  assert.match(lifecycle.text, Pin.phrase("refuses it `head-moved-after-label-#<M>` and its report's settle takes the label off; then a fresh finisher"));
+  const ledger = Pin.file(join(REPO, "skills", "run-team", "references", "ledger.md"));
+  assert.match(ledger.text, Pin.phrase("or when a merge bot's `head-moved-after-label` refusal settles), naming the attempt that settled `labelled`"));
+  assert.match(FINISHER_REFERENCE.text, Pin.phrase("The bot leaves the label where it is, and its report's settle clears it"));
+  assert.doesNotMatch(FINISHER_REFERENCE.text, Pin.phrase("its refusal costs a pass and leaves the label lying"));
 });

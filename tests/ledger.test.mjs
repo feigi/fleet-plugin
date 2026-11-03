@@ -20,6 +20,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { rendering } from "./support/rendered-brief.mjs";
 import { writeQueueGh } from "./support/queue-gh.mjs";
+import { seedLabelMap } from "./support/label-map-seed.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
 // #155's fix resolves the ledger's own repository with a real `git`
@@ -3698,6 +3699,7 @@ function tokenFixture(t, initial = [], { dispatch = false, dispatched = [] } = {
     delete gitEnv.GIT_DIR;
     delete gitEnv.GIT_WORK_TREE;
     assert.equal(spawnSync("git", ["init", "-q"], { cwd: dir, env: gitEnv }).status, 0);
+    seedLabelMap(dir);
   }
   const file = join(dir, "ledger.md");
   const section = dispatched.length === 0 ? "" : `## Dispatched\n\n${dispatched.map((e) => `- ${e}\n`).join("")}\n`;

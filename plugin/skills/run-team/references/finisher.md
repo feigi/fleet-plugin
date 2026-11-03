@@ -121,6 +121,7 @@ and will act on it. Relay everything — reversals too — then dispatch.
   No flag skips it: a PR `append` refuses is fixed on the ledger, as at close-out.
 - **The PR's closing references match its ruling and exclude its own suggestion-band record** → `ledger.mjs dispatch` reads the PR's `closingIssuesReferences` from `gh pr view <M>` before it dispatches any finisher, counting only those in the PR's own repository: a reference into another repository closes none of this repository's tickets, whatever its number. When the ruled row says `closed_own_ticket=yes`, each ticket a settled `impl-<N>=PR#<M>` token names must be closed by the body (`Closes #<N>`); when it says `no`, none may be, and no reference may be the PR's own suggestion-band record. A blank verdict is refused until it is set. A refusal names the PR and the ticket. The controller repairs the body itself with `gh pr edit <M> --body-file <file>`, then dispatches the finisher again. A `gh` read that fails refuses the dispatch and writes nothing.
 - **The PR carries exactly one release label** → `ledger.mjs dispatch` reads the PR's labels from `gh pr view <M>` before it dispatches any finisher, and refuses unless exactly one of `patch`, `minor` and `major` is among them — the count `finisher-label.mjs` makes before it labels. A repository whose label list defines none of the three is not gated. A Ticketless PR with none is not refused: `finisher-label.mjs` adds `patch` to it before its count. Any other PR with none is refused naming the tickets it closes, and any PR with several naming the labels found — the bump, or which label stays, is not picked for the controller. The controller adds or removes the label itself, then dispatches the finisher again. A `gh` read that fails or answers malformed refuses the dispatch, saying the labels could not be read, and writes nothing.
+- **The PR carries no `ready-to-merge`** → the same `gh pr view <M>` read of the PR's labels answers it, and `ledger.mjs dispatch` refuses any finisher while the label is on, writing nothing and naming `fleet-event.mjs label-off <M>`. A finisher runs on an unlabelled PR: the label a merge bot's `head-moved-after-label` refusal left comes off with its report's settle, and the command takes off any other. A repair finisher's PR lacks the label by definition, so it passes.
 
 A PR known to conflict cannot merge, and a finisher on it would race the conflict fix-applier rebasing it. That is why the conflict-hold refusal SKILL.md describes exists.
 
@@ -307,7 +308,10 @@ in it, per `references/isolation.md`, **A reused worktree may lack the runner**.
 The label is a
 verdict on the tree the finisher read, and a GitHub label does not follow the
 branch — on one PR it survived a push and came to sit on a commit nobody had
-audited. The token is how the tick tells your
+audited. `fleet-event.mjs label-off <pr>` takes it off: it writes
+`label-off=<attempt>` onto the PR's row, the attempt being the latest finisher
+that settled `labelled`, removes the label and reads the PR's labels back. The
+token is how the tick tells your
 removal from a finisher that never labelled — a tick run between a removal and
 its token re-dispatches a finisher into your take-off window. The label goes
 before the approval because removing the artifact the merge bot gates on is
@@ -316,9 +320,10 @@ observed holding until after an abort message arrived.
 
 When a push moves the PR off its labelled head, the merge bot refuses the new
 head on its own (`run-merge-bot.md`, **The labelled head**), so your take-off
-is not the only guard — but its refusal costs a pass and leaves the label
-lying, which is yours to clear either way, the same way: `label-off=` first,
-then the removal.
+is not the only guard. The bot leaves the label where it is, and its report's
+settle clears it — the same command, then one PR comment — before the fresh
+finisher, which `ledger.mjs dispatch` refuses to start on a PR that still
+carries the label.
 
 ## A final report is not proof the member stopped
 
