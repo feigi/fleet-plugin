@@ -1,0 +1,231 @@
+{
+  "pr": 4294,
+  "head": "8ad9519f7e6cfb522af529ef2ff45c3d4af4ef2f",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I did not write to that directory (my reads were all in the snapshot); other agents may have modified it."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. I wrote nothing in that directory; both files were already modified when I started, so they come from the controller's own checkout, not from me."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I did not write to that checkout, so these two modifications predate my work or come from another agent."
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin —  M docs/metrics/ticket-features.tsv /  M docs/metrics/tier-outcomes.tsv (my only command in that directory was `pwd`; every other command chained `cd` into the scratch copy or used absolute snapshot/scratch paths, so these modifications predate or are outside this review agent)"
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. Neither came from this review: every command here changed into the scratch copy or the scratch dir first, and the only path read outside them was the diff and test log under the run dir."
+    },
+    {
+      "dimension": "tests",
+      "state": "clean",
+      "line": "CWD-AUDIT: clean /Users/chris/dev/fleet-plugin"
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 13,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4294/run-sgRtnINA/snapshot-8ad9519f",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/pr-cost.mjs",
+      "line": 101,
+      "claim": "The starting Cells are still defined in two places: STAGE_1 in pr-cost.mjs and STARTING_CELLS in ticket-router.mjs. The PR keeps them in step with an equality test, and the test's reason ('the two scripts import nothing of each other') does not hold up, because pr-cost.mjs can import STARTING_CELLS from ticket-router.mjs without any import cycle. The ticket asked for one source of truth for the starting Cells.",
+      "evidence": "`git grep 'from \"./pr-cost.mjs\"' -- plugin/scripts` → only metrics-refresh.mjs:94, so ticket-router.mjs does not import pr-cost.mjs directly or through anything else. Mutation m4 replaced `export const STAGE_1 = [...]` with `import { STARTING_CELLS } from \"./ticket-router.mjs\"; export const STAGE_1 = STARTING_CELLS;`, then `node --test --test-reporter=tap tests/pr-cost.test.mjs` → `# pass 62 / # fail 0`. tests/pr-cost.test.mjs:453-455 asserts deepEqual(STAGE_1, STARTING_CELLS).",
+      "suggested_fix": "Have pr-cost.mjs import STARTING_CELLS from ticket-router.mjs, delete STAGE_1 and the equality test, and rename the remaining uses.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/fleet-tick.mjs",
+      "line": 530,
+      "claim": "After this PR there are no stages, but the live cost-guard output still says 'every non-default stage-1 cell tripped — the router retires' (fleet-tick.mjs:530 and pr-cost.mjs:315), and the comment at pr-cost.mjs:100 still reads 'Stage 1 is the model axis at fixed `high`'. Operators are left with wording for a concept that no longer exists.",
+      "evidence": "`git grep -n -i -w -E 'stages?|effort cells?' -- plugin/scripts/{ticket-router,compute-cell-evidence,metrics-refresh,pr-cost,fleet-tick}.mjs` → fleet-tick.mjs:530, pr-cost.mjs:100, pr-cost.mjs:224, pr-cost.mjs:315. tests/fleet-tick.test.mjs:463 still checks for the 'stage-1 cell' wording. The ticket's acceptance criteria name only `STAGE2` and the table's `stage`, so this falls outside the literal criteria, which is why it is a suggestion.",
+      "suggested_fix": "Change the wording to 'every non-default starting Cell tripped' in fleet-tick.mjs, pr-cost.mjs and the fleet-tick test, so it matches the burn-in vocabulary.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/router-table.json",
+      "line": 12,
+      "claim": "The shipped router-table.json was hand-edited from `burn_in: true` to `false`, with `fitted_commit` left unchanged. Every install that routes by the shipped table now does every-5th exploration over [slow-high, slow-medium, task-max] instead of a burn-in draw on every Pull. The edit agrees with the new rule, but no test requires it and the PR does not mention the change in dispatch.",
+      "evidence": "A node probe of the shipped table gives burn_in=false, cells=[slow-high, task-high, smol-high, slow-medium, task-max] and guard.n={slow-high:104, smol-high:32, task-high:104}, with smol-high tripped. origin/main's table had stage 2 and burn_in=true with the same guard. probe.mjs, case B3: rowDispatch on the shipped table gives {by:'every-5th', cells:['slow-high','slow-medium','task-max']}. `git grep burn_in -- tests | grep -i shipped` finds no test that requires the shipped table's burn_in value.",
+      "suggested_fix": "Mention in the PR body that the shipped table leaves burn-in with this release, so installs switch to every-5th exploration, or refit the table so `fitted_commit` matches what produced it.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 376,
+      "claim": "During burn-in, `drawPool` returns the fixed STARTING_CELLS and ignores `table.cells`. A table whose `cells` omits a starting Cell therefore still routes to that Cell with `reason=ok`, and validateTable accepts the table.",
+      "evidence": "Probe: table burn_in:true, cells [\"slow-high\"], guard untripped. validateTable returned the table (valid: true). 30 route() calls drew task-high:ok, slow-high:ok and smol-high:ok, so Cells absent from `table.cells`, `rows` and `reasons` were dispatched with no degrade. The test \"burn_in reads the starting Cells even when the table's cells lacks one\" pins the fit side as intended. The drift is only visible in the Routing's DRAW=K/3.",
+      "suggested_fix": "If this is meant to be an invariant, have validateTable require every STARTING_CELLS member in `cells`, so a malformed table is refused instead of drawing outside itself. If the behaviour is intended, document it in the validateTable comment.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 784,
+      "claim": "`burn_in` is judged with `guard.n[c] ?? 0`. A starting Cell missing from the guard's counts silently keeps burn-in on, with no signal that the count was absent rather than low. The `?? 0` pattern was already there, so this is not new.",
+      "evidence": "Probe: fitTable with guard.n = {slow-high:20, task-high:20} and no smol-high gave burn_in: true. A test pins this, so it is intended. The cockpit heading reads \"smol-high has 0 of the 20…\", which cannot tell a missing count from a real zero.",
+      "suggested_fix": "None required; mention only if absent counts should be distinguished from zero in the heading.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/pr-cost.mjs",
+      "line": 101,
+      "claim": "pr-cost.mjs keeps its own `STAGE_1` list, a second copy of ticket-router's new `STARTING_CELLS`. The only link between them is a new equality test. Without it, the guard's retire test and the router's burn-in set could drift apart with no error.",
+      "evidence": "grep over plugin/ shows `export const STAGE_1 = [\"slow-high\",\"task-high\",\"smol-high\"]` at pr-cost.mjs:101, used at line 227. The diff adds `assert.deepEqual(STAGE_1, STARTING_CELLS)` in tests/pr-cost.test.mjs.",
+      "suggested_fix": "Acceptable as is, since the comment says the scripts import nothing of each other. Otherwise export the list from a shared module.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 339,
+      "claim": "validateTable no longer checks `stage`, and nothing else rejects the field. A table that still carries a `stage` key, such as an older installed router-table.json, is accepted and fitTable drops the key on the next refit, with no notice. No other reader of `.stage` remains in the router or cockpit code.",
+      "evidence": "Probe: a valid table plus `stage: \"junk\"` passed validateTable (valid: true). fitTable output has no `stage` key. The grep for `.stage` found only unrelated pull.mjs Pull-record stages and pr-cost's STAGE_1.",
+      "suggested_fix": "None needed; the silent drop is the stated intent of removing the field.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/compute-cell-evidence.mjs",
+      "line": 508,
+      "claim": "The `every starting Cell had its merged PRs` fallback in routesHeading, reached when burn_in is true but no starting Cell is short, is asserted by no test; rewording it leaves the whole compute-cell-evidence suite green.",
+      "evidence": "red: none (mutant survived). Mutation: `s/every starting Cell had its merged PRs/every Cell had its merged PRs/` on compute-cell-evidence.mjs, run `./agent-test tests/compute-cell-evidence.test.mjs` → tests 91, fail 0. Unmutated baseline for that file ran inside the 157/157 pass run of `./agent-test tests/compute-cell-evidence.test.mjs tests/cockpit-tabs.test.mjs` → exit 0, 157 pass.",
+      "suggested_fix": "Add a case in tests/compute-cell-evidence.test.mjs with burn_in true and guard.n at MIN_N for all three starting Cells, and assert the full heading text.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/compute-cell-evidence.mjs",
+      "line": 713,
+      "claim": "The `every starting Cell has its merged PRs` fallback in evidenceFavours' heading (burn_in true, nobody short) is asserted by no test. The diff's only mention of that phrase is an assertion message string on a `heading === null` check for a burn_in false table.",
+      "evidence": "red: none (mutant survived). Mutation: `s/every starting Cell has its merged PRs/every Cell has its merged PRs/` on compute-cell-evidence.mjs, run `./agent-test tests/compute-cell-evidence.test.mjs tests/cockpit-tabs.test.mjs` → tests 157, fail 0. Baseline of the same command on the unmutated tree → 157 pass, fail 0, cancelled 0.",
+      "suggested_fix": "Add a FIT({burn_in:true, guard.n all >= 20}) heading assertion for the present-tense fallback.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 376,
+      "claim": "The new invariant that the Cells burn-in draws from (the frozen STARTING_CELLS) are also in the table's `cells` is not enforced by validateTable, so a valid table can burn-in-draw a Cell its own `cells` and `reasons` do not contain.",
+      "evidence": "I read validateTable (lines 300-352): it checks `cells` is a non-empty, unique array of cell tokens, and `burn_in` is a boolean. It never checks `cells` against STARTING_CELLS or `burn_in` against guard.n. `drawPool = table.burn_in ? STARTING_CELLS : table.cells` (line 376) and fitTable's `burn_in: !STARTING_CELLS.every(...)` (line 784) now use a constant separate from `table.cells`. The shipped router-table.json happens to list all three starting Cells, so nothing breaks today. I did not run a probe.",
+      "suggested_fix": "In validateTable, require STARTING_CELLS ⊆ t.cells (or derive the pool as STARTING_CELLS.filter(c => table.cells.includes(c))). Also reject, or ignore with a note, a stale `stage` key: the PR removes `stage` from the table but validateTable does not reject unknown keys, so an old table carrying it still loads silently.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 80,
+      "claim": "STARTING_CELLS is frozen at runtime, but its type is a mutable-looking string[] that other modules import, and the hard-coded duplicate in tests (STAGE_1) is asserted equal only in a test.",
+      "evidence": "`export const STARTING_CELLS = Object.freeze([...])` at line 80; imported in compute-cell-evidence.mjs line 35. tests/pr-cost.test.mjs line 454 does `assert.deepEqual(STAGE_1, STARTING_CELLS)` and ticket-router.test.mjs lines 2592-2593 assert the freeze. Freezing does protect the set from callers (verified in the code), so this is minor.",
+      "suggested_fix": "None needed beyond the above. Optionally add a JSDoc `@type {readonly string[]}`.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/compute-cell-evidence.mjs",
+      "line": 485,
+      "claim": "The 'starting Cells short of MIN_N' predicate is restated in two modules — ticket-router.mjs:784 (`burn_in: !STARTING_CELLS.every((c) => (guard.n[c] ?? 0) >= MIN_N)`) and compute-cell-evidence.mjs:485 (`STARTING_CELLS.filter((c) => (table.guard.n[c] ?? 0) < MIN_N).map((c) => [c, table.guard.n[c] ?? 0])`, which also looks up and defaults `n[c]` twice) — so the heading's list of what holds burn-in and the fit's burn_in can drift apart.",
+      "evidence": "Ran probe1.mjs in my copy: for 648 guard.n combinations (each starting Cell absent/0/7/19/20/69, plus an extra slow-medium absent/0/25), compared the current filter-then-map against `STARTING_CELLS.map((c) => [c, n[c] ?? 0]).filter(([, k]) => k < MIN_N)` and compared `fitTable({ prior: DAY_ONE_TABLE, …, guard: { tripped: [], n, window_start: null } }).burn_in` against `that.length > 0`. Output: `{ cases: 648, shortWordsMismatch: 0, burnInVsShortMismatch: 0 }`.",
+      "suggested_fix": "In ticket-router.mjs export one helper, e.g. `export const shortStartingCells = (n) => STARTING_CELLS.map((c) => [c, n[c] ?? 0]).filter(([, k]) => k < MIN_N);`, set `burn_in: shortStartingCells(guard.n).length > 0` in fitTable, and in shortWords write `const short = shortStartingCells(table.guard.n);` (compute-cell-evidence would then import shortStartingCells instead of STARTING_CELLS).",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/pr-cost.mjs",
+      "line": 101,
+      "claim": "The three starting Cells are now two independent literals — pr-cost.mjs:101 `STAGE_1` and the new ticket-router.mjs:80 `STARTING_CELLS` — and the PR adds a test (tests/pr-cost.test.mjs:453-455) only to keep them equal; one shared constant would remove both the duplicate and the pinning test.",
+      "evidence": "git grep: ledger-grammar.mjs's only import is `node:crypto`, and pr-cost.mjs already depends on it through pull-attribution.mjs:86, member-outcomes.mjs:18 and tier-outcomes.mjs:123, so it introduces no cycle and keeps the two scripts' 'import nothing of each other' property. In my copy I added `export const STARTING_CELLS = Object.freeze([...])` to ledger-grammar.mjs after POLICY_CELL, had ticket-router.mjs import it (and export it again for the existing tests), and replaced pr-cost's literal with `import { STARTING_CELLS as STAGE_1 } from \"./ledger-grammar.mjs\"`. Then ran `node --test --test-reporter=tap tests/pr-cost.test.mjs tests/ticket-router.test.mjs tests/compute-cell-evidence.test.mjs tests/cell-evidence-alerts.test.mjs`. Output: `# tests 344 / # pass 344 / # fail 0 / # cancelled 0`, exit 0. The only use of STAGE_1 is `.filter(...)` at pr-cost.mjs:227, so freezing it does not change behavior. I reverted the change afterwards.",
+      "suggested_fix": "Define `export const STARTING_CELLS = Object.freeze([\"slow-high\", \"task-high\", \"smol-high\"]);` once in ledger-grammar.mjs, next to POLICY_CELL (which is already the shared Cell constant for both scripts). Import it in ticket-router.mjs, compute-cell-evidence.mjs and pr-cost.mjs, where it replaces STAGE_1 at :227. Delete the local literals, delete the STAGE_1 export, and drop the pin test at tests/pr-cost.test.mjs:453-455. Point imports straight at ledger-grammar.mjs rather than re-exporting.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

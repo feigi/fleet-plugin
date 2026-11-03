@@ -1,0 +1,83 @@
+{
+  "run": 1792347576340,
+  "session": "/Users/chris/.omp/agent/sessions/-dev-fleet-plugin/2026-10-18T18-19-15-372Z_01a1503d-462c-7577-b4a7-89b9df3972c2",
+  "scratch": "/Users/chris/.fleet/scratch/fleet-plugin-28971265",
+  "inFlight": 5,
+  "steps": {
+    "branch": {
+      "status": "ok",
+      "at": "2026-10-18T18:19:26.922Z",
+      "output": "HEAD is refs/heads/main"
+    },
+    "fast-forward": {
+      "status": "ok",
+      "at": "2026-10-18T18:19:28.769Z",
+      "output": "main is level with origin/main"
+    },
+    "pin": {
+      "status": "ok",
+      "at": "2026-10-18T18:19:28.905Z",
+      "output": "instruments pinned"
+    },
+    "baseline": {
+      "status": "ok",
+      "at": "2026-10-18T18:19:29.061Z",
+      "output": "main-checkout baseline recorded"
+    },
+    "preflight": {
+      "status": "ok",
+      "at": "2026-10-18T18:19:29.132Z",
+      "output": "preflight.mjs passed (PREFLIGHT SKIPPED: this check set already passed (/Users/chris/dev/fleet-plugin/.fleet/preflight.json; delete it to check again))"
+    },
+    "ruleset": {
+      "status": "drift",
+      "at": "2026-10-18T18:19:30.398Z",
+      "output": "the live gate differs from the ruleset spec\napply-ruleset: feigi/fleet-plugin ruleset 20119969 does NOT match .github/rulesets/main.json:\n55,58d54\n<           },\n<           {\n<             \"context\": \"proc-macos\",\n<             \"integration_id\": 15368\napply-ruleset: drift — re-run without --check, as a repository admin, to reconcile"
+    },
+    "tier-roles": {
+      "status": "ok",
+      "at": "2026-10-18T18:19:32.207Z",
+      "output": "every tier route resolves (in-flight bound 5)\ntier-roles: every definition routes to a resolvable model at a level it runs, no shadowing override"
+    },
+    "metrics": {
+      "status": "ok",
+      "at": "2026-10-18T18:19:36.245Z",
+      "output": "metrics-refresh.mjs ran\nmetrics-refresh: drain: 22 rows from .fleet/ticket-features.pending.tsv into docs/metrics/ticket-features.tsv (0 already there)\nmetrics-refresh: cost guard: verdict none, pr-cost.mjs exit 4; .fleet/cost-guard.json computed 2026-10-18T18:19:36.238Z"
+    },
+    "cockpit": {
+      "status": "ok",
+      "at": "2026-10-18T18:19:36.246Z",
+      "output": "launched board.mjs serve, pid 2051"
+    },
+    "rotate": {
+      "status": "ok",
+      "at": "2026-10-18T18:19:36.343Z",
+      "output": "ledger rotated, run 1792347576340\narchived /Users/chris/dev/fleet-plugin/.fleet/phase0.json -> /Users/chris/dev/fleet-plugin/.fleet/phase0.2026-10-18T181936Z.json\narchived /Users/chris/dev/fleet-plugin/.fleet/briefs -> /Users/chris/dev/fleet-plugin/.fleet/briefs.2026-10-18T181936Z\nrotated /Users/chris/dev/fleet-plugin/.fleet/ledger.md -> /Users/chris/dev/fleet-plugin/.fleet/ledger.2026-10-18T181936Z.md"
+    },
+    "reclaim": {
+      "status": "ok",
+      "at": "2026-10-18T18:19:37.044Z",
+      "output": "scratch reclaimed"
+    },
+    "recipe": {
+      "status": "ok",
+      "at": "2026-10-18T18:19:37.329Z",
+      "output": "withheld: the Recipe's command lines can carry environment assignments"
+    },
+    "fold-in": {
+      "status": "ok",
+      "at": "2026-10-18T18:19:37.996Z",
+      "output": "2 PR(s) queued, 0 already on a carried row, 1 closing no issue\nqueued PR#3505 for review (closes #3156)\nqueued PR#3506 for review (closes #3157)\nNEED review PR#3486 (closes no issue)"
+    },
+    "stranded": {
+      "status": "ok",
+      "at": "2026-10-18T18:19:39.147Z",
+      "output": "prior dead: 0 claim(s), 0 live token(s) carried"
+    },
+    "shortlist": {
+      "status": "ok",
+      "at": "2026-10-18T18:19:40.370Z",
+      "output": "shortlist built"
+    }
+  }
+}

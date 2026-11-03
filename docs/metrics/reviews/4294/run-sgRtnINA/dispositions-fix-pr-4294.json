@@ -1,0 +1,154 @@
+{
+ "head": "8ad9519f7e6cfb522af529ef2ff45c3d4af4ef2f",
+ "run": "run-sgRtnINA",
+ "entries": [
+  {
+   "bucket": "unverified",
+   "index": 0,
+   "scope": "in",
+   "claimKind": "shape",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4294/fix-YjwhMRbN/u0/verdict.json",
+   "disposition": "defer",
+   "issue": 4298,
+   "reason": "refuted: Refuted. The suggested remedy (pr-cost.mjs imports STARTING_CELLS from ticket-router.mjs) turns a pinned test red: `./agent-test tests/pr-cost.test.mjs tests/pull-attribution.test.mjs` \u2192 exit 1, fail 1 incl 'the floor and the bootstrap range are one rule each: both scripts import them from pull-attr"
+  },
+  {
+   "bucket": "unverified",
+   "index": 1,
+   "scope": "in",
+   "claimKind": "behavior",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4294/fix-YjwhMRbN/u1/verdict.json",
+   "disposition": "apply",
+   "remedyFiles": [
+    "plugin/scripts/fleet-tick.mjs",
+    "plugin/scripts/pr-cost.mjs",
+    "tests/fleet-tick.test.mjs",
+    "tests/pr-cost.test.mjs"
+   ],
+   "reason": "refuter survived; remedy applied in 47659819"
+  },
+  {
+   "bucket": "unverified",
+   "index": 2,
+   "scope": "in",
+   "claimKind": "behavior",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4294/fix-YjwhMRbN/u2/verdict.json",
+   "disposition": "defer",
+   "issue": 4298,
+   "reason": "refuted: Refuted on every half. (1) Not hand-edited: `ticket-router.mjs fit` with origin/main's table as prior, the recorded commit and the table's own guard snapshot reproduces plugin/scripts/router-table.json byte for byte, `burn_in false` from the new rule. (2) A check requires it: `ticket-router.mjs --ch"
+  },
+  {
+   "bucket": "unverified",
+   "index": 3,
+   "scope": "in",
+   "claimKind": "behavior",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4294/fix-YjwhMRbN/u3/verdict.json",
+   "disposition": "defer",
+   "issue": 4298,
+   "reason": "refuted: Refuted: the behaviour reproduces but is the stated design. Ticket #4240 and the drawPool comment say burn-in draws the starting Cells whatever `cells` the table holds, and the test 'fit: burn_in reads the starting Cells even when the table's `cells` lacks one' pins it. validateTable never treated `"
+  },
+  {
+   "bucket": "unverified",
+   "index": 4,
+   "scope": "in",
+   "claimKind": "behavior",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4294/fix-YjwhMRbN/u4/verdict.json",
+   "disposition": "defer",
+   "issue": 4298,
+   "reason": "refuted: Refuted: the finding asks for no change. `?? 0` keeps burn-in on when a starting Cell has no count, the conservative direction; the guard's `n` is built from its own Cells, where no merged PR on the newest generation is 0, so absent and 0 are one state. `env -u FORCE_COLOR ./agent-test tests/ticket-"
+  },
+  {
+   "bucket": "unverified",
+   "index": 5,
+   "scope": "in",
+   "claimKind": "behavior",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4294/fix-YjwhMRbN/u5/verdict.json",
+   "disposition": "defer",
+   "issue": 4298,
+   "reason": "refuted: Refuted: the 'drift with no error' premise is false. red: `./agent-test tests/pr-cost.test.mjs` (STAGE_1 mutated) \u2192 exit 1, fail 2 incl 'the guard's retire test covers the Cells burn-in covers: \u2026'; baseline: same command on 8ad9519f \u2192 exit 0, 62/62, that test pass. The duplicate is removed in this f"
+  },
+  {
+   "bucket": "unverified",
+   "index": 6,
+   "scope": "in",
+   "claimKind": "behavior",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4294/fix-YjwhMRbN/u6/verdict.json",
+   "disposition": "defer",
+   "issue": 4298,
+   "reason": "refuted: Refuted: validateTable accepts any unknown top-level key (probe: `stage: 2` and an unrelated `zzz: 1` both validate), so a stale `stage` is tolerated like any other; no reader of a table's `stage` remains; the finding's own fix is 'None needed'. No code change proposed, so no test run."
+  },
+  {
+   "bucket": "unverified",
+   "index": 7,
+   "scope": "in",
+   "claimKind": "behavior",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4294/fix-YjwhMRbN/u7/verdict.json",
+   "disposition": "apply",
+   "remedyFiles": [
+    "tests/compute-cell-evidence.test.mjs"
+   ],
+   "reason": "refuter survived; remedy applied in 47659819"
+  },
+  {
+   "bucket": "unverified",
+   "index": 8,
+   "scope": "in",
+   "claimKind": "behavior",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4294/fix-YjwhMRbN/u8/verdict.json",
+   "disposition": "apply",
+   "remedyFiles": [
+    "tests/compute-cell-evidence.test.mjs"
+   ],
+   "reason": "refuter survived; remedy applied in 47659819"
+  },
+  {
+   "bucket": "unverified",
+   "index": 9,
+   "scope": "in",
+   "claimKind": "behavior",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4294/fix-YjwhMRbN/u9/verdict.json",
+   "disposition": "defer",
+   "issue": 4298,
+   "reason": "refuted: Refuted: the behaviour is the PR's documented design ('burn-in draws the starting Cells, whatever `cells` the table holds'), and the remedy as written breaks a test. red: `./agent-test tests/ticket-router.test.mjs` (STARTING_CELLS \u2286 cells required) \u2192 exit 1, fail 1 incl 'route: with every non-defaul"
+  },
+  {
+   "bucket": "unverified",
+   "index": 10,
+   "scope": "in",
+   "claimKind": "shape",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4294/fix-YjwhMRbN/u10/verdict.json",
+   "disposition": "defer",
+   "issue": 4298,
+   "reason": "refuted: Refuted: not a defect, and the finding says 'None needed'. A probe confirms the freeze (push throws TypeError, Object.isFrozen true). The repository has no tsconfig/jsconfig and ticket-router.mjs carries no JSDoc types, so a `@type` would start a convention no checker reads."
+  },
+  {
+   "bucket": "unverified",
+   "index": 11,
+   "scope": "in",
+   "claimKind": "shape",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4294/fix-YjwhMRbN/u11/verdict.json",
+   "disposition": "apply",
+   "remedyFiles": [
+    "plugin/scripts/ticket-router.mjs",
+    "plugin/scripts/compute-cell-evidence.mjs"
+   ],
+   "reason": "refuter survived; remedy applied in 47659819"
+  },
+  {
+   "bucket": "unverified",
+   "index": 12,
+   "scope": "in",
+   "claimKind": "shape",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4294/fix-YjwhMRbN/u12/verdict.json",
+   "disposition": "apply",
+   "remedyFiles": [
+    "plugin/scripts/ledger-grammar.mjs",
+    "plugin/scripts/ticket-router.mjs",
+    "plugin/scripts/pr-cost.mjs",
+    "tests/pr-cost.test.mjs",
+    "tests/ticket-router.test.mjs"
+   ],
+   "reason": "refuter survived; remedy applied in 47659819"
+  }
+ ]
+}

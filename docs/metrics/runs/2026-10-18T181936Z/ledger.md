@@ -1,0 +1,164 @@
+# Fleet run ledger
+
+## Rows
+
+- #3091 impl-3091=PR#3448 · tier=smol-high · tier-ok=impl-3091:fleet-implementer-smol-high · review=member:review-pr-3448 · reviewed=1a18bed130a3f9c847c071c46919a2381e48c582:8/1/18:run-hnhykECr · fix-pr-3448=applied:55cad59cd1f5f5cb574543a3efcb13a1ebc50966 · dispositions-ok=fix-pr-3448:run-hnhykECr · conflict-hold:#3448 · fix-pr-3448-b=applied:9eb6d1690262ca94426581bb6512c85ded621096 · ci=39089250659:1:success · finisher-pr-3448=labelled
+- #3127 impl-3127=PR#3449 · tier=slow-high · tier-ok=impl-3127:fleet-implementer-slow-high · review=member:review-pr-3449 · reviewed=95837f7662756ba2c9269a14529e7f660b41cf29:6/0/18:run-nKRR9SBP · fix-pr-3449=applied:100b8e5b338eaf357f90bc27cc621cf627001365 · dispositions-ok=fix-pr-3449:run-nKRR9SBP · ci=39089697613:1:failure · finisher-pr-3449=labelled · held-behind:#3440 · conflict-hold:#3449 (conflict: tests/run-team-shape-prose.test.mjs) · fix-pr-3449-b=applied:2d664514e524b54d0d6c4035ff3df6af9ef9b314 · label-off=finisher-pr-3449 · ci=39115184468:1:success · finisher-pr-3449-b=labelled
+- #3128 impl-3128=PR#3440 · tier=smol-high · tier-ok=impl-3128:fleet-implementer-smol-high · review=member:review-pr-3440 · reviewed=99031d43f2f6166f352910f3706fa8e336bdc48d:5/0/12:run-bpQclbn0 · fix-pr-3440=applied:1361a9f4f703fedd75b52b5dece5d13c366983ac · dispositions-ok=fix-pr-3440:run-bpQclbn0 · ci=39086171111:1:failure · finisher-pr-3440=halted:other · finisher-pr-3440-b=labelled
+- #3129 impl-3129=PR#3444 · tier=slow-high · tier-ok=impl-3129:fleet-implementer-slow-high · review=member:review-pr-3444 · reviewed=c02fa5b9224556066aa21df057a2dddec567d2db:1/2/15:run-93eDEHLF · fix-pr-3444=applied:969fe64a95d22cc189f5984f12457d4b30968e73 · dispositions-ok=fix-pr-3444:run-93eDEHLF · ci=39088715353:1:failure · finisher-pr-3444=labelled
+- #3138 impl-3138=PR#3439 · tier=slow-high · tier-ok=impl-3138:fleet-implementer-slow-high · review=member:review-pr-3439 · reviewed=214e098991109bedff71bf3ea9594a269219e543:0/1/9:run-Gp56A6ee · fix-pr-3439=applied:7228f812a2b9581c6f203c253f9fff2561ec59e8 · dispositions-ok=fix-pr-3439:run-Gp56A6ee · ci=39083654619:1:success · finisher-pr-3439=labelled
+- #3139 impl-3139=PR#3467 · tier=slow-high · tier-ok=impl-3139:fleet-implementer-slow-high · review=member:review-pr-3467 · reviewed=673b565abe579ef7ac95a3fb4ccefe335030d9ef:0/0/6:run-fpBr85bD · fix-pr-3467=applied:e9551a211c56da51e190ec1a99392e1b2877c69f · dispositions-ok=fix-pr-3467:run-fpBr85bD · ci=39094212749:1:success · finisher-pr-3467=labelled
+- #3149 impl-3149=PR#3470 · tier=task-high · tier-ok=impl-3149:fleet-implementer-task-high · review=member:review-pr-3470 · reviewed=dac7eb3031e0457ecb40f01f1d23b6b6f019acd3:0/0/17:run-DiyeLfjd · fix-pr-3470=applied:28d735a590ca5a5a48c01eb900eafaae532d7158 · dispositions-ok=fix-pr-3470:run-DiyeLfjd · ci=39099562470:1:success · finisher-pr-3470=labelled · held-behind:#3440 · held-behind:#3449 · conflict-hold:#3470 · fix-pr-3470-b=applied:691aee127daba73b83876b80fab06e953549edaa · label-off=finisher-pr-3470 · ci=39123823317:1:success · finisher-pr-3470-b=labelled
+- #3152 impl-3152=PR#3451 · tier=task-high · tier-ok=impl-3152:fleet-implementer-task-high · review=member:review-pr-3451 · reviewed=a6b5d5dfd284144c4a24335fb496400134100884:1/0/4:run-CrbbrGxq · fix-pr-3451=applied:73376fafcd76e74a26535a31ab27228712ac3fd1 · dispositions-ok=fix-pr-3451:run-CrbbrGxq · ci=39087115269:1:success · finisher-pr-3451=labelled
+- #3156 impl-3156=PR#3505 · tier=smol-high · tier-ok=impl-3156:fleet-implementer-smol-high · review=member:review-pr-3505 · reviewed=849520c615e5271a6ecbfe3dd3b38527a767e886:2/1/17:run-d51andyM · fix-pr-3505
+- #3157 impl-3157=PR#3506 · tier=smol-high · tier-ok=impl-3157:fleet-implementer-smol-high · review=member:review-pr-3506 · reviewed=7c2a85db163cdbff3e32041dde7a53304e0be85e:12/0/16:run-N9FQ75KX · fix-pr-3506
+- #3220 impl-3220=PR#3457 · tier=task-high · tier-ok=impl-3220:fleet-implementer-task-high · review=member:review-pr-3457 · reviewed=9078bbc287d8c94bf676b2cb1450ff968fc8b245:0/0/2:run-sMwAUWfu · fix-pr-3457=no-op · dispositions-ok=fix-pr-3457:run-sMwAUWfu · finisher-pr-3457=labelled
+- #3427 impl-3427=PR#3464 · tier=slow-high · tier-ok=impl-3427:fleet-implementer-slow-high · review=member:review-pr-3464 · reviewed=92d5b9dbb3c91262a327878fa344bba71b607fb9:0/0/10:run-9ebB9lEM · fix-pr-3464=applied:1ba44c14a8b60d1f5bf38a0dc6227a593d5d7908 · dispositions-ok=fix-pr-3464:run-9ebB9lEM · ci=39092236321:1:failure · finisher-pr-3464=halted:other · impl-3427-b=PR#3464 · tier-ok=impl-3427-b:fleet-implementer-slow-high · review=member:review-pr-3464-b=failed · review=member:review-pr-3464-c · reviewed=cddc870ff74aab43467c515ffa23d3711aa2662b:0/2/8:run-naIRX4SO · fix-pr-3464-b=applied:b047f45b529ae6586776cf53472a8c71a1f71c14 · dispositions-ok=fix-pr-3464-b:run-naIRX4SO · ci=39115476578:1:failure · finisher-pr-3464-b=labelled
+- #3436 impl-3436=PR#3468 · tier=slow-high · tier-ok=impl-3436:fleet-implementer-slow-high · review=member:review-pr-3468 · reviewed=92ae5815fd9d4651a848474a7f90b0bff2c0485b:1/1/12:run-cFa5vuCC · fix-pr-3468=applied:efe18096af2a9f097494b1b0ae5f281afbf15d72 · dispositions-ok=fix-pr-3468:run-cFa5vuCC · ci=39097661755:1:failure · finisher-pr-3468=halted:other · finisher-pr-3468-b=labelled · fix-pr-3468-c=applied:bb82016de983e7f906c4091435aa922c1b1135db · label-off=finisher-pr-3468-b · ci=39126300261:1:failure · finisher-pr-3468-c=labelled · held-behind:#1
+- #3170 impl-3170=PR#3478 · tier=smol-high · tier-ok=impl-3170:fleet-implementer-smol-high · review=member:review-pr-3478 · reviewed=06e14ebb2755796c0dc2e5f4dd8ef987d1908ad4:1/0/12:run-Uqf1LP0I · fix-pr-3478=applied:373bf43591b0373947f03d12c7a4587326fd3a2a · dispositions-ok=fix-pr-3478:run-Uqf1LP0I · ci=39123013178:1:failure · finisher-pr-3478=halted:other · impl-3170-b=PR#3478 · tier-ok=impl-3170-b:fleet-implementer-smol-high · ci=39124283405:1:failure · finisher-pr-3478-b=labelled
+- #3443 impl-3443=PR#3479 · tier=task-high · tier-ok=impl-3443:fleet-implementer-task-high · review=member:review-pr-3479 · reviewed=997957ddf29690876ab3b15de19390e2122e4a41:0/0/2:run-IMOG4wyb · fix-pr-3479=applied:3707dc55d7a54c18451cbe32883733452b55ec86 · dispositions-ok=fix-pr-3479:run-IMOG4wyb · ci=39123958636:1:failure · finisher-pr-3479=labelled
+- #3454 impl-3454=PR#3482 · tier=slow-high · tier-ok=impl-3454:fleet-implementer-slow-high · review=member:review-pr-3482 · reviewed=c00eaafcc4d1094fff45462d565fa0df92771dca:0/0/9:run-cGLzam1f · fix-pr-3482=applied:fff7ff71c59470daacad767cfbe5301ac0935a70 · dispositions-ok=fix-pr-3482:run-cGLzam1f · ci=39125674313:1:failure · finisher-pr-3482=labelled
+- #3483 review=member:review-pr-3483 · reviewed=3fc33759a300718e3f25ae690cdfb7ec527e482f:0/1/7:run-YEanbIpV
+- #3219 impl-3219=PR#3493 · tier=smol-high · tier-ok=impl-3219:fleet-implementer-smol-high · review=member:review-pr-3493 · reviewed=599930e98f8e85c360dcc31eaf9070e17dd296cd:5/1/21:run-soFo30sv · fix-pr-3493=applied:b8f343fa002e2ac4048de2954ebe1faf7c74429c · dispositions-ok=fix-pr-3493:run-soFo30sv · conflict-hold:#3493 · fix-pr-3493-b=applied:c517879970ebd4ed96105168bd99e7f42e8c52b5 · ci=39136428456:1:success · finisher-pr-3493=labelled
+- #3306 impl-3306=PR#3492 · tier=task-high · tier-ok=impl-3306:fleet-implementer-task-high · review=member:review-pr-3492 · reviewed=f2273ffba31cb12aeb9e9af3cb1ff596fc9bd86c:1/1/9:run-ht1NZflU · fix-pr-3492=applied:749204d2c111d23ed945202408d56142ad68bbb7 · dispositions-ok=fix-pr-3492:run-ht1NZflU · ci=39131990711:1:failure · finisher-pr-3492=labelled
+- #3472 impl-3472=PR#3495 · tier=slow-high · tier-ok=impl-3472:fleet-implementer-slow-high · review=member:review-pr-3495 · reviewed=8de1708c96e7cc4ab7a56a1444fc7b1afcb468c4:0/0/11:run-erUPIMrD · fix-pr-3495=applied:643a0c083c528ea595d34a5bb9d1a52b42357454 · dispositions-ok=fix-pr-3495:run-erUPIMrD · ci=39133806102:1:failure · finisher-pr-3495=labelled
+- #3474 impl-3474=PR#3497 · tier=slow-high · tier-ok=impl-3474:fleet-implementer-slow-high · review=member:review-pr-3497 · reviewed=3dd9616ef8fffb2de55518cec53678f37915419c:2/0/21:run-YWAhzBvb · fix-pr-3497=applied:4fbc6f4b9423711247bb7771a02331fba96884a4 · dispositions-ok=fix-pr-3497:run-YWAhzBvb · ci=39135093885:1:failure · finisher-pr-3497=labelled
+- #3417 impl-3417=PR#3501 · tier=task-high · tier-ok=impl-3417:fleet-implementer-task-high · review=member:review-pr-3501 · reviewed=bf279fd6226b330aa5ad28447177f68146f4e1a9:1/0/4:run-NhZrRyFw · fix-pr-3501=applied:b307b93c1d422e9cfca7562040e2e471ee589e36 · dispositions-ok=fix-pr-3501:run-NhZrRyFw · ci=39136980170:1:failure · finisher-pr-3501=halted:other · finisher-pr-3501-b=labelled
+- #3476 impl-3476=PR#3503 · tier=task-high · tier-ok=impl-3476:fleet-implementer-task-high · review=member:review-pr-3503=failed · review=member:review-pr-3503-b · reviewed=d6c1b6ddcd0ff74a1ee44aab4282df2befd31000:1/0/11:run-2USm1nth · fix-pr-3503=applied:d2cf42efcf1b21086d8f14c9316fb2c090adcdc6 · dispositions-ok=fix-pr-3503:run-2USm1nth · ci=39139596351:1:failure · finisher-pr-3503=labelled
+
+## Dispatched
+
+- impl-3091=PR#3448 brief=8b6900ab
+- impl-3127=PR#3449 brief=186c0e27
+- impl-3128=PR#3440 brief=ac5bbc0d
+- impl-3129=PR#3444 brief=900a5309
+- impl-3138=PR#3439 brief=5be30e5f
+- fix-pr-3439=applied:7228f812a2b9581c6f203c253f9fff2561ec59e8 brief=48a0b293
+- fix-pr-3440=applied:1361a9f4f703fedd75b52b5dece5d13c366983ac brief=72a20037
+- finisher-pr-3439=labelled brief=c515f2e3
+- merge-bot-1=done brief=ad10e6e4
+- impl-3152=PR#3451 brief=91fa5ecf
+- fix-pr-3448=applied:55cad59cd1f5f5cb574543a3efcb13a1ebc50966 brief=918d12b2
+- fix-pr-3451=applied:73376fafcd76e74a26535a31ab27228712ac3fd1 brief=4aa04337
+- finisher-pr-3440=halted:other brief=e69de18d
+- fix-pr-3444=applied:969fe64a95d22cc189f5984f12457d4b30968e73 brief=c670d5c0
+- finisher-pr-3451=labelled brief=26d68e3d
+- merge-bot-2=done brief=32283dfd
+- fix-pr-3449=applied:100b8e5b338eaf357f90bc27cc621cf627001365 brief=dea4e405
+- fix-pr-3448-b=applied:9eb6d1690262ca94426581bb6512c85ded621096 brief=5418fb1e
+- impl-3220=PR#3457 brief=71455350
+- finisher-pr-3444=labelled brief=27ffbccb
+- merge-bot-3=done brief=36824e45
+- fix-pr-3457=no-op brief=bab7e0bc
+- finisher-pr-3448=labelled brief=c33f9e35
+- finisher-pr-3449=labelled brief=9508b67f
+- impl-3427=PR#3464 brief=5ffed05e
+- finisher-pr-3457=labelled brief=d3cc136a
+- impl-3436=PR#3468 brief=3558f1a0
+- fix-pr-3464=applied:1ba44c14a8b60d1f5bf38a0dc6227a593d5d7908 brief=dbb6caae
+- impl-3139=PR#3467 brief=e61c056c
+- finisher-pr-3464=halted:other brief=41a2d563
+- fix-pr-3467=applied:e9551a211c56da51e190ec1a99392e1b2877c69f brief=0b104bce
+- finisher-pr-3467=labelled brief=cf0764b3
+- merge-bot-4=done brief=ab361c48
+- fix-pr-3468=applied:efe18096af2a9f097494b1b0ae5f281afbf15d72 brief=35165ef1
+- impl-3149=PR#3470 brief=bbb9b8af
+- fix-pr-3470=applied:28d735a590ca5a5a48c01eb900eafaae532d7158 brief=88582b31
+- finisher-pr-3468=halted:other brief=117e854a
+- finisher-pr-3470=labelled brief=8c83d0da
+- merge-bot-5=done brief=eb7847c9
+- finisher-pr-3440-b=labelled brief=0e870d78
+- finisher-pr-3468-b=labelled brief=20a33844
+- merge-bot-6=done brief=018b18f2
+- impl-3427-b=PR#3464 brief=6c731672
+- fix-pr-3449-b=applied:2d664514e524b54d0d6c4035ff3df6af9ef9b314 brief=2c32a1d1
+- fix-pr-3464-b=applied:b047f45b529ae6586776cf53472a8c71a1f71c14 brief=7d8124c9
+- finisher-pr-3449-b=labelled brief=682c5cb6
+- finisher-pr-3464-b=labelled brief=1e627c46
+- impl-3170=PR#3478 brief=c1fbc360
+- fix-pr-3470-b=applied:691aee127daba73b83876b80fab06e953549edaa brief=d3dd7908
+- merge-bot-7=done brief=7a5cedec
+- fix-pr-3478=applied:373bf43591b0373947f03d12c7a4587326fd3a2a brief=d62da320
+- impl-3443=PR#3479 brief=314e3ebc
+- fix-pr-3479=applied:3707dc55d7a54c18451cbe32883733452b55ec86 brief=49cf879e
+- merge-bot-8=done brief=01f05297
+- impl-3454=PR#3482 brief=753cbc7d
+- finisher-pr-3478=halted:other brief=2d100e03
+- impl-3170-b=PR#3478 brief=b81d930d
+- merge-bot-9=done brief=acbf5661
+- finisher-pr-3470-b=labelled brief=0db99188
+- finisher-pr-3479=labelled brief=18d7b1be
+- fix-pr-3468-c=applied:bb82016de983e7f906c4091435aa922c1b1135db brief=f7c1a06c
+- fix-pr-3482=applied:fff7ff71c59470daacad767cfbe5301ac0935a70 brief=dbf5846e
+- finisher-pr-3482=labelled brief=f919dff3
+- impl-3219=PR#3493 brief=8cc3b752
+- merge-bot-10=done brief=64639775
+- impl-3306=PR#3492 brief=210a5e29
+- finisher-pr-3468-c=labelled brief=295bd7fe
+- finisher-pr-3478-b=labelled brief=6af08f89
+- fix-pr-3492=applied:749204d2c111d23ed945202408d56142ad68bbb7 brief=747a3fff
+- impl-3472=PR#3495 brief=1e1cb406
+- impl-3474=PR#3497 brief=19e0f93a
+- fix-pr-3493=applied:b8f343fa002e2ac4048de2954ebe1faf7c74429c brief=49f4368e
+- fix-pr-3495=applied:643a0c083c528ea595d34a5bb9d1a52b42357454 brief=b45be2c0
+- finisher-pr-3492=labelled brief=dd61ac74
+- merge-bot-11=done brief=2d0a6404
+- fix-pr-3497=applied:4fbc6f4b9423711247bb7771a02331fba96884a4 brief=a781915a
+- finisher-pr-3495=labelled brief=7d3a847c
+- impl-3417=PR#3501 brief=46d8ac60
+- finisher-pr-3497=labelled brief=d8b44389
+- fix-pr-3493-b=applied:c517879970ebd4ed96105168bd99e7f42e8c52b5 brief=597e95e4
+- fix-pr-3501=applied:b307b93c1d422e9cfca7562040e2e471ee589e36 brief=fa478392
+- finisher-pr-3493=labelled brief=13988cf6
+- impl-3476=PR#3503 brief=22e9bccb
+- finisher-pr-3501=halted:other brief=dc128c11
+- finisher-pr-3501-b=labelled brief=dc128c11
+- fix-pr-3503=applied:d2cf42efcf1b21086d8f14c9316fb2c090adcdc6 brief=1370482b
+- impl-3156=PR#3505 brief=ba6ab5ea
+- impl-3157=PR#3506 brief=0c8ee141
+- finisher-pr-3503=labelled brief=62717fea
+- merge-bot-12=done brief=3697a9c9
+- fix-pr-3505 brief=103f5fc5
+- fix-pr-3506 brief=2d8f785e
+
+## Filed
+
+- #3441 PR #3439 review: the suggestion band, checked
+- #3442 main-checkout headMove: unrelated stderr such as GIT_TRACE on an absent baseline commit reads as could-not-look, not missing
+- #3443 main-checkout headMove: no test covers a baseline probe that is signal-killed or never runs (status null)
+- #3450 PR #3440 review: the suggestion band, checked
+- #3452 PR #3451 review: the suggestion band, checked
+- #3453 resolveWorkspace step-2 probe reads any --resolve-git-dir refusal as no and silently re-keys the workspace
+- #3454 fleet-dir workspaceOf gives each of its two git probes a fresh timeoutMs, so fleetFile can take twice its bound
+- #3455 PR #3448 review: the suggestion band, checked
+- #3456 PR #3444 review: the suggestion band, checked
+- #3458 phase0-receipt.mjs PHASE0-INCOMPLETE remedy still prescribes the bash `phase0.mjs --session <session>` form, which exits 2 since #3127
+- #3459 .out-of-scope/spend-dir-harness-tag.md still rules on findSubagentsDir()/spendDirPin(), which #3127 deleted
+- #3460 .out-of-scope/spend-dir-pin-seed-collapse.md still rules on spendDirPin(), which #3127 deleted
+- #3461 PR #3449 review: the suggestion band, checked
+- #3462 board-gather.mjs session-scope comment vs the receipt's name check: review's rewording conflicts with the applied survived[1] fix (PR #3449)
+- #3463 PR #3457 review: the suggestion band, checked
+- #3465 baseline-efficiency-derive.py: scrape_member_outcomes skips every row whose width differs from COLUMNS, so a member-outcomes.mjs column change parses 0 rows with no column-mismatch error
+- #3466 PR #3464 review: the suggestion band, checked
+- #3469 PR #3467 review: the suggestion band, checked
+- #3471 PR #3468 review: the suggestion band, checked
+- #3472 finisher duty 2 rejects the closed wontfix suggestion-band record that dispositions-check accepts
+- #3473 PR #3470 review: the suggestion band, checked
+- #3476 review tests dimension dropped when the diff has no tests, so a diff that changes code with no test coverage is never flagged
+- #3477 baseline-efficiency-derive.py first_last_ts returns (None, None) for a missing or unparseable implementer transcript, so main() silently counts it idle
+- #3480 in-flight-cycle-time-stages-derive.mjs: listing pages cached by different runs double-count a PR across a page boundary
+- #3481 PR #3478 review: the suggestion band, checked
+- #3487 ledger check never queries the tracker in .bare, bare and --separate-git-dir layouts: repoCheck's rev-parse --show-toplevel fails outside a work tree
+- #3488 PR #3482 review: the suggestion band, checked
+- #3496 PR #3492 review: the suggestion band, checked
+- #3498 PR #3493 review: the suggestion band, checked
+- #3499 PR #3495 review: the suggestion band, checked
+- #3500 PR #3497 review: the suggestion band, checked
+- #3502 PR #3501 review: the suggestion band, checked
+- #3504 PR #3503 review: the suggestion band, checked
+- #3507 requirements.md 2.3 still describes the Recipe as Install step + Test entrypoint, omitting the Check step
+- #3508 shell.md assumption row 88 omits derive-testcmd.sh check/checkMutation validation
+
+## Ruled
+
+

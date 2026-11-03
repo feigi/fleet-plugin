@@ -1,0 +1,350 @@
+# Fleet run ledger
+
+## Rows
+
+- #3262 review=member:review-pr-3262 · reviewed=7f45d726cb6a1813fc123366e157f38eda3b8ce2:1/2/16:run-pg3YKP04 · fix-pr-3262=applied:a0736f45 · dispositions-ok=fix-pr-3262:run-pg3YKP04 · ci=38609683344:1:failure · finisher-pr-3262=labelled · conflict-hold:#3262 · fix-pr-3262-b=applied:e6266b4b
+- #3263 #3263 review=member:review-pr-3263 · reviewed=e52312f679f1b5c2b566a44af5abecd0cb173257:4/3/18:run-BUsEeHQJ · fix-pr-3263=applied:40fd53dc · dispositions-ok=fix-pr-3263:run-BUsEeHQJ · ci=38603173930:1:success · finisher-pr-3263=labelled · held-behind:#3262 · conflict-hold:#3263 · fix-pr-3263-b=applied:5ff070e4 · conflict-hold:#3263-b (conflict: tests/shared-refusal.test.mjs) · fix-pr-3263-c=applied:34b2c334
+- #3264 review=member:review-pr-3264 · reviewed=38a22d9653dff0eaea7b055b2ef4403abff96568:1/0/16:run-6DMSZpX8 · fix-pr-3264=applied:ab355589 · dispositions-ok=fix-pr-3264:run-6DMSZpX8 · ci=38605147818:1:failure · finisher-pr-3264=labelled
+- #3265 review=member:review-pr-3265 · reviewed=c7a779110f150f35152bb844ad9eb21a679316f9:4/1/22:run-Mu4nPJmO · fix-pr-3265=applied:d46eda3a · dispositions-ok=fix-pr-3265:run-Mu4nPJmO · ci=38607089040:1:failure · finisher-pr-3265=labelled
+- #3185 impl-3185=PR#3293 · tier=smol-high · tier-ok=impl-3185:fleet-implementer-smol-high · review=member:review-pr-3293 · reviewed=026fd07bea2dda16e25d07ad08fbd78505b45b34:15/0/25:run-Vp9Ghv5s · fix-pr-3293=applied:44dc5865 · dispositions-ok=fix-pr-3293:run-Vp9Ghv5s · fix-pr-3293-b=killed · fix-pr-3293-c=applied:173dd121 · ci=38707113193:1:success · finisher-pr-3293=halted:other · finisher-pr-3293-b=labelled
+- #3190 impl-3190=killed · tier=smol-high · tier-ok=impl-3190:fleet-implementer-smol-high · impl-3190-b=PR#3290 · tier-ok=impl-3190-b:fleet-implementer-smol-high · review=member:review-pr-3290 · reviewed=214894ab2574debb3976e917a4b01927c4d3f410:22/0/17:run-DQUzsIjs · fix-pr-3290=applied:80de5511 · dispositions-ok=fix-pr-3290:run-DQUzsIjs · fix-pr-3290-b=killed · fix-pr-3290-c=applied:2ed0bd5e · fix-pr-3290-d=applied:11a00e5a · ci=38709569635:1:success · finisher-pr-3290=labelled
+- #3227 impl-3227=PR#3350 · tier=task-high · tier-ok=impl-3227:fleet-implementer-task-high · review=member:review-pr-3350 · reviewed=de04facb684528f984c098b2b51d7aa46479cc22:3/0/16:run-A5B3lczr · fix-pr-3350=applied:e7d51ac6 · dispositions-ok=fix-pr-3350:run-A5B3lczr · ci=38844923288:1:success · finisher-pr-3350=labelled
+- #3228 impl-3228=PR#3273 · tier=smol-high · tier-ok=impl-3228:fleet-implementer-smol-high · review=member:review-pr-3273 · reviewed=45897c6a0e11c4caf2ba9e7a4172892ac1f78381:7/1/13:run-27F5taU1 · fix-pr-3273=applied:cf57b534 · dispositions-ok=fix-pr-3273:run-27F5taU1 · ci=38609987411:1:failure · finisher-pr-3273=labelled
+- #3251 impl-3251=PR#3274 · tier=slow-high · tier-ok=impl-3251:fleet-implementer-slow-high · review=member:review-pr-3274=failed · review=member:review-pr-3274-b · reviewed=87192aef6c976d91ab0fcc355c876ef225dea07d:0/0/7:run-jEbM0vnT · fix-pr-3274=applied:8aa7f069 · dispositions-ok=fix-pr-3274:run-jEbM0vnT · ci=38611628301:1:failure · finisher-pr-3274=halted:other · finisher-pr-3274-b=labelled
+- #3259 impl-3259=PR#3279 · tier=slow-high · tier-ok=impl-3259:fleet-implementer-slow-high · review=member:review-pr-3279 · reviewed=1150fdd984aaf6f11a6656a2c881b6b77293de5d:1/0/4:run-fu7Ng6sl · fix-pr-3279=applied:861152bc · dispositions-ok=fix-pr-3279:run-fu7Ng6sl · ci=38611008005:1:success · finisher-pr-3279=labelled
+- #3270 impl-3270=PR#3278 · tier=smol-high · tier-ok=impl-3270:fleet-implementer-smol-high · review=member:review-pr-3278 · reviewed=0e5f7dd677099516c7dd2a8608908114652e763b:7/1/13:run-4gvoG0uZ · fix-pr-3278=applied:866a72be · dispositions-ok=fix-pr-3278:run-4gvoG0uZ · fix-pr-3278-b=applied:5bf20843 · ci=38614228317:1:failure · finisher-pr-3278=labelled
+- #3271 review=member:review-pr-3271 · reviewed=7bfc26c77312456dc3b1e07495ec2a9433cfb208:0/0/1:run-Y3bhtgrN · fix-pr-3271=no-op · dispositions-ok=fix-pr-3271:run-Y3bhtgrN · ci=38592038049:1:success · finisher-pr-3271=labelled
+- #3197 impl-3197=PR#3321 · tier=slow-high · tier-ok=impl-3197:fleet-implementer-slow-high · review=member:review-pr-3321 · reviewed=535b4507b7fd0ce7ff66d19a8b0b26ebc257f0d7:5/0/19:run-g7qtM0Rk · fix-pr-3321=applied:7f9f3ee7 · dispositions-ok=fix-pr-3321:run-g7qtM0Rk · ci=38767865853:1:success · finisher-pr-3321=labelled
+- #3199 impl-3199=PR#3287 · tier=task-high · tier-ok=impl-3199:fleet-implementer-task-high · review=member:review-pr-3287 · reviewed=ba59281f73a8cf94efbab0347b35bb34e33c1640:2/3/24:run-csGy6dZ7 · fix-pr-3287=applied:3023fa70 · dispositions-ok=fix-pr-3287:run-csGy6dZ7 · ci=38648998542:1:success · finisher-pr-3287=halted:other · finisher-pr-3287-b=failed · finisher-pr-3287-c=labelled
+- #3196 impl-3196-c=PR#3304 · tier=slow-high · tier-ok=impl-3196-c:fleet-implementer-slow-high · review=member:review-pr-3304 · reviewed=2a99f70c17f1eacbcf91067733d00d9fb96fa43a:2/2/19:run-CDH7GZkT · fix-pr-3304=applied:d793645b · dispositions-ok=fix-pr-3304:run-CDH7GZkT · fix-pr-3304-b=applied:fcd6186a · ci=38720430503:1:success · finisher-pr-3304=labelled
+- #3297 review=member:review-pr-3297=failed · review=member:review-pr-3297-b · reviewed=d653bffc46b5dcf79742aadeffea2ba2f99ec4d7:6/0/6:run-2aZkd4e2 · fix-pr-3297=applied:7aecd509 · dispositions-ok=fix-pr-3297:run-2aZkd4e2 · ci=38709840205:1:success · finisher-pr-3297=labelled
+- #3268 impl-3268=killed · tier=smol-high · tier-ok=impl-3268:fleet-implementer-smol-high · impl-3268-b=PR#3298 · tier-ok=impl-3268-b:fleet-implementer-smol-high · review=member:review-pr-3298 · reviewed=1d2bde541db057995d6feb203e8c6cde69253594:2/0/4:run-CS9GLy4r · fix-pr-3298=applied:acc3aec7 · dispositions-ok=fix-pr-3298:run-CS9GLy4r · fix-pr-3298-b=applied:5bc24057 · ci=38715547665:1:success · finisher-pr-3298=labelled
+- #3198 impl-3198-b=PR#3325 · tier=slow-high · tier-ok=impl-3198-b:fleet-implementer-slow-high · review=member:review-pr-3325 · reviewed=55e40f14b4c90928d3ac12fa7e5fb7dac564a61b:8/1/14:run-S30I2x2R · fix-pr-3325=applied:7a9d00c6 · dispositions-ok=fix-pr-3325:run-S30I2x2R · ci=38784682635:1:success · finisher-pr-3325=labelled
+- #3200 impl-3200=PR#3315 · tier=slow-high · tier-ok=impl-3200:fleet-implementer-slow-high · review=member:review-pr-3315 · reviewed=9fe03f7d5294d9871bf54485375615cbd981a08a:6/1/12:run-11xzFBI8 · fix-pr-3315=applied:7a9e17c9 · dispositions-ok=fix-pr-3315:run-11xzFBI8 · ci=38751043588:1:success · finisher-pr-3315=labelled
+- #3201 impl-3201-b=PR#3330 · tier=slow-high · tier-ok=impl-3201-b:fleet-implementer-slow-high · review=member:review-pr-3330 · reviewed=f08210e9625e20f6ae11809540dea9804c950fa6:3/0/18:run-3FzETcuj · fix-pr-3330=applied:2c03b448 · dispositions-ok=fix-pr-3330:run-3FzETcuj · ci=38804721082:2:success · finisher-pr-3330=labelled
+- #3194 impl-3194=PR#3307 · tier=task-high · tier-ok=impl-3194:fleet-implementer-task-high · review=member:review-pr-3307 · reviewed=1d6805dba783ff3d679238165f98aa0d33dfd8f2:4/0/13:run-C7RNdBjF · fix-pr-3307=applied:997c3937 · dispositions-escalate=fix-pr-3307:run-C7RNdBjF · fix-pr-3307-b=applied:ced9cc13 · dispositions-escalate=fix-pr-3307-b:run-C7RNdBjF · review=member:review-pr-3307-b · reviewed=ced9cc13b1dc2130066805b8b3d4d34d369edffe:7/1/15:run-47TIcv5N · fix-pr-3307-c=applied:46b73322 · dispositions-ok=fix-pr-3307-c:run-47TIcv5N · ci=38736795000:1:success · finisher-pr-3307=labelled
+- #3195 impl-3195-b=PR#3316 · tier=slow-high · tier-ok=impl-3195-b:fleet-implementer-slow-high · review=member:review-pr-3316 · reviewed=37f4a2cde614a3dfbae6daadce8e761013d025b2:3/1/13:run-vEFlUWnv · fix-pr-3316=applied:5df22479 · dispositions-ok=fix-pr-3316:run-vEFlUWnv · ci=38752242925:1:success · finisher-pr-3316=labelled
+- #3203 impl-3203=PR#3320 · tier=task-high · tier-ok=impl-3203:fleet-implementer-task-high · review=member:review-pr-3320 · reviewed=dd622ef05211314a745df073f80a0a65379e92a7:6/0/10:run-BmVJ20dw · fix-pr-3320=applied:31b09376 · dispositions-ok=fix-pr-3320:run-BmVJ20dw · ci=38763971975:1:success · finisher-pr-3320=labelled
+- #3202 impl-3202=PR#3331 · tier=task-high · tier-ok=impl-3202:fleet-implementer-task-high · review=member:review-pr-3331 · reviewed=2ce6808c7fd0781c92dc1a2a97e48c6d0694ebef:7/0/25:run-YR4tBrX8 · fix-pr-3331=applied:0117a539 · dispositions-ok=fix-pr-3331:run-YR4tBrX8 · ci=38804887425:1:success · finisher-pr-3331=labelled
+- #3205 impl-3205=PR#3326 · tier=task-high · tier-ok=impl-3205:fleet-implementer-task-high · review=member:review-pr-3326 · reviewed=e0abaa05bedc5275f87821bf651ae6d65a30d907:9/0/17:run-MMHNN7my · fix-pr-3326=applied:67596902 · dispositions-ok=fix-pr-3326:run-MMHNN7my · ci=38784800282:1:success · finisher-pr-3326=labelled
+- #3204 impl-3204=PR#3336 · tier=slow-high · tier-ok=impl-3204:fleet-implementer-slow-high · review=member:review-pr-3336 · reviewed=1a1c8c7116ce763c6191561150d1de09a28e2c19:0/3/25:run-mA51TSUs · fix-pr-3336=applied:e412ba6f · dispositions-ok=fix-pr-3336:run-mA51TSUs · ci=38817882030:1:success · finisher-pr-3336=labelled
+- #3207 impl-3207=PR#3335 · tier=slow-high · tier-ok=impl-3207:fleet-implementer-slow-high · review=member:review-pr-3335 · reviewed=5f6e1c69b1fc4be6286f03973af1257f987bffdd:5/0/11:run-BXbjhyyJ · fix-pr-3335=applied:c788780a · dispositions-ok=fix-pr-3335:run-BXbjhyyJ · ci=38820635128:1:success · finisher-pr-3335=labelled
+- #3277 impl-3277=PR#3339 · tier=slow-high · tier-ok=impl-3277:fleet-implementer-slow-high · review=member:review-pr-3339 · reviewed=8d7bf93a0d1053993737d07ff1726171d457b89e:0/1/6:run-pQJ6QYSI · fix-pr-3339=no-op · dispositions-ok=fix-pr-3339:run-pQJ6QYSI · ci=38819262554:1:success · finisher-pr-3339=labelled
+- #3280 impl-3280=PR#3340 · tier=task-high · tier-ok=impl-3280:fleet-implementer-task-high · review=member:review-pr-3340 · reviewed=44af2459d5906f16d79484f53f5f95fddabf28dd:0/1/12:run-lMWQISj9 · fix-pr-3340=applied:b7d3e43c · dispositions-ok=fix-pr-3340:run-lMWQISj9 · ci=38826935015:1:success · finisher-pr-3340=labelled
+- #3284 impl-3284=PR#3345 · tier=slow-high · tier-ok=impl-3284:fleet-implementer-slow-high · review=member:review-pr-3345 · reviewed=265aafcc77902abbd6d306eb6c30842c687bb5f4:0/0/9:run-u5SlcK4v · fix-pr-3345=applied:fd34e901 · dispositions-ok=fix-pr-3345:run-u5SlcK4v · fix-pr-3345-b=applied:24a34ada · ci=38832017977:1:success · finisher-pr-3345=labelled
+- #3288 impl-3288=PR#3348 · tier=task-high · tier-ok=impl-3288:fleet-implementer-task-high · review=member:review-pr-3348 · reviewed=308239c6a61a03f228dd3e783a61a3554f243273:0/0/5:run-mQeujliz · fix-pr-3348=applied:6eaa33df · dispositions-ok=fix-pr-3348:run-mQeujliz · ci=38833609109:1:success · finisher-pr-3348=labelled
+- #3311 impl-3311=PR#3351 · tier=slow-high · tier-ok=impl-3311:fleet-implementer-slow-high · review=member:review-pr-3351 · reviewed=d7bff46686333517ae79f490553f2ea0ec3ba617:0/0/2:run-cEe2OEXF · fix-pr-3351=no-op · dispositions-ok=fix-pr-3351:run-cEe2OEXF · ci=38836031410:1:success · finisher-pr-3351=labelled
+- #3313 impl-3313=PR#3352 · tier=smol-high · tier-ok=impl-3313:fleet-implementer-smol-high · review=member:review-pr-3352 · reviewed=99ca24a5e233113cb44c70698cfc08317c810d3f:5/1/5:run-nnRXWTK8 · fix-pr-3352=applied:6bdaba2f · dispositions-ok=fix-pr-3352:run-nnRXWTK8 · fix-pr-3352-b=applied:2e078185 · fix-pr-3352-c=applied:bf14f00b · fix-pr-3352-d=applied:8a625466 · ci=38861727293:1:success · finisher-pr-3352=labelled
+- #3314 impl-3314=PR#3356 · tier=smol-high · tier-ok=impl-3314:fleet-implementer-smol-high · review=member:review-pr-3356 · reviewed=3104297b6b4930626450ac61f7d8453211e34cd6:11/0/16:run-RQj0aOLj · fix-pr-3356=applied:b98f36aa · dispositions-ok=fix-pr-3356:run-RQj0aOLj · ci=38860428284:1:success · finisher-pr-3356=labelled
+- #3322 impl-3322=PR#3354 · tier=task-high · tier-ok=impl-3322:fleet-implementer-task-high · review=member:review-pr-3354 · reviewed=da36ca2b5205e94b09c32323dac0c978cdd3f0c4:0/0/5:run-0ePhU9gq · fix-pr-3354=no-op · dispositions-ok=fix-pr-3354:run-0ePhU9gq · ci=38841416192:1:success · finisher-pr-3354=labelled
+- #3332 impl-3332=PR#3365 · tier=slow-high · tier-ok=impl-3332:fleet-implementer-slow-high · review=member:review-pr-3365 · reviewed=6197859297f974ed89c9140a69677bef940496be:0/0/12:run-nfjdRKik · fix-pr-3365=applied:a9e3a9f6 · dispositions-ok=fix-pr-3365:run-nfjdRKik · ci=38891011107:1:success · finisher-pr-3365=labelled
+- #3328 impl-3328=PR#3359 · tier=task-high · tier-ok=impl-3328:fleet-implementer-task-high · review=member:review-pr-3359 · reviewed=9d13a36cf4de9c7980c55f3202df02cc71ed0598:0/2/12:run-zus8Dw2S · fix-pr-3359=applied:6f40e1e1 · dispositions-ok=fix-pr-3359:run-zus8Dw2S · ci=38869213495:1:success · finisher-pr-3359=labelled
+- #3206 impl-3206=PR#3361 · tier=task-high · tier-ok=impl-3206:fleet-implementer-task-high · review=member:review-pr-3361 · reviewed=bfc5f4a5fd4ae318251674f647ae472cb47d2769:2/4/22:run-VZ0MYAOz · fix-pr-3361=applied:3fc997a8 · dispositions-ok=fix-pr-3361:run-VZ0MYAOz · ci=38877637346:1:success · finisher-pr-3361=labelled
+- #3208 impl-3208=PR#3362 · tier=slow-high · tier-ok=impl-3208:fleet-implementer-slow-high · review=member:review-pr-3362 · reviewed=e148098853a7e3d222e722a029d5b68585b696d4:5/1/13:run-slrWihor · fix-pr-3362=applied:03674166 · dispositions-ok=fix-pr-3362:run-slrWihor · ci=38885948533:1:success · finisher-pr-3362=labelled
+- #3229 impl-3229=PR#3366 · tier=task-high · tier-ok=impl-3229:fleet-implementer-task-high · review=member:review-pr-3366 · reviewed=f10a96be1c1925ddca94b4294678470b23ff77e4:1/0/20:run-pQ6qjxC2 · fix-pr-3366=applied:dc33b867 · dispositions-ok=fix-pr-3366:run-pQ6qjxC2 · ci=38897676231:1:success · finisher-pr-3366=labelled
+- #3209 impl-3209=PR#3373 · tier=slow-high · tier-ok=impl-3209:fleet-implementer-slow-high · review=member:review-pr-3373 · reviewed=26d414f28eef0d06bb061180d9b602f40a7d2b26:4/0/6:run-Mp6hmJiH · fix-pr-3373=applied:b88886e3 · dispositions-ok=fix-pr-3373:run-Mp6hmJiH · ci=38908725332:1:success · finisher-pr-3373=labelled
+- #3132 impl-3132=PR#3371 · tier=slow-high · tier-ok=impl-3132:fleet-implementer-slow-high · review=member:review-pr-3371 · reviewed=a6bd914560bbe2512a203cd3381dcde4f7dbc2f5:1/0/19:run-rhIMK7bw · fix-pr-3371=applied:e9d6482c · dispositions-ok=fix-pr-3371:run-rhIMK7bw · fix-pr-3371-b=applied:9517ebc7 · ci=38908379877:1:success · finisher-pr-3371=labelled
+- #3370 review=member:review-pr-3370 · reviewed=bd87119713822f5dc9966642e3b590164f8f306b:0/0/3:run-zQzkESNP · fix-pr-3370=applied:6c3b634c · dispositions-ok=fix-pr-3370:run-zQzkESNP · ci=38904211790:1:success · finisher-pr-3370=labelled
+- #2880 impl-2880=PR#3377 · tier=slow-high · tier-ok=impl-2880:fleet-implementer-slow-high · review=member:review-pr-3377 · reviewed=14c883d7d42ec99cd0daa0a88e89e4739894a37a:0/0/16:run-PGjY3Gzc · fix-pr-3377=applied:debe25bc · dispositions-ok=fix-pr-3377:run-PGjY3Gzc · ci=38914854576:1:success · finisher-pr-3377=labelled
+- #3210 impl-3210=PR#3381 · tier=task-high · tier-ok=impl-3210:fleet-implementer-task-high · review=member:review-pr-3381=failed · review=member:review-pr-3381-b · reviewed=f994b88db8a307c9dbd8c2a97aa4893475c5bfc1:5/0/8:run-MjeahqLh · fix-pr-3381=applied:c02e0555 · dispositions-ok=fix-pr-3381:run-MjeahqLh · ci=38948800445:1:success · finisher-pr-3381=labelled
+- #3036 impl-3036=PR#3383 · tier=slow-high · tier-ok=impl-3036:fleet-implementer-slow-high · review=member:review-pr-3383 · reviewed=9ef3bbfa384e002d28473118bc09f48099013d3a:3/1/16:run-WrJ0SRpA · fix-pr-3383=applied:5e9ddaff · dispositions-ok=fix-pr-3383:run-WrJ0SRpA · ci=38949621783:1:success · finisher-pr-3383=labelled
+- #3211 impl-3211=PR#3389 · tier=slow-high · tier-ok=impl-3211:fleet-implementer-slow-high · review=member:review-pr-3389 · reviewed=9c111f9639b7cb7218f28c53dadd5759acf3ef30:1/0/8:run-VyNHX0HH · fix-pr-3389=applied:99ea9431 · dispositions-ok=fix-pr-3389:run-VyNHX0HH · ci=38955227526:1:success · finisher-pr-3389=labelled
+
+## Dispatched
+
+- fix-pr-3264=applied:ab355589
+- impl-3228=PR#3273
+- impl-3251=PR#3274
+- fix-pr-3265=applied:d46eda3a
+- fix-pr-3262=applied:a0736f45
+- fix-pr-3263=applied:40fd53dc
+- impl-3259=PR#3279
+- impl-3270=PR#3278
+- finisher-pr-3263=labelled
+- fix-pr-3273=applied:cf57b534
+- merge-bot-1=done
+- finisher-pr-3264=labelled
+- merge-bot-2=done
+- fix-pr-3274=applied:8aa7f069
+- fix-pr-3279=applied:861152bc
+- finisher-pr-3265=labelled
+- finisher-pr-3262=labelled
+- finisher-pr-3273=labelled
+- fix-pr-3278=applied:866a72be
+- merge-bot-3=done
+- finisher-pr-3274=halted:other
+- finisher-pr-3279=labelled
+- fix-pr-3278-b=applied:5bf20843
+- fix-pr-3271=no-op
+- finisher-pr-3274-b=labelled
+- finisher-pr-3278=labelled
+- merge-bot-4=done
+- merge-bot-5=done
+- merge-bot-6=done
+- fix-pr-3262-b=applied:e6266b4b
+- impl-3199=PR#3287
+- fix-pr-3287=applied:3023fa70
+- finisher-pr-3287=halted:other
+- finisher-pr-3287-b=failed
+- finisher-pr-3287-c=labelled
+- fix-pr-3263-b=applied:5ff070e4
+- merge-bot-7=done
+- merge-bot-8=done
+- fix-pr-3263-c=applied:34b2c334
+- impl-3190=killed
+- impl-3190-b=PR#3290
+- merge-bot-9=done
+- impl-3185=PR#3293
+- fix-pr-3290=applied:80de5511
+- finisher-pr-3271=labelled
+- merge-bot-10=done
+- fix-pr-3293=applied:44dc5865
+- fix-pr-3290-b=killed
+- fix-pr-3293-b=killed
+- impl-3196=killed
+- impl-3268=killed
+- fix-pr-3290-c=applied:2ed0bd5e
+- fix-pr-3293-c=applied:173dd121
+- impl-3196-b=bailed
+- impl-3268-b=PR#3298
+- impl-3196-c=PR#3304
+- finisher-pr-3293=halted:other
+- fix-pr-3290-d=applied:11a00e5a
+- fix-pr-3297=applied:7aecd509
+- finisher-pr-3293-b=labelled
+- merge-bot-11=done
+- fix-pr-3298=applied:acc3aec7
+- finisher-pr-3290=labelled
+- merge-bot-12=done
+- finisher-pr-3297=labelled
+- merge-bot-13=done
+- impl-3194=PR#3307
+- fix-pr-3304=applied:d793645b
+- fix-pr-3298-b=applied:5bc24057
+- finisher-pr-3298=labelled
+- merge-bot-14=done
+- fix-pr-3307=applied:997c3937
+- fix-pr-3304-b=applied:fcd6186a
+- fix-pr-3307-b=applied:ced9cc13
+- finisher-pr-3304=labelled
+- merge-bot-15=done
+- impl-3200=PR#3315
+- fix-pr-3307-c=applied:46b73322
+- finisher-pr-3307=labelled
+- merge-bot-16=done
+- impl-3195=bailed
+- impl-3195-b=PR#3316
+- fix-pr-3315=applied:7a9e17c9
+- fix-pr-3316=applied:5df22479
+- finisher-pr-3315=labelled
+- merge-bot-17=done
+- finisher-pr-3316=labelled
+- merge-bot-18=done
+- impl-3197=PR#3321
+- impl-3203=PR#3320
+- fix-pr-3320=applied:31b09376
+- fix-pr-3321=applied:7f9f3ee7
+- finisher-pr-3320=labelled
+- merge-bot-19=done
+- finisher-pr-3321=labelled
+- merge-bot-20=done
+- impl-3198=bailed
+- impl-3205=PR#3326
+- impl-3198-b=PR#3325
+- fix-pr-3325=applied:7a9d00c6
+- fix-pr-3326=applied:67596902
+- finisher-pr-3325=labelled
+- merge-bot-21=done
+- finisher-pr-3326=labelled
+- merge-bot-22=done
+- merge-bot-23=done
+- impl-3201=bailed
+- impl-3202=PR#3331
+- impl-3201-b=PR#3330
+- fix-pr-3330=applied:2c03b448
+- fix-pr-3331=applied:0117a539
+- finisher-pr-3331=labelled
+- merge-bot-24=done
+- finisher-pr-3330=labelled
+- merge-bot-25=done
+- impl-3204=PR#3336
+- impl-3207=PR#3335
+- fix-pr-3336=applied:e412ba6f
+- fix-pr-3335=applied:c788780a
+- impl-3277=PR#3339
+- impl-3280=PR#3340
+- fix-pr-3339=no-op
+- finisher-pr-3336=labelled
+- merge-bot-26=done
+- finisher-pr-3339=labelled
+- finisher-pr-3335=labelled
+- merge-bot-27=done
+- merge-bot-28=done
+- merge-bot-29=done
+- fix-pr-3340=applied:b7d3e43c
+- impl-3227=PR#3350
+- impl-3284=PR#3345
+- fix-pr-3345=applied:fd34e901
+- finisher-pr-3340=labelled
+- merge-bot-30=done
+- merge-bot-31=done
+- impl-3288=PR#3348
+- fix-pr-3345-b=applied:24a34ada
+- fix-pr-3348=applied:6eaa33df
+- finisher-pr-3345=labelled
+- merge-bot-32=done
+- finisher-pr-3348=labelled
+- merge-bot-33=done
+- impl-3311=PR#3351
+- impl-3313=PR#3352
+- fix-pr-3351=no-op
+- fix-pr-3352=applied:6bdaba2f
+- finisher-pr-3351=labelled
+- merge-bot-34=done
+- impl-3314=PR#3356
+- impl-3322=PR#3354
+- fix-pr-3350=applied:e7d51ac6
+- fix-pr-3354=no-op
+- finisher-pr-3354=labelled
+- fix-pr-3352-b=applied:2e078185
+- merge-bot-35=done
+- finisher-pr-3350=labelled
+- fix-pr-3356=applied:b98f36aa
+- merge-bot-36=done
+- fix-pr-3352-c=applied:bf14f00b
+- fix-pr-3352-d=applied:8a625466
+- impl-3328=PR#3359
+- finisher-pr-3356=labelled
+- merge-bot-37=done
+- finisher-pr-3352=labelled
+- merge-bot-38=done
+- merge-bot-39=done
+- fix-pr-3359=applied:6f40e1e1
+- impl-3206=PR#3361
+- impl-3208=PR#3362
+- finisher-pr-3359=labelled
+- merge-bot-40=done
+- fix-pr-3361=applied:3fc997a8
+- finisher-pr-3361=labelled
+- merge-bot-41=done
+- fix-pr-3362=applied:03674166
+- impl-3332=PR#3365
+- finisher-pr-3362=labelled
+- merge-bot-42=done
+- impl-3229=PR#3366
+- fix-pr-3365=applied:a9e3a9f6
+- fix-pr-3366=applied:dc33b867
+- finisher-pr-3365=labelled
+- merge-bot-43=done
+- impl-3209=PR#3373
+- impl-3132=PR#3371
+- finisher-pr-3366=labelled
+- merge-bot-44=done
+- fix-pr-3370=applied:6c3b634c
+- impl-2880=PR#3377
+- fix-pr-3371=applied:e9d6482c
+- fix-pr-3373=applied:b88886e3
+- finisher-pr-3370=labelled
+- merge-bot-45=done
+- fix-pr-3371-b=applied:9517ebc7
+- finisher-pr-3371=labelled
+- finisher-pr-3373=labelled
+- merge-bot-46=done
+- merge-bot-47=done
+- impl-3210=PR#3381
+- fix-pr-3377=applied:debe25bc
+- finisher-pr-3377=labelled
+- merge-bot-48=done
+- impl-3036=PR#3383
+- fix-pr-3381=applied:c02e0555
+- fix-pr-3383=applied:5e9ddaff
+- finisher-pr-3381=labelled
+- merge-bot-49=done
+- finisher-pr-3383=labelled
+- merge-bot-50=done
+- impl-3211=PR#3389
+- fix-pr-3389=applied:99ea9431
+- finisher-pr-3389=labelled
+- merge-bot-51=done
+
+## Filed
+
+- #3275 PR #3263 review: the suggestion band, checked
+- #3276 PR #3265 review: the suggestion band, checked
+- #3277 Spec § 8.2 and ADR 0031 § Guard word the history windows as overlapping; the guard script builds disjoint pairs
+- #3280 phase0.mjs: a same-session run started after a completed run resumes its all-ok receipt and skips every step, rotate included
+- #3281 PR #3273 review: the suggestion band, checked
+- #3282 PR #3279 review: the suggestion band, checked
+- #3283 PR #3274 review: the suggestion band, checked
+- #3284 prove-merge.sh merge-commit path: preIsParentOfHead is a constant-true gate, so a main-side pre passes where leg 1 would fail
+- #3285 PR #3278 review: the suggestion band, checked
+- #3286 PR #3271 review: the suggestion band, checked
+- #3288 tier-outcomes.tsv header still says sizing is read off the PR body's Sizing: line, stale now that append reads the implementer report file
+- #3289 PR #3287 review: the suggestion band, checked
+- #3294 PR #3290 review: the suggestion band, checked
+- #3295 PR #3293 review: the suggestion band, checked
+- #3299 label-map spec: Story 9 stale-label pre-flight cannot hold under D10 marker hash
+- #3300 label-map spec: ensure certain path never enforces D8, duplicate or invalid derived strings are written
+- #3301 label-map spec: exists-live case sensitivity and stored label spelling unspecified
+- #3302 label-map spec: D5 certain default beside a live near match, and re-derivation re-asks maintainer answers
+- #3303 PR #3297 review: the suggestion band, checked
+- #3305 PR #3298 review: the suggestion band, checked
+- #3306 tier-check reads the phase-0 receipt from the cwd's workspace, not the one its --ledger names
+- #3308 PR #3304 review: the suggestion band, checked
+- #3309 PR #3307 review: SKILL.md says to paste shell traps into the merge bot's brief, which the agent body now carries
+- #3310 PR #3307 review: finisher body report paragraph lists a CI gate it never defines
+- #3311 PR #3307 review: finisher repair brief says 'as above' with no duty text above it
+- #3312 PR #3307 review: the suggestion band, checked
+- #3318 PR #3315 review: the suggestion band, checked
+- #3319 PR #3316 review: the suggestion band, checked
+- #3322 SKILL.md pointers to phase 0 land on the driver; detail moved to references/phase-0.md
+- #3323 PR #3320 review: the suggestion band, checked
+- #3324 PR #3321 review: the suggestion band, checked
+- #3327 PR #3325 review: the suggestion band, checked
+- #3328 fleet-tick SETTLE advises settle --from-report for a report file that fails its family schema
+- #3329 PR #3326 review: the suggestion band, checked
+- #3332 fleet-tick: NO-TRANSCRIPT and CHECK-LIVENESS stay silent while the heartbeat state file is degraded
+- #3333 PR #3330 review: the suggestion band, checked
+- #3334 PR #3331 review: the suggestion band, checked
+- #3337 PR #3336 review: the suggestion band, checked
+- #3338 PR #3335 review: the suggestion band, checked
+- #3341 PR #3339 review: the suggestion band, checked
+- #3342 closeout finish docs: references/close-out.md and phase-0.md omit the phase0-receipt step
+- #3343 SKILL.md End of run step 3 lists the closeout finish steps without the phase0 receipt set-aside
+- #3344 PR #3340 review: the suggestion band, checked
+- #3346 stale prove-merge.sh line citations in ADR 0007 and external-assumptions shell.md
+- #3347 PR #3345 review: the suggestion band, checked
+- #3349 PR #3348 review: the suggestion band, checked
+- #3353 PR #3352 review: the suggestion band, checked
+- #3355 PR #3350 review: the suggestion band, checked
+- #3357 PR #3354 review: the suggestion band, checked
+- #3358 PR #3356 review: the suggestion band, checked
+- #3360 PR #3359 review: the suggestion band, checked
+- #3363 PR #3361 review: the suggestion band, checked
+- #3364 PR #3362 review: the suggestion band, checked
+- #3367 PR #3365 review: the suggestion band, checked
+- #3368 PR #3366 review: the suggestion band, checked
+- #3372 PR #3370 review: the suggestion band, checked
+- #3374 PR #3371 review: the suggestion band, checked
+- #3375 plugin/scripts/ledger.mjs comment names SKILL.md's finisher step as spelling ledger.mjs check "<subject>", now in references/finisher.md
+- #3376 PR #3373 review: the suggestion band, checked
+- #3379 PR #3377 review: the suggestion band, checked
+- #3382 fleet-tick counts a parked member as live: no registry check against ledger tokens
+- #3384 shell-traps.md self-referential See references/shell-traps.md pointers
+- #3385 run-team shape test: exit-verb pin matches a noun, so a first paragraph with no exit verb passes
+- #3386 Linux controller record: a record written before the start-identity change reads dead and is not refused (proc.mjs judgeController)
+- #3387 PR #3383 review: the suggestion band, checked
+- #3388 PR #3381 review: the suggestion band, checked
+- #3390 PR #3389 review: the suggestion band, checked
+
+## Ruled
+
+- #3262 maintainer rebased remote a0736f45 -> 14f0ed16, git cherry all '-' (clean); no re-review per maintainer; label carries via rebase-carry
+- #3307 maintainer ruled survived[2] (shell-traps prose vs merge-bot body): fix in #3307, re-pin tests/shell-traps-prose.test.mjs, not defer to #3309
+- #3340 controller added main-gain-removal ack for closeout.mjs import (names added only), same class as the maintainer-authorised acks on #3262/#3263
+- #3352 controller error: fix-pr-3352/-c and fix-pr-3350 derived the bound from the caps sum against #3313's Agent Brief ruling (default 5, shared definition, recorded in the receipt, independent of caps); correcting in fix-pr-3352-d incl. tickCaps
+- #3352 controller added six main-gain-removal acks (#3350 lines): deliberate removal of the caps-sum bound per the #3313 Agent Brief, same authority class as the earlier maintainer-delegated acks
+- #3209 controller routed slow-high instead of the router's smol-high draw: smol-high produced a hollow or unusable run on most of this run's tickets
+- #3132 controller routed slow-high instead of the router's smol-high draw (heavy ledger/tick change; smol-high unreliable this run)
+- #2880 controller routed slow-high instead of the router's smol-high draw (heavy multi-file change with an authoritative Agent Brief)
+- #3211 controller routed slow-high over the router's smol-high draw; restored ready-for-agent after a wrong fork relabel (ceiling ships at measured size per the brief's own rule)
