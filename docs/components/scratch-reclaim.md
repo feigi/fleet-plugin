@@ -45,11 +45,25 @@ work in flight rather than every run's history.
    name. A keyed name whose number is the other type, or nothing, falls here,
    and so does a `merge-bot-<n>` report or check record, which names no PR and
    no ticket.
-4. **The review snapshot prunes its own PR.** `review-core.mjs` runs
-   `reclaim-scratch.mjs --pr <N>`, which removes only `pr<N>/run-*` roots idle
-   past 7 days — no ledger, no `gh` — and prints `SNAPSHOT_PRUNE_FAILED` when
-   the receipt names a failed removal. Reading nothing the cwd decides, it
-   does not check that `--root` is this workspace's own.
+4. **The review snapshot prunes its own PR, and a review evicts its own
+   trees.** `review-core.mjs` runs `reclaim-scratch.mjs --pr <N>`, which
+   removes `pr<N>/run-*` roots idle past 7 days — no ledger, no `gh` — and
+   evicts the trees in every run root it keeps: each directory that holds a
+   `.git` of its own, at any depth — the snapshot, a specialist's or a
+   refuter's copy — loses every path git ignores in it, whatever `git status`
+   says. Tracked files, each `.git`, untracked files git does not ignore and
+   everything in the run root outside a tree stay, and nothing marks or
+   restores an evicted tree. A directory that resolves to an enclosing
+   repository is never stripped, no symlink is followed, and a repository
+   inside an ignored directory goes with that directory. The step prints
+   `SNAPSHOT_PRUNE_FAILED` when the receipt's `failed[]` is non-empty, and a
+   tree that failed is tried again by the next review's pass. `runReview`
+   runs the same eviction on its own run root when it returns or throws after
+   its snapshot step reported one — only a path of the shape
+   `<scratch>/pr<N>/run-` and eight characters, a real directory — and logs a
+   failure there without changing what the review returns. Reading nothing
+   the cwd decides, `--pr` does not check that `--root` is this workspace's
+   own.
 5. **One removal sequence.** Every removal restores owner rwx, clears darwin's
    `uchg`/`uappnd` flags where `chflags` exists, then `rm -rf`, so a fixture
    that dropped its own read bit cannot wedge it. A removal that still fails is

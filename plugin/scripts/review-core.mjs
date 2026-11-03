@@ -23,12 +23,14 @@
 // `null`, which every guard here — `if (snap) {...}`, `unrunCrashed`,
 // `verdictFor` — is written against).
 //
-// Three imports. arg.mjs's isDigits(): this file is an ordinary
+// The imports. arg.mjs's isDigits(): this file is an ordinary
 // module, so it consumes the repo's digits rule directly rather than
 // declaring its own copy. node:path's `posix`, to normalise a
 // scratch path before `runnerScratchRefusal` reads its last component, and
-// its `isAbsolute`, to refuse a scratch that is not an absolute path.
-// fleet-dir.mjs's scratchRoot(), scratchRootRefusal() and FleetDirUnresolvable.
+// its `isAbsolute`, to refuse a scratch that is not an absolute path; node:fs's
+// `lstatSync`, to tell a real run-root directory from a symlink before the
+// review's end evicts the trees in it. evict-tree.mjs's evictTrees(), which does
+// that eviction. fleet-dir.mjs's scratchRoot(), scratchRootRefusal() and FleetDirUnresolvable.
 // scratchRoot() and FleetDirUnresolvable serve the one caller that passes no
 // `scratch` at all — a standalone review with no dispatcher — which takes the
 // fleet's own scratch root for this repository; scratchRootRefusal() vets every
@@ -41,8 +43,10 @@
 // review-eval.mjs's import of it failed. A suite sweep keeps a
 // shipped `.mjs` from importing a relative module under any other extension.
 
+import { lstatSync } from "node:fs";
 import { isAbsolute, posix } from "node:path";
 import { isDigits } from "./arg.mjs";
+import { evictTrees } from "./evict-tree.mjs";
 import { FleetDirUnresolvable, scratchRoot, scratchRootRefusal } from "./fleet-dir.mjs";
 
 // --- Schemas ----------------------------------------------------------
@@ -1003,7 +1007,49 @@ function standaloneScratchRoot() {
   return root;
 }
 
+/**
+ * The review. When it returns or throws after its snapshot step has reported a
+ * run root of this PR, it evicts every tree in that run root: the snapshot and
+ * each specialist's and refuter's copy lose every path git ignores in them,
+ * and nothing restores them. The run root's other files stay, review.json
+ * among them. A failed eviction is logged and never changes what the review
+ * returns or throws.
+ */
 export async function runReview(host, args) {
+  const run = { scratch: null, pr: null, runRoot: null };
+  try {
+    return await reviewRun(host, args, run);
+  } finally {
+    evictRunRoot(host.log, run);
+  }
+}
+
+// A reported run root eviction may touch: this PR's partition of the scratch
+// root, a slash, `run-` and the eight `mktemp` characters, and nothing after —
+// so no `..` segment, no trailing slash, no other directory. It must also be a
+// real directory, not a symlink.
+function evictableRunRoot(runRoot, scratch, pr) {
+  const partition = posix.join(scratch, `pr${pr}`);
+  if (typeof runRoot !== "string" || !runRoot.startsWith(`${partition}/`)) return false;
+  if (!/^run-[A-Za-z0-9]{8}$/.test(runRoot.slice(partition.length + 1))) return false;
+  try {
+    return lstatSync(partition).isDirectory() && lstatSync(runRoot).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function evictRunRoot(log, { scratch, pr, runRoot }) {
+  try {
+    if (scratch === null || !evictableRunRoot(runRoot, scratch, pr)) return;
+    const done = evictTrees(runRoot, { apply: true });
+    for (const f of done.failed) log(`eviction at the end of the review failed in ${f.path}: ${f.error}`);
+  } catch (e) {
+    log(`eviction at the end of the review failed in ${runRoot}: ${e?.message ?? e}`);
+  }
+}
+
+async function reviewRun(host, args, run) {
   const { agent, phase, log } = host;
   const pipeline = host.pipeline ?? defaultPipeline;
   const parallel = host.parallel ?? defaultParallel;
@@ -1069,6 +1115,8 @@ export async function runReview(host, args) {
     const rootRefusal = scratchRootRefusal(scratch);
     if (rootRefusal !== null) throw new Error(`review-pr: args.scratch: ${rootRefusal}`);
   }
+  run.scratch = scratch;
+  run.pr = pr;
 
   const explicitDimensions = resolveDimensions(A.dimensions, DEFAULT_DIMENSIONS);
 
@@ -1255,6 +1303,9 @@ installError only replaces installCmd and installExit, and uncoveredError only
 replaces uncovered.`,
     { label: `snapshot${forPr}`, phase: "Snapshot", agentType: SNAPSHOT_AGENT_TYPE, schema: SNAPSHOT_SCHEMA },
   );
+  // From here the run root the snapshot step made is known, whatever the
+  // report says next: runReview's end evicts the trees in it.
+  if (snap && typeof snap.runRoot === "string") run.runRoot = snap.runRoot;
 
   if (snap) {
     if (typeof snap.head === "string") snap.head = snap.head.trim().toLowerCase();

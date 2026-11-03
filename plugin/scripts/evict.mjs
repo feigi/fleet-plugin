@@ -54,7 +54,7 @@
 //
 // `--apply` judges each tree to evict again, writes the mark (EVICTED, a file
 // in the tree's git admin dir) unless the tree carries it already, then removes
-// every ignored path but the runner through reclaim-scratch.mjs's one removal
+// every ignored path but the runner through evict-tree.mjs's one removal
 // sequence. Tracked files, HEAD, the branch and the registration are not
 // touched. Best-effort per tree: a tree whose mark cannot be written, or a path
 // in it that cannot be removed, lands in `failed`; the sweep goes on. A mark
@@ -99,10 +99,11 @@ import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineFlags, isDigits, makeDie, writeAll } from "./arg.mjs";
 import { adminDir, EVICTED, evictionMark, how, RESTORED } from "./evict-mark.mjs";
+import { RUNNER, ignoredPaths, removeIgnored } from "./evict-tree.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { liveOnLedger, parseMember, REVIEWER } from "./ledger-grammar.mjs";
-import { ledgerFile, readLedger, removeEntry } from "./reclaim-scratch.mjs";
+import { ledgerFile, readLedger } from "./reclaim-scratch.mjs";
 import { CLAIM_BRANCH, CLAIM_WORKTREE } from "./stranded.mjs";
 
 const NAME = "evict";
@@ -114,7 +115,6 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export const IDLE_MS = 7 * DAY_MS;
 /** Whether a tree whose HEAD last moved, or which was last restored, at `last` is idle at `now`. */
 export const isIdle = (now, last) => now - last >= IDLE_MS;
-const RUNNER = "agent-test";
 const GIT_TIMEOUT_MS = 30_000;
 const MAX_BUFFER = 64 * 1024 * 1024;
 // claim-ticket.sh's `rederive`, word for word. The refusals that send their
@@ -277,21 +277,6 @@ function restoredAt(dir) {
   return at;
 }
 
-// Every path the tree ignores, relative to it, but the runner — a directory
-// git lists whole once, and nothing listed inside one already listed.
-function ignoredPaths(tree) {
-  const r = git(tree, ["ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory"]);
-  if (r.error || r.status !== 0) throw new Error(`git ls-files --ignored failed (${how(r)})`);
-  const out = [];
-  for (const p of r.stdout.split("\0").filter(Boolean).sort()) {
-    const bare = p.replace(/\/$/, "");
-    if (bare === RUNNER) continue;
-    if (out.some((q) => q.endsWith("/") && p.startsWith(q))) continue;
-    out.push(p);
-  }
-  return out;
-}
-
 const within = (path, root) => path === root || path.startsWith(root.endsWith(sep) ? root : root + sep);
 
 /**
@@ -370,12 +355,7 @@ function evictTree(path, verdict, now) {
       return `could not write ${join(verdict.dir, EVICTED)} (${e.code ?? e.message}), so nothing was removed`;
     }
   }
-  const errors = [];
-  for (const p of verdict.ignored) {
-    const error = removeEntry(join(path, p.replace(/\/$/, "")));
-    if (error !== null) errors.push(`${p}: ${error}`);
-  }
-  return errors.length ? `could not remove ${errors.join("; ")}` : null;
+  return removeIgnored(path, verdict.ignored);
 }
 
 function sweep({ afterRotate, apply }) {

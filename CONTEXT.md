@@ -72,10 +72,12 @@ days. A sibling key with no valid `checkout-path` is kept. All of it by
 _Avoid_: reap, prune, cleanup
 
 **Evict**:
-Removing a claim tree's installed dependencies — every path git ignores in it except the
-`agent-test` runner — once 7 days pass with neither a HEAD move nor a restore in it. The
-claim, its tree, branch and commits stay; the Install step runs again before a member runs
-code there. Not Reap, Release or Reclaim, which remove things.
+Removing a tree's installed dependencies — every path git ignores in it except the
+`agent-test` runner — while the tree stays. A claim tree is evicted once 7 days pass with
+neither a HEAD move nor a restore in it; the claim, its tree, branch and commits stay, and
+the Install step runs again before a member runs code there. A review run's snapshot and
+copies are evicted when the review ends, and nothing restores them. Not Reap, Release or
+Reclaim, which remove things.
 _Avoid_: prune, cleanup, reap, dehydrate
 
 **Upstream**:

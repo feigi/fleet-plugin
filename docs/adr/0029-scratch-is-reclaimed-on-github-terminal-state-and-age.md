@@ -15,7 +15,9 @@ checkout still exists, or whose checkout and the directory that held it are both
 gone is kept, and a key is removed whole only when its checkout is gone, that
 directory is present and nothing under it changed in 7 days, the whole verdict
 taken again just before removal; it asks GitHub nothing, and the root sweep
-never judges `checkout-path`.
+never judges `checkout-path`. Amended by #4076: decision 7's `--pr <N>` also
+evicts the trees in each run root of the PR that it keeps, still with no
+ledger and no `gh`, and a review evicts its own run root's trees when it ends.
 
 ## Context
 

@@ -12,7 +12,9 @@ written, and one that still cannot be removed is named in `failed` on every
 sweep (decision 5); a restore records its time just before its Install step
 runs, not once the tree is clean (decision 6), so a restore still installing,
 or one refused after the checks ahead of the Install step, holds the tree for
-7 days.
+7 days. Amended by #4076: the review scratch volume this ADR left out of scope
+is evicted too — a review run's snapshot and copies lose their installed
+dependencies when the review ends, and nothing restores them.
 
 ## Context
 
