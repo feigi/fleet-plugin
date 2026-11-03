@@ -854,6 +854,29 @@ test("watchWindow: a candidate held and released while the watch is up excuses a
   } finally { await watch.stop(); }
 });
 
+// The real probe's free reading, which the scripted rows below never reach: a
+// refused connect is a candidate nothing holds. A probe that read every port
+// as held would otherwise pass this file, while the derived-port CLI rows
+// skipped every landing past their first candidate as an outside holder's
+// doing. A drawn port something outside the test still holds once the watch
+// is down takes the outside-holder skip; one that was held and let go inside
+// the watch cannot be told from that broken probe, so the row draws again and
+// fails only when every draw read held a port the row could then bind itself.
+test("watchWindow: the real probe reads a candidate nothing holds as free", async (t) => {
+  for (let draw = 0; draw < 3; draw++) {
+    const [port] = await unheldPorts(1);
+    const watch = await watchWindow([port]);
+    await watch.stop();
+    if (!watch.allHeld()) return;
+    const holder = createServer();
+    const failure = await new Promise((res) => { holder.once("error", res); holder.listen(port, "127.0.0.1", () => res(null)); });
+    if (failure?.code === "EADDRINUSE") return t.skip(heldOutside(port));
+    if (failure) throw failure;
+    await new Promise((res) => holder.close(res));
+  }
+  assert.fail("the real probe read a port nothing held as held on every draw");
+});
+
 // The rows below pin watchWindow's own logic, so they hand it a scripted probe
 // in place of the connect: the candidates in `held` answer on every round and
 // nothing else does. The ports are labels nothing connects to, so no port
