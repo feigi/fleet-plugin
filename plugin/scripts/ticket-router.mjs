@@ -36,8 +36,10 @@
 //     `--model-roles` names, holding that record), omp's model catalog
 //     (`omp models --json`, or the file `--catalog` names) and the
 //     implementer definitions in the agents directory beside the script
-//     (or `--agents`). A read that fails warns and leaves the Pull no Cell
-//     to draw.
+//     (or `--agents`). A read that fails, or that `omp` does not answer
+//     within OMP_READ_TIMEOUT_MS, warns and leaves the Pull no Cell to draw;
+//     a read that leaves a role no level to run at, or finds no implementer
+//     definition, warns too.
 //   fit --table <json> --features <tsv> --members <tsv> --verdicts <tsv>
 //       --guard <cost-guard.json> --commit <rev> [--due]
 //     Re-fits the table from the three TSVs as committed at `--commit` (read
@@ -86,6 +88,9 @@ export const INSTALL_PACKAGE = join(SCRIPT_DIR, "..", "package.json");
 
 // Exploration cadence after burn-in: the Pull that creates `impl-` row 5k.
 const EXPLORE_EVERY = 5;
+// An `omp` install read that has not answered in this many milliseconds is killed and warns as a failed read: the
+// Pull runs `route` with no timeout of its own, so a hung `omp` would otherwise hang the Pull.
+const OMP_READ_TIMEOUT_MS = 10_000;
 // The fit's adoption floor (merged PRs per side), margin, and cadence.
 export const MIN_N = 20;
 const ADOPT_RATIO = 0.75;
@@ -536,18 +541,28 @@ export function sessionDate(session) {
   return /^(\d{4}-\d{2}-\d{2})T/.exec(session)?.[1] ?? "";
 }
 
+const gcd = (a, b) => (b === 0 ? a : gcd(b, a % b));
+const fraction = (n, d) => {
+  const g = gcd(n, d);
+  return d === g ? `${n / g}` : `${n / g}/${d / g}`;
+};
+
 /**
  * The probability that a Pull's Cell was assigned to it, as a fraction that reads back exactly: `1`, or `<n>/<d>` in
- * lowest terms. `K` is the number of Cells the Pull's draw was over (rowDispatch's `cells`), 0 where there was none
- * to draw — no guard, every candidate tripped or absent — and the Pull's Cell was certain. A burn-in Pull draws, chain
- * head or not, so it is 1/K. After burn-in a chain head never explores, so it is 1; an exploring Pull is the
- * exploring share times 1/K; any other Pull runs its group's Cell at the share left.
+ * lowest terms. `cell` is the Cell the Pull runs, `policy` its group's Cell, and `cells` the Cells its draw was over
+ * (rowDispatch's), [] where there was none to draw — no guard, every candidate tripped or absent — and the Pull's Cell
+ * was certain. A burn-in Pull draws, chain head or not, so it is 1/K over the K Cells drawn. After burn-in a chain head
+ * never explores, so it is 1. Any other Pull's Cell is the sum of the two ways to it: the share left (4/5) when it is
+ * the group's Cell, and the exploring share times 1/K when the draw holds it — both for a group Cell that is also one
+ * of the Cells drawn, as under the `speed` Objective, whose Cell can be one of the `cost` row Cell's exploration Cells.
  */
-export function assignmentProb({ burnIn, chainHead, exploring, K }) {
-  if (K === 0 || (burnIn && K === 1)) return "1";
-  if (burnIn) return `1/${K}`;
+export function assignmentProb({ burnIn, chainHead, cell, policy, cells }) {
+  const K = cells.length;
+  if (K === 0) return "1";
+  if (burnIn) return fraction(1, K);
   if (chainHead) return "1";
-  return exploring ? `1/${EXPLORE_EVERY * K}` : `${EXPLORE_EVERY - 1}/${EXPLORE_EVERY}`;
+  const atPolicy = cell === policy ? (EXPLORE_EVERY - 1) * K : 0;
+  return fraction(atPolicy + (cells.includes(cell) ? 1 : 0), EXPLORE_EVERY * K);
 }
 
 /**
@@ -607,13 +622,12 @@ export function route({
   let cell = policy;
   let draw = null;
   let by = null;
-  let exploring = false;
   if (guard !== null) {
-    exploring = table.burn_in || (implRow % EXPLORE_EVERY === 0 && !chainHead);
+    const exploring = table.burn_in || (implRow % EXPLORE_EVERY === 0 && !chainHead);
     if (exploring) {
       if (drawPool(table, drawRow.policy, install).some((c) => guard.tripped.includes(c))) degrade("guard-tripped");
       if (drawRow.draw !== null) {
-        // rowDispatch's `cells` never hold the group's own Cell: nothing more to withhold.
+        // rowDispatch's `cells` never hold the `cost` row's Cell: nothing more to withhold.
         const d = drawCell({ session, ticket, policyCell: null, cells: drawRow.draw.cells });
         cell = d.cell;
         draw = { k: d.k, K: d.K };
@@ -622,7 +636,7 @@ export function route({
     }
   }
   reason ??= "ok";
-  const prob = assignmentProb({ burnIn: table.burn_in, chainHead, exploring, K: drawRow.draw?.cells.length ?? 0 });
+  const prob = assignmentProb({ burnIn: table.burn_in, chainHead, cell, policy, cells: drawRow.draw?.cells ?? [] });
 
   const row = {
     run_date: sessionDate(session), session, agent: `impl-${ticket}`, ticket: String(ticket),
@@ -1040,17 +1054,35 @@ function main() {
     const guard = readGuard(readJson(guardPath));
     const chainHead = F.has("chain-head");
     // Only a Pull past burn-in that may explore reads what the install runs: its draw, or the share it ran at, needs
-    // the group's exploration Cells. A read that fails leaves the Pull no Cell to draw, and warns, never the exit.
+    // the group's exploration Cells. A read that fails or does not answer in OMP_READ_TIMEOUT_MS, a `modelRoles` that
+    // is no record and a catalog with no `models` list leave the Pull no Cell to draw, and warn, never the exit; so
+    // does a read that holds nothing to draw: a role that runs at no level, or no implementer definition.
     let install = null;
     if (guard !== null && !table.burn_in && !chainHead) {
+      const warn = (what) => process.stderr.write(`${NAME}: WARNING ${what}\n`);
+      const agents = F.arg("agents") ?? join(SCRIPT_DIR, "..", "agents");
+      const kind = (v) => (v === undefined ? "absent" : v === null ? "null" : Array.isArray(v) ? "an array" : `a ${typeof v}`);
       try {
-        install = installOf({
-          modelRoles: F.arg("model-roles") === null ? readOmpConfigValue("modelRoles") : JSON.parse(readFileSync(F.arg("model-roles"), "utf8")),
-          catalog: F.arg("catalog") === null ? readOmpModelCatalog() : JSON.parse(readFileSync(F.arg("catalog"), "utf8")),
-          definitions: readdirSync(F.arg("agents") ?? join(SCRIPT_DIR, "..", "agents")),
-        });
+        const modelRoles = F.arg("model-roles") === null
+          ? readOmpConfigValue("modelRoles", { timeout: OMP_READ_TIMEOUT_MS })
+          : JSON.parse(readFileSync(F.arg("model-roles"), "utf8"));
+        const catalog = F.arg("catalog") === null
+          ? readOmpModelCatalog({ timeout: OMP_READ_TIMEOUT_MS })
+          : JSON.parse(readFileSync(F.arg("catalog"), "utf8"));
+        if (typeof modelRoles !== "object" || modelRoles === null || Array.isArray(modelRoles)) {
+          throw new Error(`modelRoles is ${kind(modelRoles)}, not a record of role to model`);
+        }
+        if (!Array.isArray(catalog?.models)) throw new Error(`omp's model catalog has no models list (models: ${kind(catalog?.models)})`);
+        install = installOf({ modelRoles, catalog, definitions: readdirSync(agents) });
       } catch (e) {
-        process.stderr.write(`${NAME}: WARNING cannot read what this install runs: ${e.message} — no exploration Cell is drawn\n`);
+        warn(`cannot read what this install runs: ${e.message} — no exploration Cell is drawn`);
+      }
+      if (install !== null) {
+        const unrun = ROLES_BY_PRICE.filter((role) => install.ladders[role].length === 0);
+        if (unrun.length > 0) {
+          warn(`this install runs ${unrun.join(", ")} at no level (modelRoles names no model for it, or one omp's catalog lists at none) — no exploration Cell of ${unrun.length === 1 ? "that role" : "those roles"} is drawn`);
+        }
+        if (install.defined.size === 0) warn(`${agents} holds no implementer definition — no exploration Cell is drawn`);
       }
     }
     const { line, row } = route({

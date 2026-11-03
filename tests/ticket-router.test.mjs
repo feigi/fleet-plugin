@@ -451,6 +451,43 @@ test("route: an install it cannot read warns, draws nothing and still routes, ex
   assert.equal(parseFeatures(readFileSync(p.pending, "utf8"))[0].assignment_prob, "1");
 });
 
+test("route: an install read that parses but holds nothing to draw warns, and the Pull still routes, exit 0", (t) => {
+  const p = world(t);
+  const file = (name, value) => { const f = join(p.dir, name); writeFileSync(f, JSON.stringify(value)); return f; };
+  const noAgents = join(p.dir, "no-agents");
+  mkdirSync(noAgents);
+  const cases = [
+    [["--model-roles", file("null-roles.json", null)], /WARNING cannot read what this install runs: modelRoles is null, not a record of role to model — no exploration Cell is drawn/],
+    [["--model-roles", file("list-roles.json", [])], /WARNING cannot read what this install runs: modelRoles is an array, not a record/],
+    [["--catalog", file("no-models.json", {})], /WARNING cannot read what this install runs: omp's model catalog has no models list \(models: absent\)/],
+    [["--model-roles", file("empty-roles.json", {})], /WARNING this install runs smol, task, slow at no level .* no exploration Cell of those roles is drawn/],
+    [["--model-roles", file("wrapped-roles.json", { value: MODEL_ROLES })], /WARNING this install runs smol, task, slow at no level/],
+    [["--catalog", file("empty-catalog.json", { models: [] })], /WARNING this install runs smol, task, slow at no level/],
+    [["--model-roles", file("no-smol.json", { ...MODEL_ROLES, smol: undefined })], /WARNING this install runs smol at no level .* no exploration Cell of that role is drawn/],
+    [["--agents", noAgents], /WARNING .*no-agents holds no implementer definition — no exploration Cell is drawn/],
+  ];
+  for (const [extra, warning] of cases) {
+    const r = routeCli(p, { implRow: 5, extra });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stderr, warning, extra.join(" "));
+  }
+  assert.equal(routeCli(p, { implRow: 5 }).stderr, "", "an install that runs every role warns nothing");
+});
+
+test("route: an omp that does not answer is killed and warns, and the Pull still routes, exit 0", (t) => {
+  const p = world(t);
+  const bin = join(p.dir, "bin");
+  mkdirSync(bin);
+  writeExecStub(join(bin, "omp"), "#!/bin/sh\nexec sleep 60\n");
+  const r = spawnSync(process.execPath, [SCRIPT, "route", "--session", SESSION, "--objective", "cost", "--ticket", "42", "--arm", "A",
+    "--impl-row", "5", "--issue", p.issue, "--guard", p.guard, "--table", p.table, "--pending", p.pending, "--agents", AGENTS],
+  { encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` }, timeout: 40_000 });
+  assert.equal(r.signal, null, "the router returned on its own, before this test's own deadline");
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /WARNING cannot read what this install runs: omp config get modelRoles --json did not answer in \d+ ms — no exploration Cell is drawn/);
+  assert.equal(parseLine(r.stdout).DRAW, "-");
+});
+
 test("route: a burn-in Pull and a chain head read nothing of the install", (t) => {
   // An unreadable install would warn: neither of these reads it.
   const missing = ["--model-roles", "/nonexistent/m.json", "--catalog", "/nonexistent/c.json", "--agents", "/nonexistent"];
@@ -2667,6 +2704,12 @@ const GUARD_STATES = {
   "the speed row's Cell tripped": row5({ tripped: ["slow-medium"] }),
 };
 
+// n/d in lowest terms, as assignment_prob writes it: `1`, or `<n>/<d>`.
+const lowest = (n, d) => {
+  for (let g = Math.min(n, d); g > 1; g--) if (n % g === 0 && d % g === 0) return lowest(n / g, d / g);
+  return d === 1 ? String(n) : `${n}/${d}`;
+};
+
 test("rowDispatch and route agree for every Objective × Stratum, guard state and phase of the table", () => {
   for (const burn_in of [true, false]) {
     const table = rowTable({ burn_in });
@@ -2688,10 +2731,15 @@ test("rowDispatch and route agree for every Objective × Stratum, guard state an
               if (burn_in) assert.ok(rd.draw.cells.every((c) => STARTING.includes(c)), `${at} row ${implRow}: burn-in draws the starting Cells alone`);
               assert.equal(r.cell, drawCell({ session: SESSION, ticket: 40 + implRow, policyCell: null, cells: rd.draw.cells }).cell, at);
               const K = rd.draw.cells.length;
-              assert.equal(row.assignment_prob, burn_in ? (K === 1 ? "1" : `1/${K}`) : `1/${5 * K}`, `${at} row ${implRow}: probability`);
+              // Past burn-in the group's Cell is 4/5 + 1/(5K) where the draw holds it too: under speed the row's Cell can be
+              // one of the cost row Cell's exploration Cells.
+              const past = lowest((r.cell === rd.policy ? 4 * K : 0) + 1, 5 * K);
+              assert.equal(row.assignment_prob, burn_in ? lowest(1, K) : past, `${at} row ${implRow}: probability`);
             } else {
               assert.deepEqual([r.draw, r.by, r.cell], [null, null, rd.policy], `${at} row ${implRow}: not drawn`);
-              assert.equal(row.assignment_prob, rd.draw === null || burn_in ? "1" : "4/5", `${at} row ${implRow}: probability`);
+              const K = rd.draw?.cells.length ?? 0;
+              const stays = rd.draw !== null && rd.draw.cells.includes(rd.policy) ? lowest(4 * K + 1, 5 * K) : "4/5";
+              assert.equal(row.assignment_prob, rd.draw === null || burn_in ? "1" : stays, `${at} row ${implRow}: probability`);
             }
             // REASON keeps the first thing that went wrong: an unreadable issue first, then rowDispatch's, then the draw's.
             const expected = stratum === "*" ? "no-issue-json" : rd.reason !== "ok" ? rd.reason : r.reason;
@@ -2799,15 +2847,47 @@ test("installOf: each role's ladder is its modelRoles target's catalog levels, b
 });
 
 test("assignmentProb: 1/N in burn-in, 4/5 at the group's Cell after it, 1/5 of 1/K on an exploring draw, 1 with nothing drawn", () => {
-  assert.equal(assignmentProb({ burnIn: true, chainHead: false, exploring: true, K: 3 }), "1/3");
-  assert.equal(assignmentProb({ burnIn: true, chainHead: true, exploring: true, K: 3 }), "1/3", "a burn-in chain head was drawn too");
-  assert.equal(assignmentProb({ burnIn: true, chainHead: false, exploring: true, K: 1 }), "1");
-  assert.equal(assignmentProb({ burnIn: true, chainHead: false, exploring: true, K: 0 }), "1", "every starting Cell tripped");
-  assert.equal(assignmentProb({ burnIn: false, chainHead: false, exploring: false, K: 4 }), "4/5");
-  assert.equal(assignmentProb({ burnIn: false, chainHead: false, exploring: true, K: 4 }), "1/20");
-  assert.equal(assignmentProb({ burnIn: false, chainHead: false, exploring: true, K: 1 }), "1/5");
-  assert.equal(assignmentProb({ burnIn: false, chainHead: true, exploring: false, K: 4 }), "1", "a chain head never explores");
-  assert.equal(assignmentProb({ burnIn: false, chainHead: false, exploring: false, K: 0 }), "1", "no candidate: no exploring slot could take it");
+  const prob = (burnIn, chainHead, cell, policy, cells) => assignmentProb({ burnIn, chainHead, cell, policy, cells });
+  assert.equal(prob(true, false, "task-high", "slow-high", STARTING), "1/3");
+  assert.equal(prob(true, true, "task-high", "slow-high", STARTING), "1/3", "a burn-in chain head was drawn too");
+  assert.equal(prob(true, false, "task-high", "slow-high", ["task-high"]), "1");
+  assert.equal(prob(true, false, "slow-high", "slow-high", []), "1", "every starting Cell tripped");
+  const around = ["task-xhigh", "task-medium", "slow-medium", "smol-xhigh"];
+  assert.equal(prob(false, false, "task-high", "task-high", around), "4/5");
+  assert.equal(prob(false, false, "slow-medium", "task-high", around), "1/20");
+  assert.equal(prob(false, false, "slow-medium", "task-high", ["slow-medium"]), "1/5");
+  assert.equal(prob(false, true, "task-high", "task-high", around), "1", "a chain head never explores");
+  assert.equal(prob(false, false, "task-high", "task-high", []), "1", "no candidate: no exploring slot could take it");
+});
+
+test("assignmentProb: a group Cell the draw also holds sums both ways to it, whichever way this Pull came", () => {
+  // Under `speed` the group's Cell can be one of the `cost` row Cell's exploration Cells: 4/5 + 1/(5K).
+  const around = ["task-xhigh", "task-medium", "slow-medium", "smol-xhigh"];
+  const prob = (cell, cells = around) => assignmentProb({ burnIn: false, chainHead: false, cell, policy: "task-xhigh", cells });
+  assert.equal(prob("task-xhigh"), "17/20", "drawn or not, the group's Cell is 4/5 + 1/20");
+  assert.equal(prob("task-medium"), "1/20", "any other drawn Cell is the exploring share alone");
+  assert.equal(prob("task-xhigh", ["task-xhigh"]), "1", "a draw over the group's Cell alone leaves no other Cell");
+  assert.equal(prob("task-xhigh", [...around, "slow-high", "task-max"]), "5/6", "25/30 in lowest terms");
+});
+
+test("route: under speed, a group Cell that is one of the cost row Cell's exploration Cells records 4/5 + 1/(5K), drawn or not", () => {
+  const table = baseTable({ rows: { cost: { "*": "task-high" }, speed: { "*": "task-xhigh" } } });
+  const guard = readGuard(guardFile());
+  const seen = new Set();
+  for (let ticket = 1; ticket <= 60; ticket++) {
+    for (const implRow of [3, 5]) {
+      const { row } = routeIn({ ticket, implRow, table, guard, objective: "speed", arm: "A" });
+      assert.equal(row.policy_cell, "task-xhigh");
+      assert.equal(row.assignment_prob, row.chosen_cell === "task-xhigh" ? "17/20" : "1/20", `ticket ${ticket} row ${implRow}: ${row.chosen_cell}`);
+      seen.add(`${implRow} ${row.chosen_cell}`);
+    }
+  }
+  assert.ok(seen.has("3 task-xhigh") && seen.has("5 task-xhigh"), "a Pull that stays and one that draws the group's Cell");
+  assert.ok([...seen].some((s) => s.startsWith("5 ") && s !== "5 task-xhigh"), "an exploring Pull that draws another Cell");
+  // A tripped speed Cell falls back to the default, slow-high, which is one of task-xhigh's exploration Cells (K = 3).
+  const fallback = baseTable({ rows: { cost: { "*": "task-xhigh" }, speed: { "*": "task-medium" } } });
+  const { row } = routeIn({ table: fallback, guard: readGuard(guardFile({ tripped: ["task-medium"] })), objective: "speed", arm: "A" });
+  assert.deepEqual([row.policy_cell, row.chosen_cell, row.assignment_prob], ["slow-high", "slow-high", "13/15"]);
 });
 
 test("route: a Pull with no guard runs the default Cell with probability 1", () => {

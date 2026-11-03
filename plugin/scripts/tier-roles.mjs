@@ -168,17 +168,20 @@ export function modelsEqual(a, b) {
 // defaults, global config, project settings, `--config` overlays, runtime
 // overrides — measured for the retired pool-preflight.mjs) —
 // `modelRoles.slow` dotted into a record is `Unknown setting` on this box,
-// so a record-valued key is always read whole. Never writes.
-export function readOmpConfigValue(key) {
-  return readOmpJson(["config", "get", key, "--json"]).value;
+// so a record-valued key is always read whole. Never writes. `timeout`, in
+// milliseconds, kills a read that has not answered and throws as a failed read;
+// none by default.
+export function readOmpConfigValue(key, { timeout } = {}) {
+  return readOmpJson(["config", "get", key, "--json"], timeout).value;
 }
 
 // omp's model catalog, `{ models: [{ selector, thinking, … }] }` — `selector`
 // is `<provider>/<id>`, `thinking` the efforts the model runs at, `null` for
 // a model with none (measured, omp 18: `anthropic/claude-haiku-4-5` →
 // minimal…xhigh, `anthropic/claude-opus-5-5` → low…max). Never refreshes.
-export function readOmpModelCatalog() {
-  return readOmpJson(["models", "--json"]);
+// `timeout` as for readOmpConfigValue.
+export function readOmpModelCatalog({ timeout } = {}) {
+  return readOmpJson(["models", "--json"], timeout);
 }
 
 // A plain JSON object — not null, an array or a scalar. Every read here
@@ -188,12 +191,13 @@ function isJsonObject(v) {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-function readOmpJson(argv) {
+function readOmpJson(argv, timeout) {
   const cmd = `omp ${argv.join(" ")}`;
   let out;
   try {
-    out = execFileSync("omp", argv, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024 });
+    out = execFileSync("omp", argv, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024, timeout });
   } catch (e) {
+    if (e.code === "ETIMEDOUT") throw new Error(`${cmd} did not answer in ${timeout} ms`);
     throw new Error(`${cmd} failed: ${e.stderr || e.message}`);
   }
   let parsed;
