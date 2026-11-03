@@ -42,6 +42,9 @@ A ticket taken by a fleet member, represented by three artefacts together — a 
 worktree, and the in-progress label on the issue. A claim's PR is opened from its branch;
 release and reap find the claim through that branch, and the implementer's settle refuses
 a PR from any other.
+A fleet claim is `implementer/<N>-impl-<N>` in `.worktrees/<N>-impl-<N>`: one per ticket,
+named for the ticket's first implementer, and every later implementer of the ticket works
+in it.
 _Avoid_: lock, reservation, assignment
 
 **Release**:

@@ -8,9 +8,16 @@
 # `.worktrees/<issue>-<slug>`. The fleet always calls it as
 # `claim-ticket.sh <N> impl-<N> implementer` (run-team references/pull.md, **Claiming**),
 # giving `implementer/<N>-impl-<N>` and `.worktrees/<N>-impl-<N>`, and releases
-# with the same pair through release-ticket.sh. <slug> and <type> are
-# free text — neither derived nor validated here — so a caller outside the fleet
-# can pass its own shape, e.g. next-ticket's human-facing `fix/<N>-<slug>`.
+# with the same pair through release-ticket.sh.
+# The number appears twice because the slug is the member name of the ticket's
+# first implementer. The claim belongs to the ticket, not to that member: a
+# replacement (`impl-<N>-b`, …) works in it and never claims again, so every
+# fleet release and the settle's head check rebuild the name from the number
+# alone. The repeat carries nothing; the name stays because claims on disk
+# carry it, and stranded.mjs and evict.mjs find claims by it.
+# <slug> and <type> are free text — neither derived nor validated here — so a
+# caller outside the fleet can pass its own shape, e.g. next-ticket's
+# human-facing `fix/<N>-<slug>`.
 #
 # The Install step and the Test entrypoint are READ from the repository's
 # proven Recipe cache through derive-testcmd.sh — never inferred, never
