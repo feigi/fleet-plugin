@@ -4013,8 +4013,8 @@ test("a row naming conflicting tier= values or a cell with no definition can sti
   const { run, rows } = tokenFixture(t, [
     "#3552 impl-3552 · tier=smol-high · tier=slow-high",
     "#3553 impl-3553 · tier=smol-high · ports=163553 · tier=slow-high",
-    "#3554 impl-3554 · tier=task-low",
-    "#3555 impl-3555 · tier=task-low",
+    "#3554 impl-3554 · tier=task-minimal",
+    "#3555 impl-3555 · tier=task-minimal",
   ]);
   run("row", "3552", "impl-3552 · tier=smol-high");
   const r = run("token", "3553", "tier=smol-high");

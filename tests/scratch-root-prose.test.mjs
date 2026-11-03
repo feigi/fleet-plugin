@@ -21,11 +21,11 @@ test("no agent body or command says a harness injects the scratch root", () => {
   }
 });
 
-test("the five implementer bodies stay byte-identical below their frontmatter", () => {
+test("the implementer bodies stay byte-identical below their frontmatter", () => {
   const bodies = readdirSync(join(PLUGIN, "agents"))
     .filter((f) => /^fleet-implementer-.*\.agent\.md$/.test(f))
     .map((f) => read("agents", f).replace(/^---\n[\s\S]*?\n---\n/, ""));
-  assert.equal(bodies.length, 5);
+  assert.ok(bodies.length > 1, `${bodies.length} implementer bodies found`);
   for (const b of bodies) assert.equal(b, bodies[0]);
 });
 

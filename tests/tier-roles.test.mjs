@@ -11,6 +11,7 @@ import {
   modelsEqual, checkRoutes, catalogEntry, semaphoreNotice, implementerCell, routableCells,
 } from "../plugin/scripts/tier-roles.mjs";
 import { POLICY_CELL } from "../plugin/scripts/ledger-grammar.mjs";
+import { DAY_ONE_TABLE } from "./support/day-one-router-table.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/tier-roles.mjs", import.meta.url));
 const SCRIPTS_DIR = fileURLToPath(new URL("../plugin/scripts", import.meta.url));
@@ -344,17 +345,59 @@ test("checkRoutes (e): slow and task resolving to different models is not a noti
   assert.deepEqual(routes({ "fleet-a": "@slow:xhigh" }).notices, []);
 });
 
-// The five-cell grid at ratification (spec 2026-09-28 § 2), and every real
-// definition clean against targets that run each one's level.
-test("checkRoutes: every real plugin/agents definition routes cleanly, and the implementer definitions are exactly the five cells", () => {
+// The grid: one definition per Cell, every role × level from low to max, and
+// every real definition clean against targets that run low to max.
+const GRID_ROLES = { slow: "claude-opus-5", task: "claude-sonnet-5", smol: "claude-haiku-4-5" };
+const GRID_CELLS = Object.keys(GRID_ROLES).flatMap((role) => ADAPTIVE.map((level) => `${role}-${level}`));
+const LOW_TO_MAX = { models: CATALOG.models.map((m) => (Object.values(GRID_ROLES).includes(m.id) ? { ...m, thinking: ADAPTIVE } : m)) };
+const catalogWithout = (role, level) => ({
+  models: LOW_TO_MAX.models.map((m) => (m.id === GRID_ROLES[role] ? { ...m, thinking: ADAPTIVE.filter((l) => l !== level) } : m)),
+});
+
+test("checkRoutes: every real plugin/agents definition routes cleanly, and the implementer definitions are exactly the grid's Cells", () => {
   const cells = readdirSync(REPO_AGENTS)
     .map((f) => /^fleet-implementer(?:-(.+))?\.agent\.md$/.exec(f))
     .filter(Boolean)
     .map((m) => m[1]);
-  assert.deepEqual(cells.sort(), ["slow-high", "slow-medium", "smol-high", "task-high", "task-max"]);
-  const { violations } = checkRoutes({ agentsDir: REPO_AGENTS, modelRoles: MODEL_ROLES, overrides: {}, catalog: CATALOG });
+  assert.deepEqual(cells.sort(), [...GRID_CELLS].sort());
+  const { violations, notices } = checkRoutes({ agentsDir: REPO_AGENTS, modelRoles: MODEL_ROLES, overrides: {}, catalog: LOW_TO_MAX });
   assert.deepEqual(violations, []);
+  assert.deepEqual(notices, []);
 });
+
+// The must-ACCEPT half for the real tree: a smol target without `max` (this
+// file's CATALOG) leaves the starting table's run green; the one Cell it cannot
+// run is a notice, because the starting table never selects it.
+test("checkRoutes: the real definitions against a smol target without max pass under the starting table, smol-max a notice", () => {
+  const { violations, notices } = checkRoutes({ agentsDir: REPO_AGENTS, modelRoles: MODEL_ROLES, overrides: {}, catalog: CATALOG, routable: routableCells(DAY_ONE_TABLE) });
+  assert.deepEqual(violations, []);
+  assert.equal(notices.length, 1, notices.join("\n"));
+  assert.match(notices[0], /^fleet-implementer-smol-max\.agent\.md: level max is not one modelRoles\.smol's target .* — cell smol-max is not one the router selects; /);
+});
+
+// Each real Cell definition the starting table does not select, alone, against
+// a catalog whose target for its role lacks its level: a notice while the Cell
+// is unroutable, a violation (the refusal) the moment a table lists it.
+for (const cell of GRID_CELLS.filter((c) => !routableCells(DAY_ONE_TABLE).has(c))) {
+  test(`checkRoutes: the real ${cell} definition's level, missing from its role's target, is a notice until a table lists ${cell}, then a violation`, () => {
+    const [role, level] = cell.split("-");
+    const agents = join(dir(), "agents");
+    mkdirSync(agents);
+    copyFileSync(join(REPO_AGENTS, `fleet-implementer-${cell}.agent.md`), join(agents, `fleet-implementer-${cell}.agent.md`));
+    const check = (table) => checkRoutes({ agentsDir: agents, modelRoles: MODEL_ROLES, overrides: {}, catalog: catalogWithout(role, level), routable: routableCells(table) });
+    const mismatch = `fleet-implementer-${cell}.agent.md: level ${level} is not one modelRoles.${role}'s target `;
+    const unroutable = check(DAY_ONE_TABLE);
+    assert.deepEqual(unroutable.violations, []);
+    assert.equal(unroutable.notices.length, 1, unroutable.notices.join("\n"));
+    assert.ok(unroutable.notices[0].startsWith(mismatch), unroutable.notices[0]);
+    assert.match(unroutable.notices[0], new RegExp(` — cell ${cell} is not one the router selects; `));
+    const routable = check({ ...DAY_ONE_TABLE, cells: [...DAY_ONE_TABLE.cells, cell] });
+    assert.deepEqual(routable.notices, []);
+    assert.equal(routable.violations.length, 1, routable.violations.join("\n"));
+    assert.ok(routable.violations[0].startsWith(mismatch), routable.violations[0]);
+    assert.ok(routable.violations[0].endsWith(" — omp would clamp it silently"), routable.violations[0]);
+  });
+}
 
 // An implementer definition whose cell the router never selects: the level
 // the role's target does not run is a notice there, a violation anywhere else.

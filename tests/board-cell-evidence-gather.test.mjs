@@ -15,6 +15,7 @@ import { COLUMNS as MEMBER_COLUMNS } from "../plugin/scripts/member-outcomes.mjs
 import { COLUMNS as TIER_COLUMNS } from "../plugin/scripts/tier-outcomes.mjs";
 import { CLOSEOUT_RECEIPT, RECEIPT, RECEIPT_HELD, formatRouting } from "../plugin/scripts/ledger-grammar.mjs";
 import { computeBoard } from "../plugin/scripts/compute-board.mjs";
+import { CELLS } from "../plugin/scripts/compute-cell-evidence.mjs";
 import { identityRoles, seededRepo } from "./support/label-map-seed.mjs";
 
 // What gather() reads for the Cell evidence tab: the guard through the tick's
@@ -262,7 +263,7 @@ test("gather: reads the guard, the receipts, the definitions and modelRoles, and
   const board = computeBoard(r);
   assert.deepEqual(board.modelRoles, r.modelRoles, "the carried read rides board.json");
   assert.equal(board.cellEvidence.guard.heading, "trips nothing");
-  assert.equal(board.cellEvidence.guard.cells.length, 5);
+  assert.equal(board.cellEvidence.guard.cells.length, CELLS.length);
   assert.equal(board.cellEvidence.guard.cells[0].figures.merged.text, "40 ≥ 20 ✓");
   assert.equal(board.cellEvidence.guard.cells[0].route.text, "Tier route: anthropic/claude-opus-5 · high");
   assert.equal(board.cellEvidence.declared.heading, "Declared, not measured: 1 other member");
@@ -343,7 +344,7 @@ test("gather: a caller that names no state directory reads no guard, no receipt 
 test("computeBoard: inputs that read none of the tab's records draw its no-guard state, not a missing field", () => {
   const board = computeBoard({ ledger: { rows: [] }, issues: [], prs: [], ci: {}, prev: null, now: 1, roles: identityRoles() });
   assert.equal(board.cellEvidence.guard.heading, "no cost guard");
-  assert.equal(board.cellEvidence.guard.cells.length, 5);
+  assert.equal(board.cellEvidence.guard.cells.length, CELLS.length);
   assert.equal(board.modelRoles, null);
   assert.equal(board.cellEvidence.declared.heading, "Declared, not measured: 0 other members");
 });

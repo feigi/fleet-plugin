@@ -429,15 +429,15 @@ test("dispatch prints the definition a routed-but-undrawn row's cell= names, rec
 });
 
 test("dispatch refuses a cell= naming no definition file or two definitions, naming cell= and not tier=", (t) => {
-  const { read, refused } = fixture(t, `# Fleet run ledger\n\n## Rows\n\n- #7 impl-7 · cell=alt · cell=slow-high\n- #8 impl-8 · cell=smol-max\n\n## Filed\n\n## Ruled\n\n`);
+  const { read, refused } = fixture(t, `# Fleet run ledger\n\n## Rows\n\n- #7 impl-7 · cell=alt · cell=slow-high\n- #8 impl-8 · cell=smol-minimal\n\n## Filed\n\n## Ruled\n\n`);
   refused(["dispatch", "7", "impl-7"], /impl-7: row carries conflicting cell= tokens \(cell=alt, cell=slow-high\)/);
-  refused(["dispatch", "8", "impl-8"], /impl-8: row #8's cell= names fleet-implementer-smol-max, which has no agents\/fleet-implementer-smol-max\.agent\.md/);
+  refused(["dispatch", "8", "impl-8"], /impl-8: row #8's cell= names fleet-implementer-smol-minimal, which has no agents\/fleet-implementer-smol-minimal\.agent\.md/);
   assert.deepEqual(read().dispatched, []);
 });
 
 // A `tier=` of the right shape whose definition has no file is refused the
 // same way: a `task` call naming it cannot resolve. Two of those: a cell
-// outside the shipped grid (`smol-max` — haiku has no `max`), and the
+// outside the shipped grid (`smol-minimal`, below its lowest level), and the
 // pre-cell `alt`, whose definition is deleted. `row` refuses a non-cell
 // `tier=` before it is written, so the rows `row` would refuse are written
 // as a ledger edited by hand — the case dispatch's own check still meets.
@@ -447,8 +447,8 @@ test("dispatch refuses an implementer whose row names no single definition, or o
   refused(["dispatch", "7", "impl-7"], /impl-7: row carries conflicting tier= tokens \(tier=alt, tier=slow-high\) — fix the row with `ledger\.mjs row` — not dispatching impl-7/);
   refused(["dispatch", "8", "impl-8"], /impl-8: tier=\.\.\/\.\.\/etc is not a definition suffix — expected \[a-z0-9\] words joined by '-' — fix the row with `ledger\.mjs row` — not dispatching impl-8/);
   refused(["dispatch", "9", "impl-9"], /impl-9: tier= is not a definition suffix/);
-  ok("row", "10", "class=routine · tier=smol-max");
-  refused(["dispatch", "10", "impl-10"], /impl-10: row #10's tier= names fleet-implementer-smol-max, which has no agents\/fleet-implementer-smol-max\.agent\.md — fix the row with `ledger\.mjs row` — not dispatching impl-10/);
+  ok("row", "10", "class=routine · tier=smol-minimal");
+  refused(["dispatch", "10", "impl-10"], /impl-10: row #10's tier= names fleet-implementer-smol-minimal, which has no agents\/fleet-implementer-smol-minimal\.agent\.md — fix the row with `ledger\.mjs row` — not dispatching impl-10/);
   refused(["dispatch", "11", "impl-11"], /impl-11: row #11's tier= names fleet-implementer-alt, which has no agents\/fleet-implementer-alt\.agent\.md/);
   ok("row", "12", "class=routine · tier=task-high · tier=slow-high");
   refused(["dispatch", "12", "impl-12"], /impl-12: row carries conflicting tier= tokens \(tier=task-high, tier=slow-high\)/);

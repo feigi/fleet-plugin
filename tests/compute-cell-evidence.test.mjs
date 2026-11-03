@@ -1,9 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readdirSync } from "node:fs";
 import { CELLS, computeCellEvidence, refitFailure } from "../plugin/scripts/compute-cell-evidence.mjs";
 import { readCostGuard } from "../plugin/scripts/fleet-tick.mjs";
 import { guardFile } from "../plugin/scripts/pr-cost.mjs";
 import { DAY_ONE_TABLE } from "./support/day-one-router-table.mjs";
+import { implementerDefinitions } from "./support/implementer-definitions.mjs";
 
 // The Cell evidence tab's model, pure: the guard section (what the guard holds
 // each Cell to) and "Declared, not measured". Every word the page shows is built
@@ -40,7 +42,7 @@ const AGENTS = {
 const build = (o = {}) => computeCellEvidence({ guard: TODAY(), receipts: NO_RECEIPTS, agents: AGENTS, modelRoles: ROLES, ...o });
 const cellOf = (ce, cell) => ce.guard.cells.find((c) => c.cell === cell);
 
-// -- all five Cells, in every state --------------------------------------------
+// -- every implementer Cell, in every state --------------------------------------
 
 const STATES = {
   "today's guard": () => ({ guard: TODAY() }),
@@ -52,11 +54,21 @@ const STATES = {
   "no modelRoles read yet": () => ({ modelRoles: null }),
 };
 
-test("all five implementer Cells are drawn in a fixed order, in every state", () => {
+test("every implementer Cell is drawn in a fixed order, in every state", () => {
   for (const [name, o] of Object.entries(STATES)) {
     assert.deepEqual(build(o()).guard.cells.map((c) => c.cell), CELLS, name);
   }
-  assert.deepEqual(CELLS, ["slow-high", "task-high", "smol-high", "slow-medium", "task-max"]);
+  assert.deepEqual(CELLS, [
+    "slow-high", "task-high", "smol-high", "slow-medium", "task-max",
+    "slow-low", "slow-xhigh", "slow-max",
+    "task-low", "task-medium", "task-xhigh",
+    "smol-low", "smol-medium", "smol-xhigh", "smol-max",
+  ]);
+});
+
+test("CELLS is exactly the Cells plugin/agents defines", () => {
+  const cells = implementerDefinitions().map((name) => name.slice("fleet-implementer-".length));
+  assert.deepEqual([...CELLS].sort(), cells.sort());
 });
 
 test("every anchor a card or link could name exists in every state: each Cell, and each generation", () => {
@@ -74,10 +86,10 @@ test("every anchor a card or link could name exists in every state: each Cell, a
   }
 });
 
-test("a Cell the guard holds beyond the five is drawn after them, never left out", () => {
-  const ce = build({ guard: guardOk([entry("slow-high"), entry("slow-low", { generation: "claude-opus-5" })]) });
-  assert.deepEqual(ce.guard.cells.map((c) => c.cell), [...CELLS, "slow-low"]);
-  assert.equal(cellOf(ce, "slow-low").figures.generation, "claude-opus-5");
+test("a Cell the guard holds beyond CELLS is drawn after them, never left out", () => {
+  const ce = build({ guard: guardOk([entry("slow-high"), entry("slow-minimal", { generation: "claude-opus-5" })]) });
+  assert.deepEqual(ce.guard.cells.map((c) => c.cell), [...CELLS, "slow-minimal"]);
+  assert.equal(cellOf(ce, "slow-minimal").figures.generation, "claude-opus-5");
 });
 
 // -- today's guard ---------------------------------------------------------------
@@ -441,14 +453,14 @@ test("Declared, not measured lists every other member: its Declared tier and its
   ]);
 });
 
-test("Declared, not measured counts the real definitions: the plugin's own, minus the five Cells", async () => {
-  const { readdirSync, readFileSync } = await import("node:fs");
+test("Declared, not measured counts the real definitions: the plugin's own, minus the Cells", async () => {
+  const { readFileSync } = await import("node:fs");
   const { parseFrontmatter } = await import("../plugin/scripts/tier-roles.mjs");
   const dir = new URL("../plugin/agents/", import.meta.url);
   const list = readdirSync(dir).filter((f) => f.endsWith(".agent.md")).map((file) => ({ file, model: parseFrontmatter(readFileSync(new URL(file, dir), "utf8")).model }));
   const d = computeCellEvidence({ guard: { status: "missing" }, receipts: NO_RECEIPTS, agents: { list, error: null }, modelRoles: ROLES }).declared;
-  assert.equal(d.members.length, list.length - 5);
-  assert.equal(d.heading, `Declared, not measured: ${list.length - 5} other members`);
+  assert.equal(d.members.length, list.length - CELLS.length);
+  assert.equal(d.heading, `Declared, not measured: ${list.length - CELLS.length} other members`);
   assert.ok(d.members.every((m) => !m.name.startsWith("fleet-implementer-")));
   assert.ok(d.members.every((m) => /^@(slow|task|smol):\w+$/.test(m.declared) && / · /.test(m.route)), JSON.stringify(d.members.find((m) => !/ · /.test(m.route))));
 });

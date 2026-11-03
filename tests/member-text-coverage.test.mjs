@@ -12,7 +12,7 @@
 //   DUPLICATION. A sentence (the text folded to single spaces, `>` gutters and
 //   `**` dropped, split on `. `) that appears verbatim in more than one of
 //   {agent body, brief template, review-and-fix.md, run-merge-bot.md} fails,
-//   listing the files. The five implementer cells are one byte-identical body
+//   listing the files. The implementer cells are one byte-identical body
 //   and count once. A sentence shorter than seven words is a phrase, not a
 //   fact, and is not counted.
 //

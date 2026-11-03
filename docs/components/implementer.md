@@ -4,8 +4,8 @@
 
 The implementer turns one claimed ticket into a pushed branch and an
 open PR. It runs as `fleet-implementer-<cell>.agent.md`: one definition
-per cell (`slow-high`, `slow-medium`, `task-high`, `task-max`,
-`smol-high` — an omp role and a thinking level), byte-identical bodies,
+per cell, every role (`slow`, `task`, `smol`) at every thinking level
+from `low` to `max` (`slow-low` … `smol-max`), byte-identical bodies,
 each declaring the route its name derives. A row with neither `tier=`
 nor `cell=` runs at the policy cell,
 [`fleet-implementer-slow-high.agent.md`](../../plugin/agents/fleet-implementer-slow-high.agent.md);
