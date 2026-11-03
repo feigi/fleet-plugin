@@ -1,7 +1,7 @@
 // The cockpit's Cell evidence tab, as a value: computeCellEvidence() turns what
 // gather() read (the cost guard, the receipts' `metrics` steps, the installed
-// definitions, the installed router table and package, the carried `modelRoles`
-// read, the Fit) into the model the page lays out.
+// definitions, the starting router table, the carried `modelRoles` and model
+// catalog reads, the Fit) into the model the page lays out.
 // Pure, like compute-board.mjs, which calls it and puts the answer in
 // `board.json` as `cellEvidence`: no file, no process, no clock. Every word the
 // tab shows is built here, so a test pins it where it is made and the page only
@@ -10,20 +10,18 @@
 // What this holds is the guard section — what the cost guard holds each
 // implementer Cell to, from the guard file and nothing recomputed, with this
 // run's Pulls booked to each Cell off the board's cards — "Declared, not
-// measured", and the policy rows: for each Objective × group of the tree, on the
-// routes-now side the Cell the installed router table plus the workspace's guard
-// route to, why, and how a Pull on that row is dispatched (ticket-router.mjs's
-// rowDispatch, the function `route` itself calls), and on the evidence-favours
-// side the same for the Fit's table (`.fleet/router-fit.json`, which
-// metrics-refresh.mjs writes beside the guard at phase 0), marked where its Cell
-// differs. The installed table is the starting table: `route` with no `--table`
-// routes by the Fit beside its `--guard`, and by the installed table only when
-// that Fit is missing, unreadable or invalid, so routes now lays out the
-// installed table, not always the one `route` routes by.
+// measured", and one view of the Fit that routes this run: the table `route`
+// routes by, which is the Fit beside the guard (`.fleet/router-fit.json`, which
+// metrics-refresh.mjs writes at phase 0), or the starting table while that Fit
+// is missing, unreadable or invalid. For each Objective × group of its tree it
+// lays out the Cell the table plus the workspace's guard route to and why
+// (ticket-router.mjs's rowDispatch, the function `route` itself calls), with
+// every candidate's verdict and range, and for each group the Cells it draws
+// over; above them, burn-in progress, the Cells the guard has tripped, a notice
+// for each starting Cell whose model changed and restarted burn-in, and a flag
+// while the newest refit failed and an older Fit, or the starting table, routes.
 // The receipts' newest `metrics` step is what the guard section quotes when there
-// is no guard; the newest one that tried a refit feeds the evidence-favours side:
-// a refit that step says failed, with no fit written after it, is said in that
-// side's heading.
+// is no guard; the newest one that tried a refit is where that flag is read.
 // Figures show only from a guard `readCostGuard` (fleet-tick.mjs, the reader
 // the tick judges the file by) accepts; `guard` here is that reader's own
 // answer, `{ status: "ok", guard }` or
@@ -35,9 +33,9 @@
 // checked where its figure would show.
 
 import { isDeepStrictEqual } from "node:util";
-import { CELL, OBJECTIVES, POLICY_CELL } from "./ledger-grammar.mjs";
+import { CELL, OBJECTIVES, POLICY_CELL, STARTING_CELLS } from "./ledger-grammar.mjs";
 import { costGuardFault } from "./fleet-tick.mjs";
-import { MIN_N, parseGuard, readGuard, rowDispatch, shortStartingCells } from "./ticket-router.mjs";
+import { MIN_N, installOf, parseGuard, readGuard, rowDispatch } from "./ticket-router.mjs";
 import { implementerCell, modelsEqual, parseModelRoute, resolveRole } from "./tier-roles.mjs";
 
 // The implementer Cells, in the order the guard section draws them: one per
@@ -124,7 +122,7 @@ function tierRoute(role, level, generation, modelRoles) {
 
 // ---------------------------------------------------------------------------
 // The newest `metrics` step of the phase 0 and close-out receipts: the guard
-// section quotes it when there is no guard. Evidence favours reads a failed
+// section quotes it when there is no guard. The view of the Fit reads a failed
 // refit off the newest one that tried a refit instead.
 // ---------------------------------------------------------------------------
 
@@ -439,7 +437,7 @@ function guardSection(read, receipts, step, modelRoles, pulls, recordsNote = nul
 }
 
 // ---------------------------------------------------------------------------
-// Policy rows: Objective × Stratum, routes now.
+// A repository's identity.
 // ---------------------------------------------------------------------------
 
 // A repository's host and `owner/name` off a `package.json` `repository` url (an
@@ -473,79 +471,104 @@ export function repoIdentity(url) {
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const list = (xs) => (xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}`);
 
-// Whose runs the installed table is, and what the install is: "this repository's
-// runs · fitted at 1a2b3c4 on 198 Pulls · @feigi/fleet-ctl 3.105.0". `install` is
-// `{ name, version, repository, error }`, `repository` the package's url.
-function routesSource(table, install, repoUrl) {
-  const named = repoIdentity(install?.repository);
-  const here = repoIdentity(repoUrl);
-  const same = named !== null && here !== null && named.host === here.host && named.name.toLowerCase() === here.name.toLowerCase();
-  const runs = same ? "this repository's runs" : named !== null ? `${named.name}'s runs` : "another repository's runs";
-  let fitted;
-  if (table === null) fitted = "no router table read";
-  else if (!table.fitted_commit) fitted = "never fitted";
-  else {
-    const on = Number.isInteger(table.n_rows) ? `on ${plural(table.n_rows, "Pull")}` : "on a number of Pulls not checked";
-    fitted = `fitted at ${String(table.fitted_commit).slice(0, 7)} ${on}`;
+// ---------------------------------------------------------------------------
+// The Fit that routes this run, `.fleet/router-fit.json`.
+// ---------------------------------------------------------------------------
+
+// The table `route` routes by, and where it comes from: the Fit gather read
+// beside the guard, else the starting table — as `route` falls back to it when
+// the Fit is missing, unreadable or invalid. `fit` is gather's read, `{ status:
+// "ok", fit } | { status: "missing" } | { status: "unreadable", why }`;
+// `starting` the starting table validateTable accepted, or null. `fit` in the
+// answer is the Fit read, null when the starting table routes.
+function routingTable(fit, starting) {
+  if (fit?.status === "ok") {
+    const p = fit.fit;
+    return { fit: p, table: p.table, source: { text: ["Fit", `computed ${when(p.computed_at)}`, plural(p.table.n_rows, "Pull")].join(" · "), check: null } };
   }
-  let installed;
-  if (install == null || install.error) installed = `install not read${install?.error ? `: ${install.error}` : ""}`;
-  else installed = `${install.name ?? "unnamed package"} ${install.version === "0.0.0" ? "linked checkout" : (install.version ?? "no version")}`;
-  const check = install == null || install.error
-    ? "not checked: the install was not read"
-    : named === null
-      ? "not checked: the install names no repository"
-      : here === null ? "not checked: this workspace's repository is not known" : null;
-  return { same, owner: named === null ? "another repository" : named.name, runs, text: [runs, fitted, installed].join(" · "), check };
+  const why = fit?.status === "unreadable" ? `the Fit is not read: ${fit.why}` : "no Fit yet: the next phase 0 writes one";
+  return { fit: null, table: starting, source: { text: `starting table · ${why}`, check: starting === null ? "not checked: no starting table read" : null } };
 }
 
-// The starting Cells short of `MIN_N` merged PRs in the table's `guard.n` — the
-// Cells burn-in waits for, and no others — in their order, as one phrase: past
-// tense for an installed table, whose counts are what its fit saw ("had"),
-// present for the Fit, whose counts are the workspace's own now ("has",
-// "have").
-function shortWords(table, tense = "past") {
-  const short = shortStartingCells(table.guard.n);
-  if (short.length === 0) return null;
-  const each = short.length === 1 ? "it needs" : "each needs";
-  const one = tense === "past" ? "had" : "has";
-  const counts = new Set(short.map(([, n]) => n));
-  if (counts.size === 1) {
-    const verb = tense === "past" ? "had" : short.length === 1 ? "has" : "have";
-    return `${list(short.map(([c]) => c))} ${verb} ${short[0][1]} of the ${MIN_N} merged PRs ${each}`;
-  }
-  return `${list(short.map(([c, n]) => `${c} ${one} ${n}`))} of the ${MIN_N} merged PRs ${each}`;
+// The flag while this run's Fit failed: `step` is the receipts' newest `metrics`
+// step that tried a refit, newestRefit's pick, `p` the Fit read, null when none
+// was. Raised while that step's output holds the failed line and no Fit was
+// written after it — a `computed_at` before the step's `at`, or one that is no
+// time. A later step that tried a refit, a Fit written after this one, or the
+// receipt no longer read clears it; a close-out step, which tries none, does not.
+function failedFitFlag(step, p) {
+  if (step === null) return null;
+  const why = refitFailure(step.output);
+  if (why === null) return null;
+  const computed = p === null ? NaN : Date.parse(p.computed_at);
+  if (Number.isFinite(computed) && computed >= Date.parse(step.at)) return null;
+  const routes = p === null ? "no Fit is read, so the starting table routes" : `the last good Fit, computed ${when(p.computed_at)}, routes`;
+  return `this run's Fit failed at ${when(step.at)}: ${why}; ${routes}`;
 }
 
-// The side's burn-in or no-guard heading, or null while neither holds. Past tense
-// for a fitted table, whose counts are what its fit saw.
-function routesHeading(table, guard, source) {
-  if (table === null) return "no router table read: the rows are not known";
+// How a Pull is dispatched, for every group alike: what `route` does under the guard.
+function dispatchHeading(table, guard) {
   if (guard === null) return `no cost guard: every Pull runs at ${POLICY_CELL}, the default Cell`;
-  if (!table.burn_in) return null;
-  const K = rowDispatch({ table, guard, objective: "cost", stratum: "*" }).draw?.cells.length ?? 0;
-  const drawn = K === 0 ? "no Cell is left to draw, so every Pull runs at its row's Cell" : `every Pull drawn over ${plural(K, "Cell")}`;
-  if (!table.fitted_commit) return `never fitted: ${drawn}`;
-  const short = shortWords(table);
-  const ends = source.same ? "" : "; it ends with a later fit, reaching this install with a plugin release";
-  return `burn-in at its fit on ${source.owner}'s runs: ${short === null ? "every starting Cell had its merged PRs" : short}; ${drawn}${ends}`;
+  if (table === null) return null;
+  if (table.burn_in) return "burn-in: every Pull is drawn over the starting Cells the guard has not tripped";
+  return "every 5th Pull that is no chain head is drawn over its group's exploration Cells; the rest run the group's Cell";
 }
 
-// One row's dispatch, in the words a heading or a row carries: what `route` does
-// with a Pull on it under the guard, from rowDispatch. Past burn-in the draw is
-// over the group's exploration Cells that this install runs and the guard has
-// not tripped. The cockpit does not read the install, so it names them without
-// counting them, and without claiming one is left: with none, `route` draws
-// nothing.
-function dispatchWords(table, rd, row) {
-  const tripped = rd.reason === "table-cell-tripped" ? `the row's ${row} tripped` : null;
-  if (rd.reason === "guard-missing") return `${POLICY_CELL} only`;
-  if (rd.draw?.by === "burn-in") {
-    return `drawn over ${plural(rd.draw.cells.length, "Cell")}: ${rd.draw.cells.join(", ")}${tripped ? `; ${tripped}, so its policy Cell is ${POLICY_CELL}` : ""}`;
-  }
-  const fifth = table.burn_in ? "no draw: no other Cell is left"
-    : "every 5th Pull drawn over the group's exploration Cells, if the install runs one the guard has not tripped";
-  return `${tripped ? `${POLICY_CELL}, ${tripped}` : "the row's Cell"}; ${fifth}`;
+// Merged PRs per starting Cell, against MIN_N: the counts burn-in is judged on —
+// the Fit's own guard counts while the Fit routes, the cost guard's while the
+// starting table does. Null with neither to count from.
+function burnInProgress(p, guard, table) {
+  const n = p !== null ? p.table.guard.n : guard?.n;
+  if (!isRecord(n)) return null;
+  const cells = STARTING_CELLS.map((cell) => ({ cell, n: count(n[cell]) ?? 0, of: MIN_N }));
+  const done = cells.filter((c) => c.n >= MIN_N).length;
+  const heading = table !== null && !table.burn_in
+    ? `burn-in ended: every starting Cell has its ${MIN_N} merged PRs`
+    : `burn-in: ${done} of ${cells.length} starting Cells ${done === 1 ? "has" : "have"} the ${MIN_N} merged PRs each needs`;
+  return { heading, cells };
+}
+
+// The Cells the cost guard has tripped, in words, or null with no guard.
+function trippedWords(guard) {
+  if (guard === null) return null;
+  return guard.tripped.length === 0 ? "the cost guard has tripped no Cell" : `tripped by the cost guard: ${list(guard.tripped)}`;
+}
+
+// A notice for each starting Cell whose role's model changed and so restarted
+// burn-in: the Fit holds an older generation of it in the root group, and its
+// newest generation is short of MIN_N merged PRs in the counts the Fit judged
+// burn-in on. None while the starting table routes, which holds no estimates.
+function modelChanges(p) {
+  if (p === null || !p.table.burn_in) return [];
+  const root = isRecord(p.table.estimates?.["*"]) ? p.table.estimates["*"] : {};
+  return STARTING_CELLS.flatMap((cell) => {
+    const e = root[cell];
+    const older = isRecord(e?.older) ? Object.keys(e.older) : [];
+    const k = count(p.table.guard.n[cell]) ?? 0;
+    if (older.length === 0 || typeof e.generation !== "string" || k >= MIN_N) return [];
+    return [`${cell}'s model changed to ${e.generation}, after ${list(older)}: burn-in restarted, at ${k} of the ${MIN_N} merged PRs it needs`];
+  });
+}
+
+// What this install runs, for the exploration Cells, off the cockpit's own reads:
+// `{ install }`, installOf's answer, or `{ install: null, why }` while one of the
+// reads it needs has no value.
+function installFrom(modelRoles, catalog, agents) {
+  if (!isRecord(modelRoles?.value)) return { install: null, why: "modelRoles not read yet" };
+  if (!isRecord(catalog?.value)) return { install: null, why: "omp's model catalog not read yet" };
+  if (agents == null || agents.error) return { install: null, why: "the definitions could not be read" };
+  return { install: installOf({ modelRoles: modelRoles.value, catalog: catalog.value, definitions: agents.list.map((a) => a.file) }), why: null };
+}
+
+// The Cells a group draws over, in words: rowDispatch's draw, which is centred on
+// the group's `cost` row Cell whichever Objective routes the Pull. Null with no
+// guard, when nothing is drawn.
+function exploringWords(table, guard, stratum, inst) {
+  if (guard === null) return null;
+  const rd = rowDispatch({ table, guard, objective: "cost", stratum, install: inst.install });
+  if (table.burn_in) return rd.draw === null ? "draws nothing: every starting Cell is tripped" : `drawn over ${list(rd.draw.cells)}`;
+  if (inst.install === null) return `exploring: not checked: ${inst.why}`;
+  return rd.draw === null ? "exploring nothing: no exploration Cell this install runs is left untripped" : `exploring ${list(rd.draw.cells)}`;
 }
 
 // A candidate's judged generation against the Tier route model of its Cell:
@@ -570,10 +593,9 @@ function intervalWords(range, objective) {
   return `95% interval [${one(range[0])}, ${one(range[1])}]`;
 }
 
-// One row of a table under the guard — the installed table for routes now, the
-// Fit's for evidence favours: the Cell it routes to and why, its
-// dispatch, and each candidate's n (null where the table carries no count),
-// verdict and interval.
+// One row of the routing table under the guard: the Cell it routes to and why,
+// the row's own Cell where the guard holds it back, and each candidate's n (null
+// where the table carries no count), verdict and interval.
 function rowEntry(table, guard, modelRoles, objective, stratum) {
   const rd = rowDispatch({ table, guard, objective, stratum });
   const row = table.rows[objective][stratum];
@@ -585,7 +607,6 @@ function rowEntry(table, guard, modelRoles, objective, stratum) {
     cell: rd.policy,
     held,
     reason: record !== null && typeof record.reason === "string" ? record.reason : "not checked",
-    dispatch: dispatchWords(table, rd, row),
     candidates: Object.entries(isRecord(record?.cells) ? record.cells : {}).map(([cell, x]) => ({
       cell,
       n: count(estimates[cell]?.merged),
@@ -596,108 +617,19 @@ function rowEntry(table, guard, modelRoles, objective, stratum) {
   };
 }
 
-// Routes now's "installed table behind main's", for the one repository whose
-// checkout holds the table the install is a release of: `label` where the
-// checkout's `fitted_commit` and `n_rows` differ from the installed table's, and
-// `check` where the checkout's table could not be compared. `checkout` is
-// gather's read of the checkout's `plugin/scripts/router-table.json`, `{ status:
-// "ok", table } | { status: "missing" } | { status: "unreadable", why }`, or
-// null where nothing read it. A consumer, whose install names another repository,
-// is never compared.
-function behindMain(source, table, checkout) {
-  const none = { label: null, check: null };
-  if (!source.same || table === null || checkout == null) return none;
-  if (checkout.status === "missing") return { label: null, check: "not checked: this checkout holds no plugin/scripts/router-table.json" };
-  if (checkout.status !== "ok") return { label: null, check: `not checked: this checkout's router table was not read: ${checkout.why}` };
-  const main = checkout.table;
-  const commit = (t) => (t.fitted_commit ? String(t.fitted_commit) : null);
-  const mainAt = commit(main);
-  const installedAt = commit(table);
-  if (mainAt === installedAt && main.n_rows === table.n_rows) return none;
-  const on = Number.isInteger(main.n_rows) ? `on ${plural(main.n_rows, "Pull")}` : "on a number of Pulls not checked";
-  const fitted = mainAt === null ? "never fitted" : `fitted at ${mainAt.slice(0, 7)} ${on}`;
-  const routes = installedAt === null ? "a table never fitted" : installedAt.slice(0, 7);
-  return { label: `main's table is ${fitted}; this install routes by ${routes} until the plugin is updated`, check: null };
-}
-
-// The routes-now side of the policy rows: its heading words and every row the
-// installed table holds, `rows[objective][stratum]` — one for each group of its
-// tree, the root `*` and any below it. `rows` is null when no table could be
-// read, and each of its rows then reads `unread`.
-function routesNow({ table, guard, modelRoles, install, repoUrl, checkout }) {
-  const source = routesSource(table, install, repoUrl);
-  const behind = behindMain(source, table, checkout);
-  const foot = source.same ? [] : [{ mark: "¹", text: "this repository's runs reach routing only through its cost guard, which can hold a Cell back but never picks one" }];
-  return {
-    title: "routes now",
-    source: { text: source.text + (foot.length ? " ¹" : ""), check: source.check ?? behind.check },
-    heading: routesHeading(table, guard, source),
-    labels: behind.label === null ? [] : [behind.label],
-    footnotes: foot,
-    rows: table === null ? null : Object.fromEntries(OBJECTIVES.map((o) => [o,
-      Object.fromEntries(Object.keys(table.rows[o]).map((s) => [s, rowEntry(table, guard, modelRoles, o, s)])),
-    ])),
-    unread: "router table not read",
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Policy rows: what the evidence favours — the Fit, `.fleet/router-fit.json`.
-// ---------------------------------------------------------------------------
-
-const FAVOURS = "evidence favours";
-
-// The evidence-favours side with no Fit to lay out: its heading says
-// why, and its column is empty — nothing is unknown there, there is nothing to show.
-const noFit = (heading, labels = []) => ({
-  title: FAVOURS, source: { text: "Fit", check: null }, heading, labels, footnotes: [], rows: null, unread: null,
-});
-
-// The newest refit failed: `step` is the receipts' newest `metrics` step that
-// tried a refit, newestRefit's pick, `p` the Fit read, null when none was. Said
-// while that step's output holds the failed line and no fit was written after
-// it — a `computed_at` before the step's `at`, or one that is no time. A later
-// step that tried a refit, a fit written after this one, or the receipt no
-// longer read clears it; a close-out step, which tries none, does not.
-function refitLabel(step, p) {
-  if (step === null) return [];
-  const why = refitFailure(step.output);
-  if (why === null) return [];
-  const computed = p === null ? NaN : Date.parse(p.computed_at);
-  if (Number.isFinite(computed) && computed >= Date.parse(step.at)) return [];
-  return [`the newest refit failed at ${when(step.at)}: ${why}`];
-}
-
-// The Fit's heading labels, against `raw`, the guard on disk, `routed`,
-// readGuard's answer for it, `table`, the installed one, and `records`, whether
-// the fit read the guard's files: fitted beside another guard, on other records,
-// or against another prior. The prior is
-// compared only on what the fit takes from it — `cells`, `classifier`,
-// `splits`, and `window_start` when the guard gives none — so a release that changes only
-// what the fit recomputes, or `fitted_commit` and `version`, raises nothing: the
-// next phase 0's refit would come out the same.
-function fitLabels(p, raw, routed, table, records) {
+// The Fit's labels against `raw`, the guard on disk, and `records`, whether the
+// Fit read the guard's files: fitted beside another guard, or on other records.
+function fitLabels(p, raw, records) {
   const labels = [];
   if (p.guard_computed_at !== raw.computed_at) labels.push(`fitted beside the guard of ${when(p.guard_computed_at)}, not this one`);
   if (records === null) labels.push("fitted on the guard's records: not checked: this guard predates the blob ids it needs");
   else if (!records) labels.push("fitted on other records than the guard's");
-  if (table === null) {
-    labels.push("fitted against the installed table: not checked: no router table read");
-    return labels;
-  }
-  const read = ["cells", "classifier", "splits", ...(routed.window_start === null ? ["window_start"] : [])];
-  const prior = isRecord(p.prior) ? p.prior : {};
-  if (read.some((k) => !isDeepStrictEqual(prior[k], table[k]))) {
-    const version = prior.version === "0.0.0" ? "linked checkout" : (typeof prior.version === "string" ? prior.version : "no version");
-    const fitted = typeof prior.fitted_commit === "string" && prior.fitted_commit !== "" ? `fitted at ${prior.fitted_commit.slice(0, 7)}` : "never fitted";
-    labels.push(`fitted against ${version} · ${fitted}; the next phase 0 refits`);
-  }
   return labels;
 }
 
-// The Cells whose newest generation's merged n the guard and the fit count
+// The Cells whose newest generation's merged n the guard and the Fit count
 // differently although both read the same files, `records` true: the guard
-// counts merges by GitHub's state, the fit by Rulings. Files the guard names no
+// counts merges by GitHub's state, the Fit by Rulings. Files the guard names no
 // blob ids for, or other files, compare nothing.
 function nDiffers(p, raw, records) {
   if (records !== true) return [];
@@ -708,89 +640,72 @@ function nDiffers(p, raw, records) {
   }).map((e) => e.cell);
 }
 
-// The evidence-favours side: the Fit's table laid out row by row under
-// the workspace's guard, as routes now lays out the installed one, each row's
-// Cell marked where it differs from the Cell routes now gives that row. `fit`
-// is gather's read, `{ status: "ok", fit } | { status: "missing" } | {
-// status: "unreadable", why }`; `guard` readCostGuard's answer and `routed`
-// readGuard's for the same file, null when the router reads none; `step` the
-// receipts' newest `metrics` step that tried a refit, newestRefit's pick; `mark` the footnote mark
-// its n footnote takes.
-function evidenceFavours({ fit: read, guard, routed, table, modelRoles, step, mark }) {
-  if (routed === null) return noFit("no Fit: it is written only beside a cost guard");
-  if (read?.status === "unreadable") return noFit(`no Fit read: ${read.why}`, refitLabel(step, null));
-  if (read?.status !== "ok") return noFit("no Fit yet: the next phase 0 writes one", refitLabel(step, null));
-  const p = read.fit;
-  const fit = p.table;
-  const raw = guard.guard;
-  // Whether the fit read the guard's files: null when the guard names no blob
-  // ids to compare, else whether the two name the same ones.
-  const records = isRecord(raw.tsv_blobs) ? isDeepStrictEqual(p.tsv_blobs, raw.tsv_blobs) : null;
-  const differ = nDiffers(p, raw, records);
-  const entry = (o, s) => {
-    const e = rowEntry(fit, routed, modelRoles, o, s);
-    const now = table === null ? null : rowDispatch({ table, guard: routed, objective: o, stratum: s }).policy;
-    return {
-      ...e,
-      differs: now !== null && now !== e.cell ? "≠ routes now" : null,
-      candidates: e.candidates.map((c) => ({ ...c, nMark: s === "*" && differ.includes(c.cell) ? mark : null })),
-    };
-  };
-  return {
-    title: FAVOURS,
-    source: { text: ["Fit", "this repository's runs", `computed ${when(p.computed_at)}`, plural(fit.n_rows, "Pull")].join(" · "), check: null },
-    heading: fit.burn_in ? `burn-in: ${shortWords(fit, "present") ?? "every starting Cell has its merged PRs"}` : null,
-    labels: [...refitLabel(step, p), ...fitLabels(p, raw, routed, table, records)],
-    footnotes: differ.length === 0 ? [] : [{ mark, text: `${list(differ)}: the guard counts merges by GitHub's state, the fit by Rulings, and the fit admits only drawn or rule-sized Pulls` }],
-    rows: Object.fromEntries(OBJECTIVES.map((o) => [o,
-      Object.fromEntries(Object.keys(fit.rows[o]).map((s) => [s, entry(o, s)])),
-    ])),
-    unread: null,
-  };
+// A group's depth in the tree and its own rule, off its rule path: `*` is the
+// root, and each test joined by `&` is one level below it.
+function groupOf(stratum) {
+  if (stratum === "*") return { depth: 0, rule: "*" };
+  const tests = stratum.split("&");
+  return { depth: tests.length, rule: tests.at(-1) };
 }
 
-// The policy rows as the page lays them out, from each side built above. Pure
-// and side-agnostic: a side's shared dispatch (the one most rows have, the rest
-// showing theirs on the row), its one model-name line when every candidate it
-// names differs, and the Objective of the live run marked. An Objective's lines
-// are the root and then each group any side holds a row for, the first side's
-// groups first: a side the group is no node of reads "no row of its own" there,
-// and follows `*`. Every row has an anchor the
-// `#cells/row/<objective>/<stratum>` link lands on. A side with no rows reads
-// its `unread` on every row; one whose `unread` is null has nothing to show, and
-// its cells are empty.
-export function policyRowsView({ sides, objective = null }) {
-  const entries = (s) => (s.rows === null ? [] : OBJECTIVES.flatMap((o) => Object.values(s.rows[o])));
-  const shared = sides.map((s) => {
-    const seen = new Map();
-    for (const e of entries(s)) seen.set(e.dispatch, (seen.get(e.dispatch) ?? 0) + 1);
-    return [...seen].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
-  });
-  const modelLine = sides.map((s) => {
-    const checks = entries(s).flatMap((e) => e.candidates.map((c) => c.model)).filter((m) => m !== null);
-    return checks.length > 0 && checks.every((m) => m.state === "differs") ? [...new Set(checks.map((m) => m.text))].join("; ") : null;
-  });
-  const show = (e, i) => ({
-    ...e,
-    dispatch: e.dispatch === shared[i] ? null : e.dispatch,
-    candidates: e.candidates.map((c) => (c.model !== null && modelLine[i] !== null ? { ...c, model: { ...c.model, text: null } } : c)),
-  });
-  const cellOf = (s, e, i) => {
-    if (s.rows === null) return s.unread ? { unread: s.unread } : { empty: true };
-    if (e === null) return { follows: "no row of its own: follows *" };
-    return show(e, i);
+/**
+ * The view of the Fit that routes this run. `fit` is gather's read of the Fit
+ * and `starting` the starting table (see routingTable); `guard`
+ * readCostGuard's answer and `routed` readGuard's for the same file, null when
+ * the router reads none; `step` the receipts' newest `metrics` step that tried
+ * a refit; `agents`, `modelRoles` and `catalog` the cockpit's own reads, which
+ * say what this install runs for each group's exploration Cells; `objective`
+ * the live run's, or null. Each Objective's lines are the table's groups in
+ * the table's order, the tree's root first; every line has an anchor the
+ * `#cells/row/<objective>/<stratum>` link lands on. A candidate's generation
+ * check moves to one model-name line when every candidate named differs.
+ */
+function fitView({ fit, starting, guard, routed, modelRoles, catalog, agents, step, objective }) {
+  const { fit: p, table, source } = routingTable(fit, starting);
+  const raw = guard?.status === "ok" ? guard.guard : null;
+  let labels = [];
+  let differ = [];
+  if (p !== null && raw !== null) {
+    // Whether the Fit read the guard's files: null when the guard names no blob
+    // ids to compare, else whether the two name the same ones.
+    const records = isRecord(raw.tsv_blobs) ? isDeepStrictEqual(p.tsv_blobs, raw.tsv_blobs) : null;
+    labels = fitLabels(p, raw, records);
+    differ = nDiffers(p, raw, records);
+  }
+  const mark = "¹";
+  const inst = installFrom(modelRoles, catalog, agents);
+  const entry = (o, s) => {
+    const e = rowEntry(table, routed, modelRoles, o, s);
+    return { ...e, candidates: e.candidates.map((c) => ({ ...c, nMark: s === "*" && differ.includes(c.cell) ? mark : null })) };
   };
-  const strata = (o) => ["*", ...new Set(sides.flatMap((s) => Object.keys(s.rows?.[o] ?? {})).filter((stratum) => stratum !== "*"))];
+  const lines = (o) => (table === null
+    ? [{ stratum: "*", ...groupOf("*"), entry: null, exploring: null, unread: "no starting table read: the rows are not known" }]
+    : Object.keys(table.rows[o]).map((s) => ({ stratum: s, ...groupOf(s), entry: entry(o, s), exploring: exploringWords(table, routed, s, inst), unread: null })));
+  const objectives = OBJECTIVES.map((o) => ({
+    objective: o,
+    live: o === objective,
+    lines: lines(o).map((l) => ({ ...l, anchor: `cells-row-${o}-${l.stratum}`, href: `#cells/row/${o}/${l.stratum}` })),
+  }));
+
+  const checks = objectives.flatMap((o) => o.lines.flatMap((l) => (l.entry === null ? [] : l.entry.candidates.map((c) => c.model)))).filter((m) => m !== null);
+  const modelLine = checks.length > 0 && checks.every((m) => m.state === "differs") ? [...new Set(checks.map((m) => m.text))].join("; ") : null;
+  if (modelLine !== null) {
+    for (const l of objectives.flatMap((o) => o.lines)) {
+      if (l.entry !== null) l.entry.candidates = l.entry.candidates.map((c) => (c.model === null ? c : { ...c, model: { ...c.model, text: null } }));
+    }
+  }
   return {
-    sides: sides.map((s, i) => ({ title: s.title, source: s.source, heading: s.heading, labels: s.labels ?? [], dispatch: shared[i], modelLine: modelLine[i], footnotes: s.footnotes })),
-    objectives: OBJECTIVES.map((o) => ({
-      objective: o,
-      live: o === objective,
-      lines: strata(o).map((stratum) => ({
-        stratum, anchor: `cells-row-${o}-${stratum}`, href: `#cells/row/${o}/${stratum}`,
-        sides: sides.map((s, i) => cellOf(s, s.rows?.[o]?.[stratum] ?? null, i)),
-      })),
-    })),
+    title: "The Fit that routes this run",
+    flag: failedFitFlag(step, p),
+    source,
+    heading: dispatchHeading(table, routed),
+    labels,
+    notices: modelChanges(p),
+    burnIn: burnInProgress(p, routed, table),
+    tripped: trippedWords(routed),
+    modelLine,
+    footnotes: differ.length === 0 ? [] : [{ mark, text: `${list(differ)}: the guard counts merges by GitHub's state, the Fit by Rulings, and the Fit admits only drawn or rule-sized Pulls` }],
+    objectives,
   };
 }
 
@@ -851,9 +766,8 @@ function prIsOpen(pr, openPrs) {
 // A guard that names no blob ids has nothing to compare, and neither has one
 // whose cockpit read nothing (`main` null). The Fit is compared only while it
 // was fitted beside this guard: a guard written after it — a close-out's,
-// which computes no Fit, or one whose refit failed — moves on alone, and
-// evidence favours' heading already says the Fit was fitted beside another
-// guard.
+// which computes no Fit, or one whose refit failed — moves on alone, and the
+// view of the Fit already says it was fitted beside another guard.
 function recordsAgainstMain({ read, fit, main, closeoutPr, openPrs }) {
   const none = { alert: null, note: null };
   if (main == null || read?.status !== "ok") return none;
@@ -949,29 +863,26 @@ function readersAlert(json) {
  * The Cell evidence tab's model. `guard` is `readCostGuard`'s answer, `receipts`
  * is `{ phase0, closeout }`, each the receipt's `metrics` step `{ status, at,
  * output }` or null, `agents` is `{ list: [{ file, model }], error }`, and
- * `modelRoles` the carried `{ value, readAt, error }` or null — `error` being
+ * `modelRoles` and `catalog` the carried `{ value, readAt, error }` reads of
+ * `omp config get modelRoles` and `omp models`, or null — `error` being
  * `{ at, message }`, and `pulls` this run's Pulls, one per card with a Cell line:
  * `{ issue, cell, mark, targets: [{ cell, generation }] }` (compute-board.mjs's
- * cellLine). `table` is the installed router table `validateTable` accepted or
- * null, `install` the install's `{ name, version, repository, error }`
- * (`repository` its url), `repoUrl` the workspace's, `objective` the live
- * run's Objective or null between runs, and `fit` the Fit as gather
- * read `.fleet/router-fit.json`: `{ status: "ok", fit: { computed_at,
- * guard_computed_at, tsv_blobs, prior, table } }`, `{ status: "missing" }` or
- * `{ status: "unreadable", why }`. An input left out reads as nothing
- * read: a missing guard, no receipt, no definitions, no `modelRoles` read, no
- * Pull, no table, no install, no Objective, no Fit.
+ * cellLine). `table` is the starting router table `validateTable` accepted or
+ * null, `objective` the live run's Objective or null between runs, and `fit`
+ * the Fit as gather read `.fleet/router-fit.json`: `{ status: "ok", fit: {
+ * computed_at, guard_computed_at, tsv_blobs, table } }`, `{ status: "missing" }`
+ * or `{ status: "unreadable", why }`. An input left out reads as nothing
+ * read: a missing guard, no receipt, no definitions, no `modelRoles` or catalog
+ * read, no Pull, no table, no Objective, no Fit.
  */
-export function computeCellEvidence({ guard, receipts, agents, modelRoles = null, pulls = [], table = null, install = null, repoUrl = null, objective = null, fit = null,
-  guardJson = null, mainMetrics = null, closeoutPr = null, openPrs = null, checkoutTable = null }) {
+export function computeCellEvidence({ guard, receipts, agents, modelRoles = null, catalog = null, pulls = [], table = null, objective = null, fit = null,
+  guardJson = null, mainMetrics = null, closeoutPr = null, openPrs = null }) {
   const routed = guard?.status === "ok" ? readGuard(guard.guard) : null;
-  const routes = routesNow({ table, guard: routed, modelRoles, install, repoUrl, checkout: checkoutTable });
   const step = newestStep(receipts);
-  const favours = evidenceFavours({ fit, guard, routed, table, modelRoles, step: newestRefit(receipts), mark: superscript(routes.footnotes.length + 1) });
   const records = recordsAgainstMain({ read: guard, fit, main: mainMetrics, closeoutPr, openPrs });
   return {
     alerts: [records.alert, noRulingAlert(guard), readersAlert(guardJson)].filter((a) => a !== null),
-    policy: policyRowsView({ sides: [routes, favours], objective }),
+    policy: fitView({ fit, starting: table, guard, routed, modelRoles, catalog, agents, step: newestRefit(receipts), objective }),
     guard: guardSection(guard, receipts, step, modelRoles, pulls, records.note),
     declared: declaredSection(agents, modelRoles),
   };

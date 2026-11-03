@@ -106,9 +106,7 @@
   .ce-foot { margin-top:8px; }
   #cells-declared summary { cursor:pointer; color:var(--dim); }
   .ce-member { display:flex; gap:10px; flex-wrap:wrap; font-size:12px; margin:2px 0 0 18px; }
-  .ce-sides { display:flex; gap:18px; flex-wrap:wrap; margin-bottom:8px; }
-  .ce-side { flex:1 1 20em; }
-  .ce-row { display:grid; gap:12px; border-top:1px solid var(--line); padding:6px 0; font-size:12px; }
+  .ce-row { display:grid; grid-template-columns:10em minmax(0, 1fr); gap:12px; border-top:1px solid var(--line); padding:6px 0; font-size:12px; }
   .ce-row a { color:var(--blue); text-decoration:none; }
   .ce-cand { color:var(--dim); margin-left:10px; }
   .ce-stratum { font-weight:600; overflow-wrap:anywhere; }
@@ -461,70 +459,74 @@ function ceEntry(e) {
   return box;
 }
 
-// One side's heading on the policy rows: its title, source line, the check it
-// could not make, its burn-in or no-guard heading, its trust labels, its shared
-// dispatch and its model-name line, where each is set.
-function cePolicySide(s) {
-  const box = el("div", "ce-side");
-  box.append(el("div", "ce-verdict", s.title), el("div", "ce-source", s.source.text));
-  if (s.source.check) box.append(el("div", "ce-note", s.source.check));
-  if (s.heading) box.append(el("div", "ce-note", s.heading));
-  for (const label of s.labels || []) box.append(el("div", "ce-note ce-amber", label));
-  if (s.dispatch) box.append(el("div", "ce-note", "dispatch: " + s.dispatch));
-  if (s.modelLine) box.append(el("div", "ce-note ce-amber", s.modelLine));
-  return box;
-}
-
-// One side's cell of a row: the Cell it routes to and why, where it differs
-// from routes now, its own dispatch where it differs from the side's, and each
-// candidate's n, verdict and interval. A side with nothing to show leaves it empty.
-function cePolicyCell(s, href) {
-  const box = el("div", "ce-polcell");
-  if (s.empty) return box;
-  if (s.unread || s.follows) { box.append(el("span", "ce-dim", s.unread || s.follows)); return box; }
-  const hd = el("div", "ce-hd");
-  hd.append(el("span", "ce-cell", s.cell));
-  if (s.differs) hd.append(el("span", "ce-amber", s.differs));
-  const reason = el("a", "ce-dim", s.reason);
-  reason.href = href;
-  hd.append(reason);
-  if (s.held) hd.append(el("span", "ce-amber", s.held));
-  box.append(hd);
-  if (s.dispatch) box.append(el("div", "ce-note", "dispatch: " + s.dispatch));
-  for (const c of s.candidates) {
-    const line = el("div", "ce-cand", `${c.cell} · n ${c.n ?? "not checked"}${c.nMark || ""} · ${c.verdict} · ${c.interval}`);
-    if (c.model && c.model.text) line.append(el("span", "ce-amber", " · " + c.model.text));
-    box.append(line);
+// The heading of the view of the Fit: its failed-Fit flag first, then its
+// source line, the check it could not make, how a Pull is dispatched, its
+// labels and model-change notices, burn-in progress, the tripped Cells and the
+// model-name line, where each is set.
+function ceFitHeading(p) {
+  const box = el("div");
+  if (p.flag) box.append(el("div", "ce-alert ce-verdict", p.flag));
+  box.append(el("div", "ce-source", p.source.text));
+  if (p.source.check) box.append(el("div", "ce-note", p.source.check));
+  if (p.heading) box.append(el("div", "ce-note", p.heading));
+  for (const label of p.labels || []) box.append(el("div", "ce-note ce-amber", label));
+  for (const notice of p.notices || []) box.append(el("div", "ce-note ce-amber", notice));
+  if (p.burnIn) {
+    box.append(el("div", "ce-note", p.burnIn.heading));
+    for (const c of p.burnIn.cells) box.append(el("div", "ce-cand", `${c.cell} · ${c.n} of ${c.of} merged PRs`));
   }
+  if (p.tripped) box.append(el("div", "ce-note", p.tripped));
+  if (p.modelLine) box.append(el("div", "ce-note ce-amber", p.modelLine));
   return box;
 }
 
-// One line of the policy rows: a group's row across every side. It is a place
+// One group's row: the Cell it routes to and why, its own Cell where the guard
+// holds it back, each candidate's n, verdict and interval, and the Cells the
+// group draws over.
+function ceFitEntry(line) {
+  const box = el("div", "ce-polcell");
+  if (line.unread) { box.append(el("span", "ce-dim", line.unread)); return box; }
+  const e = line.entry;
+  const hd = el("div", "ce-hd");
+  hd.append(el("span", "ce-cell", e.cell));
+  const reason = el("a", "ce-dim", e.reason);
+  reason.href = line.href;
+  hd.append(reason);
+  if (e.held) hd.append(el("span", "ce-amber", e.held));
+  box.append(hd);
+  for (const c of e.candidates) {
+    const row = el("div", "ce-cand", `${c.cell} · n ${c.n ?? "not checked"}${c.nMark || ""} · ${c.verdict} · ${c.interval}`);
+    if (c.model && c.model.text) row.append(el("span", "ce-amber", " · " + c.model.text));
+    box.append(row);
+  }
+  if (line.exploring) box.append(el("div", "ce-note", line.exploring));
+  return box;
+}
+
+// One group of the tree, its rule indented by its depth. It is a place
 // `#cells/row/<objective>/<stratum>` lands on.
-function cePolicyLine(line) {
+function ceFitLine(line) {
   const box = ceBox("div", "ce-row", line.anchor);
-  box.style.gridTemplateColumns = `10em repeat(${line.sides.length}, minmax(0, 1fr))`;
-  box.append(el("span", "ce-stratum", line.stratum));
-  for (const s of line.sides) box.append(cePolicyCell(s, line.href));
+  const rule = el("span", "ce-stratum", line.rule);
+  rule.style.paddingLeft = `${line.depth}em`;
+  rule.title = line.stratum;
+  box.append(rule, ceFitEntry(line));
   return box;
 }
 
-// The policy rows, Objective × Stratum: each side's heading, then one row-aligned
-// table with the live run's Objective marked.
+// The view of the Fit that routes this run: its heading, then each Objective's
+// tree of groups, with the live run's Objective marked.
 function cePolicy(p) {
   const sec = ceBox("section", "ce-sec", "cells-rows");
-  sec.append(el("h2", null, "Policy rows: Objective × Stratum"));
-  const sides = el("div", "ce-sides");
-  for (const s of p.sides) sides.append(cePolicySide(s));
-  sec.append(sides);
+  sec.append(el("h2", null, p.title), ceFitHeading(p));
   for (const o of p.objectives) {
     const hd = el("div", "ce-hd ce-obj");
     hd.append(el("span", "ce-cell", o.objective));
     if (o.live) hd.append(el("span", "badge", "this run's Objective"));
     sec.append(hd);
-    for (const line of o.lines) sec.append(cePolicyLine(line));
+    for (const line of o.lines) sec.append(ceFitLine(line));
   }
-  for (const s of p.sides) for (const f of s.footnotes) sec.append(el("div", "ce-foot", `${f.mark} ${f.text}`));
+  for (const f of p.footnotes) sec.append(el("div", "ce-foot", `${f.mark} ${f.text}`));
   return sec;
 }
 
@@ -554,7 +556,7 @@ function renderCells(ce) {
   const g = ce.guard;
 
   const links = el("div", "ce-links");
-  for (const [href, text] of [["#cells/rows", "policy rows"], ["#cells/guard", "the guard"], ["#cells/declared", "declared, not measured"]]) {
+  for (const [href, text] of [["#cells/rows", "the Fit"], ["#cells/guard", "the guard"], ["#cells/declared", "declared, not measured"]]) {
     if (!ce.policy && href === "#cells/rows") continue;
     if (links.children.length) links.append(document.createTextNode(" · "));
     const a = el("a", null, text);

@@ -841,30 +841,13 @@ export function readCloseoutPr(stateDir) {
   return { number: Number(number), at: typeof at === "string" ? at : null };
 }
 
-// The checkout's own router table, `plugin/scripts/router-table.json` under the
-// workspace (the directory `stateDir` is in), as the installed one is read:
-// `{ status: "ok", table }`, `{ status: "missing" }` (no such file: a consumer's
-// checkout) or `{ status: "unreadable", why }`. Never warns: the installed
-// table's read does, and a consumer is not at fault for lacking this file.
-export function readCheckoutTable(stateDir) {
-  let text;
-  try {
-    text = readFileSync(join(dirname(stateDir), "plugin", "scripts", "router-table.json"), "utf8");
-  } catch (e) {
-    return e.code === "ENOENT" ? { status: "missing" } : { status: "unreadable", why: e.code ?? e.message };
-  }
-  let table;
-  try { table = validateTable(JSON.parse(text)); } catch { return { status: "unreadable", why: "not JSON" }; }
-  return table instanceof Error ? { status: "unreadable", why: table.message } : { status: "ok", table };
-}
-
 // The Fit metrics-refresh.mjs writes beside the guard,
 // `.fleet/router-fit.json`: `{ status: "ok", fit }`, `{ status: "missing" }`
 // or `{ status: "unreadable", why }`. Its `table` is read through `validateTable`,
 // as the installed one is, and its `n_rows`, which `validateTable` does not check
 // and the tab prints, must be a count; `computed_at` and `guard_computed_at` must
-// be strings, and `tsv_blobs` and `prior` objects, their values checked where the
-// tab reads them.
+// be strings, and `tsv_blobs` an object, its values checked where the tab reads
+// them.
 export function readFitFile(stateDir) {
   let text;
   try {
@@ -878,13 +861,11 @@ export function readFitFile(stateDir) {
   for (const key of ["computed_at", "guard_computed_at"]) {
     if (typeof p[key] !== "string") return { status: "unreadable", why: `\`${key}\` is not a string` };
   }
-  for (const key of ["tsv_blobs", "prior"]) {
-    if (!isJsonObject(p[key])) return { status: "unreadable", why: `\`${key}\` is not an object` };
-  }
+  if (!isJsonObject(p.tsv_blobs)) return { status: "unreadable", why: "`tsv_blobs` is not an object" };
   const table = validateTable(p.table);
   if (table instanceof Error) return { status: "unreadable", why: table.message };
   if (!Number.isInteger(table.n_rows) || table.n_rows < 0) return { status: "unreadable", why: "router table: `n_rows` is not a count" };
-  return { status: "ok", fit: { computed_at: p.computed_at, guard_computed_at: p.guard_computed_at, tsv_blobs: p.tsv_blobs, prior: p.prior, table } };
+  return { status: "ok", fit: { computed_at: p.computed_at, guard_computed_at: p.guard_computed_at, tsv_blobs: p.tsv_blobs, table } };
 }
 
 // A receipt's `metrics` step, `{ status, at, output }`, or null: no receipt, one
@@ -921,29 +902,6 @@ export function readAgents(scriptDir) {
     }
   }
   return { list, error: null };
-}
-
-// The install's own `package.json`, `../package.json` from the script's
-// directory: `{ name, version, repository, error }`, `repository` the url its
-// field names (the field is a string or `{ url }`), null where it names none.
-// A file that cannot be read or parsed is `error`, with the rest null: the tab
-// words an install it cannot name, never a guess.
-export function readInstall(scriptDir) {
-  const file = join(scriptDir, "..", "package.json");
-  let pkg;
-  try {
-    pkg = JSON.parse(readFileSync(file, "utf8"));
-  } catch (e) {
-    return { name: null, version: null, repository: null, error: `${file}: ${e instanceof SyntaxError ? "not JSON" : (e.code ?? e.message)}` };
-  }
-  if (!isJsonObject(pkg)) return { name: null, version: null, repository: null, error: `${file}: not a JSON object` };
-  const repo = isJsonObject(pkg.repository) ? pkg.repository.url : pkg.repository;
-  return {
-    name: typeof pkg.name === "string" ? pkg.name : null,
-    version: typeof pkg.version === "string" ? pkg.version : null,
-    repository: typeof repo === "string" ? repo : null,
-    error: null,
-  };
 }
 
 // The live run's Objective, off the phase-0 receipt in the workspace's `.fleet`
@@ -1046,6 +1004,32 @@ export async function carryModelRoles(carried, now, read = readModelRoles) {
   return carry(heldRead(carried) ?? NO_READ, now, read, MODEL_ROLES_EVERY_MS);
 }
 
+// `omp models --json`, omp's model catalog, in the cockpit's own environment:
+// `{ ok: true, value }` with `{ models: [{ selector, thinking }] }`, only the
+// models that name the efforts they run at — what a role's ladder is read off
+// for the exploration Cells, so the carried read stays small — or `{ ok: false,
+// why }`.
+export async function readCatalog(timeout = MODEL_ROLES_TIMEOUT_MS) {
+  const argv = ["models", "--json"];
+  const r = await execRead("omp", argv, { timeout });
+  if (r.error) {
+    const how = r.code ?? (r.signal ? `killed by ${r.signal}` : `exit ${r.status}`);
+    return { ok: false, why: `omp ${argv.join(" ")} failed (${how})` };
+  }
+  let parsed;
+  try { parsed = JSON.parse(r.stdout); } catch { return { ok: false, why: `omp ${argv.join(" ")} printed non-JSON` }; }
+  if (!isJsonObject(parsed) || !Array.isArray(parsed.models)) return { ok: false, why: `omp ${argv.join(" ")} printed no model list` };
+  const models = parsed.models
+    .filter((m) => isJsonObject(m) && typeof m.selector === "string" && Array.isArray(m.thinking))
+    .map((m) => ({ selector: m.selector, thinking: m.thinking.filter((t) => typeof t === "string") }));
+  return { ok: true, value: { models } };
+}
+
+// The carried model catalog read, the same way as `modelRoles`.
+export async function carryCatalog(carried, now, read = readCatalog) {
+  return carry(heldRead(carried) ?? NO_READ, now, read, MODEL_ROLES_EVERY_MS);
+}
+
 // The carried `docs/metrics` contents call, the same way: `value` is `{ blobs }`,
 // `blobs` null for a 404 and otherwise main's blob id by path. A workspace whose
 // repository the cockpit cannot name has nothing to ask `gh api` about, and says
@@ -1089,7 +1073,7 @@ export async function carryMainMetrics(carried, now, repoUrl, read = readMainMet
 // `stateDir` is the workspace's `.fleet` directory, where the cost guard and the
 // receipts the Cell evidence tab reads live. Null, as with `stateFile`, says no
 // caller named one: that tab is then built from no guard and no receipt, and the
-// cockpit's `omp` is not asked for `modelRoles`.
+// cockpit's `omp` is not asked for `modelRoles` or its model catalog.
 //
 // `cwd` is the checkout whose Label map is read, once per gather, through
 // label-map.mjs's reader; it defaults to this process's cwd, where every `gh`
@@ -1335,29 +1319,28 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, stateDir 
   const now = Date.now();
   const stallOwnerOf = isStalled(assessBeat({ beat, ticked, acted, controller, now })) ? stallOwner(controller, NAME) : null;
   // The Cell evidence tab's inputs. Every file again on every tick, nothing
-  // cached, the rule of every read here; the one exception is `modelRoles`, one
-  // child spawn, carried from the previous board and read again at most once a
-  // minute. `stateDir` is the workspace's `.fleet`: a caller that names none names
-  // no workspace, so it reads none of the workspace's records and spawns no `omp`
-  // either (a guard that reads as missing, no receipts, the read carried as it was).
+  // cached, the rule of every read here; the exceptions are `modelRoles` and the
+  // model catalog, one child spawn each, carried from the previous board and read
+  // again at most once a minute. `stateDir` is the workspace's `.fleet`: a caller
+  // that names none names no workspace, so it reads none of the workspace's
+  // records and spawns no `omp` either (a guard that reads as missing, no
+  // receipts, the reads carried as they were).
   const guard = stateDir === null ? { status: "missing" } : readGuardFile(stateDir);
   const guardJson = stateDir === null ? null : readGuardJson(stateDir);
   const fit = stateDir === null ? { status: "missing" } : readFitFile(stateDir);
   const closeoutPr = stateDir === null ? null : readCloseoutPr(stateDir);
-  const checkoutTable = stateDir === null ? { status: "missing" } : readCheckoutTable(stateDir);
   const receipts = stateDir === null
     ? { phase0: null, closeout: null }
     : { phase0: readMetricsStep(join(stateDir, RECEIPT)), closeout: readMetricsStep(join(stateDir, CLOSEOUT_RECEIPT)) };
   const agents = readAgents(scriptDir);
-  const install = readInstall(scriptDir);
   const objective = stateDir === null ? null : readObjective(stateDir);
   // Read side by side: each has its own 10 s timeout, and one after the other a
-  // tick on which both hang would stall twice as long.
-  const [modelRoles, mainMetrics] = stateDir === null
-    ? [heldRead(prev?.modelRoles), null]
-    : await Promise.all([carryModelRoles(prev?.modelRoles, now), carryMainMetrics(prev?.mainMetrics, now, repoUrl)]);
+  // tick on which every one hangs would stall once for each.
+  const [modelRoles, catalog, mainMetrics] = stateDir === null
+    ? [heldRead(prev?.modelRoles), heldRead(prev?.catalog), null]
+    : await Promise.all([carryModelRoles(prev?.modelRoles, now), carryCatalog(prev?.catalog, now), carryMainMetrics(prev?.mainMetrics, now, repoUrl)]);
   return { ledger, issues, prs, merged, closed, closedIssues, ci, prev, repo, repoUrl, workspace, port, spend, beat, ticked, acted, controller, stallOwner: stallOwnerOf, poolOk,
     roles, labelMapError,
-    poolCapped, prsOk, prsCapped, guard, guardJson, fit, receipts, closeoutPr, agents, modelRoles, mainMetrics, install, objective, implementers: [...implementers.values()], routerTable, checkoutTable,
+    poolCapped, prsOk, prsCapped, guard, guardJson, fit, receipts, closeoutPr, agents, modelRoles, catalog, mainMetrics, objective, implementers: [...implementers.values()], routerTable,
     now, interval };
 }

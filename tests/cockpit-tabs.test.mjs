@@ -827,12 +827,12 @@ test("a guard entry lists this run's Pulls booked to it, each with its mark", ()
   assert.ok(textOf(document.getElementById("cell-slow-high@claude-opus-6")).includes("no figures yet for claude-opus-6"));
 });
 
-// -- the policy rows: routes now, row by row ------------------------------------------------------
+// -- the view of the Fit that routes this run -----------------------------------------------------
 
-// The day-one table, not plugin/scripts/router-table.json: a re-fit moves the shipped one.
+// The day-one table, not plugin/scripts/router-table.json: the starting table every repository begins from.
 const SHIPPED_TABLE = DAY_ONE_TABLE;
-const rowsInstall = { name: "@feigi/fleet-ctl", version: "3.104.0", repository: "git+https://github.com/feigi/fleet-plugin.git", error: null };
-const policyEvidence = (o = {}) => evidence({ table: SHIPPED_TABLE, install: rowsInstall, repoUrl: "https://github.com/feigi/fleet-plugin", ...o });
+// With no Fit read, the starting table routes.
+const policyEvidence = (o = {}) => evidence({ table: SHIPPED_TABLE, ...o });
 // A table fitted on 198 Pulls: the root splits on the brief's length, and the group above the cut has a row of its own.
 const FITTED_ROWS = {
   ...SHIPPED_TABLE, fitted_commit: "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d", n_rows: 198, window_start: "2026-10-03",
@@ -851,16 +851,18 @@ const FITTED_ROWS = {
   estimates: { "*": { "task-high": { generation: "claude-sonnet-5-5", merged: 60 } } },
 };
 
-test("the policy rows come first on Cell evidence and draw each side's words and every row", () => {
+test("the view of the Fit comes first on Cell evidence and draws its words and every line", () => {
   const { document, render, model, open } = harness();
   open("#cells");
   render(model({ cellEvidence: policyEvidence({ objective: "speed" }) }));
   const host = document.getElementById("cells");
   assert.deepEqual(host.children.map((c) => c.id).filter(Boolean), ["cells-rows", "cells-guard", "cells-declared"]);
   const text = textOf(document.getElementById("cells-rows")).replace(/\s+/g, " ");
-  for (const words of ["Policy rows: Objective × Stratum", "routes now", "this repository's runs · never fitted · @feigi/fleet-ctl 3.104.0",
-    "never fitted: every Pull drawn over 3 Cells", "dispatch: drawn over 3 Cells: slow-high, task-high, smol-high", "slow-high", "unjudged"]) {
-    assert.ok(text.includes(words), `the rows do not draw ${JSON.stringify(words)}`);
+  for (const words of ["The Fit that routes this run", "starting table · no Fit yet: the next phase 0 writes one",
+    "burn-in: every Pull is drawn over the starting Cells the guard has not tripped", "burn-in: 2 of 3 starting Cells have the 20 merged PRs each needs",
+    "slow-high · 69 of 20 merged PRs", "smol-high · 0 of 20 merged PRs", "the cost guard has tripped no Cell", "slow-high", "unjudged",
+    "drawn over slow-high, task-high and smol-high"]) {
+    assert.ok(text.includes(words), `the view does not draw ${JSON.stringify(words)}`);
   }
   assert.equal(text.includes("this run's Objective"), true);
   const ids = idsOf(document.getElementById("cells-rows"));
@@ -940,7 +942,7 @@ test("a card's link to its policy row lands on the row of its rule path when the
       ledger: { rows: ["#31 impl-31"], routed: [routed("impl-31", { stratum: ABOVE })], agents: {}, filed: [], ruled: [] },
       issues: [], prs: [], ci: {}, prev: null, now: Date.now(), implementers: [implRec("impl-31", "slow-high", "claude-opus-5")],
       guard: ceGuard(), modelRoles: ceRoles, receipts: { phase0: null, closeout: null }, agents: ceAgents,
-      install: rowsInstall, repoUrl: "https://github.com/feigi/fleet-plugin",
+      repoUrl: "https://github.com/feigi/fleet-plugin",
     }));
     const link = linksIn(document.getElementById("card-31")).find((h) => h.startsWith("#cells/row/"));
     assert.equal(link, `#cells/row/cost/${group}`, why);
@@ -950,16 +952,18 @@ test("a card's link to its policy row lands on the row of its rule path when the
   }
 });
 
-test("a row's own reason is a link to it, and a row of its own draws its Cell, reason and each candidate", () => {
+test("a group's own reason is a link to it, and its line draws its rule, its Cell, reason, each candidate and its draw", () => {
   const { document, render, model } = harness();
   render(model({ cellEvidence: policyEvidence({ table: FITTED_ROWS }) }));
   const row = document.getElementById("cells-row-cost-*");
   const link = linksIn(row);
   assert.deepEqual(link, ["#cells/row/cost/*"]);
   const text = textOf(row).replace(/\s+/g, " ");
-  for (const words of ["slow-high", "no-qualifier", "task-high · n 60 · not-reliably-cheaper · 95% interval [−$1.25, $0.50]"]) assert.ok(text.includes(words), words);
-  assert.equal(document.getElementById(`cells-row-cost-${BELOW}`).children.length, 3, "the group, then routes now, then evidence favours: a row of its own to each");
-  assert.ok(textOf(document.getElementById(`cells-row-cost-${ABOVE}`)).includes("task-high"), "a group with a row of its own keeps it");
+  for (const words of ["slow-high", "no-qualifier", "task-high · n 60 · not-reliably-cheaper · 95% interval [−$1.25, $0.50]", "drawn over slow-high, task-high and smol-high"]) assert.ok(text.includes(words), words);
+  assert.equal(row.children.length, 2, "the group's rule, then its one entry");
+  const above = document.getElementById(`cells-row-cost-${ABOVE}`);
+  assert.ok(textOf(above).includes("task-high"), "a group with a row of its own keeps it");
+  assert.equal(above.children[0].style.paddingLeft, "1em", "a group one split down is indented one level");
 });
 
 test("a candidate whose estimate carries no count reads n not checked on the page, never n 0", () => {
@@ -969,22 +973,14 @@ test("a candidate whose estimate carries no count reads n not checked on the pag
   assert.ok(text.includes("task-high · n not checked · not-reliably-cheaper"), text);
 });
 
-test("a consumer's rows read <owner/name>'s runs and carry the footnote under the section", () => {
-  const { document, render, model } = harness();
-  render(model({ cellEvidence: policyEvidence({ repoUrl: "https://ghe.example.com/acme/widgets" }) }));
-  const rows = document.getElementById("cells-rows");
-  const text = textOf(rows).replace(/\s+/g, " ");
-  assert.ok(text.includes("feigi/fleet-plugin's runs · never fitted · @feigi/fleet-ctl 3.104.0 ¹"));
-  assert.equal(rows.children.at(-1).className, "ce-foot");
-  assert.equal(rows.children.at(-1).textContent, "¹ this repository's runs reach routing only through its cost guard, which can hold a Cell back but never picks one");
-});
-
-test("an install naming no repository draws 'another repository's runs' and 'not checked'", () => {
-  const { document, render, model } = harness();
-  render(model({ cellEvidence: policyEvidence({ install: { ...rowsInstall, repository: null } }) }));
-  const text = textOf(document.getElementById("cells-rows")).replace(/\s+/g, " ");
-  assert.ok(text.includes("another repository's runs · never fitted"));
-  assert.ok(text.includes("not checked: the install names no repository"));
+test("no sentence on the page says a repository's runs reach routing only through its cost guard, and nothing is drawn as two sides", () => {
+  for (const ce of [policyEvidence(), policyEvidence({ guard: besideGuard(), fit: fitRead() }), policyEvidence({ guard: { status: "missing" } })]) {
+    const { document, render, model } = harness();
+    render(model({ cellEvidence: ce }));
+    const text = textOf(document.getElementById("cells")).replace(/\s+/g, " ");
+    for (const words of ["only through its cost guard", "routes now", "evidence favours"]) assert.equal(text.includes(words), false, words);
+  }
+  assert.doesNotMatch(HTML, /routes now|evidence favours|ce-sides/);
 });
 
 test("a model name label is drawn where a candidate's judged generation differs from its Cell's Tier route model", () => {
@@ -995,7 +991,7 @@ test("a model name label is drawn where a candidate's judged generation differs 
   assert.ok(text.includes("judged on claude-sonnet-5-5; task-high runs anthropic/claude-sonnet-5-6 here"));
 });
 
-// -- the policy rows: what the evidence favours ----------------------------------------------------
+// -- the view of the Fit: a Fit read beside its guard ---------------------------------------------
 
 const fitReason = { cell: "task-high", reason: "sole-qualifier", cells: { "task-high": { verdict: "qualifies", range: [-3.1, -0.4] } }, pairs: [] };
 const fitRead = (o = {}) => ({
@@ -1015,37 +1011,60 @@ const fitRead = (o = {}) => ({
 });
 const besideGuard = () => ({ ...ceGuard(), guard: { ...ceGuard().guard, tsv_blobs: { "docs/metrics/tier-outcomes.tsv": "18b6a980" } } });
 
-test("evidence favours is drawn beside routes now: its source, its burn-in heading, each row's Cell marked ≠ routes now, and the n footnote", () => {
+test("the Fit that routes is drawn as one view: its source, burn-in progress, each group's Cell and candidates, and the n footnote", () => {
   const { document, render, model } = harness();
   render(model({ cellEvidence: policyEvidence({ guard: besideGuard(), fit: fitRead() }) }));
   const rows = document.getElementById("cells-rows");
   const text = textOf(rows).replace(/\s+/g, " ");
-  for (const words of ["evidence favours", "Fit · this repository's runs · computed 2026-10-26 19:17Z · 235 Pulls",
-    "burn-in: smol-high has 12 of the 20 merged PRs it needs", "task-high ≠ routes now", "task-high · n 67¹ · qualifies · 95% interval [−$3.10, −$0.40]"]) {
+  for (const words of ["Fit · computed 2026-10-26 19:17Z · 235 Pulls", "burn-in: 2 of 3 starting Cells have the 20 merged PRs each needs", "smol-high · 12 of 20 merged PRs",
+    "task-high · n 67¹ · qualifies · 95% interval [−$3.10, −$0.40]", "drawn over slow-high, task-high and smol-high"]) {
     assert.ok(text.includes(words), `the rows do not draw ${JSON.stringify(words)}`);
   }
   const row = document.getElementById("cells-row-cost-*");
-  assert.equal(row.children.length, 3, "the Stratum, then routes now, then evidence favours");
-  assert.ok(textOf(row.children[1]).includes("slow-high"));
-  assert.ok(textOf(row.children[2]).includes("≠ routes now"));
-  assert.equal(textOf(row.children[1]).includes("≠"), false, "routes now carries no mark");
-  assert.equal(rows.children.at(-1).textContent, "¹ task-high: the guard counts merges by GitHub's state, the fit by Rulings, and the fit admits only drawn or rule-sized Pulls");
+  assert.equal(row.children.length, 2, "the group's rule, then its one entry");
+  assert.ok(textOf(row.children[1]).includes("task-high"));
+  assert.equal(rows.children.at(-1).textContent, "¹ task-high: the guard counts merges by GitHub's state, the Fit by Rulings, and the Fit admits only drawn or rule-sized Pulls");
 });
 
-test("evidence favours' heading labels are drawn in its heading, and with no Fit its column is empty", () => {
-  const labelled = harness();
-  labelled.render(labelled.model({ cellEvidence: policyEvidence({ guard: besideGuard(), fit: fitRead({ guard_computed_at: "2026-10-25T08:00:00.000Z" }) }) }));
-  const side = labelled.document.getElementById("cells-rows").children.find((c) => c.className === "ce-sides").children[1];
-  assert.ok(textOf(side).includes("fitted beside the guard of 2026-10-25 08:00Z, not this one"), textOf(side));
+const failedReceipts = { phase0: { status: "ok", at: "2026-10-28T08:00:00.000Z", output: "metrics-refresh: fit: failed — EISDIR" }, closeout: null };
 
-  const none = harness();
-  none.render(none.model({ cellEvidence: policyEvidence() }));
-  const rows = none.document.getElementById("cells-rows");
-  assert.ok(textOf(rows).includes("no Fit yet: the next phase 0 writes one"));
-  const row = none.document.getElementById("cells-row-cost-*");
-  assert.equal(row.children.length, 3);
-  assert.deepEqual(row.children[2].children, [], "nothing is unknown there: the column is empty");
-  assert.equal(none.document.getElementById(`cells-row-cost-${BELOW}`), null, "a one-node tree has no row for a group it does not hold");
+test("a failed Fit is flagged first in the view's heading, above the last good Fit's rows, and its labels follow", () => {
+  const { document, render, model } = harness();
+  render(model({ cellEvidence: policyEvidence({ guard: besideGuard(), fit: fitRead({ guard_computed_at: "2026-10-25T08:00:00.000Z" }), receipts: failedReceipts }) }));
+  const heading = document.getElementById("cells-rows").children[1];
+  assert.equal(heading.children[0].textContent, "this run's Fit failed at 2026-10-28 08:00Z: EISDIR; the last good Fit, computed 2026-10-26 19:17Z, routes");
+  assert.ok(textOf(heading).includes("fitted beside the guard of 2026-10-25 08:00Z, not this one"));
+  assert.ok(textOf(document.getElementById("cells-row-cost-*")).includes("task-high"), "the last good Fit's row");
+});
+
+test("a failed Fit with none ever written is flagged above the starting table's rows", () => {
+  const { document, render, model } = harness();
+  render(model({ cellEvidence: policyEvidence({ fit: { status: "missing" }, receipts: failedReceipts }) }));
+  const heading = document.getElementById("cells-rows").children[1];
+  assert.equal(heading.children[0].textContent, "this run's Fit failed at 2026-10-28 08:00Z: EISDIR; no Fit is read, so the starting table routes");
+  const row = document.getElementById("cells-row-cost-*");
+  assert.ok(textOf(row).includes("slow-high") && textOf(row).includes("unjudged"), "the starting table's row");
+});
+
+test("a role whose model changed and restarted burn-in shows its notice in the view's heading", () => {
+  const { document, render, model } = harness();
+  const fit = fitRead();
+  fit.fit.table = {
+    ...fit.fit.table,
+    estimates: { "*": { "task-high": { generation: "claude-sonnet-5-5", merged: 3, older: { "claude-sonnet-5-4": { merged: 30 } } } } },
+    guard: { tripped: [], n: { "slow-high": 69, "task-high": 3, "smol-high": 12 } },
+  };
+  render(model({ cellEvidence: policyEvidence({ guard: besideGuard(), fit }) }));
+  assert.ok(textOf(document.getElementById("cells-rows").children[1]).includes("task-high's model changed to claude-sonnet-5-5, after claude-sonnet-5-4: burn-in restarted, at 3 of the 20 merged PRs it needs"));
+});
+
+test("the Cells the guard has tripped are named in the view's heading", () => {
+  const { document, render, model } = harness();
+  const tripped = { ...ceGuard(), guard: { ...ceGuard().guard, verdict: "tripped", tripped: ["task-high"] } };
+  render(model({ cellEvidence: policyEvidence({ guard: tripped }) }));
+  const text = textOf(document.getElementById("cells-rows")).replace(/\s+/g, " ");
+  assert.ok(text.includes("tripped by the cost guard: task-high"));
+  assert.ok(text.includes("drawn over slow-high and smol-high"));
 });
 
 test("a board.json from before the policy rows draws the tab without them, and no link to them", () => {
