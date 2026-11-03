@@ -20,7 +20,7 @@
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
@@ -86,7 +86,11 @@ const pluginTree = (dir) => {
 };
 
 const IMPL = { kind: "sub", id: "impl-42", name: "fleet-implementer-slow-high", depth: 1, parentId: "Main" };
-const OTHER_CELLS = ["slow-medium", "task-high", "task-max", "smol-high"].map((cell) => ({ ...IMPL, name: `fleet-implementer-${cell}` }));
+// Every other Cell's definition on disk, so a Cell added later is held to the rule the day it lands.
+const OTHER_CELLS = readdirSync(new URL("../plugin/agents/", import.meta.url))
+  .map((f) => /^(fleet-implementer-.+)\.agent\.md$/.exec(f)?.[1])
+  .filter((name) => name !== undefined && name !== IMPL.name)
+  .map((name) => ({ ...IMPL, name }));
 const REVIEWER = { kind: "sub", id: "review-pr-9.Correctness", name: "fleet-review-correctness", depth: 2, parentId: "review-pr-9" };
 const FINISHER = { kind: "sub", id: "finisher-pr-9", name: "fleet-finisher", depth: 1, parentId: "Main" };
 const CHILD = { kind: "sub", id: "impl-42.Probe", name: "task", depth: 2, parentId: "impl-42" };
@@ -197,6 +201,7 @@ test("a fix-applier is guarded whether or not its definition name says so: bash 
 test("bash: an implementer is refused from the main checkout, never from its worktree; nobody else is", async () => {
   const r = await refused(IMPL, "bash", { command: "git status" }, ROOT, "implementer bash with no cwd");
   assert.ok(r.includes(REAL_ROOT), `the bash refusal does not name the cwd it resolved: ${r}`);
+  assert.ok(OTHER_CELLS.some((c) => c.name === "fleet-implementer-task-max"), "the other Cells' definitions were read");
   for (const cell of OTHER_CELLS) await refused(cell, "bash", { command: "true" }, ROOT, `${cell.name} bash with no cwd`);
   // The bash rule is closed to the `CELL` grammar: a `fleet-implementer-`
   // name outside it is no implementer definition, and keeps the inherited cwd.

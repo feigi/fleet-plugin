@@ -35,11 +35,18 @@ import { costGuardFault } from "./fleet-tick.mjs";
 import { MIN_N, parseGuard, readGuard, rowDispatch } from "./ticket-router.mjs";
 import { implementerCell, modelsEqual, parseModelRoute, resolveRole } from "./tier-roles.mjs";
 
-// The implementer Cells, in the order the guard section draws them. All five are
-// drawn in every state: a card or a rescue can name any of them, and no link may
-// point at nothing. A Cell the guard holds beyond these is drawn after them
-// rather than left out.
-export const CELLS = Object.freeze(["slow-high", "task-high", "smol-high", "slow-medium", "task-max"]);
+// The implementer Cells, in the order the guard section draws them: one per
+// definition, every role × level from low to max. All of them are drawn in
+// every state: a card or a rescue can name any of them, and no link may point
+// at nothing. The five Cells that had definitions first keep their order; the
+// rest follow by role (slow, task, smol), each role's levels low to max. A
+// Cell the guard holds beyond these is drawn after them rather than left out.
+export const CELLS = Object.freeze([
+  "slow-high", "task-high", "smol-high", "slow-medium", "task-max",
+  "slow-low", "slow-xhigh", "slow-max",
+  "task-low", "task-medium", "task-xhigh",
+  "smol-low", "smol-medium", "smol-xhigh", "smol-max",
+]);
 
 const MINUS = "−";
 const SUPERSCRIPT = "⁰¹²³⁴⁵⁶⁷⁸⁹";
@@ -367,7 +374,7 @@ function booked(entry, pulls) {
   return out;
 }
 
-// The Cells drawn: the five, then any the guard holds or a card names beyond them.
+// The Cells drawn: CELLS, then any the guard holds or a card names beyond them.
 const drawOrder = (held, pulls) => [...new Set([...CELLS, ...held, ...pulls.flatMap((p) => p.targets.map((t) => t.cell)).filter((c) => CELL.test(c))])];
 
 // `step` is the receipts' newest `metrics` step, newestStep's pick.

@@ -11,7 +11,7 @@
 // nothing, so a read demanded of them would be a false refusal.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
 import { memberPrompt } from "./support/render-brief.mjs";
@@ -126,7 +126,9 @@ test("every member that reads says a refusal never types the role name", () => {
 });
 
 test("the implementers read nothing: their one role mention is a prohibition", () => {
-  for (const name of ["fleet-implementer-slow-high", "fleet-implementer-slow-medium", "fleet-implementer-smol-high", "fleet-implementer-task-high", "fleet-implementer-task-max"]) {
+  const names = readdirSync(join(PLUGIN, "agents")).map((f) => /^(fleet-implementer-.+)\.agent\.md$/.exec(f)?.[1]).filter(Boolean);
+  assert.ok(names.includes("fleet-implementer-slow-high"), "the implementer definitions were read");
+  for (const name of names) {
     const text = file("agents", `${name}.agent.md`).text;
     assert.doesNotMatch(text, SHOW_RE, `${name} reads the Label map`);
     assert.match(text, Pin.phrase("Never apply `ready-to-merge`, never merge."), `${name} lost its prohibition`);

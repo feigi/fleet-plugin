@@ -572,7 +572,12 @@ test("Cell evidence: the pane draws the model's words, the guard section first a
   assert.equal(declared.tag, "details");
   assert.equal(declared.open, false, "collapsed until it is opened");
   const order = guard.children.filter((c) => /^cell-/.test(c.id ?? "")).map((c) => c.id);
-  assert.deepEqual(order, ["cell-slow-high", "cell-task-high", "cell-smol-high", "cell-slow-medium", "cell-task-max"]);
+  assert.deepEqual(order, [
+    "cell-slow-high", "cell-task-high", "cell-smol-high", "cell-slow-medium", "cell-task-max",
+    "cell-slow-low", "cell-slow-xhigh", "cell-slow-max",
+    "cell-task-low", "cell-task-medium", "cell-task-xhigh",
+    "cell-smol-low", "cell-smol-medium", "cell-smol-xhigh", "cell-smol-max",
+  ]);
 });
 
 test("Cell evidence: an alert is drawn first, in the model's words, and the tab's label carries ⚠n from the same list whichever tab is open", () => {

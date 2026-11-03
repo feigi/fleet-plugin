@@ -257,7 +257,7 @@ test("the fix-applier's stash rule says nothing partitions the stack, so the pro
 // must not forbid it there. The exemption is pinned to "never pushed" — the
 // clause that makes it safe — and to the commit that IS pushed running the
 // hooks, so a bare "a WIP commit may take `--no-verify`" cannot stand in. It
-// lives in the stash block of all five implementer bodies and the fix-applier's.
+// lives in the stash block of every implementer body and the fix-applier's.
 const WIP_EXEMPTION =
   "A WIP commit may take `--no-verify` — it is never pushed: the amend or the real commit after `git reset --soft HEAD^` runs the repository's hooks, and that commit is the one you push.";
 

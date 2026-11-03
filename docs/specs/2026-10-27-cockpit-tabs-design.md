@@ -279,9 +279,12 @@ window from <date> · min 20 merged PRs · floor 15 pts over slow-high" (from
 heading-level checks: "not checked" with why (§ 6.1), a failing `modelRoles`
 read, the no-guard quotes (§ 5.1), and an alert-level check that cannot run.
 
-**All five implementer Cells are always drawn**, in a fixed order:
-slow-high, task-high, smol-high, slow-medium, task-max. A card or a rescue
-can name any of them, and no link may point at nothing.
+**Every implementer Cell is always drawn**, one per definition, in a fixed
+order: slow-high, task-high, smol-high, slow-medium, task-max, then the rest
+by role (slow, task, smol), each role's levels low to max: slow-low,
+slow-xhigh, slow-max, task-low, task-medium, task-xhigh, smol-low,
+smol-medium, smol-xhigh, smol-max. A card or a rescue can name any of them,
+and no link may point at nothing.
 
 **Each entry's header line:** the Cell, "judged on <generation>", "Tier route:
 <model> · <level>" with "⚑ differs from the judged generation" where it does
