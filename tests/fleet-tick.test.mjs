@@ -1390,12 +1390,83 @@ test("deriveRun: the verdict is read by review run and highest retry, never by p
 test("deriveRun: a second review at the same head is answered by none of the first review's verdicts", () => {
   const round1 = "reviewed=abc1234:2/0/0:run-Round1aa · fix-pr-21=applied:def5678 · dispositions-ok=fix-pr-21:run-Round1aa";
   const r = run({ rows: [`#20 impl-20=PR#21 → PR#21 · ${round1} · review=wf:x reviewed=abc1234:1/0/0:run-Round2bb`] }, [pr(21)]);
-  assert.deepEqual(r.reviewed, [{ pr: 21, head: "abc1234", run: "run-Round2bb", survived: 1, unverified: 0, dispositions: null, fixLive: [] }]);
+  assert.deepEqual(r.reviewed, [{ pr: 21, head: "abc1234", fleetHead: "abc1234", run: "run-Round2bb", survived: 1, unverified: 0, dispositions: null, fixLive: [] }]);
   assert.deepEqual(r.fixDue, [21]);
   // Control: the same verdict answers the review whose run it names.
   const once = run({ rows: [`#20 impl-20=PR#21 → PR#21 · ${round1}`] }, [pr(21)]);
   assert.deepEqual(once.reviewed[0].dispositions, { verdict: "ok", member: "fix-pr-21" });
   assert.deepEqual(once.fixDue, []);
+});
+
+// A PR's `fleetHead`, on its `reviewed[]` entry: the head its branch stands at
+// as the ledger knows it. A returned review sets it to that review's head, and
+// of the fix-appliers that landed `applied:<head>` after the review, the one
+// with the greatest retry suffix moves it to its head; `no-op` pushes nothing,
+// and a `failed`, `killed` or live member has no head the ledger knows.
+const REVIEW_1 = "reviewed=abc1234:1/0/0:run-abc1234r";
+const REVIEW_2 = "review=wf:x reviewed=fedcba9:0/0/0:run-fedcba9r";
+const fleetHeadOf = (...tokens) => run({ rows: [`#20 impl-20=PR#21 → PR#21 · ${tokens.join(" · ")}`] }, [pr(21)]).reviewed.find((x) => x.pr === 21)?.fleetHead;
+
+test("deriveRun: a returned review's fleetHead is its own head, and each applied: landed after it moves it", () => {
+  assert.equal(fleetHeadOf(REVIEW_1), "abc1234");
+  assert.equal(fleetHeadOf(REVIEW_1, "fix-pr-21=applied:def5678"), "def5678");
+  assert.equal(fleetHeadOf(REVIEW_1, "fix-pr-21=applied:def5678", "fix-pr-21-b=applied:0123abc"), "0123abc", "the fix-applier landed after the other names it");
+});
+
+test("deriveRun: a newer reviewed= resets the fleetHead to its own head, whatever landed before it", () => {
+  assert.equal(fleetHeadOf(REVIEW_1, "fix-pr-21=applied:def5678", REVIEW_2), "fedcba9");
+  assert.equal(fleetHeadOf(REVIEW_1, "fix-pr-21=applied:def5678", REVIEW_2, "fix-pr-21-b=applied:0123abc"), "0123abc", "and an applied: after it moves it again");
+});
+
+test("deriveRun: the fleetHead is the head of the landed fix-applier with the greatest retry suffix, wherever a row rewrite put its token", () => {
+  assert.equal(fleetHeadOf(REVIEW_1, "fix-pr-21-b=applied:0123abc", "fix-pr-21=applied:def5678"), "0123abc", "a -b retry's token before the older one's");
+  // Settled in `## Dispatched` alone, the older member lands where its bare
+  // copy sits — after the -b token here — and still names no later push.
+  const bareAfter = run({ rows: [`#20 impl-20=PR#21 → PR#21 · ${REVIEW_1} · fix-pr-21-b=applied:0123abc · fix-pr-21`], dispatched: ["fix-pr-21=applied:def5678"] }, [pr(21)]);
+  assert.equal(bareAfter.reviewed[0].fleetHead, "0123abc");
+});
+
+test("deriveRun: a retry suffix is compared only among fix-appliers landed since the latest reviewed=", () => {
+  assert.equal(fleetHeadOf(REVIEW_1, "fix-pr-21-b=applied:0123abc", REVIEW_2, "fix-pr-21=applied:def5678"), "def5678");
+});
+
+test("deriveRun: only an applied: outcome moves the fleetHead — no-op, failed, killed and a live fix-applier leave it", () => {
+  for (const outcome of ["=no-op", "=failed", "=killed", ""]) {
+    assert.equal(fleetHeadOf(REVIEW_1, `fix-pr-21${outcome}`), "abc1234", `with no push before it: fix-pr-21${outcome}`);
+    assert.equal(fleetHeadOf(REVIEW_1, "fix-pr-21=applied:def5678", `fix-pr-21-b${outcome}`), "def5678", `after a push: fix-pr-21-b${outcome}`);
+  }
+});
+
+test("deriveRun: a conflict fix-applier's applied: moves the fleetHead like a review fix-applier's", () => {
+  assert.equal(fleetHeadOf(REVIEW_1, "conflict-hold:#21", "fix-pr-21=applied:def5678"), "def5678");
+});
+
+test("deriveRun: the fleetHead is lowercase, as the reviewed head is, whatever case the tokens spell", () => {
+  assert.equal(fleetHeadOf("reviewed=ABC1234:1/0/0:run-abc1234r"), "abc1234");
+  assert.equal(fleetHeadOf("reviewed=ABC1234:1/0/0:run-abc1234r", "fix-pr-21=applied:DEF5678"), "def5678");
+});
+
+test("deriveRun: a fix-applier lands once, wherever its copies sit — a second copy after a newer reviewed= moves nothing", () => {
+  const twice = run({ rows: [`#20 impl-20=PR#21 → PR#21 · ${REVIEW_1} · fix-pr-21=applied:def5678 · ${REVIEW_2} · fix-pr-21=applied:def5678`] }, [pr(21)]);
+  assert.equal(twice.reviewed[0].fleetHead, "fedcba9");
+  const bare = run({ rows: [`#20 impl-20=PR#21 → PR#21 · ${REVIEW_1} · fix-pr-21=applied:def5678 · ${REVIEW_2} · fix-pr-21`] }, [pr(21)]);
+  assert.equal(bare.reviewed[0].fleetHead, "fedcba9", "a bare copy beside the settled one is no landing");
+  // Settled in `## Dispatched` alone, the member lands where its bare copy sits.
+  const dispatched = ["fix-pr-21=applied:def5678"];
+  const before = run({ rows: [`#20 impl-20=PR#21 → PR#21 · ${REVIEW_1} · fix-pr-21 · ${REVIEW_2}`], dispatched }, [pr(21)]);
+  assert.equal(before.reviewed[0].fleetHead, "fedcba9");
+  const after = run({ rows: [`#20 impl-20=PR#21 → PR#21 · ${REVIEW_1} · ${REVIEW_2} · fix-pr-21`], dispatched }, [pr(21)]);
+  assert.equal(after.reviewed[0].fleetHead, "def5678");
+});
+
+test("deriveRun: a fix-applier token on another PR's row lands nothing — on its own PR's fleetHead or on the row's", () => {
+  const rows = [`#20 impl-20=PR#21 → PR#21 · ${REVIEW_1}`, "#30 impl-30=PR#31 → PR#31 · reviewed=0123abc:1/0/0:run-0123abcr · fix-pr-21=applied:def5678"];
+  const r = run({ rows, dispatched: ["fix-pr-21=applied:def5678"] }, [pr(21), pr(31)]);
+  assert.deepEqual(r.reviewed.map((x) => [x.pr, x.fleetHead]), [[21, "abc1234"], [31, "0123abc"]]);
+});
+
+test("deriveRun: a PR that landed applied: but never had a review returned has no reviewed entry, so no fleetHead", () => {
+  assert.deepEqual(run({ rows: ["#20 impl-20=PR#21 → PR#21 · fix-pr-21=applied:def5678"] }, [pr(21)]).reviewed, []);
 });
 
 // A verdict naming a run that is not the eight characters `mktemp` chose is no

@@ -107,6 +107,12 @@ the outcome token, and checks the world before writing:
 | `finisher-pr-M=halted:<cause>` | `cause` in vocabulary; `evidence` non-empty |
 | `merge-bot-n=done` | each `merged[].pr` reads MERGED |
 
+*Amended (#4249): `fix-pr-M=no-op` is checked against the PR's fleet head, not
+the latest `reviewed=`'s head alone: the head of the `applied:` that the
+fix-applier with the greatest retry suffix landed since that `reviewed=`,
+else that `reviewed=`'s head — never the one whose token sits last in the
+row.*
+
 A check that fails is exit 3 naming the mismatch, nothing written: the
 member's claim and the world disagree, and the controller rules. A check
 that cannot look (`gh` outage) is exit 2 and the settle is retried; it never

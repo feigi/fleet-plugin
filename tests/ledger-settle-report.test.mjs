@@ -425,6 +425,159 @@ test("fix-pr-M=no-op: a PR with no reviewed= is exit 3", () => {
   f.refused("fix-pr-6", 3, /failed: PR #6's row names a reviewed= head/);
 });
 
+// -- fix-pr-M=no-op after a push ----------------------------------------------
+//
+// A fix-applier that landed `applied:<head>` moved the branch past the head the
+// review named, so a later fix-applier's no-op is checked against the PR's
+// fleet head: the head of the latest `applied:` landed since the PR's latest
+// `reviewed=`, else that review's head. The check's name says which head it
+// required, and whether a review or an `applied:` push named it.
+
+// A commit on top of origin's feat, the way a fix-applier pushes one: its SHA.
+const pushOnFeat = (f, message) => {
+  f.git(f.work, "checkout", "-q", "feat");
+  f.git(f.work, "commit", "-q", "--allow-empty", "-m", message);
+  f.git(f.work, "push", "-q", "origin", "feat");
+  const sha = f.git(f.work, "rev-parse", "HEAD");
+  f.git(f.work, "checkout", "-q", "main");
+  return sha;
+};
+// Origin's feat put back on `sha`, a head the branch has left.
+const putFeatOn = (f, sha) => f.git(f.work, "push", "-q", "--force", "origin", `${sha}:refs/heads/feat`);
+// PR 6's review returning at `head`, as the runner `runner` and the run `run`.
+const returnReview = (f, head, runner = "review-pr-6", run = "run-abcd1234") => (
+  f.ok("review", "6", `review=member:${runner}`, `reviewed=${head.slice(0, 12)}:1/0/0:${run}`)
+);
+// `member` dispatched, pushing a commit onto origin's feat and settling
+// `applied:` on it: that head.
+const landApplied = (f, member) => {
+  f.ok("dispatch", "6", member);
+  const head = pushOnFeat(f, `${member}'s fix`);
+  f.report(member, fixReport(f, { member, head }));
+  assert.equal(f.settled(member).outcome, `applied:${head}`);
+  return head;
+};
+// `member` dispatched, its no-op report written and not settled.
+const reportNoOp = (f, member) => {
+  f.ok("dispatch", "6", member);
+  f.report(member, fixReport(f, { member, outcome: "no-op" }));
+};
+// The check's name when the head required is a review's, and when it is an
+// `applied:` push's, landed since the review whose head is `reviewed`.
+const reviewedCheck = (required) => `origin refs/heads/feat is ${required}, the head PR #6's latest reviewed= names`;
+const appliedCheck = (required, reviewed) => `origin refs/heads/feat is ${required}, the head PR #6's latest applied: names, landed since its latest reviewed= ${reviewed}`;
+
+test("fix-pr-M=no-op: after an earlier fix-applier's applied: push, origin's branch at that head settles", () => {
+  const f = fixture();
+  returnReview(f, f.head);
+  const pushed = landApplied(f, "fix-pr-6");
+  reportNoOp(f, "fix-pr-6-b");
+  const receipt = f.settled("fix-pr-6-b");
+  assert.equal(receipt.outcome, "no-op");
+  assert.deepEqual(receipt.checks, [{ name: appliedCheck(pushed, f.head.slice(0, 12)), ok: true }]);
+  assert.equal(dispatched(f, "fix-pr-6-b"), "fix-pr-6-b=no-op");
+});
+
+test("fix-pr-M=no-op: after an applied: push, origin's branch back on the reviewed= head or on a third head is exit 3, naming the head required and why", () => {
+  const f = fixture();
+  returnReview(f, f.head);
+  const pushed = landApplied(f, "fix-pr-6");
+  reportNoOp(f, "fix-pr-6-b");
+  const required = new RegExp(`failed: ${appliedCheck(pushed, f.head.slice(0, 12))}`);
+  putFeatOn(f, f.head);
+  f.refused("fix-pr-6-b", 3, required);
+  pushOnFeat(f, "a push no fix-applier landed");
+  f.refused("fix-pr-6-b", 3, required);
+  assert.equal(dispatched(f, "fix-pr-6-b"), "fix-pr-6-b", "the member stays dispatched, unsettled");
+});
+
+test("fix-pr-M=no-op: after two applied: pushes, the later fix-applier's head is the one required", () => {
+  const f = fixture();
+  returnReview(f, f.head);
+  const first = landApplied(f, "fix-pr-6");
+  const second = landApplied(f, "fix-pr-6-b");
+  reportNoOp(f, "fix-pr-6-c");
+  putFeatOn(f, first);
+  f.refused("fix-pr-6-c", 3, new RegExp(`failed: ${appliedCheck(second, f.head.slice(0, 12))}`));
+  putFeatOn(f, second);
+  assert.deepEqual(f.settled("fix-pr-6-c").checks, [{ name: appliedCheck(second, f.head.slice(0, 12)), ok: true }]);
+});
+
+test("fix-pr-M=no-op: after a row rewrite puts the later fix-applier's applied: token before the earlier one's, the later head is still the one required", () => {
+  const f = fixture();
+  returnReview(f, f.head);
+  const first = landApplied(f, "fix-pr-6");
+  const second = landApplied(f, "fix-pr-6-b");
+  const earlier = `fix-pr-6=applied:${first}`;
+  const later = `fix-pr-6-b=applied:${second}`;
+  const row = f.ok("read").rows.find((r) => r.includes(later));
+  assert.ok(row.indexOf(earlier) !== -1 && row.indexOf(earlier) < row.indexOf(later), row);
+  const [key, ...text] = row.replace(earlier, "\0").replace(later, earlier).replace("\0", later).split(" ");
+  f.ok("row", key, text.join(" "));
+  assert.ok(f.ok("read").rows.some((r) => r.indexOf(later) !== -1 && r.indexOf(later) < r.indexOf(earlier)), "the rewrite landed");
+  reportNoOp(f, "fix-pr-6-c");
+  putFeatOn(f, first);
+  f.refused("fix-pr-6-c", 3, new RegExp(`failed: ${appliedCheck(second, f.head.slice(0, 12))}`));
+  putFeatOn(f, second);
+  assert.deepEqual(f.settled("fix-pr-6-c").checks, [{ name: appliedCheck(second, f.head.slice(0, 12)), ok: true }]);
+});
+
+test("fix-pr-M=no-op: an applied: push followed by a newer reviewed= — the newer review's head is the one required", () => {
+  const f = fixture();
+  returnReview(f, f.head);
+  const pushed = landApplied(f, "fix-pr-6");
+  const reread = pushOnFeat(f, "a push the newer review read");
+  returnReview(f, reread, "review-pr-6-b", "run-bcde2345");
+  reportNoOp(f, "fix-pr-6-b");
+  putFeatOn(f, pushed);
+  f.refused("fix-pr-6-b", 3, new RegExp(`failed: ${reviewedCheck(reread.slice(0, 12))}`));
+  putFeatOn(f, reread);
+  assert.deepEqual(f.settled("fix-pr-6-b").checks, [{ name: reviewedCheck(reread.slice(0, 12)), ok: true }]);
+});
+
+test("fix-pr-M=no-op: a failed, no-op or killed predecessor leaves the head required where it was", () => {
+  for (const predecessor of ["failed", "no-op", "killed"]) {
+    // No push before it: the review's head stays the one required.
+    const before = fixture();
+    const reviewedBefore = before.head.slice(0, 12);
+    returnReview(before, before.head);
+    before.ok("dispatch", "6", "fix-pr-6");
+    before.ok("settle", "fix-pr-6", predecessor);
+    reportNoOp(before, "fix-pr-6-b");
+    pushOnFeat(before, "a push no fix-applier landed");
+    before.refused("fix-pr-6-b", 3, new RegExp(`failed: ${reviewedCheck(reviewedBefore)}`));
+    putFeatOn(before, before.head);
+    assert.deepEqual(before.settled("fix-pr-6-b").checks, [{ name: reviewedCheck(reviewedBefore), ok: true }], `fix-pr-6=${predecessor}`);
+
+    // A push before it: the head that push landed stays the one required.
+    const after = fixture();
+    const reviewedAfter = after.head.slice(0, 12);
+    returnReview(after, after.head);
+    const pushed = landApplied(after, "fix-pr-6");
+    after.ok("dispatch", "6", "fix-pr-6-b");
+    after.ok("settle", "fix-pr-6-b", predecessor);
+    reportNoOp(after, "fix-pr-6-c");
+    putFeatOn(after, after.head);
+    after.refused("fix-pr-6-c", 3, new RegExp(`failed: ${appliedCheck(pushed, reviewedAfter)}`));
+    putFeatOn(after, pushed);
+    assert.deepEqual(after.settled("fix-pr-6-c").checks, [{ name: appliedCheck(pushed, reviewedAfter), ok: true }], `fix-pr-6=applied, fix-pr-6-b=${predecessor}`);
+  }
+});
+
+test("fix-pr-M=no-op: an applied: head settled as an upper-case prefix is compared by lowercase prefix", () => {
+  const f = fixture();
+  returnReview(f, f.head);
+  f.ok("dispatch", "6", "fix-pr-6");
+  // Letters in the spelled prefix, so the upper case differs from the SHA's own.
+  let pushed;
+  do {
+    pushed = pushOnFeat(f, "the fix");
+  } while (!/[a-f]/.test(pushed.slice(0, 9)));
+  f.ok("settle", "fix-pr-6", `applied:${pushed.slice(0, 9).toUpperCase()}`);
+  reportNoOp(f, "fix-pr-6-b");
+  assert.deepEqual(f.settled("fix-pr-6-b").checks, [{ name: appliedCheck(pushed.slice(0, 9), f.head.slice(0, 12)), ok: true }]);
+});
+
 // -- finisher-pr-M=labelled ---------------------------------------------------
 
 test("finisher-pr-M=labelled: the label on the PR and in the read-back settles", () => {
