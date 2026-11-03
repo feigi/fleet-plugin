@@ -222,6 +222,13 @@ includes every non-default cell uniformly. The draw lives in the router
 script (§ 4) as one pure function, `drawCell({ session, ticket, policyCell,
 cells }) → { cell, k, K }`, exported from `ledger-grammar.mjs` alongside
 `CELL`.
+*Amended (#4247): E is the group's exploration Cells, not `cells` less
+`policy_cell`: the Cells around the group's `cost` row Cell (its role one
+effort level up and one down, the bigger model one level lower, the smaller
+model one level higher) that this install runs and the guard has not tripped.
+Each Pull records the probability its Cell was assigned with as
+`assignment_prob`, which `exploration_draw` alone does not give
+(`docs/specs/2026-11-01-self-refining-router-design.md` § 2.6, § 2.12).*
 
 **K=0 rule (addendum).** When every non-default cell has been withdrawn
 (E empty), the Exploration Pull dispatches `policy_cell` instead:
@@ -240,6 +247,11 @@ feature-based exclusion: a heavy ticket may draw `smol-high`; review +
 finisher are the safety net (standing decision 3). The member is never
 told. Exploration is not pausable per run; `/run-team` gains no argument;
 withdrawing a cell (below) is the only off switch.
+*Amended (#4247): withdrawing a Cell is no longer an off switch, because the
+stopping rule retires: each repository excludes a failing Cell on its own
+evidence, through its cost guard, each row's quality floor and its groups'
+exploration moving on (`docs/specs/2026-11-01-self-refining-router-design.md`
+§ 2.7).*
 
 **Records.**
 - **Ledger:** `ledger.mjs row <N> "impl-<N> · … · tier=<cell>"` on
@@ -263,6 +275,8 @@ passed: resolved model = `modelRoles.<role>`'s target at dispatch) and
 `member-outcomes.tsv`'s `effort` equals the cell's `<level>`. Rows
 dispatched as `fleet-implementer`/`fleet-implementer-alt` (pre-cutover
 history) are never admissible to the per-cell readout.
+*Amended (#4247): the stopping rule this paragraph names as a reader retires
+(`docs/specs/2026-11-01-self-refining-router-design.md` § 2.7).*
 
 **Comparison with N cells.** "Unconfounded comparison" = a *within-session*
 comparison: for cell X ≠ `slow-high`, one session holding ≥1 admissible row
@@ -315,6 +329,11 @@ draws after that commit use the smaller E; dropping the cell from
 reachable and keeps the draw from ever naming a cell with no live
 definition). **Reinstatement** = the reverse PR, maintainer-only; the
 date filter above restarts the count.
+*Amended (#4247): the stopping rule retires, with the hook duty that ran it
+and the `Withdraw exploration cell` issue it filed. A Cell's definition leaves
+the plugin only through an ordinary change, and each repository excludes a
+failing Cell on its own evidence
+(`docs/specs/2026-11-01-self-refining-router-design.md` § 2.7).*
 
 **Clarification from `#2725` (2026-10-04):** a ticket's verdict belongs to
 one cell, the cell of its carrier (defined here). The ticket's ruling is its
@@ -334,6 +353,8 @@ cells counted for
 both. A carrier at the policy cell, or one that is not admissible or predates
 its cell's definition, charges nobody: the verdict does not fall back to an
 earlier Pull.
+*Amended (#4247): the stopping rule this clarifies retires
+(`docs/specs/2026-11-01-self-refining-router-design.md` § 2.7).*
 
 **Amendment from `#2038` (Router, resolved 2026-09-28):**
 1. **Burn-in:** while `router-table.json.burn_in` is true, **every** Pull
@@ -341,11 +362,18 @@ earlier Pull.
    including `slow-high`, `exploration_draw = k/K` with K = |cells|. Ends
    when every cell in `cells` has pooled n≥20 in `cost-guard.json`; the fit
    flips the flag. Afterwards the every-5th-row draw applies unchanged.
+   *Amended (#4247): burn-in draws over the starting Cells less those the
+   guard has tripped and ends on them alone, and afterwards the draw is over
+   the group's exploration Cells
+   (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.2, § 2.6).*
 2. **Staged `cells`:** stage 1 = `{slow-high, task-high, smol-high}` (model
    axis at fixed `high`); stage 2 adds `slow-medium`, `task-max` on
    surviving models. The list lives in `router-table.json.cells`; the fit
    advances it. Stage-2 `fleet-implementer-<cell>.agent.md` definitions may
    exist before they enter `cells`.
+   *Amended (#4247): there are no stages, and no `stage` to advance:
+   `slow-medium` and `task-max` are exploration candidates like any other Cell
+   (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.2, § 2.6).*
 3. Rationale: at ~60 verdicts/week the 5k draw over K=4 reaches n=20/cell in
    6.7 weeks; stage-1 burn-in reaches it in ≈1.
 
@@ -468,6 +496,9 @@ Runs at **phase 0 and
 close-out** through the repo-local hook (§ 5). No committed report
 snapshot; the numbers a ruling turns on go into the ADR that rules, not
 into a tracked file.
+*Amended (#4247): `retire` is judged over the starting Cells, not over a stage
+1, now that there are no stages
+(`docs/specs/2026-11-01-self-refining-router-design.md` § 2.7).*
 
 **`fleet-tick.mjs` row**, following the existing `HOLD (tier mismatch …)`
 pattern (`#1111`'s carrier requirement), `acts:false`:
@@ -519,6 +550,12 @@ ships the table with one row, `"*": "slow-high"`; the first re-fit that
 writes a non-default row **is** v2 — mechanism unchanged, data changed. No
 parametric ticket→cell model, ever: at the reachable n a table diff is
 reviewable, coefficients are not.
+*Amended (#4247): a stratum is no longer `light`, `heavy` or `unknown`: it is
+a group, a node of a tree of splits on inputs recorded at dispatch, and the
+shipped table is the starting table, whose one group `*` holds every ticket. A
+non-default row comes from a repository's own Fit, which routes that
+repository's runs, not from a re-fit of the shipped table
+(`docs/specs/2026-11-01-self-refining-router-design.md` § 2.2, § 2.3, § 2.4).*
 
 ### R2. Classifiers (the extension seam)
 
@@ -527,6 +564,15 @@ reviewable, coefficients are not.
 | `rule` | route script, always | `unknown` when metrics are blank; else `heavy` for a Slice (a row with a `parent`); else `heavy` iff `brief_chars > 3483 ∨ criteria > 5`, else `light` | every Pull → `policy_cell` |
 | `haiku` | one `judge()` call in the controller's eval cell, `{type:"choice", criteria:{light,heavy}}` over the issue text | `sizing.json` | arm B, once gated |
 | `jev` | the same `judge()` call with TypeSafe credentials present | `sizing.json` | arm B, once gated |
+
+*Amended (#4247): the `rule` classifier and its `light`, `heavy` and `unknown`
+outputs retire: `route` walks the table's tree of splits on the ticket's
+dispatch-time inputs to a group and files the group's rule path as the
+Routing's `STRATUM` (`*` for the root). A ticket that lacks the input a split
+reads follows that node's own row, and a Slice's `parent` is one of the inputs
+a split may read, not a `heavy` by rule
+(`docs/specs/2026-11-01-self-refining-router-design.md` § 2.4, which also
+decides when a group splits).*
 
 `judge()` replaces the `#2035`-era haiku `fleet-router` **member** (≈175×
 cheaper, $0.0002 vs ~$0.035; same model; cost from `status().cost`). No
@@ -555,6 +601,12 @@ recomputed.
 gate = a classifier passed its backtest **and** the table has ≥1
 non-default row. Until then: *B not run — the table has no row a better
 classifier could change.*
+*Amended (#4247): a sizing label names no group of the tree, so a live B Pull
+records its label and routes as an A Pull does; arm B stays as designed and
+switched off (`classifier.b` null), and how a label would enter a tree is the
+effort that switches it on
+(`docs/specs/2026-11-01-self-refining-router-design.md` § 2.4, Routing by
+group).*
 
 ### R3. Table artefact — `plugin/scripts/router-table.json`
 
@@ -598,6 +650,15 @@ present, else `rows[objective]["*"]`, and a `speed` set has a row only
 where its `cost` set has one.*
 *Amended (#3809): `guard` is the snapshot of the guard's `tripped[]` and
 per-cell `n` that the fit read; `--check` re-fits against it.*
+*Amended (#4247): the shipped `router-table.json` is the starting table: one
+group `*`, `cells` the starting Cells, `burn_in` true, every row `slow-high`,
+no estimates, `fitted_commit` null. It changes only when the starting point
+itself does, so no re-fit PR diff exists for `estimates` and `reasons` to
+explain; they record the Fit's evidence for each group, which the cockpit's
+view of the Fit reads. A table's groups are the nodes of the tree `splits`
+holds, each with a `cost` and a `speed` row (a group the Fit cannot judge
+holds its parent's, not `*`'s), and there is no `stage`
+(`docs/specs/2026-11-01-self-refining-router-design.md` § 2.2, § 2.4).*
 
 **Amended (#2573, 2026-10-13): the table records the commit its fit read,
 not a date.** `fitted_through` is replaced by `fitted_commit`: the sha of the
@@ -608,6 +669,11 @@ stays beside it. A date cut cannot reproduce a fit: a run's own rows reach
 are drained later with an older date, `member-outcomes.tsv` is re-sorted and
 rewritten on every scrape, and `tier-outcomes.tsv` rows are re-judged in
 place.
+*Amended (#4247): a Fit records the git blob id of each metrics file it read
+(`tsv_blobs`) and the guard it used beside its table, in
+`.fleet/router-fit.json`; its table's own `fitted_commit` stays null, since
+nothing commits a Fit (`docs/specs/2026-11-01-self-refining-router-design.md`
+§ 2.3).*
 
 ### R4. Allocation — burn-in, then 5k
 
@@ -617,8 +683,17 @@ place.
   when every cell in `cells` has pooled n≥20 in `cost-guard.json`; the fit
   flips `burn_in` to `false`. Cheaper than today (every non-default cell is
   cheaper than opus); the quality net is review + finisher.
+  *Amended (#4247): burn-in draws over the starting Cells (`slow-high`,
+  `task-high` and `smol-high`) less those the guard has tripped, and ends once
+  every starting Cell has `MIN_N` merged PRs on its newest generation; a Cell
+  that exploration adds does not re-enter it
+  (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.2).*
 - **After burn-in:** the every-5th-`impl-`-row draw (§ 2), E = `cells`
   minus `policy_cell`, unchanged.
+  *Amended (#4247): after burn-in the every-5th draw is uniform over the
+  group's exploration Cells, not over `cells` less `policy_cell`: the Cells
+  around the group's `cost` row Cell that this install runs and the guard has
+  not tripped (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.6).*
 - **Stage 1** = model axis at fixed `high`: `{slow-high, task-high,
   smol-high}` (K=3 during burn-in, over all three cells; K=2 applies
   only to the post-burn-in draw, which excludes `policy_cell`) —
@@ -628,6 +703,9 @@ place.
   advances `stage` and `cells` when every stage-1 cell has n≥20 and either
   a `*` adoption or an eviction has occurred. Stage-2 definitions may exist
   on disk before they enter `cells`.
+  *Amended (#4247): there is no stage 2 and no `stage` in the table:
+  `slow-medium` and `task-max` are exploration candidates like any other Cell
+  (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.2, § 2.6).*
 
 Under stage 1 + burn-in at ~60 verdicts/week: n=20/cell in ≈1 week, n=60 in
 ≈3, first per-stratum rows in ≈2.
@@ -648,6 +726,8 @@ non-exploration rows are excluded (they are the A/B's test set). No
 inverse-propensity weighting: within a stratum every `chosen_cell` is
 either the policy row or a uniform draw, so per-(stratum, cell) means are
 unbiased; `exploration_draw` is an audit column.
+*Amended (#4247): the `fit` and `--due` modes this paragraph names retire
+(`docs/specs/2026-11-01-self-refining-router-design.md` § 2.9).*
 
 **Adoption rule, per stratum s (and `*`)** — amended (#3753, 2026-10-24).
 A candidate is a cell other than `slow-high` not in
@@ -674,6 +754,14 @@ implemented by #3785): `reasons` holds one set per Objective, like `rows`:
 `reasons.cost` the records above, `reasons.speed` the same shape judged
 by minutes of work time per merged PR from the `cost` row's cell, and an
 `unjudged` record with no cell for a stratum with no `cost` row.*
+*Amended (#4247): the rule judges each group of the table's tree in turn, and
+"only the guard's trip removes it from the draw" no longer holds: a group's
+draw is centred on its current `cost` row Cell, so a Cell also leaves the draw
+when that row's Cell changes and the Cell is no longer one of its exploration
+Cells (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.4, § 2.7).
+`docs/specs/2026-11-01-self-refining-router-design.md` § 2.5 decides that
+Cells are compared only over the stretches in which both were drawn, then
+pooled; slice S6 (#4242) carries that change.*
 
 **Cadence and operator:** every **N = 50** merged PRs since
 `fitted_through`, **run by the repo-local skill (§ 5) after a run** (the
@@ -682,10 +770,20 @@ plugin's own `metrics-refresh.mjs` has already drained the pending TSV by then):
 merge. A no-change fit still lands (`estimates` moves; reviewers watch n
 climb). Never a maintainer-run obligation (`#1111`). The fit never moves
 `WINDOW_START`.
+*Amended (#4247): no re-fit runs on a cadence and no chore PR carries a table:
+`metrics-refresh.mjs` computes the Fit at every phase 0 over the repository's
+own records and writes it to `.fleet/router-fit.json`, where it routes that
+run, and nothing commits it. `ticket-router.mjs` has no `fit` or `--due` mode,
+and the repo-local hook has no re-fit duty
+(`docs/specs/2026-11-01-self-refining-router-design.md` § 2.3, § 2.9).*
 
 **Check — `ticket-router.mjs --check`** (CI, alongside `tier-roles.mjs
 --check`): re-fits from rows with `run_date ≤ fitted_through` and fails if
 the result ≠ the checked-in table. The table is a code carrier.
+*Amended (#4247): the checked-in table is the starting table, which no re-fit
+moves, so the grouping design retires `--check` and CI's Router table check
+(`docs/specs/2026-11-01-self-refining-router-design.md` § 2.9); #4321 removes
+the mode and the CI step that #4320 left.*
 
 **Amended (#2573, 2026-10-13): fit, check and cadence read a commit, not
 the working tree.** `fit` takes `--commit <rev>` and reads the three TSVs
@@ -700,6 +798,10 @@ names `git fetch --depth=1 origin <sha>`, which CI runs first, skipped while
 features rows at `--commit`, on or after `window_start`, that are not in the
 fitted commit's features file, matched by `session` + `agent`, replacing
 "since `fitted_through`".
+*Amended (#4247): the Fit reads the working-tree metrics files at phase 0, not
+a commit, and records the git blob id of each in the Fit file; `fit` and its
+`--commit` are gone (`docs/specs/2026-11-01-self-refining-router-design.md`
+§ 2.3).*
 
 ### R6. Route — `ticket-router.mjs route`
 
@@ -721,6 +823,13 @@ only for usage errors** (bad args, unreadable/invalid `router-table.json`)
 SKILL.md's "a probe that could not look emits an event". `REASON` goes to
 the ledger only, inside the Pull's Routing; the fit distinguishes fallback
 rows by blank metrics. The controller holds no copy of the defaulting logic.
+*Amended (#4247): `route` reads the table from the Fit beside `--guard`
+(`.fleet/router-fit.json`), else from the starting table beside the script
+(`router-table.json`), and `REASON` names why it fell back: `fit-missing`,
+`fit-unreadable` or `fit-invalid`, none of them a usage error; `--table` still
+names a table directly. The stratum is the group the tree's walk ends at, and
+`STRATUM` is its rule path, not `light`, `heavy` or `unknown`
+(`docs/specs/2026-11-01-self-refining-router-design.md` § 2.3, § 2.4).*
 
 **Amended (#3893, 2026-10-28): the line is the Pull's whole Routing.** `BY`
 says what made the draw, `BRIEF` and `CRITERIA` are the numbers the `rule`
@@ -737,6 +846,9 @@ non-blank line, or the first issue a `## Parent` section the body opens with
 names — and `-` for a ticket that is no Slice or when no issue was read. The
 `rule` Stratum of a Slice is `heavy` whatever its brief's numbers. A `## Routed`
 entry written before the part carries no `PARENT=` and reads as `PARENT=-`.
+*Amended (#4247): a Slice is no longer `heavy` by rule: `parent` is one of the
+inputs a split of the table's tree may read
+(`docs/specs/2026-11-01-self-refining-router-design.md` § 2.4).*
 
 **Amended (#3895): the dispatch of one row is a function.** `rowDispatch({ table,
 guard, objective, stratum })` is what `route` does with one row under one guard,
@@ -750,6 +862,12 @@ Objective routes the row. `route` calls it for its policy row, its base row
 Cell evidence tab, which calls it too, cannot disagree with routing.
 `REASON`'s `guard-tripped` stays `route`'s: it needs the Pull to be exploring.
 `rowFor` and `MIN_N` are exported beside it.
+*Amended (#4247): `rowDispatch` also takes `install`, what this install runs.
+Its `draw.cells` are the starting Cells less the tripped during burn-in and,
+after it, the group's exploration Cells around its `cost` row Cell that
+`install` runs and the guard has not tripped, not the table's Cells less the
+tripped and the `cost` row's
+(`docs/specs/2026-11-01-self-refining-router-design.md` § 2.6).*
 
 Guard/table asymmetry, stated on purpose: the guard is pooled, the table
 per-stratum; a cell evicted pooled cannot win a stratum. Conservative by
@@ -771,6 +889,11 @@ One script, `plugin/scripts/ticket-router.mjs`, modes `route` / `fit` /
 because the stratum rule is the one function that must never diverge
 between dispatch and fit. Not `fleet-router.mjs` (the retired member's
 name).
+*Amended (#4247): `ticket-router.mjs` has the `route` mode and `--check`;
+`fit` retires (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.9),
+the Fit being computed in-process by `metrics-refresh.mjs` through `fitTable`,
+and the walk from a ticket's inputs to its group, `stratumOf`, is the one
+function dispatch and the Fit share.*
 
 ## 5. The repo-local hook (`#2089`)
 
@@ -799,12 +922,23 @@ as what the evidence favours — and never fails the run: an error prints
 exit status as they were. The repo-local skill keeps only this repository's
 self-maintenance and is run by a rule in `AGENTS.md`, not called by run-team.
 Its duties, all drawn from this spec:
+*Amended (#4247): the Preview fit this paragraph describes is the Fit:
+`metrics-refresh.mjs` writes it to `.fleet/router-fit.json` at phase 0, with
+`splits` in its prior in place of `stage`, `route` routes by it and nothing
+commits it; its failure line is `metrics-refresh: fit: failed — <why>`
+(`docs/specs/2026-11-01-self-refining-router-design.md` § 2.3).*
 
 - Print the role-target drift notice (§ 2).
 - Run the per-cell stopping rule (§ 2) and file a withdrawal issue on floor
   failure.
+  *Amended (#4247): the stopping rule retires, and with it this duty and the
+  `Withdraw exploration cell` issue it filed
+  (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.7).*
 - Run `ticket-router.mjs fit` every 50 merged PRs whose features rows are
   not in `fitted_commit` (§ 4 R5), opening a chore PR.
+  *Amended (#4247): the re-fit retires, with `ticket-router.mjs fit`, the
+  cadence and the chore PR; the hook has the drift notice alone
+  (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.9).*
 
 The plugin itself keeps the repo-agnostic parts — the closing-issue filter in
 `fleet-tick.mjs`, the router script, the instrument script, the cell

@@ -21,6 +21,11 @@ The cockpit (`board.mjs serve`) gains a tab strip: **Board · Cell evidence · T
   used. It answers three questions, each figure with its trust status:
   - per Objective × Stratum row: the Cell routes now gives and why, beside the
     Cell the evidence favours, with each candidate's verdict and interval;
+    *Amended (#4247): the tab shows one view of the Fit that routes the run,
+    for each Objective the groups of its tree, each with its Cell, why and
+    every candidate's verdict and interval, not the Cell routes now beside the
+    Cell the evidence favours
+    (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.8).*
   - per Cell: what the cost guard holds it to — merged PRs against `MIN_N`,
     the fail-rate gap against the 15-point Quality floor, $ per merged PR
     against `slow-high`;
@@ -48,6 +53,9 @@ Three glossary entries land with this spec in CONTEXT.md § Tier: **Routing**,
 **Preview fit** and **Cell evidence**. **As-routed** and **Admissible row** are
 reworded from "the Cell it drew" to "the Pull's Cell": after burn-in about 4
 Pulls in 5 are not drawn, and they book to their policy row's Cell.
+*Amended (#4247): the Preview fit entry retires into Fit, the table that
+routes the run (`CONTEXT.md`;
+`docs/specs/2026-11-01-self-refining-router-design.md` § 2.11).*
 
 The tab names are labels, not domain terms, and get no entry (#3881). The
 token tab is **Tokens**: it cannot be read as $, so it does not clash with
@@ -77,9 +85,13 @@ member role.
 ### 3.2 The Cell evidence tab, top to bottom
 
 1. A line of in-tab links: policy rows · the guard · declared, not measured.
+   *Amended (#4247): the first link reads "the Fit", not "policy rows"
+   (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.8).*
 2. **Alerts** (§ 6.3), one box each, only while the state holds: a headline
    and a sentence.
 3. **Policy rows: Objective × Stratum** (§ 5.2).
+   *Amended (#4247): item 3 is one view of the Fit that routes the run
+   (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.8).*
 4. **The guard: what it holds each Cell to** (§ 5.3).
 5. **Declared, not measured** (§ 5.4), collapsed.
 
@@ -102,6 +114,15 @@ Footnote texts sit under the section that carries their marks.
 | Records not on main | the `tsv_blobs` the guard and the Preview fit record; main's blob ids from `gh api --hostname <host> repos/<owner>/<name>/contents/docs/metrics`; `.fleet/closeout.json` `pr` and `steps["commit-and-pr"].at` | — |
 | Installed table behind main's (this repository only) | the checkout's `plugin/scripts/router-table.json` | `validateTable` |
 | Each card's Cell line | the ledger's `## Routed` entry (§ 10.2), the row's `tier=` tokens, `## Dispatched` `agent=`, the members' transcripts | `parseRouting`; the member record the gather already builds |
+
+*Amended (#4247): the tab reads the Fit, `.fleet/router-fit.json`, as `route`
+reads it (`validateTable` on its `table`), and lays out the starting table
+beside the script only while no Fit is read. It reads no
+`.fleet/router-preview.json`, no install `package.json` and no checkout table,
+so the Routes now, What the evidence favours, Whose runs the installed table
+is and Installed table behind main's rows retire; the Records not on main row
+reads the Fit's `tsv_blobs`
+(`docs/specs/2026-11-01-self-refining-router-design.md` § 2.8).*
 
 The Cell evidence tab reads no per-Pull record. The pending features rows,
 the ledger's tokens, the scratch `pull.json` and the transcripts are the
@@ -154,11 +175,23 @@ which answers 404 (measured in diagram-docs' checkout).
     `cells` are the shipped table's, and only a repo-local hook ever fits it,
     so a consumer stays in burn-in until a plugin release ships a fitted
     table.
+    *Amended (#4247): the view names no source repository and no install
+    version, and no footnote says a consumer's runs reach routing "only
+    through its cost guard": each repository's Fit is computed from its own
+    records and routes its runs, so a consumer's view reads as this
+    repository's does (`docs/specs/2026-11-01-self-refining-router-design.md`
+    § 2.8).*
 - **The guard and the Preview fit** read "this repository's runs", each with
   its `computed_at`. The Preview fit takes only `stage`, `cells`,
   `classifier` and `window_start` from its prior; its rows, estimates and
   burn-in are the workspace's own records laid out on the shipped table's
   Cells.
+  *Amended (#4247): the Preview fit is the Fit, which takes `cells`,
+  `classifier`, `splits` and `window_start` from its prior, the starting
+  table; there is no `stage`. Its source line reads
+  `Fit · computed <time> · <n> Pulls`, and the guard's still reads "this
+  repository's runs" (`docs/specs/2026-11-01-self-refining-router-design.md`
+  § 2.8).*
 
 ## 5. The Cell evidence tab
 
@@ -170,6 +203,12 @@ which answers 404 (measured in diagram-docs' checkout).
 | **Holds nothing back** | verdict `none`: from the first guard until the baseline Cell has `min_n` merged PRs | as the table says | the Preview fit | "holds no Cell back until slow-high has 20 merged PRs: it has k"; each Cell "n of 20" |
 | **Before the first Preview fit** | a guard, no `router-preview.json` (this repository's first state once the tab ships) | as the table says | "no Preview fit yet: the next phase 0 writes one", column empty | the new counts read "not checked"; records-against-main reads "not checked: this guard predates the blob ids it needs" |
 | **Normal** | a guard and a Preview fit | § 5.2 | § 5.2 | § 5.3 |
+
+*Amended (#4247): the Routes now and Evidence favours columns are one view of
+the Fit that routes the run: with no Fit read it is the starting table and
+says "no Fit yet: the next phase 0 writes one", and with no cost guard it says
+"no cost guard: every Pull runs at slow-high, the default Cell"; the guard
+column stands (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.8).*
 
 **No cost guard: the guard section's heading** quotes metrics-refresh's own
 line, with its time, from the newest `metrics` step in the phase 0 and
@@ -203,12 +242,20 @@ and any trust labels for that side.
 - Today, evidence favours (on a scratch Preview fit of `ac26799a`):
   "Preview fit · this repository's runs · computed <t> · 198 Pulls" and
   "stage 2: slow-medium and task-max have 0 of the 20 merged PRs each needs".
+  *Amended (#4247): there is one heading, "The Fit that routes this run", with
+  one source line (`Fit · computed <time> · <n> Pulls`, or "starting table ·
+  no Fit yet: the next phase 0 writes one"), one dispatch heading and the
+  Fit's trust labels, not a pair of sides
+  (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.8).*
 
 **Burn-in headings**, each from its own side's table (`burn_in`, `stage`,
 `cells`, `guard.n` against `MIN_N`):
 
 - An unfitted table: "never fitted: every Pull drawn over K Cells", in every
   workspace.
+  *Amended (#4247): while the starting table routes, the heading reads
+  "burn-in: every Pull is drawn over the starting Cells the guard has not
+  tripped" (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.8).*
 - Routes now, fitted and in burn-in: the counts are the installed table's own
   `guard.n`, what its fit saw, so they read in the past tense and name the
   source: "stage 2 at its fit on feigi/fleet-plugin's runs: slow-medium and
@@ -216,13 +263,27 @@ and any trust labels for that side.
   Cells". In a consumer the heading adds what ends it: "a later fit, reaching
   this install with a plugin release". Nothing a consumer does ends the
   shipped burn-in.
+  *Amended (#4247): the counts are each starting Cell's merged PRs against
+  `MIN_N`, from the Fit's own guard while a Fit routes, with no `stage`, and a
+  consumer's burn-in ends on its own Fit, not on a plugin release
+  (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.8).*
 - Evidence favours in burn-in: the workspace's own counts, present tense:
   "stage 2: slow-medium and task-max have 0 of the 20 merged PRs each needs".
+  *Amended (#4247): burn-in progress is one line of the one view, not a side's:
+  each starting Cell's merged PRs against `MIN_N`, taken from the cost guard's
+  counts while the starting table routes, and a starting Cell whose role's
+  model changed shows a notice that burn-in restarted
+  (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.8).*
 - K counts the Cells the draw uses under the workspace's guard, the same
   count each row's dispatch uses.
+  *Amended (#4247): each group's line names the Cells its draw is over, and no
+  count K is shown (`docs/specs/2026-11-01-self-refining-router-design.md`
+  § 2.8).*
 - `fit --due`'s `MERGED=<n>/50` is not shown: it counts toward the re-fit
   gate, not toward any figure, and a consumer has no `fitted_commit` to count
   from.
+  *Amended (#4247): `fit --due` is retired, so no `MERGED=<n>/50` is left to
+  omit (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.9).*
 
 **One row-aligned table** for both Objectives, routes now on the left and
 evidence favours on the right.
@@ -250,6 +311,14 @@ evidence favours on the right.
   follows *".
 - Footnotes under the section: the consumer's source footnote (§ 4.3) and the
   guard-against-Preview-fit n footnote (§ 6.2).
+  *Amended (#4247): the table is the Fit's alone: for each Objective the
+  groups of its tree, the root `*` first, each with its Cell, why and every
+  candidate's verdict and 95% interval, and with what its draw is over, the
+  starting Cells in burn-in and after it the group's exploration Cells that
+  this install runs and the guard has not tripped. Every group has a row of
+  its own, so none collapses into `*`, there is no `≠ routes now` mark, and
+  the guard-against-Fit n footnote is the only one
+  (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.8).*
 
 **Model names when the generations differ.** Each side compares a candidate's
 judged generation with that Cell's Tier route model (`resolveRole` on
@@ -328,6 +397,9 @@ A label's place follows what it qualifies:
 
 - **Beside the figure:** a few words next to one figure, or, for a whole side
   (routes now, evidence favours), in that side's heading.
+  *Amended (#4247): a label for the whole view sits in the view's heading,
+  since there are no sides
+  (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.8).*
 - **Footnote:** a mark on the figure and a sentence under its section, for a
   label that needs a sentence.
 - **Alert:** a state of the whole records, at the top of the tab, shown only
@@ -358,6 +430,14 @@ never raises an alert. A label states its claim and cites no ticket.
 | The Preview fit's newest refit failed | the newest step's failed line, against the fit's `computed_at` | in evidence favours' heading, first; also when no fit was read; never with no guard | yes |
 | Router and tick read the guard differently | `readGuard` against `readCostGuard` | alert | yes |
 | `modelRoles` read failing | the read's time and error, carried in `board.json` | beside the Tier route model, after a failed read only | yes |
+
+*Amended (#4247): the Preview fit is the Fit throughout: the Burn-in row
+counts each starting Cell's merged PRs against `MIN_N` from the Fit's own
+guard (the cost guard's while the starting table routes), with no `stage`, in
+the one view; the Records not on main row compares the Fit's `tsv_blobs`; the
+Installed table behind main's and Preview fit's prior is not the installed
+table rows retire; and the newest-refit-failed row is the failed-Fit flag
+(`docs/specs/2026-11-01-self-refining-router-design.md` § 2.8).*
 
 **Rulings given by hand.** A Ruling is derived when its note has `append`'s
 form, `review <run> at <head7>, record …` or `…, no record: …`; any other
@@ -413,6 +493,9 @@ names the workspace's repo (§ 4.3): when the installed table's
 reads "main's table is fitted at X on N Pulls; this install routes by Y until
 the plugin is updated". A merged re-fit reaches the install only with a
 release. Today both are unfitted, so there is no label.
+*Amended (#4247): retired: the tab no longer compares the installed table with
+the checkout's (`docs/specs/2026-11-01-self-refining-router-design.md`
+§ 2.8).*
 
 **Guard against Preview fit.** When both read the same files and a Cell's
 merged n still differs, the fit's n carries the footnote: "the guard counts
@@ -432,6 +515,10 @@ fields the fit recomputes, or only `fitted_commit` and `version`, raises no
 label, because the next phase 0's refit would come out the same. The words
 name the prior: "fitted against <version, fitted_commit>; the next phase 0
 refits".
+*Amended (#4247): retired: the Fit is computed at every phase 0 from the
+starting table beside the scripts, and the tab raises no label for a prior
+that differs from it (`docs/specs/2026-11-01-self-refining-router-design.md`
+§ 2.8).*
 
 **The Preview fit's newest refit failed.** (amended by #4020: this signal's
 table row and this paragraph.) It reads the newest `metrics` step of the
@@ -454,6 +541,11 @@ when the newest step no longer has the line, when a fit is written after the
 step, or when the receipt holding the step is no longer read: close-out's
 `phase0-receipt` step moves `phase0.json`, and phase 0's `rotate` step
 archives `closeout.json`.
+*Amended (#4247): the failed line is `metrics-refresh: fit: failed — <why>`,
+and the label is a flag at the head of the view,
+`this run's Fit failed at <time>: <why>`, followed by which table routes: the
+last good Fit, or the starting table when no Fit is read
+(`docs/specs/2026-11-01-self-refining-router-design.md` § 2.8).*
 
 **Guard readers.** The guard section shows figures only from a file
 `readCostGuard` accepts. A guard that `readGuard` accepts and `readCostGuard`
@@ -492,6 +584,12 @@ card, because both come from the row in `ledger.md`.
 | Model | the dispatch-time model and thinking level of the Pull's first implementer at its Cell, keyed the way the Cell generation is: "claude-haiku-5-5 · high". Adds "fell back to <model>" when the last turn's model differs. A rescue shows its own model beside "rescue at". "not on record" when the transcript holds none | the member record the gather already builds |
 | Mark | where the first implementer ran off the Pull's Cell (7.3) | the ledger and the transcript |
 
+*Amended (#4247): the Stratum part is the group's rule path (`*` for the root,
+else the tests taken from it, such as `brief_chars>4047`), followed, where
+they hold, by `no brief read`, `no sizing`, `Slice of #<parent>` or, under arm
+B, `sized <label>`; no thresholds are exported
+(`docs/specs/2026-11-01-self-refining-router-design.md` § 2.8).*
+
 Rows written before the Routing read "not on record" for whatever their
 tokens lack (the Cell then comes from `tier=`), and an old `route=` value
 reads "recorded as …". Today's three cards predate the Routing.
@@ -509,6 +607,13 @@ reads "recorded as …". Today's three cards predate the Routing.
 | `no-issue-json` / `no-sizing` | "issue unreadable when routed" / "no sizing"; the Stratum reads unknown |
 | `fit-missing` / `fit-unreadable` / `fit-invalid` | "no Fit: starting table" / "Fit unreadable: starting table" / "Fit invalid: starting table" |
 | any other recorded value | "recorded as …" |
+
+*Amended (#4247): "cost row, heavy" reads `cost row, <the group's rule path>`,
+and `follows *` is said when the installed table beside the scripts holds no
+row for that group. Where the Stratum read `unknown`, the line gives the
+group's path with `no brief read` for a Routing whose issue could not be read
+and with `no sizing` for an arm B Pull that got no label
+(`docs/specs/2026-11-01-self-refining-router-design.md` § 2.8).*
 
 `REASON` keeps only the first thing that went wrong, and the card never
 guesses the rest. The card shows the Routing as recorded and never re-checks
@@ -546,6 +651,9 @@ Two lines below the card's existing meta line:
    at <cell> <model · level>".
 2. Stratum with its numbers · model · level: "heavy: 9,658 chars (past
    3,483), 8 criteria (past 5) · claude-haiku-5-5 · high".
+   *Amended (#4247): the Stratum part is the group's rule path, without
+   thresholds, as the Stratum row of the Cell line's parts table now reads
+   (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.8).*
 
 A mark adds a third line starting with ⚑: amber, or red when the Pull counts
 in no Cell's figures. "not on record" parts are drawn dim and italic in their
@@ -613,8 +721,15 @@ today's board.
   `TRIPPED` is the guard's `tripped` at route time; `SIZED` is arm B's sizing
   label. Today's line lacks burn-in, the tripped Cells, the brief length, the
   criteria count and the sizing label.
+  *Amended (#4247): `STRATUM` is the group's rule path, not `light`, `heavy`
+  or `unknown`, and `REASON` also takes `fit-missing`, `fit-unreadable` and
+  `fit-invalid` (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.3,
+  § 2.4).*
 - **The Stratum thresholds are exported** (`HEAVY_BRIEF_CHARS`,
   `HEAVY_CRITERIA`), for the card's "(past 3,483)".
+  *Amended (#4247): retired: a group is named by its rule path, so no Stratum
+  threshold exists to export
+  (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.4, § 2.8).*
 
 ### 10.2 The Routing on the ledger
 
@@ -674,6 +789,12 @@ accepting the file.
 Every fitted table's `estimates` carry `by_hand` too. Once the router table
 has been fitted, the change that adds the count re-fits it: `--check`
 compares whole tables.
+*Amended (#4247): no re-fit of a shipped table follows such a change: the
+starting table carries no estimates and each repository's Fit recomputes them
+at its next phase 0 (`docs/specs/2026-11-01-self-refining-router-design.md`
+§ 2.2, § 2.3); the grouping design retires `--check` and CI's Router table
+check (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.9), and
+#4321 removes the mode and the CI step that #4320 left.*
 
 ### 10.4 The Preview fit
 
@@ -684,6 +805,9 @@ called in-process: the guard runs as a subprocess because its exit status is
 its verdict, which a fit does not have, and the `fit` CLI reads TSVs only as
 committed, so a working-tree CLI mode would be a second fit path. A fit over
 195 Pulls took 0.24 s locally.
+*Amended (#4247): the duty is the Fit: it runs at phase 0 only, since
+close-out passes `--no-fit`, and its prior is the starting table beside the
+scripts (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.3).*
 
 It writes `.fleet/router-preview.json` through a temp file and a rename:
 
@@ -699,7 +823,14 @@ It writes `.fleet/router-preview.json` through a temp file and a rename:
   and leaves the exit status unchanged. (amended by #4020: the line goes to
   stdout, the one stream close-out's receipt keeps on exit 0, and the cockpit
   reads it there, § 6.2.)
+  *Amended (#4247): the line is `metrics-refresh: fit: failed — <why>`, and
+  the run routes by the last Fit that computed, else by the starting table
+  (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.3).*
 - It is never routed and never committed.
+  *Amended (#4247): the Fit is routed, from `.fleet/router-fit.json` beside
+  the guard, with the guard it used in its record and `splits` in its prior in
+  place of `stage`; it is still never committed
+  (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.3).*
 
 ### 10.5 The cockpit
 

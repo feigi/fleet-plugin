@@ -69,3 +69,9 @@ layer underneath the [Implementer](implementer.md) role.
   [ADR 0016](../adr/0016-per-ticket-model-effort-routing.md)) is what
   [`ticket-router.mjs`](../../plugin/scripts/ticket-router.mjs) builds,
   replacing today's fixed exploration cell.
+  *Amended (#4247): `ticket-router.mjs` builds that design as
+  [`docs/specs/2026-11-01-self-refining-router-design.md`](../specs/2026-11-01-self-refining-router-design.md)
+  amends it: it routes by the repository's own Fit, recomputed at every phase
+  0 and kept in `.fleet/`, or by the starting table while there is none, and
+  each group of the table's tree explores around its own `cost` row Cell
+  (§ 2.3, § 2.6).*
