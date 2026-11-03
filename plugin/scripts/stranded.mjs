@@ -200,10 +200,11 @@ const real = (p) => {
 };
 
 // A claim's names, off claim-ticket.sh's shapes for an implementer:
-// `.worktrees/<N>-impl-<N>[-x]` and `implementer/<N>-impl-<N>[-x]`, `-x` a
-// replacement's single retry letter. Each captures the number and the member
-// name `impl-<N>[-x]`, the slug release-ticket.sh takes. evict.mjs judges its
-// candidates by the same two.
+// `.worktrees/<N>-impl-<N>` and `implementer/<N>-impl-<N>`. Both also accept a
+// `-x` retry letter that no fleet path writes — a replacement works in the
+// first implementer's claim and never claims again — so a claim made by hand
+// under such a name is still reported. Each captures the number and the slug
+// release-ticket.sh takes. evict.mjs judges its candidates by the same two.
 export const CLAIM_WORKTREE = /^([1-9][0-9]*)-(impl-\1(?:-[a-z])?)$/;
 export const CLAIM_BRANCH = /^implementer\/([1-9][0-9]*)-(impl-\1(?:-[a-z])?)$/;
 const WAYS_OUT = "push the branch and open a PR, or release the claim by hand";

@@ -644,7 +644,7 @@ test("a claim with nothing ahead of origin/main is still listed — its dry run 
   ]);
 });
 
-test("a branch with no worktree is a claim too; each member of one ticket is listed, and its issue is read once", (t) => {
+test("a branch with no worktree is a claim too; two claims on one ticket are both listed, and its issue is read once", (t) => {
   const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12"] });
   commitIn(f, "12-impl-12");
   const tip = git(f.repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit-tree", "-m", "work", "-p", "HEAD", "HEAD^{tree}").trim();
@@ -666,7 +666,7 @@ test("unlabelled claims are listed in issue-number order, not in the order git n
   assert.deepEqual(r.out.claims.map((c) => c.n), [9, 12]);
 });
 
-test("a retry member's worktree `.worktrees/<N>-impl-<N>-<x>` is the claim's worktree", (t) => {
+test("a hand-made worktree `.worktrees/<N>-impl-<N>-<x>` is still a claim's worktree", (t) => {
   const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12-b"] });
   const r = f.run({ views: { 12: view(12) } });
   assert.equal(r.status, 0, r.stderr);
