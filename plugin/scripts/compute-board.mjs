@@ -369,6 +369,9 @@ function reasonWords(r, table) {
     case "guard-missing": return [part("no cost guard yet: default Cell only")];
     case "no-issue-json": return [part("issue unreadable when routed")];
     case "no-sizing": return [part("no sizing")];
+    case "fit-missing": return [part("no Fit: starting table")];
+    case "fit-unreadable": return [part("Fit unreadable: starting table")];
+    case "fit-invalid": return [part("Fit invalid: starting table")];
     default: return [part(`recorded as ${r.reason}`)];
   }
 }
@@ -867,7 +870,7 @@ export function computeBoard(inputs) {
     cellEvidence: computeCellEvidence({
       guard: inputs.guard,
       guardJson: inputs.guardJson,
-      preview: inputs.preview,
+      fit: inputs.fit,
       receipts: inputs.receipts,
       closeoutPr: inputs.closeoutPr,
       openPrs: inputs.prsOk === false ? null : { numbers: (inputs.prs ?? []).map((p) => p.number), capped: inputs.prsCapped === true },

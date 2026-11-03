@@ -910,7 +910,9 @@ export const isRulePath = (x) => typeof x === "string" && RULE_PATH.test(x);
 // receipt, and every Routing names the one it routed by.
 export const OBJECTIVES = Object.freeze(["cost", "speed"]);
 const DRAWN_BY = Object.freeze(["burn-in", "every-5th"]);
-export const ROUTING_REASONS = Object.freeze(["ok", "no-issue-json", "no-sizing", "guard-missing", "guard-tripped", "table-cell-tripped"]);
+export const ROUTING_REASONS = Object.freeze([
+  "ok", "no-issue-json", "no-sizing", "guard-missing", "guard-tripped", "table-cell-tripped", "fit-missing", "fit-unreadable", "fit-invalid",
+]);
 const SIZINGS = Object.freeze(["light", "heavy"]);
 const ROUTING_KEYS = Object.freeze(["POLICY", "CELL", "DRAW", "BY", "STRATUM", "BRIEF", "CRITERIA", "PARENT", "SIZED", "OBJECTIVE", "TRIPPED", "REASON"]);
 const PARENT_AT = ROUTING_KEYS.indexOf("PARENT");

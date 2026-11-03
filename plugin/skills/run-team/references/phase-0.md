@@ -247,10 +247,15 @@ and the guard the script also widens a `docs/metrics/member-outcomes.tsv`
 written before the newest columns: each row gains them, `ending` reads
 `unknown` on an implementer's row, and nothing else changes. Without that,
 phase 0, the close-out scrape and `tier-outcomes.mjs append` refuse the file.
-After a guard it wrote, the script writes the Preview fit,
-`.fleet/router-preview.json`, which only the cockpit reads: nothing routes by
-it and nothing commits it, and a `metrics-refresh: preview: failed — <why>`
-line leaves the exit at 0, so it never stops the run.
+After a guard it wrote, the script computes the Fit — the router's table fitted
+over the three metrics files and that guard, with the starting table beside the
+scripts as its prior — and writes it to `.fleet/router-fit.json`, which every
+Pull of this run routes by. Nothing commits it. One Fit per run: close-out
+computes none, so each close-out's rows route the next run. A
+`metrics-refresh: fit: failed — <why>` line leaves the previous file as it
+was and the exit at 0, so it never stops the run: the run routes by the last
+Fit that computed, else by the starting table. A skipped guard skips the Fit
+too, and both files are left as they are.
 
 ## Launch the cockpit
 

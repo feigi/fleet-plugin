@@ -276,8 +276,13 @@ one; a B Pull routes exactly as an A one until the table opens arm B.
 row set of the run's Objective, `OBJECTIVE`, which it reads off the phase-0
 receipt. The printed line is the
 whole routing decision — never re-derive `CELL` from the table, the guard or
-this paragraph. A missing or unreadable `.fleet/cost-guard.json` routes the
-default cell only (`REASON=guard-missing`), burn-in included. On the ledger the
+this paragraph. The table it routes by is the Fit phase 0 wrote,
+`.fleet/router-fit.json` beside `--guard`; a Fit that is absent, unreadable,
+unparseable or not a valid table routes by the starting table beside the
+script, and `REASON` says so (`fit-missing`, `fit-unreadable`, `fit-invalid`).
+A missing or unreadable `.fleet/cost-guard.json` routes the
+default cell only (`REASON=guard-missing`), burn-in included, whatever the Fit
+holds. On the ledger the
 whole line, `REASON` with it, is the Pull's `## Routed` entry; a row carries no
 `route=` (an older row's `route=<REASON>` still reads).
 
@@ -441,7 +446,7 @@ controller's probe could not look.
 **Every 5th Pull by ledger count goes at an exploration cell.** Count the `impl-`
 rows in `.fleet/ledger.md` at Pull time; the Pull that creates row 5, 10, 15 …
 is an Exploration Pull, and the router draws its cell: `k = 1 +
-(sha256("<session>\t<ticket>")[0:8] mod K)` over `router-table.json`'s
+(sha256("<session>\t<ticket>")[0:8] mod K)` over the routing table's
 `cells` minus the policy cell, in token order. Under either Objective that
 policy cell is the `cost` row set's, so the draw is the same under both. While the table's `burn_in` is
 true every Pull draws, over every cell, the policy cell included. An

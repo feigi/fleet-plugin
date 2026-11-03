@@ -236,6 +236,65 @@ test("route: guard-missing — no guard (or an unparseable one) dispatches the d
   }
 });
 
+// The route call the run makes: no `--table`, so the table is the Fit beside `--guard`, else the starting table.
+const routeByFit = (p, { implRow = 3 } = {}) => cli(["route", "--session", SESSION, "--objective", "cost", "--ticket", "42", "--arm", "A",
+  "--impl-row", String(implRow), "--issue", p.issue, "--guard", p.guard, "--pending", p.pending]);
+const fitFile = (p) => join(p.dir, "router-fit.json");
+const writeFit = (p, table) => writeFileSync(fitFile(p), JSON.stringify({ computed_at: "2026-10-01T00:00:00.000Z", table }));
+
+test("route: with no --table, the Fit beside --guard routes the Pull", (t) => {
+  const p = world(t);
+  writeFit(p, baseTable({ rows: both({ "*": "task-high" }) }));
+  const r = routeByFit(p);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, "POLICY=task-high CELL=task-high DRAW=- BY=- STRATUM=* BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok\n");
+});
+
+test("route: a Fit that is absent, unreadable, unparseable or invalid routes by the starting table, and REASON names which", (t) => {
+  const cases = [
+    ["fit-missing", () => {}],
+    ["fit-unreadable", (p) => mkdirSync(fitFile(p))],
+    ["fit-unreadable", (p) => writeFileSync(fitFile(p), "{nope")],
+    ["fit-invalid", (p) => writeFileSync(fitFile(p), "null")],
+    ["fit-invalid", (p) => writeFit(p, { ...baseTable(), cells: [] })],
+  ];
+  for (const [reason, make] of cases) {
+    const p = world(t);
+    make(p);
+    const r = routeByFit(p);
+    assert.equal(r.status, 0, `${reason}: ${r.stderr}`);
+    const starting = routeCli({ ...p, table: DEFAULT_TABLE }, { ticket: 42 });
+    assert.equal(starting.status, 0, starting.stderr);
+    assert.deepEqual(parseLine(r.stdout), { ...parseLine(starting.stdout), REASON: reason }, reason);
+  }
+});
+
+test("route: a deleted guard still routes slow-high with no draw, whatever the Fit holds — a valid one, none, or an invalid one", (t) => {
+  for (const [fit, make] of [
+    ["valid", (p) => writeFit(p, baseTable({ burn_in: true, rows: both({ "*": "task-high" }) }))],
+    ["absent", () => {}],
+    ["invalid", (p) => writeFileSync(fitFile(p), "null")],
+  ]) {
+    const p = world(t, { guard: null });
+    make(p);
+    for (const implRow of [3, 5]) {
+      const r = routeByFit(p, { implRow });
+      assert.equal(r.status, 0, `${fit}: ${r.stderr}`);
+      assert.deepEqual(parseLine(r.stdout), {
+        POLICY: "slow-high", CELL: "slow-high", DRAW: "-", BY: "-", STRATUM: "*", BRIEF: "31", CRITERIA: "2", PARENT: "-", SIZED: "-", OBJECTIVE: "cost", TRIPPED: "-", REASON: "guard-missing",
+      }, `${fit} Fit, impl row ${implRow}`);
+    }
+  }
+});
+
+test("route: an explicit --table routes by that table and never reads the Fit", (t) => {
+  const p = world(t);
+  writeFit(p, baseTable({ rows: both({ "*": "task-high" }) }));
+  const r = routeCli(p);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^POLICY=slow-high CELL=slow-high .* REASON=ok\n$/);
+});
+
 test("route: guard-tripped — a tripped cell leaves the draw's pool, and the line says so", (t) => {
   const p = world(t, { table: baseTable({ burn_in: true }), guard: guardFile({ tripped: ["smol-high"], verdict: "tripped" }) });
   const r = routeCli(p);

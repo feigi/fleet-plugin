@@ -16,6 +16,12 @@
 //     routing by the objective's row set, and appends the Pull's
 //     ticket-features row to the pending TSV (by default
 //     `ticket-features.pending.tsv` beside `--guard`, in the run's `.fleet/`).
+//     With no `--table` it routes by the Fit, `router-fit.json` beside
+//     `--guard`, which metrics-refresh.mjs writes at phase 0. A Fit that is
+//     absent, unreadable, unparseable or fails validateTable routes by the
+//     starting table beside the script instead, and `REASON` names why:
+//     `fit-missing`, `fit-unreadable` or `fit-invalid`. A missing guard routes
+//     the default cell whatever the table, so it names no Fit there.
 //     The paths its brief names are looked up under the working directory,
 //     the checkout, for `named_lines`. Exit 0 on every data degradation — a
 //     missing or unreadable issue, sizing or guard file degrades the line,
@@ -430,6 +436,27 @@ export function readGuard(raw) {
   return r.ok ? r.guard : null;
 }
 
+/** The Fit's file name: metrics-refresh.mjs writes it beside the cost guard, and `route` reads it there. */
+export const FIT_FILE = "router-fit.json";
+
+/**
+ * The table the Fit beside `guardPath` holds, `{ table, fallback: null }`, or `{ table: null, fallback }` when
+ * there is none to route by: `fallback` is the Routing `REASON` that names why — `fit-missing` for no file,
+ * `fit-unreadable` for one that will not read or parse, `fit-invalid` for one whose `table` validateTable refuses.
+ */
+export function readFitBeside(guardPath) {
+  let text;
+  try {
+    text = readFileSync(join(dirname(guardPath), FIT_FILE), "utf8");
+  } catch (e) {
+    return { table: null, fallback: e.code === "ENOENT" ? "fit-missing" : "fit-unreadable" };
+  }
+  let fit;
+  try { fit = JSON.parse(text); } catch { return { table: null, fallback: "fit-unreadable" }; }
+  const table = validateTable(fit?.table);
+  return table instanceof Error ? { table: null, fallback: "fit-invalid" } : { table, fallback: null };
+}
+
 /** The sizing verdict on a live B Pull: `{ src, label, usd }`, or null when it is unusable. */
 function readSizing(raw, classifier) {
   if (raw === null || typeof raw !== "object" || raw.source !== classifier.b) return null;
@@ -456,15 +483,18 @@ export function sessionDate(session) {
  * it leaves out the cell the `cost` set routes the group to, whichever set
  * routes the Pull, so a Pull draws the same cell under both. A live B Pull
  * records its sizing verdict and routes as an A Pull does: a label names no
- * group of the tree.
+ * group of the tree. `fallback` is readFitBeside's REASON when `table` is the
+ * starting table standing in for a Fit, else null: it is the first thing that
+ * went wrong, except beside no guard, where the table routes nothing.
  * @returns {{ line: string, row: Record<string,string> }}
  */
 export function route({
   session, ticket, arm, implRow, chainHead = false, issue, sizing = null, guard, table, objective, now = Date.now(),
-  root = process.cwd(), version = installVersion(),
+  root = process.cwd(), version = installVersion(), fallback = null,
 }) {
   let reason = null;
   const degrade = (r) => { reason ??= r; };
+  if (fallback !== null && guard !== null) degrade(fallback);
 
   const metrics = issueMetrics(issue, now);
   if (metrics === null) degrade("no-issue-json");
@@ -898,11 +928,15 @@ function main() {
   if (foreign) die(`--${foreign} does not apply to ${mode === "check" ? "--check" : mode}`);
   const need = (name) => F.arg(name) ?? die(`${mode === "check" ? "--check" : mode} needs --${name}`);
 
+  // `route` with no `--table` routes by the Fit beside `--guard`, else by the starting table.
+  const fit = mode === "route" && F.arg("table") === null && F.arg("guard") !== null ? readFitBeside(F.arg("guard")) : null;
   const tablePath = mode === "route" ? (F.arg("table") ?? DEFAULT_TABLE) : need("table");
-  let table;
-  try { table = JSON.parse(readFileSync(tablePath, "utf8")); } catch (e) { die(`cannot read the router table ${tablePath}: ${e.message}`); }
-  const valid = validateTable(table);
-  if (valid instanceof Error) die(`${tablePath}: ${valid.message}`);
+  let table = fit?.table ?? null;
+  if (table === null) {
+    try { table = JSON.parse(readFileSync(tablePath, "utf8")); } catch (e) { die(`cannot read the router table ${tablePath}: ${e.message}`); }
+    const valid = validateTable(table);
+    if (valid instanceof Error) die(`${tablePath}: ${valid.message}`);
+  }
 
   if (mode === "route") {
     const ticket = need("ticket");
@@ -938,6 +972,7 @@ function main() {
     const { line, row } = route({
       session, ticket: Number(ticket), arm, implRow: Number(implRowArg), chainHead: F.has("chain-head"),
       issue: readJson(issuePath), sizing: readJson(F.arg("sizing")), guard: readGuard(readJson(guardPath)), table, objective, root, version,
+      fallback: fit?.fallback ?? null,
     });
     const pending = F.arg("pending") ?? join(dirname(guardPath), "ticket-features.pending.tsv");
     // The header decision and the append are not atomic and take no lock. That is
