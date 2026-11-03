@@ -5,6 +5,13 @@ on #3994, against `main` at `ff574efe`. The ruling replaces the issue body's
 proposed remedy, which removed the whole worktree. Amended by #4228: the
 restore no longer reports an Install step's exit 126/127 as a Recipe that no
 longer runs, as decision 6 below words it; that exit names no cause by itself.
+Amended by #4098: a marked tree that still holds ignored paths is no longer
+kept for its mark alone (decision 4) — it meets every other keep-rule and,
+when none holds it, its ignored paths are removed again with the mark left as
+written, and one that still cannot be removed is named in `failed` on every
+sweep (decision 5); a restore records its time just before its Install step
+runs, not once the tree is clean (decision 6), so a restore still installing,
+or one refused, holds the tree for 7 days.
 
 ## Context
 
