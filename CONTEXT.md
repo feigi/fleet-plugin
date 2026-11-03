@@ -571,7 +571,9 @@ The pure function (`drawCell`) that picks a cell uniformly from the
 eligible cells on an Exploration Pull — during burn-in the starting table's
 Cells, afterwards the Stratum's exploration Cells — deterministic from the
 session id and ticket number, no RNG, no seed. Each Pull's probability of the
-Cell it got is known at the draw, and the Fit weighs the Pull by it.
+Cell it got is known at the draw, recorded as `assignment_prob` in
+`ticket-features.tsv` (blank on a row written before the column: unknown), and
+the Fit weighs the Pull by it.
 _Avoid_: random draw, coin flip
 
 **Ending**:

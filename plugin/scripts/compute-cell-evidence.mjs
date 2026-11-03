@@ -532,14 +532,19 @@ function routesHeading(table, guard, source) {
 }
 
 // One row's dispatch, in the words a heading or a row carries: what `route` does
-// with a Pull on it under the guard, from rowDispatch.
+// with a Pull on it under the guard, from rowDispatch. Past burn-in the draw is
+// over the group's exploration Cells that this install runs and the guard has
+// not tripped. The cockpit does not read the install, so it names them without
+// counting them, and without claiming one is left: with none, `route` draws
+// nothing.
 function dispatchWords(table, rd, row) {
   const tripped = rd.reason === "table-cell-tripped" ? `the row's ${row} tripped` : null;
   if (rd.reason === "guard-missing") return `${POLICY_CELL} only`;
   if (rd.draw?.by === "burn-in") {
     return `drawn over ${plural(rd.draw.cells.length, "Cell")}: ${rd.draw.cells.join(", ")}${tripped ? `; ${tripped}, so its policy Cell is ${POLICY_CELL}` : ""}`;
   }
-  const fifth = rd.draw === null ? "no draw: no other Cell is left" : "every 5th Pull drawn over the rest";
+  const fifth = table.burn_in ? "no draw: no other Cell is left"
+    : "every 5th Pull drawn over the group's exploration Cells, if the install runs one the guard has not tripped";
   return `${tripped ? `${POLICY_CELL}, ${tripped}` : "the row's Cell"}; ${fifth}`;
 }
 

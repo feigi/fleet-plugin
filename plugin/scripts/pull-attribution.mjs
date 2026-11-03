@@ -98,11 +98,15 @@ import { DATE, isDerivedNote, rulingFor, rulingsByTicket } from "./tier-outcomes
 // or lies outside the checkout; `dirs` the number of distinct directories they
 // span. Those three are blank when the brief names no path. `title` is the
 // issue's title, and `plugin_version` the install's `package.json` `version`.
+// `assignment_prob` is the probability the router assigned the Pull its
+// `chosen_cell` with, written as a fraction that reads back exactly: `1`, or
+// `<n>/<d>` in lowest terms (ticket-router.mjs's assignmentProb). Blank is
+// unknown, a row written before the column: never a probability of 1 or 0.
 export const FEATURE_COLUMNS = Object.freeze([
   "run_date", "session", "agent", "ticket", "policy_cell", "chosen_cell", "exploration_draw",
   "sizing_src", "sizing_pre", "router_usd", "brief_chars", "criteria", "comments", "age_days",
   "paths", "test_paths", "xrefs", "kind", "objective", "parent",
-  "named_paths", "named_lines", "dirs", "title", "plugin_version",
+  "named_paths", "named_lines", "dirs", "title", "plugin_version", "assignment_prob",
 ]);
 export const OPTIONAL_COLUMNS = new Set(FEATURE_COLUMNS.slice(FEATURE_COLUMNS.indexOf("objective")));
 

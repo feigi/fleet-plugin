@@ -19,7 +19,7 @@
 // rows the next drain finds already there, so a second run changes nothing.
 // A corpus written before a column the pending file carries — one the row
 // grammar names, `objective`, `parent`, `named_paths`, `named_lines`, `dirs`,
-// `title` or `plugin_version` — gains that column, blank on every row it
+// `title`, `plugin_version` or `assignment_prob` — gains that column, blank on every row it
 // already holds. A pending file begun before one of them drains its rows
 // blank in it.
 // A pending file that is empty, or blank lines only, is removed with its own

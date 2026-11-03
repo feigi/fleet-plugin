@@ -282,7 +282,18 @@ unparseable or not a valid table routes by the starting table beside the
 script, and `REASON` says so (`fit-missing`, `fit-unreadable`, `fit-invalid`).
 A missing or unreadable `.fleet/cost-guard.json` routes the
 default cell only (`REASON=guard-missing`), burn-in included, whatever the Fit
-holds. On the ledger the
+holds. Past burn-in an exploring Pull draws over its group's exploration
+Cells, around the group's `cost` row Cell: its role one effort level up and
+one down, the bigger model one level lower, the smaller model one level
+higher — those this install runs (a definition, at a level omp's catalog lists
+for the role's `modelRoles` model, both read by the router) and the guard has
+not tripped. The router writes the Pull's ticket-features row with
+`assignment_prob`, the probability its Cell was assigned with: in burn-in 1
+over the Cells drawn; past it 4/5 at the group's Cell, 1/5 of 1 over the Cells
+drawn on an exploring Pull, the two summed for a group Cell the draw also holds
+(under `speed` the row's Cell can be one of the `cost` row Cell's exploration
+Cells), and 1 where no Cell could be drawn (a chain head, no guard, no
+candidate left). On the ledger the
 whole line, `REASON` with it, is the Pull's `## Routed` entry; a row carries no
 `route=` (an older row's `route=<REASON>` still reads).
 
@@ -446,9 +457,9 @@ controller's probe could not look.
 **Every 5th Pull by ledger count goes at an exploration cell.** Count the `impl-`
 rows in `.fleet/ledger.md` at Pull time; the Pull that creates row 5, 10, 15 …
 is an Exploration Pull, and the router draws its cell: `k = 1 +
-(sha256("<session>\t<ticket>")[0:8] mod K)` over the routing table's
-`cells` minus the policy cell, in token order. Under either Objective that
-policy cell is the `cost` row set's, so the draw is the same under both. While the table's `burn_in` is
+(sha256("<session>\t<ticket>")[0:8] mod K)` over the group's exploration Cells
+this install runs and the guard has not tripped, in token order. Under either
+Objective they are the ones around the `cost` row set's Cell, so the draw is the same under both. While the table's `burn_in` is
 true every Pull draws, over the starting cells (the three models at `high`) the
 guard has not tripped, the policy cell included; a cell the table lists beyond
 them is never drawn. An

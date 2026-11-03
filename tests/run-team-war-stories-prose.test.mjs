@@ -118,8 +118,8 @@ const CORRECTIONS = [
     "duty 1 just proved the owned worktree sits at that pin,",
     "duty 1 just proved the owned worktree holds nothing your dispatch pin lacks, though its `HEAD` may differ from it,",
   ],
-  // The router draws over the table it routes by, the Fit beside the guard, else the starting table.
-  ["over `router-table.json`'s `cells` minus the policy cell", "over the routing table's `cells` minus the policy cell"],
+  // Past burn-in the router draws over the group's exploration Cells, around its `cost` row Cell, not the table's cells.
+  ["over `router-table.json`'s `cells` minus the policy cell", "over the group's exploration Cells this install runs and the guard has not tripped"],
   // Burn-in draws the starting cells, not every cell the table lists.
   [
     "While the table's `burn_in` is true every Pull draws, over every cell, the policy cell included.",
