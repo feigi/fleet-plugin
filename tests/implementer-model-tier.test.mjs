@@ -218,6 +218,26 @@ test("every implementer definition is named for a cell and declares exactly the 
   }
 });
 
+test("every implementer definition's description is the shared template with its own cell substituted (#4295)", () => {
+  // An orchestrator reads `description:` when it picks an agent, so a
+  // description naming another cell misdescribes the definition, and the
+  // byte-identical clause is the description's statement of the body pin
+  // above. Only the frontmatter line is read: a body edit leaves this green.
+  const template = (cell) =>
+    `A \`/skill:run-team\` implementer at cell ${cell}. Dispatched by the controller at the Pull's dispatch, never invoked directly; the body is byte-identical across every fleet-implementer-* definition.`;
+  const names = implementers();
+  const descriptions = new Map();
+  for (const name of names) {
+    const cell = name.slice(PREFIX.length);
+    const description = /^description: (.*)$/m.exec(frontmatterOf(name))?.[1];
+    assert.equal(description, template(cell), `${name}.agent.md's description is not the shared template at cell ${cell}`);
+    descriptions.set(description, name);
+  }
+  // Exact equality alone passes a template that lost its cell, so every
+  // description must also differ from every other one: the cell is really in the text.
+  assert.equal(descriptions.size, names.length, "two implementer definitions share one description — the template no longer substitutes the cell");
+});
+
 test("every implementer definition lists no tools — a list would drop dispatch capability", () => {
   // references/member-lifecycle.md's "Every member is named" section: the
   // name is the ledger token and the hub address — a `tools:` list that
