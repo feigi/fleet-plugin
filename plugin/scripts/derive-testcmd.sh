@@ -416,9 +416,9 @@ fi
 # `;`, `&`, or a newline lets a real shell read the caller's "$@" as an
 # unrelated top-level command instead of args reaching the Test entrypoint, and
 # one containing a `#`-led word swallows everything after it, "$@" included, as
-# a comment. review-core.mjs's shared test run appends no arguments but embeds
-# the string in `{ cd <dir> && <cmd>; }`, where the same endings and `#` word
-# break the wrapper as a syntax error — measured on both. A trailing
+# a comment. review-core.mjs's shared test run hands the string to
+# suite-slot.mjs single-quoted and appends no arguments, so neither hazard
+# reaches it there. A trailing
 # newline is checked here too: the frame above lets a value keep one
 # where an unframed `$(…)` capture always dropped it silently, so a value
 # that used to read as `true;` now reads as `true;\n` and would otherwise

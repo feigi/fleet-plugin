@@ -1089,10 +1089,10 @@ async function reviewRun(host, args, run) {
   // entrypoint off the Recipe cache and passes it. Refused here, beside the
   // other argument refusals, so a review that could never run its suite costs
   // no snapshot.
-  if (typeof A.testCmd !== "string" || A.testCmd.trim() === "") {
-    throw new Error(`review-pr: args.testCmd is required — the Test entrypoint the shared run executes, got ${JSON.stringify(A.testCmd)}`);
-  }
   const testCmd = A.testCmd;
+  if (typeof testCmd !== "string" || testCmd.trim() === "") {
+    throw new Error(`review-pr: args.testCmd is required — the Test entrypoint the shared run executes, got ${JSON.stringify(testCmd)}`);
+  }
 
   // Resolved only now: the default spawns git, so a missing or malformed `pr`
   // is refused on its own terms before anything is resolved or spawned.

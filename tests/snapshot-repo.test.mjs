@@ -111,6 +111,20 @@ function reviewedRepo(t, { exportIgnore = false } = {}) {
   return dir;
 }
 
+/** Commits the tree as the commit the Recipe was proven on, `origin/main`. */
+function commitAsOriginMain(dir) {
+  git(dir, "add", "-A");
+  git(dir, "-c", "user.name=fixture", "-c", "user.email=fixture@invalid", "commit", "-q", "-m", "recipe");
+  git(dir, "update-ref", "refs/remotes/origin/main", "HEAD");
+}
+
+/** Writes a proven Recipe cache with these Install and Test steps, derived at `origin/main`. */
+function writeRecipe(dir, { install, test }) {
+  mkdirSync(join(dir, ".fleet"), { recursive: true });
+  const recipe = { install, check: true, test, derivedAt: git(dir, "rev-parse", "origin/main"), installClean: true, testCount: 1, uncovered: [] };
+  writeFileSync(join(dir, ".fleet", "recipe.json"), `${JSON.stringify(recipe)}\n`);
+}
+
 /** The Install step every `installedRepo` writes unless a case names its own. */
 const DEPS_INSTALL = "mkdir -p .deps && echo ok > .deps/marker";
 
@@ -130,12 +144,8 @@ function installedRepo(t, { install = DEPS_INSTALL } = {}) {
   writeFileSync(join(dir, ".gitignore"), "ignored.txt\n.deps/\n");
   writeFileSync(join(dir, "install.sh"), `${install}\n`);
   writeFileSync(join(dir, "check.sh"), "test -f .deps/marker\n");
-  git(dir, "add", "-A");
-  git(dir, "-c", "user.name=fixture", "-c", "user.email=fixture@invalid", "commit", "-q", "-m", "recipe");
-  git(dir, "update-ref", "refs/remotes/origin/main", "HEAD");
-  mkdirSync(join(dir, ".fleet"), { recursive: true });
-  const recipe = { install: "sh ./install.sh", check: true, test: "sh ./check.sh", derivedAt: git(dir, "rev-parse", "HEAD"), installClean: true, testCount: 1, uncovered: [] };
-  writeFileSync(join(dir, ".fleet", "recipe.json"), `${JSON.stringify(recipe)}\n`);
+  commitAsOriginMain(dir);
+  writeRecipe(dir, { install: "sh ./install.sh", test: "sh ./check.sh" });
   return dir;
 }
 
@@ -149,15 +159,11 @@ function scriptInstallRepo(t, change, { install = "./install.sh" } = {}) {
   const dir = reviewedRepo(t);
   writeFileSync(join(dir, ".gitignore"), "ignored.txt\n.deps/\n");
   writeFileSync(join(dir, "install.sh"), `#!/bin/sh\n${DEPS_INSTALL}\n`, { mode: 0o755 });
-  git(dir, "add", "-A");
-  git(dir, "-c", "user.name=fixture", "-c", "user.email=fixture@invalid", "commit", "-q", "-m", "recipe");
-  git(dir, "update-ref", "refs/remotes/origin/main", "HEAD");
+  commitAsOriginMain(dir);
   change(dir);
   git(dir, "add", "-A");
   git(dir, "-c", "user.name=fixture", "-c", "user.email=fixture@invalid", "commit", "-q", "--allow-empty", "-m", "pr");
-  mkdirSync(join(dir, ".fleet"), { recursive: true });
-  const recipe = { install, check: true, test: "true", derivedAt: git(dir, "rev-parse", "origin/main"), installClean: true, testCount: 1, uncovered: [] };
-  writeFileSync(join(dir, ".fleet", "recipe.json"), `${JSON.stringify(recipe)}\n`);
+  writeRecipe(dir, { install, test: "true" });
   return dir;
 }
 
