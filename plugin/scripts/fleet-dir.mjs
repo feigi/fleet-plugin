@@ -113,9 +113,10 @@ function workspaceOf(cwd, timeoutMs, canonicalise) {
  * the run's file in someone else's workspace, silently, at exit 0.
  *
  * `canonicalise` is git-env.mjs's resolveWorkspace() opt-in, passed through:
- * only a caller that keys something on the path (the cockpit's port) takes
- * it. Everyone else prints the path it resolves, and realpath would change
- * that spelling without changing which file it names.
+ * only a caller that keys something on the path takes it — the cockpit's
+ * port, a scratch key's `checkout-path`. Everyone else prints the path it
+ * resolves, and realpath would change that spelling without changing which
+ * file it names.
  *
  * `timeoutMs` (default git-env.mjs's DEFAULT_GIT_TIMEOUT_MS) bounds each git
  * child, not the call. When the common git dir is not named `.git` and the

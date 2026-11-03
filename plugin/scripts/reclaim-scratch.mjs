@@ -571,22 +571,28 @@ function judgeSiblings(root, cutoff) {
 // A read of `checkout-path` that leaves no file to judge, rather than an error.
 const NO_CHECKOUT_FILE = new Set(["ENOENT", "ENOTDIR", "EISDIR", "EACCES", "EPERM"]);
 
-// The checkout `key`'s `checkout-path` names: `{ checkout }`; `{ none }`, why
-// there is no valid file — missing, unreadable, anything but one absolute
-// path, or a path whose sha256 does not start with the key's 8-hex suffix;
-// or `{ error }` for any other failure to read it.
+// The checkout `key`'s `checkout-path` names, `{ checkout }`, or the `{ reason }`
+// the key is kept for instead: `no checkout file: …` when there is no valid
+// file — missing, unreadable, not a regular file, anything but one absolute
+// path, or a path whose sha256 does not start with the key's 8-hex suffix —
+// or the error any other failure to read it left. Only a regular file is read:
+// a FIFO there would block the pass and a link to a device such as /dev/zero
+// would never end.
 function checkoutOf(key) {
+  const file = join(key, CHECKOUT_FILE);
+  const none = (why) => ({ reason: `no checkout file: ${why}` });
   let text;
   try {
-    text = readFileSync(join(key, CHECKOUT_FILE), "utf8");
+    if (!lstatSync(file).isFile()) return none(`${CHECKOUT_FILE} is not a regular file`);
+    text = readFileSync(file, "utf8");
   } catch (e) {
-    if (NO_CHECKOUT_FILE.has(e.code)) return { none: e.code === "ENOENT" ? `${CHECKOUT_FILE} is missing` : `${CHECKOUT_FILE} cannot be read (${e.code})` };
-    return { error: `its ${CHECKOUT_FILE} cannot be read: ${e.message}` };
+    if (NO_CHECKOUT_FILE.has(e.code)) return none(e.code === "ENOENT" ? `${CHECKOUT_FILE} is missing` : `${CHECKOUT_FILE} cannot be read (${e.code})`);
+    return { reason: `its ${CHECKOUT_FILE} cannot be read: ${e.message}` };
   }
   const line = text.endsWith("\n") ? text.slice(0, -1) : text;
-  if (line.includes("\n") || !isAbsolute(line)) return { none: `${CHECKOUT_FILE} holds no single absolute path` };
+  if (line.includes("\n") || !isAbsolute(line)) return none(`${CHECKOUT_FILE} holds no single absolute path`);
   const suffix = basename(key).slice(-8);
-  if (!createHash("sha256").update(line).digest("hex").startsWith(suffix)) return { none: `${line} does not hash to the key's suffix ${suffix}` };
+  if (!createHash("sha256").update(line).digest("hex").startsWith(suffix)) return none(`${line} does not hash to the key's suffix ${suffix}`);
   return { checkout: line };
 }
 
@@ -614,8 +620,7 @@ function judgeSibling(path, cutoff) {
   const idle = freshUnder(path, cutoff, unreadable) === null;
   const keep = (reason) => ({ remove: false, reason, idle });
   const found = checkoutOf(path);
-  if (found.error !== undefined) return keep(found.error);
-  if (found.none !== undefined) return keep(`no checkout file: ${found.none}`);
+  if (found.reason !== undefined) return keep(found.reason);
   const { checkout } = found;
   const at = existsAt(checkout);
   if (at instanceof Error) return keep(`whether its checkout ${checkout} exists cannot be told: ${at.message}`);
@@ -626,7 +631,7 @@ function judgeSibling(path, cutoff) {
   if (!up) return keep(`neither its checkout ${checkout} nor ${held}, the directory that held it, exists`);
   if (!idle) return keep("sibling key modified within 7 days");
   if (unreadable.length > 0) return keep(`sibling key could not be read whole (${unreadable[0]})`);
-  return { remove: true, reason: `its checkout ${checkout} is gone and nothing under it changed in 7 days`, idle };
+  return { remove: true, reason: `its checkout ${checkout} is gone and nothing under it changed in 7 days`, idle: true };
 }
 
 // The live key's own `checkout-path`, written when it is missing or says

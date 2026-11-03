@@ -61,9 +61,10 @@ work in flight rather than every run's history.
    else, a temp file renamed over it, and writes no other key's; a dry run
    writes nothing, and a failed write lands in `failed[]`. It then judges each
    key-shaped directory directly under the scratch parent, other than the live
-   key. A key whose file is missing, unreadable, not one absolute path, or a path
-   that does not hash to the key's suffix is kept, having no checkout file; one
-   whose checkout still exists is kept, its own phase 0 reclaims it; one whose
+   key. A key whose file is missing, unreadable, not a regular file, not one
+   absolute path, or a path that does not hash to the key's suffix is kept,
+   having no checkout file; one whose checkout still exists is kept, its own
+   phase 0 reclaims it; one whose
    checkout and the directory that held it are both gone is kept, since an
    unplugged drive reads the same. Only a key whose checkout is gone while that
    directory is present goes, whole, and only when nothing under it changed in
