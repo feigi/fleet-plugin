@@ -89,6 +89,8 @@
 //       replay, so each of those is an unpaired line.
 //     - a `commit` entry, amend and merge commits included: a member kept
 //       working after the dispatch, or a remote rebase superseded this worktree.
+//       The two tests are `uniqueIn()` of unique-in-upstream.mjs, which the merge
+//       bot runs as a command; what follows is what it does.
 //       A range holds nothing unique only when two tests both find nothing. By
 //       patch: `git cherry <upstream> HEAD` prints no `+` line and `git
 //       rev-list --merges --count <upstream>..HEAD` is 0 - `git cherry` never
@@ -159,6 +161,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeDie, defineFlags, writeAll } from "./arg.mjs";
 import { gitEnv } from "./git-env.mjs";
+import { UniqueReadError, uniqueIn as uniqueInWorktree } from "./unique-in-upstream.mjs";
 
 const NAME = "finisher-audit";
 const die = makeDie(NAME);
@@ -253,12 +256,11 @@ function run(cmd, args, options = {}) {
 
 // A git call inside the worktree. A call that could not run, was killed or
 // exited non-zero stops the audit at exit 2 unless the caller asked to read the
-// failure itself (`soft`), which then carries the exit status and the stdout
-// the call left.
+// failure itself (`soft`), which then carries the error.
 function git(step, args, { soft = false, timeout } = {}) {
   const r = run("git", ["-C", realpath, ...args], timeout === undefined ? {} : { timeout });
   if (r.error || r.signal || r.status !== 0) {
-    if (soft) return { ok: false, status: r.status, out: r.stdout ?? "", error: (r.error?.message ?? r.stderr ?? "").trim() || `exit ${r.status ?? r.signal}` };
+    if (soft) return { ok: false, error: (r.error?.message ?? r.stderr ?? "").trim() || `exit ${r.status ?? r.signal}` };
     const why = r.error?.message ?? (r.signal ? `killed by ${r.signal}` : (r.stderr ?? "").trim() || `exit ${r.status}`);
     fail(`${step}: git ${args.join(" ")} failed: ${why}`);
   }
@@ -288,47 +290,16 @@ function remoteState(branch, head) {
   return { state: r.sha === head ? "pushed" : "differs", ref: r.ref, sha: r.sha };
 }
 
-// The tree id `git merge-tree --write-tree` prints first.
-const TREE_ID = /^[0-9a-f]{40}$/;
-
-// What merging `HEAD` into `upstream` makes, read by `git merge-tree`'s exit
-// code and the tree id on the first line of its stdout: exit 0 is a merge that
-// went through, exit 1 with a tree id a conflict, which is a finding. Exit 1
-// with no tree id is git refusing a revision it cannot merge, so the exit code
-// alone cannot tell a conflict from it. That, exit 128 (unrelated histories
-// among its causes), a signal and a spawn error are reads that failed: exit 2.
-// The merge's tree and blob objects are written to the object store; no ref and
-// no file of the worktree moves.
-function mergeInto(upstream) {
-  const args = ["merge-tree", "--write-tree", upstream, "HEAD"];
-  const merge = git("merge-tree", args, { soft: true });
-  const tree = merge.out.split("\n")[0];
-  if (!TREE_ID.test(tree) || (!merge.ok && merge.status !== 1)) {
-    fail(`merge-tree: git ${args.join(" ")} failed: ${merge.error ?? "no tree id on stdout"}`);
-  }
-  return { tree, conflict: !merge.ok };
-}
-
-// The paths where `tree` differs from `upstream`'s own tree, none for a tree
-// that is its own.
-function changedPaths(upstream, tree) {
-  return git("paths", ["diff-tree", "-r", "--name-only", "-z", `${upstream}^{tree}`, tree]).out.split("\0").filter((p) => p !== "");
-}
-
-// What `HEAD` holds that `upstream` lacks, by two tests, either of which finds
-// it. By patch: `git cherry` prints `+` for a commit whose patch `upstream` does
-// not carry, `-` for one it does. It never lists a merge commit, so a merge's
-// own content is invisible to it and a merge in the range counts as unique. By
-// content: merging `HEAD` into `upstream` conflicts or makes a tree other than
-// `upstream`'s own. An `upstream` the object store lacks fails the read, exit
-// 2, and so does a merge that could not be read.
+// What `HEAD` holds that `upstream` lacks, by the two tests unique-in-upstream.mjs
+// owns. A read that could not be made stops the audit at exit 2, as a failed git
+// call anywhere above does.
 function uniqueIn(upstream) {
-  const listing = git("cherry", ["cherry", upstream, "HEAD"]).out;
-  const merges = Number(git("merges", ["rev-list", "--merges", "--count", `${upstream}..HEAD`]).out.trim());
-  const merged = mergeInto(upstream);
-  const content = { ...merged, paths: changedPaths(upstream, merged.tree) };
-  const unique = merges > 0 || listing.split("\n").some((l) => l.startsWith("+")) || content.conflict || content.paths.length > 0;
-  return { listing, merges, content, unique };
+  try {
+    return uniqueInWorktree(realpath, upstream, { env: GIT_ENV });
+  } catch (e) {
+    if (e instanceof UniqueReadError) fail(e.message);
+    throw e;
+  }
 }
 
 // `git range-diff` prints one line per pairing, `<n>:  <sha> <marker> <m>:  <sha>

@@ -361,6 +361,14 @@ const COVERED_MJS = {
   // finisher-tree.test.mjs, "an inherited GIT_DIR naming another repository
   // cannot retarget the tree".
   "finisher-tree.mjs": 1,
+  // ONE scrubbed env, the default of `uniqueIn()`'s `env` option, handed to the
+  // single `git()` helper behind the cherry, rev-list, merge-tree and diff-tree
+  // reads. An ambient GIT_DIR would answer those reads for another repository,
+  // so the verdict would describe that repository's history. finisher-audit.mjs
+  // passes its own scrubbed env and is counted under its own entry. Behavioural
+  // fixture: unique-in-upstream.test.mjs, "an inherited GIT_DIR naming another
+  // repository cannot retarget the read".
+  "unique-in-upstream.mjs": 1,
   // TWO scrubbed envs. `run()` is the one spawn primitive for the `gh` reads
   // and the `git` upstream reads and writes; an ambient GIT_DIR would answer
   // those reads for another repository and write the upstream into its config.
