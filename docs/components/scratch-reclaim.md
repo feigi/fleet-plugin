@@ -54,17 +54,29 @@ work in flight rather than every run's history.
    `uchg`/`uappnd` flags where `chflags` exists, then `rm -rf`, so a fixture
    that dropped its own read bit cannot wedge it. A removal that still fails is
    reported in the receipt's `failed[]`, and the sweep goes on.
-6. **Sibling keys are judged on age alone.** `reclaim-scratch.mjs --siblings
-   --root <scratch>` judges each key-shaped directory directly under the scratch
-   parent, other than the live key: one with nothing modified in 7 days goes
-   whole, one with anything fresh stays whole, and so does one with any part
-   that cannot be read. `--apply` judges each key again just before removing
-   it, so a key another run wrote to meanwhile is kept. `--root` must be this
-   workspace's own scratch root. Entries that are not key-shaped, and links,
-   are never judged. Its receipt carries `ledger: null`, and its entries are
-   the sibling key directories. Phase 0 runs it on every pass, straight after
-   the root sweep, whatever the root sweep answered, and lists what either
-   pass's `failed[]` names.
+6. **Sibling keys are judged by the checkout they record.** A key's top level
+   holds `checkout-path`, one line naming the absolute, canonical checkout the
+   key's hash is taken over. `reclaim-scratch.mjs --siblings --root <scratch>
+   --apply` first writes its own key's file when it is missing or says anything
+   else, a temp file renamed over it, and writes no other key's; a dry run
+   writes nothing, and a failed write lands in `failed[]`. It then judges each
+   key-shaped directory directly under the scratch parent, other than the live
+   key. A key whose file is missing, unreadable, not a regular file, not one
+   absolute path, or a path that does not hash to the key's suffix is kept,
+   having no checkout file; one whose checkout still exists is kept, its own
+   phase 0 reclaims it; one whose
+   checkout and the directory that held it are both gone is kept, since an
+   unplugged drive reads the same. Only a key whose checkout is gone while that
+   directory is present goes, whole, and only when nothing under it changed in
+   7 days and every part of it could be read. `--apply` takes the whole verdict
+   again just before removing a key. The pass asks GitHub nothing. `--root` must
+   be this workspace's own scratch root. Entries that are not key-shaped, and
+   links, are never judged. Its receipt carries `ledger: null`, and each kept
+   entry says, as `idle`, whether nothing under the key was found modified in 7
+   days. The root sweep never judges `checkout-path`. Phase 0 runs the pass on
+   every pass, straight after the root sweep, whatever the root sweep answered,
+   names each key it removed and each it kept with nothing modified in 7 days,
+   with the reason, and lists what either pass's `failed[]` names.
 
 ## Opinionated choices
 

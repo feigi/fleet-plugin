@@ -686,6 +686,36 @@ test("reclaim: what either pass's receipt lists in failed[] at exit 0 is named, 
   assert.match(g.receipt().steps.reclaim.output, /^sibling keys: could not read reclaim-scratch\.mjs's receipt: /m);
 });
 
+test("reclaim: the sibling pass's output names each key it removed and each it kept with nothing modified in 7 days, with path and reason, never a key modified within 7 days, and the step stays ok", () => {
+  const f = fixture();
+  f.control("reclaim-scratch", {
+    by: {
+      "--root": { out: JSON.stringify({ applied: true, ledger: null, removed: [{ path: "/s/pr5", reason: "PR #5 is MERGED" }], kept: [{ path: "/s/pr6", reason: "PR #6 is OPEN" }], failed: [] }) },
+      "--siblings": {
+        out: JSON.stringify({
+          applied: true, ledger: null,
+          removed: [{ path: "/p/gone-aaaaaaaa", reason: "its checkout /c/gone is gone and nothing under it changed in 7 days" }],
+          kept: [
+            { path: "/p/old-bbbbbbbb", reason: "no checkout file: checkout-path is missing", idle: true },
+            { path: "/p/busy-cccccccc", reason: "sibling key modified within 7 days", idle: false },
+          ],
+          failed: [{ path: "/p/other-dddddddd", error: "EACCES" }],
+        }),
+      },
+    },
+  });
+  const r = f.run();
+  assert.equal(r.status, 0, r.stdout + r.err);
+  const receipt = f.receipt();
+  assert.deepEqual(statuses(receipt), allOk);
+  assert.deepEqual(receipt.steps.reclaim.output.split("\n"), [
+    "scratch reclaimed",
+    "sibling keys: removed /p/gone-aaaaaaaa (its checkout /c/gone is gone and nothing under it changed in 7 days)",
+    "sibling keys: kept /p/old-bbbbbbbb (no checkout file: checkout-path is missing)",
+    "sibling keys: could not reclaim /p/other-dddddddd (EACCES)",
+  ]);
+});
+
 test("evict is recorded and never stops the run: a refusal and each tree its receipt's failed[] names are listed", () => {
   const f = fixture();
   f.control("evict", { exit: 2, err: "evict: refuses" });

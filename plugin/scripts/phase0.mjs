@@ -90,7 +90,9 @@
 //                 then `reclaim-scratch.mjs --siblings --root <scratch> --apply`
 //                 for the other keys under the scratch parent, which runs
 //                 whatever the first answered. What either receipt's failed[]
-//                 names is listed. Recorded; never fails the run.
+//                 names is listed, and so, from the sibling pass's receipt, is
+//                 each key removed and each kept with nothing modified within
+//                 7 days, with its reason. Recorded; never fails the run.
 //   evict         `evict.mjs --after-rotate --apply`, straight after the
 //                 reclaim: the claim trees idle past evict.mjs's bound lose
 //                 their installed dependencies. A non-zero exit, and each
@@ -436,7 +438,7 @@ function reclaim({ cwd, scratch }) {
   return ok([
     live.status === 0 ? "scratch reclaimed" : withText(`reclaim-scratch.mjs ${live.how}, not enforced`, live),
     ...unreclaimed("scratch root", live),
-    ...(siblings.status === 0 ? unreclaimed("sibling keys", siblings) : [withText(`sibling keys: reclaim-scratch.mjs ${siblings.how}, not enforced`, siblings)]),
+    ...(siblings.status === 0 ? unreclaimed("sibling keys", siblings, { named: true }) : [withText(`sibling keys: reclaim-scratch.mjs ${siblings.how}, not enforced`, siblings)]),
   ].join("\n"));
 }
 
@@ -449,17 +451,29 @@ function evict({ cwd }) {
 }
 
 // A pass that exited 0 still lists in its receipt's `failed[]` what it could
-// not judge or remove: each is named here, and none fails the step.
-function unreclaimed(what, r, { script = "reclaim-scratch.mjs", verb = "reclaim" } = {}) {
+// not judge or remove: each is named here, and none fails the step. `named`
+// (the sibling pass) also names each entry the receipt's `removed[]` holds and
+// each in `kept[]` whose `idle` is true: a key kept while it is still being
+// written to is not news.
+function unreclaimed(what, r, { script = "reclaim-scratch.mjs", verb = "reclaim", named = false } = {}) {
   if (r.status !== 0) return [];
-  let entries;
+  let receipt;
   try {
-    ({ failed: entries } = JSON.parse(r.stdout));
+    receipt = JSON.parse(r.stdout);
   } catch (e) {
     return [`${what}: could not read ${script}'s receipt: ${e.message}`];
   }
-  if (!Array.isArray(entries)) return [`${what}: ${script}'s receipt holds no failed[]`];
-  return entries.map((x) => `${what}: could not ${verb} ${x?.path} (${x?.error})`);
+  const { failed: entries, removed, kept } = receipt ?? {};
+  const out = [];
+  if (named) {
+    if (!Array.isArray(removed) || !Array.isArray(kept)) out.push(`${what}: ${script}'s receipt holds no removed[] or kept[]`);
+    else {
+      out.push(...removed.map((x) => `${what}: removed ${x?.path} (${x?.reason})`));
+      out.push(...kept.filter((x) => x?.idle === true).map((x) => `${what}: kept ${x.path} (${x.reason})`));
+    }
+  }
+  if (!Array.isArray(entries)) return [...out, `${what}: ${script}'s receipt holds no failed[]`];
+  return [...out, ...entries.map((x) => `${what}: could not ${verb} ${x?.path} (${x?.error})`)];
 }
 
 function recipe({ cwd }) {

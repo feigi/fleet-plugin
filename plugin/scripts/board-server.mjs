@@ -194,7 +194,7 @@ function isWorkspaceId(v) {
  * The workspace comes from fleet-dir.mjs's fleetFile(), the same locator the
  * run's ledger and heartbeat are resolved with — so the board, the ledger and
  * the heartbeat cannot disagree about which run they belong to — asked with
- * the `canonicalise` opt-in only this caller takes: a symlinked route to one
+ * the `canonicalise` opt-in: a symlinked route to one
  * workspace must derive that workspace's port instead of a second, private
  * one.
  *

@@ -28,7 +28,9 @@ patch only makes sense for a git worktree, and none is created under `impl-<N>/`
 **The anecdote behind the request was about a different partition.** The triggering
 report, #3317, described a fixer that died with its diff surviving only in a scratch
 worktree. That was a fix-applier, whose scratch lives under `pr<N>/`, not `impl-<N>/`.
-The `pr<N>/` side is a separate question.
+The `pr<N>/` side is out of scope too: a fix-applier works in the PR's own worktree and
+keeps only repros and mutation runs under `pr<N>/`, so no scratch partition holds
+uncommitted code.
 
 ## What is not rejected
 

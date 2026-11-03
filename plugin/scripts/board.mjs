@@ -21,7 +21,7 @@ import { serve, resolveCockpitInstance, cockpitWorkspace } from "./board-server.
 // filename rather than spelling `heartbeat.json` a second time. The PATH
 // still comes from resolveCockpitInstance() (board-server.mjs), not from
 // statePath(): the workspace is already resolved once per launch there, with
-// the `canonicalise` opt-in only that caller takes, and a second resolution
+// the `canonicalise` opt-in statePath() does not take, and a second resolution
 // could answer differently.
 import { stateFileIn } from "./fleet-state.mjs";
 import { cockpitLifetime, controllerVerdict } from "./cockpit-lifetime.mjs";

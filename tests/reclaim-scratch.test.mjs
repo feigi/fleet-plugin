@@ -7,13 +7,14 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
   chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync,
   symlinkSync, utimesSync, writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { freshUnder } from "../plugin/scripts/reclaim-scratch.mjs";
@@ -135,9 +136,9 @@ function fixture(t) {
       walk(p);
       return p;
     },
-    run(args, { env = {}, cwd = repo } = {}) {
+    run(args, { env = {}, cwd = repo, timeout } = {}) {
       const r = spawnSync(process.execPath, [SCRIPT, ...args], {
-        cwd, encoding: "utf8",
+        cwd, encoding: "utf8", timeout,
         env: { ...GIT_ENV, PATH: `${bin}:${process.env.PATH}`, HOME: home, GH_LOG: ghLog, GH_STATES: statesFile, ...env },
       });
       r.gh = readFileSync(ghLog, "utf8").split("\n").filter(Boolean);
@@ -1355,24 +1356,55 @@ test("(10) a `reports` whose type cannot be read is kept, never aged out whole",
 
 // The sibling pass: `--root` names the live key, the fixture's own scratch
 // root `f.root`. Returns the fixture with that root aged 8 d, plus the scratch
-// parent.
+// parent, and `key()`, which makes a sibling key the way scratchRoot() names
+// one: `<folder>-<first 8 hex of the sha256 of checkout>`, its `checkout-path`
+// holding `content` (none when null), everything under it aged `days`.
 function siblingFixture(t) {
   const f = fixture(t);
   f.age(f.root, 8);
-  return { ...f, parent: dirname(f.root) };
+  const parent = dirname(f.root);
+  const key = (checkout, { days = 8, content = `${checkout}\n`, name = null } = {}) => {
+    const path = join(parent, name ?? `${basename(checkout)}-${createHash("sha256").update(checkout).digest("hex").slice(0, 8)}`);
+    mkdirSync(path, { recursive: true });
+    if (content !== null) writeFileSync(join(path, "checkout-path"), content);
+    f.age(path, days);
+    return path;
+  };
+  // A checkout path with nothing at it, the directory that held it present.
+  const gone = (name) => {
+    mkdirSync(join(f.base, "gone"), { recursive: true });
+    return join(f.base, "gone", name);
+  };
+  return { ...f, parent, key, gone };
 }
 
-test("(11) a sibling key idle 8 d is removed whole; a sibling with a fresh file three levels down is kept; non-key entries and the live key are untouched", (t) => {
+test("(11) a sibling key whose checkout still exists is kept however idle, with its pr<N> partition, the reason naming the checkout", (t) => {
   const f = siblingFixture(t);
-  const stale = join(f.parent, "impl-tool-aaaaaaaa");
-  mkdirSync(join(stale, "a", "b"), { recursive: true });
-  writeFileSync(join(stale, "a", "b", "c.txt"), "x");
-  f.age(stale, 8);
-  const fresh = join(f.parent, "other-repo-bbbbbbbb");
-  mkdirSync(join(fresh, "a", "b"), { recursive: true });
-  writeFileSync(join(fresh, "a", "b", "c.txt"), "x");
-  f.age(fresh, 8);
-  utimesSync(join(fresh, "a", "b", "c.txt"), new Date(), new Date());
+  const checkout = join(f.base, "elsewhere");
+  mkdirSync(checkout);
+  const key = f.key(checkout, { days: 0 });
+  mkdirSync(join(key, "pr7", "run-1"), { recursive: true });
+  writeFileSync(join(key, "pr7", "run-1", "review.json"), "x");
+  f.age(key, 8);
+
+  const r = f.run(["--siblings", "--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.removed, []);
+  assert.deepEqual(paths(r.out.kept), [key]);
+  assert.equal(reasonOf(r.out.kept, key), `its checkout ${checkout} still exists, so its own phase 0 reclaims it`);
+  assert.equal(r.out.kept[0].idle, true, "nothing under the key was modified in 7 days");
+  assert.ok(existsSync(join(key, "pr7", "run-1", "review.json")), "a key whose checkout exists lost its partition");
+  assert.equal(r.gh.length, 0, "the sibling pass asks GitHub nothing");
+});
+
+test("(11) a sibling key whose checkout is gone, the directory that held it present, is removed whole after 8 d idle and kept after 6; non-key entries and the live key are untouched", (t) => {
+  const f = siblingFixture(t);
+  const old = f.key(f.gone("old"), { days: 0 });
+  mkdirSync(join(old, "pr7", "run-1"), { recursive: true });
+  writeFileSync(join(old, "pr7", "run-1", "review.json"), "x");
+  f.age(old, 8);
+  const young = f.key(f.gone("young"), { days: 6 });
   const legacy = join(f.parent, "pr1234");
   mkdirSync(legacy);
   f.age(legacy, 8);
@@ -1389,23 +1421,216 @@ test("(11) a sibling key idle 8 d is removed whole; a sibling with a fresh file 
   assert.equal(dry.status, 0, dry.stderr);
   assert.equal(dry.out.applied, false);
   assert.equal(dry.out.ledger, null, "the sibling pass reads no ledger");
-  assert.deepEqual(paths(dry.out.removed), [stale]);
-  assert.equal(reasonOf(dry.out.removed, stale), "sibling key idle past 7 days");
-  assert.deepEqual(paths(dry.out.kept), [fresh]);
-  assert.equal(reasonOf(dry.out.kept, fresh), "sibling key modified within 7 days");
-  assert.ok(existsSync(stale), "a dry run removed");
+  assert.deepEqual(paths(dry.out.removed), [old]);
+  assert.equal(reasonOf(dry.out.removed, old), `its checkout ${f.gone("old")} is gone and nothing under it changed in 7 days`);
+  assert.deepEqual(paths(dry.out.kept), [young]);
+  assert.equal(reasonOf(dry.out.kept, young), "sibling key modified within 7 days");
+  assert.equal(dry.out.kept[0].idle, false);
+  assert.ok(existsSync(old), "a dry run removed");
 
   const r = f.run(["--siblings", "--root", f.root, "--apply"]);
 
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.out.applied, true);
-  assert.deepEqual(paths(r.out.removed), [stale]);
+  assert.deepEqual(paths(r.out.removed), [old]);
+  assert.deepEqual(paths(r.out.kept), [young]);
   assert.deepEqual(r.out.failed, []);
-  assert.ok(!existsSync(stale), "the idle sibling key survived --apply");
-  assert.ok(existsSync(fresh), "a sibling with a fresh file was removed");
+  assert.ok(!existsSync(old), "the idle key whose checkout is gone survived --apply");
+  assert.ok(existsSync(young), "a key modified 6 days ago was removed");
   assert.ok(existsSync(legacy) && existsSync(loose), "a non-key entry under the scratch parent was touched");
   assert.ok(existsSync(liveFile), "the live key was touched by the sibling pass");
   assert.equal(r.gh.length, 0, "the sibling pass asks GitHub nothing");
+});
+
+test("(11) a sibling key whose checkout and the directory that held it are both gone is kept, the reason naming both", (t) => {
+  const f = siblingFixture(t);
+  const checkout = join(f.base, "unplugged", "repo");
+  const key = f.key(checkout);
+
+  const r = f.run(["--siblings", "--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.removed, []);
+  assert.equal(reasonOf(r.out.kept, key), `neither its checkout ${checkout} nor ${dirname(checkout)}, the directory that held it, exists`);
+  assert.equal(r.out.kept[0].idle, true);
+  assert.ok(existsSync(key), "a key whose checkout's parent is gone was removed");
+});
+
+test("(11) a sibling key with no checkout-path, one holding a relative path or two lines, or one whose path does not hash to the key's suffix is kept as having no checkout file", (t) => {
+  const f = siblingFixture(t);
+  const checkout = f.gone("repo");
+  // Named for the sha256 of exactly what each file holds, so the hash check
+  // passes and only the single-absolute-path rule can keep them.
+  const hex8 = (s) => createHash("sha256").update(s).digest("hex").slice(0, 8);
+  const none = f.key(checkout, { content: null, name: "none-11111111" });
+  const relative = f.key(checkout, { content: "gone/repo\n", name: `relative-${hex8("gone/repo")}` });
+  assert.ok(!createHash("sha256").update(checkout).digest("hex").startsWith("33333333"));
+  const mismatch = f.key(checkout, { name: "mismatch-33333333" });
+  const twoLines = f.key(checkout, { content: `${checkout}\n${checkout}\n`, name: `two-lines-${hex8(`${checkout}\n${checkout}`)}` });
+
+  const r = f.run(["--siblings", "--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.removed, []);
+  assert.deepEqual(paths(r.out.kept), [none, relative, mismatch, twoLines].sort());
+  assert.equal(reasonOf(r.out.kept, none), "no checkout file: checkout-path is missing");
+  assert.equal(reasonOf(r.out.kept, relative), "no checkout file: checkout-path holds no single absolute path");
+  assert.equal(reasonOf(r.out.kept, mismatch), `no checkout file: ${checkout} does not hash to the key's suffix 33333333`);
+  assert.equal(reasonOf(r.out.kept, twoLines), "no checkout file: checkout-path holds no single absolute path");
+  for (const k of [none, relative, mismatch, twoLines]) assert.ok(existsSync(k), `${k} was removed`);
+  assert.ok(r.out.kept.every((e) => e.idle === true));
+});
+
+test("(11) --siblings --apply writes the live key's checkout-path holding the workspace's canonical path, rewrites only one that says anything else, and a dry run writes nothing", (t) => {
+  const f = siblingFixture(t);
+  const file = join(f.root, "checkout-path");
+  const link = join(f.base, "route");
+  symlinkSync(f.repo, link);
+
+  const dry = f.run(["--siblings", "--root", f.root]);
+  assert.equal(dry.status, 0, dry.stderr);
+  assert.ok(!existsSync(file), "a dry run wrote the checkout file");
+
+  const r = f.run(["--siblings", "--root", f.root, "--apply"], { cwd: link });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.failed, []);
+  assert.equal(readFileSync(file, "utf8"), `${realpathSync(f.repo)}\n`);
+  assert.deepEqual(readdirSync(f.root), ["checkout-path"], "the temp file was left behind");
+
+  f.age(file, 8);
+  const before = lstatSync(file).mtimeMs;
+  const again = f.run(["--siblings", "--root", f.root, "--apply"]);
+  assert.equal(again.status, 0, again.stderr);
+  assert.equal(readFileSync(file, "utf8"), `${realpathSync(f.repo)}\n`);
+  assert.equal(lstatSync(file).mtimeMs, before, "a checkout file already right was rewritten");
+
+  writeFileSync(file, "/somewhere/else\n");
+  const fixed = f.run(["--siblings", "--root", f.root, "--apply"]);
+  assert.equal(fixed.status, 0, fixed.stderr);
+  assert.equal(readFileSync(file, "utf8"), `${realpathSync(f.repo)}\n`);
+});
+
+test("(11) a checkout-path write that fails is listed in failed[] and the other keys are still judged", { skip: process.getuid?.() === 0 && "root writes the read-only key" }, (t) => {
+  const f = siblingFixture(t);
+  const old = f.key(f.gone("old"));
+  chmodSync(f.root, 0o555);
+  let r;
+  try {
+    r = f.run(["--siblings", "--root", f.root, "--apply"]);
+  } finally {
+    chmodSync(f.root, 0o755);
+  }
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.out.failed.length, 1, JSON.stringify(r.out.failed));
+  assert.equal(r.out.failed[0].path, join(f.root, "checkout-path"));
+  assert.match(r.out.failed[0].error, /EACCES/);
+  assert.deepEqual(paths(r.out.removed), [old]);
+  assert.ok(!existsSync(join(f.root, "checkout-path")));
+});
+
+test("(11) a checkout-path rename that fails leaves no temp file behind", (t) => {
+  const f = siblingFixture(t);
+  // A non-empty directory where the file goes: the temp file is written, and
+  // the rename over it fails.
+  mkdirSync(join(f.root, "checkout-path", "held"), { recursive: true });
+
+  const r = f.run(["--siblings", "--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.out.failed.length, 1, JSON.stringify(r.out.failed));
+  assert.equal(r.out.failed[0].path, join(f.root, "checkout-path"));
+  assert.deepEqual(readdirSync(f.root), ["checkout-path"], "the temp file was left behind");
+});
+
+test("(11) a sibling key whose checkout-path is not a regular file is kept as having no checkout file, and the pass does not block reading it", (t) => {
+  const f = siblingFixture(t);
+  const key = f.key(f.gone("fifo"), { content: null });
+  const made = spawnSync("mkfifo", [join(key, "checkout-path")]);
+  if (made.status !== 0) return t.skip("mkfifo unavailable");
+
+  const r = f.run(["--siblings", "--root", f.root, "--apply"], { timeout: 20_000 });
+
+  assert.equal(r.signal, null, "the sibling pass blocked reading a FIFO checkout-path");
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(reasonOf(r.out.kept, key), "no checkout file: checkout-path is not a regular file");
+  assert.ok(existsSync(key), "a key whose checkout-path is a FIFO was removed");
+});
+
+test("(11) a sibling key whose checkout-path cannot be read is kept as having no checkout file", { skip: process.getuid?.() === 0 && "root reads the unreadable file" }, (t) => {
+  const f = siblingFixture(t);
+  const key = f.key(f.gone("locked"));
+  chmodSync(join(key, "checkout-path"), 0o000);
+
+  const r = f.run(["--siblings", "--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(reasonOf(r.out.kept, key), "no checkout file: checkout-path cannot be read (EACCES)");
+  assert.ok(existsSync(key), "a key whose checkout-path cannot be read was removed");
+});
+
+test("(11) a sibling key whose checkout is a dangling symlink is kept, since something is at the path", (t) => {
+  const f = siblingFixture(t);
+  const checkout = f.gone("link");
+  symlinkSync(join(f.base, "nowhere"), checkout);
+  const key = f.key(checkout);
+
+  const r = f.run(["--siblings", "--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.removed, []);
+  assert.equal(reasonOf(r.out.kept, key), `its checkout ${checkout} still exists, so its own phase 0 reclaims it`);
+  assert.ok(existsSync(key), "a key whose checkout is a dangling symlink was removed");
+});
+
+test("(11) a sibling key whose checkout sat under what is now a file reads as gone, the file present, and is removed after 8 d idle", (t) => {
+  const f = siblingFixture(t);
+  const held = f.gone("now-a-file");
+  writeFileSync(held, "x");
+  const checkout = join(held, "repo");
+  const key = f.key(checkout);
+
+  const r = f.run(["--siblings", "--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(reasonOf(r.out.removed, key), `its checkout ${checkout} is gone and nothing under it changed in 7 days`);
+  assert.ok(!existsSync(key), "a key whose checkout's path runs through a file survived --apply");
+});
+
+test("(11) a sibling key whose checkout cannot be looked at is kept, with the error", { skip: process.getuid?.() === 0 && "root searches the unsearchable directory" }, (t) => {
+  const f = siblingFixture(t);
+  const locked = join(f.base, "locked");
+  mkdirSync(locked);
+  const checkout = join(locked, "repo");
+  const key = f.key(checkout);
+  chmodSync(locked, 0o600);
+  let r;
+  try {
+    r = f.run(["--siblings", "--root", f.root, "--apply"]);
+  } finally {
+    chmodSync(locked, 0o755);
+  }
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.removed, []);
+  const reason = reasonOf(r.out.kept, key);
+  assert.ok(reason.startsWith(`whether its checkout ${checkout} exists cannot be told: EACCES`), reason);
+  assert.ok(existsSync(key), "a key whose checkout cannot be looked at was removed");
+});
+
+test("(11) the root sweep neither removes nor lists an 8-day-old checkout-path in the live key", (t) => {
+  const f = fixture(t);
+  f.ledger();
+  f.states({});
+  const file = f.file("checkout-path", 8);
+  const stray = f.file("stray.txt", 8);
+
+  const r = f.run(["--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r.out.removed), [stray], "the sweep ran");
+  assert.ok(![...r.out.removed, ...r.out.kept].some((e) => e.path === file), "the root sweep judged checkout-path");
+  assert.ok(existsSync(file), "the root sweep removed checkout-path");
 });
 
 test("(11) a key-shaped file or a symlink under the scratch parent is never removed by the sibling pass", (t) => {
@@ -1457,47 +1682,33 @@ test("(11) the sibling pass refuses a root that is not this workspace's own scra
   assert.ok(existsSync(stale) && existsSync(outside) && existsSync(f.root), "a refused invocation removed something");
 });
 
-test("(11) a sibling key with nothing modified in 7 days is removed, one modified 6 days ago is kept — the boundary is the retention", (t) => {
-  const f = siblingFixture(t);
-  const old = join(f.parent, "old-11111111");
-  mkdirSync(old);
-  f.age(old, 8);
-  const young = join(f.parent, "young-22222222");
-  mkdirSync(young);
-  f.age(young, 6);
+test("(11) a sibling key judged removable is judged again just before removal: kept once its checkout reappears, its checkout file changes, or it is written to", (t) => {
+  const cases = [
+    ["its checkout reappears", (k, c) => c, (k, c) => `its checkout ${c} still exists, so its own phase 0 reclaims it`],
+    ["its checkout file changes", (k) => join(k, "checkout-path"), () => /^no checkout file: /],
+    ["it is written to", (k) => join(k, "fresh.txt"), () => "sibling key modified within 7 days"],
+  ];
+  for (const [what, target, reason] of cases) {
+    const f = siblingFixture(t);
+    const [earlier, later] = [f.gone("first"), f.gone("second")].map((c) => ({ c, k: f.key(c) })).sort((x, y) => (x.k < y.k ? -1 : 1));
+    // An `rm` that, removing the earlier key, has another run touch the later one.
+    writeExecStub(join(f.base, "bin", "rm"), `#!/bin/sh\nfor a in "$@"; do [ "$a" = "$RACE_ON" ] && : > "$RACE_WRITE"; done\nexec /bin/rm "$@"\n`);
 
-  const r = f.run(["--siblings", "--root", f.root, "--apply"]);
+    const r = f.run(["--siblings", "--root", f.root, "--apply"], { env: { RACE_ON: earlier.k, RACE_WRITE: target(later.k, later.c) } });
 
-  assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(paths(r.out.removed), [old]);
-  assert.deepEqual(paths(r.out.kept), [young]);
-  assert.ok(existsSync(young), "a key modified 6 days ago was removed");
-});
-
-test("(11) a sibling key written to while an earlier key is being removed is judged again and kept", (t) => {
-  const f = siblingFixture(t);
-  const first = join(f.parent, "aaa-11111111");
-  mkdirSync(first);
-  f.age(first, 8);
-  const second = join(f.parent, "zzz-22222222");
-  mkdirSync(second);
-  f.age(second, 8);
-  // An `rm` that, removing the first key, has another run write into the second.
-  writeExecStub(join(f.base, "bin", "rm"), `#!/bin/sh\nfor a in "$@"; do [ "$a" = "$RACE_ON" ] && : > "$RACE_WRITE"; done\nexec /bin/rm "$@"\n`);
-  const written = join(second, "fresh.txt");
-
-  const r = f.run(["--siblings", "--root", f.root, "--apply"], { env: { RACE_ON: first, RACE_WRITE: written } });
-
-  assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(paths(r.out.removed), [first]);
-  assert.deepEqual(paths(r.out.kept), [second]);
-  assert.equal(reasonOf(r.out.kept, second), "sibling key modified within 7 days");
-  assert.ok(existsSync(written), "a key written to after it was judged was removed");
+    assert.equal(r.status, 0, `${what}: ${r.stderr}`);
+    assert.deepEqual(paths(r.out.removed), [earlier.k], what);
+    assert.deepEqual(paths(r.out.kept), [later.k], what);
+    const want = reason(later.k, later.c);
+    if (want instanceof RegExp) assert.match(reasonOf(r.out.kept, later.k), want, what);
+    else assert.equal(reasonOf(r.out.kept, later.k), want, what);
+    assert.ok(existsSync(later.k), `${what}: a key judged again was removed`);
+  }
 });
 
 test("(11) a sibling key with a part that cannot be read is kept whole, with that part named", { skip: process.getuid?.() === 0 && "root reads the locked directory" }, (t) => {
   const f = siblingFixture(t);
-  const key = join(f.parent, "locked-33333333");
+  const key = f.key(f.gone("locked"), { days: 0 });
   const locked = join(key, "locked");
   mkdirSync(locked, { recursive: true });
   writeFileSync(join(locked, "fresh.txt"), "x");
@@ -1510,5 +1721,6 @@ test("(11) a sibling key with a part that cannot be read is kept whole, with tha
   assert.deepEqual(r.out.removed, []);
   assert.deepEqual(paths(r.out.kept), [key]);
   assert.equal(reasonOf(r.out.kept, key), `sibling key could not be read whole (${locked}: EACCES)`);
+  assert.equal(r.out.kept[0].idle, true, "nothing found modified within 7 days");
   assert.ok(existsSync(key), "a key with an unreadable part was removed");
 });
