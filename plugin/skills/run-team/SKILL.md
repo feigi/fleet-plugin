@@ -133,6 +133,7 @@ Run each as `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run flee
 | Merge-bot pass report | `fleet-event.mjs merge-bot-report merge-bot-<n>` |
 | CI run terminal | `fleet-event.mjs ci <pr>` |
 | Label seen (persistent Monitor) | `fleet-event.mjs label <pr>` |
+| Label to come off before an approved push | `fleet-event.mjs label-off <pr>` |
 | `CONFLICT` line | `fleet-event.mjs conflict <pr>` |
 | Alarm (a [fleet-alarm] turn) | `fleet-event.mjs heartbeat` |
 | Drain | `fleet-event.mjs drain --reason "<reason>"` |
@@ -630,10 +631,9 @@ finisher again.
 **A final report is not proof the member stopped.** **The standing CI facts are
 in the fix-applier body, not in per-event messages.**
 
-**Once the label is on, take it off before you approve any push.** Write `label-off=<latest finisher attempt>` onto the PR's row first
-(`ledger.mjs token <PR number> label-off=<latest finisher attempt>`, which keeps
-every token the row already has, see references/ledger.md), then
-remove the label (`gh pr edit <pr> --remove-label "<ready-to-merge string>"`, the string `show ready-to-merge` prints), then approve. Then
+**Once the label is on, take it off before you approve any push.** Run
+`fleet-event.mjs label-off <pr>` first: it writes `label-off=<the attempt that settled labelled>`
+onto the PR's row, removes the label and reads the PR's labels back, then approve. Then
 dispatch a **fresh** finisher against the new head; the first audit does not
 transfer, since it verified a different tree. See references/finisher.md.
 
@@ -807,7 +807,7 @@ Match the failure to its row in the table below and run that response; where the
 | `review-pr` workflow throws or returns no tree | Retry once under the next letter (`review-pr-<pr#>-b`); still failing, report and leave the PR at review-due. Never enqueue the PR as reviewed — the workflow is not a member, so no other row here covers it |
 | Reviewer, fix-applier or red-check fixer cannot reach green | Report, leave the PR unlabeled, free the slot — the last two settle `failed`; a wake's `NEED derive-recipe` is phase 0's mid-run trigger; a second `failed` fix-applier since review escalates |
 | Merge bot finds the worktree ahead of the PR head **on the local-rebase fallback** | `worktree-diverged-#<pr>`, PR stays queued. Read the stray commit; push-or-discard is yours, and the maintainer's if the evidence cannot settle it |
-| Merge bot finds the head moved after `ready-to-merge` was applied | The label binds to the head's net change, not to one SHA: a proven rebase-carry keeps the label — the bot proceeds and reports `rebase-carry-#<pr>` with the labelled and accepted SHAs, and nothing is dispatched. Any other move is `head-moved-after-label-#<pr>`, PR stays queued, label untouched. Dispatch a **fresh** finisher against the new head — the first audit verified a different tree |
+| Merge bot finds the head moved after `ready-to-merge` was applied | The label binds to the head's net change, not to one SHA: a proven rebase-carry keeps the label — the bot proceeds and reports `rebase-carry-#<pr>` with the labelled and accepted SHAs, and nothing is dispatched. Any other move is `head-moved-after-label-#<pr>`: the bot leaves the label alone, and its report's settle takes it off (`label-off=` on the row, then one PR comment). Dispatch a **fresh** finisher against the new head — the first audit verified a different tree |
 | Merge bot cannot resolve a rebase safely | Stop that PR, report, continue. On a conflict the bot has already appended `conflict-hold:#<pr>` to the PR's row; the tick prints `DISPATCH fix-pr PR#<pr>` and holds the merge until that fix-applier settles. A PR that conflicts before any bot reaches it is the tick's `CONFLICT PR#<pr>` line, whose hold you record |
 | Merge bot's gate refuses on its instrument re-check (`instrument-set-changed` or `instruments-unanswerable`, exit 2) | Report `<reason>-#<pr>` with what it printed, PR stays queued, label untouched. Do not re-run the gate |
 | Merge bot's CI wait reaches its per-PR time bound with the run's `status` still not `completed` | The bot skips that PR and reports `ci-wait-timeout-#<pr>` with the run id and its status. PR stays queued, label untouched |

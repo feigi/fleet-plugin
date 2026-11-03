@@ -894,6 +894,16 @@ test("the latest finisher attempt decides the halt flag too, whichever of the ro
   assert.deepEqual(flagsFor("finisher-pr-931=halted:rebase", "finisher-pr-931=halted:rebase"), ["halted:rebase"]);
 });
 
+test("a labelled finisher followed by a halted:past-pin attempt: the card is READY while the label is on, and flags halted:past-pin once label-off names the labelled attempt and the label is off", () => {
+  const row = "#941 impl-941=PR#931 → PR#931 · reviewed=abc1234:0/0/0:run-abc1234r · finisher-pr-931=labelled · finisher-pr-931-b=halted:past-pin";
+  const queued = computeBoard(reproInputs({ rows: [row], prs: [openPr(931, ["ready-to-merge"])], prev: { tickets: [] } }));
+  assert.equal(card(queued, 941).column, "READY");
+  assert.deepEqual(card(queued, 941).flags, [], "a halt on a labelled PR is not read: that is why the label comes off");
+  const off = computeBoard(reproInputs({ rows: [`${row} · label-off=finisher-pr-931`], prs: [openPr(931)], prev: { tickets: [] } }));
+  assert.equal(card(off, 941).column, "REVIEW");
+  assert.deepEqual(card(off, 941).flags, ["halted:past-pin"]);
+});
+
 test("#1820: a live implementer is IMPLEMENTING, and still earns stale", () => {
   const b = computeBoard(reproInputs());
   assert.equal(card(b, 906).column, "IMPLEMENTING");

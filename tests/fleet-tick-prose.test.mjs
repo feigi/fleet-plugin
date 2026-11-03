@@ -130,6 +130,7 @@ test("the wake table names every wake, each with its fleet-event.mjs command", (
     ["Merge-bot pass report", "`fleet-event.mjs merge-bot-report merge-bot-<n>`"],
     ["CI run terminal", "`fleet-event.mjs ci <pr>`"],
     ["Label seen (persistent Monitor)", "`fleet-event.mjs label <pr>`"],
+    ["Label to come off before an approved push", "`fleet-event.mjs label-off <pr>`"],
     ["`CONFLICT` line", "`fleet-event.mjs conflict <pr>`"],
     ["Alarm (a [fleet-alarm] turn)", "`fleet-event.mjs heartbeat`"],
     ["Drain", "`fleet-event.mjs drain --reason \"<reason>\"`"],

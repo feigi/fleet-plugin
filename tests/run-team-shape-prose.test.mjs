@@ -696,6 +696,17 @@ const CHANGED = [
     "A second failure on the same review is written as `dispositions-escalate=fix-pr-<M>-b:<run>` in place of a mismatch: the tick prints no `DISPATCH fix-pr` for it, `dispatch` refuses the finisher naming `dispositions escalate`, and you post the check's output with `gh pr comment <M>` and flag the PR for a human.",
     "A second failure on the same review is written as `dispositions-escalate=fix-pr-<M>-b:<run>` in place of a mismatch: the tick prints no `DISPATCH fix-pr` for it.",
   ],
+  // A merge bot's `head-moved-after-label` refusal ends the label: its report's
+  // settle takes it off before the fresh finisher, so no sentence says the PR
+  // stays queued with the label untouched.
+  [
+    "Any other move is `head-moved-after-label-#<pr>`, PR stays queued, label untouched.",
+    "Any other move is `head-moved-after-label-#<pr>`: the bot leaves the label alone, and its report's settle takes it off (`label-off=` on the row, then one PR comment).",
+  ],
+  [
+    "On a PR carrying `ready-to-merge`, the push moves the head after the label, so the next merge bot refuses it `head-moved-after-label-#<M>`: a fresh finisher, per **Failure handling**.",
+    "On a PR carrying `ready-to-merge`, the push moves the head after the label, so the next merge bot refuses it `head-moved-after-label-#<M>` and its report's settle takes the label off; then a fresh finisher, per **Failure handling**.",
+  ],
 ];
 
 // Sentences deleted outright, each named with what stands in its place.

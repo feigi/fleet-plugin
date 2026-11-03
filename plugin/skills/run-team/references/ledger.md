@@ -94,7 +94,7 @@ A member that dies between spawn and write is invisible — and members die in b
 
 ## Label-off and conflict holds
 
-`label-off=<finisher-pr-M[-x]>` is written before you take `ready-to-merge` off PR M on purpose (taking it off before you approve a push, or clearing one left on a moved head), naming that PR's latest finisher attempt: the tick reads a missing label as a finisher's miss only after the last attempt a `label-off=` names, so without it your own removal reads as one.
+`label-off=<finisher-pr-M[-x]>` is written by `fleet-event.mjs label-off M` before it takes `ready-to-merge` off PR M on purpose (before you approve a push, or when a merge bot's `head-moved-after-label` refusal settles), naming the attempt that settled `labelled`: the tick reads a missing label as a finisher's miss only after the last attempt a `label-off=` names, so without it a removal reads as one. A PR whose rows hold no attempt that settled `labelled` (a hand label) gets none.
 
 `ci=<run-id>:<attempt>:<conclusion>` is a row token the same way, and so is `conflict-hold:#<pr>` — written by the merge bot itself (`run-merge-bot.md` step 1), or by you off the tick's `CONFLICT` line, naming the row's own PR. It is not an Exclusion: that gates a ticket's claim, this a PR's merge.
 

@@ -665,10 +665,11 @@ export function currentDispositions(tokens, run) {
   return best === null ? null : { verdict: best.verdict, member: best.member.name };
 }
 
-// `label-off=<finisher-pr-M[-x]>` — written by the controller BEFORE it
-// takes `ready-to-merge` off PR M on purpose (before approving a push; clearing
-// a label left on a moved head), naming the latest finisher attempt. A missing
-// label is a finisher's miss only when no such removal accounts for it.
+// `label-off=<finisher-pr-M[-x]>` — written by `fleet-event.mjs label-off M`
+// BEFORE it takes `ready-to-merge` off PR M on purpose (before approving a
+// push; a merge bot's `head-moved-after-label` refusal), naming the attempt
+// that settled `labelled`. A missing label is a finisher's miss only when no
+// such removal accounts for it.
 // `undefined` for a token that is not a label-off at all, null for one naming
 // no finisher-pr member — `ledger.mjs row` refuses that one at write time, and
 // deriveRun refuses a hand-written one.

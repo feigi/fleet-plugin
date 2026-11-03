@@ -100,6 +100,8 @@ function fixture(t, { labelMap = {} } = {}) {
   const dir = join(root, "run");
   mkdirSync(dir);
   git(dir, "init", "-q");
+  // The ledger in `dir` is dispatched against: a finisher dispatch reads this repository's Label map.
+  if (labelMap !== null) seedLabelMap(dir);
   mkdirSync(join(root, "docs", "metrics"), { recursive: true });
   writeFileSync(join(root, "docs", "metrics", "tier-outcomes.tsv"), "2026-10-21\t40\t10\troutine\tslow-high\tyes\tno\truled\n");
   const repo = join(dir, "repo");

@@ -214,7 +214,7 @@ function defaultLedgerPath() {
 }
 
 // What `row` and `token` say of a `label-off=` naming no finisher this run has.
-const LABEL_OFF_UNKNOWN = "names no finisher-pr member this run has dispatched or recorded — label-off=<finisher-pr-M[-x]>, the latest finisher attempt, before taking ready-to-merge off PR M";
+const LABEL_OFF_UNKNOWN = "names no finisher-pr member this run has dispatched or recorded — label-off=<finisher-pr-M[-x]>, the attempt that settled labelled, before taking ready-to-merge off PR M (fleet-event.mjs label-off M writes it)";
 
 const argv = process.argv.slice(2);
 // Both flags are read by EXACT token below (`indexOf`), so the `--flag=value`
@@ -2180,12 +2180,14 @@ async function closingRefusals(member, { tickets, ruling, tsv }) {
   return { refs: closed, failures };
 }
 
-// The finisher gate's release-label check for the PR `member` finishes: the
-// PR carries exactly one release label, or its repository defines none, as
-// finisher-label.mjs counts them before it labels. `tickets` are the tickets
-// rulingOf() found settled implementer tokens naming the PR for, and `refs`
-// the issues closingRefusals() read it closing, its own suggestion-band
-// record aside. Returns the refusal, or null.
+// The finisher gate's label checks for the PR `member` finishes: the PR
+// carries no `ready-to-merge` — a finisher runs on an unlabelled PR, and the
+// label comes off with `fleet-event.mjs label-off`, which names the attempt
+// that applied it — and exactly one release label, or its repository defines
+// none, as finisher-label.mjs counts them before it labels. `tickets` are the
+// tickets rulingOf() found settled implementer tokens naming the PR for, and
+// `refs` the issues closingRefusals() read it closing, its own
+// suggestion-band record aside. Returns the refusal, or null.
 // A Ticketless PR (ticketless.mjs's isTicketless) with none is not refused:
 // finisher-label.mjs adds `patch` to it. A repository label list that may be
 // cut off still refuses it, as finisher-label.mjs refuses it then too. Any
@@ -2195,8 +2197,13 @@ async function closingRefusals(member, { tickets, ruling, tsv }) {
 function releaseLabelRefusal(member, tickets, refs) {
   const pr = member.number;
   const where = `dispatch ${member.name}`;
-  const { prLabels, repoLabels } = checkReaders(where);
-  const found = releaseLabelsIn(prLabels(pr));
+  const { prLabels, repoLabels, repoDir } = checkReaders(where);
+  const labels = prLabels(pr);
+  const ready = readyLabel(repoDir(), where);
+  if (labels.includes(ready)) {
+    return `PR #${pr} carries ${ready} — a finisher runs on a PR without it: run \`fleet-event.mjs label-off ${pr}\`, then dispatch ${member.name} again`;
+  }
+  const found = releaseLabelsIn(labels);
   if (found.length === 1) return null;
   if (found.length > 1) return `PR #${pr} carries more than one release label (${found.join(", ")}) — exactly one may stay, and which is not picked here`;
   const defined = releaseLabelsDefined(repoLabels());
@@ -2404,8 +2411,8 @@ async function runDispatch() {
   // waits on its ruling, its tier-outcomes row, written while the PR is open
   // and its review evidence still in scratch; see rulingOf(). Last, the
   // PR's closing references must match that ruling and exclude its own
-  // suggestion-band record, and the PR must carry exactly one release label,
-  // both read off gh from the ledger's repository; see closingRefusals() and
+  // suggestion-band record, and the PR must carry no `ready-to-merge` and
+  // exactly one release label, all read off gh from the ledger's repository; see closingRefusals() and
   // releaseLabelRefusal(). Refused here, before anything is written, so no
   // check can be skipped by forgetting to run it.
   if (member.family === "finisher-pr") {

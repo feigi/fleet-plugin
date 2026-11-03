@@ -78,8 +78,16 @@
 //       entry whose reason is `main-gain-removed:<path>`, bound to the head
 //       and body digest the bot's gate reading `<scratch>/pr<pr>/<merge-bot-n>/ci.json`
 //       records it refused, unless the rows already carry it (a reading that
-//       is missing or is not that refusal is a NEED, nothing written), then
-//       `settle --from-report`.
+//       is missing or is not that refusal is a NEED, nothing written).
+//       For each `refused[]` entry whose reason is `head-moved-after-label`
+//       the label comes off, as `label-off <pr>` below does, unless the PR is
+//       not open, no longer carries `ready-to-merge`, or its newest
+//       `ready-to-merge-head:` record names its current head (a newer audit
+//       covers it); then one PR comment names the bot, the recorded head (or
+//       that there is none) and the PR's head, skipped when the PR already
+//       carries it. A PR that cannot be read is a NEED, nothing written. The
+//       bot itself leaves the label alone; the fresh finisher dispatches
+//       onto a PR with none. Then `settle --from-report`.
 //       Every other refusal reason writes nothing. The reap and the reclaim
 //       run under the tick's `--apply`.
 //       The reap and the reclaim run once for every merge bot settled `done`, always, even when the pass merged nothing, and again on the next tick after an `APPLY FAILED` line, and on every tick while this run has no controller record to remember the pass by.
@@ -112,6 +120,19 @@
 //   label <pr>
 //       No write: a `ready-to-merge` label was seen, and the tick is the whole
 //       of the event.
+//   label-off <pr>
+//       Takes `ready-to-merge` off PR <pr> and is unconditional: its caller
+//       decides that the label comes off. It names the attempt whose label
+//       comes off — the latest `finisher-pr-<pr>[-x]` that settled `labelled`
+//       after the highest attempt a `label-off=` already names, read off the
+//       rows and `## Dispatched` as the tick reads them — and writes
+//       `ledger.mjs token <pr> label-off=<attempt>`, no token when no attempt
+//       settled `labelled` (a hand label) or a token already names it. Then
+//       `gh pr edit <pr> --remove-label` and a read of the PR's labels. The
+//       token always lands before the removal. A failed write, or a read-back
+//       that still carries the label, is a `NEED label-off PR #<pr> …`
+//       naming this command; a re-run removes the label and adds no second
+//       token.
 //   conflict <pr>
 //       The tick's `CONFLICT` line for the PR, recorded: `ledger.mjs token
 //       <pr> conflict-hold:#<pr>`, no note beside it (`token` refuses any
@@ -200,8 +221,9 @@ import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { LabelMapUnreadable, readLabelMap } from "./label-map.mjs";
 import { BRIEFS, REVIEW, REVIEWED, REVIEWER, dispositionsToken, memberTokens, nextReviewerName, parseDispatchedEntry, parseMember, parseToken, readRetired, rowNums } from "./ledger-grammar.mjs";
-import { NO_TRANSCRIPT_AFTER_DEFAULT, PARKS, controllerState, foldLedger, parkedToken } from "./fleet-tick.mjs";
+import { NO_TRANSCRIPT_AFTER_DEFAULT, PARKS, controllerState, foldLedger, latestFinisherAttempts, parkedToken } from "./fleet-tick.mjs";
 import { phase0Gate, readRunReceipt, tickCaps } from "./phase0-receipt.mjs";
+import { newestHeadRecord } from "./ready-to-merge-head.mjs";
 import { defaultScratch, readReportIn, reportsDir } from "./report-files.mjs";
 import { readRecipe } from "./recipe-read.mjs";
 import { readState, statePath } from "./fleet-state.mjs";
@@ -222,6 +244,7 @@ const KINDS = {
   "review-failed": { args: ["<pr>", "<launch>"], pr: true },
   ci: { args: ["<pr>"], pr: true },
   label: { args: ["<pr>"], pr: true },
+  "label-off": { args: ["<pr>"], pr: true },
   conflict: { args: ["<pr>"], pr: true },
   heartbeat: { args: [] },
   drain: { args: [], flag: "--reason \"<reason>\"" },
@@ -669,8 +692,114 @@ function mergeBotReport(ev, member) {
   const read = ev.report(member);
   for (const { pr, reason } of read.state === "ok" ? read.report.refused : []) {
     if (PARKS.test(reason)) park(ev, member, pr, reason);
+    else if (reason === MOVED) movedAfterLabel(ev, member, pr);
   }
   ev.settle(member);
+}
+
+// The refusal reason of a head no carry proves, which ends the label.
+const MOVED = "head-moved-after-label";
+
+// PR `pr`'s state, labels, head and comments as one `gh pr view`, or null
+// when gh could not answer (the NEED, named `what`, is printed here).
+function prView(ev, pr, what) {
+  const r = gh(["pr", "view", String(pr), "--json", "state,labels,headRefOid,comments"]);
+  let v = null;
+  if (r.status === 0) {
+    try {
+      v = JSON.parse(r.stdout);
+    } catch {
+      // Falls through to the NEED below.
+    }
+  }
+  const isObject = (x) => x !== null && typeof x === "object" && !Array.isArray(x);
+  if (!isObject(v) || typeof v.state !== "string" || !Array.isArray(v.labels) || !v.labels.every((l) => typeof l?.name === "string")
+    || !/^[0-9a-f]{40}$/.test(v.headRefOid) || !Array.isArray(v.comments)
+    || !v.comments.every((c) => isObject(c) && typeof c.body === "string" && typeof c.createdAt === "string")) {
+    ev.need(`${what} — gh pr view ${pr} did not answer a PR (${r.status === 0 ? `unexpected shape: ${r.stdout.trim().slice(0, 120)}` : said(r)})`);
+    return null;
+  }
+  return { state: v.state, labels: v.labels.map((l) => l.name), head: v.headRefOid, comments: v.comments, bodies: v.comments.map((c) => c.body.trim()) };
+}
+
+// A merge bot's `head-moved-after-label` refusal ends the label: PR `pr` is
+// taken off the queue for a fresh finisher, unless it is no longer open,
+// no longer carries the label, or its newest `ready-to-merge-head:` record
+// names its current head (a newer audit covers it — labelled-head.mjs's route
+// `current`). Then one comment names the bot, the recorded head and the
+// PR's head, skipped when the PR already carries it.
+function movedAfterLabel(ev, member, pr) {
+  const what = `take-off PR #${pr} ${MOVED}`;
+  const ready = ev.labels["ready-to-merge"];
+  const view = prView(ev, pr, `${what} — if it is open and labelled, run fleet-event.mjs label-off ${pr}`);
+  if (view === null) return;
+  if (view.state !== "OPEN") {
+    ev.note(`#${pr} ${MOVED}: not open, label left`);
+    return;
+  }
+  if (!view.labels.includes(ready)) {
+    ev.note(`#${pr} ${MOVED}: no ${ready} on it, nothing to take off`);
+    return;
+  }
+  const record = newestHeadRecord(view.comments);
+  if (record === view.head) {
+    ev.note(`#${pr} ${MOVED}: its newest head record names its head, label left`);
+    return;
+  }
+  if (!takeLabelOff(ev, pr)) return;
+  const body = `**${member} refused this PR \`${MOVED}\`; \`${ready}\` came off for a fresh finisher.**\n\n`
+    + `- recorded head: ${record ?? "none recorded"}\n- PR head: ${view.head}`;
+  ev.comment("pr", pr, body, view, `${MOVED} comment`);
+}
+
+// `label-off=<attempt>` on PR `pr`'s row, then `ready-to-merge` off the PR,
+// read back. The attempt is the latest `finisher-pr-<pr>[-x]` that settled
+// `labelled`, read as the tick reads attempts — after the highest attempt a
+// `label-off=` already names — so none is written for a label no finisher
+// applied, nor a second for an attempt a token already names. The token lands
+// before the removal. False when the label could not be taken off (a NEED
+// naming the command is printed, or the token's refusal passes through).
+function takeLabelOff(ev, pr) {
+  const ready = ev.labels["ready-to-merge"];
+  const again = `run fleet-event.mjs label-off ${pr} again`;
+  const stretch = latestFinisherAttempts(ev.ledger, new Set([pr])).find((u) => u.pr === pr);
+  const attempt = stretch?.attempts.filter((a) => a.outcome === "labelled").at(-1)?.name;
+  if (attempt === undefined) {
+    ev.note(`#${pr}: no finisher attempt settled labelled since the last label-off=, none written`);
+  } else {
+    const tok = `label-off=${attempt}`;
+    const w = node("ledger.mjs", ["token", String(pr), tok]);
+    if (w.status !== 0) {
+      ev.refuse(`token #${pr} ${tok}`, w);
+      return false;
+    }
+    ev.note(`#${pr} ${tok}`);
+  }
+  const e = gh(["pr", "edit", String(pr), "--remove-label", ready]);
+  if (e.status !== 0) {
+    ev.need(`label-off PR #${pr} — gh pr edit failed: ${said(e)}; ${again}`);
+    return false;
+  }
+  const back = gh(["pr", "view", String(pr), "--json", "labels"]);
+  let labels = null;
+  if (back.status === 0) {
+    try {
+      const l = JSON.parse(back.stdout).labels;
+      if (Array.isArray(l) && l.every((x) => typeof x?.name === "string")) labels = l.map((x) => x.name);
+    } catch {
+      // Read as no answer below.
+    }
+  }
+  if (labels === null) {
+    ev.need(`label-off PR #${pr} — the read-back of its labels did not answer (${back.status === 0 ? "unexpected shape" : said(back)}); ${again}`);
+    return false;
+  }
+  if (labels.includes(ready)) {
+    ev.need(`label-off PR #${pr} — it still carries ${ready} after the removal; ${again}`);
+    return false;
+  }
+  ev.note(`#${pr} ${ready} taken off`);
+  return true;
 }
 
 // `ledger.mjs token <pr> parked=<head>:<body digest>:<reason>` for a refusal
@@ -1016,6 +1145,7 @@ function main() {
   else if (kind === "review-result") reviewResult(ev, pr, args[1]);
   else if (kind === "review-failed") reviewFailed(ev, pr, args[1]);
   else if (kind === "ci") ci(ev, pr);
+  else if (kind === "label-off") takeLabelOff(ev, pr);
   else if (kind === "conflict") conflict(ev, pr);
   else if (kind === "drain") drain(ev, reason);
   else if (kind === "undrain") undrain(ev, reason);

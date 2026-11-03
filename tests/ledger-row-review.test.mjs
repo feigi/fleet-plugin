@@ -26,6 +26,7 @@ import { rowWriteRefusal } from "../plugin/scripts/ledger-grammar.mjs";
 import { deriveRun } from "../plugin/scripts/fleet-tick.mjs";
 import { rendering } from "./support/rendered-brief.mjs";
 import { writeQueueGh, closes } from "./support/queue-gh.mjs";
+import { seedLabelMap } from "./support/label-map-seed.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
 
@@ -48,6 +49,7 @@ function fixture(t, rows = null, { gh = false } = {}) {
   if (gh) {
     writeQueueGh(bin);
     assert.equal(spawnSync("git", ["init", "-q", root]).status, 0);
+    seedLabelMap(root);
   }
   const env = { ...process.env, PATH: bin };
   delete env.GIT_DIR;

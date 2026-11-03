@@ -1807,7 +1807,7 @@ const ticketPr = (f) => {
 };
 
 test("a Ticketless PR with no release label is dispatched, and a ticket PR with none is still refused", (t) => {
-  for (const labels of [[], ["ready-to-merge", "bug"]]) {
+  for (const labels of [[], ["bug"]]) {
     const f = fixture(t);
     f.put("3631", UNTICKETED_ROW);
     labelled(f.bin, 3631, labels);
@@ -1879,7 +1879,7 @@ test("a PR with no release label that closes nothing but is an implementer's is 
 });
 
 test("a PR with more than one release label is refused, naming each, and picking none", (t) => {
-  for (const [labels, named] of [[["minor", "patch"], "patch, minor"], [["major", "ready-to-merge", "minor", "patch"], "patch, minor, major"]]) {
+  for (const [labels, named] of [[["minor", "patch"], "patch, minor"], [["major", "minor", "patch"], "patch, minor, major"]]) {
     const f = fixture(t);
     f.put("3631", UNTICKETED_ROW);
     labelled(f.bin, 3631, labels);
@@ -1892,7 +1892,7 @@ test("a PR with more than one release label is refused, naming each, and picking
 });
 
 test("a PR with exactly one release label is recorded, whatever other labels it carries", (t) => {
-  for (const labels of [["major"], ["bug", "minor", "ready-to-merge"]]) {
+  for (const labels of [["major"], ["bug", "minor"]]) {
     const f = fixture(t);
     f.put("3545", RULED_ROW);
     f.rule(3606, "3545", "yes", [3545]);
@@ -1901,6 +1901,42 @@ test("a PR with exactly one release label is recorded, whatever other labels it 
     assert.deepEqual(f.read().dispatched, ["finisher-pr-3606"]);
     assert.deepEqual(labelListCalls(f.bin), []);
   }
+});
+
+// The label check reads the PR's labels once for the release labels, and
+// the same read answers whether it still carries `ready-to-merge`: a finisher
+// runs on a PR without it, and `fleet-event.mjs label-off` takes it off.
+const labelReads = (bin, pr) => ghCalls(bin).filter((c) => c === `pr view ${pr} --json labels`);
+
+test("a finisher is refused while its PR carries ready-to-merge, naming fleet-event.mjs label-off, writing nothing, and dispatches once the label is off", (t) => {
+  for (const [name, pr, prepare] of [
+    ["Ticketless", 3631, (f) => f.put("3631", UNTICKETED_ROW)],
+    ["ticket", 3606, ticketPr],
+    ["repair", 3631, (f) => f.put("3631", `${UNTICKETED_ROW} · finisher-pr-3631=halted:past-pin`)],
+  ]) {
+    const f = fixture(t);
+    prepare(f);
+    const member = name === "repair" ? "finisher-pr-3631-b" : `finisher-pr-${pr}`;
+    labelled(f.bin, pr, ["patch", "ready-to-merge"]);
+    const before = readFileSync(f.file, "utf8");
+    f.refused(["dispatch", String(pr), member],
+      new RegExp(`${member}: PR #${pr} carries ready-to-merge — a finisher runs on a PR without it: run \`fleet-event\\.mjs label-off ${pr}\`, then dispatch ${member} again — not dispatching ${member}`));
+    assert.equal(readFileSync(f.file, "utf8"), before, `${name}: nothing written`);
+    assert.deepEqual(labelReads(f.bin, pr), [`pr view ${pr} --json labels`], `${name}: the release-label read answers it, no read of its own`);
+    labelled(f.bin, pr, ["patch"]);
+    assert.equal(f.ok("dispatch", String(pr), member).agent, "fleet-finisher", name);
+    assert.ok(f.read().dispatched.includes(member), name);
+  }
+});
+
+test("a finisher is refused for the Label map's string for ready-to-merge, not the role's name", (t) => {
+  const f = fixture(t);
+  seedLabelMap(f.root, { roles: { "ready-to-merge": "queue ok" } });
+  f.put("3631", UNTICKETED_ROW);
+  labelled(f.bin, 3631, ["patch", "queue ok"]);
+  f.refused(["dispatch", "3631", "finisher-pr-3631"], /PR #3631 carries queue ok — a finisher runs on a PR without it: run `fleet-event\.mjs label-off 3631`/);
+  labelled(f.bin, 3631, ["patch", "ready-to-merge"]);
+  assert.equal(f.ok("dispatch", "3631", "finisher-pr-3631").agent, "fleet-finisher", "a label the map does not call ready-to-merge is no queue label");
 });
 
 test("a ticket PR with no release label in a repository that defines none is recorded", (t) => {

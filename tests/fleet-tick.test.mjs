@@ -1147,6 +1147,25 @@ test("deriveRun: a label-off'd attempt is the controller's own removal — nothi
   }
 });
 
+// A labelled finisher followed by a halted:past-pin attempt, the shape of a
+// labelled PR whose fresh finisher halted: while the label is on the PR is
+// queued and the halt is read nowhere; label-off names the labelled attempt,
+// and once the label is off the PR leaves the merge queue and the re-review
+// the halt asks for prints.
+test("deriveRun: a labelled finisher then a halted:past-pin attempt prints DISPATCH review once label-off names the labelled attempt and the label is off, and leaves the merge queue", () => {
+  const base = "#10 impl-10=PR#40 → PR#40 · review=wf:a reviewed=abc1234:0/0/0:run-abc1234r · finisher-pr-40=labelled · finisher-pr-40-b=halted:past-pin";
+  const actions = (r) => reconcile({ ...state(), ...r }).filter((x) => x.role === "reviewers").map((x) => x.action);
+  const queued = run({ rows: [base] }, [pr(40, ["ready-to-merge"], [10], HEAD_B)]);
+  assert.equal(queued.mergeQueue, 1);
+  assert.deepEqual(queued.reviewDue, [], "a halt on a labelled PR is not read");
+  assert.ok(!actions(queued).includes("DISPATCH review PR#40"));
+  const off = run({ rows: [`${base} · label-off=finisher-pr-40`] }, [pr(40, [], [10], HEAD_B)]);
+  assert.equal(off.mergeQueue, 0);
+  assert.deepEqual(off.unlabelled, [], "the removal is accounted for");
+  assert.deepEqual(off.reviewDue, [40]);
+  assert.ok(actions(off).includes("DISPATCH review PR#40"), actions(off).join("\n"));
+});
+
 test("deriveRun: two labelled attempts in one stretch escalate rather than dispatch a third", () => {
   const open = [pr(40, ["minor"], [10])];
   const r = run({ rows: [`${LABELLED} · finisher-pr-40-b=labelled`] }, open);
