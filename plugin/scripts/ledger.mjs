@@ -2164,25 +2164,30 @@ function checkReaders(where) {
 // The finisher gate's closing-reference checks for the PR `member` finishes,
 // read off the PR's closingIssuesReferences in its own repository — a
 // reference into another repository closes no issue here, whatever its
-// number — and the titles and labels of the issues they name; its second
-// argument is rulingOf()'s answer, which let the PR through. Check 1, when a
-// settled implementer's token names the PR: each ticket it names is closed by
-// the body when the PR's ruling is closed_own_ticket=yes, and is not when the
-// ruling is no. Check 2, for every PR: no reference may be the
-// suggestion-band record of this PR's review — an issue whose title, trimmed,
-// is recordTitle(), as dispositions-check.mjs finds the record. Check 3, for
-// every PR, Ticketless ones included: no reference besides the PR's own
-// tickets may be a ticket another claim holds, its issue carrying the Label
-// map's in-progress string (claimedElsewhere()). Returns `{refs, failures}`:
-// the issue numbers the PR closes, its own suggestion-band record aside —
-// that one is a failure here, not a ticket — and one line per failure. A read
-// the checks need dies, naming the read, and writes nothing.
+// number — its head branch, and the titles and labels of the issues they
+// name; its second argument is rulingOf()'s answer, which let the PR through.
+// Check 1, when a settled implementer's token names the PR: each ticket it
+// names is closed by the body when the PR's ruling is closed_own_ticket=yes,
+// and is not when the ruling is no. Check 2, for every PR: no reference may
+// be the suggestion-band record of this PR's review — an issue whose title,
+// trimmed, is recordTitle(), as dispositions-check.mjs finds the record.
+// Check 3, for every PR, Ticketless ones included: no reference besides the
+// PR's own tickets may be a ticket another claim holds, its issue carrying
+// the Label map's in-progress string (claimedElsewhere()). The PR's own
+// tickets are the ones its settled tokens name and, when its head is a claim
+// branch (stranded.mjs's CLAIM_BRANCH), that claim's ticket — a PR a run
+// inherited carries no token, and its own claim holds its ticket until it
+// merges. Returns `{refs, failures}`: the issue numbers the PR closes, its
+// own suggestion-band record aside — that one is a failure here, not a
+// ticket — and one line per failure. A read the checks need dies, naming the
+// read, and writes nothing.
 async function closingRefusals(member, { tickets, ruling, tsv }) {
   const pr = member.number;
   const where = `dispatch ${member.name}`;
   const { recordTitle } = await import("./dispositions-check.mjs");
+  const { CLAIM_BRANCH } = await import("./stranded.mjs");
   const { prViewClosing, issueRead, claimedElsewhere } = checkReaders(where);
-  const refs = prViewClosing(pr, "closingIssuesReferences,url").numbers;
+  const { view, numbers: refs } = prViewClosing(pr, "closingIssuesReferences,url,headRefName");
   const failures = [];
   if (tickets.length > 0) {
     const verdict = ruling.closed_own_ticket;
@@ -2199,18 +2204,20 @@ async function closingRefusals(member, { tickets, ruling, tsv }) {
     }
   }
   const own = recordTitle(pr);
-  const closed = [];
+  // The label names of each issue the PR closes, its own record aside.
   const labels = new Map();
   for (const n of refs) {
     const issue = issueRead(n);
     if (issue.title.trim() === own) {
       failures.push(`PR #${pr} closes #${n}, its own suggestion-band record — rephrase the mention as "Refs #${n}" or "issue #${n}"`);
     } else {
-      closed.push(n);
       labels.set(n, issue.labels);
     }
   }
-  for (const n of claimedElsewhere(closed, tickets, (m) => labels.get(m))) {
+  const closed = [...labels.keys()];
+  const claim = CLAIM_BRANCH.exec(view.headRefName);
+  const ownTickets = claim === null ? tickets : [...tickets, Number(claim[1])];
+  for (const n of claimedElsewhere(closed, ownTickets, (m) => labels.get(m))) {
     failures.push(`PR #${pr} closes #${n}, which another claim holds — rephrase it as "Refs #${n}"`);
   }
   return { refs: closed, failures };
@@ -2941,9 +2948,14 @@ async function runSettleFromReport() {
       check(`PR #${report.pr} reads OPEN`, pr.state === "OPEN");
       check(`PR #${report.pr} closes #${live.number}`, numbers.includes(live.number));
       // The claim's own ticket is the token's: a replacement impl-N-x holds
-      // the same claim as impl-N, so it is never refused for #N.
-      const held = claimedElsewhere(numbers, [live.number], issueLabels);
-      check(`PR #${report.pr} closes no ticket another claim holds (in-progress: ${held.length === 0 ? "none" : held.map((n) => `#${n}`).join(", ")})`, held.length === 0);
+      // the same claim as impl-N, so it is never refused for #N. A PR that is
+      // not OPEN, or does not close #N, has failed already, so no other
+      // reference's issue is read: a read that could not look would turn
+      // that exit 3 into exit 2.
+      if (pr.state === "OPEN" && numbers.includes(live.number)) {
+        const held = claimedElsewhere(numbers, [live.number], issueLabels);
+        check(`PR #${report.pr} closes no ticket another claim holds (in-progress: ${held.length === 0 ? "none" : held.map((n) => `#${n}`).join(", ")})`, held.length === 0);
+      }
       // The claim's branch comes from the ticket: the Pull claims with member
       // impl-N, so its branch is implementer/N-impl-N, and close-out releases
       // impl-N. Never from the settling member's name or its report: a

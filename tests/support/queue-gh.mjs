@@ -1,12 +1,14 @@
 // A `gh` stub for `ledger.mjs dispatch`. `gh pr list` answers `prs` as the
 // open `ready-to-merge` queue `dispatch merge-bot` records. A finisher dispatch
-// reads four more answers: `gh pr view <n> --json closingIssuesReferences,url`,
-// `gh issue view <n> --json title,labels`, `gh pr view <n> --json labels` and the
-// repository's label list, `gh label list --json name --limit <limit>`. They
-// default to a PR in `OWN_REPO` that closes nothing and carries `patch`, an
-// issue titled `issue <n>` carrying no label, and a repository defining all
-// three release labels; `closes`, `titled`, `issueLabelled`, `labelled` and
-// `defines` set them per test, and `failsOn` makes any of them fail. Any other
+// reads four more answers: `gh pr view <n> --json
+// closingIssuesReferences,url,headRefName`, `gh issue view <n> --json
+// title,labels`, `gh pr view <n> --json labels` and the repository's label
+// list, `gh label list --json name --limit <limit>`. They default to a PR in
+// `OWN_REPO` that closes nothing, is headed by a branch that is no claim's
+// and carries `patch`, an issue titled `issue <n>` carrying no label, and a
+// repository defining all three release labels; `closes`, `titled`,
+// `issueLabelled`, `labelled` and `defines` set them per test, and `failsOn`
+// makes any of them fail. Any other
 // gh call fails loudly. Every call is appended to `<bin>/calls`, so a test can
 // assert that a refusal made none.
 //
@@ -55,10 +57,10 @@ case "$1 $2" in
   printf '%s\\n' '${JSON.stringify(prs.map((number) => ({ number })))}' ;;
 "pr view")
   case "$4 $5" in
-  "--json closingIssuesReferences,url")
+  "--json closingIssuesReferences,url,headRefName")
     f='${bin}/pr-'"$3"
     [ -f "$f.fail" ] && { printf 'gh stub: pr view %s failed\\n' "$3" >&2; exit 1; }
-    if [ -f "$f.json" ]; then /bin/cat "$f.json"; else printf '{"closingIssuesReferences":[],"url":"${prUrl("")}%s"}\\n' "$3"; fi ;;
+    if [ -f "$f.json" ]; then /bin/cat "$f.json"; else printf '{"closingIssuesReferences":[],"url":"${prUrl("")}%s","headRefName":"${NO_CLAIM_HEAD}"}\\n' "$3"; fi ;;
   "--json labels")
     f='${bin}/labels-'"$3"
     [ -f "$f.fail" ] && { printf 'gh stub: pr view %s labels failed\\n' "$3" >&2; exit 1; }
@@ -80,14 +82,18 @@ esac
 `);
 }
 
+/** A head branch that is no claim's: the head every PR the stub answers for has unless `closes` names one. */
+const NO_CLAIM_HEAD = "feature/topic";
+
 /**
- * Answers `gh pr view <pr> --json closingIssuesReferences,url` with the PR's
- * url and `refs`: each an issue number in `OWN_REPO`, or a reference object
- * as it stands — `ref(n, "other/repo")` for another repository's issue.
+ * Answers `gh pr view <pr> --json closingIssuesReferences,url,headRefName`
+ * with the PR's url, `refs` and `head`: each of `refs` an issue number in
+ * `OWN_REPO`, or a reference object as it stands — `ref(n, "other/repo")` for
+ * another repository's issue.
  */
-export function closes(bin, pr, refs) {
+export function closes(bin, pr, refs, head = NO_CLAIM_HEAD) {
   const closing = refs.map((r) => (typeof r === "number" ? ref(r) : r));
-  writeFileSync(join(bin, `pr-${pr}.json`), JSON.stringify({ closingIssuesReferences: closing, url: prUrl(pr) }));
+  writeFileSync(join(bin, `pr-${pr}.json`), JSON.stringify({ closingIssuesReferences: closing, url: prUrl(pr), headRefName: head }));
 }
 
 /** Answers `gh issue view <n> --json title,labels` with `title`, carrying no label. */

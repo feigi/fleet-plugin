@@ -232,7 +232,6 @@ test("impl-N=PR#M: a PR that does not close ticket N is exit 3", () => {
   f.ok("dispatch", "5", "impl-5");
   f.report("impl-5", implReport(f));
   f.pr(6, { state: "OPEN", closingIssuesReferences: [ref(55)] });
-  f.issue(55, { labels: [] });
   f.refused("impl-5", 3, /failed: PR #6 closes #5/);
 });
 
@@ -242,6 +241,21 @@ test("impl-N=PR#M: a PR whose only reference to #N is another repository's is ex
   f.report("impl-5", implReport(f));
   f.pr(6, { state: "OPEN", closingIssuesReferences: [ref(5, "other-org/other-repo")] });
   f.refused("impl-5", 3, /failed: PR #6 closes #5/);
+});
+
+test("impl-N=PR#M: a PR that is not OPEN, or does not close #N, is exit 3 for that check, no other reference's issue read", () => {
+  for (const [view, why] of [
+    [{ state: "CLOSED", closingIssuesReferences: [ref(5), ref(7)] }, /failed: PR #6 reads OPEN/],
+    [{ state: "OPEN", closingIssuesReferences: [ref(55), ref(7)] }, /failed: PR #6 closes #5/],
+  ]) {
+    const f = fixture();
+    f.ok("dispatch", "5", "impl-5");
+    f.report("impl-5", implReport(f));
+    // No answer file for issue 7 or 55: reading either would be exit 2.
+    f.pr(6, view);
+    f.refused("impl-5", 3, why);
+    assert.deepEqual(issueReads(f), []);
+  }
 });
 
 // A claim's ticket is closed only by the claim's own PR: a PR closing a ticket

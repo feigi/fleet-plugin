@@ -27,12 +27,13 @@ import { LABEL_ROLES } from "../plugin/scripts/label-map.mjs";
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/dispositions-check.mjs", import.meta.url));
 const LEDGER = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
 
-// The `gh` stub: `issue view <n> --json labels,state,title` (or `--json title`,
-// or `--json title,labels`)
+// The `gh` stub: `issue view <n> --json labels,state,title` (or `--json
+// title,labels`)
 // answered from FAKE_GH_ISSUES, an issue it does not hold answered the way gh
-// answers one that does not exist. `pr view <n> --json closingIssuesReferences,url`
-// answered from FAKE_GH_PRS, a PR it does not hold with no references, in
-// queue-gh.mjs's own repository; `pr view <n> --json labels` answered from
+// answers one that does not exist. `pr view <n> --json
+// closingIssuesReferences,url,headRefName` answered from FAKE_GH_PRS, a PR it
+// does not hold with no references, in queue-gh.mjs's own repository, headed
+// by a branch that is no claim's; `pr view <n> --json labels` answered from
 // FAKE_GH_PRS too, a PR it does not hold carrying `patch`.
 // FAKE_GH_DOWN answers every call as an unreachable API. FAKE_GH_LOG, when set,
 // gets one line per call: its argv, cwd and GIT_DIR.
@@ -43,9 +44,9 @@ const { FAKE_GH_ISSUES, FAKE_GH_DOWN, FAKE_GH_LOG, FAKE_GH_PRS } = process.env;
 if (FAKE_GH_LOG) fs.appendFileSync(FAKE_GH_LOG, JSON.stringify({ argv, cwd: process.cwd(), GIT_DIR: process.env.GIT_DIR ?? null }) + "\\n");
 if (FAKE_GH_DOWN) { process.stderr.write("error connecting to api.github.com\\n"); process.exit(1); }
 const [cmd, sub, n, flag, fields] = argv;
-if (argv.length === 5 && cmd === "pr" && sub === "view" && flag === "--json" && fields === "closingIssuesReferences,url") {
+if (argv.length === 5 && cmd === "pr" && sub === "view" && flag === "--json" && fields === "closingIssuesReferences,url,headRefName") {
   const prs = JSON.parse(fs.readFileSync(FAKE_GH_PRS, "utf8"));
-  process.stdout.write(JSON.stringify({ closingIssuesReferences: prs[n]?.closingIssuesReferences ?? [], url: ${JSON.stringify(prUrl(""))} + n }));
+  process.stdout.write(JSON.stringify({ closingIssuesReferences: prs[n]?.closingIssuesReferences ?? [], url: ${JSON.stringify(prUrl(""))} + n, headRefName: "feature/topic" }));
   process.exit(0);
 }
 if (argv.length === 5 && cmd === "pr" && sub === "view" && flag === "--json" && fields === "labels") {
@@ -53,7 +54,7 @@ if (argv.length === 5 && cmd === "pr" && sub === "view" && flag === "--json" && 
   process.stdout.write(JSON.stringify({ labels: (prs[n]?.labels ?? ["patch"]).map((name) => ({ name })) }));
   process.exit(0);
 }
-if (argv.length !== 5 || cmd !== "issue" || sub !== "view" || flag !== "--json" || (fields !== "labels,state,title" && fields !== "title" && fields !== "title,labels")) {
+if (argv.length !== 5 || cmd !== "issue" || sub !== "view" || flag !== "--json" || (fields !== "labels,state,title" && fields !== "title,labels")) {
   process.stderr.write("gh stub: unexpected call " + JSON.stringify(argv) + "\\n");
   process.exit(2);
 }
@@ -62,7 +63,7 @@ if (!issue) {
   process.stderr.write("GraphQL: Could not resolve to an issue or pull request with the number of " + n + ". (repository.issue)\\n");
   process.exit(1);
 }
-process.stdout.write(JSON.stringify(fields === "title" ? { title: issue.title } : { labels: issue.labels.map((name) => ({ name })), state: issue.state, title: issue.title }));
+process.stdout.write(JSON.stringify({ labels: issue.labels.map((name) => ({ name })), state: issue.state, title: issue.title }));
 `;
 const openIssue = (label) => ({ state: "OPEN", title: "a deferred finding", labels: [label] });
 const bandRecord = (pr = 40) => ({ state: "CLOSED", title: recordTitle(pr), labels: ["wontfix"] });
