@@ -849,13 +849,13 @@ const FIT = (o = {}) => ({
   guard: { tripped: [], n: { "slow-high": 69, "smol-high": 32, "task-high": 69 } },
   ...o,
 });
-// The guard these fixtures stand beside: TODAY's, with the blob ids the preview read.
+// The guard these fixtures stand beside: TODAY's, with the blob ids the Fit read.
 const BESIDE = (o = {}) => guardOk(TODAY().guard.cells, { tsv_blobs: BLOBS, ...o });
-const PREVIEW = (o = {}) => ({
+const FIT_READ = (o = {}) => ({
   status: "ok",
-  preview: { computed_at: "2026-10-26T19:17:40.000Z", guard_computed_at: "2026-10-26T19:17:33.000Z", tsv_blobs: BLOBS, prior: PRIOR, table: FIT(), ...o },
+  fit: { computed_at: "2026-10-26T19:17:40.000Z", guard_computed_at: "2026-10-26T19:17:33.000Z", tsv_blobs: BLOBS, prior: PRIOR, table: FIT(), ...o },
 });
-const favours = (o = {}) => policy({ guard: BESIDE(), preview: PREVIEW(), ...o });
+const favours = (o = {}) => policy({ guard: BESIDE(), fit: FIT_READ(), ...o });
 const favoursOf = (p) => p.sides[1];
 
 test("evidence favours sits beside routes now, on the right", () => {
@@ -885,7 +885,7 @@ test("today's records: the Fit reads stage 2 with slow-medium and task-max at 0 
 
 test("≠ routes now is marked only where the two Cells differ, the Cell routes now gives a row it has none of its own for included", () => {
   const slow = { cost: { "*": "slow-high", [BELOW]: "slow-high" }, speed: { "*": "slow-high", [BELOW]: "task-high" } };
-  const p = favours({ preview: PREVIEW({ table: FIT({ rows: slow }) }) });
+  const p = favours({ fit: FIT_READ({ table: FIT({ rows: slow }) }) });
   assert.equal(lineOf(p, "cost", "*").sides[1].differs, null);
   assert.equal(lineOf(p, "cost", BELOW).sides[1].differs, null, "routes now follows * there, which is slow-high too");
   assert.equal(lineOf(p, "speed", BELOW).sides[1].differs, "≠ routes now");
@@ -905,9 +905,9 @@ test("evidence favours states: no cost guard, before the first Fit, and a Fit th
   const cases = [
     ["no cost guard", { guard: { status: "missing" } }, "no Fit: it is written only beside a cost guard"],
     ["an unreadable guard", { guard: { status: "unreadable", why: "not JSON" } }, "no Fit: it is written only beside a cost guard"],
-    ["before the first Fit", { preview: { status: "missing" } }, "no Fit yet: the next phase 0 writes one"],
-    ["left out", { preview: undefined }, "no Fit yet: the next phase 0 writes one"],
-    ["unreadable", { preview: { status: "unreadable", why: "not JSON" } }, "no Fit read: not JSON"],
+    ["before the first Fit", { fit: { status: "missing" } }, "no Fit yet: the next phase 0 writes one"],
+    ["left out", { fit: undefined }, "no Fit yet: the next phase 0 writes one"],
+    ["unreadable", { fit: { status: "unreadable", why: "not JSON" } }, "no Fit read: not JSON"],
   ];
   for (const [name, o, heading] of cases) {
     const p = favours(o);
@@ -924,21 +924,21 @@ test("evidence favours states: no cost guard, before the first Fit, and a Fit th
 });
 
 test("a Fit out of burn-in has no burn-in heading; a single short Cell, or Cells short by different counts, are worded each", () => {
-  assert.equal(favoursOf(favours({ preview: PREVIEW({ table: FIT({ burn_in: false, guard: { tripped: [], n: Object.fromEntries(FIVE.map((c) => [c, 20])) } }) }) })).heading, null);
+  assert.equal(favoursOf(favours({ fit: FIT_READ({ table: FIT({ burn_in: false, guard: { tripped: [], n: Object.fromEntries(FIVE.map((c) => [c, 20])) } }) }) })).heading, null);
   const one = FIT({ guard: { tripped: [], n: { "slow-high": 69, "task-high": 69, "smol-high": 32, "slow-medium": 20 } } });
-  assert.equal(favoursOf(favours({ preview: PREVIEW({ table: one }) })).heading, "stage 2: task-max has 0 of the 20 merged PRs it needs");
+  assert.equal(favoursOf(favours({ fit: FIT_READ({ table: one }) })).heading, "stage 2: task-max has 0 of the 20 merged PRs it needs");
   const two = FIT({ guard: { tripped: [], n: { "slow-high": 69, "task-high": 69, "smol-high": 32, "slow-medium": 3 } } });
-  assert.equal(favoursOf(favours({ preview: PREVIEW({ table: two }) })).heading, "stage 2: slow-medium has 3 and task-max has 0 of the 20 merged PRs each needs");
+  assert.equal(favoursOf(favours({ fit: FIT_READ({ table: two }) })).heading, "stage 2: slow-medium has 3 and task-max has 0 of the 20 merged PRs each needs");
 });
 
 test("heading label: fitted beside another guard fires only when guard_computed_at differs from the guard's computed_at", () => {
-  assert.deepEqual(favoursOf(favours({ preview: PREVIEW({ guard_computed_at: "2026-10-25T08:00:00.000Z" }) })).labels, ["fitted beside the guard of 2026-10-25 08:00Z, not this one"]);
+  assert.deepEqual(favoursOf(favours({ fit: FIT_READ({ guard_computed_at: "2026-10-25T08:00:00.000Z" }) })).labels, ["fitted beside the guard of 2026-10-25 08:00Z, not this one"]);
   assert.deepEqual(favoursOf(favours()).labels, []);
 });
 
 test("heading label: fitted on other records fires only when the two files' tsv_blobs differ, and reads not checked when the guard has none", () => {
   const other = { ...BLOBS, "docs/metrics/tier-outcomes.tsv": "d59dc49b" };
-  assert.deepEqual(favoursOf(favours({ preview: PREVIEW({ tsv_blobs: other }) })).labels, ["fitted on other records than the guard's"]);
+  assert.deepEqual(favoursOf(favours({ fit: FIT_READ({ tsv_blobs: other }) })).labels, ["fitted on other records than the guard's"]);
   const { tsv_blobs, ...older } = BESIDE().guard;
   assert.deepEqual(favoursOf(favours({ guard: { status: "ok", guard: older } })).labels, ["fitted on the guard's records: not checked: this guard predates the blob ids it needs"]);
   assert.deepEqual(favoursOf(favours()).labels, []);
@@ -947,23 +947,23 @@ test("heading label: fitted on other records fires only when the two files' tsv_
 test("heading label: fitted against another prior fires on stage, cells, classifier or splits, and on window_start only when the guard gave none", () => {
   const label = "fitted against 3.104.0 · never fitted; the next phase 0 refits";
   for (const [field, value] of [["stage", 2], ["cells", ["slow-high", "task-high"]], ["classifier", { b: "haiku", tau: 0.7 }], ["splits", SPLITS]]) {
-    assert.deepEqual(favoursOf(favours({ preview: PREVIEW({ prior: { ...PRIOR, [field]: value } }) })).labels, [label], field);
+    assert.deepEqual(favoursOf(favours({ fit: FIT_READ({ prior: { ...PRIOR, [field]: value } }) })).labels, [label], field);
   }
-  const windowed = PREVIEW({ prior: { ...PRIOR, window_start: "2026-09-01" } });
-  assert.deepEqual(favoursOf(favours({ preview: windowed })).labels, [], "the guard gave a window_start, so the prior's was not read");
-  assert.deepEqual(favoursOf(favours({ preview: windowed, guard: BESIDE({ window_start: null }) })).labels, [label]);
-  const fitted = PREVIEW({ prior: { ...PRIOR, stage: 2, fitted_commit: "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d", version: "0.0.0" } });
-  assert.deepEqual(favoursOf(favours({ preview: fitted })).labels, ["fitted against linked checkout · fitted at 1a2b3c4; the next phase 0 refits"]);
-  const unfitted = PREVIEW({ prior: { ...PRIOR, stage: 2, fitted_commit: "" } });
-  assert.deepEqual(favoursOf(favours({ preview: unfitted })).labels, [label], "an empty fitted_commit was never fitted");
-  const unversioned = PREVIEW({ prior: { ...PRIOR, stage: 2, version: 7 } });
-  assert.deepEqual(favoursOf(favours({ preview: unversioned })).labels, ["fitted against no version · never fitted; the next phase 0 refits"], "a version that is not a string is none");
-  assert.deepEqual(favoursOf(favours({ preview: PREVIEW({ prior: null }) })).labels.length, 1, "a prior the file lacks is not the installed table");
+  const windowed = FIT_READ({ prior: { ...PRIOR, window_start: "2026-09-01" } });
+  assert.deepEqual(favoursOf(favours({ fit: windowed })).labels, [], "the guard gave a window_start, so the prior's was not read");
+  assert.deepEqual(favoursOf(favours({ fit: windowed, guard: BESIDE({ window_start: null }) })).labels, [label]);
+  const fitted = FIT_READ({ prior: { ...PRIOR, stage: 2, fitted_commit: "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d", version: "0.0.0" } });
+  assert.deepEqual(favoursOf(favours({ fit: fitted })).labels, ["fitted against linked checkout · fitted at 1a2b3c4; the next phase 0 refits"]);
+  const unfitted = FIT_READ({ prior: { ...PRIOR, stage: 2, fitted_commit: "" } });
+  assert.deepEqual(favoursOf(favours({ fit: unfitted })).labels, [label], "an empty fitted_commit was never fitted");
+  const unversioned = FIT_READ({ prior: { ...PRIOR, stage: 2, version: 7 } });
+  assert.deepEqual(favoursOf(favours({ fit: unversioned })).labels, ["fitted against no version · never fitted; the next phase 0 refits"], "a version that is not a string is none");
+  assert.deepEqual(favoursOf(favours({ fit: FIT_READ({ prior: null }) })).labels.length, 1, "a prior the file lacks is not the installed table");
 });
 
 test("heading label: a release changing only fitted_commit and version raises no prior label", () => {
-  const release = PREVIEW({ prior: { ...PRIOR, fitted_commit: "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d", version: "3.105.0" } });
-  assert.deepEqual(favoursOf(favours({ preview: release })).labels, []);
+  const release = FIT_READ({ prior: { ...PRIOR, fitted_commit: "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d", version: "3.105.0" } });
+  assert.deepEqual(favoursOf(favours({ fit: release })).labels, []);
   assert.deepEqual(favoursOf(favours({ table: { ...SHIPPED, fitted_commit: "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d", n_rows: 198 } })).labels, [], "nor does an installed table that differs only there");
   assert.deepEqual(favoursOf(favours({ table: null })).labels, ["fitted against the installed table: not checked: no router table read"]);
 });
@@ -982,7 +982,7 @@ test("no installed table: no row is marked ≠ routes now, and a group the Fit h
 
 test("the guard-against-fit n footnote shows when both read the same files and a Cell's n differs, its mark on the fit's n", () => {
   const est = (n, generation = "claude-sonnet-5-5") => ({ ...FIT().estimates, "*": { ...FIT().estimates["*"], "task-high": { generation, merged: n } } });
-  const p = favours({ preview: PREVIEW({ table: FIT({ estimates: est(67) }) }) });
+  const p = favours({ fit: FIT_READ({ table: FIT({ estimates: est(67) }) }) });
   const s = favoursOf(p);
   assert.deepEqual(s.footnotes, [{ mark: "¹", text: "task-high: the guard counts merges by GitHub's state, the fit by Rulings, and the fit admits only drawn or rule-sized Pulls" }]);
   for (const o of ["cost", "speed"]) {
@@ -991,19 +991,19 @@ test("the guard-against-fit n footnote shows when both read the same files and a
   }
   assert.equal(lineOf(p, "cost", BELOW).sides[1].candidates[0].nMark, null, "a group's n is not the guard's Cell-wide count");
 
-  const other = favours({ preview: PREVIEW({ table: FIT({ estimates: est(67) }), tsv_blobs: { ...BLOBS, "docs/metrics/tier-outcomes.tsv": "d59dc49b" } }) });
+  const other = favours({ fit: FIT_READ({ table: FIT({ estimates: est(67) }), tsv_blobs: { ...BLOBS, "docs/metrics/tier-outcomes.tsv": "d59dc49b" } }) });
   assert.deepEqual(favoursOf(other).footnotes, [], "other files: the counts need not agree");
   assert.deepEqual(favoursOf(favours()).footnotes, [], "the same n on the same files");
   const { tsv_blobs, ...older } = BESIDE().guard;
-  assert.deepEqual(favoursOf(favours({ guard: { status: "ok", guard: older }, preview: PREVIEW({ table: FIT({ estimates: est(67) }) }) })).footnotes, [], "no blob ids, nothing to compare");
-  const generation = favours({ preview: PREVIEW({ table: FIT({ estimates: est(67, "claude-sonnet-5") }) }) });
+  assert.deepEqual(favoursOf(favours({ guard: { status: "ok", guard: older }, fit: FIT_READ({ table: FIT({ estimates: est(67) }) }) })).footnotes, [], "no blob ids, nothing to compare");
+  const generation = favours({ fit: FIT_READ({ table: FIT({ estimates: est(67, "claude-sonnet-5") }) }) });
   assert.deepEqual(favoursOf(generation).footnotes, [], "another generation's n: not the one the guard counts");
   assert.equal(lineOf(generation, "cost", "*").sides[1].candidates[0].nMark, null);
   for (const merged of [null, "67", -1]) {
-    assert.deepEqual(favoursOf(favours({ preview: PREVIEW({ table: FIT({ estimates: est(merged) }) }) })).footnotes, [], `a merged of ${JSON.stringify(merged)} is no count to compare`);
+    assert.deepEqual(favoursOf(favours({ fit: FIT_READ({ table: FIT({ estimates: est(merged) }) }) })).footnotes, [], `a merged of ${JSON.stringify(merged)} is no count to compare`);
   }
 
-  const consumer = favours({ repoUrl: "https://ghe.example.com/acme/widgets", preview: PREVIEW({ table: FIT({ estimates: est(67) }) }) });
+  const consumer = favours({ repoUrl: "https://ghe.example.com/acme/widgets", fit: FIT_READ({ table: FIT({ estimates: est(67) }) }) });
   assert.equal(consumer.sides[0].footnotes[0].mark, "¹");
   assert.equal(favoursOf(consumer).footnotes[0].mark, "²", "numbered after routes now's own");
 });
@@ -1019,7 +1019,7 @@ const refitOut = (why = EISDIR) => [
 const REFIT = `the newest refit failed at 2026-10-28 08:00Z: ${EISDIR}`;
 const failedAt = (at, output = refitOut()) => step("ok", at, output);
 
-test("refitFailure reads the reason off the failed preview line, found anywhere in a line, and nothing else", () => {
+test("refitFailure reads the reason off the failed fit line, found anywhere in a line, and nothing else", () => {
   assert.equal(refitFailure(refitOut()), EISDIR);
   assert.equal(refitFailure("metrics-refresh.mjs failed: metrics-refresh: fit: failed —   spaced out  \r\nnext"), "spaced out");
   assert.equal(refitFailure("metrics-refresh: fit: skipped, no guard written — .fleet/router-fit.json left as it is"), null);
@@ -1029,18 +1029,16 @@ test("refitFailure reads the reason off the failed preview line, found anywhere 
 });
 
 test("evidence favours: a fit older than the newest step that failed its refit says so first, and its own labels follow", () => {
-  const p = favours({ receipts: { phase0: failedAt("2026-10-28T08:00:00.000Z"), closeout: null }, preview: PREVIEW({ guard_computed_at: "2026-10-25T08:00:00.000Z" }) });
+  const p = favours({ receipts: { phase0: failedAt("2026-10-28T08:00:00.000Z"), closeout: null }, fit: FIT_READ({ guard_computed_at: "2026-10-25T08:00:00.000Z" }) });
   assert.deepEqual(favoursOf(p).labels, [REFIT, "fitted beside the guard of 2026-10-25 08:00Z, not this one"]);
   const closeout = favours({ receipts: { phase0: null, closeout: failedAt("2026-10-28T08:00:00.000Z") } });
   assert.deepEqual(favoursOf(closeout).labels, [REFIT], "close-out's step is read as phase 0's is");
 });
 
-test("evidence favours: no refit label when the newest step has no failed line, a fit came after it, there is no receipt, or no guard", () => {
+test("evidence favours: no refit label when the newest step that tried a refit has no failed line, a fit came after it, there is no receipt, or no guard", () => {
   const older = failedAt("2026-10-28T08:00:00.000Z");
   const newer = step("ok", "2026-10-28T10:00:00.000Z", "metrics-refresh: cost guard: verdict none\nmetrics-refresh: fit: fitted 235 Pulls, stage 2, in burn-in");
-  assert.deepEqual(favoursOf(favours({ receipts: { phase0: older, closeout: newer } })).labels, [], "the older step's failed line is not the newest");
-  const stopped = step("failed", "2026-10-28T10:00:00.000Z", "metrics-refresh.mjs failed: metrics-refresh: drain failed: pending file malformed");
-  assert.deepEqual(favoursOf(favours({ receipts: { phase0: stopped, closeout: older } })).labels, [], "a newest step that stopped before the refit");
+  assert.deepEqual(favoursOf(favours({ receipts: { phase0: older, closeout: newer } })).labels, [], "the older step's failed line is not the newest refit");
   const tie = { phase0: step("ok", "2026-10-28T08:00:00.000Z", "metrics-refresh: fit: fitted 235 Pulls"), closeout: older };
   assert.deepEqual(favoursOf(favours({ receipts: tie })).labels, [], "on equal times, phase 0's step is the newest");
 
@@ -1060,20 +1058,28 @@ test("evidence favours: no refit label when the newest step has no failed line, 
   }
 });
 
+test("evidence favours: a newer step that tried no refit — a --no-fit close-out, or one that stopped before its refit — leaves an earlier failed refit said", () => {
+  const failed = failedAt("2026-10-28T08:00:00.000Z");
+  const noFit = step("ok", "2026-10-28T12:00:00.000Z", "metrics-refresh: drain: nothing pending\nmetrics-refresh: cost guard: verdict none; pr-cost.mjs exit 4; .fleet/cost-guard.json computed 2026-10-28T12:00:00.000Z");
+  assert.deepEqual(favoursOf(favours({ receipts: { phase0: failed, closeout: noFit } })).labels, [REFIT], "a close-out computes no Fit");
+  const stopped = step("failed", "2026-10-28T10:00:00.000Z", "metrics-refresh.mjs failed: metrics-refresh: drain failed: pending file malformed");
+  assert.deepEqual(favoursOf(favours({ receipts: { phase0: stopped, closeout: failed } })).labels, [REFIT], "a step that stopped before its refit");
+});
+
 test("evidence favours: with no fit read, the failed refit is the side's one label and its heading is unchanged", () => {
   const receipts = { phase0: failedAt("2026-10-28T08:00:00.000Z"), closeout: null };
-  for (const [preview, heading] of [
+  for (const [fit, heading] of [
     [{ status: "missing" }, "no Fit yet: the next phase 0 writes one"],
     [{ status: "unreadable", why: "not JSON" }, "no Fit read: not JSON"],
   ]) {
-    const s = favoursOf(favours({ preview, receipts }));
-    assert.equal(s.heading, heading, preview.status);
-    assert.deepEqual(s.labels, [REFIT], preview.status);
+    const s = favoursOf(favours({ fit, receipts }));
+    assert.equal(s.heading, heading, fit.status);
+    assert.deepEqual(s.labels, [REFIT], fit.status);
   }
 });
 
 test("evidence favours: a fit whose computed_at is no time counts as not after the step, so the label shows", () => {
-  const p = favours({ receipts: { phase0: failedAt("2026-10-28T08:00:00.000Z"), closeout: null }, preview: PREVIEW({ computed_at: "garbage" }) });
+  const p = favours({ receipts: { phase0: failedAt("2026-10-28T08:00:00.000Z"), closeout: null }, fit: FIT_READ({ computed_at: "garbage" }) });
   assert.deepEqual(favoursOf(p).labels, [REFIT]);
 });
 

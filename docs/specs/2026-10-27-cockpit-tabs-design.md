@@ -507,6 +507,7 @@ reads "recorded as …". Today's three cards predate the Routing.
 | not drawn, `guard-missing` | "no cost guard yet: default Cell only" |
 | not drawn, `guard-tripped` (no Cell left to draw) | "every other Cell tripped: no draw" |
 | `no-issue-json` / `no-sizing` | "issue unreadable when routed" / "no sizing"; the Stratum reads unknown |
+| `fit-missing` / `fit-unreadable` / `fit-invalid` | "no Fit: starting table" / "Fit unreadable: starting table" / "Fit invalid: starting table" |
 | any other recorded value | "recorded as …" |
 
 `REASON` keeps only the first thing that went wrong, and the card never

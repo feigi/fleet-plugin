@@ -15,10 +15,15 @@
 // route to, why, and how a Pull on that row is dispatched (ticket-router.mjs's
 // rowDispatch, the function `route` itself calls), and on the evidence-favours
 // side the same for the Fit's table (`.fleet/router-fit.json`, which
-// metrics-refresh.mjs writes beside the guard), marked where its Cell differs.
-// The receipts' newest `metrics` step, which the guard section quotes when there
-// is no guard, also feeds the evidence-favours side: a refit that step says
-// failed, with no fit written after it, is said in that side's heading.
+// metrics-refresh.mjs writes beside the guard at phase 0), marked where its Cell
+// differs. The installed table is the starting table: `route` with no `--table`
+// routes by the Fit beside its `--guard`, and by the installed table only when
+// that Fit is missing, unreadable or invalid, so routes now lays out the
+// installed table, not always the one `route` routes by.
+// The receipts' newest `metrics` step is what the guard section quotes when there
+// is no guard; the newest one that tried a refit feeds the evidence-favours side:
+// a refit that step says failed, with no fit written after it, is said in that
+// side's heading.
 // Figures show only from a guard `readCostGuard` (fleet-tick.mjs, the reader
 // the tick judges the file by) accepts; `guard` here is that reader's own
 // answer, `{ status: "ok", guard }` or
@@ -119,19 +124,30 @@ function tierRoute(role, level, generation, modelRoles) {
 
 // ---------------------------------------------------------------------------
 // The newest `metrics` step of the phase 0 and close-out receipts: the guard
-// section quotes it when there is no guard, and evidence favours reads a failed refit off it.
+// section quotes it when there is no guard. Evidence favours reads a failed
+// refit off the newest one that tried a refit instead.
 // ---------------------------------------------------------------------------
 
 // `step` is `{ status, at, output }` or null. A step that has not run carries no
 // refresh to quote.
 const ran = (step) => step != null && step.status !== "pending" && Number.isFinite(Date.parse(step.at));
 
+// The newest of `steps` by `at`; on equal times, the first. Null for none.
+const newest = (steps) => (steps.length === 0 ? null : steps.reduce((a, b) => (Date.parse(b.at) > Date.parse(a.at) ? b : a)));
+
 // The newest `metrics` step of the two receipts that has run, by `at`; on equal
 // times, phase 0's. Null when neither receipt has run one.
 function newestStep(receipts) {
-  const steps = [receipts?.phase0, receipts?.closeout].filter(ran);
-  if (steps.length === 0) return null;
-  return steps.reduce((a, b) => (Date.parse(b.at) > Date.parse(a.at) ? b : a));
+  return newest([receipts?.phase0, receipts?.closeout].filter(ran));
+}
+
+// The newest `metrics` step of the two receipts that tried a refit — its output
+// carries a `metrics-refresh: fit:` line — picked as newestStep picks. A
+// close-out's step, which runs with `--no-fit` and computes no Fit, and a step
+// that stopped before its refit tried none, so neither hides an earlier
+// failure. Null when neither receipt's step tried one.
+function newestRefit(receipts) {
+  return newest([receipts?.phase0, receipts?.closeout].filter((s) => ran(s) && /metrics-refresh: fit: /.test(String(s.output ?? ""))));
 }
 
 // metrics-refresh's own line from a step's output: the cost-guard duty's, else
@@ -631,11 +647,12 @@ const noFit = (heading, labels = []) => ({
   title: FAVOURS, source: { text: "Fit", check: null }, heading, labels, footnotes: [], rows: null, unread: null,
 });
 
-// The newest refit failed: `step` is the receipts' newest `metrics` step, `p`
-// the Fit read, null when none was. Said while that step's output holds
-// the failed line and no fit was written after it — a `computed_at` before the
-// step's `at`, or one that is no time. A later step, a fit written after this
-// one, or the receipt no longer read clears it.
+// The newest refit failed: `step` is the receipts' newest `metrics` step that
+// tried a refit, newestRefit's pick, `p` the Fit read, null when none was. Said
+// while that step's output holds the failed line and no fit was written after
+// it — a `computed_at` before the step's `at`, or one that is no time. A later
+// step that tried a refit, a fit written after this one, or the receipt no
+// longer read clears it; a close-out step, which tries none, does not.
 function refitLabel(step, p) {
   if (step === null) return [];
   const why = refitFailure(step.output);
@@ -653,7 +670,7 @@ function refitLabel(step, p) {
 // `splits`, and `window_start` when the guard gives none — so a release that changes only
 // what the fit recomputes, or `fitted_commit` and `version`, raises nothing: the
 // next phase 0's refit would come out the same.
-function previewLabels(p, raw, routed, table, records) {
+function fitLabels(p, raw, routed, table, records) {
   const labels = [];
   if (p.guard_computed_at !== raw.computed_at) labels.push(`fitted beside the guard of ${when(p.guard_computed_at)}, not this one`);
   if (records === null) labels.push("fitted on the guard's records: not checked: this guard predates the blob ids it needs");
@@ -687,17 +704,17 @@ function nDiffers(p, raw, records) {
 
 // The evidence-favours side: the Fit's table laid out row by row under
 // the workspace's guard, as routes now lays out the installed one, each row's
-// Cell marked where it differs from the Cell routes now gives that row. `preview`
-// is gather's read, `{ status: "ok", preview } | { status: "missing" } | {
+// Cell marked where it differs from the Cell routes now gives that row. `fit`
+// is gather's read, `{ status: "ok", fit } | { status: "missing" } | {
 // status: "unreadable", why }`; `guard` readCostGuard's answer and `routed`
 // readGuard's for the same file, null when the router reads none; `step` the
-// receipts' newest `metrics` step, newestStep's pick; `mark` the footnote mark
+// receipts' newest `metrics` step that tried a refit, newestRefit's pick; `mark` the footnote mark
 // its n footnote takes.
-function evidenceFavours({ preview, guard, routed, table, modelRoles, step, mark }) {
+function evidenceFavours({ fit: read, guard, routed, table, modelRoles, step, mark }) {
   if (routed === null) return noFit("no Fit: it is written only beside a cost guard");
-  if (preview?.status === "unreadable") return noFit(`no Fit read: ${preview.why}`, refitLabel(step, null));
-  if (preview?.status !== "ok") return noFit("no Fit yet: the next phase 0 writes one", refitLabel(step, null));
-  const p = preview.preview;
+  if (read?.status === "unreadable") return noFit(`no Fit read: ${read.why}`, refitLabel(step, null));
+  if (read?.status !== "ok") return noFit("no Fit yet: the next phase 0 writes one", refitLabel(step, null));
+  const p = read.fit;
   const fit = p.table;
   const raw = guard.guard;
   // Whether the fit read the guard's files: null when the guard names no blob
@@ -717,7 +734,7 @@ function evidenceFavours({ preview, guard, routed, table, modelRoles, step, mark
     title: FAVOURS,
     source: { text: ["Fit", "this repository's runs", `computed ${when(p.computed_at)}`, plural(fit.n_rows, "Pull")].join(" · "), check: null },
     heading: fit.burn_in ? `stage ${fit.stage}: ${shortWords(fit, "present") ?? "every Cell has its merged PRs"}` : null,
-    labels: [...refitLabel(step, p), ...previewLabels(p, raw, routed, table, records)],
+    labels: [...refitLabel(step, p), ...fitLabels(p, raw, routed, table, records)],
     footnotes: differ.length === 0 ? [] : [{ mark, text: `${list(differ)}: the guard counts merges by GitHub's state, the fit by Rulings, and the fit admits only drawn or rule-sized Pulls` }],
     rows: Object.fromEntries(OBJECTIVES.map((o) => [o,
       Object.fromEntries(Object.keys(fit.rows[o]).map((s) => [s, entry(o, s)])),
@@ -826,8 +843,12 @@ function prIsOpen(pr, openPrs) {
 // an alert, so an offline cockpit raises none. `main` is the carried read of
 // `docs/metrics`, `{ value: { blobs }, readAt, error }`, `blobs` null for a 404.
 // A guard that names no blob ids has nothing to compare, and neither has one
-// whose cockpit read nothing (`main` null).
-function recordsAgainstMain({ read, preview, main, closeoutPr, openPrs }) {
+// whose cockpit read nothing (`main` null). The Fit is compared only while it
+// was fitted beside this guard: a guard written after it — a close-out's,
+// which computes no Fit, or one whose refit failed — moves on alone, and
+// evidence favours' heading already says the Fit was fitted beside another
+// guard.
+function recordsAgainstMain({ read, fit, main, closeoutPr, openPrs }) {
   const none = { alert: null, note: null };
   if (main == null || read?.status !== "ok") return none;
   const g = read.guard;
@@ -840,7 +861,7 @@ function recordsAgainstMain({ read, preview, main, closeoutPr, openPrs }) {
   if (blobs === null) return { alert: null, note: "records against main: main holds no metrics yet" };
   if (!isRecord(blobs)) return unchecked("main's docs/metrics not read yet");
 
-  const mine = preview?.status === "ok" ? preview.preview : null;
+  const mine = fit?.status === "ok" && fit.fit.guard_computed_at === g.computed_at ? fit.fit : null;
   const held = (ids, path) => (isRecord(ids) && Object.hasOwn(ids, path) ? ids[path] : undefined);
   const paths = [...new Set([...Object.keys(g.tsv_blobs), ...(mine === null ? [] : Object.keys(mine.tsv_blobs))])].sort();
   const lines = [];
@@ -928,20 +949,20 @@ function readersAlert(json) {
  * cellLine). `table` is the installed router table `validateTable` accepted or
  * null, `install` the install's `{ name, version, repository, error }`
  * (`repository` its url), `repoUrl` the workspace's, `objective` the live
- * run's Objective or null between runs, and `preview` the Fit as gather
- * read `.fleet/router-fit.json`: `{ status: "ok", preview: { computed_at,
+ * run's Objective or null between runs, and `fit` the Fit as gather
+ * read `.fleet/router-fit.json`: `{ status: "ok", fit: { computed_at,
  * guard_computed_at, tsv_blobs, prior, table } }`, `{ status: "missing" }` or
  * `{ status: "unreadable", why }`. An input left out reads as nothing
  * read: a missing guard, no receipt, no definitions, no `modelRoles` read, no
  * Pull, no table, no install, no Objective, no Fit.
  */
-export function computeCellEvidence({ guard, receipts, agents, modelRoles = null, pulls = [], table = null, install = null, repoUrl = null, objective = null, preview = null,
+export function computeCellEvidence({ guard, receipts, agents, modelRoles = null, pulls = [], table = null, install = null, repoUrl = null, objective = null, fit = null,
   guardJson = null, mainMetrics = null, closeoutPr = null, openPrs = null, checkoutTable = null }) {
   const routed = guard?.status === "ok" ? readGuard(guard.guard) : null;
   const routes = routesNow({ table, guard: routed, modelRoles, install, repoUrl, checkout: checkoutTable });
   const step = newestStep(receipts);
-  const favours = evidenceFavours({ preview, guard, routed, table, modelRoles, step, mark: superscript(routes.footnotes.length + 1) });
-  const records = recordsAgainstMain({ read: guard, preview, main: mainMetrics, closeoutPr, openPrs });
+  const favours = evidenceFavours({ fit, guard, routed, table, modelRoles, step: newestRefit(receipts), mark: superscript(routes.footnotes.length + 1) });
+  const records = recordsAgainstMain({ read: guard, fit, main: mainMetrics, closeoutPr, openPrs });
   return {
     alerts: [records.alert, noRulingAlert(guard), readersAlert(guardJson)].filter((a) => a !== null),
     policy: policyRowsView({ sides: [routes, favours], objective }),

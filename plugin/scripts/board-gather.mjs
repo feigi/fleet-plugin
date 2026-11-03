@@ -40,7 +40,7 @@ import { repoIdentity } from "./compute-cell-evidence.mjs";
 import { readCostGuard } from "./fleet-tick.mjs";
 import { parseFrontmatter } from "./tier-roles.mjs";
 import { isImplementer } from "./member-outcomes.mjs";
-import { validateTable } from "./ticket-router.mjs";
+import { FIT_FILE, validateTable } from "./ticket-router.mjs";
 import { LabelMapUnreadable, readLabelMap } from "./label-map.mjs";
 import { FleetDirUnresolvable } from "./fleet-dir.mjs";
 // The heartbeat's liveness mark and the controller record beside it, read here
@@ -859,7 +859,7 @@ export function readCheckoutTable(stateDir) {
 }
 
 // The Fit metrics-refresh.mjs writes beside the guard,
-// `.fleet/router-fit.json`: `{ status: "ok", preview }`, `{ status: "missing" }`
+// `.fleet/router-fit.json`: `{ status: "ok", fit }`, `{ status: "missing" }`
 // or `{ status: "unreadable", why }`. Its `table` is read through `validateTable`,
 // as the installed one is, and its `n_rows`, which `validateTable` does not check
 // and the tab prints, must be a count; `computed_at` and `guard_computed_at` must
@@ -868,7 +868,7 @@ export function readCheckoutTable(stateDir) {
 export function readFitFile(stateDir) {
   let text;
   try {
-    text = readFileSync(join(stateDir, "router-fit.json"), "utf8");
+    text = readFileSync(join(stateDir, FIT_FILE), "utf8");
   } catch (e) {
     return e.code === "ENOENT" ? { status: "missing" } : { status: "unreadable", why: e.code ?? e.message };
   }
@@ -884,7 +884,7 @@ export function readFitFile(stateDir) {
   const table = validateTable(p.table);
   if (table instanceof Error) return { status: "unreadable", why: table.message };
   if (!Number.isInteger(table.n_rows) || table.n_rows < 0) return { status: "unreadable", why: "router table: `n_rows` is not a count" };
-  return { status: "ok", preview: { computed_at: p.computed_at, guard_computed_at: p.guard_computed_at, tsv_blobs: p.tsv_blobs, prior: p.prior, table } };
+  return { status: "ok", fit: { computed_at: p.computed_at, guard_computed_at: p.guard_computed_at, tsv_blobs: p.tsv_blobs, prior: p.prior, table } };
 }
 
 // A receipt's `metrics` step, `{ status, at, output }`, or null: no receipt, one
@@ -1342,7 +1342,7 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, stateDir 
   // either (a guard that reads as missing, no receipts, the read carried as it was).
   const guard = stateDir === null ? { status: "missing" } : readGuardFile(stateDir);
   const guardJson = stateDir === null ? null : readGuardJson(stateDir);
-  const preview = stateDir === null ? { status: "missing" } : readFitFile(stateDir);
+  const fit = stateDir === null ? { status: "missing" } : readFitFile(stateDir);
   const closeoutPr = stateDir === null ? null : readCloseoutPr(stateDir);
   const checkoutTable = stateDir === null ? { status: "missing" } : readCheckoutTable(stateDir);
   const receipts = stateDir === null
@@ -1358,6 +1358,6 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, stateDir 
     : await Promise.all([carryModelRoles(prev?.modelRoles, now), carryMainMetrics(prev?.mainMetrics, now, repoUrl)]);
   return { ledger, issues, prs, merged, closed, closedIssues, ci, prev, repo, repoUrl, workspace, port, spend, beat, ticked, acted, controller, stallOwner: stallOwnerOf, poolOk,
     roles, labelMapError,
-    poolCapped, prsOk, prsCapped, guard, guardJson, preview, receipts, closeoutPr, agents, modelRoles, mainMetrics, install, objective, implementers: [...implementers.values()], routerTable, checkoutTable,
+    poolCapped, prsOk, prsCapped, guard, guardJson, fit, receipts, closeoutPr, agents, modelRoles, mainMetrics, install, objective, implementers: [...implementers.values()], routerTable, checkoutTable,
     now, interval };
 }

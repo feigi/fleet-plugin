@@ -269,15 +269,21 @@ test("route: a Fit that is absent, unreadable, unparseable or invalid routes by 
   }
 });
 
-test("route: a deleted guard still routes slow-high with no draw, whatever the Fit holds", (t) => {
-  const p = world(t, { guard: null });
-  writeFit(p, baseTable({ burn_in: true, rows: both({ "*": "task-high" }) }));
-  for (const implRow of [3, 5]) {
-    const r = routeByFit(p, { implRow });
-    assert.equal(r.status, 0, r.stderr);
-    assert.deepEqual(parseLine(r.stdout), {
-      POLICY: "slow-high", CELL: "slow-high", DRAW: "-", BY: "-", STRATUM: "*", BRIEF: "31", CRITERIA: "2", PARENT: "-", SIZED: "-", OBJECTIVE: "cost", TRIPPED: "-", REASON: "guard-missing",
-    });
+test("route: a deleted guard still routes slow-high with no draw, whatever the Fit holds — a valid one, none, or an invalid one", (t) => {
+  for (const [fit, make] of [
+    ["valid", (p) => writeFit(p, baseTable({ burn_in: true, rows: both({ "*": "task-high" }) }))],
+    ["absent", () => {}],
+    ["invalid", (p) => writeFileSync(fitFile(p), "null")],
+  ]) {
+    const p = world(t, { guard: null });
+    make(p);
+    for (const implRow of [3, 5]) {
+      const r = routeByFit(p, { implRow });
+      assert.equal(r.status, 0, `${fit}: ${r.stderr}`);
+      assert.deepEqual(parseLine(r.stdout), {
+        POLICY: "slow-high", CELL: "slow-high", DRAW: "-", BY: "-", STRATUM: "*", BRIEF: "31", CRITERIA: "2", PARENT: "-", SIZED: "-", OBJECTIVE: "cost", TRIPPED: "-", REASON: "guard-missing",
+      }, `${fit} Fit, impl row ${implRow}`);
+    }
   }
 });
 

@@ -320,8 +320,12 @@ const ROUTER = join(dirname(SCRIPT), "ticket-router.mjs");
 function routeIn(f, table = null) {
   const issue = join(f.root, "issue.json");
   writeFileSync(issue, JSON.stringify({ title: "t", body: "short brief\n- [ ] one", comments: [], labels: [{ name: "bug" }], createdAt: "2026-10-01T00:00:00Z" }));
-  const tableArgs = table === null ? [] : ["--table", join(f.root, "routed-table.json")];
-  if (table !== null) writeFileSync(tableArgs[1], JSON.stringify(table));
+  const tableArgs = [];
+  if (table !== null) {
+    const path = join(f.root, "routed-table.json");
+    writeFileSync(path, JSON.stringify(table));
+    tableArgs.push("--table", path);
+  }
   const r = spawnSync(process.execPath, [ROUTER, "route", "--session", SESSION, "--objective", "cost", "--ticket", "42", "--arm", "A", "--impl-row", "3",
     "--issue", issue, "--guard", join(f.repo, GUARD), "--pending", join(f.root, "pending.tsv"), ...tableArgs], { cwd: f.repo, encoding: "utf8", env: ENV });
   assert.equal(r.status, 0, r.stderr);

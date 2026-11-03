@@ -203,7 +203,7 @@ test("readFitFile: reads what metrics-refresh writes; a missing file is missing;
   const written = writtenFit(dir);
   // The tab reads every field but the guard the Fit used, which route does not read either.
   const { guard: _used, ...read } = written;
-  assert.deepEqual(readFitFile(stateDir), { status: "ok", preview: read });
+  assert.deepEqual(readFitFile(stateDir), { status: "ok", fit: read });
   const path = join(stateDir, "router-fit.json");
   for (const [text, why] of [
     ["{ nope", "not JSON"],
@@ -218,7 +218,7 @@ test("readFitFile: reads what metrics-refresh writes; a missing file is missing;
     writeFileSync(path, text);
     assert.deepEqual(readFitFile(stateDir), { status: "unreadable", why }, text);
   }
-  const dirState = join(tempDir("cell-evidence-preview-dir-"), ".fleet");
+  const dirState = join(tempDir("cell-evidence-fit-dir-"), ".fleet");
   mkdirSync(join(dirState, "router-fit.json"), { recursive: true });
   assert.deepEqual(readFitFile(dirState), { status: "unreadable", why: "EISDIR" }, "a read error is named by its code");
 });
@@ -275,17 +275,17 @@ test("gather: reads the guard, the receipts, the definitions and modelRoles, and
 test("gather: reads the Fit in the state directory every tick, and the board lays it out as what the evidence favours", async (t) => {
   const w = workspace(t);
   const before = await quiet(() => gather(w.opts));
-  assert.deepEqual(before.preview, { status: "missing" });
+  assert.deepEqual(before.fit, { status: "missing" });
   assert.equal(computeBoard(before).cellEvidence.policy.sides[1].heading, "no Fit yet: the next phase 0 writes one");
   writtenFit(w.root);
   const r = await quiet(() => gather(w.opts));
-  assert.equal(r.preview.status, "ok");
+  assert.equal(r.fit.status, "ok");
   const s = computeBoard(r).cellEvidence.policy.sides[1];
   assert.equal(s.title, "evidence favours");
   assert.equal(s.source.text, "Fit · this repository's runs · computed 2026-10-28 08:00Z · 0 Pulls");
   assert.equal(s.heading, "stage 1: slow-high, task-high and smol-high have 0 of the 20 merged PRs each needs");
   const { stateDir, ...rest } = w.opts;
-  assert.deepEqual((await quiet(() => gather(rest))).preview, { status: "missing" }, "no state directory, no workspace's records read");
+  assert.deepEqual((await quiet(() => gather(rest))).fit, { status: "missing" }, "no state directory, no workspace's records read");
 });
 
 test("gather: modelRoles is read once, then carried tick to tick through board.json, not read again within the minute", async (t) => {

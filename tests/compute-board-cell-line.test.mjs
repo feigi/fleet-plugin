@@ -92,6 +92,12 @@ test("cellLine: no guard, and no Cell left to draw", () => {
     "slow-high<#cells/slow-high@claude-haiku-5-5> · every other Cell tripped: no draw");
 });
 
+test("cellLine: a Pull routed by the starting table in place of a Fit says which Fit fault put it there", () => {
+  for (const [reason, words] of [["fit-missing", "no Fit: starting table"], ["fit-unreadable", "Fit unreadable: starting table"], ["fit-invalid", "Fit invalid: starting table"]]) {
+    assert.equal(lines(undrawn({ reason }))[0], `slow-high<#cells/slow-high@claude-haiku-5-5> · ${words}`, reason);
+  }
+});
+
 test("cellLine: an issue unread when routed, and no sizing, read the root `*` with what is missing", () => {
   assert.deepEqual(lines(undrawn({ reason: "no-issue-json", stratum: "*", brief: null, criteria: null })), [
     "slow-high<#cells/slow-high@claude-haiku-5-5> · issue unreadable when routed",
