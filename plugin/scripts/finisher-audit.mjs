@@ -256,12 +256,11 @@ function run(cmd, args, options = {}) {
 
 // A git call inside the worktree. A call that could not run, was killed or
 // exited non-zero stops the audit at exit 2 unless the caller asked to read the
-// failure itself (`soft`), which then carries the exit status and the stdout
-// the call left.
+// failure itself (`soft`), which then carries the error.
 function git(step, args, { soft = false, timeout } = {}) {
   const r = run("git", ["-C", realpath, ...args], timeout === undefined ? {} : { timeout });
   if (r.error || r.signal || r.status !== 0) {
-    if (soft) return { ok: false, status: r.status, out: r.stdout ?? "", error: (r.error?.message ?? r.stderr ?? "").trim() || `exit ${r.status ?? r.signal}` };
+    if (soft) return { ok: false, error: (r.error?.message ?? r.stderr ?? "").trim() || `exit ${r.status ?? r.signal}` };
     const why = r.error?.message ?? (r.signal ? `killed by ${r.signal}` : (r.stderr ?? "").trim() || `exit ${r.status}`);
     fail(`${step}: git ${args.join(" ")} failed: ${why}`);
   }

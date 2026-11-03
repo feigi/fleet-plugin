@@ -49,9 +49,10 @@
 //   0  a verdict: read `unique`, which is true or false. Never an exit code for
 //      it, so a caller that only reads the exit status cannot take "something
 //      unique" for a failure of the read.
-//   2  no verdict: a usage refusal, or a read that failed. A failed read prints
-//      `{worktree, upstream, error}` on stdout, `error` naming the call, and the
-//      same line on stderr. It is never a clean answer.
+//   2  no verdict: a usage refusal, a read that failed, or a verdict that could
+//      not be written to stdout. A failed read prints `{worktree, upstream,
+//      error}` on stdout, `error` naming the call, and the message on stderr.
+//      It is never a clean answer.
 
 import { spawnSync } from "node:child_process";
 import { makeDie, defineFlags, writeAll } from "./arg.mjs";
@@ -102,10 +103,8 @@ export function uniqueIn(worktree, upstream, { env = gitEnv() } = {}) {
     throw new UniqueReadError(`merge-tree: git ${mergeArgs.join(" ")} failed: ${merge.error ?? "no tree id on stdout"}`);
   }
   const paths = git("paths", ["diff-tree", "-r", "--name-only", "-z", `${upstream}^{tree}`, tree]).out.split("\0").filter((p) => p !== "");
-  const content = { tree, conflict: !merge.ok, paths };
-
-  const unique = merges > 0 || listing.split("\n").some((l) => l.startsWith("+")) || content.conflict || content.paths.length > 0;
-  return { listing, merges, content, unique };
+  const unique = merges > 0 || listing.split("\n").some((l) => l.startsWith("+")) || !merge.ok || paths.length > 0;
+  return { listing, merges, content: { tree, conflict: !merge.ok, paths }, unique };
 }
 
 function main() {
@@ -120,7 +119,7 @@ function main() {
   if (worktree === null || upstream === null) die("usage: unique-in-upstream.mjs --worktree <path> --upstream <ref>");
   try {
     const verdict = uniqueIn(worktree, upstream);
-    writeAll(1, `${JSON.stringify({ worktree, upstream, ...verdict })}\n`);
+    if (!writeAll(1, `${JSON.stringify({ worktree, upstream, ...verdict })}\n`)) die("the verdict could not be written to stdout");
     process.exit(0);
   } catch (e) {
     if (!(e instanceof UniqueReadError)) throw e;

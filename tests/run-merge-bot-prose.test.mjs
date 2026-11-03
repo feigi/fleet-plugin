@@ -369,10 +369,19 @@ test("step 1 answers a `+` on the server-side path, with the structural reason",
 // advanced main and force-pushed, clone left at the pre-rebase head; nothing
 // before that clone fetched, a `-` per rebased commit after, a `+` in both
 // once an unpushed commit was added). Pinned to the rule, not to the shape of
-// either listing: `+` is the signal, its absence is clean.
-test("step 1 defines the probe's clean answer by the absence of `+`, not by silence", () => {
+// either listing: the clean answer is `"unique": false`, and the listing is
+// evidence of the patch read only.
+test("step 1 defines the probe's clean answer as `\"unique\": false`, not as silence", () => {
   assert.match(step1(), /the clean answer is `"unique": false`, not the absence of output/);
   assert.match(step1(), /one that has fetched reads `-` for every rebased commit\. Both are `unique: false`/);
+});
+
+// A rebase drops a merge commit, so a superseded worktree whose branch carried
+// one still holds that merge and reads `unique: true` with no work of its own.
+// Both sites say so, or a reader takes the fallback's STOP for an unpushed commit.
+test("both sites say a superseded worktree still carrying a dropped merge reads `unique: true`", () => {
+  assert.match(step1(), /The exception is a fetched worktree whose branch carried a merge commit: the rebase drops the merge, so the worktree still holds a merge the branch lacks and reads `unique: true` though it holds no work of its own/);
+  assert.match(fallbackBlock(), /`"unique": false` → behind, a worktree the rebase superseded included — unless its branch carried a merge commit the rebase dropped\. The worktree still holds that merge, so it reads `"unique": true`/);
 });
 
 // Both reads count, and the prose says why: the patch read alone passes an

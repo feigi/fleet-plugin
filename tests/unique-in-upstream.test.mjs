@@ -14,7 +14,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeExecStub } from "./support/exec-stub.mjs";
@@ -148,6 +148,29 @@ test("unique: two edits to the same line conflict, and a conflict is a finding r
   assert.equal(r.out.content.conflict, true);
 });
 
+// The upstream deletes a file and adds it back changed; the worktree's one commit is
+// that same delete, so it reads `-`. Merging it is a modify/delete conflict whose tree
+// keeps the upstream's file, so the tree comparison is clean and only the conflict
+// finds it.
+test("unique: a modify/delete conflict whose tree is the upstream's own is unique by the conflict alone", () => {
+  const f = fixture();
+  const base = commitText(f.wt, "gone.txt", "x\n", "base");
+  git(f.wt, "rm", "-q", "gone.txt");
+  git(f.wt, "commit", "-q", "-m", "delete");
+  commitText(f.wt, "gone.txt", "y\n", "re-add");
+  git(f.wt, "push", "-q", "origin", "feat");
+  git(f.wt, "reset", "-q", "--hard", base);
+  git(f.wt, "rm", "-q", "gone.txt");
+  git(f.wt, "commit", "-q", "-m", "delete, unpushed");
+  const r = ask(f);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.out.merges, 0);
+  assert.deepEqual(cherryLines(r).map((l) => l[0]), ["-"]);
+  assert.equal(r.out.content.conflict, true);
+  assert.deepEqual(r.out.content.paths, []);
+  assert.equal(r.out.unique, true);
+});
+
 test("unique: an unpushed commit the remote does not carry is a `+` line", () => {
   const f = fixture();
   commit(f.wt, "unpushed");
@@ -156,6 +179,33 @@ test("unique: an unpushed commit the remote does not carry is a `+` line", () =>
   assert.match(r.out.listing, /^\+ [0-9a-f]{40}$/m);
   assert.equal(r.out.unique, true);
   assert.deepEqual(r.out.content.paths, ["unpushed.txt"]);
+});
+
+test("unique: a file in a subdirectory is named by its path, not by its directory", () => {
+  const f = fixture();
+  mkdirSync(join(f.wt, "dir"));
+  commit(f.wt, "nested", join("dir", "file.txt"));
+  const r = ask(f);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.out.unique, true);
+  assert.deepEqual(r.out.content.paths, ["dir/file.txt"]);
+});
+
+// Enough changed paths that their names alone pass spawnSync's 1 MiB default buffer,
+// all at the root so that only the buffer decides this case. Asked through uniqueIn():
+// the CLI's own JSON line would pass that default in this file's `ask()` as well.
+test("unique: a commit whose changed paths pass spawnSync's default buffer is read whole", () => {
+  const f = fixture();
+  const name = (i) => `${String(i).padStart(6, "0")}-${"p".repeat(100)}.txt`;
+  const expected = Array.from({ length: 12000 }, (_, i) => name(i));
+  for (const [i, p] of expected.entries()) writeFileSync(join(f.wt, p), `${i}\n`);
+  git(f.wt, "add", "-A");
+  git(f.wt, "commit", "-q", "-m", "bulk");
+  assert.ok(expected.join("\0").length > 1024 * 1024, "fixture: the path names pass 1 MiB");
+  const v = uniqueIn(f.wt, f.upstream, { env: ENV });
+  assert.equal(v.unique, true);
+  assert.equal(v.content.conflict, false);
+  assert.deepEqual(v.content.paths, expected);
 });
 
 // A merge commit past the upstream that adds a file of its own, both of whose
@@ -240,6 +290,37 @@ test("not unique: a worktree that has fetched the remote rebase reads a `-` per 
   for (const l of listing) assert.match(l, /^- [0-9a-f]{40}$/);
   assert.equal(r.out.unique, false);
   assert.deepEqual(r.out.content, { tree: treeOf(f, f.rebased), conflict: false, paths: [] });
+});
+
+// The same rebase over a branch that carried a merge of main: the rebase drops the merge,
+// so the worktree, holding nothing of its own, still holds a merge commit the upstream
+// lacks. Every patch reads `-` and the tree comparison is clean; the merge alone makes it
+// unique. Two rebased commits beside the one merge tell `--merges` from a count of every
+// commit in the range.
+test("unique: a superseded worktree still carrying the merge commit the rebase dropped is unique by that merge alone", () => {
+  const f = fixture();
+  f.late = commit(f.wt, "late");
+  commit(f.w, "main-merged");
+  git(f.w, "push", "-q", "origin", "main");
+  git(f.wt, "merge", "-q", "--no-ff", "-m", "merge main", "main");
+  git(f.wt, "push", "-q", "origin", "feat");
+  const o = otherClone(f);
+  git(o, "checkout", "-q", "main");
+  commit(o, "main-moves");
+  git(o, "push", "-q", "origin", "main");
+  git(o, "checkout", "-q", "feat");
+  git(o, "rebase", "-q", "origin/main");
+  git(o, "push", "-q", "--force", "origin", "feat");
+  git(f.w, "fetch", "-q", "origin");
+  assert.equal(git(o, "rev-list", "--merges", "--count", "origin/main..feat"), "0", "fixture: the rebase dropped the merge");
+  const r = ask(f);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.out.merges, 1);
+  const listing = cherryLines(r);
+  assert.equal(listing.length, 2);
+  for (const l of listing) assert.match(l, /^- [0-9a-f]{40}$/);
+  assert.deepEqual(r.out.content, { tree: treeOf(f, f.upstream), conflict: false, paths: [] });
+  assert.equal(r.out.unique, true);
 });
 
 test("not unique: a commit that differs from the upstream's only in its message", () => {
@@ -392,5 +473,27 @@ test("exit 2: a missing flag, an unknown flag or a stray argument is refused wit
     assert.equal(r.status, 2, `${args.join(" ")}: ${r.stderr}`);
     assert.equal(r.out, null, `${args.join(" ")} printed a verdict`);
     assert.match(r.stderr, /^\nunique-in-upstream: /);
+  }
+});
+
+// Exit 0 means a verdict was read, so a verdict that never reached stdout must not leave
+// that 0 standing.
+test("exit 2: a verdict that cannot be written to stdout is no verdict", () => {
+  const f = fixture();
+  const run = (stdout) =>
+    spawnSync(process.execPath, [SCRIPT, "--worktree", f.wt, "--upstream", f.upstream], {
+      cwd: f.w,
+      env: ENV,
+      encoding: "utf8",
+      stdio: ["ignore", stdout, "pipe"],
+    });
+  assert.equal(run("pipe").status, 0, "control: the same read writes its verdict and exits 0");
+  const readOnly = openSync("/dev/null", "r");
+  try {
+    const r = run(readOnly);
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /^\nunique-in-upstream: the verdict could not be written to stdout/);
+  } finally {
+    closeSync(readOnly);
   }
 });
