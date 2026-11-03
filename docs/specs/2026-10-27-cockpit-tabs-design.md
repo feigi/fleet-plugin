@@ -95,7 +95,7 @@ Footnote texts sit under the section that carries their marks.
 | What the guard holds each Cell to | `.fleet/cost-guard.json`, extended (§ 10.3) | `readCostGuard` (`fleet-tick.mjs`): figures show only from a file it accepts; nothing is recomputed |
 | What the evidence favours | `.fleet/router-preview.json`, new (§ 10.4); (amended by #4020: and the newest `metrics` step of `.fleet/phase0.json` and `.fleet/closeout.json`, the one the guard section's heading reads, for a failed refit, § 6.2) | `validateTable` on its `table` |
 | Each Cell's Tier route model | `omp config get modelRoles --json`, in the cockpit's own environment (which can differ from the controller's; each card's Resolved tier stays the record of what ran) | `tier-roles.mjs`: `readOmpConfigValue`, `resolveRole`, `modelsEqual` |
-| Declared, not measured | the installed definitions, `../agents/*.agent.md` from the script's directory, minus the five implementer Cells (14 members today) | `parseFrontmatter` |
+| Declared, not measured | the installed definitions, `../agents/*.agent.md` from the script's directory, minus the implementer Cells' definitions (`fleet-implementer-<cell>`, one per Cell) | `parseFrontmatter` |
 | The live run's Objective | `.fleet/phase0.json` `objective`; absent between runs, so nothing is marked | the receipt read the gather already makes every tick |
 | Whose runs the installed table is | its `fitted_commit` and `n_rows`; the install's `package.json` (`../package.json` from the script's directory) `name`, `version` and `repository` | — |
 | The guard section's heading when there is no guard | the `metrics` step (`status`, `at`, `output`) of `.fleet/phase0.json` and `.fleet/closeout.json`, the newer of the two | — |
@@ -585,8 +585,8 @@ Links are hash routes, a pure function of the hash:
   to where you were. No hash link opens a new window; the card's PR link,
   which leaves the cockpit for GitHub, still opens in a new tab.
 - A link with no target lands on the tab's top. Every link the page draws has
-  a target in every state, which is why all five Cells are always drawn and a
-  generation with no figures still gets an entry.
+  a target in every state, which is why every implementer Cell is always
+  drawn and a generation with no figures still gets an entry.
 
 ## 9. The Tokens tab
 

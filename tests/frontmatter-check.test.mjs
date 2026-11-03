@@ -20,9 +20,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { writeFileSync, readFileSync, mkdirSync, existsSync, readdirSync } from "node:fs";
+import { writeFileSync, readFileSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tempDir } from "./support/temp-dir.mjs";
+import { implementerDefinitions } from "./support/implementer-definitions.mjs";
 import { fileURLToPath } from "node:url";
 import {
   parseAllowlist, kindForPath, parseFrontmatter, checkFields, formatViolation,
@@ -447,9 +448,7 @@ test("MUTATION PROOF: an unknown key introduced -> red; reverted -> green", () =
 // ---------------------------------------------------------------------------
 
 test("REAL TREE: every tracked agents/skills/commands frontmatter file in this checkout passes the real allow-list", () => {
-  const agentFiles = readdirSync(join(REPO, "agents"))
-    .filter((f) => /^fleet-implementer-.+\.agent\.md$/.test(f))
-    .map((f) => `agents/${f}`);
+  const agentFiles = implementerDefinitions().map((name) => `agents/${name}.agent.md`);
   assert.ok(agentFiles.includes("agents/fleet-implementer-slow-high.agent.md"), "the implementer definitions were read");
   const skillFiles = ["next-ticket", "run-team", "sizing-a-ticket"].map((s) => `skills/${s}/SKILL.md`);
   const commandFiles = ["review-and-fix.md", "run-merge-bot.md"].map((f) => `commands/${f}`);

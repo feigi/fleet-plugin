@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync } from "node:fs";
+import { implementerDefinitions } from "./support/implementer-definitions.mjs";
 import { classifyRole, computeSpend, attributeTools, mergeTools, canonicalMemberName, CANONICAL_MEMBER_NAME_PREFIXES } from "../plugin/scripts/compute-spend.mjs";
 import { foldOmpTranscript, parseMemberName } from "../plugin/scripts/member-record.mjs";
 
@@ -419,7 +419,7 @@ test("the fleet implementer definitions classify as implementer, independent of 
   // Every Cell's definition on disk, and the pre-cell pair #2129 retired:
   // recorded history still carries rows dispatched under those two, and books
   // them by definition.
-  const cellDefs = readdirSync(new URL("../plugin/agents/", import.meta.url)).map((f) => /^(fleet-implementer-.+)\.agent\.md$/.exec(f)?.[1]).filter(Boolean);
+  const cellDefs = implementerDefinitions();
   assert.ok(cellDefs.includes("fleet-implementer-slow-high"), "the implementer definitions were read");
   for (const def of [...cellDefs, "fleet-implementer", "fleet-implementer-alt"]) {
     assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: def, description: "Ticket #1486. Worktree: .worktrees/1486-classify" }), "implementer", def);

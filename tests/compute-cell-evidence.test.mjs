@@ -5,6 +5,7 @@ import { CELLS, computeCellEvidence, refitFailure } from "../plugin/scripts/comp
 import { readCostGuard } from "../plugin/scripts/fleet-tick.mjs";
 import { guardFile } from "../plugin/scripts/pr-cost.mjs";
 import { DAY_ONE_TABLE } from "./support/day-one-router-table.mjs";
+import { implementerDefinitions } from "./support/implementer-definitions.mjs";
 
 // The Cell evidence tab's model, pure: the guard section (what the guard holds
 // each Cell to) and "Declared, not measured". Every word the page shows is built
@@ -66,9 +67,7 @@ test("every implementer Cell is drawn in a fixed order, in every state", () => {
 });
 
 test("CELLS is exactly the Cells plugin/agents defines", () => {
-  const cells = readdirSync(new URL("../plugin/agents/", import.meta.url))
-    .map((f) => /^fleet-implementer-(.+)\.agent\.md$/.exec(f)?.[1])
-    .filter(Boolean);
+  const cells = implementerDefinitions().map((name) => name.slice("fleet-implementer-".length));
   assert.deepEqual([...CELLS].sort(), cells.sort());
 });
 
@@ -455,7 +454,7 @@ test("Declared, not measured lists every other member: its Declared tier and its
 });
 
 test("Declared, not measured counts the real definitions: the plugin's own, minus the Cells", async () => {
-  const { readdirSync, readFileSync } = await import("node:fs");
+  const { readFileSync } = await import("node:fs");
   const { parseFrontmatter } = await import("../plugin/scripts/tier-roles.mjs");
   const dir = new URL("../plugin/agents/", import.meta.url);
   const list = readdirSync(dir).filter((f) => f.endsWith(".agent.md")).map((file) => ({ file, model: parseFrontmatter(readFileSync(new URL(file, dir), "utf8")).model }));

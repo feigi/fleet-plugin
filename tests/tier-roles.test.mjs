@@ -349,12 +349,10 @@ test("checkRoutes (e): slow and task resolving to different models is not a noti
 // every real definition clean against targets that run low to max.
 const GRID_ROLES = { slow: "claude-opus-5", task: "claude-sonnet-5", smol: "claude-haiku-4-5" };
 const GRID_CELLS = Object.keys(GRID_ROLES).flatMap((role) => ADAPTIVE.map((level) => `${role}-${level}`));
+const LOW_TO_MAX = { models: CATALOG.models.map((m) => (Object.values(GRID_ROLES).includes(m.id) ? { ...m, thinking: ADAPTIVE } : m)) };
 const catalogWithout = (role, level) => ({
-  models: CATALOG.models.map((m) => (Object.values(GRID_ROLES).includes(m.id)
-    ? { ...m, thinking: ADAPTIVE.filter((l) => !(m.id === GRID_ROLES[role] && l === level)) }
-    : m)),
+  models: LOW_TO_MAX.models.map((m) => (m.id === GRID_ROLES[role] ? { ...m, thinking: ADAPTIVE.filter((l) => l !== level) } : m)),
 });
-const LOW_TO_MAX = catalogWithout(null, null);
 
 test("checkRoutes: every real plugin/agents definition routes cleanly, and the implementer definitions are exactly the grid's Cells", () => {
   const cells = readdirSync(REPO_AGENTS)

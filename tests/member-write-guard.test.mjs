@@ -20,11 +20,12 @@
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import memberWriteGuard, { decide } from "../plugin/scripts/member-write-guard.mjs";
+import { implementerDefinitions } from "./support/implementer-definitions.mjs";
 
 const ENV = gitEnv({
   GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.com", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.com",
@@ -87,9 +88,8 @@ const pluginTree = (dir) => {
 
 const IMPL = { kind: "sub", id: "impl-42", name: "fleet-implementer-slow-high", depth: 1, parentId: "Main" };
 // Every other Cell's definition on disk, so a Cell added later is held to the rule the day it lands.
-const OTHER_CELLS = readdirSync(new URL("../plugin/agents/", import.meta.url))
-  .map((f) => /^(fleet-implementer-.+)\.agent\.md$/.exec(f)?.[1])
-  .filter((name) => name !== undefined && name !== IMPL.name)
+const OTHER_CELLS = implementerDefinitions()
+  .filter((name) => name !== IMPL.name)
   .map((name) => ({ ...IMPL, name }));
 const REVIEWER = { kind: "sub", id: "review-pr-9.Correctness", name: "fleet-review-correctness", depth: 2, parentId: "review-pr-9" };
 const FINISHER = { kind: "sub", id: "finisher-pr-9", name: "fleet-finisher", depth: 1, parentId: "Main" };
