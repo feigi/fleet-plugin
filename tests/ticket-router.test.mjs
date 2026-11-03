@@ -1002,8 +1002,10 @@ test("stratumOf: a ticket that lacks the input a split reads stays at that node 
 });
 
 // A features column a split reads that is neither blank nor a plain count, each a value `Number()` reads as no number
-// or as some number.
-const CORRUPT_COUNTS = ["abc", "many", "Infinity", "1e400", "5e3", "0x1000", "0b1", "0o7", " 5000 ", "5000 ", "5000.5", "-5", "+5", " ", "\t", "5000\n"];
+// or as some number — or, for a digit string too long to read as a finite number, as Infinity.
+const CORRUPT_COUNTS = ["abc", "many", "Infinity", "1e400", "5e3", "0x1000", "0b1", "0o7", " 5000 ", "5000 ", "5000.5", "-5", "+5", " ", "\t", "5000\n", "9".repeat(309)];
+// A brief_chars split with a criteria split on its `<=` side.
+const CRITERIA_BELOW = treeOf({ ...SPLITS, [BELOW]: { input: "criteria", cut: 2 } }, ["*", ABOVE, BELOW, `${BELOW}&criteria>2`, `${BELOW}&criteria<=2`]);
 
 test("stratumOf refuses a column a number split reads that is neither blank nor a plain count, naming the column and value — and the row's ticket where it has one", () => {
   const table = twoLeaf({ "*": "slow-high", [ABOVE]: "slow-high", [BELOW]: "slow-high" });
@@ -1018,21 +1020,20 @@ test("stratumOf refuses a column a number split reads that is neither blank nor 
     }
   }
   // Deeper in the tree too: the walk refuses the cell the split it reaches reads.
-  const deep = treeOf({ "*": { input: "brief_chars", cut: CUT }, [BELOW]: { input: "criteria", cut: 2 } }, ["*", ABOVE, BELOW, `${BELOW}&criteria>2`, `${BELOW}&criteria<=2`]);
-  assert.throws(() => at(deep, { brief_chars: "100", criteria: "2.5" }), /criteria is '2\.5'/);
+  assert.throws(() => at(CRITERIA_BELOW, { brief_chars: "100", criteria: "2.5" }), /criteria is '2\.5'/);
 });
 
 test("stratumOf reads past a corrupt column no split it reaches reads, and an unread issue's row, whatever its other columns hold", () => {
   const table = twoLeaf({ "*": "slow-high", [ABOVE]: "slow-high", [BELOW]: "slow-high" });
+  const criteria = treeOf({ "*": { input: "criteria", cut: 2 } }, ["*", "criteria>2", "criteria<=2"]);
   for (const bad of CORRUPT_COUNTS) {
     for (const other of NUMBER_INPUTS.filter((o) => o !== "brief_chars")) assert.equal(at(table, { brief_chars: "5000", [other]: bad }), ABOVE, `${other} ${JSON.stringify(bad)}`);
-    assert.equal(stratumOf(table, { brief_chars: "", criteria: bad }), "*", "an unread issue holds no input");
+    assert.equal(stratumOf(criteria, { brief_chars: "", criteria: bad }), "*", "an unread issue holds no input");
   }
   // Past the cut there is no further split, so the criteria the `<=` side's split reads is never read.
-  const deep = treeOf({ "*": { input: "brief_chars", cut: CUT }, [BELOW]: { input: "criteria", cut: 2 } }, ["*", ABOVE, BELOW, `${BELOW}&criteria>2`, `${BELOW}&criteria<=2`]);
-  assert.equal(at(deep, { brief_chars: "5000", criteria: "2.5" }), ABOVE);
-  assert.equal(at(deep, { brief_chars: "100", criteria: "3" }), `${BELOW}&criteria>2`);
-  assert.equal(at(deep, { brief_chars: "100", criteria: "" }), BELOW);
+  assert.equal(at(CRITERIA_BELOW, { brief_chars: "5000", criteria: "2.5" }), ABOVE);
+  assert.equal(at(CRITERIA_BELOW, { brief_chars: "100", criteria: "3" }), `${BELOW}&criteria>2`);
+  assert.equal(at(CRITERIA_BELOW, { brief_chars: "100", criteria: "" }), BELOW);
 });
 
 test("stratumOf: a kind split sends a ticket of that kind to `kind=` and any other kind to `kind!=`; a ticket with no kind lacks the input", () => {
