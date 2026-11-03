@@ -1923,12 +1923,10 @@ test("--check refuses at exit 2 a features row whose run_date is neither blank n
   // --check re-fits the commit the table records, so the table records the one holding the row.
   writeFileSync(p.table, JSON.stringify(baseTable({ burn_in: true, fitted_commit: p.git("rev-parse", "HEAD") })));
   const before = readFileSync(p.table, "utf8");
-  for (const args of [["--check", ...p.fitArgs]]) {
-    const r = cli(args);
-    assert.equal(r.status, 2, `${args.join(" ")}: ${r.stderr}`);
-    assert.match(r.stderr, /cannot join --features .*, --members .* and --verdicts .*: ticket #7: a ticket-features row's run_date is '10\/01\/2026', expected YYYY-MM-DD or blank/);
-    assert.equal(r.stdout, "");
-  }
+  const r = cli(["--check", ...p.fitArgs]);
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /cannot join --features .*, --members .* and --verdicts .*: ticket #7: a ticket-features row's run_date is '10\/01\/2026', expected YYYY-MM-DD or blank/);
+  assert.equal(r.stdout, "");
   assert.equal(readFileSync(p.table, "utf8"), before);
   p.write({ features: [exploring({ ticket: "1" }), exploring({ ticket: "7", run_date: "" })], verdicts: [ruled(1, 11)] });
   p.commit();
@@ -1984,12 +1982,10 @@ test("--check refuses at exit 2 a booked cost that is neither blank nor a number
   const p = fitWorld(t, { features: [f], members: [implementer(f, { pr: "11", ending: "pr", cost: "n/a" })], verdicts: [ruled(1, 11)] });
   writeFileSync(p.table, JSON.stringify(baseTable({ burn_in: true, fitted_commit: p.git("rev-parse", "HEAD") })));
   const before = readFileSync(p.table, "utf8");
-  for (const args of [["--check", ...p.fitArgs]]) {
-    const r = cli(args);
-    assert.equal(r.status, 2, `${args.join(" ")}: ${r.stderr}`);
-    assert.match(r.stderr, /: member-outcomes row session \S+ agent impl-1: cost 'n\/a' is not a number/);
-    assert.equal(r.stdout, "");
-  }
+  const r = cli(["--check", ...p.fitArgs]);
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /: member-outcomes row session \S+ agent impl-1: cost 'n\/a' is not a number/);
+  assert.equal(r.stdout, "");
   assert.equal(readFileSync(p.table, "utf8"), before);
 });
 

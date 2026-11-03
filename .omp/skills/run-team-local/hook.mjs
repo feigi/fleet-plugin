@@ -109,17 +109,11 @@ function main() {
   }
   const agentsDir = F.arg("agents") ?? join(repo, "plugin", "agents");
 
-  const duties = [
-    ["drift notice", () => driftNotice(repo, agentsDir, F)],
-  ];
-  for (const [name, duty] of duties) {
-    try {
-      duty();
-    } catch (e) {
-      warn(`${name} failed: ${e.message}`);
-      process.exitCode = 1;
-      return;
-    }
+  try {
+    driftNotice(repo, agentsDir, F);
+  } catch (e) {
+    warn(`drift notice failed: ${e.message}`);
+    process.exitCode = 1;
   }
 }
 
