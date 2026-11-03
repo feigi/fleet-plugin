@@ -121,7 +121,9 @@ const DEPS_INSTALL = "mkdir -p .deps && echo ok > .deps/marker";
  * directory that is NOT `node_modules`, `.deps/`, which the repository's own
  * `.gitignore` covers — and its Test entrypoint runs `check.sh`, which passes
  * only when `.deps/marker` is there. So the suite is green exactly where the
- * Install step ran, in whatever layout it installs.
+ * Install step ran, in whatever layout it installs. `origin/main` names the
+ * commit the Recipe was proven on, which is the tree the snapshot block reads
+ * the Install step against.
  */
 function installedRepo(t, { install = DEPS_INSTALL } = {}) {
   const dir = reviewedRepo(t);
@@ -130,8 +132,31 @@ function installedRepo(t, { install = DEPS_INSTALL } = {}) {
   writeFileSync(join(dir, "check.sh"), "test -f .deps/marker\n");
   git(dir, "add", "-A");
   git(dir, "-c", "user.name=fixture", "-c", "user.email=fixture@invalid", "commit", "-q", "-m", "recipe");
+  git(dir, "update-ref", "refs/remotes/origin/main", "HEAD");
   mkdirSync(join(dir, ".fleet"), { recursive: true });
   const recipe = { install: "sh ./install.sh", check: true, test: "sh ./check.sh", derivedAt: git(dir, "rev-parse", "HEAD"), installClean: true, testCount: 1, uncovered: [] };
+  writeFileSync(join(dir, ".fleet", "recipe.json"), `${JSON.stringify(recipe)}\n`);
+  return dir;
+}
+
+/**
+ * A repository whose Recipe Install step is the repo-relative script
+ * `./install.sh`, executable on `origin/main`, and whose HEAD — the PR head —
+ * is `origin/main` plus whatever `change` does to the tree, committed. The
+ * Recipe cache names `install` as its Install step.
+ */
+function scriptInstallRepo(t, change, { install = "./install.sh" } = {}) {
+  const dir = reviewedRepo(t);
+  writeFileSync(join(dir, ".gitignore"), "ignored.txt\n.deps/\n");
+  writeFileSync(join(dir, "install.sh"), `#!/bin/sh\n${DEPS_INSTALL}\n`, { mode: 0o755 });
+  git(dir, "add", "-A");
+  git(dir, "-c", "user.name=fixture", "-c", "user.email=fixture@invalid", "commit", "-q", "-m", "recipe");
+  git(dir, "update-ref", "refs/remotes/origin/main", "HEAD");
+  change(dir);
+  git(dir, "add", "-A");
+  git(dir, "-c", "user.name=fixture", "-c", "user.email=fixture@invalid", "commit", "-q", "--allow-empty", "-m", "pr");
+  mkdirSync(join(dir, ".fleet"), { recursive: true });
+  const recipe = { install, check: true, test: "true", derivedAt: git(dir, "rev-parse", "origin/main"), installClean: true, testCount: 1, uncovered: [] };
   writeFileSync(join(dir, ".fleet", "recipe.json"), `${JSON.stringify(recipe)}\n`);
   return dir;
 }
@@ -1207,5 +1232,53 @@ test("an Install step the Recipe cache cannot supply is reported unread, and not
   assert.equal(status, 0, `the block exited non-zero with no Recipe cache: ${out}`);
   assert.match(out, /^SNAPSHOT_INSTALL_UNREAD$/m, `the block did not report an unreadable Install step: ${out}`);
   assert.doesNotMatch(out, /SNAPSHOT_INSTALL_EXIT=/, `the block ran something as the Install step with no Recipe cache to read it from: ${out}`);
+  assert.ok(!existsSync(join(runRoot, "install.log")), "an install log exists, so something ran as the Install step");
+});
+
+// #4046: the Install step is read against `origin/main`, the tree the Recipe
+// was proven on, never against the PR's own tree. A PR that deletes, renames
+// or de-executes the Install step's path therefore reads valid, runs the step
+// in the snapshot and fails it there — the exit the review files as its
+// Install finding — rather than reading as an invalid Recipe cache.
+for (const [what, change, exit] of [
+  ["deletes", (dir) => rmSync(join(dir, "install.sh")), 127],
+  ["renames", (dir) => git(dir, "mv", "install.sh", "setup.sh"), 127],
+  ["removes the exec bit of", (dir) => chmodSync(join(dir, "install.sh"), 0o644), 126],
+]) {
+  test(`a PR head that ${what} the Install step's path reads the step off origin/main and runs it to exit ${exit}`, (t) => {
+    const worktree = scriptInstallRepo(t, change);
+    const { runRoot, out, err, status } = cut(t, render(SOURCES[0][1], worktree));
+
+    assert.equal(status, 0, `the block exited non-zero on a broken Install path: ${out}`);
+    assert.match(out, /SNAPSHOT_TREE_MATCH/, `the fixture's own cut failed: ${out}`);
+    assert.match(out, /^SNAPSHOT_INSTALL_STEP=\.\/install\.sh$/m, `the Install step was not read off origin/main: ${out}${err}`);
+    assert.doesNotMatch(out, /SNAPSHOT_INSTALL_UNREAD/, `the PR's own change read as an invalid Recipe cache: ${out}`);
+    assert.match(out, new RegExp(`^SNAPSHOT_INSTALL_EXIT=${exit}$`, "m"), `the Install step did not run and exit ${exit} in the snapshot: ${out}`);
+    assert.ok(existsSync(join(runRoot, "install.log")), "no install log, so nothing ran as the Install step");
+  });
+}
+
+// The accept direction of the same read: a PR head that leaves the Install
+// step's path alone reads it and runs it to exit 0.
+test("a PR head that keeps the Install step's path runs the step read off origin/main to exit 0", (t) => {
+  const worktree = scriptInstallRepo(t, (dir) => writeFileSync(join(dir, "plain.txt"), "changed\n"));
+  const { snap, out } = cut(t, render(SOURCES[0][1], worktree));
+
+  assert.match(out, /^SNAPSHOT_INSTALL_STEP=\.\/install\.sh$/m, `the Install step was not read: ${out}`);
+  assert.match(out, /^SNAPSHOT_INSTALL_EXIT=0$/m, `the Install step did not run to exit 0: ${out}`);
+  assert.ok(existsSync(join(snap, ".deps", "marker")), "the Install step ran somewhere other than the snapshot");
+});
+
+// A path `origin/main` lacks is a Recipe cache invalid on `origin/main`:
+// derive-testcmd.sh refuses, the block reports the step unread, and nothing
+// runs — the same verdict the controller's own `--at origin/main` reads give.
+test("an Install step whose path origin/main lacks is reported unread, with derive-testcmd.sh's refusal, and nothing runs", (t) => {
+  const worktree = scriptInstallRepo(t, () => {}, { install: "./missing.sh" });
+  const { runRoot, out, err, status } = cut(t, render(SOURCES[0][1], worktree));
+
+  assert.equal(status, 0, `the block exited non-zero on an unreadable Install step: ${out}`);
+  assert.match(out, /^SNAPSHOT_INSTALL_UNREAD$/m, `the block did not report an unreadable Install step: ${out}`);
+  assert.match(err, /derive-testcmd/, `derive-testcmd.sh's refusal did not reach the block's stderr: ${err}`);
+  assert.doesNotMatch(out, /SNAPSHOT_INSTALL_EXIT=/, `the block ran something as the Install step: ${out}`);
   assert.ok(!existsSync(join(runRoot, "install.log")), "an install log exists, so something ran as the Install step");
 });

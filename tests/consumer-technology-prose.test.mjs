@@ -104,6 +104,11 @@ test("ADR 0015's Status line carries the #3490 running-service amendment", () =>
   assert.match(status, Pin.phrase("Amended by #3490: the Test entrypoint and Check step need no running service, self-started included; such steps are always uncovered, and a repository with no service-free test step is RECIPE NOT PROVEN."));
 });
 
+test("ADR 0015's Status line carries the #4046 review-snapshot amendment", () => {
+  const status = ADR_0015.paragraph("**Status:**", "ADR 0015 Status", "## Context").text;
+  assert.match(status, Pin.phrase("Amended by #4046: the review snapshot no longer reads the Test entrypoint — the review runs the testCmd its caller passes and refuses without one — and it reads the Install step at origin/main."));
+});
+
 test("requirements 1.1 adds whatever the Recipe runs to the tool floor", () => {
   assert.match(
     REQUIREMENTS.between("| `shasum` | any |", "### 1.2", "requirements.md section 1.1 table tail").text,
@@ -126,9 +131,9 @@ test("review-and-fix step 3 reads the standalone testCmd off the Recipe cache an
   assert.doesNotMatch(step, /node --test/, "step 3 names this repository's own test command again");
 });
 
-test("review-and-fix's git archive bullet runs the Install step in the copy, read from a tree that holds the cache", () => {
+test("review-and-fix's git archive bullet runs the Install step in the copy, read from a tree that holds the cache, at origin/main", () => {
   const archive = REVIEW_AND_FIX.bullet("- **`git archive` carries tracked files only.**", "\n- **Initialize the copy", "review-and-fix.md git archive bullet").text;
-  assert.match(archive, Pin.phrase("run the Install step in the copy (read it off the worktree or main checkout, `derive-testcmd.sh <worktree or main checkout> install`; pointed at the copy it refuses, since a copy holds no Recipe cache)"));
+  assert.match(archive, Pin.phrase("run the Install step in the copy (read it off the worktree or main checkout, `derive-testcmd.sh <worktree or main checkout> install --at origin/main`; pointed at the copy it refuses, since a copy holds no Recipe cache)"));
 });
 
 test("run-team: a tree with no runner gets the Recipe's Test entrypoint, with no shared-stack carve-out", () => {

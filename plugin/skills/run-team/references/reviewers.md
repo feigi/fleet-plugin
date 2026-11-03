@@ -131,7 +131,7 @@ that ran clean has nothing in those three either.
 
 ## A failed review is a failure event, not a clean review
 
-The review throws on missing `args.pr`/`args.worktree` and on a snapshot agent
+The review throws on missing `args.pr`/`args.worktree`/`args.testCmd` and on a snapshot agent
 that returned no tree, and a failure surfaces mid-loop, where "react, never
 block" makes it easy to log and carry on — leaving a PR that *reads* as
 reviewed and is not.

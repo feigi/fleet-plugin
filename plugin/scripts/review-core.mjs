@@ -1,7 +1,7 @@
 // review-core.mjs — the review body for PR review.
 //
 // This file holds every host-independent declaration PR review needs: the
-// JSON schemas, `usableDiff`, `usableMessages`, `messagesNote`, `refuterMessagesNote`, `readRules`, `resolveTestCmd`,
+// JSON schemas, `usableDiff`, `usableMessages`, `messagesNote`, `refuterMessagesNote`, `readRules`,
 // `decodeArgs`, `selectDimensions`, `resolveDimensions`, `snapshotMissing`,
 // `installReason`/`installFinding`, `suiteVerdictOf`/`unrunCrashed`,
 // `sharedRunNote`, `copyRule`,
@@ -134,8 +134,6 @@ export const SNAPSHOT_SCHEMA = {
     messagesPath: { type: "string" },
     refHead: { type: "string" },
     prHead: { type: "string" },
-    testCmd: { type: "string" },
-    testCmdError: { type: "string" },
     // The Recipe's `uncovered` as derive-testcmd.sh printed it: the merge-gating
     // CI steps neither the Test entrypoint nor the Check step runs, one line of JSON, `[]` for none.
     // `uncoveredError` carries the reader's refusal instead when it could not
@@ -408,23 +406,6 @@ only after 'wc -l' says it is small — a count, not a feeling. An unbounded rea
 is never a one-off cost: it rides your prefix for every remaining turn,
 re-billed as cache-read each time. Measured over one run, 88 unpiped whole-file
 reads carried 434 KB.`;
-}
-
-// The step a missing Test entrypoint is derived by, named in the refusal so the
-// caller — a controller or a reviewer — knows what to run rather than what went
-// wrong. derive-testcmd.sh's refusals about the cache name the same
-// step; its exit-3 refusals name an environment fault instead, which the caller
-// fixes rather than deriving. This one covers the case where the snapshot agent
-// reported no reason at all.
-const DERIVATION_STEP =
-  "run the Recipe derivation step (run-team phase 0, before the first claim) to derive, prove and write the Recipe cache";
-
-export function resolveTestCmd(explicit, snap) {
-  if (explicit) return explicit;
-  if (snap && snap.testCmd) return snap.testCmd;
-  throw new Error(
-    `review-pr: no test command for this repository — ${(snap && snap.testCmdError) || `the snapshot agent read no Recipe cache; ${DERIVATION_STEP}`}. Pass args.testCmd to override.`,
-  );
 }
 
 // The review's one run goes through the suite-slot wrapper, by the Resolver,
@@ -1104,6 +1085,15 @@ async function reviewRun(host, args, run) {
   // into it: an absent `pr` is owed "required", not a complaint about digits.
   if (!isDigits(pr)) throw new Error(`review-pr: args.pr must be a PR number, got ${JSON.stringify(pr)}`);
 
+  // Nothing in the review derives a test command: every caller reads the Test
+  // entrypoint off the Recipe cache and passes it. Refused here, beside the
+  // other argument refusals, so a review that could never run its suite costs
+  // no snapshot.
+  if (typeof A.testCmd !== "string" || A.testCmd.trim() === "") {
+    throw new Error(`review-pr: args.testCmd is required — the Test entrypoint the shared run executes, got ${JSON.stringify(A.testCmd)}`);
+  }
+  const testCmd = A.testCmd;
+
   // Resolved only now: the default spawns git, so a missing or malformed `pr`
   // is refused on its own terms before anything is resolved or spawned.
   const scratch = A.scratch === undefined ? standaloneScratchRoot() : A.scratch;
@@ -1154,7 +1144,7 @@ async function reviewRun(host, args, run) {
     ( cd "$SNAP" && git init -q && git add -A -f && git -c user.name=fleet -c user.email=fleet@invalid commit -q --no-verify -m "review snapshot of $SHA" ) || echo SNAPSHOT_INIT_FAILED
     SNAPTREE=$(git -C "$SNAP" rev-parse 'HEAD^{tree}' 2>/dev/null); SRCTREE=$(git -C ${worktree} rev-parse 'HEAD^{tree}')
     { [ -d "$SNAP/.git" ] && [ -n "$SNAPTREE" ] && [ "$SNAPTREE" = "$SRCTREE" ]; } && echo SNAPSHOT_TREE_MATCH || echo SNAPSHOT_TREE_MISMATCH="snapshot $SNAPTREE vs commit $SRCTREE"
-    INSTALL=$(~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run derive-testcmd.sh ${worktree} install) && echo SNAPSHOT_INSTALL_STEP="$INSTALL" || { INSTALL=; echo SNAPSHOT_INSTALL_UNREAD; }
+    INSTALL=$(~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run derive-testcmd.sh ${worktree} install --at origin/main) && echo SNAPSHOT_INSTALL_STEP="$INSTALL" || { INSTALL=; echo SNAPSHOT_INSTALL_UNREAD; }
     [ -z "$INSTALL" ] || { ( cd "$SNAP" && env -u CI sh -c "$INSTALL" ) >"$RUN/install.log" 2>&1; echo SNAPSHOT_INSTALL_EXIT=$?; }
     if [ -d "$SNAP/.git" ] && git -C "$SNAP" status --porcelain --untracked-files=all >"$RUN/status.txt"; then head -n 20 "$RUN/status.txt" | sed 's/^/SNAPSHOT_UNTRACKED=/'; echo SNAPSHOT_UNTRACKED_COUNT=$(wc -l <"$RUN/status.txt" | tr -d ' '); else echo SNAPSHOT_STATUS_FAILED; fi
 
@@ -1273,17 +1263,7 @@ a match nor a mismatch. Do not judge whether the diff is usable, and do not
 withhold one field because another failed: report what you got and let the
 caller decide.
 
-Then read this repository's Test entrypoint out of its Recipe cache:
-
-    ~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run derive-testcmd.sh ${worktree} test
-
-Report \`testCmd\` = its stdout ONLY if it exited 0. If it exited non-zero,
-report \`testCmdError\` = its stderr and omit \`testCmd\`. Never derive or
-guess a command yourself: a refusal about the cache names the step that
-derives it; an exit-3 refusal names an environment fault, and the caller fixes
-that instead of deriving.
-
-Then read, out of the same cache, the merge-gating CI steps that neither the
+Then read, out of the Recipe cache, the merge-gating CI steps that neither the
 Test entrypoint nor the Check step runs:
 
     ~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run derive-testcmd.sh ${worktree} uncovered
@@ -1334,8 +1314,7 @@ replaces uncovered.`,
   log(`snapshot ${snap.head} at ${snap.path} — head ref ${snap.refHead || "(absent): head check SKIPPED"} — PR head ${snap.prHead ?? "(absent)"}`);
   log(environmentNote(snap));
 
-  const testCmd = resolveTestCmd(A.testCmd, snap);
-  log(`testCmd ${A.testCmd ? "(caller override)" : "(derived)"} ${testCmd}`);
+  log(`testCmd ${testCmd}`);
   // An Install step that failed or never ran leaves a snapshot that cannot
   // measure the tree: the shared run is skipped, the suite verdict is not
   // usable through `testRunReason`, and a non-zero exit is filed as a finding.

@@ -327,7 +327,6 @@ function fakeReviewHost(scopeSearched) {
           head: "abc123",
           pathVerified: true,
           repoVerified: true,
-          testCmd: "node --test",
         };
       if (opts.label === "test-run:pr7") return { exitCode: 0, tests: 5, pass: 5, fail: 0 };
       if (opts.label === "review:correctness:pr7")
@@ -349,6 +348,7 @@ test("runReview carries a specialist's dirty CWD-AUDIT into the payload's cwdAud
     pr: 7,
     worktree: "/repo/.worktrees/7-x",
     scratch: "/scr",
+    testCmd: "node --test",
     dimensions: ["correctness"],
   });
   assert.deepEqual(
@@ -364,6 +364,7 @@ test("runReview flags a specialist's missing CWD-AUDIT line rather than reading 
     pr: 7,
     worktree: "/repo/.worktrees/7-x",
     scratch: "/scr",
+    testCmd: "node --test",
     dimensions: ["correctness"],
   });
   assert.deepEqual(

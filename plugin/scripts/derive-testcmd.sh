@@ -14,8 +14,8 @@
 #
 # The ONE reader of the cache — reused, not reimplemented, by claim-ticket.sh
 # (the Install step it runs and the Test entrypoint it bakes into the runner)
-# and by review-core.mjs's snapshot agent (the Test entrypoint handed to the
-# specialists). Two independent readers is what drifts.
+# and by review-core.mjs's snapshot agent (the Install step it runs in the
+# snapshot). Two independent readers is what drifts.
 #
 # THE CACHE is `<workspace>/.fleet/recipe.json`, where <workspace> is the
 # directory git-env.mjs's resolveWorkspace() names for the repository: the
@@ -114,7 +114,7 @@ export LC_ALL=C
 # `$repo` — and the cache it then reads is another repository's Recipe,
 # reported as this one's. Both consumers act on that string: claim-ticket.sh
 # runs it in a fresh worktree and bakes it into the runner, and review-core.mjs's
-# snapshot agent hands it to every specialist.
+# snapshot agent runs it in the snapshot.
 #
 # GIT_WORK_TREE is unset alongside it: the vacuous-suite probe's `check-ignore`
 # reads the ignore rules of whatever work tree git is pointed at, so an ambient
@@ -416,7 +416,7 @@ fi
 # `;`, `&`, or a newline lets a real shell read the caller's "$@" as an
 # unrelated top-level command instead of args reaching the Test entrypoint, and
 # one containing a `#`-led word swallows everything after it, "$@" included, as
-# a comment. review-core.mjs's snapshot agent appends no arguments but embeds
+# a comment. review-core.mjs's shared test run appends no arguments but embeds
 # the string in `{ cd <dir> && <cmd>; }`, where the same endings and `#` word
 # break the wrapper as a syntax error — measured on both. A trailing
 # newline is checked here too: the frame above lets a value keep one
