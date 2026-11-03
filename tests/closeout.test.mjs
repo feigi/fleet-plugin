@@ -983,6 +983,7 @@ test("finish: pending CI returns within the call's bound at exit 4 with NEED mer
   assert.deepEqual(r.out.filter((l) => l.startsWith("NEED ")), ["NEED merge-wait PR #7"]);
   assert.match(r.stdout, /^closeout: merge: pending$/m);
   assert.ok(f.calls("ci-state").length >= 2, "it read CI again inside the call");
+  assert.ok(f.calls("ci-state").length <= Number(COUNTED.env.CLOSEOUT_POLLS), "the pass cap, not the call's deadline, ended the wait");
   const first = f.receipt();
   assert.equal(first.steps["heartbeat-stop"].status, "ok");
   assert.equal(first.steps.merge.status, "pending");

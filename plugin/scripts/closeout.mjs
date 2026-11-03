@@ -686,8 +686,7 @@ function stepMerge({ receipt, save, started }) {
       }
     }
     if (Date.now() >= bound) return atBound(last);
-    if (passes >= POLLS) break;
-    if (Date.now() + POLL_MS + READ_MS >= deadline) break;
+    if (passes >= POLLS || Date.now() + POLL_MS + READ_MS >= deadline) break;
     Atomics.wait(IDLE, 0, 0, POLL_MS);
   }
   if (Date.now() >= bound) return atBound(last);
