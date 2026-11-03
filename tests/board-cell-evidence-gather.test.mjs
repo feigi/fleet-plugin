@@ -7,9 +7,10 @@ import { writeExecStub } from "./support/exec-stub.mjs";
 import { dayOneScripts } from "./support/day-one-router-table.mjs";
 import {
   MODEL_ROLES_EVERY_MS, MODEL_ROLES_TIMEOUT_MS, carryCatalog, carryModelRoles, gather, readAgents, readCatalog, readGuardFile, readMetricsStep, readModelRoles,
-  readHeldImplementers, readObjective, readFitFile, readRouterTable, receiptSpendDir,
+  readHeldImplementers, readObjective, readFitFile, readRouterTable, receiptSpendDir, repoIdentity,
 } from "../plugin/scripts/board-gather.mjs";
 import { writeFit } from "../plugin/scripts/metrics-refresh.mjs";
+import { readFitBeside } from "../plugin/scripts/ticket-router.mjs";
 import { FEATURE_COLUMNS } from "../plugin/scripts/pull-attribution.mjs";
 import { COLUMNS as MEMBER_COLUMNS } from "../plugin/scripts/member-outcomes.mjs";
 import { COLUMNS as TIER_COLUMNS } from "../plugin/scripts/tier-outcomes.mjs";
@@ -28,10 +29,17 @@ const ROLES = { slow: "anthropic/claude-opus-5:high", task: "anthropic/claude-so
 const CATALOG = { models: [
   { selector: "anthropic/claude-opus-5", thinking: ["low", "medium", "high", "xhigh", "max"], name: "Claude Opus 5" },
   { selector: "anthropic/claude-sonnet-5-5", thinking: ["low", "medium", "high", "xhigh", "max"] },
+  { selector: "anthropic/claude-haiku-5-5", thinking: ["low", "medium", "high", "xhigh", 3, null] },
+  { selector: "openai/gpt-x", thinking: null },
+] };
+// What readCatalog keeps of it: every model, in its order, so a role's model matches the entry route's own
+// read matches it to — a model naming no efforts stays, with `thinking` null — and only the efforts that are words.
+const CATALOG_READ = { models: [
+  { selector: "anthropic/claude-opus-5", thinking: ["low", "medium", "high", "xhigh", "max"] },
+  { selector: "anthropic/claude-sonnet-5-5", thinking: ["low", "medium", "high", "xhigh", "max"] },
   { selector: "anthropic/claude-haiku-5-5", thinking: ["low", "medium", "high", "xhigh"] },
   { selector: "openai/gpt-x", thinking: null },
 ] };
-const CATALOG_READ = { models: CATALOG.models.filter((m) => Array.isArray(m.thinking)).map(({ selector, thinking }) => ({ selector, thinking })) };
 
 // -- carryModelRoles: at most one read a minute ------------------------------------------
 
@@ -171,6 +179,15 @@ test("readCatalog: a failing omp, non-JSON and an answer with no model list are 
   }
 });
 
+test("readCatalog: a list in which no model names its efforts is a failed read, never a catalog with no ladder in it", async (t) => {
+  await withOmp(t, `echo '{"models":[{"selector":"a/b","thinking":null},{"selector":"c/d"},{"thinking":["low"]}]}'`, async () => {
+    assert.deepEqual(await readCatalog(), { ok: false, why: "omp models --json printed no model with a thinking list" });
+  });
+  await withOmp(t, `echo '{"models":[{"selector":"a/b","thinking":null},{"selector":"c/d","thinking":["low"]}]}'`, async () => {
+    assert.deepEqual(await readCatalog(), { ok: true, value: { models: [{ selector: "a/b", thinking: null }, { selector: "c/d", thinking: ["low"] }] } }, "one ladder is enough");
+  });
+});
+
 test("carryCatalog: read at most once a minute, a failure keeping the carried value", async () => {
   const { read, calls } = reader({ ok: true, value: CATALOG_READ }, { ok: false, why: "omp models --json failed (exit 1)" });
   const first = await carryCatalog(null, NOW, read);
@@ -255,18 +272,34 @@ test("readFitFile: reads what metrics-refresh writes; a missing file is missing;
   for (const [text, why] of [
     ["{ nope", "not JSON"],
     ["[]", "not a JSON object"],
-    [JSON.stringify({ ...written, guard_computed_at: null }), "`guard_computed_at` is not a string"],
-    [JSON.stringify({ ...written, tsv_blobs: [] }), "`tsv_blobs` is not an object"],
     [JSON.stringify({ ...written, table: { ...written.table, burn_in: "no" } }), "router table: `burn_in` is not a boolean"],
-    [JSON.stringify({ ...written, table: { ...written.table, n_rows: undefined } }), "router table: `n_rows` is not a count"],
-    [JSON.stringify({ ...written, table: { ...written.table, n_rows: "235" } }), "router table: `n_rows` is not a count"],
   ]) {
     writeFileSync(path, text);
     assert.deepEqual(readFitFile(stateDir), { status: "unreadable", why }, text);
+    assert.notEqual(readFitBeside(join(stateDir, "cost-guard.json")).fallback, null, `route falls back too: ${text}`);
   }
   const dirState = join(tempDir("cell-evidence-fit-dir-"), ".fleet");
   mkdirSync(join(dirState, "router-fit.json"), { recursive: true });
   assert.deepEqual(readFitFile(dirState), { status: "unreadable", why: "EISDIR" }, "a read error is named by its code");
+});
+
+test("readFitFile: a Fit route routes by is read, whatever the fields only the tab reads hold; each of those reads null", () => {
+  const dir = tempDir("cell-evidence-fit-fields-");
+  const stateDir = join(dir, ".fleet");
+  const written = writtenFit(dir);
+  const { guard: _used, prior: _prior, ...read } = written;
+  const path = join(stateDir, "router-fit.json");
+  for (const [text, fit] of [
+    [JSON.stringify({ ...written, computed_at: 3 }), { ...read, computed_at: null }],
+    [JSON.stringify({ ...written, guard_computed_at: null }), { ...read, guard_computed_at: null }],
+    [JSON.stringify({ ...written, tsv_blobs: [] }), { ...read, tsv_blobs: null }],
+    [JSON.stringify({ table: written.table }), { computed_at: null, guard_computed_at: null, tsv_blobs: null, table: written.table }],
+    [JSON.stringify({ ...written, table: { ...written.table, n_rows: "235" } }), { ...read, table: { ...written.table, n_rows: "235" } }],
+  ]) {
+    writeFileSync(path, text);
+    assert.equal(readFitBeside(join(stateDir, "cost-guard.json")).fallback, null, `route routes by this Fit: ${text}`);
+    assert.deepEqual(readFitFile(stateDir), { status: "ok", fit }, text);
+  }
 });
 
 // -- gather(): the whole read, and the board it makes --------------------------------------------
@@ -687,6 +720,28 @@ test("gather: a caller that names no state directory reads no Objective", async 
   const w = workspace(t);
   const r = await quiet(() => gather({ ...w.opts, stateDir: null }));
   assert.equal(r.objective, null);
+});
+
+test("repoIdentity reads the shapes a package.json repository takes", () => {
+  const want = { host: "github.com", name: "feigi/fleet-plugin" };
+  for (const u of ["git+https://github.com/feigi/fleet-plugin.git", "https://github.com/feigi/fleet-plugin", "https://github.com/feigi/fleet-plugin/", "git://github.com/feigi/fleet-plugin.git",
+    "git@github.com:feigi/fleet-plugin.git", "ssh://git@github.com/feigi/fleet-plugin.git", "github:feigi/fleet-plugin", "feigi/fleet-plugin", "https://github.com/feigi/fleet-plugin/tree/main/plugin"]) {
+    assert.deepEqual(repoIdentity(u), want, u);
+  }
+  assert.deepEqual(repoIdentity("git+ssh://git@ghe.example.com/acme/widgets.git"), { host: "ghe.example.com", name: "acme/widgets" });
+  assert.deepEqual(repoIdentity("git@GitHub.com:feigi/fleet-plugin.git"), want, "an scp host compares without case");
+  assert.deepEqual(repoIdentity("gitlab:acme/widgets"), { host: "gitlab.com", name: "acme/widgets" });
+  assert.deepEqual(repoIdentity("bitbucket:acme/widgets"), { host: "bitbucket.org", name: "acme/widgets" });
+  assert.deepEqual(repoIdentity("bitbucket:acme/widgets"), repoIdentity("https://bitbucket.org/acme/widgets"), "the bitbucket shorthand is bitbucket.org's");
+  for (const u of [null, undefined, 3, "", "nope", "https://github.com/owner"]) assert.equal(repoIdentity(u), null, String(u));
+});
+
+test("repoIdentity drops a ref pin and a www. host, and refuses a relative path", () => {
+  const want = { host: "github.com", name: "feigi/fleet-plugin" };
+  for (const u of ["github:feigi/fleet-plugin#main", "feigi/fleet-plugin#main", "git+https://github.com/feigi/fleet-plugin.git#v1", "git@github.com:feigi/fleet-plugin.git#v1", "https://www.github.com/feigi/fleet-plugin"]) {
+    assert.deepEqual(repoIdentity(u), want, u);
+  }
+  for (const u of ["../x", "./x", "x/..", "https://github.com/o/.git"]) assert.equal(repoIdentity(u), null, u);
 });
 
 // -- records not on main: the contents call, through the whole read --------------------------------

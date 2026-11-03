@@ -36,7 +36,6 @@ import { RECEIPT, RECEIPT_HELD, CLOSEOUT_RECEIPT, OBJECTIVES, isOmpSessionDirNam
 import { lastSegment } from "./pull-attribution.mjs";
 import { NAME, warnOnce, execRead } from "./board-common.mjs";
 import { mergedReadPrs, issuesOfPrs } from "./compute-board.mjs";
-import { repoIdentity } from "./compute-cell-evidence.mjs";
 import { readCostGuard } from "./fleet-tick.mjs";
 import { parseFrontmatter } from "./tier-roles.mjs";
 import { isImplementer } from "./member-outcomes.mjs";
@@ -843,11 +842,13 @@ export function readCloseoutPr(stateDir) {
 
 // The Fit metrics-refresh.mjs writes beside the guard,
 // `.fleet/router-fit.json`: `{ status: "ok", fit }`, `{ status: "missing" }`
-// or `{ status: "unreadable", why }`. Its `table` is read through `validateTable`,
-// as the installed one is, and its `n_rows`, which `validateTable` does not check
-// and the tab prints, must be a count; `computed_at` and `guard_computed_at` must
-// be strings, and `tsv_blobs` an object, its values checked where the tab reads
-// them.
+// or `{ status: "unreadable", why }`. It is read as `route` reads it
+// (ticket-router.mjs's readFitBeside): the Fit is read whenever its `table`
+// passes `validateTable`, so the tab never says the starting table routes while
+// `route` routes by the Fit. The fields only the tab reads decide nothing:
+// `computed_at` and `guard_computed_at` are null where they are no string and
+// `tsv_blobs` null where it is no object, and the tab says each is not checked,
+// as it says of an `n_rows` that is no count.
 export function readFitFile(stateDir) {
   let text;
   try {
@@ -858,14 +859,10 @@ export function readFitFile(stateDir) {
   let p;
   try { p = JSON.parse(text); } catch { return { status: "unreadable", why: "not JSON" }; }
   if (!isJsonObject(p)) return { status: "unreadable", why: "not a JSON object" };
-  for (const key of ["computed_at", "guard_computed_at"]) {
-    if (typeof p[key] !== "string") return { status: "unreadable", why: `\`${key}\` is not a string` };
-  }
-  if (!isJsonObject(p.tsv_blobs)) return { status: "unreadable", why: "`tsv_blobs` is not an object" };
   const table = validateTable(p.table);
   if (table instanceof Error) return { status: "unreadable", why: table.message };
-  if (!Number.isInteger(table.n_rows) || table.n_rows < 0) return { status: "unreadable", why: "router table: `n_rows` is not a count" };
-  return { status: "ok", fit: { computed_at: p.computed_at, guard_computed_at: p.guard_computed_at, tsv_blobs: p.tsv_blobs, table } };
+  const stringOrNull = (v) => (typeof v === "string" ? v : null);
+  return { status: "ok", fit: { computed_at: stringOrNull(p.computed_at), guard_computed_at: stringOrNull(p.guard_computed_at), tsv_blobs: isJsonObject(p.tsv_blobs) ? p.tsv_blobs : null, table } };
 }
 
 // A receipt's `metrics` step, `{ status, at, output }`, or null: no receipt, one
@@ -957,19 +954,27 @@ export const MODEL_ROLES_EVERY_MS = 60_000;
 // `omp` would otherwise hold every tick after it, not just this tab's.
 export const MODEL_ROLES_TIMEOUT_MS = 10_000;
 
+// One `omp <argv>` whose stdout is JSON, in the cockpit's own environment:
+// `{ ok: true, cmd, json }` with the command in words and what it printed, or
+// `{ ok: false, why }`. Each reader adds only its own shape check.
+async function readOmpJson(argv, timeout) {
+  const cmd = `omp ${argv.join(" ")}`;
+  const r = await execRead("omp", argv, { timeout });
+  if (r.error) {
+    const how = r.code ?? (r.signal ? `killed by ${r.signal}` : `exit ${r.status}`);
+    return { ok: false, why: `${cmd} failed (${how})` };
+  }
+  try { return { ok: true, cmd, json: JSON.parse(r.stdout) }; } catch { return { ok: false, why: `${cmd} printed non-JSON` }; }
+}
+
 // `omp config get modelRoles --json`, in the cockpit's own environment, which can
 // differ from the controller's. `{ ok: true, value }` with the record, or
 // `{ ok: false, why }`.
 export async function readModelRoles(timeout = MODEL_ROLES_TIMEOUT_MS) {
-  const argv = ["config", "get", "modelRoles", "--json"];
-  const r = await execRead("omp", argv, { timeout });
-  if (r.error) {
-    const how = r.code ?? (r.signal ? `killed by ${r.signal}` : `exit ${r.status}`);
-    return { ok: false, why: `omp ${argv.join(" ")} failed (${how})` };
-  }
-  let value;
-  try { value = JSON.parse(r.stdout)?.value; } catch { return { ok: false, why: `omp ${argv.join(" ")} printed non-JSON` }; }
-  if (!isJsonObject(value)) return { ok: false, why: `omp ${argv.join(" ")} printed no modelRoles record` };
+  const r = await readOmpJson(["config", "get", "modelRoles", "--json"], timeout);
+  if (!r.ok) return r;
+  const value = r.json?.value;
+  if (!isJsonObject(value)) return { ok: false, why: `${r.cmd} printed no modelRoles record` };
   return { ok: true, value };
 }
 
@@ -1005,29 +1010,56 @@ export async function carryModelRoles(carried, now, read = readModelRoles) {
 }
 
 // `omp models --json`, omp's model catalog, in the cockpit's own environment:
-// `{ ok: true, value }` with `{ models: [{ selector, thinking }] }`, only the
-// models that name the efforts they run at — what a role's ladder is read off
-// for the exploration Cells, so the carried read stays small — or `{ ok: false,
-// why }`.
+// `{ ok: true, value }` with `{ models: [{ selector, thinking }] }` — every
+// listed model that has a selector, in the catalog's order, so a role's model
+// matches the entry route's own catalog read matches it to; `thinking` the
+// efforts it runs at, what a role's ladder is read off for the exploration
+// Cells, or null where it names none, and nothing else, so the carried read
+// stays small — or `{ ok: false, why }`, also for a list in which no model names
+// its efforts: a catalog with no ladder in it is a read that failed, never an
+// install whose exploration Cells are all tripped.
 export async function readCatalog(timeout = MODEL_ROLES_TIMEOUT_MS) {
-  const argv = ["models", "--json"];
-  const r = await execRead("omp", argv, { timeout });
-  if (r.error) {
-    const how = r.code ?? (r.signal ? `killed by ${r.signal}` : `exit ${r.status}`);
-    return { ok: false, why: `omp ${argv.join(" ")} failed (${how})` };
-  }
-  let parsed;
-  try { parsed = JSON.parse(r.stdout); } catch { return { ok: false, why: `omp ${argv.join(" ")} printed non-JSON` }; }
-  if (!isJsonObject(parsed) || !Array.isArray(parsed.models)) return { ok: false, why: `omp ${argv.join(" ")} printed no model list` };
-  const models = parsed.models
-    .filter((m) => isJsonObject(m) && typeof m.selector === "string" && Array.isArray(m.thinking))
-    .map((m) => ({ selector: m.selector, thinking: m.thinking.filter((t) => typeof t === "string") }));
+  const r = await readOmpJson(["models", "--json"], timeout);
+  if (!r.ok) return r;
+  if (!isJsonObject(r.json) || !Array.isArray(r.json.models)) return { ok: false, why: `${r.cmd} printed no model list` };
+  const models = r.json.models
+    .filter((m) => isJsonObject(m) && typeof m.selector === "string")
+    .map((m) => ({ selector: m.selector, thinking: Array.isArray(m.thinking) ? m.thinking.filter((t) => typeof t === "string") : null }));
+  if (r.json.models.length > 0 && !models.some((m) => m.thinking !== null)) return { ok: false, why: `${r.cmd} printed no model with a thinking list` };
   return { ok: true, value: { models } };
 }
 
 // The carried model catalog read, the same way as `modelRoles`.
 export async function carryCatalog(carried, now, read = readCatalog) {
   return carry(heldRead(carried) ?? NO_READ, now, read, MODEL_ROLES_EVERY_MS);
+}
+
+// A repository's host and `owner/name` off its url — `gh repo view`'s, or any
+// shape a `package.json` `repository` takes: an npm shorthand, a scp-style
+// address or a URL — or null when it names none. A `#ref` pin and a `www.` host
+// name the same repository; a segment of dots only names none.
+export function repoIdentity(url) {
+  if (typeof url !== "string") return null;
+  const s = url.trim().replace(/^git\+/, "").replace(/#.*$/, "");
+  let host;
+  let path;
+  const short = /^(github|gitlab|bitbucket):([^/\s]+\/[^/\s]+)$/.exec(s);
+  const scp = /^[^@/\s]+@([^:/\s]+):(.+)$/.exec(s);
+  if (short) {
+    host = `${short[1]}.${short[1] === "bitbucket" ? "org" : "com"}`;
+    path = short[2];
+  } else if (scp) {
+    [, host, path] = scp;
+  } else if (/^[\w.-]+\/[\w.-]+$/.test(s)) {
+    host = "github.com";
+    path = s;
+  } else {
+    try { ({ hostname: host, pathname: path } = new URL(s)); } catch { return null; }
+  }
+  const [owner, rest] = path.split("/").filter(Boolean);
+  const name = rest?.replace(/\.git$/, "");
+  if (!host || !owner || !name || /^\.+$/.test(owner) || /^\.+$/.test(name)) return null;
+  return { host: host.toLowerCase().replace(/^www\./, ""), name: `${owner}/${name}` };
 }
 
 // The carried `docs/metrics` contents call, the same way: `value` is `{ blobs }`,

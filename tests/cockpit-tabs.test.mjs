@@ -1032,7 +1032,10 @@ test("a failed Fit is flagged first in the view's heading, above the last good F
   const { document, render, model } = harness();
   render(model({ cellEvidence: policyEvidence({ guard: besideGuard(), fit: fitRead({ guard_computed_at: "2026-10-25T08:00:00.000Z" }), receipts: failedReceipts }) }));
   const heading = document.getElementById("cells-rows").children[1];
-  assert.equal(heading.children[0].textContent, "this run's Fit failed at 2026-10-28 08:00Z: EISDIR; the last good Fit, computed 2026-10-26 19:17Z, routes");
+  // The page's amber text rule is `.ce-alert .ce-verdict`, so the flag's words sit in a ce-verdict inside its ce-alert.
+  assert.equal(heading.children[0].className, "ce-alert");
+  assert.equal(heading.children[0].children[0].className, "ce-verdict");
+  assert.equal(heading.children[0].children[0].textContent, "this run's Fit failed at 2026-10-28 08:00Z: EISDIR; the last good Fit, computed 2026-10-26 19:17Z, routes");
   assert.ok(textOf(heading).includes("fitted beside the guard of 2026-10-25 08:00Z, not this one"));
   assert.ok(textOf(document.getElementById("cells-row-cost-*")).includes("task-high"), "the last good Fit's row");
 });
@@ -1041,7 +1044,7 @@ test("a failed Fit with none ever written is flagged above the starting table's 
   const { document, render, model } = harness();
   render(model({ cellEvidence: policyEvidence({ fit: { status: "missing" }, receipts: failedReceipts }) }));
   const heading = document.getElementById("cells-rows").children[1];
-  assert.equal(heading.children[0].textContent, "this run's Fit failed at 2026-10-28 08:00Z: EISDIR; no Fit is read, so the starting table routes");
+  assert.equal(heading.children[0].children[0].textContent, "this run's Fit failed at 2026-10-28 08:00Z: EISDIR; no Fit is read, so the starting table routes");
   const row = document.getElementById("cells-row-cost-*");
   assert.ok(textOf(row).includes("slow-high") && textOf(row).includes("unjudged"), "the starting table's row");
 });

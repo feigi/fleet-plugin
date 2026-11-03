@@ -116,6 +116,12 @@ test("a Fit fitted beside an earlier guard is not compared: a close-out's guard,
   assert.deepEqual(ids(build({ fit: fit(COMPUTED), ...merged })), ["records-not-on-main"], "the same Fit fitted beside this guard is compared");
 });
 
+test("a Fit beside this guard that names no blob ids of its own is not compared: the guard's records alone decide", () => {
+  const fit = { status: "ok", fit: { computed_at: "2026-10-26T19:17:40.000Z", guard_computed_at: COMPUTED, tsv_blobs: null, table: SHIPPED } };
+  assert.deepEqual(ids(build({ fit, mainMetrics: read({ [MEMBERS]: MEMBERS_ID, [TIER]: GUARD_TIER }) })), [], "the guard's records on main");
+  assert.deepEqual(build({ fit }).alerts[0].lines, [`${TIER}: the guard read 9df10b12; main holds 84123e74`], "the guard behind main, the Fit not named");
+});
+
 test("a file main lacks is a difference: main holds none", () => {
   const ce = build({ mainMetrics: read({ [MEMBERS]: MEMBERS_ID }) });
   assert.deepEqual(ce.alerts[0].lines, [`${TIER}: the guard read 9df10b12; main holds none`]);

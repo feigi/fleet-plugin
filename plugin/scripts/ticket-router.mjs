@@ -98,7 +98,7 @@ export const FIT_EVERY_MERGED = 50;
 // The starting Cells short of MIN_N merged PRs in a guard's `n`, each with its
 // count, in their order: burn-in holds while any is. A Cell the guard has no
 // count for has 0.
-export const shortStartingCells = (n) => STARTING_CELLS.map((c) => [c, n[c] ?? 0]).filter(([, k]) => k < MIN_N);
+const shortStartingCells = (n) => STARTING_CELLS.map((c) => [c, n[c] ?? 0]).filter(([, k]) => k < MIN_N);
 const KINDS = new Set(["bug", "enhancement", "documentation"]);
 const DAY_MS = 86_400_000;
 

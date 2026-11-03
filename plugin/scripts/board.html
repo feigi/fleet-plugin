@@ -465,7 +465,7 @@ function ceEntry(e) {
 // model-name line, where each is set.
 function ceFitHeading(p) {
   const box = el("div");
-  if (p.flag) box.append(el("div", "ce-alert ce-verdict", p.flag));
+  if (p.flag) { const flag = el("div", "ce-alert"); flag.append(el("div", "ce-verdict", p.flag)); box.append(flag); }
   box.append(el("div", "ce-source", p.source.text));
   if (p.source.check) box.append(el("div", "ce-note", p.source.check));
   if (p.heading) box.append(el("div", "ce-note", p.heading));

@@ -436,38 +436,6 @@ function guardSection(read, receipts, step, modelRoles, pulls, recordsNote = nul
   return { state, heading, source, notes, cells, footnotes };
 }
 
-// ---------------------------------------------------------------------------
-// A repository's identity.
-// ---------------------------------------------------------------------------
-
-// A repository's host and `owner/name` off a `package.json` `repository` url (an
-// npm shorthand, a scp-style address or a URL), or null when it names none. A
-// `#ref` pin and a `www.` host name the same repository; a segment of dots only
-// names none.
-export function repoIdentity(url) {
-  if (typeof url !== "string") return null;
-  const s = url.trim().replace(/^git\+/, "").replace(/#.*$/, "");
-  let host;
-  let path;
-  const short = /^(github|gitlab|bitbucket):([^/\s]+\/[^/\s]+)$/.exec(s);
-  const scp = /^[^@/\s]+@([^:/\s]+):(.+)$/.exec(s);
-  if (short) {
-    host = `${short[1]}.${short[1] === "bitbucket" ? "org" : "com"}`;
-    path = short[2];
-  } else if (scp) {
-    [, host, path] = scp;
-  } else if (/^[\w.-]+\/[\w.-]+$/.test(s)) {
-    host = "github.com";
-    path = s;
-  } else {
-    try { ({ hostname: host, pathname: path } = new URL(s)); } catch { return null; }
-  }
-  const [owner, rest] = path.split("/").filter(Boolean);
-  const name = rest?.replace(/\.git$/, "");
-  if (!host || !owner || !name || /^\.+$/.test(owner) || /^\.+$/.test(name)) return null;
-  return { host: host.toLowerCase().replace(/^www\./, ""), name: `${owner}/${name}` };
-}
-
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const list = (xs) => (xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}`);
 
@@ -484,11 +452,17 @@ const list = (xs) => (xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", "
 function routingTable(fit, starting) {
   if (fit?.status === "ok") {
     const p = fit.fit;
-    return { fit: p, table: p.table, source: { text: ["Fit", `computed ${when(p.computed_at)}`, plural(p.table.n_rows, "Pull")].join(" · "), check: null } };
+    const n = p.table.n_rows;
+    const rows = Number.isInteger(n) && n >= 0 ? plural(n, "Pull") : "Pulls: not checked: `n_rows` is not a count";
+    return { fit: p, table: p.table, source: { text: ["Fit", computedWords(p), rows].join(" · "), check: null } };
   }
   const why = fit?.status === "unreadable" ? `the Fit is not read: ${fit.why}` : "no Fit yet: the next phase 0 writes one";
   return { fit: null, table: starting, source: { text: `starting table · ${why}`, check: starting === null ? "not checked: no starting table read" : null } };
 }
+
+// When the Fit read was computed, in words: its `computed_at` is null when the
+// file holds no string there, which leaves the table it routes by unchanged.
+const computedWords = (p) => (p.computed_at === null ? "computed: not checked: `computed_at` is not a string" : `computed ${when(p.computed_at)}`);
 
 // The flag while this run's Fit failed: `step` is the receipts' newest `metrics`
 // step that tried a refit, newestRefit's pick, `p` the Fit read, null when none
@@ -502,7 +476,7 @@ function failedFitFlag(step, p) {
   if (why === null) return null;
   const computed = p === null ? NaN : Date.parse(p.computed_at);
   if (Number.isFinite(computed) && computed >= Date.parse(step.at)) return null;
-  const routes = p === null ? "no Fit is read, so the starting table routes" : `the last good Fit, computed ${when(p.computed_at)}, routes`;
+  const routes = p === null ? "no Fit is read, so the starting table routes" : `the last good Fit, ${computedWords(p)}, routes`;
   return `this run's Fit failed at ${when(step.at)}: ${why}; ${routes}`;
 }
 
@@ -516,15 +490,20 @@ function dispatchHeading(table, guard) {
 
 // Merged PRs per starting Cell, against MIN_N: the counts burn-in is judged on —
 // the Fit's own guard counts while the Fit routes, the cost guard's while the
-// starting table does. Null with neither to count from.
+// starting table does. Null with neither to count from. The heading follows the
+// routing table's `burn_in`, and says "ended" only of counts that all reach
+// MIN_N: a Fit sets its flag off its own counts, but the starting table's flag
+// is its own, whatever the cost guard counts since.
 function burnInProgress(p, guard, table) {
   const n = p !== null ? p.table.guard.n : guard?.n;
   if (!isRecord(n)) return null;
   const cells = STARTING_CELLS.map((cell) => ({ cell, n: count(n[cell]) ?? 0, of: MIN_N }));
   const done = cells.filter((c) => c.n >= MIN_N).length;
-  const heading = table !== null && !table.burn_in
+  const tally = `${done} of ${cells.length} starting Cells ${done === 1 ? "has" : "have"} the ${MIN_N} merged PRs each needs`;
+  if (table === null || table.burn_in) return { heading: `burn-in: ${tally}`, cells };
+  const heading = done === cells.length
     ? `burn-in ended: every starting Cell has its ${MIN_N} merged PRs`
-    : `burn-in: ${done} of ${cells.length} starting Cells ${done === 1 ? "has" : "have"} the ${MIN_N} merged PRs each needs`;
+    : `no burn-in: the starting table routes without it, though only ${tally}`;
   return { heading, cells };
 }
 
@@ -551,13 +530,17 @@ function modelChanges(p) {
 }
 
 // What this install runs, for the exploration Cells, off the cockpit's own reads:
-// `{ install }`, installOf's answer, or `{ install: null, why }` while one of the
-// reads it needs has no value.
+// `{ install, note }`, installOf's answer, or `{ install: null, why }` while one
+// of the reads it needs has no value. A catalog read that fails is worded the
+// way readLabel words modelRoles': beside the unread catalog in `why`, and in
+// `note`, while the last read stands, beside the Cells it names.
 function installFrom(modelRoles, catalog, agents) {
-  if (!isRecord(modelRoles?.value)) return { install: null, why: "modelRoles not read yet" };
-  if (!isRecord(catalog?.value)) return { install: null, why: "omp's model catalog not read yet" };
-  if (agents == null || agents.error) return { install: null, why: "the definitions could not be read" };
-  return { install: installOf({ modelRoles: modelRoles.value, catalog: catalog.value, definitions: agents.list.map((a) => a.file) }), why: null };
+  if (!isRecord(modelRoles?.value)) return { install: null, why: "modelRoles not read yet", note: null };
+  const failing = catalog?.error == null ? "" : `; reading fails: ${catalog.error.message}`;
+  if (!isRecord(catalog?.value)) return { install: null, why: `omp's model catalog not read yet${failing}`, note: null };
+  if (agents == null || agents.error) return { install: null, why: "the definitions could not be read", note: null };
+  const note = failing === "" ? null : `omp's model catalog as read at ${when(catalog.readAt)}${failing}`;
+  return { install: installOf({ modelRoles: modelRoles.value, catalog: catalog.value, definitions: agents.list.map((a) => a.file) }), why: null, note };
 }
 
 // The Cells a group draws over, in words: rowDispatch's draw, which is centred on
@@ -565,10 +548,11 @@ function installFrom(modelRoles, catalog, agents) {
 // guard, when nothing is drawn.
 function exploringWords(table, guard, stratum, inst) {
   if (guard === null) return null;
+  if (!table.burn_in && inst.install === null) return `exploring: not checked: ${inst.why}`;
   const rd = rowDispatch({ table, guard, objective: "cost", stratum, install: inst.install });
   if (table.burn_in) return rd.draw === null ? "draws nothing: every starting Cell is tripped" : `drawn over ${list(rd.draw.cells)}`;
-  if (inst.install === null) return `exploring: not checked: ${inst.why}`;
-  return rd.draw === null ? "exploring nothing: no exploration Cell this install runs is left untripped" : `exploring ${list(rd.draw.cells)}`;
+  const words = rd.draw === null ? "exploring nothing: no exploration Cell this install runs is left untripped" : `exploring ${list(rd.draw.cells)}`;
+  return inst.note === null ? words : `${words}; ${inst.note}`;
 }
 
 // A candidate's judged generation against the Tier route model of its Cell:
@@ -619,10 +603,12 @@ function rowEntry(table, guard, modelRoles, objective, stratum) {
 
 // The Fit's labels against `raw`, the guard on disk, and `records`, whether the
 // Fit read the guard's files: fitted beside another guard, or on other records.
+// A Fit that names no guard time or no blob ids leaves its own check unchecked.
 function fitLabels(p, raw, records) {
   const labels = [];
-  if (p.guard_computed_at !== raw.computed_at) labels.push(`fitted beside the guard of ${when(p.guard_computed_at)}, not this one`);
-  if (records === null) labels.push("fitted on the guard's records: not checked: this guard predates the blob ids it needs");
+  if (p.guard_computed_at === null) labels.push("fitted beside this guard: not checked: `guard_computed_at` is not a string");
+  else if (p.guard_computed_at !== raw.computed_at) labels.push(`fitted beside the guard of ${when(p.guard_computed_at)}, not this one`);
+  if (records === null) labels.push(`fitted on the guard's records: not checked: ${isRecord(raw.tsv_blobs) ? "the Fit names no blob ids" : "this guard predates the blob ids it needs"}`);
   else if (!records) labels.push("fitted on other records than the guard's");
   return labels;
 }
@@ -666,9 +652,9 @@ function fitView({ fit, starting, guard, routed, modelRoles, catalog, agents, st
   let labels = [];
   let differ = [];
   if (p !== null && raw !== null) {
-    // Whether the Fit read the guard's files: null when the guard names no blob
-    // ids to compare, else whether the two name the same ones.
-    const records = isRecord(raw.tsv_blobs) ? isDeepStrictEqual(p.tsv_blobs, raw.tsv_blobs) : null;
+    // Whether the Fit read the guard's files: null when the guard or the Fit
+    // names no blob ids to compare, else whether the two name the same ones.
+    const records = isRecord(raw.tsv_blobs) && p.tsv_blobs !== null ? isDeepStrictEqual(p.tsv_blobs, raw.tsv_blobs) : null;
     labels = fitLabels(p, raw, records);
     differ = nDiffers(p, raw, records);
   }
@@ -678,13 +664,20 @@ function fitView({ fit, starting, guard, routed, modelRoles, catalog, agents, st
     const e = rowEntry(table, routed, modelRoles, o, s);
     return { ...e, candidates: e.candidates.map((c) => ({ ...c, nMark: s === "*" && differ.includes(c.cell) ? mark : null })) };
   };
-  const lines = (o) => (table === null
-    ? [{ stratum: "*", ...groupOf("*"), entry: null, exploring: null, unread: "no starting table read: the rows are not known" }]
-    : Object.keys(table.rows[o]).map((s) => ({ stratum: s, ...groupOf(s), entry: entry(o, s), exploring: exploringWords(table, routed, s, inst), unread: null })));
+  // A group's exploration Cells are centred on its `cost` row whichever
+  // Objective routes the Pull, so each group's words are worked out once.
+  const exploring = new Map();
+  const exploringOf = (s) => {
+    if (!exploring.has(s)) exploring.set(s, exploringWords(table, routed, s, inst));
+    return exploring.get(s);
+  };
+  const line = (o, s, rest) => ({ stratum: s, ...groupOf(s), ...rest, anchor: `cells-row-${o}-${s}`, href: `#cells/row/${o}/${s}` });
   const objectives = OBJECTIVES.map((o) => ({
     objective: o,
     live: o === objective,
-    lines: lines(o).map((l) => ({ ...l, anchor: `cells-row-${o}-${l.stratum}`, href: `#cells/row/${o}/${l.stratum}` })),
+    lines: table === null
+      ? [line(o, "*", { entry: null, exploring: null, unread: "no starting table read: the rows are not known" })]
+      : Object.keys(table.rows[o]).map((s) => line(o, s, { entry: entry(o, s), exploring: exploringOf(s), unread: null })),
   }));
 
   const checks = objectives.flatMap((o) => o.lines.flatMap((l) => (l.entry === null ? [] : l.entry.candidates.map((c) => c.model)))).filter((m) => m !== null);
@@ -765,9 +758,10 @@ function prIsOpen(pr, openPrs) {
 // `docs/metrics`, `{ value: { blobs }, readAt, error }`, `blobs` null for a 404.
 // A guard that names no blob ids has nothing to compare, and neither has one
 // whose cockpit read nothing (`main` null). The Fit is compared only while it
-// was fitted beside this guard: a guard written after it — a close-out's,
-// which computes no Fit, or one whose refit failed — moves on alone, and the
-// view of the Fit already says it was fitted beside another guard.
+// was fitted beside this guard and names blob ids of its own: a guard written
+// after it — a close-out's, which computes no Fit, or one whose refit failed —
+// moves on alone, and the view of the Fit already says it was fitted beside
+// another guard, or that its blob ids are not checked.
 function recordsAgainstMain({ read, fit, main, closeoutPr, openPrs }) {
   const none = { alert: null, note: null };
   if (main == null || read?.status !== "ok") return none;
@@ -781,7 +775,7 @@ function recordsAgainstMain({ read, fit, main, closeoutPr, openPrs }) {
   if (blobs === null) return { alert: null, note: "records against main: main holds no metrics yet" };
   if (!isRecord(blobs)) return unchecked("main's docs/metrics not read yet");
 
-  const mine = fit?.status === "ok" && fit.fit.guard_computed_at === g.computed_at ? fit.fit : null;
+  const mine = fit?.status === "ok" && fit.fit.guard_computed_at === g.computed_at && fit.fit.tsv_blobs !== null ? fit.fit : null;
   const held = (ids, path) => (isRecord(ids) && Object.hasOwn(ids, path) ? ids[path] : undefined);
   const paths = [...new Set([...Object.keys(g.tsv_blobs), ...(mine === null ? [] : Object.keys(mine.tsv_blobs))])].sort();
   const lines = [];
@@ -870,7 +864,8 @@ function readersAlert(json) {
  * cellLine). `table` is the starting router table `validateTable` accepted or
  * null, `objective` the live run's Objective or null between runs, and `fit`
  * the Fit as gather read `.fleet/router-fit.json`: `{ status: "ok", fit: {
- * computed_at, guard_computed_at, tsv_blobs, table } }`, `{ status: "missing" }`
+ * computed_at, guard_computed_at, tsv_blobs, table } }`, the first three null
+ * where the file holds no string or object, `{ status: "missing" }`
  * or `{ status: "unreadable", why }`. An input left out reads as nothing
  * read: a missing guard, no receipt, no definitions, no `modelRoles` or catalog
  * read, no Pull, no table, no Objective, no Fit.

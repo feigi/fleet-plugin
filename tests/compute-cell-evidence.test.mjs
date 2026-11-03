@@ -506,7 +506,6 @@ test("figures show from the file pr-cost.mjs writes, as the tick's reader accept
 
 // -- the view of the Fit that routes this run ---------------------------------------------------
 
-const { repoIdentity } = await import("../plugin/scripts/compute-cell-evidence.mjs");
 // The day-one table, not plugin/scripts/router-table.json: the starting table every repository begins from.
 const STARTING = DAY_ONE_TABLE;
 
@@ -607,6 +606,28 @@ test("burn-in progress: merged PRs per starting Cell against 20, from the Fit's 
   assert.equal(policy({ guard: { status: "missing" } }).burnIn, null, "no guard and no Fit: nothing to count from");
 });
 
+test("burn-in progress: a Cell at exactly 20 merged PRs has them, one at 19 does not", () => {
+  const edge = FIT({ burn_in: true, guard: { tripped: [], n: { "slow-high": 20, "task-high": 19, "smol-high": 69 } } });
+  assert.deepEqual(fitted({ fit: FIT_READ({ table: edge }) }).burnIn, {
+    heading: "burn-in: 2 of 3 starting Cells have the 20 merged PRs each needs",
+    cells: [{ cell: "slow-high", n: 20, of: 20 }, { cell: "task-high", n: 19, of: 20 }, { cell: "smol-high", n: 69, of: 20 }],
+  });
+});
+
+test("burn-in progress under a starting table out of burn-in: 'ended' only once the cost guard's counts all reach 20", () => {
+  const outOfBurnIn = { ...STARTING, burn_in: false };
+  const short = guardOk([
+    entry("slow-high", { n: 2 }),
+    entry("task-high", { generation: "claude-sonnet-5-5", n: 0 }),
+    entry("smol-high", { generation: "claude-haiku-5-5", n: 25 }),
+  ]);
+  assert.deepEqual(policy({ table: outOfBurnIn, guard: short }).burnIn, {
+    heading: "no burn-in: the starting table routes without it, though only 1 of 3 starting Cells has the 20 merged PRs each needs",
+    cells: [{ cell: "slow-high", n: 2, of: 20 }, { cell: "task-high", n: 0, of: 20 }, { cell: "smol-high", n: 25, of: 20 }],
+  }, "the cost guard's counts, never under a heading that says they are all in");
+  assert.equal(policy({ table: outOfBurnIn }).burnIn.heading, "burn-in ended: every starting Cell has its 20 merged PRs");
+});
+
 test("the Fit routes: its source names it, and each Objective's lines are the tree's groups, each with its rule, its Cell and every candidate's verdict and range", () => {
   const p = fitted();
   assert.deepEqual(p.source, { text: "Fit · computed 2026-10-26 19:17Z · 235 Pulls", check: null });
@@ -656,6 +677,15 @@ test("exploration: what this install runs is not checked while a read it needs h
   assert.equal(lineOf(policy({ catalog: null }), "cost", "*").exploring, "drawn over slow-high, task-high and smol-high", "burn-in draws the starting Cells, whatever the install runs");
 });
 
+test("exploration: a catalog read that fails says why, beside the unread catalog and beside the Cells a stale one names", () => {
+  const failing = { at: Date.UTC(2026, 9, 28, 10, 0), message: "omp models --json failed (ENOENT)" };
+  assert.equal(lineOf(fitted({ catalog: { value: null, readAt: null, error: failing } }), "cost", "*").exploring,
+    "exploring: not checked: omp's model catalog not read yet; reading fails: omp models --json failed (ENOENT)");
+  assert.equal(lineOf(fitted({ catalog: { ...CATALOG, error: failing } }), "cost", "*").exploring,
+    "exploring task-xhigh, task-medium, slow-medium and smol-xhigh; omp's model catalog as read at 2026-10-28 09:00Z; reading fails: omp models --json failed (ENOENT)");
+  assert.equal(lineOf(fitted(), "cost", "*").exploring, "exploring task-xhigh, task-medium, slow-medium and smol-xhigh", "a read that stands carries no note");
+});
+
 test("tripped Cells: the guard's are named, a tripped row Cell is replaced by slow-high, and burn-in draws the rest", () => {
   const tripped = BESIDE({ verdict: "tripped", tripped: ["task-high"] });
   const p = fitted({ guard: tripped });
@@ -699,6 +729,21 @@ test("no model-change notice once the new model has its 20 merged PRs, with no o
   assert.deepEqual(fitted({ fit: FIT_READ({ table: { ...CHANGED(20), burn_in: false } }) }).notices, []);
   assert.deepEqual(fitted({ fit: FIT_READ({ table: FIT({ burn_in: true, guard: { tripped: [], n: { "slow-high": 3 } } }) }) }).notices, [], "no older generation: a first burn-in");
   assert.deepEqual(policy().notices, []);
+});
+
+test("the model-change notice holds below 20 merged PRs and goes at exactly 20, and only in burn-in", () => {
+  assert.deepEqual(fitted({ fit: FIT_READ({ table: CHANGED(20) }) }).notices, [], "in burn-in, at exactly 20: no notice");
+  assert.deepEqual(fitted({ fit: FIT_READ({ table: CHANGED(19) }) }).notices, ["slow-high's model changed to claude-opus-5-5, after claude-opus-5: burn-in restarted, at 19 of the 20 merged PRs it needs"]);
+  assert.deepEqual(fitted({ fit: FIT_READ({ table: { ...CHANGED(3), burn_in: false } }) }).notices, [], "short of 20 beside an older generation, but out of burn-in");
+});
+
+test("no model-change notice beside an older generation when the record names no generation of its own", () => {
+  const unnamed = FIT({
+    burn_in: true,
+    estimates: { "*": { ...FIT().estimates["*"], "slow-high": { merged: 3, older: { "claude-opus-5": { merged: 69 } } } } },
+    guard: { tripped: [], n: { "slow-high": 3, "task-high": 69, "smol-high": 32 } },
+  });
+  assert.deepEqual(fitted({ fit: FIT_READ({ table: unnamed }) }).notices, []);
 });
 
 test("Fit-versus-guard labels: fitted beside another guard, on other records, or against a guard with no blob ids; nothing for the Fit beside its own guard", () => {
@@ -795,26 +840,11 @@ test("an unreadable Fit: the starting table routes, and the source says why the 
   assert.deepEqual(lineOf(p, "cost", "*").entry.cell, "slow-high");
 });
 
-test("repoIdentity reads the shapes a package.json repository takes", () => {
-  const want = { host: "github.com", name: "feigi/fleet-plugin" };
-  for (const u of ["git+https://github.com/feigi/fleet-plugin.git", "https://github.com/feigi/fleet-plugin", "https://github.com/feigi/fleet-plugin/", "git://github.com/feigi/fleet-plugin.git",
-    "git@github.com:feigi/fleet-plugin.git", "ssh://git@github.com/feigi/fleet-plugin.git", "github:feigi/fleet-plugin", "feigi/fleet-plugin", "https://github.com/feigi/fleet-plugin/tree/main/plugin"]) {
-    assert.deepEqual(repoIdentity(u), want, u);
-  }
-  assert.deepEqual(repoIdentity("git+ssh://git@ghe.example.com/acme/widgets.git"), { host: "ghe.example.com", name: "acme/widgets" });
-  assert.deepEqual(repoIdentity("git@GitHub.com:feigi/fleet-plugin.git"), want, "an scp host compares without case");
-  assert.deepEqual(repoIdentity("gitlab:acme/widgets"), { host: "gitlab.com", name: "acme/widgets" });
-  assert.deepEqual(repoIdentity("bitbucket:acme/widgets"), { host: "bitbucket.org", name: "acme/widgets" });
-  assert.deepEqual(repoIdentity("bitbucket:acme/widgets"), repoIdentity("https://bitbucket.org/acme/widgets"), "the bitbucket shorthand is bitbucket.org's");
-  for (const u of [null, undefined, 3, "", "nope", "https://github.com/owner"]) assert.equal(repoIdentity(u), null, String(u));
-});
-
-test("repoIdentity drops a ref pin and a www. host, and refuses a relative path", () => {
-  const want = { host: "github.com", name: "feigi/fleet-plugin" };
-  for (const u of ["github:feigi/fleet-plugin#main", "feigi/fleet-plugin#main", "git+https://github.com/feigi/fleet-plugin.git#v1", "git@github.com:feigi/fleet-plugin.git#v1", "https://www.github.com/feigi/fleet-plugin"]) {
-    assert.deepEqual(repoIdentity(u), want, u);
-  }
-  for (const u of ["../x", "./x", "x/..", "https://github.com/o/.git"]) assert.equal(repoIdentity(u), null, u);
+test("a Fit route routes by whose own fields are not all read: each is not checked, and the Fit's rows are laid out", () => {
+  const p = fitted({ fit: FIT_READ({ computed_at: null, guard_computed_at: null, tsv_blobs: null, table: FIT({ n_rows: "235" }) }) });
+  assert.deepEqual(p.source, { text: "Fit · computed: not checked: `computed_at` is not a string · Pulls: not checked: `n_rows` is not a count", check: null });
+  assert.deepEqual(p.labels, ["fitted beside this guard: not checked: `guard_computed_at` is not a string", "fitted on the guard's records: not checked: the Fit names no blob ids"]);
+  assert.equal(lineOf(p, "cost", "*").entry.cell, "task-high", "the Fit's own row, not the starting table's");
 });
 
 // -- the failed-Fit flag ---------------------------------------------------------------------------
@@ -866,6 +896,11 @@ test("no failed-Fit flag when the newest step that tried a refit has no failed l
   assert.equal(fitted({ receipts: { phase0: failedAt("2026-10-26T19:17:40.000Z"), closeout: null } }).flag, null, "a Fit computed at the step's own time is not before it");
   assert.equal(fitted().flag, null, "no receipt");
   assert.equal(fitted({ receipts: { phase0: step("pending", "2026-10-28T08:00:00.000Z", refitOut()), closeout: null } }).flag, null, "a step that has not run");
+});
+
+test("a failed Fit beside a last good Fit whose computed_at is no string: flagged, the time it was computed not checked", () => {
+  const p = fitted({ fit: FIT_READ({ computed_at: null }), receipts: { phase0: failedAt("2026-10-28T08:00:00.000Z"), closeout: null } });
+  assert.equal(p.flag, `this run's Fit failed at 2026-10-28 08:00Z: ${EISDIR}; the last good Fit, computed: not checked: \`computed_at\` is not a string, routes`);
 });
 
 test("a newer step that tried no refit — a --no-fit close-out, or one that stopped before its refit — leaves an earlier failed Fit flagged", () => {
