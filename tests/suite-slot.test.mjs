@@ -139,6 +139,33 @@ test("a wait that outlasts the cap exits 75 naming the wait, having launched not
   assert.doesNotMatch(r.stderr, /by hand/, "a live holder is named as a wedge to remove");
 });
 
+test("a wait that goes round its loop more than once prints its waiting line once, before it gives up", () => {
+  const host = slotHome();
+  const mark = join(tempDir("slot-once-"), "ran");
+  holdSlots(host, 2);
+  // 3 s is more than one 2 s cycle: the wrapper wakes, finds the slots still
+  // held and sleeps again before the cap expires.
+  const r = run(host, 'touch "$MARK"', [], { FLEET_SUITE_WAIT_S: "3", MARK: mark });
+  assert.equal(r.status, 75, r.stdout + r.stderr);
+  const waiting = r.stderr.match(new RegExp(WAITING.source, "gm")) ?? [];
+  assert.deepEqual(waiting, ["suite-slot: waiting up to 3s for a slot"], `the waiting line does not print exactly once, naming the cap: ${r.stderr}`);
+  const gaveUp = r.stderr.search(/^suite-slot: no slot after 3s$/m);
+  assert.ok(gaveUp >= 0, r.stderr);
+  assert.ok(r.stderr.search(WAITING) < gaveUp, `the waiting line does not precede the give-up line: ${r.stderr}`);
+  assert.equal(existsSync(mark), false, "the entrypoint ran without a slot");
+});
+
+test("a cap of 0 gives up at once without announcing a wait", () => {
+  const host = slotHome();
+  const mark = join(tempDir("slot-zero-"), "ran");
+  holdSlots(host, 2);
+  const r = run(host, 'touch "$MARK"', [], { FLEET_SUITE_WAIT_S: "0", MARK: mark });
+  assert.equal(r.status, 75, r.stdout + r.stderr);
+  assert.match(r.stderr, /^suite-slot: no slot after 0s$/m);
+  assert.doesNotMatch(r.stderr, WAITING, "a wrapper that never sleeps announced a wait");
+  assert.equal(existsSync(mark), false, "the entrypoint ran without a slot");
+});
+
 test("FLEET_SUITE_SLOTS sets how many full runs fit", () => {
   const host = slotHome();
   holdSlots(host, 1);
