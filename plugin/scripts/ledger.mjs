@@ -2711,8 +2711,11 @@ function recordFiled(id, subject) {
 //   fix-pr-M=applied:<head>   origin's refs/heads/<branch> is <head>, fetched
 //                             by verify-sha.sh; the Check-step record (below)
 //                             holds for <head>
-//   fix-pr-M=no-op            origin's refs/heads/<branch> is the head PR M's
-//                             latest reviewed= names, as the tick folds it
+//   fix-pr-M=no-op            origin's refs/heads/<branch> is PR M's fleet
+//                             head, as the tick folds it: the head of the
+//                             latest applied:<head> a fix-applier landed since
+//                             PR M's latest reviewed=, else the head that
+//                             reviewed= names
 //   finisher-pr-M=labelled    PR M's labels carry ready-to-merge, and so does
 //                             the report's labelsReadBack
 //   finisher-pr-M=halted:<c>  cause is in the halted:<cause> vocabulary and
@@ -2912,13 +2915,20 @@ async function runSettleFromReport() {
         if (!(e instanceof LedgerError)) throw e;
         die(`${where}: ${e.message} — fleet-tick.mjs refuses this ledger, so PR #${live.number}'s latest reviewed= cannot be read off it; nothing written`);
       }
-      const reviewed = fold.reviewed.find((r) => r.pr === live.number)?.head ?? null;
-      if (reviewed === null) {
+      // An earlier fix-applier's push moved the branch past the head the latest
+      // review names, so the head required is the fold's `fleetHead`, which
+      // is that review's head until an `applied:` lands after it.
+      const review = fold.reviewed.find((r) => r.pr === live.number);
+      if (review === undefined) {
         check(`PR #${live.number}'s row names a reviewed= head`, false);
       } else {
         const head = remoteHead(report.branch);
-        check(`origin refs/heads/${report.branch} is ${reviewed}, the head PR #${live.number}'s latest reviewed= names`,
-          head !== null && head.toLowerCase().startsWith(reviewed.toLowerCase()));
+        const required = review.fleetHead;
+        const why = required === review.head
+          ? `the head PR #${live.number}'s latest reviewed= names`
+          : `the head PR #${live.number}'s latest applied: names, landed since its latest reviewed= ${review.head}`;
+        check(`origin refs/heads/${report.branch} is ${required}, ${why}`,
+          head !== null && head.toLowerCase().startsWith(required.toLowerCase()));
       }
     } else {
       outcome = "failed";
