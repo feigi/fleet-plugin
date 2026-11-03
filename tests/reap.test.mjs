@@ -39,6 +39,11 @@ const ENV = {
   GIT_COMMITTER_EMAIL: "t@example.com",
   GIT_CONFIG_GLOBAL: "/dev/null",
   GIT_CONFIG_SYSTEM: "/dev/null",
+  // A non-stopping editor, exported on every run: it outranks a `-c` editor
+  // setting, so a fixture that has to stop a rebase must pass its own editor in
+  // the spawned env (`stopAtEditRebase`). Pinned here, a fixture that relies on
+  // `-c` never stops, on every run, not only under a shell that exports one.
+  GIT_SEQUENCE_EDITOR: "true",
 };
 
 // `maintenance.auto=false` on every fixture call: fetch, commit and merge start
@@ -2537,6 +2542,19 @@ test("a fleet worktree left on a branch that no longer exists is reported, never
 const quietGit = (cwd, ...args) => execFileSync("git", args, { cwd, env: ENV, stdio: "pipe" });
 
 /**
+ * Stop `wt` mid-`rebase -i` at an `edit` on its tip commit. The editor goes in
+ * as GIT_SEQUENCE_EDITOR in the spawned git's own env, never as `git -c`: an
+ * exported GIT_SEQUENCE_EDITOR outranks a `-c` editor setting, so the one
+ * already in the env (ENV pins one), not this one, would be handed the todo list.
+ */
+const stopAtEditRebase = (wt) =>
+  execFileSync("git", ["rebase", "-i", "HEAD~1"], {
+    cwd: wt,
+    env: { ...ENV, GIT_SEQUENCE_EDITOR: "sed -i.bak s/^pick/edit/" },
+    stdio: "pipe",
+  });
+
+/**
  * A merged `[gone]` branch whose linked worktree `stop` leaves mid-operation
  * and DETACHED: the listing prints no `branch` line for it, so the `$wt`
  * lookup never binds it and the branch reaches the delete with nothing
@@ -2570,7 +2588,7 @@ function heldMidOperation(t, name, stop) {
 }
 
 for (const [what, stop, finish] of [
-  ["stopped mid-`rebase -i`", (wt) => quietGit(wt, "-c", "sequence.editor=sed -i.bak s/^pick/edit/", "rebase", "-i", "HEAD~1"), (wt) => quietGit(wt, "rebase", "--continue")],
+  ["stopped mid-`rebase -i`", stopAtEditRebase, (wt) => quietGit(wt, "rebase", "--continue")],
   ["mid-`bisect`", (wt) => quietGit(wt, "bisect", "start", "HEAD", "HEAD~2"), (wt) => quietGit(wt, "bisect", "reset")],
 ]) {
   test(`a [gone] branch held by a worktree ${what} is kept (#2219)`, (t) => {
@@ -2602,9 +2620,7 @@ test("a [gone] branch whose holder check cannot read a worktree's rebase state i
   // nothing. Unknown is a keep, never "not held".
   if (process.getuid?.() === 0) return t.skip("root reads every file");
   const name = "feature/held";
-  const { w, wt } = heldMidOperation(t, name, (wt) =>
-    quietGit(wt, "-c", "sequence.editor=sed -i.bak s/^pick/edit/", "rebase", "-i", "HEAD~1"),
-  );
+  const { w, wt } = heldMidOperation(t, name, stopAtEditRebase);
   const rebaseMerge = join(adminEntry(w, wt), "rebase-merge");
   chmodSync(rebaseMerge, 0o000);
   let r;
@@ -2656,7 +2672,8 @@ test("a worktree mid-rebase of a DIFFERENT branch does not hold a [gone] branch'
   writeFileSync(join(sib, "other.txt"), "other work\n");
   git(sib, "add", "other.txt");
   git(sib, "commit", "-q", "-m", "other work");
-  quietGit(sib, "-c", "sequence.editor=sed -i.bak s/^pick/edit/", "rebase", "-i", "HEAD~1");
+  stopAtEditRebase(sib);
+  assert.ok(existsSync(join(adminEntry(w, sib), "rebase-merge")), "fixture: the rebase must really be stopped");
 
   const { code, json, stderr } = runReap(w, ["--apply"]);
 
