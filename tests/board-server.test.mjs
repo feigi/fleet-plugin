@@ -841,7 +841,7 @@ async function untilLaunched(rig, count) {
 // read — the shape a probe before the spawn and another after the announce
 // both miss — and it still excuses a landing past it.
 test("watchWindow: a candidate held and released while the watch is up excuses a landing past it", async (t) => {
-  const [held, landed] = [await unheldPort(), await unheldPort()];
+  const [held, landed] = await unheldPorts(2);
   const watch = await watchWindow([held, landed]);
   try {
     const holder = createServer();
@@ -854,14 +854,43 @@ test("watchWindow: a candidate held and released while the watch is up excuses a
   } finally { await watch.stop(); }
 });
 
+// The real probe's free reading, which the scripted rows below never reach: a
+// refused connect is a candidate nothing holds. A probe that read every port
+// as held would otherwise pass this file, while the derived-port CLI rows
+// skipped every landing past their first candidate as an outside holder's
+// doing. A drawn port something outside the test still holds once the watch
+// is down takes the outside-holder skip; one that was held and let go inside
+// the watch cannot be told from that broken probe, so the row draws again and
+// fails only when every draw read held a port the row could then bind itself.
+test("watchWindow: the real probe reads a candidate nothing holds as free", async (t) => {
+  for (let draw = 0; draw < 3; draw++) {
+    const [port] = await unheldPorts(1);
+    const watch = await watchWindow([port]);
+    await watch.stop();
+    if (!watch.allHeld()) return;
+    const holder = createServer();
+    const failure = await new Promise((res) => { holder.once("error", res); holder.listen(port, "127.0.0.1", () => res(null)); });
+    if (failure?.code === "EADDRINUSE") return t.skip(heldOutside(port));
+    if (failure) throw failure;
+    await new Promise((res) => holder.close(res));
+  }
+  assert.fail("the real probe read a port nothing held as held on every draw");
+});
+
+// The rows below pin watchWindow's own logic, so they hand it a scripted probe
+// in place of the connect: the candidates in `held` answer on every round and
+// nothing else does. The ports are labels nothing connects to, so no port
+// bound or released elsewhere on the machine moves these rows (#4267).
+const scriptedWatch = (ports, ...held) => watchWindow(ports, undefined, async (p) => held.includes(p));
+
 // The half that must refuse to excuse: with nothing held, a landing past the
 // first candidate is the scan's own doing and the rows have to fail on it,
 // and a landing on the first candidate needs no excuse at all.
 test("watchWindow: with nothing held, no landing is excused", async () => {
-  const window = [await unheldPort(), await unheldPort()];
-  const first = await watchWindow(window);
+  const window = [40001, 40002];
+  const first = await scriptedWatch(window);
   assert.equal(await first.blockerBefore(window[1]), null, "a landing past a free candidate was excused");
-  const second = await watchWindow(window);
+  const second = await scriptedWatch(window);
   assert.equal(await second.blockerBefore(window[0]), null);
 });
 
@@ -869,39 +898,27 @@ test("watchWindow: with nothing held, no landing is excused", async () => {
 // account for: here the first is held for the whole watch and the second is
 // free throughout, so a landing past both is the scan's own doing and the
 // rows have to fail on it, held first candidate or not.
-test("watchWindow: a landing past a candidate nothing held is not excused by an earlier one that was held", async (t) => {
-  const [held, free, landed] = [await unheldPort(), await unheldPort(), await unheldPort()];
-  const holder = createServer();
-  const failure = await new Promise((res) => { holder.once("error", res); holder.listen(held, "127.0.0.1", () => res(null)); });
-  if (failure?.code === "EADDRINUSE") return t.skip(heldOutside(held));
-  if (failure) throw failure;
-  const watch = await watchWindow([held, free, landed]);
+test("watchWindow: a landing past a candidate nothing held is not excused by an earlier one that was held", async () => {
+  const [held, free, landed] = [40001, 40002, 40003];
+  const watch = await scriptedWatch([held, free, landed], held);
   try {
     assert.equal(await watch.blockerBefore(landed), null, "a landing past a free candidate was excused by an earlier held one");
-  } finally {
-    await watch.stop();
-    await new Promise((res) => holder.close(res));
-  }
+  } finally { await watch.stop(); }
 });
 
 // allHeld()'s two answers: a window with one candidate free is not
 // exhausted by its holders, and the rows have to fail on a launch that gave up
 // on it; a window whose every candidate answered is.
-test("watchWindow: allHeld() is true only when every candidate was seen held", async (t) => {
-  const [held, free] = [await unheldPort(), await unheldPort()];
-  const holder = createServer();
-  const failure = await new Promise((res) => { holder.once("error", res); holder.listen(held, "127.0.0.1", () => res(null)); });
-  if (failure?.code === "EADDRINUSE") return t.skip(heldOutside(held));
-  if (failure) throw failure;
-  const partial = await watchWindow([held, free]);
-  const whole = await watchWindow([held]);
+test("watchWindow: allHeld() is true only when every candidate was seen held", async () => {
+  const [held, free] = [40001, 40002];
+  const partial = await scriptedWatch([held, free], held);
+  const whole = await scriptedWatch([held], held);
   try {
     assert.equal(partial.allHeld(), false, "a window with a free candidate was read as exhausted by its holders");
     assert.equal(whole.allHeld(), true, "a window whose every candidate was held was not read as exhausted");
   } finally {
     await partial.stop();
     await whole.stop();
-    await new Promise((res) => holder.close(res));
   }
 });
 
@@ -909,14 +926,10 @@ test("watchWindow: allHeld() is true only when every candidate was seen held", a
 // only a launch that exited before announcing, against a window whose every
 // candidate was seen held. A window with a candidate free, or a rejection that
 // is not that exit (the row's own announce timeout), is the row's failure.
-test("heldWindowExit: skips only an exit before announcing against a window seen wholly held", async (t) => {
-  const [held, free] = [await unheldPort(), await unheldPort()];
-  const holder = createServer();
-  const failure = await new Promise((res) => { holder.once("error", res); holder.listen(held, "127.0.0.1", () => res(null)); });
-  if (failure?.code === "EADDRINUSE") return t.skip(heldOutside(held));
-  if (failure) throw failure;
-  const partial = await watchWindow([held, free]);
-  const whole = await watchWindow([held]);
+test("heldWindowExit: skips only an exit before announcing against a window seen wholly held", async () => {
+  const [held, free] = [40001, 40002];
+  const partial = await scriptedWatch([held, free], held);
+  const whole = await scriptedWatch([held], held);
   const exitedEarly = new Error("serve exited (2) before announcing: board: no free port for this workspace");
   const timedOut = new Error("timed out waiting for the cockpit to announce");
   try {
@@ -926,7 +939,6 @@ test("heldWindowExit: skips only an exit before announcing against a window seen
   } finally {
     await partial.stop();
     await whole.stop();
-    await new Promise((res) => holder.close(res));
   }
 });
 
@@ -1255,13 +1267,14 @@ syncBuiltinESMExports();`;
   return { r, cwd: opts.cwd };
 }
 
-// A port nobody holds, for a launch whose connect is stubbed: only a launch
-// that wrongly decides the port is free ever binds it.
-async function unheldPort() {
-  const probe = createServer();
-  const port = await new Promise((res) => probe.listen(0, "127.0.0.1", () => res(probe.address().port)));
-  await new Promise((res) => probe.close(res));
-  return port;
+// Ports nobody holds, for a launch whose connect is stubbed: only a launch
+// that wrongly decides a port is free ever binds it. All `n` are bound at
+// once before any is released, so no two of them are the same port.
+async function unheldPorts(n) {
+  const probes = Array.from({ length: n }, () => createServer());
+  const ports = await Promise.all(probes.map((p) => new Promise((res) => p.listen(0, "127.0.0.1", () => res(p.address().port)))));
+  await Promise.all(probes.map((p) => new Promise((res) => p.close(res))));
+  return ports;
 }
 
 // ECONNREFUSED is the one connect error that means "free". Any other —
@@ -1270,7 +1283,7 @@ async function unheldPort() {
 // could not ask. It dies naming the check, with the error's own text after
 // it, and starts nothing.
 test("CLI: a pre-bind connect that fails with anything but a refusal is fatal, not read as a free port", async () => {
-  const port = await unheldPort();
+  const [port] = await unheldPorts(1);
   const { r, cwd } = serveWithConnect(
     `const s = new net.Socket(); setImmediate(() => s.emit("error", Object.assign(new Error("connect EPERM 127.0.0.1:${port}"), { code: "EPERM" }))); return s;`,
     port,
@@ -1287,7 +1300,7 @@ test("CLI: a pre-bind connect that fails with anything but a refusal is fatal, n
 // the check's own failure, not the held-port answer the check resolves for a
 // connect that succeeds or times out.
 test("CLI: a pre-bind connect error carrying EADDRINUSE dies naming the check, not as a held port", async () => {
-  const port = await unheldPort();
+  const [port] = await unheldPorts(1);
   const { r, cwd } = serveWithConnect(
     `const s = new net.Socket(); setImmediate(() => s.emit("error", Object.assign(new Error("connect EADDRINUSE 127.0.0.1:${port}"), { code: "EADDRINUSE" }))); return s;`,
     port,
@@ -1302,7 +1315,7 @@ test("CLI: a pre-bind connect error carrying EADDRINUSE dies naming the check, n
 // — EACCES here, past a connect that was refused — dies with the bind's text
 // as it came, never attributed to the held-check that let it through.
 test("CLI: a bind fault after a refused pre-bind connect dies with the bind's own message", async () => {
-  const port = await unheldPort();
+  const [port] = await unheldPorts(1);
   const { r } = serveWithConnect(
     `const s = new net.Socket(); setImmediate(() => s.emit("error", Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:${port}"), { code: "ECONNREFUSED" }))); return s;`,
     port,
@@ -1322,7 +1335,7 @@ test("CLI: a bind fault after a refused pre-bind connect dies with the bind's ow
 // kernel's pending connect, which keeps a real process alive; without it a
 // never-resolving promise lets the process exit 0 with nothing said.
 test("CLI: a pre-bind connect that never completes counts as a held port", async () => {
-  const port = await unheldPort();
+  const [port] = await unheldPorts(1);
   const { r, cwd } = serveWithConnect(
     `const s = new net.Socket(); const keep = setInterval(() => {}, 100); s.once("close", () => clearInterval(keep)); return s;`,
     port,
