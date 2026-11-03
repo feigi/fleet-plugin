@@ -164,6 +164,13 @@ test("a Cell below min_n reads 'n of 20: not judged' even while the guard judges
   assert.equal(cellOf(ce, "task-high").figures.merged.text, "12 of 20: not judged");
 });
 
+test("a Cell the guard lists unmatched reads 'not judged' though past min_n, while the Cells it judged read ✓", () => {
+  const ce = build({ guard: guardOk([entry("slow-high"), entry("task-high"), entry("smol-high", { n: 32, n_merged: 32 })], { unmatched: ["task-high"] }) });
+  assert.equal(cellOf(ce, "task-high").figures.merged.text, "69 ≥ 20: not judged, under 20 on a side in the stretches shared with slow-high");
+  assert.equal(cellOf(ce, "smol-high").figures.merged.text, "32 ≥ 20 ✓");
+  assert.equal(cellOf(ce, "slow-high").figures.merged.text, "69 ≥ 20 ✓");
+});
+
 // -- no cost guard: the newest receipt's metrics line ----------------------------------
 
 const step = (status, at, output) => ({ status, at, output });

@@ -2,6 +2,11 @@
 // Derivation script for issue #4119 (map #4118): how long burn-in takes at a
 // consumer's pace, and what it costs against routing every Pull at slow-high.
 //
+// Run it in a checkout of e5040b9a, the commit consumer-burn-in.md was
+// measured at: it imports `underFloor` from pull-attribution.mjs, which later
+// commits removed, and calls pr-cost.mjs's `trips` with counts, where later
+// commits take two cells' Pulls.
+//
 // Zero dependencies beyond the Router's own modules, imported from this checkout
 // (plugin/scripts/*.mjs): every figure about a Cell comes from pull-attribution /
 // pr-cost / ticket-router, never from a hand re-derivation. Node >= 18.

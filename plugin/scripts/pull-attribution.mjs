@@ -1,8 +1,9 @@
 // The one booking of member rows, merges and claims to Pulls, read by both the
 // cost guard (pr-cost.mjs) and the router's fit (ticket-router.mjs), so the two
 // print the same figures for a cell. Neither CLI imports the other; both import
-// this, and with it the two judgements they share: the quality floor (the
-// guard's fail leg) and the bootstrap range of a $ per merged PR difference.
+// this, and with it the comparison of two cells they share: the quality floor
+// (the guard's fail leg), the figures a row is judged by and the bootstrap range
+// of a $ per merged PR difference.
 //
 // THE UNIT is the Pull, a ticket-features.tsv row, booked AS ROUTED to its
 // `chosen_cell`: its merge, its Ruling and all its spend. A ticket Pulled twice
@@ -79,9 +80,38 @@
 // earlier model rejoins that generation's Pulls. Only the newest generation's
 // figures are judged; older ones are reported beside them, never pooled.
 //
+// STRETCHES. Two cells are compared only over the stretches in which both were
+// drawn. A stretch is one UTC calendar week of `run_date`, Monday first, cut
+// again wherever the recorded `plugin_version` changes. The cut is global: it
+// is read off the sequence of every windowed Pull, by session id then file
+// order, so every cell shares the same boundaries. A blank version is unknown
+// and never itself a cut; only a change between two recorded, different
+// versions cuts, before the Pull that records the newer one. `attribute` gives
+// every unit its stretch.
+//
+// THE COMPARISON. `compareCells` holds two cells' newest-generation counted
+// Pulls against each other over their shared stretches: each stretch on its
+// own, then the stretches pooled with Mantel-Haenszel weights. A stretch
+// weighs w_cell·w_base/(w_cell + w_base) over the counts w the figure is
+// weighed by — Pulls for $ and minutes per merged PR, claims for the fail
+// rate. A side's $ (or minutes) per merged PR is its spend per Pull over its
+// merged PRs per Pull, each averaged over the stretches with those weights, so
+// the spend of a stretch in which it merged nothing still counts; its fail
+// rate is its stretches' fail rates averaged, a stretch in which either side
+// has no claim weighing nothing. Every Pull of a shared stretch is kept, none
+// filtered or decayed, and one in a stretch the other has none in takes no
+// part. A shift that hits both cells in a stretch cancels, since the gap is
+// read inside it, and a cell that ran in one stretch is held to the other's
+// Pulls of that stretch alone. With one shared stretch the comparison is the
+// cells' own figures. The bootstrap resamples within each stretch.
+//
 // THE FLOOR. A cell is under the floor against a baseline when its fail rate
-// is TRIP_POINTS or more points above the baseline's, compared in integer
-// counts. The guard holds it pooled; the fit holds it per row.
+// is TRIP_POINTS or more points above the baseline's over the stretches they
+// share, compared in integers so a gap of exactly the margin reads as one:
+// each stretch's cross-product of the counts, weighted as above, summed as
+// exact fractions, which with one stretch is the cross-product of the counts.
+// The guard holds it over every group's Pulls together; the fit holds it per
+// row.
 
 import { CELL } from "./ledger-grammar.mjs";
 import { parseMemberName } from "./member-record.mjs";
@@ -113,12 +143,6 @@ export const OPTIONAL_COLUMNS = new Set(FEATURE_COLUMNS.slice(FEATURE_COLUMNS.in
 // The quality floor's margin, in points of fail rate.
 export const TRIP_POINTS = 15;
 
-// The floor, in integer counts so a 3-of-20 difference is exactly 15 points
-// rather than 14.999… in floating point. Each side is `{ claims, failed }`.
-export function underFloor(cell, base) {
-  return (cell.failed * base.claims - base.failed * cell.claims) * 100 >= TRIP_POINTS * cell.claims * base.claims;
-}
-
 const round2 = (x) => (Number.isFinite(x) ? Number(x.toFixed(2)) : null);
 
 // Deterministic, so a re-run reads the same range.
@@ -133,38 +157,148 @@ function mulberry32(seed) {
   };
 }
 
-// The bootstrap 95% range of (cell − base) per merged PR, its ends rounded to
-// two places. Each unit is one counted Pull, `bootUnit`'s shape:
-// `{ value, merged }`, `value` the measure `bootUnit` was asked for and
-// merged 0 or 1. The figure per merged PR is Σvalue / Σmerged. null when
-// either side has no unit, or when under half the resamples have a merged PR
-// on both sides.
+// What a unit measures: its `value` over its `per` is the figure, $ or minutes of work time per merged PR, or the
+// fail rate in points per claim; `weigh` is what it adds to the count its stretch is weighed by, one Pull or its
+// claims.
+const MEASURES = Object.freeze({
+  usd: { value: (u) => u.spend, per: (u) => (u.merged ? 1 : 0), weigh: () => 1 },
+  minutes: { value: (u) => u.workS / 60, per: (u) => (u.merged ? 1 : 0), weigh: () => 1 },
+  fail: { value: (u) => 100 * u.falseClaims, per: (u) => u.claims, weigh: (u) => u.claims },
+});
+
+// A counted Pull as a unit of `measure`, one of MEASURES: `{ value, per, weigh, stretch }`.
+export const bootUnit = (u, measure = "usd") => {
+  const m = MEASURES[measure];
+  return { value: m.value(u), per: m.per(u), weigh: m.weigh(u), stretch: u.stretch };
+};
+
+// The stretches in which both sides have a unit, as `{ cell, base }` lists of those units, in the order the cell first meets them.
+function sharedStretches(cellUnits, baseUnits) {
+  const byStretch = new Map();
+  for (const [side, units] of [["cell", cellUnits], ["base", baseUnits]]) {
+    for (const u of units) {
+      const held = byStretch.get(u.stretch) ?? byStretch.set(u.stretch, { cell: [], base: [] }).get(u.stretch);
+      held[side].push(u);
+    }
+  }
+  return [...byStretch.values()].filter((s) => s.cell.length > 0 && s.base.length > 0);
+}
+
+// One side's units in a stretch as `{ v, d, w }`: their values, their `per`s and their `weigh`s summed.
+const sumOf = (units) => units.reduce((s, u) => ({ v: s.v + u.value, d: s.d + u.per, w: s.w + u.weigh }), { v: 0, d: 0, w: 0 });
+
+// The two sides' figures pooled over the stretches: `sums` holds one `{ cell, base }` of `{ v, d, w }` per stretch.
+// A stretch is weighted by w_cell·w_base/(w_cell + w_base), what the thinner side lets it weigh, one in which
+// either side has no w taking no part, and a side's figure is its v per w over its d per w, each averaged with
+// those weights: with w the d, the average of the stretches' v/d. A side's v and d of a stretch are scaled by
+// its weight over its w, taken relative to the first stretch's, so that with one stretch the figure is v/d
+// exactly. null when no stretch takes part, or when a side has no d in those that do.
+function pool(sums) {
+  const weights = sums.map(({ cell, base }) => (cell.w > 0 && base.w > 0 ? (cell.w * base.w) / (cell.w + base.w) : 0));
+  const figure = (side) => {
+    let v = 0, d = 0, first = null;
+    sums.forEach((s, k) => {
+      if (weights[k] === 0) return;
+      const scale = weights[k] / s[side].w;
+      first ??= scale;
+      v += (scale / first) * s[side].v;
+      d += (scale / first) * s[side].d;
+    });
+    return d > 0 ? v / d : null;
+  };
+  const [cell, base] = [figure("cell"), figure("base")];
+  return cell === null || base === null ? null : { cell, base };
+}
+
+// The bootstrap 95% range of (cell − base), its ends rounded to two places, over the stretches in which both
+// sides have units. Each stretch's units are resampled among themselves and the stretches pooled as `pool` pools
+// them, so a shift in a stretch that hits both sides cancels in every resample. A unit is one counted Pull,
+// `bootUnit`'s shape `{ value, per, weigh, stretch }`; units with no stretch are in one together. null when no
+// stretch is shared, or when under half the resamples have a figure on both sides.
 export function bootstrapDiffCI(cellUnits, baseUnits, { iterations = 2000, seed = 1 } = {}) {
-  if (!cellUnits.length || !baseUnits.length) return null;
+  const shared = sharedStretches(cellUnits, baseUnits);
+  if (shared.length === 0) return null;
   const rand = mulberry32(seed);
   const resample = (units) => {
-    let u = 0, m = 0;
+    let v = 0, d = 0, w = 0;
     for (let i = 0; i < units.length; i++) {
       const x = units[Math.floor(rand() * units.length)];
-      u += x.value; m += x.merged;
+      v += x.value; d += x.per; w += x.weigh;
     }
-    return m ? u / m : null;
+    return { v, d, w };
   };
   const diffs = [];
   for (let i = 0; i < iterations; i++) {
-    const a = resample(cellUnits), b = resample(baseUnits);
-    if (a !== null && b !== null) diffs.push(a - b);
+    const cell = shared.map((s) => resample(s.cell));
+    const base = shared.map((s) => resample(s.base));
+    const pooled = pool(shared.map((_, k) => ({ cell: cell[k], base: base[k] })));
+    if (pooled !== null) diffs.push(pooled.cell - pooled.base);
   }
   if (diffs.length < iterations / 2) return null;
   diffs.sort((x, y) => x - y);
   return [round2(diffs[Math.floor(0.025 * (diffs.length - 1))]), round2(diffs[Math.ceil(0.975 * (diffs.length - 1))])];
 }
 
-// What a bootstrap unit measures: `usd`, its spend, or `minutes`, its work time.
-const METRIC = Object.freeze({ usd: (u) => u.spend, minutes: (u) => u.workS / 60 });
+const countsOf = (units) => ({
+  n: units.length,
+  merged: units.filter((u) => u.merged).length,
+  claims: units.reduce((n, u) => n + u.claims, 0),
+  failed: units.reduce((n, u) => n + u.falseClaims, 0),
+});
 
-// A counted Pull as a bootstrap unit, its `value` the Pull's `metric`.
-export const bootUnit = (u, metric = "usd") => ({ value: METRIC[metric](u), merged: u.merged ? 1 : 0 });
+// Whether the pooled fail-rate gap reaches TRIP_POINTS, in integers so a gap of exactly the margin reads as one. A
+// stretch adds (failed_cell·claims_base − failed_base·claims_cell)/(claims_cell + claims_base) to the gap and
+// claims_cell·claims_base/(claims_cell + claims_base) to the weight `pool` gives it, a stretch in which either side
+// has no claim adding nothing: with one stretch, the cross-product test of the counts. false when no stretch has a
+// claim on both sides.
+function reachesMargin(shared) {
+  let gap = [0n, 1n];
+  let weight = [0n, 1n];
+  for (const s of shared) {
+    const [c, b] = [countsOf(s.cell), countsOf(s.base)];
+    if (c.claims === 0 || b.claims === 0) continue;
+    const n = BigInt(c.claims + b.claims);
+    gap = [gap[0] * n + BigInt(c.failed * b.claims - b.failed * c.claims) * gap[1], gap[1] * n];
+    weight = [weight[0] * n + BigInt(c.claims * b.claims) * weight[1], weight[1] * n];
+  }
+  return weight[0] > 0n && 100n * gap[0] * weight[1] >= BigInt(TRIP_POINTS) * weight[0] * gap[1];
+}
+
+/**
+ * Two cells' newest-generation counted Pulls compared over the stretches in which both were drawn, the one
+ * comparison the fit's rows, its floor and the cost guard make. Within each shared stretch the two cells are
+ * compared, and the stretches are pooled by `pool`, so a shift that hits both cells in a stretch cancels and
+ * every Pull of a shared stretch is kept, its spend and work time in the $ and minutes per merged PR even where
+ * its side merged nothing in that stretch. A cell's Pulls in a stretch the other has none in take no part.
+ * Returns `{ stretches, cell, base, underFloor, range }`: `stretches`, how many were shared; `cell` and `base`,
+ * each side's counts over the shared stretches (`n`, `merged`, `claims`, `failed`) beside its figures pooled
+ * over them (`usd_per_merged`, `minutes_per_merged`, `fail_rate`, null where a side has no merged PR or no
+ * claim to carry one);
+ * `underFloor`, whether the cell's fail rate is TRIP_POINTS or more points above the base's, pooled; and
+ * `range(measure)`, the bootstrap range of (cell − base) for `measure`, one of `usd`, `minutes` (per merged
+ * PR) and `fail` (points), null where there is none. With one shared stretch these are the Pulls' own figures,
+ * the integer cross-product of their counts and the bootstrap of their units.
+ */
+export function compareCells(cellPulls, basePulls) {
+  const shared = sharedStretches(cellPulls, basePulls);
+  const pooled = Object.fromEntries(Object.keys(MEASURES).map((measure) => [measure, pool(shared.map((s) => ({
+    cell: sumOf(s.cell.map((u) => bootUnit(u, measure))),
+    base: sumOf(s.base.map((u) => bootUnit(u, measure))),
+  })))]));
+  const side = (which) => ({
+    ...countsOf(shared.flatMap((s) => s[which])),
+    usd_per_merged: pooled.usd?.[which] ?? null,
+    minutes_per_merged: pooled.minutes?.[which] ?? null,
+    fail_rate: pooled.fail === null ? null : pooled.fail[which] / 100,
+  });
+  return {
+    stretches: shared.length,
+    cell: side("cell"),
+    base: side("base"),
+    underFloor: reachesMargin(shared),
+    range: (measure) => bootstrapDiffCI(cellPulls.map((u) => bootUnit(u, measure)), basePulls.map((u) => bootUnit(u, measure))),
+  };
+}
 
 const ISSUE_NUMBER = /^[1-9][0-9]*$/;
 
@@ -283,9 +417,41 @@ function numberOf(row, field, column = field) {
   return n;
 }
 
+const DAY_MS = 86_400_000;
+
+// The Monday opening the UTC calendar week that `date` (YYYY-MM-DD) falls in, in the same form.
+function weekOf(date) {
+  const [y, m, d] = date.split("-").map(Number);
+  const t = Date.UTC(y, m - 1, d);
+  return new Date(t - ((new Date(t).getUTCDay() + 6) % 7) * DAY_MS).toISOString().slice(0, 10);
+}
+
+/**
+ * Each of `pulls` to its stretch, a name: `<the Monday opening its run_date's UTC week>/<k>`, `k` the number of
+ * version changes before it. The changes are read off the sequence of every one of `pulls` — by session id, then
+ * in the order given, as `generations` orders them — so every cell is cut at the same places. Only a change
+ * between two recorded, different `plugin_version`s cuts, before the Pull that records the newer one: a blank
+ * version is unknown, leaves the stretch in force, and the first version recorded cuts nothing.
+ */
+function stretchesOf(pulls) {
+  const sequence = pulls.map((pull, at) => ({ pull, at })).sort((a, b) => cmp(a.pull.session, b.pull.session) || a.at - b.at);
+  const stretch = new Map();
+  let changes = 0;
+  let version = "";
+  for (const { pull } of sequence) {
+    const recorded = pull.plugin_version ?? "";
+    if (recorded !== "") {
+      if (version !== "" && recorded !== version) changes++;
+      version = recorded;
+    }
+    stretch.set(pull, `${weekOf(pull.run_date)}/${changes}`);
+  }
+  return stretch;
+}
+
 /**
  * One unit per ticket-features row dated on or after `windowStart` (every dated
- * row when null), in file order: `{ pull, cell, stratum, generation, status,
+ * row when null), in file order: `{ pull, cell, stratum, stretch, generation, status,
  * merged, pr, ruling, pendingPr, noRuling, noRulingPrs, claims, falseClaims, rows, spend, workS }`,
  * `generation` null exactly when the Pull is excluded. `noRulingPrs` are the
  * Pull's own implementer PRs that are merged and that no Pull holds a Ruling
@@ -294,7 +460,8 @@ function numberOf(row, field, column = field) {
  * booked `cost` is blank, and `workS`, its work time in seconds, when a booked
  * `work_s` of a row naming no parent is. `prs` is `gh pr list`'s
  * `{ number, state }` rows, or null when PR state is unknown (the fit). `stratum`
- * maps a features row to its stratum. Throws `AttributionError` on a features
+ * maps a features row to its stratum. `stretch` names the Pull's stretch among
+ * the windowed Pulls (`stretchesOf`), excluded Pulls included. Throws `AttributionError` on a features
  * row it cannot date or a booked `cost` or `work_s` it cannot read, and
  * `RulingError` as `rulingFor` does.
  */
@@ -327,6 +494,7 @@ export function attribute({ features, members, tiers, prs = null, windowStart = 
 
   // Rulings: each PR's merge to one Pull, carriers first, then the date floor.
   const inWindow = pulls.filter((p) => windowStart === null || p.run_date >= windowStart);
+  const stretch = stretchesOf(inWindow);
   const rulings = rulingsByTicket(tiers);
   const fileOrder = new Map(tiers.map((t, i) => [t, i]));
   // Each PR to its latest ruling row in file order, whatever its ticket or date.
@@ -402,7 +570,7 @@ export function attribute({ features, members, tiers, prs = null, windowStart = 
     else if (blank || (r && !r.carried)) status = "unpriced";
     else if (untimed) status = "untimed";
     return {
-      pull, cell: pull.chosen_cell, stratum: stratum(pull), generation, status, merged, pr: r?.pr ?? null, ruling: r?.ruling ?? null,
+      pull, cell: pull.chosen_cell, stratum: stratum(pull), stretch: stretch.get(pull), generation, status, merged, pr: r?.pr ?? null, ruling: r?.ruling ?? null,
       noRuling: noRulingPrs.length > 0, noRulingPrs, pendingPr, claims, falseClaims, rows: booked, spend: blank ? null : spend, workS: untimed ? null : workS,
     };
   });

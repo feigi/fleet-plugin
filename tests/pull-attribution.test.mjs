@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { formatTsv, parseTsv as parseMemberTsv } from "../plugin/scripts/member-outcomes.mjs";
 import { RulingError, formatRow, parseTierOutcomes } from "../plugin/scripts/tier-outcomes.mjs";
-import { AttributionError, FEATURE_COLUMNS, TRIP_POINTS, admissibleRow, attribute, bootUnit, bootstrapDiffCI, parseFeatures, tally, underFloor } from "../plugin/scripts/pull-attribution.mjs";
+import { AttributionError, FEATURE_COLUMNS, TRIP_POINTS, admissibleRow, attribute, bootUnit, bootstrapDiffCI, compareCells, parseFeatures, tally } from "../plugin/scripts/pull-attribution.mjs";
 import { WINDOW_START, computeReport, guardFile } from "../plugin/scripts/pr-cost.mjs";
 import { fitTable, readGuard } from "../plugin/scripts/ticket-router.mjs";
 
@@ -937,7 +937,7 @@ test("the fit's range against slow-high is the guard's usd_diff_ci95: the same n
 
 test("an unmerged counted Pull is a bootstrap unit with its spend and no merged PR: 20 merged and 10 closed at $3 against $10 span -5.5, not a flat -7", () => {
   // Both ranges build their units with bootUnit; the guard reads PR state, so a closed PR is an unmerged counted Pull there.
-  assert.deepEqual([bootUnit({ spend: 3, merged: false }), bootUnit({ spend: 3, merged: true })], [{ value: 3, merged: 0 }, { value: 3, merged: 1 }]);
+  assert.deepEqual([bootUnit({ spend: 3, merged: false, stretch: "s" }), bootUnit({ spend: 3, merged: true, stretch: "s" })], [{ value: 3, per: 0, weigh: 1, stretch: "s" }, { value: 3, per: 1, weigh: 1, stretch: "s" }]);
   const w = world();
   baseline(w);
   addPulls(w, { cell: "task-high", model: "model-t", count: 20, usd: 3 });
@@ -947,33 +947,28 @@ test("an unmerged counted Pull is a bootstrap unit with its spend and no merged 
   // Booked as merged, every resample of task-high would read $3 a PR, and the range would be [-7, -7].
   const ci = th.usd_diff_ci95;
   assert.ok(ci[0] < -5.5 && -5.5 < ci[1], `a range around $4.50 − $10: ${ci}`);
-  assert.deepEqual(bootstrapDiffCI(Array(30).fill({ value: 3, merged: 1 }), Array(20).fill({ value: 10, merged: 1 })), [-7, -7]);
+  assert.deepEqual(bootstrapDiffCI(Array(30).fill({ value: 3, per: 1, weigh: 1 }), Array(20).fill({ value: 10, per: 1, weigh: 1 })), [-7, -7]);
 });
 
-test("bootUnit takes a metric: `minutes` is a Pull's work time over 60, `usd` its spend and the default; bootstrapDiffCI reads the unit's value", () => {
-  const u = { spend: 3, workS: 90, merged: true };
-  assert.deepEqual([bootUnit(u), bootUnit(u, "usd"), bootUnit(u, "minutes")], [{ value: 3, merged: 1 }, { value: 3, merged: 1 }, { value: 1.5, merged: 1 }]);
+test("bootUnit takes a measure: `minutes` is a Pull's work time over 60, `usd` its spend and the default, each weighing one Pull, `fail` its false claims in points over its claims, weighing its claims; bootstrapDiffCI reads the unit's value", () => {
+  const u = { spend: 3, workS: 90, merged: true, claims: 4, falseClaims: 1, stretch: "s" };
+  assert.deepEqual(
+    [bootUnit(u), bootUnit(u, "usd"), bootUnit(u, "minutes"), bootUnit(u, "fail")],
+    [{ value: 3, per: 1, weigh: 1, stretch: "s" }, { value: 3, per: 1, weigh: 1, stretch: "s" }, { value: 1.5, per: 1, weigh: 1, stretch: "s" }, { value: 100, per: 4, weigh: 4, stretch: "s" }],
+  );
   assert.deepEqual(bootstrapDiffCI(Array(20).fill(bootUnit({ ...u, workS: 60 }, "minutes")), Array(20).fill(bootUnit({ ...u, workS: 150 }, "minutes"))), [-1.5, -1.5]);
 });
 
-test("the floor and the bootstrap range are one rule each: both scripts import them from pull-attribution.mjs, and neither imports the other", () => {
+test("the comparison is one function: both scripts import compareCells from pull-attribution.mjs and carry no stretch or pooling of their own, and neither imports the other", () => {
   const src = (f) => readFileSync(new URL(`../plugin/scripts/${f}`, import.meta.url), "utf8");
   const guard = src("pr-cost.mjs"), fit = src("ticket-router.mjs");
   for (const s of [guard, fit]) {
-    assert.match(s, /import \{[^}]*\bunderFloor\b[^}]*\} from "\.\/pull-attribution\.mjs"/);
-    assert.match(s, /import \{[^}]*\bbootstrapDiffCI\b[^}]*\} from "\.\/pull-attribution\.mjs"/);
-    assert.doesNotMatch(s, /function (?:bootstrapDiffCI|mulberry32|underFloor)\b|const TRIP_POINTS\b/);
+    assert.match(s, /import \{[^}]*\bcompareCells\b[^}]*\} from "\.\/pull-attribution\.mjs"/);
+    assert.doesNotMatch(s, /import \{[^}]*\b(?:bootUnit|bootstrapDiffCI|underFloor)\b[^}]*\} from "\.\/pull-attribution\.mjs"/);
+    assert.doesNotMatch(s, /function (?:bootstrapDiffCI|mulberry32|pool|sharedStretches|stretchesOf|weekOf|reachesMargin)\b|const TRIP_POINTS\b|\bgetUTCDay\b|\bDate\.UTC\b|\bBigInt\b/);
   }
   assert.doesNotMatch(guard, /from "\.\/ticket-router\.mjs"/);
   assert.doesNotMatch(fit, /from "\.\/pr-cost\.mjs"/);
-});
-
-test("underFloor compares counts: 3 of 20 over the baseline is exactly 15 points, 2 of 20 against 3 of 30 is equal", () => {
-  assert.equal(TRIP_POINTS, 15);
-  assert.equal(underFloor({ claims: 20, failed: 7 }, { claims: 20, failed: 4 }), true);
-  assert.equal(underFloor({ claims: 20, failed: 6 }, { claims: 20, failed: 4 }), false);
-  assert.equal(underFloor({ claims: 20, failed: 8 }, { claims: 20, failed: 5 }), true, "40% against 25%");
-  assert.equal(underFloor({ claims: 20, failed: 2 }, { claims: 30, failed: 3 }), false);
 });
 
 test("a model change re-enters burn-in: 3 merged on B after 30 on A is the guard's n, neither adopted nor tripped, and 20 merged on B end it again", () => {
@@ -1163,4 +1158,254 @@ test("on the committed corpus, smol-high's newest generation is claude-haiku-5-5
     .map(([c, f]) => [c, e([f.generation, f]), Object.entries(f.older).map(e)]);
   assert.deepEqual(fit, guard);
   assert.equal(guard.find(([c]) => c === "smol-high")[1][0], "claude-haiku-5-5");
+});
+
+// ---------------------------------------------------------------------------
+// Stretches: the weeks and installs a comparison is matched over
+// ---------------------------------------------------------------------------
+
+// A Pull of `ticket` at slow-high on `date`, in a session that opens with it, its row recording `version`.
+const dated = (ticket, date, version = "", o = {}) => pull(ticket, "slow-high", {
+  run_date: date, session: `${date}T10-00-00-000Z_01a00000-0000-7000-8000-000000000000`, plugin_version: version, ...o,
+});
+// The stretch each features row falls in, in file order. With no member rows every Pull is excluded, and each unit still carries its stretch.
+const stretchesOf = (rows, windowStart = null) => {
+  const w = world();
+  w.features.push(...rows);
+  return attribute({ ...parsed(w), windowStart }).map((u) => u.stretch);
+};
+const sameStretch = (s, ...at) => at.every((i) => s[i] === s[at[0]]);
+
+test("a stretch is one UTC calendar week of run_date, Monday first: Sunday ends a week, Monday opens the next, a year's turn is no cut", () => {
+  const s = stretchesOf([
+    dated(1, "2026-10-03"), dated(2, "2026-10-04"), dated(3, "2026-10-05"), dated(4, "2026-10-11"), dated(5, "2026-10-12"),
+    dated(6, "2026-12-28"), dated(7, "2027-01-03"), dated(8, "2027-01-04"),
+  ]);
+  assert.ok(sameStretch(s, 0, 1), "Saturday and Sunday close the week of Monday 2026-09-28");
+  assert.notEqual(s[1], s[2], "Monday 2026-10-05 opens the next week");
+  assert.ok(sameStretch(s, 2, 3), "Monday through Sunday are one week");
+  assert.notEqual(s[3], s[4]);
+  assert.ok(sameStretch(s, 5, 6), "Monday 2026-12-28 and Sunday 2027-01-03 are one week across the new year");
+  assert.notEqual(s[6], s[7]);
+  assert.equal(new Set(s).size, 5, "five weeks in all");
+});
+
+test("a recorded plugin_version change cuts a week in two, the cut before the Pull that records the new version", () => {
+  const s = stretchesOf([dated(1, "2026-10-05", "1.0.0"), dated(2, "2026-10-06", "1.0.0"), dated(3, "2026-10-07", "1.1.0"), dated(4, "2026-10-08", "1.1.0")]);
+  assert.ok(sameStretch(s, 0, 1));
+  assert.ok(sameStretch(s, 2, 3));
+  assert.notEqual(s[1], s[2], "one week, two stretches");
+  // The new version holds on into the next week, which a week's turn cuts on its own.
+  const next = stretchesOf([dated(1, "2026-10-07", "1.0.0"), dated(2, "2026-10-08", "1.1.0"), dated(3, "2026-10-12", "1.1.0"), dated(4, "2026-10-13", "1.1.0")]);
+  assert.deepEqual([sameStretch(next, 2, 3), next[1] !== next[2], next[0] !== next[1]], [true, true, true]);
+});
+
+test("a blank plugin_version is unknown, never itself a cut: it stays in the stretch in force, and the first version recorded cuts nothing", () => {
+  const blankBetween = stretchesOf([dated(1, "2026-10-05", "1.0.0"), dated(2, "2026-10-06", ""), dated(3, "2026-10-07", "1.0.0")]);
+  assert.ok(sameStretch(blankBetween, 0, 1, 2), "the same version either side of a blank");
+  const blankFirst = stretchesOf([dated(1, "2026-10-05", ""), dated(2, "2026-10-06", "1.0.0"), dated(3, "2026-10-07", "1.0.0")]);
+  assert.ok(sameStretch(blankFirst, 0, 1, 2), "rows before the column, then the first version recorded");
+  const changeOverBlank = stretchesOf([dated(1, "2026-10-05", "1.0.0"), dated(2, "2026-10-06", ""), dated(3, "2026-10-07", "1.1.0")]);
+  assert.ok(sameStretch(changeOverBlank, 0, 1), "the blank stays with the version before it");
+  assert.notEqual(changeOverBlank[1], changeOverBlank[2], "the cut is where the new version is first recorded");
+  const allBlank = stretchesOf([dated(1, "2026-10-05", ""), dated(2, "2026-10-09", ""), dated(3, "2026-10-12", "")]);
+  assert.deepEqual([sameStretch(allBlank, 0, 1), allBlank[1] !== allBlank[2]], [true, true], "a record that never names a version is cut by the week alone");
+});
+
+test("a return to an earlier version cuts again: 1.0.0, 1.1.0, 1.0.0 in one week are three stretches", () => {
+  const s = stretchesOf([dated(1, "2026-10-05", "1.0.0"), dated(2, "2026-10-06", "1.1.0"), dated(3, "2026-10-07", "1.0.0")]);
+  assert.equal(new Set(s).size, 3);
+});
+
+test("the cut is global and read in session order: a Pull that records no version is cut by another's, wherever it sits in the file", () => {
+  // Cell B's Pulls record no version, yet B's second Pull is on the far side of A's change in the sequence of every Pull.
+  const rows = [
+    dated(1, "2026-10-05", "", { chosen_cell: "task-high" }),
+    dated(2, "2026-10-05", "1.0.0", { session: "2026-10-05T10-30-00-000Z_x" }),
+    dated(3, "2026-10-06", "1.1.0", { session: "2026-10-06T10-00-00-000Z_x" }),
+    dated(4, "2026-10-07", "", { session: "2026-10-07T10-00-00-000Z_x", chosen_cell: "task-high" }),
+  ];
+  const s = stretchesOf(rows);
+  assert.notEqual(s[0], s[3], "the one cell's two Pulls fall either side of the other's version change");
+  assert.ok(sameStretch(s, 0, 1), "and the first Pulls, before the change, share theirs");
+  assert.ok(sameStretch(s, 2, 3));
+  // Session id first, then file order: the same Pulls filed out of order read the same.
+  const shuffled = stretchesOf([rows[3], rows[1], rows[0], rows[2]]);
+  assert.deepEqual([sameStretch(shuffled, 2, 1), sameStretch(shuffled, 0, 3), shuffled[0] !== shuffled[1]], [true, true, true]);
+  // Where sessions tie, file order decides.
+  const tied = stretchesOf([dated(1, "2026-10-05", "1.0.0"), dated(2, "2026-10-05", "1.1.0"), dated(3, "2026-10-05", "1.1.0")]);
+  assert.deepEqual([tied[0] !== tied[1], sameStretch(tied, 1, 2)], [true, true]);
+});
+
+test("the record is the windowed Pulls: a Pull before windowStart is no part of the sequence, so its version cuts nothing inside it", () => {
+  // Were the earlier Pull read, 1.0.0 then 1.1.0 would cut between the two windowed Pulls; with the window it is the first version recorded.
+  const rows = [dated(1, "2026-10-02", "1.0.0"), dated(2, "2026-10-06", ""), dated(3, "2026-10-07", "1.1.0")];
+  const s = stretchesOf(rows, "2026-10-05");
+  assert.equal(s.length, 2, "the earlier Pull is no unit");
+  assert.ok(sameStretch(s, 0, 1));
+});
+
+// ---------------------------------------------------------------------------
+// compareCells: two cells' Pulls over the stretches in which both were drawn
+// ---------------------------------------------------------------------------
+
+// A counted Pull in `stretch`: merged and one claim, spending $1 over a minute, unless told.
+const unit = (stretch, o = {}) => ({ stretch, merged: true, claims: 1, falseClaims: 0, spend: 1, workS: 60, ...o });
+// `n` such Pulls, the first `fails` of them a false claim.
+const units3 = (stretch, n, { fails = 0, ...o } = {}) => Array.from({ length: n }, (_, i) => unit(stretch, { falseClaims: i < fails ? 1 : 0, ...o }));
+const W1 = "2026-10-05/0", W2 = "2026-10-12/0", W3 = "2026-10-19/0";
+
+test("compareCells over one shared stretch is the cell's own figures: $ and minutes per merged PR, the fail rate, and the floor as counts", () => {
+  const cell = units3(W1, 20, { fails: 7, spend: 5, workS: 120 });
+  const base = units3(W1, 20, { fails: 4, spend: 10, workS: 300 });
+  const m = compareCells(cell, base);
+  assert.equal(m.stretches, 1);
+  assert.deepEqual(m.cell, { n: 20, merged: 20, claims: 20, failed: 7, usd_per_merged: 5, minutes_per_merged: 2, fail_rate: 0.35 });
+  assert.deepEqual(m.base, { n: 20, merged: 20, claims: 20, failed: 4, usd_per_merged: 10, minutes_per_merged: 5, fail_rate: 0.2 });
+  assert.equal(m.underFloor, true, "3 of 20 over the baseline is exactly 15 points");
+  assert.equal(compareCells(units3(W1, 20, { fails: 6 }), base).underFloor, false, "2 of 20 over is 10 points");
+  assert.equal(compareCells(units3(W1, 20, { fails: 8 }), units3(W1, 20, { fails: 5 })).underFloor, true, "40% against 25%");
+  assert.equal(compareCells(units3(W1, 20, { fails: 2 }), units3(W1, 30, { fails: 3 })).underFloor, false, "2 of 20 against 3 of 30 is equal");
+  assert.deepEqual(m.range("usd"), bootstrapDiffCI(cell.map((u) => bootUnit(u, "usd")), base.map((u) => bootUnit(u, "usd"))), "the range is the bootstrap of those Pulls");
+  assert.deepEqual(compareCells(units3(W1, 30, { spend: 3 }), units3(W1, 20, { spend: 10 })).range("usd"), [-7, -7]);
+});
+
+test("compareCells counts an unmerged Pull's spend and no merged PR, and a Pull's claims, not its merges, for the fail rate", () => {
+  const cell = [...units3(W1, 20, { spend: 3 }), ...units3(W1, 10, { spend: 3, merged: false, claims: 0 })];
+  const m = compareCells(cell, units3(W1, 20, { spend: 10 }));
+  assert.deepEqual([m.cell.n, m.cell.merged, m.cell.claims, m.cell.usd_per_merged], [30, 20, 20, 4.5]);
+  const two = compareCells([unit(W1, { claims: 2, falseClaims: 1 })], [unit(W1, { claims: 4, falseClaims: 1 })]);
+  assert.deepEqual([two.cell.fail_rate, two.base.fail_rate], [0.5, 0.25]);
+});
+
+test("compareCells reads no floor against a side with no claim, even in one stretch: a fail rate of 5 of 20 against none is not under it, nor none against 3 of 20", () => {
+  const noClaims = (n) => units3(W1, n, { claims: 0 });
+  for (const [cell, base] of [[units3(W1, 20, { fails: 5 }), noClaims(20)], [noClaims(20), units3(W1, 20, { fails: 3 })]]) {
+    const m = compareCells(cell, base);
+    assert.deepEqual([m.stretches, m.cell.fail_rate, m.base.fail_rate, m.underFloor, m.range("fail")], [1, null, null, false, null]);
+  }
+});
+
+test("compareCells takes only the stretches in which both cells have Pulls, and the base's others change nothing", () => {
+  const cell = [...units3(W1, 12, { fails: 6, spend: 8 }), ...units3(W2, 10, { fails: 2, spend: 6 })];
+  const base = [...units3(W2, 10, { fails: 1, spend: 10 }), ...units3(W3, 30, { fails: 0, spend: 1 })];
+  const m = compareCells(cell, base);
+  assert.equal(m.stretches, 1, "only W2 is shared");
+  assert.deepEqual([m.cell.n, m.cell.merged, m.cell.claims, m.cell.failed], [10, 10, 10, 2], "the cell's Pulls of W1 take no part");
+  assert.deepEqual([m.base.n, m.base.merged, m.base.claims, m.base.failed], [10, 10, 10, 1], "nor the base's of W3");
+  const alone = compareCells(units3(W2, 10, { fails: 2, spend: 6 }), units3(W2, 10, { fails: 1, spend: 10 }));
+  assert.deepEqual({ ...m, range: m.range("usd") }, { ...alone, range: alone.range("usd") }, "exactly the comparison of W2 alone");
+});
+
+test("compareCells with no shared stretch compares nothing: no merged PR on either side, no figure, no range, never under the floor", () => {
+  const m = compareCells(units3(W1, 25, { fails: 25, spend: 99 }), units3(W2, 25, { fails: 0 }));
+  assert.equal(m.stretches, 0);
+  assert.deepEqual(m.cell, { n: 0, merged: 0, claims: 0, failed: 0, usd_per_merged: null, minutes_per_merged: null, fail_rate: null });
+  assert.deepEqual(m.base, m.cell);
+  assert.deepEqual([m.underFloor, m.range("usd"), m.range("minutes"), m.range("fail")], [false, null, null, null]);
+  assert.equal(compareCells([], units3(W1, 20)).stretches, 0);
+  assert.equal(compareCells(units3(W1, 20), []).range("usd"), null);
+});
+
+test("compareCells pools within each stretch: a shift that hits both cells in a stretch cancels, however unevenly the cells were drawn across the stretches", () => {
+  // Both cells fail half their claims in W1 and a tenth in W2, but the cell was drawn mostly in W1 and the base mostly in W2.
+  const cell = [...units3(W1, 20, { fails: 10 }), ...units3(W2, 10, { fails: 1 })];
+  const base = [...units3(W1, 10, { fails: 5 }), ...units3(W2, 40, { fails: 4 })];
+  const m = compareCells(cell, base);
+  assert.equal(m.stretches, 2);
+  assert.equal(m.cell.fail_rate, m.base.fail_rate, "no gap within either stretch");
+  assert.equal(m.underFloor, false);
+  // Pooled over their Pulls instead, the cell's 11 of 30 against the base's 9 of 50 would be 18.7 points over the floor.
+  const together = (units) => units.map((u) => ({ ...u, stretch: undefined }));
+  assert.equal(compareCells(together(cell), together(base)).underFloor, true);
+
+  // The $ per merged PR: each stretch's gap is the same whatever the stretch's own level, so a shift per stretch leaves the pooled gap and its range alone.
+  const priced = [...units3(W1, 20, { spend: 5 }), ...units3(W2, 10, { spend: 7 })];
+  const against = [...units3(W1, 10, { spend: 8 }), ...units3(W2, 40, { spend: 9 })];
+  const shift = (units, by) => units.map((u) => ({ ...u, spend: u.spend + by[u.stretch] }));
+  const gap = (c, b) => { const x = compareCells(c, b); return [x.cell.usd_per_merged - x.base.usd_per_merged, x.range("usd")]; };
+  const [pooled, range] = gap(priced, against);
+  // Gaps of -3 in W1 and -2 in W2, weighted by 20·10/30 and 10·40/50.
+  assert.ok(Math.abs(pooled - -36 / (200 / 30 + 8)) < 1e-9, `the pooled gap is -2.4545…: ${pooled}`);
+  assert.deepEqual(range, [-2.45, -2.45]);
+  const by = { [W1]: 100, [W2]: 0.5 };
+  const [shifted, shiftedRange] = gap(shift(priced, by), shift(against, by));
+  assert.ok(Math.abs(shifted - pooled) < 1e-9);
+  assert.deepEqual(shiftedRange, range);
+});
+
+test("a cell that ran in one stretch is compared with the base's Pulls of that stretch alone, whatever the base did in its others", () => {
+  const cell = units3(W2, 20, { fails: 8, spend: 6 });
+  const alone = units3(W2, 25, { fails: 7, spend: 10 });
+  // Elsewhere the base failed nothing at $1: over its whole run it would read 7 of 105, 33 points under the cell's 40%.
+  const base = [...units3(W1, 40, { spend: 1 }), ...alone, ...units3(W3, 40, { spend: 1 })];
+  const m = compareCells(cell, base);
+  const only = compareCells(cell, alone);
+  assert.deepEqual({ ...m, range: m.range("usd") }, { ...only, range: only.range("usd") });
+  assert.deepEqual([m.stretches, m.base.n, m.base.fail_rate, m.base.usd_per_merged, m.underFloor], [1, 25, 0.28, 10, false], "8 of 20 against 7 of 25 is 12 points");
+});
+
+test("a stretch in which a side merged nothing still counts that side's spend in its $ per merged PR: every Pull of a shared stretch is kept", () => {
+  // The cell spent $100 on each of 5 abandoned Pulls in W1 and $1 on each of 5 merged in W2; the base merged its 5 of each at $10.
+  const cell = [...units3(W1, 5, { merged: false, claims: 0, spend: 100 }), ...units3(W2, 5, { spend: 1 })];
+  const base = [...units3(W1, 5, { spend: 10 }), ...units3(W2, 5, { spend: 10 })];
+  const m = compareCells(cell, base);
+  // Equal weeks weigh alike: $50.50 a Pull over half a merged PR a Pull, so $101, not the $1 of the merged week alone.
+  assert.deepEqual([m.stretches, m.cell.n, m.cell.merged, m.cell.usd_per_merged, m.base.usd_per_merged, m.cell.minutes_per_merged], [2, 10, 5, 101, 10, 2]);
+  assert.deepEqual(m.range("usd"), [91, 91], "the bootstrap pools every resample the same way");
+  // Merged only in different stretches, each side's figure still carries the spend of the week it merged nothing in.
+  const apart = compareCells([...units3(W1, 20), ...units3(W2, 5, { merged: false, claims: 0 })], [...units3(W1, 5, { merged: false, claims: 0 }), ...units3(W2, 20)]);
+  assert.deepEqual([apart.cell.merged, apart.base.merged, apart.cell.usd_per_merged, apart.base.usd_per_merged, apart.cell.minutes_per_merged], [20, 20, 2, 2, 2]);
+  assert.deepEqual([apart.cell.fail_rate, apart.underFloor, apart.range("usd")], [null, false, [0, 0]], "no week holds a claim on both sides: no fail rate, so no floor");
+});
+
+test("compareCells reads the floor in exact counts across stretches: three stretches each exactly 15 points over are 15 points over, and one short is not", () => {
+  assert.equal(TRIP_POINTS, 15);
+  const drawn = (fails) => fails.flatMap((n, k) => units3([W1, W2, W3][k], 20, { fails: n }));
+  // 7 of 20 against 4, and 5 against 2, three times over: each gap is 15 points exactly, which pooled in floating point
+  // reads as 14.999999999999996.
+  for (const base of [4, 2]) {
+    assert.equal(compareCells(drawn([base + 3, base + 3, base + 3]), drawn([base, base, base])).underFloor, true, `${base + 3} of 20 against ${base}, in each of three stretches`);
+  }
+  const base = drawn([4, 4, 4]);
+  assert.equal(compareCells(drawn([7, 7, 6]), base).underFloor, false, "a stretch short of the margin");
+  assert.equal(compareCells(drawn([8, 7, 6]), base).underFloor, true, "a stretch over and a stretch under, equally weighted, average to the margin");
+});
+
+test("the bootstrap resamples within each stretch: stretches that differ in level but not in gap give a range with no width, as one pooled stretch would not", () => {
+  const cell = [...units3(W1, 20, { spend: 10 }), ...units3(W2, 20, { spend: 30 })];
+  const base = [...units3(W1, 20, { spend: 12 }), ...units3(W2, 20, { spend: 32 })];
+  const units = (pulls) => pulls.map((u) => bootUnit(u, "usd"));
+  assert.deepEqual(bootstrapDiffCI(units(cell), units(base)), [-2, -2]);
+  const flat = (pulls) => units(pulls).map((u) => ({ ...u, stretch: undefined }));
+  const [lo, hi] = bootstrapDiffCI(flat(cell), flat(base));
+  assert.ok(hi - lo > 1, `resampled as one, the mix of W1 and W2 moves the range: [${lo}, ${hi}]`);
+});
+
+test("compareCells' fail range is in points of the fail rate: 18 of 32 against 9 of 32 is 28.125 points, its range about it", () => {
+  const [lo, hi] = compareCells(units3(W1, 32, { fails: 18 }), units3(W1, 32, { fails: 9 })).range("fail");
+  assert.ok(lo > 0 && lo < 28.125 && hi > 28.125 && hi < 60, `a range about 28.1 points: [${lo}, ${hi}]`);
+  assert.deepEqual(compareCells(units3(W1, 20, { fails: 4 }), units3(W1, 20, { fails: 4 })).range("fail").map((x) => Math.sign(x)), [-1, 1]);
+});
+
+test("on the committed corpus, smol-high is compared with slow-high only over the weeks both were drawn, and its fail-rate gap is the notes' 28 points, give or take the week", () => {
+  const read = (f) => readFileSync(new URL(`../docs/metrics/${f}`, import.meta.url), "utf8");
+  const members = parseMemberTsv(read("member-outcomes.tsv"));
+  const tiers = parseTierOutcomes(read("tier-outcomes.tsv"));
+  // The Pulls the notes read, to the end of October: a record that grows reads the same here.
+  const features = parseFeatures(read("ticket-features.tsv")).filter((f) => f.run_date <= "2026-10-31");
+  const prs = [...new Set(tiers.map((t) => t.pr))].map((number) => ({ number: Number(number), state: "MERGED" }));
+  const cells = new Map(tally(attribute({ members, tiers, features, prs, windowStart: WINDOW_START })).map((t) => [t.cell, t]));
+  const [smol, slow] = [cells.get("smol-high"), cells.get("slow-high")];
+  const weeksOf = (t) => new Set(t.pulls.map((u) => u.stretch));
+  const shared = [...weeksOf(smol)].filter((s) => weeksOf(slow).has(s));
+  const m = compareCells(smol.pulls, slow.pulls);
+  assert.deepEqual([m.stretches, shared.length, weeksOf(slow).size], [2, 2, 4], "smol-high ran in two of the four weeks slow-high did");
+  assert.deepEqual([m.cell.failed, m.cell.claims], [18, 32], "the notes' 18 of 32");
+  assert.deepEqual([m.base.n, m.base.n < slow.n, m.base.failed, m.base.claims], [63, true, 15, 63], "against slow-high's 63 Pulls of those weeks, not its 104");
+  const gap = (m.cell.fail_rate - m.base.fail_rate) * 100;
+  assert.ok(gap > 28 && gap < 36, `the notes read +28.1 points on a pool cut by session; cut by week it is ${gap.toFixed(1)}`);
+  assert.equal(m.underFloor, true);
+  const [lo, hi] = m.range("fail");
+  assert.ok(lo > 0 && lo < gap && gap < hi && hi > 45 && hi < 56, `a range about it, as the notes' [3.1, 50.0]: [${lo}, ${hi}]`);
 });

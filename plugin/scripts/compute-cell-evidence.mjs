@@ -190,14 +190,19 @@ const FIELD_WORDS = [
 
 // Merged PRs against `min_n`. A Cell is judged only while the baseline has
 // `min_n` merged PRs itself: below that the guard holds nothing back, whatever a
-// Cell's own n.
+// Cell's own n. A Cell the guard lists `unmatched` has `min_n` of its own but is
+// short of them, on its side or the baseline's, in the stretches both were drawn
+// in, so it was not judged either.
 function mergedFigure(e, g, isBase) {
   const n = e.n;
   const min = g.min_n;
   const base = g.baseline.cell;
-  const judged = isBase || g.verdict !== "none";
+  const unmatched = !isBase && Array.isArray(g.unmatched) && g.unmatched.includes(e.cell);
+  const judged = isBase || (g.verdict !== "none" && !unmatched);
   const text = n >= min
-    ? judged ? `${n} ≥ ${min} ✓` : `${n} ≥ ${min}: not judged until ${base} has ${min}`
+    ? judged ? `${n} ≥ ${min} ✓`
+      : unmatched ? `${n} ≥ ${min}: not judged, under ${min} on a side in the stretches shared with ${base}`
+        : `${n} ≥ ${min}: not judged until ${base} has ${min}`
     : `${n} of ${min}: not judged`;
   const beside = [];
   const unchecked = [];
@@ -210,9 +215,11 @@ function mergedFigure(e, g, isBase) {
 }
 
 // The fail rate with its gap to the baseline's and to the floor, worked from the
-// claim and failure counts. Whole counts and the integer cross-product are what
-// the guard itself judges by (`underFloor`), so a gap near the floor reads the
-// way the guard rules; a rounded rate never enters it.
+// claim and failure counts of the Cell's whole generation. Whole counts and the
+// integer cross-product are what the guard itself judges by, so a rounded rate
+// never enters it. The guard holds a Cell to the baseline only over the stretches
+// both were drawn in, so a gap read from the whole generations can differ from
+// the one the guard ruled on, and `tripped` is what it ruled.
 function failFigure(e, g, baseEntry, isBase) {
   const claims = count(e.n_claims);
   const failed = count(e.n_failed);

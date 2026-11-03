@@ -127,8 +127,10 @@ const line = (label, ps) => {
   out([label, ps.length, `${dates[0]}..${dates.at(-1)}`, `${fmt(o.mean, 0)}/${fmt(o.med, 0)}`, `${fmt(t.mean, 1)}/${fmt(t.med, 0)}`, `${fmt(w.mean, 0)}/${fmt(w.med, 0)}`, `${fmt(c.mean)}/${fmt(c.med)}`].join("\t"));
 };
 // Router's own bootstrap (pull-attribution.mjs bootstrapDiffCI, 2000 resamples, seed 1) over per-Pull units:
-// every unit counts as merged:1, so the figure is the mean per Pull, not per merged PR. Ends are rounded to 2 places.
-const ci = (xh, hi, sel) => bootstrapDiffCI(xh.map((p) => ({ value: sel(p), merged: 1 })), hi.map((p) => ({ value: sel(p), merged: 1 })));
+// every unit counts as one merged PR (`per: 1`) weighing one Pull, with no stretch, so all are in one together and the
+// figure is the mean per Pull, not per merged PR. Ends are rounded to 2 places.
+const unit = (value) => ({ value, per: 1, weigh: 1 });
+const ci = (xh, hi, sel) => bootstrapDiffCI(xh.map((p) => unit(sel(p))), hi.map((p) => unit(sel(p))));
 const range = (ps) => { const d = ps.map((p) => p.date).sort(); return [d[0], d.at(-1)]; };
 for (const harness of ["omp", "claude"]) {
   out();

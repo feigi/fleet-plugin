@@ -2,6 +2,10 @@
 // Derivation script for issue #4150: which pre-dispatch ticket inputs change
 // which Cell wins, and what a grouping on them would gain over one Cell.
 //
+// Run it in a checkout of 24d29a4e, the commit router-inputs.md was measured
+// at: it imports `underFloor` from pull-attribution.mjs and `ruleStratum` from
+// ticket-router.mjs, which later commits removed.
+//
 // Every figure comes from the Router's own modules, imported from this
 // checkout (plugin/scripts/): the Fit's Pull set is ticket-router.mjs's
 // `fitPulls` (attribute(...) over docs/metrics/*.tsv, window 2026-10-03,
