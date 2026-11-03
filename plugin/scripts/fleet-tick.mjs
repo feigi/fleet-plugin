@@ -527,7 +527,7 @@ export function routerRows(s) {
   const usd = (x) => (x === null ? "n/a" : `$${x.toFixed(2)}`);
   const vs = (c) => `${c.cell} ${usd(c.mean_usd)} vs ${usd(b.mean_usd)}, fail ${pct(c.fail_rate)} vs ${pct(b.fail_rate)}, n=${c.n}/${b.n}`;
   if (verdict === "tripped") {
-    const retired = g.guard.retire ? "; every non-default stage-1 cell tripped — the router retires" : "";
+    const retired = g.guard.retire ? "; every non-default starting Cell tripped — the router retires" : "";
     return row("DEFAULT-ONLY", `cost guard: ${cells.filter((c) => tripped.includes(c.cell)).map(vs).join("; ")}${retired}; ${age}`);
   }
   const others = cells.filter((c) => c.cell !== b.cell);

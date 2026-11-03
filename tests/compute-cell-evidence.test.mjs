@@ -649,6 +649,11 @@ test("burn-in, fitted: starting Cells short by different counts are each named, 
   assert.match(heading({ tripped: [], n: { ...n, "task-high": 69 } }), /^burn-in at its fit on .*: smol-high had 3 of the 20 merged PRs it needs;/);
 });
 
+test("burn-in, fitted: a table still in burn-in whose every starting Cell has its merged PRs says so", () => {
+  const n = { "slow-high": 69, "task-high": 20, "smol-high": 20, "slow-medium": 0, "task-max": 0 };
+  assert.equal(sideOf(policy({ table: FITTED({ guard: { tripped: [], n } }) })).heading, "burn-in at its fit on feigi/fleet-plugin's runs: every starting Cell had its merged PRs; every Pull drawn over 3 Cells");
+});
+
 test("K counts the Cells the draw uses under the guard: a tripped Cell is not one, and none left is no draw", () => {
   const tripped = (cells) => guardOk(TODAY().guard.cells, { verdict: "tripped", tripped: cells });
   assert.equal(sideOf(policy({ guard: tripped(["smol-high"]) })).heading, "never fitted: every Pull drawn over 2 Cells");
@@ -934,6 +939,12 @@ test("a Fit out of burn-in has no burn-in heading; a single short starting Cell,
   // A Cell beyond the starting ones, short of MIN_N, is no part of burn-in: the heading never names it.
   const beyond = FIT({ cells: FIVE, burn_in: true, guard: { tripped: [], n: { "slow-high": 69, "task-high": 69, "smol-high": 7, "slow-medium": 0, "task-max": 0 } } });
   assert.equal(heading(beyond), "burn-in: smol-high has 7 of the 20 merged PRs it needs");
+});
+
+test("a Fit in burn-in whose every starting Cell has its merged PRs says so, in the present tense", () => {
+  const heading = (table) => favoursOf(favours({ fit: FIT_READ({ table }) })).heading;
+  const none = FIT({ burn_in: true, guard: { tripped: [], n: { "slow-high": 69, "task-high": 20, "smol-high": 32 } } });
+  assert.equal(heading(none), "burn-in: every starting Cell has its merged PRs");
 });
 
 test("heading label: fitted beside another guard fires only when guard_computed_at differs from the guard's computed_at", () => {

@@ -37,7 +37,7 @@
 import { isDeepStrictEqual } from "node:util";
 import { CELL, OBJECTIVES, POLICY_CELL } from "./ledger-grammar.mjs";
 import { costGuardFault } from "./fleet-tick.mjs";
-import { MIN_N, STARTING_CELLS, parseGuard, readGuard, rowDispatch } from "./ticket-router.mjs";
+import { MIN_N, parseGuard, readGuard, rowDispatch, shortStartingCells } from "./ticket-router.mjs";
 import { implementerCell, modelsEqual, parseModelRoute, resolveRole } from "./tier-roles.mjs";
 
 // The implementer Cells, in the order the guard section draws them: one per
@@ -505,7 +505,7 @@ function routesSource(table, install, repoUrl) {
 // present for the Fit, whose counts are the workspace's own now ("has",
 // "have").
 function shortWords(table, tense = "past") {
-  const short = STARTING_CELLS.filter((c) => (table.guard.n[c] ?? 0) < MIN_N).map((c) => [c, table.guard.n[c] ?? 0]);
+  const short = shortStartingCells(table.guard.n);
   if (short.length === 0) return null;
   const each = short.length === 1 ? "it needs" : "each needs";
   const one = tense === "past" ? "had" : "has";

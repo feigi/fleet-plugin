@@ -7,10 +7,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import {
-  DEFAULT_TABLE, STARTING_CELLS, bArmLive, installVersion, issueMetrics, route, rowDispatch, rowFor, fitTable, readGuard, stratumOf, validateTable, formatFeatureRow, mergedSince, resolveCommit, sliceParent,
+  DEFAULT_TABLE, bArmLive, installVersion, issueMetrics, route, rowDispatch, rowFor, fitTable, readGuard, stratumOf, validateTable, formatFeatureRow, mergedSince, resolveCommit, sliceParent,
 } from "../plugin/scripts/ticket-router.mjs";
 import { FEATURE_COLUMNS as COLUMNS, parseFeatures } from "../plugin/scripts/pull-attribution.mjs";
-import { drawCell, CELL, formatRouting, parseRouting } from "../plugin/scripts/ledger-grammar.mjs";
+import { drawCell, CELL, STARTING_CELLS, formatRouting, parseRouting } from "../plugin/scripts/ledger-grammar.mjs";
 import { COLUMNS as MEMBER_COLUMNS, parseTsv as parseMemberTsv } from "../plugin/scripts/member-outcomes.mjs";
 import { COLUMNS as VERDICT_COLUMNS } from "../plugin/scripts/tier-outcomes.mjs";
 import { rendering } from "./support/rendered-brief.mjs";

@@ -854,6 +854,12 @@ export const CELL_DEF = new RegExp(`^fleet-implementer-${CELL.source.slice(1)}`)
 // bare row to.
 export const POLICY_CELL = "slow-high";
 
+// The Cells burn-in covers: the three models at `high`. A Cell exploration adds
+// is none of them, whatever its merged PRs: burn-in neither draws it nor waits
+// for it. Exported so ticket-router.mjs's burn-in and pr-cost.mjs's retire
+// condition read one list, though neither script imports the other.
+export const STARTING_CELLS = Object.freeze(["slow-high", "task-high", "smol-high"]);
+
 // The Exploration Pull's draw: uniform over every cell but
 // `policyCell`, keyed off the row's own `session` and `ticket`, so the draw
 // is reproducible from the row and a re-dispatch of the same ticket in the

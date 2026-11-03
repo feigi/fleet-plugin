@@ -88,6 +88,7 @@ import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
 import { AttributionError, TRIP_POINTS, attribute, bootUnit, bootstrapDiffCI, parseFeatures, tally, underFloor } from "./pull-attribution.mjs";
+import { STARTING_CELLS } from "./ledger-grammar.mjs";
 import { RulingError, parseTierOutcomes } from "./tier-outcomes.mjs";
 
 const NAME = "pr-cost";
@@ -97,8 +98,6 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 // this constant in a reviewed change.
 export const WINDOW_START = "2026-10-03";
 export const BASELINE_CELL = "slow-high";
-// Stage 1 is the model axis at fixed `high`.
-export const STAGE_1 = ["slow-high", "task-high", "smol-high"];
 export const MIN_N = 20;
 export const EXIT = { ok: 0, tripped: 3, none: 4 };
 export const GH_PR_LIMIT = 1000;
@@ -221,10 +220,10 @@ export function computeReport({ members, tiers, features, prs, routerTable = nul
     }
   }
   const verdict = baseline.n < MIN_N ? "none" : tripped.length ? "tripped" : "ok";
-  // Retire: every non-default stage-1 cell tripped before any row of either
+  // Retire: every non-default starting Cell tripped before any row of either
   // objective's set adopted one.
   const adopted = Object.values(routerTable?.rows ?? {}).some((set) => Object.values(set).some((c) => c !== BASELINE_CELL));
-  const retire = !adopted && STAGE_1.filter((c) => c !== BASELINE_CELL).every((c) => tripped.includes(c));
+  const retire = !adopted && STARTING_CELLS.filter((c) => c !== BASELINE_CELL).every((c) => tripped.includes(c));
 
   return {
     window_start: windowStart,
@@ -312,7 +311,7 @@ export function formatReport(report) {
     for (const o of f.older) lines.push(line(o, "older"));
   }
   const b = report.baseline;
-  lines.push(`# verdict: ${report.verdict} (baseline ${b.cell} n=${b.n}/${MIN_N}${report.tripped.length ? `; tripped ${report.tripped.join(" ")}` : ""})${report.retire ? " — retire: every non-default stage-1 cell tripped" : ""}`);
+  lines.push(`# verdict: ${report.verdict} (baseline ${b.cell} n=${b.n}/${MIN_N}${report.tripped.length ? `; tripped ${report.tripped.join(" ")}` : ""})${report.retire ? " — retire: every non-default starting Cell tripped" : ""}`);
   lines.push(`# window_start ${report.window_start}; pending PRs: ${report.pending.length ? report.pending.join(" ") : "none"}`);
   const ab = report.ab;
   lines.push(ab.status === "not-run"

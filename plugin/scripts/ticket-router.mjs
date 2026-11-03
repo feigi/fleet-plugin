@@ -60,7 +60,7 @@ import { isDeepStrictEqual } from "node:util";
 import { isCLI } from "./is-cli.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { makeDie, defineFlags } from "./arg.mjs";
-import { CELL, OBJECTIVES, POLICY_CELL, drawCell, formatRouting, isRulePath, parseMember } from "./ledger-grammar.mjs";
+import { CELL, OBJECTIVES, POLICY_CELL, STARTING_CELLS, drawCell, formatRouting, isRulePath, parseMember } from "./ledger-grammar.mjs";
 import { objectiveFromReceipt, sessionFromReceipt } from "./phase0-receipt.mjs";
 import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
 import {
@@ -81,9 +81,10 @@ const EXPLORE_EVERY = 5;
 export const MIN_N = 20;
 const ADOPT_RATIO = 0.75;
 export const FIT_EVERY_MERGED = 50;
-// The Cells burn-in covers: the three models at `high`. A Cell exploration adds is none of them, whatever its merged
-// PRs: burn-in neither draws it nor waits for it.
-export const STARTING_CELLS = Object.freeze(["slow-high", "task-high", "smol-high"]);
+// The starting Cells short of MIN_N merged PRs in a guard's `n`, each with its
+// count, in their order: burn-in holds while any is. A Cell the guard has no
+// count for has 0.
+export const shortStartingCells = (n) => STARTING_CELLS.map((c) => [c, n[c] ?? 0]).filter(([, k]) => k < MIN_N);
 const KINDS = new Set(["bug", "enhancement", "documentation"]);
 const DAY_MS = 86_400_000;
 
@@ -811,7 +812,7 @@ export function fitTable({ prior, features, members, verdicts, guard, commit = n
     fitted_commit: commit,
     n_rows: units.length,
     cells: prior.cells,
-    burn_in: !STARTING_CELLS.every((c) => (guard.n[c] ?? 0) >= MIN_N),
+    burn_in: shortStartingCells(guard.n).length > 0,
     splits: prior.splits,
     rows,
     classifier: prior.classifier,
