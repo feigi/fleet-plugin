@@ -812,7 +812,7 @@ test("parseFeatures refuses a ticket, or a non-blank parent, that is not an issu
 
 test("parseFeatures reads the named-path, title and version columns by name, and blank from a header written before them", () => {
   const named = ["named_paths", "named_lines", "dirs", "title", "plugin_version"];
-  assert.deepEqual(FEATURE_COLUMNS.slice(FEATURE_COLUMNS.indexOf("parent") + 1), named, "appended after parent, in this order");
+  assert.deepEqual(FEATURE_COLUMNS.slice(FEATURE_COLUMNS.indexOf("parent") + 1, -1), named, "appended after parent, in this order");
   const values = { ticket: "7", chosen_cell: "slow-high", named_paths: "plugin/a.mjs docs/b.md:3-9", named_lines: "12 -", dirs: "2", title: "a title", plugin_version: "1.2.3" };
   const text = (cols) => `${cols.join("\t")}\n${cols.map((c) => values[c] ?? "").join("\t")}\n`;
   const [withThem] = parseFeatures(text(FEATURE_COLUMNS));
@@ -820,6 +820,15 @@ test("parseFeatures reads the named-path, title and version columns by name, and
   const [without] = parseFeatures(text(FEATURE_COLUMNS.filter((c) => !named.includes(c))));
   assert.deepEqual(named.map((c) => without[c]), named.map(() => ""));
   assert.deepEqual({ ...without, ...Object.fromEntries(named.map((c) => [c, withThem[c]])) }, withThem, "every other column reads the same");
+});
+
+test("parseFeatures reads assignment_prob, the last column, as written, and blank — unknown, never 1 or 0 — from a header written before it", () => {
+  assert.equal(FEATURE_COLUMNS.at(-1), "assignment_prob");
+  const text = (cols, prob) => `${cols.join("\t")}\n${cols.map((c) => ({ ticket: "7", chosen_cell: "slow-high", assignment_prob: prob })[c] ?? "").join("\t")}\n`;
+  for (const prob of ["1", "4/5", "1/15"]) assert.equal(parseFeatures(text(FEATURE_COLUMNS, prob))[0].assignment_prob, prob);
+  const [without] = parseFeatures(text(FEATURE_COLUMNS.slice(0, -1), "4/5"));
+  assert.equal(without.assignment_prob, "");
+  assert.equal(without.ticket, "7");
 });
 
 test("admissibleRow: the cell's own definition at its level with a dispatch model on record, and nothing short of all three", () => {

@@ -282,7 +282,16 @@ unparseable or not a valid table routes by the starting table beside the
 script, and `REASON` says so (`fit-missing`, `fit-unreadable`, `fit-invalid`).
 A missing or unreadable `.fleet/cost-guard.json` routes the
 default cell only (`REASON=guard-missing`), burn-in included, whatever the Fit
-holds. On the ledger the
+holds. Past burn-in an exploring Pull draws over its group's exploration
+Cells, around the group's `cost` row Cell: its role one effort level up and
+one down, the bigger model one level lower, the smaller model one level
+higher — those this install runs (a definition, at a level omp's catalog lists
+for the role's `modelRoles` model, both read by the router) and the guard has
+not tripped. The router writes the Pull's ticket-features row with
+`assignment_prob`, the probability its Cell was assigned with: in burn-in 1
+over the Cells drawn; past it 4/5 at the group's Cell, 1/5 of 1 over the Cells
+drawn on an exploring Pull, and 1 where no Cell could be drawn (a chain head,
+no guard, no candidate left). On the ledger the
 whole line, `REASON` with it, is the Pull's `## Routed` entry; a row carries no
 `route=` (an older row's `route=<REASON>` still reads).
 

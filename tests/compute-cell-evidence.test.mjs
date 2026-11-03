@@ -682,16 +682,16 @@ test("verdict none holds nothing back: the table is the dispatch", () => {
   const none = guardOk(TODAY().guard.cells, { verdict: "none" });
   const p = policy({ guard: none, table: FITTED({ burn_in: false }) });
   assert.equal(sideOf(p).heading, null, "no burn-in, no guard heading");
-  assert.equal(sideOf(p).dispatch, "the row's Cell; every 5th Pull drawn over the rest");
+  assert.equal(sideOf(p).dispatch, "the row's Cell; every 5th Pull drawn over the group's exploration Cells");
   assert.equal(lineOf(p, "cost", ABOVE).sides[0].cell, "task-high");
 });
 
 test("per-row exceptions: a tripped row Cell replaced by slow-high shows on its row, the shared dispatch in the heading", () => {
   const tripped = guardOk(TODAY().guard.cells, { verdict: "tripped", tripped: ["task-high"] });
   const p = policy({ guard: tripped, table: FITTED({ burn_in: false }) });
-  assert.equal(sideOf(p).dispatch, "the row's Cell; every 5th Pull drawn over the rest");
+  assert.equal(sideOf(p).dispatch, "the row's Cell; every 5th Pull drawn over the group's exploration Cells");
   const above = lineOf(p, "cost", ABOVE).sides[0];
-  assert.deepEqual([above.cell, above.held, above.dispatch], ["slow-high", "task-high tripped", "slow-high, the row's task-high tripped; every 5th Pull drawn over the rest"]);
+  assert.deepEqual([above.cell, above.held, above.dispatch], ["slow-high", "task-high tripped", "slow-high, the row's task-high tripped; every 5th Pull drawn over the group's exploration Cells"]);
   const star = lineOf(p, "cost", "*").sides[0];
   assert.equal(star.dispatch, null, "a row that dispatches like the rest names no dispatch of its own");
   assert.equal(lineOf(p, "speed", ABOVE).sides[0].dispatch, above.dispatch, "under both Objectives");

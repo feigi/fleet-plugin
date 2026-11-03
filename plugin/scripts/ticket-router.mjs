@@ -8,6 +8,7 @@
 //         --impl-row <k> --issue <issue.json> --guard <cost-guard.json>
 //         [--sizing <sizing.json>] [--table <router-table.json>]
 //         [--chain-head] [--pending <tsv>]
+//         [--model-roles <json>] [--catalog <json>] [--agents <dir>]
 //     Prints one line, the Pull's Routing (ledger-grammar.mjs owns its
 //     grammar): `POLICY=<cell> CELL=<cell> DRAW=<k/K|-> BY=<burn-in|every-5th|->
 //     STRATUM=<rule path> BRIEF=<chars|-> CRITERIA=<n|-> PARENT=<N|->
@@ -29,7 +30,14 @@
 //     an unreadable/invalid table: the caller does not dispatch then. With no
 //     `--session`, the session is the one the phase-0 receipt
 //     `.fleet/phase0.json` records, and with no `--objective` the objective
-//     is; a receipt that records none is exit 2.
+//     is; a receipt that records none is exit 2. A Pull past burn-in that is
+//     no chain head reads what the install runs, for its group's exploration
+//     Cells: `modelRoles` (`omp config get modelRoles --json`, or the file
+//     `--model-roles` names, holding that record), omp's model catalog
+//     (`omp models --json`, or the file `--catalog` names) and the
+//     implementer definitions in the agents directory beside the script
+//     (or `--agents`). A read that fails warns and leaves the Pull no Cell
+//     to draw.
 //   fit --table <json> --features <tsv> --members <tsv> --verdicts <tsv>
 //       --guard <cost-guard.json> --commit <rev> [--due]
 //     Re-fits the table from the three TSVs as committed at `--commit` (read
@@ -49,10 +57,10 @@
 //     not hold exits 2 naming the `git fetch` that brings it.
 //
 // The script never touches the network: the issue, the sizing verdict and
-// the guard are files the caller wrote, and a fitted commit is fetched by the
-// caller.
+// the guard are files the caller wrote, a fitted commit is fetched by the
+// caller, and the install reads ask the local `omp`.
 
-import { readFileSync, writeFileSync, renameSync, appendFileSync, mkdirSync, statSync, realpathSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync, renameSync, appendFileSync, mkdirSync, statSync, realpathSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -68,6 +76,7 @@ import {
 } from "./pull-attribution.mjs";
 import { RulingError, parseTierOutcomes } from "./tier-outcomes.mjs";
 import { LINE_REF, briefPaths, briefText } from "./ticket-text.mjs";
+import { catalogEntry, implementerCell, readOmpConfigValue, readOmpModelCatalog, resolveRole } from "./tier-roles.mjs";
 
 const NAME = "ticket-router";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -375,12 +384,57 @@ export function bArmLive(table, objective) {
 /** The row a group routes by: its own, else the `*` row's — as a name no node of the table holds does, such as a group a Routing filed under another table names. */
 export const rowFor = (rows, stratum) => rows[stratum] ?? rows["*"];
 
+// The fleet's roles by price, cheapest first: the model one step along is the bigger one.
+const ROLES_BY_PRICE = Object.freeze(["smol", "task", "slow"]);
+// The levels a Cell can name, by effort, lowest first: the order a role's ladder is read in.
+const LEVELS = Object.freeze(CELL.source.match(/\)-\(([^)]*)\)/)[1].split("|"));
+const rank = (level) => LEVELS.indexOf(level);
+
 /**
- * The Cells an exploring Pull may draw, before the guard's tripped Cells (and, after burn-in, the policy Cell) leave
- * any out: burn-in draws the starting Cells, whatever `cells` the table holds, and a draw after it the table's own.
- * The fit judges `burn_in` over the same starting Cells, so the Cells that end burn-in are the Cells it draws.
+ * What this install can run, for the exploration draw: `ladders`, per role, the levels its `modelRoles` target runs
+ * at in omp's model catalog, by effort, lowest first ([] for a role that resolves to no model or to one the catalog
+ * does not list); `defined`, the Cells an implementer definition exists for. `definitions` is the agents
+ * directory's file names.
  */
-const drawPool = (table) => (table.burn_in ? STARTING_CELLS : table.cells);
+export function installOf({ modelRoles, catalog, definitions }) {
+  const ladders = Object.fromEntries(ROLES_BY_PRICE.map((role) => {
+    const model = resolveRole(role, modelRoles);
+    const thinking = model === null ? null : catalogEntry(model, catalog)?.thinking;
+    return [role, Array.isArray(thinking) ? LEVELS.filter((l) => thinking.includes(l)) : []];
+  }));
+  return { ladders, defined: new Set(definitions.map(implementerCell).filter((c) => c !== null)) };
+}
+
+/**
+ * The exploration Cells of a group whose `cost` row Cell is `centre`, on `ladders` (installOf's): the role's next
+ * level above and next level below on its own ladder, the bigger model's next level below, the smaller model's
+ * next level above. A rung a ladder does not hold is absent: there is no level above its top, no bigger model
+ * above `slow` and no smaller one below `smol`.
+ */
+export function explorationCells(centre, ladders) {
+  const [, role, level] = CELL.exec(centre);
+  const above = (r) => ladders[r].find((l) => rank(l) > rank(level));
+  const below = (r) => ladders[r].findLast((l) => rank(l) < rank(level));
+  const at = ROLES_BY_PRICE.indexOf(role);
+  const bigger = ROLES_BY_PRICE[at + 1];
+  const smaller = ROLES_BY_PRICE[at - 1];
+  return [
+    [role, above(role)], [role, below(role)],
+    [bigger, bigger && below(bigger)], [smaller, smaller && above(smaller)],
+  ].filter(([, l]) => l !== undefined).map(([r, l]) => `${r}-${l}`);
+}
+
+/**
+ * The Cells an exploring Pull may draw, before the guard's tripped Cells leave any out: burn-in draws the starting
+ * Cells, whatever `cells` the table holds; a draw after it the exploration Cells around `centre`, the group's `cost`
+ * row Cell, that `install` (installOf's) can run — none when the install was not read (null). The fit judges
+ * `burn_in` over the same starting Cells, so the Cells that end burn-in are the Cells it draws.
+ */
+const drawPool = (table, centre, install) => {
+  if (table.burn_in) return STARTING_CELLS;
+  if (install === null) return [];
+  return explorationCells(centre, install.ladders).filter((c) => install.defined.has(c));
+};
 
 /**
  * What `route` does with one row under one guard, with no per-Pull input.
@@ -388,20 +442,20 @@ const drawPool = (table) => (table.burn_in ? STARTING_CELLS : table.cells);
  * default cell when there is no guard or the row's Cell is tripped; `reason`
  * is `guard-missing`, `table-cell-tripped` or `ok`. `draw` is what an
  * exploring Pull picks from — `by` `burn-in` (every Pull) or `every-5th` —
- * over `cells`: drawPool()'s Cells less the tripped, and on an every-5th draw
- * less the `cost` row's Cell for the stratum too, as the guard leaves it (the
- * default cell when that row's Cell is tripped), whichever objective routes
- * the row. It is null with no guard and when no Cell is left to draw.
+ * over `cells`: drawPool()'s Cells less the tripped, centred on the `cost`
+ * row's Cell for the stratum as the guard leaves it (the default cell when
+ * that row's Cell is tripped), whichever objective routes the row. `install`
+ * is installOf's answer, or null where it was not read: an every-5th draw
+ * then has no Cell. `draw` is null with no guard and when no Cell is left.
  * @returns {{ policy: string, reason: "guard-missing"|"table-cell-tripped"|"ok", draw: null | { by: "burn-in"|"every-5th", cells: string[] } }}
  */
-export function rowDispatch({ table, guard, objective, stratum }) {
+export function rowDispatch({ table, guard, objective, stratum, install = null }) {
   if (guard === null) return { policy: POLICY_CELL, reason: "guard-missing", draw: null };
   const tripped = new Set(guard.tripped);
   const adjust = (cell) => (tripped.has(cell) ? POLICY_CELL : cell);
   const row = rowFor(table.rows[objective], stratum);
   const by = table.burn_in ? "burn-in" : "every-5th";
-  const left = drawPool(table).filter((c) => !tripped.has(c));
-  const cells = table.burn_in ? left : left.filter((c) => c !== adjust(rowFor(table.rows.cost, stratum)));
+  const cells = drawPool(table, adjust(rowFor(table.rows.cost, stratum)), install).filter((c) => !tripped.has(c));
   return {
     policy: adjust(row),
     reason: tripped.has(row) ? "table-cell-tripped" : "ok",
@@ -483,22 +537,40 @@ export function sessionDate(session) {
 }
 
 /**
+ * The probability that a Pull's Cell was assigned to it, as a fraction that reads back exactly: `1`, or `<n>/<d>` in
+ * lowest terms. `K` is the number of Cells the Pull's draw was over (rowDispatch's `cells`), 0 where there was none
+ * to draw — no guard, every candidate tripped or absent — and the Pull's Cell was certain. A burn-in Pull draws, chain
+ * head or not, so it is 1/K. After burn-in a chain head never explores, so it is 1; an exploring Pull is the
+ * exploring share times 1/K; any other Pull runs its group's Cell at the share left.
+ */
+export function assignmentProb({ burnIn, chainHead, exploring, K }) {
+  if (K === 0 || (burnIn && K === 1)) return "1";
+  if (burnIn) return `1/${K}`;
+  if (chainHead) return "1";
+  return exploring ? `1/${EXPLORE_EVERY * K}` : `${EXPLORE_EVERY - 1}/${EXPLORE_EVERY}`;
+}
+
+/**
  * One Pull's routing, by `objective`'s row set. Every input is already read
  * but the paths the brief names, which `named_lines` reads under `root`, the
  * checkout. `version` is the install's, `plugin_version` on the row. The
  * ticket's group is the node the tree's walk ends at (stratumOf), and the row
  * set's row for it routes the Pull. The exploration draw ignores the objective:
- * it leaves out the cell the `cost` set routes the group to, whichever set
- * routes the Pull, so a Pull draws the same cell under both. A live B Pull
+ * it is centred on the cell the `cost` set routes the group to, whichever set
+ * routes the Pull, so a Pull draws the same cell under both. `install` is
+ * installOf's answer, or null where it was not read, which leaves an every-5th
+ * Pull nothing to draw. A live B Pull
  * records its sizing verdict and routes as an A Pull does: a label names no
  * group of the tree. `fallback` is readFitBeside's REASON when `table` is the
  * starting table standing in for a Fit, else null: it is the first thing that
- * went wrong, except beside no guard, where the table routes nothing.
+ * went wrong, except beside no guard, where the table routes nothing. The row's
+ * `assignment_prob` is the probability the Pull's Cell was assigned with
+ * (assignmentProb).
  * @returns {{ line: string, row: Record<string,string> }}
  */
 export function route({
   session, ticket, arm, implRow, chainHead = false, issue, sizing = null, guard, table, objective, now = Date.now(),
-  root = process.cwd(), version = installVersion(), fallback = null,
+  root = process.cwd(), version = installVersion(), fallback = null, install = null,
 }) {
   let reason = null;
   const degrade = (r) => { reason ??= r; };
@@ -525,7 +597,7 @@ export function route({
     }
   }
 
-  const dispatch = (o) => rowDispatch({ table, guard, objective: o, stratum });
+  const dispatch = (o) => rowDispatch({ table, guard, objective: o, stratum, install });
   const policyRow = dispatch(objective);
   const drawRow = dispatch("cost");
   if (policyRow.reason !== "ok") degrade(policyRow.reason);
@@ -535,13 +607,13 @@ export function route({
   let cell = policy;
   let draw = null;
   let by = null;
+  let exploring = false;
   if (guard !== null) {
-    const exploring = table.burn_in || (implRow % EXPLORE_EVERY === 0 && !chainHead);
+    exploring = table.burn_in || (implRow % EXPLORE_EVERY === 0 && !chainHead);
     if (exploring) {
-      const policyCell = table.burn_in ? null : drawRow.policy;
-      if (drawPool(table).some((c) => c !== policyCell && guard.tripped.includes(c))) degrade("guard-tripped");
+      if (drawPool(table, drawRow.policy, install).some((c) => guard.tripped.includes(c))) degrade("guard-tripped");
       if (drawRow.draw !== null) {
-        // rowDispatch already left the policy Cell out of `cells`: nothing more to withhold.
+        // rowDispatch's `cells` never hold the group's own Cell: nothing more to withhold.
         const d = drawCell({ session, ticket, policyCell: null, cells: drawRow.draw.cells });
         cell = d.cell;
         draw = { k: d.k, K: d.K };
@@ -550,11 +622,13 @@ export function route({
     }
   }
   reason ??= "ok";
+  const prob = assignmentProb({ burnIn: table.burn_in, chainHead, exploring, K: drawRow.draw?.cells.length ?? 0 });
 
   const row = {
     run_date: sessionDate(session), session, agent: `impl-${ticket}`, ticket: String(ticket),
     policy_cell: policy, chosen_cell: cell, exploration_draw: draw === null ? "" : `${draw.k}/${draw.K}`,
     sizing_src: sizingSrc, sizing_pre: sizingPre, router_usd: routerUsd, ...m, objective, plugin_version: version ?? "",
+    assignment_prob: prob,
   };
   const line = formatRouting({
     policy, cell, draw, by, stratum,
@@ -900,7 +974,7 @@ function main() {
   const F = defineFlags(die, {
     flags: {
       session: "value", objective: "value", ticket: "value", arm: "value", "impl-row": "value", issue: "value",
-      sizing: "value", guard: "value", table: "value", pending: "value", "chain-head": "bool",
+      sizing: "value", guard: "value", table: "value", pending: "value", "chain-head": "bool", "model-roles": "value", catalog: "value", agents: "value",
       features: "value", members: "value", verdicts: "value", commit: "value", check: "bool", due: "bool",
     },
     positionals: ["route", "fit"],
@@ -913,7 +987,7 @@ function main() {
     die("usage: ticket-router.mjs route … | fit … | --check … — exactly one mode");
   }
   const allowed = {
-    route: ["session", "objective", "ticket", "arm", "impl-row", "issue", "sizing", "guard", "table", "pending", "chain-head"],
+    route: ["session", "objective", "ticket", "arm", "impl-row", "issue", "sizing", "guard", "table", "pending", "chain-head", "model-roles", "catalog", "agents"],
     fit: ["table", "features", "members", "verdicts", "guard", "commit", "due"],
     check: ["check", "table", "features", "members", "verdicts"],
   }[mode];
@@ -963,10 +1037,26 @@ function main() {
     }
     const version = installVersion();
     if (version === null) process.stderr.write(`${NAME}: WARNING ${INSTALL_PACKAGE} names no readable version — plugin_version is blank\n`);
+    const guard = readGuard(readJson(guardPath));
+    const chainHead = F.has("chain-head");
+    // Only a Pull past burn-in that may explore reads what the install runs: its draw, or the share it ran at, needs
+    // the group's exploration Cells. A read that fails leaves the Pull no Cell to draw, and warns, never the exit.
+    let install = null;
+    if (guard !== null && !table.burn_in && !chainHead) {
+      try {
+        install = installOf({
+          modelRoles: F.arg("model-roles") === null ? readOmpConfigValue("modelRoles") : JSON.parse(readFileSync(F.arg("model-roles"), "utf8")),
+          catalog: F.arg("catalog") === null ? readOmpModelCatalog() : JSON.parse(readFileSync(F.arg("catalog"), "utf8")),
+          definitions: readdirSync(F.arg("agents") ?? join(SCRIPT_DIR, "..", "agents")),
+        });
+      } catch (e) {
+        process.stderr.write(`${NAME}: WARNING cannot read what this install runs: ${e.message} — no exploration Cell is drawn\n`);
+      }
+    }
     const { line, row } = route({
-      session, ticket: Number(ticket), arm, implRow: Number(implRowArg), chainHead: F.has("chain-head"),
-      issue: readJson(issuePath), sizing: readJson(F.arg("sizing")), guard: readGuard(readJson(guardPath)), table, objective, root, version,
-      fallback: fit?.fallback ?? null,
+      session, ticket: Number(ticket), arm, implRow: Number(implRowArg), chainHead,
+      issue: readJson(issuePath), sizing: readJson(F.arg("sizing")), guard, table, objective, root, version,
+      fallback: fit?.fallback ?? null, install,
     });
     const pending = F.arg("pending") ?? join(dirname(guardPath), "ticket-features.pending.tsv");
     // The header decision and the append are not atomic and take no lock. That is

@@ -252,18 +252,20 @@ test("a pending file with a column the corpus lacks fails the drain, leaves the 
 });
 
 // A corpus or pending file from before a column lacks every later column too:
-// `objective`, then `parent`, then the named-path columns, the title and the plugin version.
+// `objective`, then `parent`, then the named-path columns, the title and the plugin version, then the assignment
+// probability.
 const NAMED = ["named_paths", "named_lines", "dirs", "title", "plugin_version"];
-const OLDER = [["objective", "parent", ...NAMED], ["parent", ...NAMED], NAMED];
+const PROB = "assignment_prob";
+const OLDER = [["objective", "parent", ...NAMED, PROB], ["parent", ...NAMED, PROB], [...NAMED, PROB], [PROB]];
 
-test("a corpus written before the objective, parent or named-path columns gains them, blank on the rows it holds, when the pending file carries them", () => {
+test("a corpus written before the objective, parent, named-path or assignment columns gains them, blank on the rows it holds, when the pending file carries them", () => {
   for (const lacks of OLDER) {
     const rows = corpus();
     ruled(rows, { ticket: 1 });
     const older = FEATURE_COLUMNS.filter((c) => !lacks.includes(c));
     const fresh = pull({
       ticket: "2", agent: "impl-2", objective: "speed", parent: "3177",
-      named_paths: "plugin/a.mjs docs/gone.md", named_lines: "12 -", dirs: "2", title: "A title", plugin_version: "1.2.3",
+      named_paths: "plugin/a.mjs docs/gone.md", named_lines: "12 -", dirs: "2", title: "A title", plugin_version: "1.2.3", assignment_prob: "1/15",
     });
     const f = fixture({ rows, pending: featuresTsv([fresh]) });
     write(f.repo, FEATURES, featuresTsv(rows.features, older));
@@ -275,10 +277,10 @@ test("a corpus written before the objective, parent or named-path columns gains 
   }
 });
 
-test("a pending file written before the objective, parent or named-path columns drains, its rows blank in them", () => {
+test("a pending file written before the objective, parent, named-path or assignment columns drains, its rows blank in them", () => {
   for (const lacks of OLDER) {
     const older = FEATURE_COLUMNS.filter((c) => !lacks.includes(c));
-    const fresh = pull({ ticket: "2", agent: "impl-2", parent: "3177", title: "A title" });
+    const fresh = pull({ ticket: "2", agent: "impl-2", parent: "3177", title: "A title", assignment_prob: "4/5" });
     const f = fixture({ pending: featuresTsv([fresh], older) });
     const r = f.run();
     assert.equal(r.status, 0, r.stderr);
@@ -326,8 +328,14 @@ function routeIn(f, table = null) {
     writeFileSync(path, JSON.stringify(table));
     tableArgs.push("--table", path);
   }
+  // A fixed install, so a Pull past burn-in reads no live omp.
+  const roles = join(f.root, "model-roles.json");
+  const catalog = join(f.root, "catalog.json");
+  writeFileSync(roles, JSON.stringify({ slow: "anthropic/claude-opus-5-5", task: "anthropic/claude-sonnet-5-5", smol: "anthropic/claude-haiku-4-5" }));
+  writeFileSync(catalog, JSON.stringify({ models: ["opus-5-5", "sonnet-5-5", "haiku-4-5"].map((m) => ({ selector: `anthropic/claude-${m}`, thinking: ["low", "medium", "high", "xhigh"] })) }));
   const r = spawnSync(process.execPath, [ROUTER, "route", "--session", SESSION, "--objective", "cost", "--ticket", "42", "--arm", "A", "--impl-row", "3",
-    "--issue", issue, "--guard", join(f.repo, GUARD), "--pending", join(f.root, "pending.tsv"), ...tableArgs], { cwd: f.repo, encoding: "utf8", env: ENV });
+    "--issue", issue, "--guard", join(f.repo, GUARD), "--pending", join(f.root, "pending.tsv"), "--model-roles", roles, "--catalog", catalog, ...tableArgs],
+  { cwd: f.repo, encoding: "utf8", env: ENV });
   assert.equal(r.status, 0, r.stderr);
   return r.stdout;
 }

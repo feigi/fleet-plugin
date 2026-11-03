@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import {
-  DEFAULT_TABLE, bArmLive, installVersion, issueMetrics, route, rowDispatch, rowFor, fitTable, readGuard, stratumOf, validateTable, formatFeatureRow, mergedSince, resolveCommit, sliceParent,
+  DEFAULT_TABLE, assignmentProb, bArmLive, explorationCells, installOf, installVersion, issueMetrics, route, rowDispatch, rowFor, fitTable, readGuard, stratumOf, validateTable, formatFeatureRow, mergedSince, resolveCommit, sliceParent,
 } from "../plugin/scripts/ticket-router.mjs";
 import { FEATURE_COLUMNS as COLUMNS, parseFeatures } from "../plugin/scripts/pull-attribution.mjs";
 import { drawCell, CELL, STARTING_CELLS, formatRouting, parseRouting } from "../plugin/scripts/ledger-grammar.mjs";
@@ -24,6 +24,8 @@ const SESSION2 = "2026-10-01T11-00-00-000Z_01a0b344-33f6-7640-96a8-05f45bf847b0"
 const STARTING = ["slow-high", "task-high", "smol-high"];
 // The columns #4159 appended after `parent`, and the version the install's package.json names.
 const NAMED = ["named_paths", "named_lines", "dirs", "title", "plugin_version"];
+// The column after them: the probability `route` assigned the Pull its Cell with.
+const PROB = "assignment_prob";
 const INSTALLED_VERSION = JSON.parse(readFileSync(new URL("../plugin/package.json", import.meta.url), "utf8")).version;
 
 // A table's `rows` or `reasons`: one set per objective, the speed set the cost set's unless named.
@@ -69,7 +71,24 @@ function world(t, { table = baseTable(), guard = guardFile(), issueJson = issue(
   if (sizing !== undefined) writeFileSync(paths.sizing, JSON.stringify(sizing));
   return paths;
 }
-const cli = (args) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8" });
+// The install every routed Pull reads here, fixed so no test depends on the machine's omp: each role's model, and a
+// catalog whose `smol` model tops out at `xhigh` while the other two reach `max`. The definitions are the plugin's own.
+const MODEL_ROLES = { slow: "anthropic/claude-opus-5-5:high", task: "anthropic/claude-sonnet-5-5:high", smol: "anthropic/claude-haiku-4-5:auto" };
+const CATALOG = { models: [
+  { selector: "anthropic/claude-opus-5-5", thinking: ["low", "medium", "high", "xhigh", "max"] },
+  { selector: "anthropic/claude-sonnet-5-5", thinking: ["low", "medium", "high", "xhigh", "max"] },
+  { selector: "anthropic/claude-haiku-4-5", thinking: ["minimal", "low", "medium", "high", "xhigh"] },
+] };
+const AGENTS = fileURLToPath(new URL("../plugin/agents", import.meta.url));
+const INSTALL = installOf({ modelRoles: MODEL_ROLES, catalog: CATALOG, definitions: readdirSync(AGENTS) });
+const INSTALL_DIR = mkdtempSync(join(tmpdir(), "ticket-router-install-"));
+process.on("exit", () => rmSync(INSTALL_DIR, { recursive: true, force: true }));
+writeFileSync(join(INSTALL_DIR, "model-roles.json"), JSON.stringify(MODEL_ROLES));
+writeFileSync(join(INSTALL_DIR, "catalog.json"), JSON.stringify(CATALOG));
+const INSTALL_FLAGS = ["--model-roles", join(INSTALL_DIR, "model-roles.json"), "--catalog", join(INSTALL_DIR, "catalog.json"), "--agents", AGENTS];
+// Every `route` run here reads the fixed install, but for any part it names itself.
+const installFlags = (args) => [0, 2, 4].flatMap((i) => (args.includes(INSTALL_FLAGS[i]) ? [] : INSTALL_FLAGS.slice(i, i + 2)));
+const cli = (args) => spawnSync(process.execPath, [SCRIPT, ...args, ...(args[0] === "route" ? installFlags(args) : [])], { encoding: "utf8" });
 function routeCli(p, { ticket = 42, arm = "A", implRow = 3, objective = "cost", extra = [] } = {}) {
   return cli(["route", "--session", SESSION, "--ticket", String(ticket), "--arm", arm, "--impl-row", String(implRow),
     ...(objective === null ? [] : ["--objective", objective]),
@@ -89,8 +108,8 @@ test("route: a clean non-exploration Pull prints the full line, REASON=ok, and r
   assert.equal(r.stdout, "POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=* BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok\n");
   const lines = readFileSync(p.pending, "utf8").replace(/\n$/, "").split("\n");
   assert.equal(lines[0], COLUMNS.join("\t"), "a new pending file starts with the header");
-  assert.equal(COLUMNS.length, 25);
-  assert.deepEqual(COLUMNS.slice(-NAMED.length), NAMED, "the new columns come after parent, in order");
+  assert.equal(COLUMNS.length, 26);
+  assert.deepEqual(COLUMNS.slice(-NAMED.length - 1), [...NAMED, PROB], "the new columns come after parent, in order");
   const [row] = parseFeatures(lines.join("\n"));
   assert.equal(row.run_date, "2026-10-01");
   assert.equal(row.session, SESSION);
@@ -105,6 +124,7 @@ test("route: a clean non-exploration Pull prints the full line, REASON=ok, and r
   assert.equal(row.title, "t");
   assert.equal(row.plugin_version, INSTALLED_VERSION, "the install's package.json version");
   assert.deepEqual([row.named_paths, row.named_lines, row.dirs], ["", "", ""], "a brief that names no path");
+  assert.equal(row.assignment_prob, "4/5", "past burn-in, a Pull that does not explore runs its group's Cell at 4 in 5");
   // A second Pull appends, never a second header.
   routeCli(p, { ticket: 43 });
   const again = readFileSync(p.pending, "utf8").replace(/\n$/, "").split("\n");
@@ -309,12 +329,12 @@ test("route: guard-tripped — a tripped cell leaves the draw's pool, and the li
 });
 
 test("route: an every-5th draw with a tripped Cell left out prints the draw, BY=every-5th and the tripped Cell", (t) => {
-  const p = world(t, { guard: guardFile({ tripped: ["smol-high"], verdict: "tripped" }) });
+  const p = world(t, { guard: guardFile({ tripped: ["slow-xhigh"], verdict: "tripped" }) });
   const r = routeCli(p, { implRow: 5 });
   assert.equal(r.status, 0, r.stderr);
-  const d = drawCell({ session: SESSION, ticket: 42, policyCell: "slow-high", cells: ["slow-high", "task-high"] });
-  assert.deepEqual(d, { cell: "task-high", k: 1, K: 1 }, "the one Cell left to draw past the policy Cell and the tripped one");
-  assert.equal(r.stdout, "POLICY=slow-high CELL=task-high DRAW=1/1 BY=every-5th STRATUM=* BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=guard-tripped\n");
+  const d = drawCell({ session: SESSION, ticket: 42, policyCell: null, cells: ["slow-medium", "task-xhigh"] });
+  assert.equal(r.stdout, `POLICY=slow-high CELL=${d.cell} DRAW=${d.k}/2 BY=every-5th STRATUM=* BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=slow-xhigh REASON=guard-tripped\n`);
+  assert.equal(parseFeatures(readFileSync(p.pending, "utf8"))[0].assignment_prob, "1/10", "1 in 5 explores, then 1 in the 2 Cells left");
 });
 
 test("route: a drawn burn-in Pull prints the whole Routing, BY=burn-in", (t) => {
@@ -323,6 +343,7 @@ test("route: a drawn burn-in Pull prints the whole Routing, BY=burn-in", (t) => 
   assert.equal(r.status, 0, r.stderr);
   const d = drawCell({ session: SESSION, ticket: 42, policyCell: null, cells: STARTING });
   assert.equal(r.stdout, `POLICY=slow-high CELL=${d.cell} DRAW=${d.k}/3 BY=burn-in STRATUM=* BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok\n`);
+  assert.equal(parseFeatures(readFileSync(p.pending, "utf8"))[0].assignment_prob, "1/3", "1 over the untripped starting Cells");
 });
 
 test("route: table-cell-tripped — a table row naming a tripped cell is replaced by the default without waiting for a re-fit", (t) => {
@@ -357,34 +378,86 @@ test("route: burn-in draws on EVERY Pull, uniformly over the starting Cells, the
   assert.equal(routeCli(p, { ticket: 7 }).stdout, routeCli(p, { ticket: 7, implRow: 99 }).stdout);
 });
 
-test("route: after burn-in only the Pull creating impl- row 5k draws, over the cells minus the policy cell", (t) => {
+// slow-high's exploration Cells on the fixed install: its own role a level up and down, and the smaller model a
+// level up. slow has no bigger model.
+const SLOW_HIGH_EXPLORES = ["slow-medium", "slow-xhigh", "task-xhigh"];
+
+test("route: after burn-in only the Pull creating impl- row 5k draws, over the group's exploration Cells", (t) => {
   const p = world(t);
   for (const implRow of [1, 4, 6, 9, 11]) assert.equal(parseLine(routeCli(p, { implRow }).stdout).DRAW, "-", `row ${implRow}`);
   for (const implRow of [5, 10, 15]) {
     const out = parseLine(routeCli(p, { implRow }).stdout);
-    const d = drawCell({ session: SESSION, ticket: 42, policyCell: "slow-high", cells: STARTING });
+    const d = drawCell({ session: SESSION, ticket: 42, policyCell: null, cells: SLOW_HIGH_EXPLORES });
     assert.equal(out.CELL, d.cell);
-    assert.equal(out.DRAW, `${d.k}/2`);
-    assert.notEqual(out.CELL, "slow-high");
+    assert.equal(out.DRAW, `${d.k}/3`);
+    assert.equal(out.BY, "every-5th");
   }
-  const [, , explore] = parseFeatures(readFileSync(p.pending, "utf8")).filter((r) => r.exploration_draw !== "");
+  const rows = parseFeatures(readFileSync(p.pending, "utf8"));
+  assert.deepEqual(rows.map((r) => r.assignment_prob), ["4/5", "4/5", "4/5", "4/5", "4/5", "1/15", "1/15", "1/15"],
+    "a Pull that does not explore runs the group's Cell at 4 in 5; one that does, its drawn Cell at 1 in 5 times 1 in 3");
+  const [, , explore] = rows.filter((r) => r.exploration_draw !== "");
   assert.ok(explore, "an exploration Pull records its draw");
-  assert.notEqual(explore.chosen_cell, explore.policy_cell);
+  assert.ok(SLOW_HIGH_EXPLORES.includes(explore.chosen_cell));
+});
+
+test("route: the exploration share stays one impl- row in five", (t) => {
+  const p = world(t);
+  const drawn = Array.from({ length: 50 }, (_, i) => parseLine(routeCli(p, { ticket: i + 1, implRow: i + 1 }).stdout).DRAW !== "-");
+  assert.deepEqual(drawn.flatMap((d, i) => (d ? [i + 1] : [])), [5, 10, 15, 20, 25, 30, 35, 40, 45, 50]);
 });
 
 test("route: a chain head on row 5k does not draw — the assignment rolls to the next Pull", (t) => {
   const p = world(t);
   assert.equal(parseLine(routeCli(p, { implRow: 5, extra: ["--chain-head"] }).stdout).DRAW, "-");
-  // In burn-in every Pull draws, chain head or not.
+  assert.equal(parseFeatures(readFileSync(p.pending, "utf8"))[0].assignment_prob, "1", "past burn-in a chain head runs its policy Cell for certain");
+  // In burn-in every Pull draws, chain head or not, and records the burn-in draw's 1/N.
   const b = world(t, { table: baseTable({ burn_in: true }) });
   assert.notEqual(parseLine(routeCli(b, { implRow: 5, extra: ["--chain-head"] }).stdout).DRAW, "-");
+  assert.equal(parseFeatures(readFileSync(b.pending, "utf8"))[0].assignment_prob, "1/3");
 });
 
-test("route: with every non-default cell withdrawn (K=0) an exploration Pull runs the policy cell and records no draw", (t) => {
-  const p = world(t, { table: baseTable({ cells: ["slow-high"] }) });
-  const r = routeCli(p, { implRow: 5 });
+test("route: a group whose every exploration Cell is tripped has no draw and runs its Cell with probability 1", (t) => {
+  const p = world(t, { guard: guardFile({ tripped: SLOW_HIGH_EXPLORES, verdict: "tripped" }) });
+  for (const implRow of [3, 5]) {
+    const r = routeCli(p, { implRow });
+    assert.equal(r.status, 0, r.stderr);
+    const out = parseLine(r.stdout);
+    assert.deepEqual([out.CELL, out.DRAW, out.BY], ["slow-high", "-", "-"], `row ${implRow}`);
+  }
+  assert.deepEqual(parseFeatures(readFileSync(p.pending, "utf8")).map((r) => [r.exploration_draw, r.assignment_prob]), [["", "1"], ["", "1"]],
+    "no exploring slot could take the Pull, so it is not 4/5 either");
+});
+
+test("route: a group whose every exploration Cell the install cannot run has no draw and runs its Cell with probability 1", (t) => {
+  const p = world(t);
+  const agents = join(p.dir, "agents");
+  mkdirSync(agents);
+  writeFileSync(join(agents, "fleet-implementer-slow-high.agent.md"), "");
+  const r = routeCli(p, { implRow: 5, extra: ["--agents", agents] });
+  assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout, "POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=* BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok\n", "no draw, so no BY");
-  assert.equal(parseFeatures(readFileSync(p.pending, "utf8"))[0].exploration_draw, "");
+  const [row] = parseFeatures(readFileSync(p.pending, "utf8"));
+  assert.deepEqual([row.exploration_draw, row.assignment_prob], ["", "1"]);
+});
+
+test("route: an install it cannot read warns, draws nothing and still routes, exit 0", (t) => {
+  const p = world(t);
+  const r = cli(["route", "--session", SESSION, "--objective", "cost", "--ticket", "42", "--arm", "A", "--impl-row", "5",
+    "--issue", p.issue, "--guard", p.guard, "--table", p.table, "--pending", p.pending,
+    "--model-roles", join(INSTALL_DIR, "model-roles.json"), "--catalog", join(p.dir, "no-catalog.json"), "--agents", AGENTS]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(parseLine(r.stdout).DRAW, "-");
+  assert.match(r.stderr, /WARNING cannot read what this install runs: .*no-catalog\.json.* — no exploration Cell is drawn/);
+  assert.equal(parseFeatures(readFileSync(p.pending, "utf8"))[0].assignment_prob, "1");
+});
+
+test("route: a burn-in Pull and a chain head read nothing of the install", (t) => {
+  // An unreadable install would warn: neither of these reads it.
+  const missing = ["--model-roles", "/nonexistent/m.json", "--catalog", "/nonexistent/c.json", "--agents", "/nonexistent"];
+  const b = world(t, { table: baseTable({ burn_in: true }) });
+  assert.equal(routeCli(b, { implRow: 5, extra: missing }).stderr, "");
+  const p = world(t);
+  assert.equal(routeCli(p, { implRow: 5, extra: ["--chain-head", ...missing] }).stderr, "");
 });
 
 test("route: exit 2 only on usage errors and an unreadable or invalid table — and nothing is recorded", (t) => {
@@ -429,7 +502,7 @@ function receiptWorld(t, receipt) {
   if (receipt !== undefined) writeFileSync(join(p.dir, ".fleet", "phase0.json"), typeof receipt === "string" ? receipt : JSON.stringify(receipt));
   const run = (session, { objective = "cost" } = {}) => spawnSync(process.execPath, [SCRIPT, "route", ...(session === undefined ? [] : ["--session", session]),
     ...(objective === null ? [] : ["--objective", objective]),
-    "--ticket", "42", "--arm", "A", "--impl-row", "3", "--issue", p.issue, "--guard", p.guard, "--table", p.table, "--pending", p.pending],
+    "--ticket", "42", "--arm", "A", "--impl-row", "3", "--issue", p.issue, "--guard", p.guard, "--table", p.table, "--pending", p.pending, ...INSTALL_FLAGS],
   { encoding: "utf8", cwd: p.dir, env: gitEnv() });
   return { ...p, run };
 }
@@ -518,7 +591,7 @@ test("route: pure — the same inputs give the same line, and the line names eve
 });
 
 // route() called directly, so the gate and sizing matrices need no process per case.
-const routeIn = (over) => route({ session: SESSION, ticket: 42, arm: "B", implRow: 3, issue: issue(), guard: readGuard(guardFile()), table: baseTable(), objective: "cost", ...over });
+const routeIn = (over) => route({ session: SESSION, ticket: 42, arm: "B", implRow: 3, issue: issue(), guard: readGuard(guardFile()), table: baseTable(), objective: "cost", install: INSTALL, ...over });
 // A two-leaf table with the B classifier set and a row that is not the default: the gate is open. The ordinary
 // issue (31 chars) is below the cut and routes to its default row; a long brief routes above the cut, to task-high.
 const liveB = (over = {}) => twoLeaf({ "*": "slow-high", [ABOVE]: "task-high", [BELOW]: "slow-high" }, undefined, { classifier: { b: "haiku", tau: null }, ...over });
@@ -981,8 +1054,8 @@ test("route: a table that splits on parent puts a Slice in its own group, any ot
   assert.equal(lineOf(null), "POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=* BRIEF=- CRITERIA=- PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=no-issue-json");
 });
 
-test("route: a pending file begun before the parent column, or before the named-path columns, keeps its width", (t) => {
-  for (const lacks of [["parent", ...NAMED], NAMED]) {
+test("route: a pending file begun before the parent column, the named-path columns or the assignment column keeps its width", (t) => {
+  for (const lacks of [["parent", ...NAMED, PROB], [...NAMED, PROB], [PROB]]) {
     const p = world(t, { issueJson: issue({ body: "Spec: #3177 § D3. Change `plugin/scripts/a.mjs`.", title: "x" }) });
     const older = COLUMNS.filter((c) => !lacks.includes(c));
     mkdirSync(dirname(p.pending), { recursive: true });
@@ -1079,7 +1152,7 @@ test("route: run with no root, the CLI looks the brief's paths up under its work
   mkdirSync(join(p.dir, "plugin", "scripts"), { recursive: true });
   writeFileSync(join(p.dir, "plugin", "scripts", "a.mjs"), "a\nb\nc\nd\n");
   const r = spawnSync(process.execPath, [SCRIPT, "route", "--session", SESSION, "--objective", "cost", "--ticket", "42", "--arm", "A", "--impl-row", "3",
-    "--issue", p.issue, "--guard", p.guard, "--table", p.table, "--pending", p.pending], { encoding: "utf8", cwd: p.dir });
+    "--issue", p.issue, "--guard", p.guard, "--table", p.table, "--pending", p.pending, ...INSTALL_FLAGS], { encoding: "utf8", cwd: p.dir });
   assert.equal(r.status, 0, r.stderr);
   const [row] = parseFeatures(readFileSync(p.pending, "utf8"));
   assert.deepEqual([row.named_paths, row.named_lines, row.dirs], ["plugin/scripts/a.mjs docs/b.md", "4 -", "2"]);
@@ -1091,7 +1164,7 @@ test("route: a working directory removed under the CLI warns and reads every nam
   const gone = join(p.dir, "gone");
   mkdirSync(gone);
   const r = spawnSync("sh", ["-c", 'cd "$1" && rmdir "$1" && shift && exec "$@"', "sh", gone, process.execPath, SCRIPT, "route", "--session", SESSION,
-    "--objective", "cost", "--ticket", "42", "--arm", "A", "--impl-row", "3", "--issue", p.issue, "--guard", p.guard, "--table", p.table, "--pending", p.pending],
+    "--objective", "cost", "--ticket", "42", "--arm", "A", "--impl-row", "3", "--issue", p.issue, "--guard", p.guard, "--table", p.table, "--pending", p.pending, ...INSTALL_FLAGS],
   { encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /^POLICY=.* REASON=ok$/m);
@@ -1105,7 +1178,7 @@ test("route: an install package.json with no readable version warns and leaves p
   const install = join(p.dir, "install");
   cpSync(dirname(SCRIPT), join(install, "scripts"), { recursive: true });
   const args = ["route", "--session", SESSION, "--objective", "cost", "--ticket", "42", "--arm", "A", "--impl-row", "3",
-    "--issue", p.issue, "--guard", p.guard, "--table", p.table, "--pending", p.pending];
+    "--issue", p.issue, "--guard", p.guard, "--table", p.table, "--pending", p.pending, ...INSTALL_FLAGS];
   const run = (pkg) => {
     writeFileSync(join(install, "package.json"), pkg);
     const r = spawnSync(process.execPath, [join(install, "scripts", "ticket-router.mjs"), ...args], { encoding: "utf8" });
@@ -2320,13 +2393,13 @@ test("fit: a prior table that records a cell under the floor has no effect on a 
 });
 
 test("route: an exploration Pull in a group the floor refused a cell can still draw it; a tripped cell is never drawn", () => {
-  const refused = { cell: "slow-high", reason: "no-qualifier", cells: { "task-high": { verdict: "under-floor", under_floor: true, bar: 0.4, range: [-5, -5] } }, pairs: [] };
+  const refused = { cell: "slow-high", reason: "no-qualifier", cells: { "slow-medium": { verdict: "under-floor", under_floor: true, bar: 0.4, range: [-5, -5] } }, pairs: [] };
   const table = twoLeaf({ "*": "task-high", [ABOVE]: "task-high", [BELOW]: "slow-high" }, undefined, { reasons: both({ "*": { ...refused, cell: "task-high", reason: "sole-qualifier" }, [ABOVE]: UNJUDGED, [BELOW]: refused }) });
   const drawn = (guard) => new Set(Array.from({ length: 40 }, (_, i) => /CELL=(\S+)/.exec(routeIn({ arm: "A", ticket: i + 1, implRow: 5, table, guard }).line)[1]));
-  assert.ok(drawn(readGuard(guardFile())).has("task-high"), "the floor never takes a cell out of the draw");
-  const tripped = drawn(readGuard(guardFile({ tripped: ["task-high"] })));
-  assert.equal(tripped.has("task-high"), false, "the guard's trip does");
-  assert.ok(tripped.has("smol-high"));
+  assert.ok(drawn(readGuard(guardFile())).has("slow-medium"), "the floor never takes a cell out of the draw");
+  const tripped = drawn(readGuard(guardFile({ tripped: ["slow-medium"] })));
+  assert.equal(tripped.has("slow-medium"), false, "the guard's trip does");
+  assert.ok(tripped.has("slow-xhigh"));
 });
 
 test("fit prints one line per row, its cell and reason, and --check exits 1 on any edited reason or range", (t) => {
@@ -2601,9 +2674,9 @@ test("rowDispatch and route agree for every Objective × Stratum, guard state an
       for (const objective of ["cost", "speed"]) {
         for (const stratum of [BELOW, ABOVE, "*"]) {
           const at = `${burn_in ? "burn-in" : "fitted"} · ${state} · ${objective} · ${stratum}`;
-          const rd = rowDispatch({ table, guard, objective, stratum });
+          const rd = rowDispatch({ table, guard, objective, stratum, install: INSTALL });
           for (let implRow = 1; implRow <= 10; implRow++) {
-            const { line } = route({ session: SESSION, ticket: 40 + implRow, arm: "A", implRow, issue: GROUP_ISSUE[stratum], guard, table, objective });
+            const { line, row } = route({ session: SESSION, ticket: 40 + implRow, arm: "A", implRow, issue: GROUP_ISSUE[stratum], guard, table, objective, install: INSTALL });
             const r = parseRouting(line);
             assert.equal(r.stratum, stratum, at);
             assert.equal(r.policy, rd.policy, `${at}: the policy Cell`);
@@ -2614,8 +2687,11 @@ test("rowDispatch and route agree for every Objective × Stratum, guard state an
               assert.ok(rd.draw.cells.includes(r.cell), `${at} row ${implRow}: ${r.cell} is drawn from ${rd.draw.cells}`);
               if (burn_in) assert.ok(rd.draw.cells.every((c) => STARTING.includes(c)), `${at} row ${implRow}: burn-in draws the starting Cells alone`);
               assert.equal(r.cell, drawCell({ session: SESSION, ticket: 40 + implRow, policyCell: null, cells: rd.draw.cells }).cell, at);
+              const K = rd.draw.cells.length;
+              assert.equal(row.assignment_prob, burn_in ? (K === 1 ? "1" : `1/${K}`) : `1/${5 * K}`, `${at} row ${implRow}: probability`);
             } else {
               assert.deepEqual([r.draw, r.by, r.cell], [null, null, rd.policy], `${at} row ${implRow}: not drawn`);
+              assert.equal(row.assignment_prob, rd.draw === null || burn_in ? "1" : "4/5", `${at} row ${implRow}: probability`);
             }
             // REASON keeps the first thing that went wrong: an unreadable issue first, then rowDispatch's, then the draw's.
             const expected = stratum === "*" ? "no-issue-json" : rd.reason !== "ok" ? rd.reason : r.reason;
@@ -2660,24 +2736,85 @@ test("rowDispatch: no guard dispatches the default Cell only, whatever the table
   assert.deepEqual(none, { policy: "task-high", reason: "ok", draw: { by: "burn-in", cells: STARTING } });
 });
 
-test("rowDispatch: after burn-in the draw leaves out the cost row's Cell, under either Objective, and the tripped", () => {
+test("rowDispatch: after burn-in the draw is the cost row's exploration Cells, under either Objective, less the tripped", () => {
   const table = rowTable();
-  assert.deepEqual(rowDispatch({ table, guard: row5({}), objective: "speed", stratum: BELOW }).draw,
-    { by: "every-5th", cells: ["slow-high", "smol-high", "slow-medium"] }, "the group's speed row is task-high too, and its cost row's task-high is what the draw leaves out");
-  assert.deepEqual(rowDispatch({ table, guard: row5({ tripped: ["task-high"] }), objective: "cost", stratum: BELOW }),
-    { policy: "slow-high", reason: "table-cell-tripped", draw: { by: "every-5th", cells: ["smol-high", "slow-medium"] } },
-    "a tripped cost row's Cell is replaced by the default, which the draw then leaves out");
+  assert.deepEqual(rowDispatch({ table, guard: row5({}), objective: "speed", stratum: BELOW, install: INSTALL }).draw,
+    { by: "every-5th", cells: ["task-xhigh", "task-medium", "slow-medium", "smol-xhigh"] }, "the group's cost row is task-high, whichever Objective routes");
+  assert.deepEqual(rowDispatch({ table, guard: row5({ tripped: ["task-high", "slow-medium"] }), objective: "cost", stratum: BELOW, install: INSTALL }),
+    { policy: "slow-high", reason: "table-cell-tripped", draw: { by: "every-5th", cells: ["slow-xhigh", "task-xhigh"] } },
+    "a tripped cost row's Cell is replaced by the default, whose exploration Cells the draw then takes, less the tripped");
+  assert.equal(rowDispatch({ table, guard: row5({}), objective: "cost", stratum: BELOW }).draw, null, "an install not read runs nothing to draw");
 });
 
 test("rowDispatch: no Cell left to draw is no draw", () => {
   const table = rowTable();
-  const all = row5({ tripped: ["task-high", "smol-high", "slow-medium"] });
-  assert.equal(rowDispatch({ table, guard: all, objective: "cost", stratum: ABOVE }).draw, null);
+  const all = row5({ tripped: ["smol-xhigh", "smol-medium", "task-medium"] });
+  assert.equal(rowDispatch({ table, guard: all, objective: "cost", stratum: ABOVE, install: INSTALL }).draw, null, "smol-high's every exploration Cell tripped");
   assert.equal(rowDispatch({ table: rowTable({ burn_in: true }), guard: row5({ tripped: ROW_CELLS }), objective: "cost", stratum: ABOVE }).draw, null);
   // Burn-in draws the starting Cells and no other: with every one tripped, the table's untripped slow-medium is no fallback.
   const startingTripped = row5({ tripped: STARTING });
-  assert.equal(rowDispatch({ table: rowTable({ burn_in: true }), guard: startingTripped, objective: "cost", stratum: ABOVE }).draw, null);
-  assert.deepEqual(rowDispatch({ table: rowTable(), guard: startingTripped, objective: "cost", stratum: ABOVE }).draw, { by: "every-5th", cells: ["slow-medium"] }, "after burn-in the table's own Cells are the draw");
+  assert.equal(rowDispatch({ table: rowTable({ burn_in: true }), guard: startingTripped, objective: "cost", stratum: ABOVE, install: INSTALL }).draw, null);
+  assert.deepEqual(rowDispatch({ table: rowTable(), guard: startingTripped, objective: "cost", stratum: ABOVE, install: INSTALL }).draw,
+    { by: "every-5th", cells: ["slow-xhigh", "slow-medium", "task-xhigh"] }, "after burn-in, the default Cell's exploration Cells are the draw");
+});
+
+test("rowDispatch: a Cell the install cannot run is never drawn", () => {
+  const table = rowTable();
+  const defined = new Set([...INSTALL.defined].filter((c) => c !== "task-xhigh" && c !== "smol-xhigh"));
+  assert.deepEqual(rowDispatch({ table, guard: row5({}), objective: "cost", stratum: BELOW, install: { ...INSTALL, defined } }).draw,
+    { by: "every-5th", cells: ["task-medium", "slow-medium"] }, "no definition, no candidate");
+  const noSmol = { ...INSTALL, ladders: { ...INSTALL.ladders, smol: [] } };
+  assert.deepEqual(rowDispatch({ table, guard: row5({}), objective: "cost", stratum: BELOW, install: noSmol }).draw,
+    { by: "every-5th", cells: ["task-xhigh", "task-medium", "slow-medium"] }, "a role the catalog runs at no level has no candidate");
+});
+
+test("explorationCells: one level up and down on the role's own ladder, the bigger model one lower, the smaller one higher", () => {
+  const L = INSTALL.ladders;
+  assert.deepEqual(L, { smol: ["minimal", "low", "medium", "high", "xhigh"], task: ["low", "medium", "high", "xhigh", "max"], slow: ["low", "medium", "high", "xhigh", "max"] });
+  assert.deepEqual(explorationCells("task-high", L), ["task-xhigh", "task-medium", "slow-medium", "smol-xhigh"]);
+  assert.deepEqual(explorationCells("slow-high", L), ["slow-xhigh", "slow-medium", "task-xhigh"], "no bigger model than slow");
+  assert.deepEqual(explorationCells("smol-high", L), ["smol-xhigh", "smol-medium", "task-medium"], "no smaller model than smol");
+  assert.deepEqual(explorationCells("slow-max", L), ["slow-xhigh"], "no level above max, on slow's ladder or task's");
+  assert.deepEqual(explorationCells("smol-xhigh", L), ["smol-high", "task-high"], "smol's ladder tops out at xhigh");
+  assert.deepEqual(explorationCells("task-low", L), ["task-medium", "smol-medium"], "no level below task's lowest, nor below slow's");
+});
+
+test("explorationCells: a level the role's catalog does not list is never a candidate — the next rung on its own ladder is", () => {
+  const ladders = { smol: ["low", "medium", "high"], task: ["low", "medium", "high", "max"], slow: ["medium", "high", "xhigh", "max"] };
+  assert.deepEqual(explorationCells("task-high", ladders), ["task-max", "task-medium", "slow-medium"], "task has no xhigh, and smol nothing above high");
+  assert.deepEqual(explorationCells("smol-medium", ladders), ["smol-high", "smol-low", "task-low"]);
+  assert.deepEqual(explorationCells("slow-medium", { ...ladders, task: [] }), ["slow-high"], "a role with no ladder has no Cell");
+});
+
+test("installOf: each role's ladder is its modelRoles target's catalog levels, by effort; the defined Cells are the implementer definitions", () => {
+  const install = installOf({
+    modelRoles: { slow: "@task", task: "anthropic/claude-sonnet-5-5:high", smol: "anthropic/claude-unlisted" },
+    catalog: { models: [{ selector: "anthropic/claude-sonnet-5-5", thinking: ["max", "high", "low", "auto"] }] },
+    definitions: ["fleet-implementer-task-high.agent.md", "fleet-reviewer.agent.md", "fleet-implementer-task-max.agent.md", "notes.txt"],
+  });
+  assert.deepEqual(install.ladders, { smol: [], task: ["low", "high", "max"], slow: ["low", "high", "max"] },
+    "slow follows its alias to task's model; a model the catalog does not list runs at no level; a level no Cell names is dropped");
+  assert.deepEqual([...install.defined].sort(), ["task-high", "task-max"]);
+  assert.deepEqual(installOf({ modelRoles: null, catalog: null, definitions: [] }).ladders, { smol: [], task: [], slow: [] });
+});
+
+test("assignmentProb: 1/N in burn-in, 4/5 at the group's Cell after it, 1/5 of 1/K on an exploring draw, 1 with nothing drawn", () => {
+  assert.equal(assignmentProb({ burnIn: true, chainHead: false, exploring: true, K: 3 }), "1/3");
+  assert.equal(assignmentProb({ burnIn: true, chainHead: true, exploring: true, K: 3 }), "1/3", "a burn-in chain head was drawn too");
+  assert.equal(assignmentProb({ burnIn: true, chainHead: false, exploring: true, K: 1 }), "1");
+  assert.equal(assignmentProb({ burnIn: true, chainHead: false, exploring: true, K: 0 }), "1", "every starting Cell tripped");
+  assert.equal(assignmentProb({ burnIn: false, chainHead: false, exploring: false, K: 4 }), "4/5");
+  assert.equal(assignmentProb({ burnIn: false, chainHead: false, exploring: true, K: 4 }), "1/20");
+  assert.equal(assignmentProb({ burnIn: false, chainHead: false, exploring: true, K: 1 }), "1/5");
+  assert.equal(assignmentProb({ burnIn: false, chainHead: true, exploring: false, K: 4 }), "1", "a chain head never explores");
+  assert.equal(assignmentProb({ burnIn: false, chainHead: false, exploring: false, K: 0 }), "1", "no candidate: no exploring slot could take it");
+});
+
+test("route: a Pull with no guard runs the default Cell with probability 1", () => {
+  for (const burn_in of [true, false]) {
+    const { row } = routeIn({ arm: "A", implRow: 5, guard: null, table: baseTable({ burn_in }) });
+    assert.deepEqual([row.chosen_cell, row.exploration_draw, row.assignment_prob], ["slow-high", "", "1"], `burn_in ${burn_in}`);
+  }
 });
 
 test("burn-in is one set: a Cell holds the fit's burn_in open exactly when burn-in draws it, whatever else the table lists", () => {
@@ -2702,11 +2839,11 @@ test("rowDispatch and route agree on arm B: a sizing label moves neither the pol
   const table = rowTable({ classifier: { b: "haiku", tau: null } });
   const guard = row5({ tripped: ["smol-high"] });
   // A short brief the sizing calls heavy: the walk puts it below the cut, so its row, its Cell and its draw are that group's.
-  const args = { session: SESSION, ticket: 42, implRow: 5, issue: issue(), sizing: haikuSizing, guard, table, objective: "speed" };
+  const args = { session: SESSION, ticket: 42, implRow: 5, issue: issue(), sizing: haikuSizing, guard, table, objective: "speed", install: INSTALL };
   const r = parseRouting(route({ ...args, arm: "B" }).line);
   assert.deepEqual([r.stratum, r.sized], [BELOW, "heavy"]);
   assert.equal(r.policy, rowDispatch({ table, guard, objective: "speed", stratum: BELOW }).policy);
-  const below = rowDispatch({ table, guard, objective: "cost", stratum: BELOW });
+  const below = rowDispatch({ table, guard, objective: "cost", stratum: BELOW, install: INSTALL });
   assert.equal(r.by, below.draw.by);
   assert.ok(below.draw.cells.includes(r.cell), `${r.cell} is drawn from the cost row's pool ${below.draw.cells}`);
   assert.equal(r.draw.K, below.draw.cells.length);
