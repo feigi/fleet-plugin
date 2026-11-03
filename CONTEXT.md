@@ -768,10 +768,8 @@ A member-outcomes row whose `subagent_type` is `fleet-implementer-<cell>` for
 the Pull's Cell (`chosen_cell`: the Cell the Router gave it, drawn on an
 Exploration Pull, else its policy row's), whose recorded effort equals that
 cell's level, and which has a resolved model on record — the only rows the
-readout script (`cell-readout.mjs`) and the per-cell stopping rule (its
-exported `stoppingRule`, run by the repo-local hook) count. Whether the
-Resolved tier matched the Declared tier is the run ledger's check; the readout
-never makes it.
+readout script (`cell-readout.mjs`) counts. Whether the Resolved tier matched
+the Declared tier is the run ledger's check; the readout never makes it.
 _Avoid_: verified row, valid row
 
 **Ruling**:

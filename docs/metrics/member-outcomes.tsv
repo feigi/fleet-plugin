@@ -124,10 +124,10 @@
 # current one under an "opus" label, and never read as a cheaper tier: pricing
 # falls with each generation, so an older Opus is not cheaper than the current
 # one and an older Sonnet is dearer. Pooling inverts the cost ordering this
-# file exists to measure. The router's fit, the cost guard and the per-cell
-# stopping rule therefore key a cell's figures on `dispatch_model`, never on
-# `model`: each judges a cell on its newest dispatch model alone and reports
-# the older ones beside it, never pooled.
+# file exists to measure. The router's fit and the cost guard therefore key a
+# cell's figures on `dispatch_model`, never on `model`: each judges a cell on
+# its newest dispatch model alone and reports the older ones beside it, never
+# pooled.
 #
 # TOKEN COLUMNS ARE PER-TURN, folded on the transcript's message.id. One
 # assistant turn is written as several jsonl lines, one per content block, each

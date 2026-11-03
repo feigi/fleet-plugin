@@ -8,9 +8,8 @@
 //   hook.mjs [--dry-run] [--repo <dir>] [--agents <dir>]
 //            [--model-roles <json>] [--catalog <json>]
 //
-// One invocation runs all three duties, in order: the role-target drift
-// notice, the per-cell stopping rule, the router re-fit when it is due. Each
-// is safe to run again.
+// One invocation runs every duty, in order: the role-target drift notice, then
+// the router re-fit when it is due. Each is safe to run again.
 //
 //   --repo     the workspace whose `.fleet/` and `docs/metrics/` the duties
 //              read and write; default the main checkout of the repository
@@ -20,10 +19,9 @@
 //   --model-roles, --catalog
 //              JSON files standing in for `omp config get modelRoles --json`
 //              and `omp models --json`, which the drift notice reads otherwise
-//   --dry-run  nothing is written to GitHub and nothing is pushed: the
-//              withdrawal issue and the re-fit PR are printed as `would …`.
-//              Every local duty still runs, the fit itself inside a throwaway
-//              checkout
+//   --dry-run  nothing is written to GitHub and nothing is pushed: the re-fit
+//              PR is printed as `would …`. Every local duty still runs, the
+//              fit itself inside a throwaway checkout
 //
 // Every plugin script this runs or imports is this checkout's own
 // plugin/scripts. Exit 0 when every duty ran; 1 when one failed — named on
@@ -37,10 +35,7 @@ import { fileURLToPath } from "node:url";
 import { makeDie, defineFlags } from "../../../plugin/scripts/arg.mjs";
 import { gitEnv, mainCheckoutDirFromGitCommonDir } from "../../../plugin/scripts/git-env.mjs";
 import { CELL } from "../../../plugin/scripts/ledger-grammar.mjs";
-import { parseFeatures } from "../../../plugin/scripts/pull-attribution.mjs";
-import { stoppingRule } from "../../../plugin/scripts/cell-readout.mjs";
 import { parseTsv as parseMemberTsv } from "../../../plugin/scripts/member-outcomes.mjs";
-import { parseTierOutcomes } from "../../../plugin/scripts/tier-outcomes.mjs";
 import {
   catalogEntry, modelsEqual, readOmpConfigValue, readOmpModelCatalog, resolveRole,
 } from "../../../plugin/scripts/tier-roles.mjs";
@@ -83,7 +78,7 @@ function definitions(agentsDir) {
     .sort()
     .map((cell) => {
       const [, role, level] = CELL.exec(cell);
-      return { cell, role, level, file: `fleet-implementer-${cell}.agent.md` };
+      return { cell, role, level };
     });
 }
 
@@ -123,73 +118,6 @@ function driftNotice(repo, agentsDir, F) {
     }
   }
   if (notices === 0) say("drift notice: every cell's last admissible row ran its role's current target, at a level that target runs");
-}
-
-function withdrawalBody(c) {
-  const rows = c.verdicts.map((v) => `| #${v.ticket} | #${v.pr} | ${v.run_date} | ${v.closed_own_ticket} | ${v.minted_false_claim} | ${v.failed ? "fail" : "pass"} |`);
-  return [
-    `\`fleet-implementer-${c.cell}\` verdicts on its newest generation, \`${c.generation}\`, since its definition was last added (${c.since}): ${c.failures} of ${c.verdicts.length} fail the quality floor (\`minted_false_claim=yes\` or \`closed_own_ticket=no\`).`,
-    "",
-    "| ticket | PR | ruled | closed_own_ticket | minted_false_claim | floor |",
-    "|---|---|---|---|---|---|",
-    ...rows,
-    "",
-  ].join("\n");
-}
-
-function stopping(repo, agentsDir, dryRun) {
-  const features = parseFeatures(metrics(repo, "ticket-features.tsv"));
-  const members = parseMemberTsv(metrics(repo, "member-outcomes.tsv"));
-  const verdicts = parseTierOutcomes(metrics(repo, "tier-outcomes.tsv"));
-  // The day each definition was most recently added: a reinstated cell's
-  // count restarts there. A definition no commit adds (a shallow clone, an
-  // uncommitted or renamed file, the wrong --agents dir) has no day to count
-  // from, so it cannot be judged.
-  const added = {};
-  const unjudged = [];
-  for (const d of definitions(agentsDir)) {
-    const day = git(agentsDir, ["log", "--diff-filter=A", "-1", "--format=%cs", "--", d.file]).trim();
-    if (day) added[d.cell] = day;
-    else unjudged.push(d.file);
-  }
-  for (const c of stoppingRule({ features, members, verdicts, added })) {
-    const tally = `${c.cell} ${c.failures}/${c.verdicts.length} floor failures since ${c.since}`;
-    // An older generation's verdicts are reported, never judged.
-    for (const o of c.older) say(`stopping rule: ${c.cell} older generation ${o.generation} ${o.failures}/${o.verdicts.length} floor failures since ${c.since} — not judged`);
-    if (!c.stop) {
-      say(`stopping rule: ${tally} — continues`);
-      continue;
-    }
-    // One open issue per cell: the tally and generation in its title move at
-    // every close-out, so the match is on the cell's prefix — case aside, which
-    // GitHub's own title search ignores and a maintainer's retitle may change —
-    // and the title is the idempotency key, written last, after the comment
-    // carrying the new verdict table. It names the generation, so a newer
-    // generation stopping at an older one's tally still comments its own table.
-    const prefix = `Withdraw exploration cell ${c.cell}:`;
-    const title = `${prefix} ${c.failures}/${c.verdicts.length} floor failures on ${c.generation}`;
-    const open = ghJson(repo, ["issue", "list", "--state", "open", "--search", `"${prefix}" in:title`, "--json", "number,title", "--limit", "100"])
-      .filter((i) => i.title.toLowerCase().startsWith(prefix.toLowerCase()))
-      .sort((a, b) => a.number - b.number);
-    const existing = open.find((i) => i.title === title) ?? open[0];
-    if (existing?.title === title) {
-      say(`stopping rule: ${tally} — withdrawal issue already open, #${existing.number}`);
-    } else if (existing && dryRun) {
-      say(`stopping rule: ${tally} — would retitle withdrawal issue #${existing.number} from "${existing.title}" to "${title}" and comment the verdict table`);
-    } else if (existing) {
-      gh(repo, ["issue", "comment", String(existing.number), "--body", withdrawalBody(c)]);
-      gh(repo, ["issue", "edit", String(existing.number), "--title", title]);
-      say(`stopping rule: ${tally} — withdrawal issue #${existing.number} retitled from "${existing.title}", verdict table commented`);
-    } else if (dryRun) {
-      say(`stopping rule: ${tally} — would file "${title}" (ready-for-human)`);
-    } else {
-      const url = gh(repo, ["issue", "create", "--title", title, "--label", "ready-for-human", "--body", withdrawalBody(c)]).trim();
-      say(`stopping rule: ${tally} — filed ${url}`);
-    }
-    const surplus = open.filter((i) => i !== existing).map((i) => `#${i.number}`);
-    if (surplus.length) say(`stopping rule: ${tally} — more open withdrawal issues for the cell, left as they are: ${surplus.join(", ")}`);
-  }
-  if (unjudged.length) throw new Error(`not judged — no commit adds ${unjudged.join(", ")}`);
 }
 
 function freeBranch(repo) {
@@ -314,7 +242,6 @@ function main() {
 
   const duties = [
     ["drift notice", () => driftNotice(repo, agentsDir, F)],
-    ["stopping rule", () => stopping(repo, agentsDir, dryRun)],
     ["router fit", () => routerFit(repo, dryRun)],
   ];
   for (const [name, duty] of duties) {

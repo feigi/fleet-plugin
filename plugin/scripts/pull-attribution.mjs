@@ -267,19 +267,8 @@ function bookImplementers(pulls, omp) {
 }
 
 // A Pull's generation from its implementer rows: its first Admissible row's dispatch model, else null.
+// Only `attribute` derives it, so the guard and the fit, which read its units, never name two generations for one Pull.
 const generationOf = (own, cell) => dispatchOrder(own).find((m) => admissibleRow(m, cell))?.dispatchModel ?? null;
-
-/**
- * Each of `pulls` (ticket-features rows) to its generation, `attribute`'s
- * rule over `members`: the dispatch model of the Pull's first Admissible
- * implementer row in dispatch order, or null when it has none. Every caller
- * that names a Pull's generation reads it here, so the guard, the fit and the
- * stopping rule never derive two generations for one Pull.
- */
-export function pullGenerations(pulls, members) {
-  const { impls } = bookImplementers(pulls, ompRows(members));
-  return new Map(pulls.map((p) => [p, generationOf(impls.get(p), p.chosen_cell)]));
-}
 
 // A booked row's recorded number in `column` (`field` on the parsed row; `column` defaults to `field` where the two names agree): null when blank; refused, naming the row, when neither blank nor a number.
 function numberOf(row, field, column = field) {
