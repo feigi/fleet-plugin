@@ -137,10 +137,10 @@ test("append: the ledger's tier-ok token wins over member-outcomes.tsv", (t) => 
 });
 
 // A Pull's `run_date` in ticket-features.tsv is the UTC date of its session
-// id, and cell-readout.mjs's stopping rule and pr-cost.mjs join a ruling to a
-// Pull with `run_date >=`. A ruling dated in the host's zone lands a day
-// before a same-instant Pull west of UTC, so the join drops it. Each instant
-// below is one where the zone's date and the UTC date differ.
+// id, and pr-cost.mjs joins a ruling to a Pull with `run_date >=`. A ruling
+// dated in the host's zone lands a day before a same-instant Pull west of
+// UTC, so the join drops it. Each instant below is one where the zone's date
+// and the UTC date differ.
 for (const [tz, clock] of [
   ["America/Los_Angeles", "2026-10-05T03:30:00Z"],
   ["Asia/Tokyo", "2026-10-04T20:30:00Z"],
@@ -157,10 +157,10 @@ for (const [tz, clock] of [
 }
 
 // A Pull's `run_date` in ticket-features.tsv is the UTC date of its session id
-// (`sessionDate`), and the fit's and cell-readout's join drops a ruling dated
-// before the Pull it rules. A ruling stamped with the host's zone date lands a
-// day before a same-instant Pull west of UTC, so the join drops it. At any
-// instant, one of these two zones is on a different calendar day than UTC.
+// (`sessionDate`), and the fit's join drops a ruling dated before the Pull it
+// rules. A ruling stamped with the host's zone date lands a day before a
+// same-instant Pull west of UTC, so the join drops it. At any instant, one of
+// these two zones is on a different calendar day than UTC.
 for (const tz of ["Pacific/Kiritimati", "Pacific/Pago_Pago"]) {
   test(`append: under TZ=${tz} run_date is the UTC date`, (t) => {
     const f = fixture(t, {

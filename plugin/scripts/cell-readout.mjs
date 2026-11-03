@@ -43,42 +43,6 @@
 // Only the refusal of conflicting ticket-features rows names a session and an
 // agent, and it prints nothing on stdout.
 //
-// STOPPING RULE (exported as `stoppingRule`, not printed by this CLI). A
-// ticket's RULING is its last tier-outcomes.tsv row in file order (a
-// `+`-joined `ticket` field rules each ticket it names); a row with both
-// verdict columns blank was never ruled, so it is skipped. Its CARRIER is
-// the ticket's last Pull in file order, at any cell, slow-high included,
-// dated on or before the ruling. Dates only set that floor: a ruling counts
-// for a Pull only when dated on or after it, and neither pick is the
-// latest-dated row. A Pull's GENERATION is pull-attribution.mjs's
-// (`pullGenerations`): the `dispatch_model` of its first Admissible
-// implementer row in dispatch order, over every implementer row booked to
-// the Pull, its retries included, so the guard and this rule never name two
-// generations for one Pull. A Pull is admissible here when it has one. A Pull at X is
-// COUNTABLE when X is a cell other than slow-high whose definition is live
-// and the Pull is admissible and dated on or after the day X's
-// `fleet-implementer-<cell>` definition was most recently added. The ruling
-// is a VERDICT for the carrier's cell only, and only when the carrier is
-// countable. Otherwise it is no verdict for any cell, never one for an
-// earlier Pull of the ticket. A ticket with no ruling, or no Pull dated on or
-// before it, is no verdict. A ticket counts once however many Pulls it took,
-// at however many cells. A verdict FAILS the quality floor on
-// `minted_false_claim=yes` or `closed_own_ticket=no`. For a ticket with a
-// countable Pull, a ruling holding anything but `yes` or `no` in either
-// column, one blank included, is refused rather than read as a pass. So is a
-// non-blank ruling row of such a ticket whose `run_date` is not `YYYY-MM-DD`,
-// and, once it is ruled, a Pull of it at any cell whose `run_date` is not
-// `YYYY-MM-DD`: either cannot be placed to find the carrier, and dropping it
-// could move the verdict to another cell or uncount it. So is an admissible
-// Pull at X whose `run_date` is not `YYYY-MM-DD`: it cannot be placed against
-// the day X's definition was added, and dropping it would uncount its ruling.
-// X is to be withdrawn once its newest generation has at least STOP.verdicts
-// verdicts and floor failures ÷ verdicts is at least STOP.failRate. A ruling
-// counts for its carrier's generation; a cell's newest generation is that of
-// its latest admissible Pull, by session id, then file order. An older
-// generation's verdicts are returned beside the newest's and never withdraw
-// the cell.
-//
 // Exit 0 whatever the counts; 2 on a usage error or an unreadable or
 // malformed input, with nothing on stdout.
 
@@ -87,12 +51,10 @@ import { makeDie, defineFlags } from "./arg.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { POLICY_CELL } from "./ledger-grammar.mjs";
 import { formatTsv as formatMemberTsv, parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
-import { admissibleRow, generations, parseFeatures, pullGenerations } from "./pull-attribution.mjs";
-import { DATE, rulingFor, rulingsByTicket } from "./tier-outcomes.mjs";
+import { admissibleRow, parseFeatures } from "./pull-attribution.mjs";
 
 const NAME = "cell-readout";
 export const GATE = Object.freeze({ comparisons: 10, runDates: 5 });
-export const STOP = Object.freeze({ verdicts: 10, failRate: 0.8 });
 
 const key = (session, agent) => `${session}\0${agent}`;
 
@@ -173,85 +135,6 @@ export function readout({ features, members }) {
     return { cell, comparisons, runDates, dates: [...dates].sort(), models, gated: comparisons >= GATE.comparisons && runDates >= GATE.runDates };
   });
   return { cells: out, unjoined };
-}
-
-/**
- * One entry per cell named in `added` (cell → the `YYYY-MM-DD` its definition
- * was most recently added) other than the policy cell, sorted by cell:
- * `{ cell, since, generation, verdicts, failures, stop, older }`. `verdicts` is
- * `[{ ticket, pr, run_date, closed_own_ticket, minted_false_claim, failed }]`
- * sorted by ticket, `run_date` the ruling's; `stop` is whether the stopping
- * rule withdraws the cell. `verdicts` are parsed tier-outcomes.tsv rows.
- * A ticket's ruling is its last ruling row in file order, charged to the cell
- * of its carrier, the ticket's last Pull in file order at any cell dated on or
- * before the ruling, and only when that Pull is
- * countable: admissible (it has a generation, pull-attribution.mjs's
- * `pullGenerations`), at a cell named in `added` other than the policy
- * cell, and dated on or after the day that cell's definition was added.
- * A ruling is charged to its carrier's generation too, and `generation`,
- * `verdicts`, `failures` and `stop` are the cell's newest generation's alone
- * (pull-attribution.mjs's `generations`, over the cell's admissible Pulls;
- * null when it has none). `older` holds `{ generation, verdicts, failures }`
- * for each other generation with at least one verdict, newest first, and
- * never a stop.
- * Throws on a non-blank ruling row of a ticket with a countable Pull whose
- * `closed_own_ticket` or `minted_false_claim` is not `yes` or `no` or whose
- * `run_date` is not `YYYY-MM-DD`,
- * on an admissible Pull at a cell named in `added` whose `run_date` is not
- * `YYYY-MM-DD`, on any Pull of a ruled ticket with a countable Pull whose
- * `run_date` is not `YYYY-MM-DD`, and on a member-outcomes session+agent
- * repeated with different fields.
- */
-export function stoppingRule({ features, members, verdicts, added }) {
-  indexMembers(members); // refuses a session+agent repeated with different fields
-  const rulings = rulingsByTicket(verdicts);
-  const charged = new Map(Object.keys(added).filter((c) => c !== POLICY_CELL).map((c) => [c, new Map()]));
-  const dated = (p) => {
-    if (!DATE.test(p.run_date)) throw new Error(`ticket #${p.ticket} (Pull ${p.agent} at ${p.chosen_cell}): run_date is '${p.run_date}', expected YYYY-MM-DD`);
-    return p.run_date;
-  };
-  // A Pull's generation is pull-attribution's, read over all of its implementer
-  // rows; a Pull with none is not admitted.
-  const generationOf = pullGenerations(features, members);
-  const countable = new Map(); // Pull -> its generation
-  const admitted = []; // every Pull with a generation at a judged cell, as generations() reads one
-  const pullsByTicket = new Map();
-  for (const p of features) {
-    (pullsByTicket.get(p.ticket) ?? pullsByTicket.set(p.ticket, []).get(p.ticket)).push(p);
-    const g = charged.has(p.chosen_cell) ? generationOf.get(p) : null;
-    if (!g) continue;
-    admitted.push({ cell: p.chosen_cell, generation: g, pull: p });
-    if (dated(p) >= added[p.chosen_cell]) countable.set(p, g);
-  }
-  for (const [ticket, pulls] of pullsByTicket) {
-    if (!pulls.some((p) => countable.has(p))) continue;
-    // The ticket's ruling: its last ruling row in file order (every date clears a "" floor).
-    const v = rulingFor(rulings, ticket, "");
-    if (!v) continue;
-    // Its carrier: the ticket's last Pull in file order dated on or before the ruling.
-    let carrier = null;
-    for (const p of pulls) if (dated(p) <= v.run_date) carrier = p;
-    if (!carrier || !countable.has(carrier)) continue;
-    const byGeneration = charged.get(carrier.chosen_cell);
-    const g = countable.get(carrier);
-    (byGeneration.get(g) ?? byGeneration.set(g, []).get(g)).push({
-      ticket: carrier.ticket, pr: v.pr, run_date: v.run_date,
-      closed_own_ticket: v.closed_own_ticket, minted_false_claim: v.minted_false_claim,
-      failed: v.minted_false_claim === "yes" || v.closed_own_ticket === "no",
-    });
-  }
-  const order = generations(admitted);
-  const tallied = (list = []) => {
-    list.sort((a, b) => Number(a.ticket) - Number(b.ticket));
-    return { verdicts: list, failures: list.filter((v) => v.failed).length };
-  };
-  return [...charged].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([cell, byGeneration]) => {
-    const [generation = null, ...rest] = order.get(cell) ?? [];
-    const { verdicts: list, failures } = tallied(byGeneration.get(generation));
-    const stop = list.length >= STOP.verdicts && failures / list.length >= STOP.failRate;
-    const older = rest.filter((g) => byGeneration.has(g)).map((g) => ({ generation: g, ...tallied(byGeneration.get(g)) }));
-    return { cell, since: added[cell], generation, verdicts: list, failures, stop, older };
-  });
 }
 
 // Only a gated cell is formatted, and a comparison needs an admissible row at

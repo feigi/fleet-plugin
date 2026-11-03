@@ -16,7 +16,6 @@ import { COLUMNS as TIER_COLUMNS, formatRow } from "../plugin/scripts/tier-outco
 import { WINDOW_START } from "../plugin/scripts/pr-cost.mjs";
 import { FEATURE_COLUMNS } from "../plugin/scripts/pull-attribution.mjs";
 import { FIT_EVERY_MERGED } from "../plugin/scripts/ticket-router.mjs";
-import { STOP } from "../plugin/scripts/cell-readout.mjs";
 
 const HOOK = fileURLToPath(new URL("../.omp/skills/run-team-local/hook.mjs", import.meta.url));
 const DAY = WINDOW_START;
@@ -87,9 +86,8 @@ const agentMd = (cell) => {
 
 // Answers `pr list` (pr-cost's merged-state read, which takes `fx.prs` through
 // the search's `created:` window and 1,000-row cap as GitHub does, or the
-// hook's open-PR read: `openPrs` plus every `prs` entry whose state is OPEN),
-// `issue list` (raw text instead of JSON when the fixture has `issuesRaw`), and
-// the writes, from GH_FIXTURE; `pr create` fails when it has `createFails`.
+// hook's open-PR read: `openPrs` plus every `prs` entry whose state is OPEN)
+// and `pr create`, from GH_FIXTURE; `pr create` fails when it has `createFails`.
 // Logs each argv to GH_LOG.
 const GH_STUB = `#!/usr/bin/env node
 const fs = require("node:fs");
@@ -104,10 +102,6 @@ if (cmd === "pr list" && fx.listFails) { process.stderr.write("gh stub: list ref
 if (cmd === "pr list") out(json === "number,headRefName"
   ? [...fx.openPrs, ...fx.prs.filter((p) => p.state === "OPEN").map((p) => ({ number: p.number, headRefName: "implementer/" + p.number }))]
   : searchPrs(fx.prs, args, FIRST_DAY));
-else if (cmd === "issue list") { if (fx.issuesRaw !== undefined) process.stdout.write(fx.issuesRaw); else out(fx.issues); }
-else if (cmd === "issue create") console.log("https://github.com/o/r/issues/901");
-else if (cmd === "issue edit") console.log("https://github.com/o/r/issues/" + args[2]);
-else if (cmd === "issue comment") console.log("https://github.com/o/r/issues/" + args[2] + "#issuecomment-1");
 else if (cmd === "pr create") { if (fx.createFails) { process.stderr.write("gh stub: create refused"); process.exit(1); } console.log("https://github.com/o/r/pull/902"); }
 else { process.stderr.write("gh stub: unexpected " + args.join(" ")); process.exit(9); }
 `;
@@ -117,9 +111,9 @@ function write(root, rel, text) {
   writeFileSync(join(root, rel), text);
 }
 
-// `readded`: cell → the date its definition is deleted and added back on main. `fitted`: the rows an
-// earlier commit of main holds, the commit the table records as `fitted_commit`.
-function fixture({ rows = corpus(), table = routerTable(), cells = STAGE1, readded = {}, fitted = null, gh = {} } = {}) {
+// `fitted`: the rows an earlier commit of main holds, the commit the table
+// records as `fitted_commit`.
+function fixture({ rows = corpus(), table = routerTable(), cells = STAGE1, fitted = null, gh = {} } = {}) {
   const root = tempDir("run-team-local-");
   const origin = join(root, "origin.git");
   const seed = join(root, "seed");
@@ -130,13 +124,6 @@ function fixture({ rows = corpus(), table = routerTable(), cells = STAGE1, readd
   for (const cell of cells) write(seed, `plugin/agents/fleet-implementer-${cell}.agent.md`, agentMd(cell));
   git(seed, ["add", "-A"]);
   commit("cells", "2026-09-01T00:00:00Z");
-  for (const [cell, at] of Object.entries(readded)) {
-    git(seed, ["rm", "--quiet", `plugin/agents/fleet-implementer-${cell}.agent.md`]);
-    commit(`withdraw ${cell}`, at);
-    write(seed, `plugin/agents/fleet-implementer-${cell}.agent.md`, agentMd(cell));
-    git(seed, ["add", "-A"]);
-    commit(`reinstate ${cell}`, at);
-  }
   if (fitted !== null) {
     write(seed, FEATURES, featuresTsv(fitted.features));
     write(seed, "docs/metrics/member-outcomes.tsv", membersTsv(fitted.members));
@@ -164,7 +151,7 @@ function fixture({ rows = corpus(), table = routerTable(), cells = STAGE1, readd
   // `gh.unlisted` names the ones `gh pr list` leaves out.
   const rulingPrs = rows.tiers.map((t) => ({ number: Number(t.pr), state: "MERGED", mergedAt: `${DAY}T12:00:00Z` }))
     .filter((p) => !(gh.unlisted ?? []).includes(p.number));
-  writeFileSync(join(root, "gh.json"), JSON.stringify({ openPrs: [], issues: [], ...gh, prs: [...rulingPrs, ...(gh.prs ?? [])] }));
+  writeFileSync(join(root, "gh.json"), JSON.stringify({ openPrs: [], ...gh, prs: [...rulingPrs, ...(gh.prs ?? [])] }));
   writeFileSync(join(root, "model-roles.json"), JSON.stringify(MODEL_ROLES));
   writeFileSync(join(root, "catalog.json"), JSON.stringify(CATALOG));
   const log = join(root, "gh.log");
@@ -243,177 +230,34 @@ test("drift notice: of the rows dated the same day it follows the higher session
 });
 
 // ---------------------------------------------------------------------------
-// the per-cell stopping rule
+// the duties, in order
 
-// smol-high at ten verdicts, eight failing the floor; task-high at three, all failing.
-function floorFailing() {
-  const rows = corpus();
-  for (let i = 0; i < STOP.verdicts; i++) ruled(rows, { ticket: 100 + i, cell: "smol-high", fail: i < 8 });
-  for (let i = 0; i < 3; i++) ruled(rows, { ticket: 200 + i, cell: "task-high", fail: true });
-  return rows;
-}
-const TITLE = "Withdraw exploration cell smol-high: 8/10 floor failures on claude-haiku-4-5";
-const STALE = { number: 78, title: "Withdraw exploration cell smol-high: 7/9 floor failures" };
-const writes = (f) => ["issue create", "issue edit", "issue comment"].flatMap((cmd) => calls(f, cmd));
-
-test("stopping rule --dry-run: a cell at ten verdicts and eight floor failures would file its withdrawal issue; a cell under the rule continues", () => {
-  const f = fixture({ rows: floorFailing() });
-  const r = f.run(["--dry-run"]);
-  assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, new RegExp(`stopping rule: smol-high 8/10 floor failures since 2026-09-01 — would file "${escape(TITLE)}" \\(ready-for-human\\)`));
-  assert.match(r.stdout, /stopping rule: task-high 3\/3 floor failures since 2026-09-01 — continues/);
-  const lists = calls(f, "issue list");
-  assert.equal(lists.length, 1, "only the stopping cell is looked up");
-  assert.deepEqual(lists[0].slice(2), ["--state", "open", "--search", `"Withdraw exploration cell smol-high:" in:title`, "--json", "number,title", "--limit", "100"]);
-  assert.deepEqual(writes(f), [], "a dry run writes nothing");
-});
-
-test("stopping rule: an older generation's tally is printed and never files, and the cell's newest generation is judged alone", () => {
-  const rows = floorFailing();
-  for (const m of rows.members) if (m.subagentType === "fleet-implementer-smol-high") m.dispatchModel = "model-a";
-  // One clean Pull after them on the cell's role model: its newest generation.
-  ruled(rows, { ticket: 300, cell: "smol-high" });
-  const f = fixture({ rows });
-  const r = f.run(["--dry-run"]);
-  assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /stopping rule: smol-high older generation model-a 8\/10 floor failures since 2026-09-01 — not judged$/m);
-  assert.match(r.stdout, /stopping rule: smol-high 0\/1 floor failures since 2026-09-01 — continues$/m);
-  assert.deepEqual(calls(f, "issue list"), [], "no withdrawal issue is looked up for the cell");
-});
-
-test("stopping rule: an open withdrawal issue with the same title is left as it is, even beside one of the cell's older tallies", () => {
-  const open = { number: 77, title: TITLE };
-  const f = fixture({ rows: floorFailing(), gh: { issues: [STALE, open] } });
-  const r = f.run();
-  assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, new RegExp(`stopping rule: smol-high 8/10 floor failures since 2026-09-01 — withdrawal issue already open, #${open.number}$`, "m"));
-  assert.deepEqual(writes(f), []);
-});
-
-test("stopping rule: an open withdrawal issue at the same tally that names no generation, or another one, gets the newest generation's verdict table and title", () => {
-  for (const prior of ["Withdraw exploration cell smol-high: 8/10 floor failures", "Withdraw exploration cell smol-high: 8/10 floor failures on model-a"]) {
-    const f = fixture({ rows: floorFailing(), gh: { issues: [{ number: 77, title: prior }] } });
-    const r = f.run();
-    assert.equal(r.status, 0, r.stderr);
-    assert.match(r.stdout, new RegExp(`stopping rule: smol-high 8/10 floor failures since 2026-09-01 — withdrawal issue #77 retitled from "${escape(prior)}", verdict table commented$`, "m"));
-    assert.deepEqual(calls(f, "issue create"), []);
-    const [comment] = calls(f, "issue comment");
-    assert.match(comment[4], /newest generation, `claude-haiku-4-5`/);
-    assert.deepEqual(calls(f, "issue edit"), [["issue", "edit", "77", "--title", TITLE]]);
+test("duties: the hook runs the drift notice, then the router fit, and no other; a cell whose rulings all fail the quality floor reads and writes no GitHub issue", () => {
+  // Ten Pulls at smol-high, each ruled and failing the quality floor, beside a due re-fit.
+  const rows = merged(FIT_EVERY_MERGED);
+  for (let i = 0; i < 10; i++) ruled(rows, { ticket: 100 + i, cell: "smol-high", fail: true });
+  for (const extra of [["--dry-run"], []]) {
+    const mode = extra.length ? "--dry-run" : "a live run";
+    const f = fixture({ rows });
+    const r = f.run(extra);
+    assert.equal(r.status, 0, `${mode}: ${r.stderr}`);
+    // The duty each `run-team-local: <duty>: …` line names, a run of one duty's lines collapsed to one.
+    const duties = [...r.stdout.matchAll(/^run-team-local: ([^:]+): /gm)].map((m) => m[1]).filter((d, i, all) => d !== all[i - 1]);
+    assert.deepEqual(duties, ["drift notice", "router fit"], mode);
+    assert.deepEqual(f.ghCalls().filter((c) => c[0] === "issue"), [], `${mode}: no issue is looked up or written`);
   }
 });
 
-test("stopping rule: the cell's open withdrawal issue at another tally gets the verdict table as a comment, then the new title; no second issue is filed", () => {
-  const f = fixture({ rows: floorFailing(), gh: { issues: [STALE] } });
-  const r = f.run();
-  assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, new RegExp(`stopping rule: smol-high 8/10 floor failures since 2026-09-01 — withdrawal issue #78 retitled from "${escape(STALE.title)}", verdict table commented$`, "m"));
-  assert.deepEqual(calls(f, "issue create"), []);
-  const [comment] = calls(f, "issue comment");
-  assert.deepEqual(comment.slice(0, 4), ["issue", "comment", "78", "--body"]);
-  assert.ok(comment[4].split("\n").includes("| #100 | #5100 | 2026-10-03 | yes | yes | fail |"), comment[4]);
-  assert.deepEqual(calls(f, "issue edit"), [["issue", "edit", "78", "--title", TITLE]]);
-  // The title is the idempotency key, so it is written after the comment.
-  assert.deepEqual(f.ghCalls().map((c) => c.slice(0, 2).join(" ")).filter((c) => c === "issue comment" || c === "issue edit"), ["issue comment", "issue edit"]);
-});
-
-test("stopping rule: with several open withdrawal issues for the cell and none at the new tally, the lowest-numbered one is retitled and commented, however the list orders them, and the others are named", () => {
-  const older = { number: 90, title: "Withdraw exploration cell smol-high: 6/8 floor failures" };
-  const newer = { number: 95, title: STALE.title };
-  const f = fixture({ rows: floorFailing(), gh: { issues: [newer, older] } });
-  const r = f.run();
-  assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, new RegExp(`stopping rule: smol-high 8/10 floor failures since 2026-09-01 — withdrawal issue #90 retitled from "${escape(older.title)}", verdict table commented$`, "m"));
-  assert.match(r.stdout, /stopping rule: smol-high 8\/10 floor failures since 2026-09-01 — more open withdrawal issues for the cell, left as they are: #95$/m);
-  assert.deepEqual(calls(f, "issue create"), []);
-  assert.deepEqual(calls(f, "issue comment").map((c) => c[2]), ["90"]);
-  assert.deepEqual(calls(f, "issue edit"), [["issue", "edit", "90", "--title", TITLE]]);
-});
-
-test("stopping rule: the cell's open issue already at the new tally is the one kept, though an older issue at another tally is also open, and that one is named", () => {
-  const older = { number: 70, title: "Withdraw exploration cell smol-high: 6/8 floor failures" };
-  const exact = { number: 77, title: TITLE };
-  const f = fixture({ rows: floorFailing(), gh: { issues: [exact, older] } });
-  const r = f.run();
-  assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, new RegExp(`stopping rule: smol-high 8/10 floor failures since 2026-09-01 — withdrawal issue already open, #${exact.number}$`, "m"));
-  assert.match(r.stdout, /stopping rule: smol-high 8\/10 floor failures since 2026-09-01 — more open withdrawal issues for the cell, left as they are: #70$/m);
-  assert.deepEqual(writes(f), []);
-});
-
-test("stopping rule: a withdrawal issue whose title differs from the prefix only in case is still the cell's, and is retitled", () => {
-  const lower = { number: 71, title: STALE.title.toLowerCase() };
-  const f = fixture({ rows: floorFailing(), gh: { issues: [lower] } });
-  const r = f.run();
-  assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(calls(f, "issue create"), []);
-  assert.deepEqual(calls(f, "issue edit"), [["issue", "edit", "71", "--title", TITLE]]);
-});
-
-test("stopping rule --dry-run: the cell's open withdrawal issue at another tally would be retitled and commented, and nothing is written", () => {
-  const f = fixture({ rows: floorFailing(), gh: { issues: [STALE] } });
-  const r = f.run(["--dry-run"]);
-  assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, new RegExp(`stopping rule: smol-high 8/10 floor failures since 2026-09-01 — would retitle withdrawal issue #78 from "${escape(STALE.title)}" to "${escape(TITLE)}" and comment the verdict table$`, "m"));
-  assert.deepEqual(writes(f), []);
-});
-
-test("stopping rule: another cell's withdrawal issue, or a title that only contains the cell's prefix, does not dedupe, and the issue is filed", () => {
-  const other = { number: 79, title: "Withdraw exploration cell task-high: 3/3 floor failures" };
-  const quoted = { number: 80, title: "Re: Withdraw exploration cell smol-high: 7/9 floor failures" };
-  const longer = { number: 81, title: "Withdraw exploration cell smol-high2: 7/9 floor failures" };
-  const f = fixture({ rows: floorFailing(), gh: { issues: [other, quoted, longer] } });
-  const r = f.run();
-  assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /stopping rule: smol-high 8\/10 floor failures since 2026-09-01 — filed https:\/\/github\.com\/o\/r\/issues\/901/);
-  assert.deepEqual([...calls(f, "issue edit"), ...calls(f, "issue comment")], []);
-  const [create] = calls(f, "issue create");
-  const flag = (name) => create[create.indexOf(name) + 1];
-  assert.equal(flag("--title"), TITLE);
-  assert.equal(flag("--label"), "ready-for-human");
-  // One verdict-table row per ticket: ticket and PR as references, the ruling's date and both floor fields.
-  const row = (ticket, minted, floor) => `| #${ticket} | #${ticket + 5000} | 2026-10-03 | yes | ${minted} | ${floor} |`;
-  const body = flag("--body").split("\n");
-  assert.ok(body.includes(row(100, "yes", "fail")), flag("--body"));
-  assert.ok(body.includes(row(109, "no", "pass")), flag("--body"));
-  const tickets = body.filter((l) => l.startsWith("| #")).map((l) => Number(l.match(/^\| #(\d+) /)[1]));
-  assert.deepEqual(tickets, [100, 101, 102, 103, 104, 105, 106, 107, 108, 109], "rows run in ascending ticket order");
-});
-
-test("stopping rule: the count restarts on the day a cell's definition was most recently added", () => {
-  const f = fixture({ rows: floorFailing(), readded: { "smol-high": "2026-10-04T00:00:00Z" } });
-  const r = f.run(["--dry-run"]);
-  assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /stopping rule: smol-high 0\/0 floor failures since 2026-10-04 — continues/);
-  assert.deepEqual(calls(f, "issue list"), []);
-});
-
-test("stopping rule: a definition no commit adds fails the duty naming it, after the cells that can be judged are reported, and the re-fit does not run", () => {
-  const f = fixture({ rows: floorFailing() });
-  // On disk beside the committed definitions, never committed.
-  writeFileSync(join(f.repo, "plugin", "agents", "fleet-implementer-smol-max.agent.md"), agentMd("smol-max"));
+test("duties: a duty that fails ends the run before the next one: a torn member-outcomes.tsv fails the drift notice, exit 1, and the router fit never starts", () => {
+  const f = fixture({ rows: merged(FIT_EVERY_MERGED) });
+  // Torn on disk only: origin/main's copy, the one the re-fit reads, is whole.
+  writeFileSync(join(f.repo, "docs", "metrics", "member-outcomes.tsv"), "# header\nshort\trow\n");
   const r = f.run(["--dry-run"]);
   assert.equal(r.status, 1, r.stdout);
-  assert.match(r.stdout, new RegExp(`stopping rule: smol-high 8/10 floor failures since 2026-09-01 — would file "${escape(TITLE)}"`));
-  assert.match(r.stderr, /run-team-local: stopping rule failed: not judged — no commit adds fleet-implementer-smol-max\.agent\.md$/m);
+  assert.match(r.stderr, /^run-team-local: drift notice failed: malformed row/m);
   assert.doesNotMatch(r.stdout, /router fit/);
-});
-
-test("stopping rule: a gh that prints something other than JSON fails the duty naming the gh command and what it printed", () => {
-  const f = fixture({ rows: floorFailing(), gh: { issuesRaw: "<html>rate limited</html>" } });
-  const r = f.run(["--dry-run"]);
-  assert.equal(r.status, 1, r.stdout);
-  assert.match(r.stderr, /stopping rule failed: gh issue list printed non-JSON \(.*\): "<html>rate limited<\/html>"$/m);
-});
-
-test("stopping rule --dry-run: a both-blank tier-outcomes row after a ticket's real ruling leaves the count as it was, and the router fit still runs", () => {
-  const rows = floorFailing();
-  rows.tiers.push(tier({ ticket: "100", pr: "1392", closed_own_ticket: "", minted_false_claim: "" }));
-  const f = fixture({ rows });
-  const r = f.run(["--dry-run"]);
-  assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, new RegExp(`stopping rule: smol-high 8/10 floor failures since 2026-09-01 — would file "${escape(TITLE)}"`));
-  assert.match(r.stdout, /^run-team-local: router fit: /m);
+  assert.deepEqual(f.ghCalls(), [], "the re-fit asked GitHub nothing");
+  assert.equal(worktrees(f.repo), 1, "and made no throwaway checkout");
 });
 
 // ---------------------------------------------------------------------------
@@ -649,8 +493,8 @@ test("router fit: a re-fit whose `pr create` fails still prints the fit's summar
 
 test("router fit: reads origin/main, not the checkout's own HEAD, when the two differ", () => {
   const f = fixture({ rows: merged(FIT_EVERY_MERGED) });
-  // A local commit no remote holds, whose features file has no rows (the hook's own stopping rule still
-  // reads the file, so it must exist): a fit from this HEAD would count no merged pull and not be due.
+  // A local commit no remote holds, whose features file has no rows: a fit from
+  // this HEAD would count no merged pull and not be due.
   write(f.repo, FEATURES, featuresTsv([]));
   git(f.repo, ["commit", "--quiet", "-am", "local only"]);
   const localSha = git(f.repo, ["rev-parse", "HEAD"]);
