@@ -30,6 +30,8 @@ const OTHER = "b".repeat(40);
 // its Inert diff verdict is `unknown` and a ticket PR at PIN is labelled only
 // with a claim: the baseline run carries this one.
 const KILL = "red: node --test tests/x.test.mjs → exit 1, fail 1 incl x; baseline: node --test tests/x.test.mjs → exit 0, x pass";
+// Another well-formed claim, different from KILL, for the case that gives --kill twice.
+const OTHER_KILL = "red: node --test tests/y.test.mjs → exit 1, fail 1 incl y; baseline: node --test tests/y.test.mjs → exit 0, y pass";
 
 // The Ticketless test's read, `gh pr view <n> --json closingIssuesReferences,url`,
 // is kept out of calls.log, which holds the calls the labelling steps make, and
@@ -390,7 +392,16 @@ test("exit 0: a ticket PR whose diff is not inert is labelled on a well-formed -
   assert.equal("killGiven" in r.out, false, "killGiven is an exit-6 field");
 });
 
-for (const bad of ["", "   ", "killed it", "killed it. red: x; baseline: y", "red: x", "baseline: node --test → exit 0, x pass", "red: ; baseline: x", "red: x; baseline: ", `${KILL}\nmore`]) {
+test("exit 0: a well-formed --kill with trailing blanks is accepted and the receipt records it exactly as given", () => {
+  const t = rig();
+  // Trailing only: the grammar anchors at `red:`, so a claim cannot be padded in front.
+  const padded = `${KILL} \t `;
+  const r = t.run(["--pr", "42", "--pin", t.commit(NOT_INERT), "--kill", padded]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.out.kill, padded, "the claim is recorded as given, not trimmed");
+});
+
+for (const bad of ["", "   ", "killed it", "killed it. red: x; baseline: y", "red: x", "baseline: node --test → exit 0, x pass", "red: ; baseline: x", "red: ; baseline: x; baseline: y", "red:; baseline: x; baseline: y", "red: x; baseline: ", `${KILL}\nmore`]) {
   test(`exit 6: a malformed --kill ${JSON.stringify(bad)} is refused like a missing one`, () => {
     const t = rig();
     const r = t.run(["--pr", "42", "--pin", t.commit(NOT_INERT), "--kill", bad]);
@@ -407,6 +418,23 @@ test("exit 6: a --kill with no value after it is an empty claim, refused at exit
   const r = t.run(["--pr", "42", "--pin", t.commit(NOT_INERT), "--repo", t.repo, "--kill"]);
   assert.equal(r.status, 6, r.stderr);
   assert.equal(r.out.killGiven, "");
+});
+
+// With --kill given twice the first is the claim; the later one is not read.
+test("exit 0: --kill given twice is read at the first, and the receipt records that claim", () => {
+  const t = rig();
+  const r = t.run(["--pr", "42", "--pin", t.commit(NOT_INERT), "--kill", KILL, "--kill", OTHER_KILL]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.out.kill, KILL, "the first --kill is the claim");
+});
+
+test("exit 6: --kill given twice is read at the first, so a malformed first is refused though a well-formed one follows", () => {
+  const t = rig();
+  const r = t.run(["--pr", "42", "--pin", t.commit(NOT_INERT), "--kill", "killed it", "--kill", KILL]);
+  assert.equal(r.status, 6, r.stderr);
+  assert.deepEqual(t.calls(), [VIEW]);
+  assert.equal(r.out.kill, null);
+  assert.equal(r.out.killGiven, "killed it");
 });
 
 test("exit 0: a ticket PR with an inert diff is labelled with no --kill, and a malformed one is ignored", () => {
