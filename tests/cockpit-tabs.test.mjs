@@ -1020,7 +1020,7 @@ test("evidence favours is drawn beside routes now: its source, its burn-in headi
   render(model({ cellEvidence: policyEvidence({ guard: besideGuard(), preview: previewFit() }) }));
   const rows = document.getElementById("cells-rows");
   const text = textOf(rows).replace(/\s+/g, " ");
-  for (const words of ["evidence favours", "Preview fit · this repository's runs · computed 2026-10-26 19:17Z · 235 Pulls",
+  for (const words of ["evidence favours", "Fit · this repository's runs · computed 2026-10-26 19:17Z · 235 Pulls",
     "stage 2: slow-medium and task-max have 0 of the 20 merged PRs each needs", "task-high ≠ routes now", "task-high · n 67¹ · qualifies · 95% interval [−$3.10, −$0.40]"]) {
     assert.ok(text.includes(words), `the rows do not draw ${JSON.stringify(words)}`);
   }
@@ -1032,7 +1032,7 @@ test("evidence favours is drawn beside routes now: its source, its burn-in headi
   assert.equal(rows.children.at(-1).textContent, "¹ task-high: the guard counts merges by GitHub's state, the fit by Rulings, and the fit admits only drawn or rule-sized Pulls");
 });
 
-test("evidence favours' heading labels are drawn in its heading, and with no Preview fit its column is empty", () => {
+test("evidence favours' heading labels are drawn in its heading, and with no Fit its column is empty", () => {
   const labelled = harness();
   labelled.render(labelled.model({ cellEvidence: policyEvidence({ guard: besideGuard(), preview: previewFit({ guard_computed_at: "2026-10-25T08:00:00.000Z" }) }) }));
   const side = labelled.document.getElementById("cells-rows").children.find((c) => c.className === "ce-sides").children[1];
@@ -1041,7 +1041,7 @@ test("evidence favours' heading labels are drawn in its heading, and with no Pre
   const none = harness();
   none.render(none.model({ cellEvidence: policyEvidence() }));
   const rows = none.document.getElementById("cells-rows");
-  assert.ok(textOf(rows).includes("no Preview fit yet: the next phase 0 writes one"));
+  assert.ok(textOf(rows).includes("no Fit yet: the next phase 0 writes one"));
   const row = none.document.getElementById("cells-row-cost-*");
   assert.equal(row.children.length, 3);
   assert.deepEqual(row.children[2].children, [], "nothing is unknown there: the column is empty");

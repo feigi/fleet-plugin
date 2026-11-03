@@ -37,7 +37,8 @@
 //                   `NEED tier-outcomes append <n>`, and the step is pending.
 //                   The verdicts come from `tier-outcomes.mjs append`, which
 //                   works them out from the Charges; this script never writes one.
-//   metrics         `metrics-refresh.mjs`. Any non-zero exit is a failed step.
+//   metrics         `metrics-refresh.mjs --no-fit`: close-out computes no Fit,
+//                   the next run's phase 0 does. Any non-zero exit is a failed step.
 //   gather          run-records.mjs's gather(): every run archive `ledger.mjs
 //                   rotate` left in `.fleet/` (`ledger.<stamp>.md`,
 //                   `phase0.<stamp>.json`, `closeout.<stamp>.json`) into
@@ -349,7 +350,7 @@ function stepTierOutcomes({ cwd }) {
 }
 
 function stepMetrics({ cwd }) {
-  const r = node("metrics-refresh.mjs", [], { cwd });
+  const r = node("metrics-refresh.mjs", ["--no-fit"], { cwd });
   return r.status === 0 ? ok(r.stdout) : failed(`metrics-refresh.mjs failed: ${detail(r)}`);
 }
 

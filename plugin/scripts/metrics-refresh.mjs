@@ -2,13 +2,15 @@
 // The run's metrics duties that keep the router's inputs current: move the
 // pending ticket-features rows into the tracked corpus, widen a member-outcomes
 // corpus written before its latest columns, refresh the cost guard over it, then
-// write the Preview fit beside that guard.
+// write the Fit beside that guard.
 //
-//   metrics-refresh.mjs [--repo <dir>]
+//   metrics-refresh.mjs [--repo <dir>] [--no-fit]
 //
 //   --repo   the workspace whose `.fleet/` and `docs/metrics/` the duties read
 //            and write; default the main checkout of the repository the cwd is
 //            in, where the router script appends its pending rows
+//   --no-fit the duties only, no Fit: close-out passes it, so a run computes
+//            one Fit, at its phase 0, and each close-out's rows route the next run
 //
 // DRAIN. `ticket-router.mjs route` appends one row per Pull to
 // `.fleet/ticket-features.pending.tsv`; this moves them into
@@ -59,28 +61,34 @@
 // (no verdict yet — the baseline cell has too few merged PRs) are verdicts the
 // router and `fleet-tick.mjs` consume, not failures; any other non-zero exit is.
 //
-// PREVIEW FIT. After the cost guard wrote a guard, and only then, the Router's
-// fit (`ticket-router.mjs`'s fitTable) runs in-process over the working-tree
-// TSVs the guard just read and the guard just written, with the installed
-// router table (`router-table.json` beside the scripts) as its prior and no
-// commit. It writes `.fleet/router-preview.json` through a temp file and a
-// rename: `computed_at`, `guard_computed_at` (the guard's own `computed_at`),
-// `tsv_blobs` (the git blob id of each TSV it read, keyed by path as the guard
-// keys its own), `prior` (the installed table's `fitted_commit`, `stage`,
-// `cells`, `classifier`, `splits` and `window_start`, and the install's `package.json`
-// `version`) and the fitted `table`. The cockpit lays it out as what the
-// evidence favours; nothing routes by it and nothing commits it. It is called
-// in-process because a fit has no verdict for an exit status to carry, and the
-// `fit` CLI reads the TSVs only as committed. It never fails the run: an error
-// prints `metrics-refresh: preview: failed — <why>`, leaves the old file in
-// place and leaves the exit status as the other duties set it. That line stays
-// on stdout: the cockpit reads it off the receipts' `metrics` step, and
-// close-out's receipt keeps only stdout from a run that exits 0.
+// FIT. After the cost guard wrote a guard, and only then, the Router's fit
+// (`ticket-router.mjs`'s fitTable) runs in-process over the working-tree TSVs
+// the guard just read and the guard just written, with the starting table
+// (`router-table.json` beside the scripts) as its prior and no commit. It
+// writes the Fit, `.fleet/router-fit.json`, through a temp file and a rename:
+// `computed_at`, `guard_computed_at` (the guard's own `computed_at`),
+// `guard` (the guard it used, as the router reads it: its `computed_at`,
+// `tripped`, per-Cell `n` and `window_start`), `tsv_blobs` (the git blob id of
+// each TSV it read, keyed by path as the guard keys its own), `prior` (the
+// starting table's `fitted_commit`, `stage`, `cells`, `classifier`, `splits`
+// and `window_start`, and the install's `package.json` `version`) and the
+// fitted `table`. `ticket-router.mjs route` routes by that `table`, read
+// beside the guard; nothing commits the file. The Fit is a pure function of
+// those records: the TSVs at the recorded blob ids, the guard and the prior
+// fit to the same table again. With no records it is the starting table's
+// fit, as any other. It is called in-process because a fit has no verdict
+// for an exit status to carry, and the `fit` CLI reads the TSVs only as
+// committed. It never fails the run: an error prints `metrics-refresh: fit:
+// failed — <why>`, leaves the old file in place, so the run routes by the
+// last Fit that computed, and leaves the exit status as the other duties set
+// it. That line stays on stdout: the cockpit reads it off the receipts'
+// `metrics` step, and close-out's receipt keeps only stdout from a run that
+// exits 0.
 //
 // One `metrics-refresh: <duty>: …` line per duty on stdout. Exit 0 when no
 // duty failed; 1 when one failed — named on stderr, and the duties after
 // it did not run (each is safe to run again); 2 on a usage error. The
-// Preview fit is not one of those duties: it never sets the exit status.
+// Fit is not one of those duties: it never sets the exit status.
 
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
@@ -94,7 +102,7 @@ import { COLUMNS as MEMBER_COLUMNS, ENDINGS, isImplementer, parseTsv as parseMem
 import { blobId } from "./pr-cost.mjs";
 import { FEATURE_COLUMNS, parseFeatures } from "./pull-attribution.mjs";
 import { REPORT_STATUSES } from "./report-files.mjs";
-import { DEFAULT_TABLE, INSTALL_PACKAGE, fitTable, installVersion, readGuard, validateTable } from "./ticket-router.mjs";
+import { DEFAULT_TABLE, FIT_FILE, INSTALL_PACKAGE, fitTable, installVersion, readGuard, validateTable } from "./ticket-router.mjs";
 import { parseTierOutcomes } from "./tier-outcomes.mjs";
 
 const NAME = "metrics-refresh";
@@ -105,7 +113,7 @@ const MEMBERS = join("docs", "metrics", "member-outcomes.tsv");
 const TIERS = join("docs", "metrics", "tier-outcomes.tsv");
 const CORPUS = [MEMBERS, TIERS, FEATURES];
 const GUARD = join(".fleet", "cost-guard.json");
-const PREVIEW = join(".fleet", "router-preview.json");
+const FIT = join(".fleet", FIT_FILE);
 // pr-cost.mjs --guard: 0 no cell tripped, 3 a cell tripped, 4 no verdict yet —
 // all three are verdicts its readers consume; anything else is a failure.
 const GUARD_VERDICT_EXITS = new Set([0, 3, 4]);
@@ -276,19 +284,19 @@ function costGuard(repo) {
   return g;
 }
 
-// The Preview fit over `repo`'s working-tree TSVs and `written`, the guard file the
+// The Fit over `repo`'s working-tree TSVs and `written`, the guard file the
 // guard duty just wrote (parsed), with the router table at `tablePath` as its
-// prior, written to `.fleet/router-preview.json` through a temp file and a
-// rename. Throws on anything it cannot read, fit or write, before the rename, so
-// the old file stays as it was.
-export function writePreview(repo, written, { tablePath = DEFAULT_TABLE, packagePath = INSTALL_PACKAGE, now = new Date() } = {}) {
+// prior, written to `.fleet/router-fit.json` through a temp file and a rename.
+// Throws on anything it cannot read, fit or write, before the rename, so the
+// old file stays as it was.
+export function writeFit(repo, written, { tablePath = DEFAULT_TABLE, packagePath = INSTALL_PACKAGE, now = new Date() } = {}) {
   const guard = readGuard(written);
   if (guard === null) throw new Error(`${GUARD} is not a guard the router reads`);
   let prior;
   try {
     prior = validateTable(JSON.parse(readFileSync(tablePath, "utf8")));
   } catch (e) {
-    throw new Error(`cannot read the installed router table ${tablePath}: ${e.code ?? e.message}`);
+    throw new Error(`cannot read the starting router table ${tablePath}: ${e.code ?? e.message}`);
   }
   if (prior instanceof Error) throw new Error(`${tablePath}: ${prior.message}`);
   // Keyed by the path as the guard keys its own (pr-cost.mjs reads these, relative to the workspace).
@@ -302,9 +310,10 @@ export function writePreview(repo, written, { tablePath = DEFAULT_TABLE, package
   const verdicts = read(TIERS, parseTierOutcomes);
   const features = read(FEATURES, parseFeatures);
   const table = fitTable({ prior, features, members, verdicts, guard, commit: null });
-  const preview = {
+  const record = {
     computed_at: now.toISOString(),
     guard_computed_at: written.computed_at,
+    guard: { computed_at: written.computed_at, tripped: guard.tripped, n: guard.n, window_start: guard.window_start },
     tsv_blobs: Object.fromEntries(Object.entries(tsvBlobs).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
     prior: {
       fitted_commit: prior.fitted_commit,
@@ -317,28 +326,28 @@ export function writePreview(repo, written, { tablePath = DEFAULT_TABLE, package
     },
     table,
   };
-  const file = join(repo, PREVIEW);
-  writeFileSync(`${file}.tmp`, `${JSON.stringify(preview, null, 2)}\n`);
+  const file = join(repo, FIT);
+  writeFileSync(`${file}.tmp`, `${JSON.stringify(record, null, 2)}\n`);
   renameSync(`${file}.tmp`, file);
-  return preview;
+  return record;
 }
 
-// The Preview fit as the run calls it: only beside a guard the guard duty wrote, and
+// The Fit as the run calls it: only beside a guard the guard duty wrote, and
 // never a failure of the run — its error is a line, and the exit stays as it was.
-function preview(repo, written) {
-  if (written === null) return say(`preview: skipped, no guard written — ${PREVIEW} left as it is`);
+function fit(repo, written) {
+  if (written === null) return say(`fit: skipped, no guard written — ${FIT} left as it is`);
   let p;
   try {
-    p = writePreview(repo, written);
+    p = writeFit(repo, written);
   } catch (e) {
-    return say(`preview: failed — ${e.message}`);
+    return say(`fit: failed — ${e.message}`);
   }
-  say(`preview: fitted ${p.table.n_rows} Pull${p.table.n_rows === 1 ? "" : "s"}, stage ${p.table.stage}${p.table.burn_in ? ", in burn-in" : ""}; ${PREVIEW} computed ${p.computed_at}`);
+  say(`fit: fitted ${p.table.n_rows} Pull${p.table.n_rows === 1 ? "" : "s"}, stage ${p.table.stage}${p.table.burn_in ? ", in burn-in" : ""}; ${FIT} computed ${p.computed_at}`);
 }
 
 function main() {
   const die = makeDie(NAME);
-  const F = defineFlags(die, { flags: { repo: "value" } });
+  const F = defineFlags(die, { flags: { repo: "value", "no-fit": "bool" } });
   F.sweep();
   F.stray();
   let repo = F.arg("repo") === null ? null : resolve(F.arg("repo"));
@@ -361,7 +370,7 @@ function main() {
       return;
     }
   }
-  preview(repo, written);
+  if (!F.has("no-fit")) fit(repo, written);
 }
 
 if (isCLI(import.meta.url)) main();

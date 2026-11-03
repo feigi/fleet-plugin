@@ -104,7 +104,7 @@ issue number among the reasons — comes before that PR's WARNING and says why.
 
 **Drain the pending ticket-features rows and refresh the cost guard, after
 the member-outcomes scrape and every `tier-outcomes.mjs append`, before the
-metrics files are committed.** `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run metrics-refresh.mjs`
+metrics files are committed.** `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run metrics-refresh.mjs --no-fit`
 moves `.fleet/ticket-features.pending.tsv` — the row the router script
 appended for each Pull at dispatch — into `docs/metrics/ticket-features.tsv`,
 deduped on `session`+`agent`, so this run's own rows are in the file that gets
@@ -112,10 +112,9 @@ committed; that file is a run artifact too and is committed with the other
 two. It then widens a `docs/metrics/member-outcomes.tsv` written before the
 newest columns, as at phase 0 — a file already at the current width is left
 as it is — and then runs `pr-cost.mjs --guard`, which rewrites
-`.fleet/cost-guard.json` from all three files. After a guard it wrote it writes
-the Preview fit, `.fleet/router-preview.json`, for the cockpit alone: it is not
-a metrics file and is never committed, and its `preview: failed — <why>` line
-leaves the exit as it was. Exit 0: every duty ran. The guard's
+`.fleet/cost-guard.json` from all three files. `--no-fit` computes no Fit:
+one Fit per run, at phase 0, so the rows this close-out commits route the
+next run, and `.fleet/router-fit.json` is left as it is. Exit 0: every duty ran. The guard's
 own exit 3 (a cell tripped) and 4 (no verdict yet, baseline too thin) are
 verdicts the router and `fleet-tick.mjs` read, never failures; the script
 absorbs them. Exit 1 names the duty that failed on stderr and the duties after it

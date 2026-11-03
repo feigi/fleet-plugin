@@ -118,6 +118,8 @@ const CORRECTIONS = [
     "duty 1 just proved the owned worktree sits at that pin,",
     "duty 1 just proved the owned worktree holds nothing your dispatch pin lacks, though its `HEAD` may differ from it,",
   ],
+  // The router draws over the table it routes by, the Fit beside the guard, else the starting table.
+  ["over `router-table.json`'s `cells` minus the policy cell", "over the routing table's `cells` minus the policy cell"],
 ];
 
 // The removed text as its blocks — paragraphs, a table, a code block — each

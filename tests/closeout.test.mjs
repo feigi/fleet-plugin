@@ -398,6 +398,7 @@ test("finish: runs the steps in order, one status line each, heartbeat --stop be
   assert.deepEqual(statusOf(f.receipt(), FINISH_STEPS), allOk(FINISH_STEPS));
   assert.deepEqual(f.order(), ["fleet-tick", "member-outcomes", "metrics-refresh", "gh", "fleet-heartbeat", "gh", "ci-state", "gh", "gh"], "pr create, the stop, then pr view, ci-state, pr merge and the pr view that confirms it");
   assert.deepEqual(f.calls("fleet-heartbeat")[0].args, ["--stop", "wrap up"]);
+  assert.deepEqual(f.calls("metrics-refresh")[0].args, ["--no-fit"], "close-out computes no Fit: the next run's phase 0 does");
   assert.equal(git(f.repo, "branch", "--show-current"), "main", "the checkout is back on main");
 });
 

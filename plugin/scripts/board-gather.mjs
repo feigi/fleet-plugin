@@ -858,17 +858,17 @@ export function readCheckoutTable(stateDir) {
   return table instanceof Error ? { status: "unreadable", why: table.message } : { status: "ok", table };
 }
 
-// The Preview fit metrics-refresh.mjs writes beside the guard,
-// `.fleet/router-preview.json`: `{ status: "ok", preview }`, `{ status: "missing" }`
+// The Fit metrics-refresh.mjs writes beside the guard,
+// `.fleet/router-fit.json`: `{ status: "ok", preview }`, `{ status: "missing" }`
 // or `{ status: "unreadable", why }`. Its `table` is read through `validateTable`,
 // as the installed one is, and its `n_rows`, which `validateTable` does not check
 // and the tab prints, must be a count; `computed_at` and `guard_computed_at` must
 // be strings, and `tsv_blobs` and `prior` objects, their values checked where the
 // tab reads them.
-export function readPreviewFile(stateDir) {
+export function readFitFile(stateDir) {
   let text;
   try {
-    text = readFileSync(join(stateDir, "router-preview.json"), "utf8");
+    text = readFileSync(join(stateDir, "router-fit.json"), "utf8");
   } catch (e) {
     return e.code === "ENOENT" ? { status: "missing" } : { status: "unreadable", why: e.code ?? e.message };
   }
@@ -1342,7 +1342,7 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, stateDir 
   // either (a guard that reads as missing, no receipts, the read carried as it was).
   const guard = stateDir === null ? { status: "missing" } : readGuardFile(stateDir);
   const guardJson = stateDir === null ? null : readGuardJson(stateDir);
-  const preview = stateDir === null ? { status: "missing" } : readPreviewFile(stateDir);
+  const preview = stateDir === null ? { status: "missing" } : readFitFile(stateDir);
   const closeoutPr = stateDir === null ? null : readCloseoutPr(stateDir);
   const checkoutTable = stateDir === null ? { status: "missing" } : readCheckoutTable(stateDir);
   const receipts = stateDir === null

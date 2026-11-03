@@ -92,21 +92,21 @@ test("the alert clears when the guard's ids match main's, and when main moves un
   const extra = build({ mainMetrics: read({ [MEMBERS]: MEMBERS_ID, [TIER]: GUARD_TIER, "docs/metrics/pricing.json": "ffffffff", "docs/metrics/x.tsv": "1" }) });
   assert.deepEqual(ids(extra), [], "a file the guard did not read is not compared");
 });
-test("the Preview fit's ids are compared too: the fit alone behind main raises the alert and names the fit", () => {
+test("the Fit's ids are compared too: the fit alone behind main raises the alert and names the fit", () => {
   const preview = { status: "ok", preview: { computed_at: "2026-10-26T19:17:40.000Z", guard_computed_at: COMPUTED, tsv_blobs: { [MEMBERS]: MEMBERS_ID, [TIER]: "0123456789abcdef0123456789abcdef01234567" }, prior: {}, table: SHIPPED } };
   const ce = build({ preview, mainMetrics: read({ [MEMBERS]: MEMBERS_ID, [TIER]: GUARD_TIER }), closeoutPr: { number: 9, at: "2026-10-26T19:18:00.000Z" }, openPrs: { numbers: [9], capped: false } });
-  assert.equal(ce.alerts[0].sentence, "the Preview fit counts the rows of open PR #9, not on main yet");
-  assert.deepEqual(ce.alerts[0].lines, [`${TIER}: the guard read 9df10b12, the Preview fit read 01234567; main holds 9df10b12`]);
+  assert.equal(ce.alerts[0].sentence, "the Fit counts the rows of open PR #9, not on main yet");
+  assert.deepEqual(ce.alerts[0].lines, [`${TIER}: the guard read 9df10b12, the Fit read 01234567; main holds 9df10b12`]);
   const both = build({ preview: { ...preview, preview: { ...preview.preview, tsv_blobs: { [MEMBERS]: MEMBERS_ID, [TIER]: GUARD_TIER } } } });
-  assert.deepEqual(both.alerts[0].lines, [`${TIER}: the guard and the Preview fit read 9df10b12; main holds 84123e74`]);
+  assert.deepEqual(both.alerts[0].lines, [`${TIER}: the guard and the Fit read 9df10b12; main holds 84123e74`]);
   assert.match(both.alerts[0].sentence, /^main's records changed after /);
 });
 
 test("the fit alone behind main: the fit's own computed_at, not the guard's, decides counts or lacks", () => {
   const fit = (computed_at) => ({ status: "ok", preview: { computed_at, guard_computed_at: COMPUTED, tsv_blobs: { [MEMBERS]: MEMBERS_ID, [TIER]: "0123456789abcdef0123456789abcdef01234567" }, prior: {}, table: SHIPPED } });
   const at = (preview) => build({ preview, mainMetrics: read({ [MEMBERS]: MEMBERS_ID, [TIER]: GUARD_TIER }), closeoutPr: { number: 9, at: "2026-10-26T19:17:36.000Z" }, openPrs: { numbers: [9], capped: false } });
-  assert.equal(at(fit("2026-10-26T19:17:40.000Z")).alerts[0].sentence, "the Preview fit lacks the rows of open PR #9");
-  assert.equal(at(fit("2026-10-26T19:17:30.000Z")).alerts[0].sentence, "the Preview fit counts the rows of open PR #9, not on main yet");
+  assert.equal(at(fit("2026-10-26T19:17:40.000Z")).alerts[0].sentence, "the Fit lacks the rows of open PR #9");
+  assert.equal(at(fit("2026-10-26T19:17:30.000Z")).alerts[0].sentence, "the Fit counts the rows of open PR #9, not on main yet");
 });
 
 test("a file main lacks is a difference: main holds none", () => {

@@ -1,7 +1,7 @@
 // The cockpit's Cell evidence tab, as a value: computeCellEvidence() turns what
 // gather() read (the cost guard, the receipts' `metrics` steps, the installed
 // definitions, the installed router table and package, the carried `modelRoles`
-// read, the Preview fit) into the model the page lays out.
+// read, the Fit) into the model the page lays out.
 // Pure, like compute-board.mjs, which calls it and puts the answer in
 // `board.json` as `cellEvidence`: no file, no process, no clock. Every word the
 // tab shows is built here, so a test pins it where it is made and the page only
@@ -14,7 +14,7 @@
 // routes-now side the Cell the installed router table plus the workspace's guard
 // route to, why, and how a Pull on that row is dispatched (ticket-router.mjs's
 // rowDispatch, the function `route` itself calls), and on the evidence-favours
-// side the same for the Preview fit's table (`.fleet/router-preview.json`, which
+// side the same for the Fit's table (`.fleet/router-fit.json`, which
 // metrics-refresh.mjs writes beside the guard), marked where its Cell differs.
 // The receipts' newest `metrics` step, which the guard section quotes when there
 // is no guard, also feeds the evidence-favours side: a refit that step says
@@ -156,11 +156,11 @@ function newestRefresh(step) {
   return { verb, at: step.at, why };
 }
 
-// Why the Preview fit's refit failed, off a `metrics` step's output: the rest of
-// metrics-refresh's `preview: failed — ` line, trimmed, or null when the output
+// Why the Fit failed, off a `metrics` step's output: the rest of
+// metrics-refresh's `fit: failed — ` line, trimmed, or null when the output
 // has none. Found anywhere in a line, as refreshLine finds its own.
 export function refitFailure(output) {
-  const m = /metrics-refresh: preview: failed — ([^\n]*)/.exec(String(output ?? ""));
+  const m = /metrics-refresh: fit: failed — ([^\n]*)/.exec(String(output ?? ""));
   return m === null ? null : m[1].trim();
 }
 
@@ -485,7 +485,7 @@ function routesSource(table, install, repoUrl) {
 
 // The Cells short of `MIN_N` merged PRs in the table's `guard.n`, in the table's
 // order, as one phrase: past tense for an installed table, whose counts are what
-// its fit saw ("had"), present for the Preview fit, whose counts are the
+// its fit saw ("had"), present for the Fit, whose counts are the
 // workspace's own now ("has", "have").
 function shortWords(table, tense = "past") {
   const short = table.cells.filter((c) => (table.guard.n[c] ?? 0) < MIN_N).map((c) => [c, table.guard.n[c] ?? 0]);
@@ -549,7 +549,7 @@ function intervalWords(range, objective) {
 }
 
 // One row of a table under the guard — the installed table for routes now, the
-// Preview fit's for evidence favours: the Cell it routes to and why, its
+// Fit's for evidence favours: the Cell it routes to and why, its
 // dispatch, and each candidate's n (null where the table carries no count),
 // verdict and interval.
 function rowEntry(table, guard, modelRoles, objective, stratum) {
@@ -620,19 +620,19 @@ function routesNow({ table, guard, modelRoles, install, repoUrl, checkout }) {
 }
 
 // ---------------------------------------------------------------------------
-// Policy rows: what the evidence favours — the Preview fit, `.fleet/router-preview.json`.
+// Policy rows: what the evidence favours — the Fit, `.fleet/router-fit.json`.
 // ---------------------------------------------------------------------------
 
 const FAVOURS = "evidence favours";
 
-// The evidence-favours side with no Preview fit to lay out: its heading says
+// The evidence-favours side with no Fit to lay out: its heading says
 // why, and its column is empty — nothing is unknown there, there is nothing to show.
 const noFit = (heading, labels = []) => ({
-  title: FAVOURS, source: { text: "Preview fit", check: null }, heading, labels, footnotes: [], rows: null, unread: null,
+  title: FAVOURS, source: { text: "Fit", check: null }, heading, labels, footnotes: [], rows: null, unread: null,
 });
 
 // The newest refit failed: `step` is the receipts' newest `metrics` step, `p`
-// the Preview fit read, null when none was. Said while that step's output holds
+// the Fit read, null when none was. Said while that step's output holds
 // the failed line and no fit was written after it — a `computed_at` before the
 // step's `at`, or one that is no time. A later step, a fit written after this
 // one, or the receipt no longer read clears it.
@@ -645,7 +645,7 @@ function refitLabel(step, p) {
   return [`the newest refit failed at ${when(step.at)}: ${why}`];
 }
 
-// The Preview fit's heading labels, against `raw`, the guard on disk, `routed`,
+// The Fit's heading labels, against `raw`, the guard on disk, `routed`,
 // readGuard's answer for it, `table`, the installed one, and `records`, whether
 // the fit read the guard's files: fitted beside another guard, on other records,
 // or against another prior. The prior is
@@ -685,7 +685,7 @@ function nDiffers(p, raw, records) {
   }).map((e) => e.cell);
 }
 
-// The evidence-favours side: the Preview fit's table laid out row by row under
+// The evidence-favours side: the Fit's table laid out row by row under
 // the workspace's guard, as routes now lays out the installed one, each row's
 // Cell marked where it differs from the Cell routes now gives that row. `preview`
 // is gather's read, `{ status: "ok", preview } | { status: "missing" } | {
@@ -694,9 +694,9 @@ function nDiffers(p, raw, records) {
 // receipts' newest `metrics` step, newestStep's pick; `mark` the footnote mark
 // its n footnote takes.
 function evidenceFavours({ preview, guard, routed, table, modelRoles, step, mark }) {
-  if (routed === null) return noFit("no Preview fit: it is written only beside a cost guard");
-  if (preview?.status === "unreadable") return noFit(`no Preview fit read: ${preview.why}`, refitLabel(step, null));
-  if (preview?.status !== "ok") return noFit("no Preview fit yet: the next phase 0 writes one", refitLabel(step, null));
+  if (routed === null) return noFit("no Fit: it is written only beside a cost guard");
+  if (preview?.status === "unreadable") return noFit(`no Fit read: ${preview.why}`, refitLabel(step, null));
+  if (preview?.status !== "ok") return noFit("no Fit yet: the next phase 0 writes one", refitLabel(step, null));
   const p = preview.preview;
   const fit = p.table;
   const raw = guard.guard;
@@ -715,7 +715,7 @@ function evidenceFavours({ preview, guard, routed, table, modelRoles, step, mark
   };
   return {
     title: FAVOURS,
-    source: { text: ["Preview fit", "this repository's runs", `computed ${when(p.computed_at)}`, plural(fit.n_rows, "Pull")].join(" · "), check: null },
+    source: { text: ["Fit", "this repository's runs", `computed ${when(p.computed_at)}`, plural(fit.n_rows, "Pull")].join(" · "), check: null },
     heading: fit.burn_in ? `stage ${fit.stage}: ${shortWords(fit, "present") ?? "every Cell has its merged PRs"}` : null,
     labels: [...refitLabel(step, p), ...previewLabels(p, raw, routed, table, records)],
     footnotes: differ.length === 0 ? [] : [{ mark, text: `${list(differ)}: the guard counts merges by GitHub's state, the fit by Rulings, and the fit admits only drawn or rule-sized Pulls` }],
@@ -820,7 +820,7 @@ function prIsOpen(pr, openPrs) {
   return openPrs.capped === true ? null : false;
 }
 
-// The guard's and the Preview fit's TSV blob ids against main's. `alert` is the
+// The guard's and the Fit's TSV blob ids against main's. `alert` is the
 // alert while the records are not on main, else null; `note`, in its place, is
 // a note under the guard section's heading: a check that could not run is never
 // an alert, so an offline cockpit raises none. `main` is the carried read of
@@ -855,14 +855,14 @@ function recordsAgainstMain({ read, preview, main, closeoutPr, openPrs }) {
     if (!gd && !fd) continue;
     guardDiffers ||= gd;
     fitDiffers ||= fd;
-    const said = [guardId === undefined ? null : fitId === guardId ? `the guard and the Preview fit read ${blob8(guardId)}` : `the guard read ${blob8(guardId)}`,
-      fitId === undefined || fitId === guardId ? null : `the Preview fit read ${blob8(fitId)}`].filter(Boolean);
+    const said = [guardId === undefined ? null : fitId === guardId ? `the guard and the Fit read ${blob8(guardId)}` : `the guard read ${blob8(guardId)}`,
+      fitId === undefined || fitId === guardId ? null : `the Fit read ${blob8(fitId)}`].filter(Boolean);
     lines.push(`${path}: ${said.join(", ")}; main holds ${onMain === undefined ? "none" : blob8(onMain)}`);
   }
   if (lines.length === 0) return none;
 
   const both = guardDiffers && fitDiffers;
-  const subject = both ? "the guard and the Preview fit" : guardDiffers ? "the guard" : "the Preview fit";
+  const subject = both ? "the guard and the Fit" : guardDiffers ? "the guard" : "the Fit";
   const pr = Number.isInteger(closeoutPr?.number) ? closeoutPr.number : null;
   const open = prIsOpen(pr, openPrs);
   const computed = guardDiffers ? g.computed_at : mine.computed_at;
@@ -876,7 +876,7 @@ function recordsAgainstMain({ read, preview, main, closeoutPr, openPrs }) {
     const committed = Date.parse(closeoutPr.at);
     if (!Number.isFinite(committed)) return unchecked(`the close-out receipt records no time for PR #${pr}'s commit step`);
     const built = Date.parse(computed);
-    if (!Number.isFinite(built)) return unchecked(`the ${guardDiffers ? "guard" : "Preview fit"} records no time it was computed`);
+    if (!Number.isFinite(built)) return unchecked(`the ${guardDiffers ? "guard" : "Fit"} records no time it was computed`);
     sentence = built <= committed
       ? `${subject} ${both ? "count" : "counts"} the rows of open PR #${pr}, not on main yet`
       : `${subject} ${both ? "lack" : "lacks"} the rows of open PR #${pr}`;
@@ -928,12 +928,12 @@ function readersAlert(json) {
  * cellLine). `table` is the installed router table `validateTable` accepted or
  * null, `install` the install's `{ name, version, repository, error }`
  * (`repository` its url), `repoUrl` the workspace's, `objective` the live
- * run's Objective or null between runs, and `preview` the Preview fit as gather
- * read `.fleet/router-preview.json`: `{ status: "ok", preview: { computed_at,
+ * run's Objective or null between runs, and `preview` the Fit as gather
+ * read `.fleet/router-fit.json`: `{ status: "ok", preview: { computed_at,
  * guard_computed_at, tsv_blobs, prior, table } }`, `{ status: "missing" }` or
  * `{ status: "unreadable", why }`. An input left out reads as nothing
  * read: a missing guard, no receipt, no definitions, no `modelRoles` read, no
- * Pull, no table, no install, no Objective, no Preview fit.
+ * Pull, no table, no install, no Objective, no Fit.
  */
 export function computeCellEvidence({ guard, receipts, agents, modelRoles = null, pulls = [], table = null, install = null, repoUrl = null, objective = null, preview = null,
   guardJson = null, mainMetrics = null, closeoutPr = null, openPrs = null, checkoutTable = null }) {
