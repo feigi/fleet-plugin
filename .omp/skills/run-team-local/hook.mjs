@@ -78,7 +78,7 @@ function definitions(agentsDir) {
     .sort()
     .map((cell) => {
       const [, role, level] = CELL.exec(cell);
-      return { cell, role, level, file: `fleet-implementer-${cell}.agent.md` };
+      return { cell, role, level };
     });
 }
 

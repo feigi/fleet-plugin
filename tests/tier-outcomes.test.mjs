@@ -137,10 +137,11 @@ test("append: the ledger's tier-ok token wins over member-outcomes.tsv", (t) => 
 });
 
 // A Pull's `run_date` in ticket-features.tsv is the UTC date of its session
-// id, and pr-cost.mjs joins a ruling to a Pull with `run_date >=`. A ruling
-// dated in the host's zone lands a day before a same-instant Pull west of
-// UTC, so the join drops it. Each instant below is one where the zone's date
-// and the UTC date differ.
+// id, and pull-attribution.mjs's `attribute`, which pr-cost.mjs and the fit
+// both call, joins a ruling to a Pull with `run_date >=`. A ruling dated in
+// the host's zone lands a day before a same-instant Pull west of UTC, so the
+// join drops it. Each instant below is one where the zone's date and the UTC
+// date differ.
 for (const [tz, clock] of [
   ["America/Los_Angeles", "2026-10-05T03:30:00Z"],
   ["Asia/Tokyo", "2026-10-04T20:30:00Z"],
