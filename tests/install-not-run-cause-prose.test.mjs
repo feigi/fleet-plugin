@@ -5,12 +5,13 @@ import { Pin } from "./support/prose-pin.mjs";
 
 // An Install step that exits 126 or 127 did not run: the shell could not
 // execute the command, or could not find it, and says nothing about why. The
-// Recipe reader probed only the command's first word, and a path in it only
-// against origin/main, so the tree's own change, a tree behind origin/main and
-// a later word of the command can each produce the exit, and a re-derivation
-// proves the same Recipe on origin/main again. installIn's message says so
-// (evict.test.mjs and finisher-tree.test.mjs hold it); this file holds the
-// prose around it, which called the exit a Recipe that no longer runs.
+// Recipe reader probed only the command's first word, and a path inside the
+// repository only against origin/main, so the tree's own change, a tree behind
+// origin/main and a later word of the command can each produce the exit, and a
+// re-derivation proves the same Recipe on origin/main again. installIn's
+// message says so (evict.test.mjs and finisher-tree.test.mjs hold it); this
+// file holds the prose around it, which called the exit a Recipe that no
+// longer runs.
 //
 // Left as it was on purpose: claim-ticket.sh's own 126/127 refusal. The claim's
 // tree is origin/main itself, so neither the tree's own change nor a tree

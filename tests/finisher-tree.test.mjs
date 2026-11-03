@@ -16,7 +16,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { REDERIVE } from "../plugin/scripts/evict.mjs";
+import { NOT_ESTABLISHED, REDERIVE } from "../plugin/scripts/evict.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/finisher-tree.mjs", import.meta.url));
 const SOURCE = readFileSync(SCRIPT, "utf8");
@@ -122,11 +122,6 @@ test("the premise: a bare detached tree at the pin cannot start the suite", (t) 
   assert.equal(suite.status, 127);
 });
 
-// What exit 126 and 127 say about the cause: nothing. The Install step's leading
-// word was probed only against origin/main, so the tree's own change, a tree
-// behind origin/main and a later word of the command can each produce them.
-const NOT_ESTABLISHED = "the cause is not established: only the command's first word was checked, and a path in it only against origin/main, so the tree's own change, a tree behind origin/main, or a later word of the command could each produce this exit";
-
 test("an Install step that cannot run, one that fails, and one that changes the tree or hides its state each get their own exit and a receipt", (t) => {
   const cases = [
     [{ INSTALL_EXIT: "127" }, 3, "not-run", 127, (tree) => `the Install step 'sh install.sh' did not run in ${tree} (exit 127: not executable or not found) — ${NOT_ESTABLISHED}`],
@@ -151,21 +146,6 @@ test("an Install step that cannot run, one that fails, and one that changes the 
     seen.add(`${kind}:${code}`);
   }
   assert.deepEqual([...seen].sort(), ["dirtied:5", "failed:4", "not-run:3", "status-after:5"]);
-});
-
-test("an Install step that exits 126 or 127 gets a receipt that blames no Recipe cache and sends no one to re-derive", (t) => {
-  for (const exit of ["126", "127"]) {
-    const f = fixture(t);
-
-    const r = f.run({}, { env: { INSTALL_EXIT: exit } });
-
-    assert.equal(r.status, 3, exit);
-    assert.equal(r.receipt.kind, "not-run", exit);
-    assert.equal(r.receipt.exit, Number(exit), exit);
-    for (const blamed of [REDERIVE, "Recipe cache is invalid", "Recipe derivation", "re-derive"]) {
-      assert.equal(r.receipt.message.includes(blamed), false, `exit ${exit}'s receipt still says "${blamed}"`);
-    }
-  }
 });
 
 test("an Install step killed by a signal is a failed install with no exit status of its own", (t) => {

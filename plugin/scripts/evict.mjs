@@ -70,14 +70,14 @@
 // --porcelain -uall` that is not empty after it as an Install step that
 // changed the tree — each with the claim's own words, but for the 126 or 127,
 // which names no cause: only the command's first word was probed, and a path
-// in it only against origin/main, so the tree's own change, a tree behind
-// origin/main or a later word of the command can each produce it. A status
-// that is not empty BEFORE it refuses in words of its own, before anything
-// runs: that change is no Install step's. Only once the status after it is
-// empty does it write the restore time (RESTORED) and then remove the mark;
-// every refusal leaves the mark. A tree with no mark refuses: there is
-// nothing to restore. Without `--apply` it runs nothing and prints the
-// command it would run. Prints
+// inside the repository only against origin/main, so the tree's own change, a
+// tree behind origin/main or a later word of the command can each produce it.
+// A status that is not empty BEFORE it refuses in words of its own, before
+// anything runs: that change is no Install step's. Only once the status after
+// it is empty does it write the restore time (RESTORED) and then remove the
+// mark; every refusal leaves the mark. A tree with no mark refuses: there is
+// nothing to restore. Without `--apply` it runs nothing and prints the command
+// it would run. Prints
 // `{"applied","worktree","install"}`; exit 0 restored (or would), 2 refused.
 //
 // That install sequence is `installIn()`, exported: finisher-tree.mjs runs the
@@ -113,9 +113,9 @@ const MAX_BUFFER = 64 * 1024 * 1024;
 // and one that changed the tree. An exit 126 or 127 does not.
 export const REDERIVE = "the Recipe cache is invalid; run the Recipe derivation step (run-team phase 0, before the first claim) to re-derive it";
 // What an exit 126 or 127 says instead: the shell's "cannot execute" or "not
-// found", with no cause. The command's first word was probed, and a path in it
-// against origin/main alone.
-const NOT_ESTABLISHED = "the cause is not established: only the command's first word was checked, and a path in it only against origin/main, so the tree's own change, a tree behind origin/main, or a later word of the command could each produce this exit";
+// found", with no cause. The command's first word was probed, and a path inside
+// the repository against origin/main alone.
+export const NOT_ESTABLISHED = "the cause is not established: only the command's first word was checked, and a path inside the repository only against origin/main, so the tree's own change, a tree behind origin/main, or a later word of the command could each produce this exit";
 // worktree.sh's `wt_op_state`, sourced: `$wt_op` names the operation in
 // progress, empty for none; a non-zero exit is an admin dir it cannot read.
 const OP_STATE = '. "$1" || exit 3; wt_op_state "$2" || exit 1; printf "%s" "$wt_op"';

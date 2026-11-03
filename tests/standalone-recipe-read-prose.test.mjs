@@ -43,18 +43,19 @@ test("the read scanner accepts a read at origin/main over a line wrap and flags 
 });
 
 test("step 3's standalone reads are the Check step's and the Test entrypoint's, each at origin/main, each from the tree it names", () => {
+  const step = step3();
   assert.deepEqual(
-    reads(step3()),
+    reads(step),
     [{ tree: "<tree>", field: "check", atOriginMain: true }, { tree: "<tree>", field: "test", atOriginMain: true }],
     "step 3 reads the Check step or the Test entrypoint with no --at origin/main, or from a path it does not name, or reads a third thing",
   );
   assert.match(
-    step3(),
+    step,
     Pin.phrase("read off the repo's Recipe cache from `<tree>`, the worktree this step runs from, at `origin/main` (`derive-testcmd.sh <tree> check --at origin/main` prints the first, `derive-testcmd.sh <tree> test --at origin/main` the second; every worktree reads the one cache)."),
     "step 3 no longer defines `<tree>` as the worktree it runs from, nor says the Recipe cache is shared by every worktree",
   );
-  assert.match(step3(), Pin.phrase("**standalone, with no dispatcher to hand you them, they are the repo's own Check step and Test entrypoint**"));
-  assert.doesNotMatch(step3(), /derive-testcmd\.sh\s+<repo>/, "step 3 reads the Recipe through <repo>, which it does not define for a read");
+  assert.match(step, Pin.phrase("**standalone, with no dispatcher to hand you them, they are the repo's own Check step and Test entrypoint**"));
+  assert.doesNotMatch(step, /derive-testcmd\.sh\s+<repo>/, "step 3 reads the Recipe through <repo>, which it does not define for a read");
 });
 
 test("step 3 tells the three refusals apart: --at fetches, exit 3 fixes the tool, and neither derives; any other exit 1 derives", () => {
