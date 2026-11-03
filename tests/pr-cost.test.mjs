@@ -433,7 +433,7 @@ test("without --guard the report prints and exits 0, writing nothing", () => {
   assert.deepEqual(json.tripped, ["task-high"]);
 });
 
-test("the retire condition holds once every non-default stage-1 cell has tripped, and only then", () => {
+test("the retire condition holds once every non-default starting Cell has tripped, and only then", () => {
   const w = world();
   addCell(w, "slow-high", MIN_N, 0, 10);
   addCell(w, "task-high", MIN_N, 0, 11);

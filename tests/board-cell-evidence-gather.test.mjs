@@ -211,7 +211,7 @@ test("readFitFile: reads what metrics-refresh writes; a missing file is missing;
     [JSON.stringify({ ...written, guard_computed_at: null }), "`guard_computed_at` is not a string"],
     [JSON.stringify({ ...written, tsv_blobs: [] }), "`tsv_blobs` is not an object"],
     [JSON.stringify({ ...written, prior: null }), "`prior` is not an object"],
-    [JSON.stringify({ ...written, table: { ...written.table, stage: 0 } }), "router table: `stage` is not a positive integer"],
+    [JSON.stringify({ ...written, table: { ...written.table, burn_in: "no" } }), "router table: `burn_in` is not a boolean"],
     [JSON.stringify({ ...written, table: { ...written.table, n_rows: undefined } }), "router table: `n_rows` is not a count"],
     [JSON.stringify({ ...written, table: { ...written.table, n_rows: "235" } }), "router table: `n_rows` is not a count"],
   ]) {
@@ -283,7 +283,7 @@ test("gather: reads the Fit in the state directory every tick, and the board lay
   const s = computeBoard(r).cellEvidence.policy.sides[1];
   assert.equal(s.title, "evidence favours");
   assert.equal(s.source.text, "Fit · this repository's runs · computed 2026-10-28 08:00Z · 0 Pulls");
-  assert.equal(s.heading, "stage 1: slow-high, task-high and smol-high have 0 of the 20 merged PRs each needs");
+  assert.equal(s.heading, "burn-in: slow-high, task-high and smol-high have 0 of the 20 merged PRs each needs");
   const { stateDir, ...rest } = w.opts;
   assert.deepEqual((await quiet(() => gather(rest))).fit, { status: "missing" }, "no state directory, no workspace's records read");
 });

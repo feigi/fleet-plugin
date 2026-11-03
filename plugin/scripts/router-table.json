@@ -2,7 +2,6 @@
   "window_start": "2026-10-03",
   "fitted_commit": "e5040b9a96d304b3ce8a40c2b2d35b143f66d450",
   "n_rows": 268,
-  "stage": 2,
   "cells": [
     "slow-high",
     "task-high",
@@ -10,7 +9,7 @@
     "slow-medium",
     "task-max"
   ],
-  "burn_in": true,
+  "burn_in": false,
   "splits": {},
   "rows": {
     "cost": {

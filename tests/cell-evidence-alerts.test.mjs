@@ -332,7 +332,7 @@ test("readCheckoutTable: the table under the workspace, missing for a checkout w
   assert.equal(ok.table.n_rows, SHIPPED.n_rows);
   writeFileSync(file, "{");
   assert.deepEqual(readCheckoutTable(stateDir), { status: "unreadable", why: "not JSON" });
-  writeFileSync(file, JSON.stringify({ ...SHIPPED, stage: "x" }));
+  writeFileSync(file, JSON.stringify({ ...SHIPPED, burn_in: "x" }));
   assert.equal(readCheckoutTable(stateDir).status, "unreadable");
 });
 

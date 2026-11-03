@@ -37,7 +37,7 @@
 import { isDeepStrictEqual } from "node:util";
 import { CELL, OBJECTIVES, POLICY_CELL } from "./ledger-grammar.mjs";
 import { costGuardFault } from "./fleet-tick.mjs";
-import { MIN_N, parseGuard, readGuard, rowDispatch } from "./ticket-router.mjs";
+import { MIN_N, parseGuard, readGuard, rowDispatch, shortStartingCells } from "./ticket-router.mjs";
 import { implementerCell, modelsEqual, parseModelRoute, resolveRole } from "./tier-roles.mjs";
 
 // The implementer Cells, in the order the guard section draws them: one per
@@ -499,12 +499,13 @@ function routesSource(table, install, repoUrl) {
   return { same, owner: named === null ? "another repository" : named.name, runs, text: [runs, fitted, installed].join(" · "), check };
 }
 
-// The Cells short of `MIN_N` merged PRs in the table's `guard.n`, in the table's
-// order, as one phrase: past tense for an installed table, whose counts are what
-// its fit saw ("had"), present for the Fit, whose counts are the
-// workspace's own now ("has", "have").
+// The starting Cells short of `MIN_N` merged PRs in the table's `guard.n` — the
+// Cells burn-in waits for, and no others — in their order, as one phrase: past
+// tense for an installed table, whose counts are what its fit saw ("had"),
+// present for the Fit, whose counts are the workspace's own now ("has",
+// "have").
 function shortWords(table, tense = "past") {
-  const short = table.cells.filter((c) => (table.guard.n[c] ?? 0) < MIN_N).map((c) => [c, table.guard.n[c] ?? 0]);
+  const short = shortStartingCells(table.guard.n);
   if (short.length === 0) return null;
   const each = short.length === 1 ? "it needs" : "each needs";
   const one = tense === "past" ? "had" : "has";
@@ -527,7 +528,7 @@ function routesHeading(table, guard, source) {
   if (!table.fitted_commit) return `never fitted: ${drawn}`;
   const short = shortWords(table);
   const ends = source.same ? "" : "; it ends with a later fit, reaching this install with a plugin release";
-  return `stage ${table.stage} at its fit on ${source.owner}'s runs: ${short === null ? "every Cell had its merged PRs" : short}; ${drawn}${ends}`;
+  return `burn-in at its fit on ${source.owner}'s runs: ${short === null ? "every starting Cell had its merged PRs" : short}; ${drawn}${ends}`;
 }
 
 // One row's dispatch, in the words a heading or a row carries: what `route` does
@@ -666,7 +667,7 @@ function refitLabel(step, p) {
 // readGuard's answer for it, `table`, the installed one, and `records`, whether
 // the fit read the guard's files: fitted beside another guard, on other records,
 // or against another prior. The prior is
-// compared only on what the fit takes from it — `stage`, `cells`, `classifier`,
+// compared only on what the fit takes from it — `cells`, `classifier`,
 // `splits`, and `window_start` when the guard gives none — so a release that changes only
 // what the fit recomputes, or `fitted_commit` and `version`, raises nothing: the
 // next phase 0's refit would come out the same.
@@ -679,7 +680,7 @@ function fitLabels(p, raw, routed, table, records) {
     labels.push("fitted against the installed table: not checked: no router table read");
     return labels;
   }
-  const read = ["stage", "cells", "classifier", "splits", ...(routed.window_start === null ? ["window_start"] : [])];
+  const read = ["cells", "classifier", "splits", ...(routed.window_start === null ? ["window_start"] : [])];
   const prior = isRecord(p.prior) ? p.prior : {};
   if (read.some((k) => !isDeepStrictEqual(prior[k], table[k]))) {
     const version = prior.version === "0.0.0" ? "linked checkout" : (typeof prior.version === "string" ? prior.version : "no version");
@@ -733,7 +734,7 @@ function evidenceFavours({ fit: read, guard, routed, table, modelRoles, step, ma
   return {
     title: FAVOURS,
     source: { text: ["Fit", "this repository's runs", `computed ${when(p.computed_at)}`, plural(fit.n_rows, "Pull")].join(" · "), check: null },
-    heading: fit.burn_in ? `stage ${fit.stage}: ${shortWords(fit, "present") ?? "every Cell has its merged PRs"}` : null,
+    heading: fit.burn_in ? `burn-in: ${shortWords(fit, "present") ?? "every starting Cell has its merged PRs"}` : null,
     labels: [...refitLabel(step, p), ...fitLabels(p, raw, routed, table, records)],
     footnotes: differ.length === 0 ? [] : [{ mark, text: `${list(differ)}: the guard counts merges by GitHub's state, the fit by Rulings, and the fit admits only drawn or rule-sized Pulls` }],
     rows: Object.fromEntries(OBJECTIVES.map((o) => [o,

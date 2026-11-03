@@ -10,7 +10,7 @@ import {
   DEFAULT_TABLE, bArmLive, installVersion, issueMetrics, route, rowDispatch, rowFor, fitTable, readGuard, stratumOf, validateTable, formatFeatureRow, mergedSince, resolveCommit, sliceParent,
 } from "../plugin/scripts/ticket-router.mjs";
 import { FEATURE_COLUMNS as COLUMNS, parseFeatures } from "../plugin/scripts/pull-attribution.mjs";
-import { drawCell, CELL, formatRouting, parseRouting } from "../plugin/scripts/ledger-grammar.mjs";
+import { drawCell, CELL, STARTING_CELLS, formatRouting, parseRouting } from "../plugin/scripts/ledger-grammar.mjs";
 import { COLUMNS as MEMBER_COLUMNS, parseTsv as parseMemberTsv } from "../plugin/scripts/member-outcomes.mjs";
 import { COLUMNS as VERDICT_COLUMNS } from "../plugin/scripts/tier-outcomes.mjs";
 import { rendering } from "./support/rendered-brief.mjs";
@@ -21,7 +21,7 @@ import { DAY_ONE_TABLE } from "./support/day-one-router-table.mjs";
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/ticket-router.mjs", import.meta.url));
 const SESSION = "2026-10-01T10-00-00-000Z_01a0b344-33f6-7640-96a8-05f45bf847a9";
 const SESSION2 = "2026-10-01T11-00-00-000Z_01a0b344-33f6-7640-96a8-05f45bf847b0";
-const STAGE1 = ["slow-high", "task-high", "smol-high"];
+const STARTING = ["slow-high", "task-high", "smol-high"];
 // The columns #4159 appended after `parent`, and the version the install's package.json names.
 const NAMED = ["named_paths", "named_lines", "dirs", "title", "plugin_version"];
 const INSTALLED_VERSION = JSON.parse(readFileSync(new URL("../plugin/package.json", import.meta.url), "utf8")).version;
@@ -30,7 +30,7 @@ const INSTALLED_VERSION = JSON.parse(readFileSync(new URL("../plugin/package.jso
 const both = (cost, speed = cost) => ({ cost, speed });
 const UNJUDGED = { cell: "slow-high", reason: "unjudged", cells: {}, pairs: [] };
 const baseTable = (over = {}) => ({
-  window_start: null, fitted_commit: null, n_rows: 0, stage: 1, cells: [...STAGE1], burn_in: false,
+  window_start: null, fitted_commit: null, n_rows: 0, cells: [...STARTING], burn_in: false,
   splits: {}, rows: both({ "*": "slow-high" }), classifier: { b: null, tau: null }, estimates: {},
   reasons: both({ "*": UNJUDGED }), guard: { tripped: [], n: {} }, ...over,
 });
@@ -47,7 +47,7 @@ const twoLeaf = (cost, speed = cost, over = {}) => baseTable({
 const guardFile = (over = {}) => ({
   computed_at: "2026-10-01T00:00:00Z", window_start: "2026-09-01",
   baseline: { cell: "slow-high", n: 5, mean_usd: 10, fail_rate: 0.5 },
-  cells: STAGE1.map((cell) => ({ cell, n: 5, mean_usd: 5, fail_rate: 0.5 })), tripped: [], verdict: "none", ...over,
+  cells: STARTING.map((cell) => ({ cell, n: 5, mean_usd: 5, fail_rate: 0.5 })), tripped: [], verdict: "none", ...over,
 });
 const issue = (over = {}) => ({
   title: "t", body: "short brief\n- [ ] one\n- [x] two", comments: [], labels: [{ name: "bug" }],
@@ -321,7 +321,7 @@ test("route: a drawn burn-in Pull prints the whole Routing, BY=burn-in", (t) => 
   const p = world(t, { table: baseTable({ burn_in: true }) });
   const r = routeCli(p);
   assert.equal(r.status, 0, r.stderr);
-  const d = drawCell({ session: SESSION, ticket: 42, policyCell: null, cells: STAGE1 });
+  const d = drawCell({ session: SESSION, ticket: 42, policyCell: null, cells: STARTING });
   assert.equal(r.stdout, `POLICY=slow-high CELL=${d.cell} DRAW=${d.k}/3 BY=burn-in STRATUM=* BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok\n`);
 });
 
@@ -340,19 +340,19 @@ test("route: a non-default table row is dispatched when its cell is not tripped"
   assert.equal(r.stdout, `POLICY=task-high CELL=task-high DRAW=- BY=- STRATUM=${BELOW} BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok\n`);
 });
 
-test("route: burn-in draws on EVERY Pull, uniformly over all cells including the default", (t) => {
+test("route: burn-in draws on EVERY Pull, uniformly over the starting Cells, the default included", (t) => {
   const p = world(t, { table: baseTable({ burn_in: true }) });
   const seen = new Set();
   for (let ticket = 1; ticket <= 30; ticket++) {
     const r = routeCli(p, { ticket, implRow: ticket });
     assert.equal(r.status, 0, r.stderr);
     const out = parseLine(r.stdout);
-    const d = drawCell({ session: SESSION, ticket, policyCell: null, cells: STAGE1 });
+    const d = drawCell({ session: SESSION, ticket, policyCell: null, cells: STARTING });
     assert.equal(out.CELL, d.cell);
     assert.equal(out.DRAW, `${d.k}/3`);
     seen.add(out.CELL);
   }
-  assert.deepEqual([...seen].sort(), [...STAGE1].sort(), "thirty burn-in draws never reached every cell");
+  assert.deepEqual([...seen].sort(), [...STARTING].sort(), "thirty burn-in draws never reached every cell");
   // Reproducible from the row: the same session and ticket draw the same cell.
   assert.equal(routeCli(p, { ticket: 7 }).stdout, routeCli(p, { ticket: 7, implRow: 99 }).stdout);
 });
@@ -362,7 +362,7 @@ test("route: after burn-in only the Pull creating impl- row 5k draws, over the c
   for (const implRow of [1, 4, 6, 9, 11]) assert.equal(parseLine(routeCli(p, { implRow }).stdout).DRAW, "-", `row ${implRow}`);
   for (const implRow of [5, 10, 15]) {
     const out = parseLine(routeCli(p, { implRow }).stdout);
-    const d = drawCell({ session: SESSION, ticket: 42, policyCell: "slow-high", cells: STAGE1 });
+    const d = drawCell({ session: SESSION, ticket: 42, policyCell: "slow-high", cells: STARTING });
     assert.equal(out.CELL, d.cell);
     assert.equal(out.DRAW, `${d.k}/2`);
     assert.notEqual(out.CELL, "slow-high");
@@ -481,7 +481,7 @@ test("route: no --objective is the one the phase-0 receipt records; a receipt th
   }
 });
 
-// What every shipped table must satisfy, whatever a re-fit made of it. It pins no `rows`, `burn_in`, `stage` or
+// What every shipped table must satisfy, whatever a re-fit made of it. It pins no `rows`, `burn_in` or
 // `cells`: the day-one table's contents are tests/support/day-one-router-table.mjs's.
 function assertShippable(table) {
   assert.equal(validateTable(table), table);
@@ -498,13 +498,13 @@ test("route: the checked-in table is valid and names only cells with a definitio
 
 test("route: the shipped-table check passes a fitted table and fails a table validateTable refuses or one naming a cell with no definition", () => {
   const fitted = twoLeaf({ "*": "smol-high", [ABOVE]: "task-max", [BELOW]: "smol-high" }, { "*": "task-high", [ABOVE]: "task-high", [BELOW]: "task-high" }, {
-    fitted_commit: "a".repeat(40), n_rows: 12, burn_in: false, stage: 2, cells: [...STAGE1, "slow-medium", "task-max"],
+    fitted_commit: "a".repeat(40), n_rows: 12, burn_in: false, cells: [...STARTING, "slow-medium", "task-max"],
   });
   assertShippable(fitted);
   assertShippable(baseTable());
   assert.throws(() => assertShippable({ ...fitted, burn_in: "no" }), /router table: `burn_in` is not a boolean/);
   assert.throws(() => assertShippable({ ...fitted, rows: both({ [ABOVE]: "slow-high", [BELOW]: "slow-high" }) }), /router table: `rows.cost` has no `\*` row/);
-  assert.throws(() => assertShippable({ ...fitted, cells: [...STAGE1, "smol-minimal"] }), /smol-minimal has no definition/);
+  assert.throws(() => assertShippable({ ...fitted, cells: [...STARTING, "smol-minimal"] }), /smol-minimal has no definition/);
   assert.throws(() => assertShippable({ ...fitted, rows: both({ "*": "slow-high", [ABOVE]: "slow-high", [BELOW]: "smol-minimal" }) }), /smol-minimal has no definition/);
 });
 
@@ -680,11 +680,6 @@ test("validateTable: each malformed router table is refused for its own reason, 
     [/`burn_in` is not a boolean/, bad({ burn_in: "yes" })],
     [/`burn_in` is not a boolean/, bad({ burn_in: 1 })],
     [/`burn_in` is not a boolean/, bad({ burn_in: undefined })],
-    [/`stage` is not a positive integer/, bad({ stage: 0 })],
-    [/`stage` is not a positive integer/, bad({ stage: -1 })],
-    [/`stage` is not a positive integer/, bad({ stage: 1.5 })],
-    [/`stage` is not a positive integer/, bad({ stage: "1" })],
-    [/`stage` is not a positive integer/, bad({ stage: undefined })],
     [/`classifier` is not an object/, bad({ classifier: null })],
     [/`classifier` is not an object/, bad({ classifier: undefined })],
     [/`classifier` is not an object/, bad({ classifier: "haiku" })],
@@ -710,7 +705,7 @@ test("validateTable: each malformed router table is refused for its own reason, 
   }
   const valid = [
     baseTable(),
-    bad({ burn_in: true, stage: 2, cells: [...STAGE1, "slow-medium", "task-max"] }),
+    bad({ burn_in: true, cells: [...STARTING, "slow-medium", "task-max"] }),
     twoLeaf({ "*": "slow-high", [ABOVE]: "task-high", [BELOW]: "smol-high" }, { "*": "task-high", [ABOVE]: "slow-high", [BELOW]: "slow-high" }),
     bad({ classifier: { b: "haiku", tau: null } }),
     bad({ classifier: { b: "jev", tau: 0.8 } }),
@@ -1258,11 +1253,13 @@ test("fit: a day-one three-TSV fixture writes an estimates-only table over its t
   assert.equal(r.status, 0, r.stderr);
   const sha = p.git("rev-parse", "HEAD");
   assert.match(r.stdout, new RegExp(`fitted 3 Pulls at ${sha.slice(0, 8)};.*; cells slow-high m n=1 merged=1 failed=1 usd_per_merged=1.00 minutes_per_merged=1.00 excluded=0 left_out=0 unpriced=0 untimed=0, `));
+  assert.match(r.stdout, /^ticket-router: fitted 3 Pulls at [0-9a-f]{8}; rows \{[^\n]*\}; burn_in true; cells /, "the summary names burn-in, then the cells");
   const table = JSON.parse(readFileSync(p.table, "utf8"));
   assert.deepEqual(table.rows.cost, { "*": "slow-high", [ABOVE]: "slow-high", [BELOW]: "slow-high" }, "no cell has n>=20 yet, so no row is adopted, and every node holds the default");
   assert.deepEqual(table.splits, SPLITS, "the fit makes no split and takes none away");
   assert.equal(table.burn_in, true);
-  assert.equal(table.stage, 1);
+  assert.deepEqual(table.cells, STARTING);
+  assert.deepEqual(Object.keys(table).sort(), ["burn_in", "cells", "classifier", "estimates", "fitted_commit", "guard", "n_rows", "reasons", "rows", "splits", "window_start"], "the fit writes these fields and no others");
   assert.equal(table.n_rows, 3);
   assert.equal(table.fitted_commit, sha, "the table records the commit the fit read, in full");
   assert.equal("fitted_through" in table, false, "no date field stays beside the commit");
@@ -1617,11 +1614,9 @@ test("fit: adopts the cheapest cell at n>=20 under 0.75x the default's $/merged 
   const next = fitTable({ prior: twoLeaf({ "*": "slow-high", [ABOVE]: "slow-high", [BELOW]: "slow-high" }, undefined, { burn_in: true }), ...direct(adoptionInput({ cheapFails: false })), guard: atN });
   assert.equal(next.rows.cost["*"], "smol-high");
   assert.equal(next.rows.cost[BELOW], "smol-high", "a node with both sides at n>=20 gets its own row");
-  assert.equal(next.stage, 2, "an adoption with every stage-1 cell at n advances the stage");
-  assert.deepEqual(next.cells, [...STAGE1, "slow-medium", "task-max"]);
-  // Burn-in ends only when EVERY cell in `cells` has n>=20, and the stage-2
-  // cells have none yet.
-  assert.equal(next.burn_in, true);
+  assert.deepEqual(next.cells, STARTING, "an adoption adds no Cell");
+  // Burn-in ends once every starting Cell has n>=20 in the guard, adoption or none.
+  assert.equal(next.burn_in, false);
 });
 
 test("fit: re-tests the quality floor per row — a cell under it is refused the row however cheap, and the guard's trip is not needed", () => {
@@ -1631,18 +1626,16 @@ test("fit: re-tests the quality floor per row — a cell under it is refused the
   assert.deepEqual(next.rows.cost, { "*": "slow-high" });
   assert.deepEqual(next.reasons.cost["*"].cells["smol-high"], { verdict: "under-floor", under_floor: true, bar: 0.15, range: [-8, -8] });
   assert.equal(next.reasons.cost["*"].reason, "no-qualifier");
-  assert.equal(next.stage, 1, "a refusal by the floor is neither an adoption nor a trip: the stage holds");
+  assert.deepEqual(next.cells, STARTING, "a refusal by the floor adds no Cell");
 });
 
 test("fit: no adoption above the 0.75x margin, for a tripped cell, or below n=20 — the default stays", () => {
   const above = fitTable({ prior: baseTable({ burn_in: true }), ...direct(adoptionInput({ cheapFails: false, cheapUsd: 8 })), guard: atN });
   assert.deepEqual(above.rows.cost, { "*": "slow-high" });
-  assert.equal(above.burn_in, false, "every stage-1 cell has pooled n>=20 in the guard");
-  assert.equal(above.stage, 1, "no adoption and no eviction: the stage holds");
+  assert.equal(above.burn_in, false, "every starting Cell has pooled n>=20 in the guard");
   const tripped = fitTable({ prior: baseTable(), ...direct(adoptionInput({ cheapFails: false })), guard: { ...atN, tripped: ["smol-high"] } });
   assert.deepEqual(tripped.rows.cost, { "*": "slow-high" });
-  assert.equal(tripped.stage, 2, "an eviction with every stage-1 cell at n advances the stage too");
-  assert.deepEqual(tripped.cells, [...STAGE1, "slow-medium", "task-max"]);
+  assert.deepEqual([tripped.cells, tripped.burn_in], [STARTING, false], "an eviction adds no Cell, and the tripped Cell at n>=20 holds no burn-in open");
   const small = fitTable({ prior: baseTable(), ...direct(adoptionInput({ cheapFails: false, n: 19 })), guard: atN });
   assert.deepEqual(small.rows.cost, { "*": "slow-high" });
   // A booked row with no cost on record makes its Pull unpriced: out of the cell's n, so the cell falls under n=20.
@@ -2086,7 +2079,7 @@ function cellInput(spec) {
   }
   return { features, members, verdicts };
 }
-const stage1AtN = { "slow-high": 20, "task-high": 20, "smol-high": 20 };
+const startingAtN = { "slow-high": 20, "task-high": 20, "smol-high": 20 };
 
 test("fit: a cell at exactly 0.75x the default's $ per merged PR is adopted", () => {
   const next = fitDirect(cellInput([["slow-high", 10], ["smol-high", 7.5]]));
@@ -2133,48 +2126,68 @@ test("fit: an unpriced default-cell Pull leaves the stratum below n=20, so it ad
   assert.deepEqual(next.rows.cost, { "*": "slow-high" });
 });
 
-test("fit: stage 2 waits until every stage-1 cell is at n>=20, even with an adoption in hand", () => {
-  const next = fitDirect(cellInput([["slow-high", 10], ["smol-high", 2]]), { n: { ...stage1AtN, "task-high": 19 } });
+test("fit: burn-in lasts until every starting Cell is at n>=20, even with an adoption in hand", () => {
+  const next = fitDirect(cellInput([["slow-high", 10], ["smol-high", 2]]), { n: { ...startingAtN, "task-high": 19 } });
   assert.equal(next.rows.cost["*"], "smol-high");
-  assert.equal(next.stage, 1);
-  assert.deepEqual(next.cells, STAGE1);
+  assert.equal(next.burn_in, true);
+  assert.deepEqual(next.cells, STARTING);
 });
 
-test("fit: stage 2 adds no effort cell on a role whose stage-1 cell is tripped", () => {
+test("fit: burn_in is judged over the starting Cells alone — whatever other Cells the table holds, with any number of merged PRs", () => {
   const input = cellInput([["slow-high", 10], ["smol-high", 2]]);
-  const taskTripped = fitDirect(input, { n: stage1AtN, tripped: ["task-high"] });
-  assert.equal(taskTripped.stage, 2);
-  assert.deepEqual(taskTripped.cells, [...STAGE1, "slow-medium"]);
-  const slowTripped = fitDirect(input, { n: stage1AtN, tripped: ["slow-high"] });
-  assert.equal(slowTripped.stage, 2);
-  assert.deepEqual(slowTripped.cells, [...STAGE1, "task-max"]);
+  const extra = ["slow-medium", "task-max"];
+  const burnIn = (n, cells = STARTING, tripped = []) => fitTable({
+    prior: baseTable({ burn_in: true, cells }), ...direct(input), guard: { tripped, n, window_start: null },
+  }).burn_in;
+  // Every starting Cell at MIN_N ends burn-in, however many merged PRs a Cell exploration added has, or whether the guard has a count for it.
+  for (const [what, n, cells] of [
+    ["no other Cell", startingAtN, STARTING],
+    ["another Cell the guard has no count for", startingAtN, [...STARTING, ...extra]],
+    ["other Cells at 0 merged PRs", { ...startingAtN, "slow-medium": 0, "task-max": 0 }, [...STARTING, ...extra]],
+    ["another Cell below MIN_N", { ...startingAtN, "slow-medium": 3 }, [...STARTING, ...extra]],
+    ["another Cell far past MIN_N", { ...startingAtN, "task-max": 500 }, [...STARTING, ...extra]],
+  ]) assert.equal(burnIn(n, cells), false, what);
+  // A starting Cell short of MIN_N keeps it on, and no other Cell's merged PRs end it.
+  for (const [what, n] of [
+    ["one starting Cell at MIN_N-1", { ...startingAtN, "task-high": 19 }],
+    ["a starting Cell the guard has no count for", { "slow-high": 20, "smol-high": 20 }],
+    ["no Cell counted", {}],
+    ["a role's model changed: its Cell's newest generation is at 0", { ...startingAtN, "smol-high": 0 }],
+  ]) {
+    assert.equal(burnIn(n), true, what);
+    assert.equal(burnIn({ ...n, "slow-medium": 50, "task-max": 50 }, [...STARTING, ...extra]), true, `${what}, with other Cells past MIN_N`);
+  }
+  // A trip takes a Cell out of the draw, not out of the count: a tripped starting Cell at MIN_N is at MIN_N.
+  assert.equal(burnIn(startingAtN, STARTING, ["smol-high"]), false);
+  assert.equal(burnIn({ ...startingAtN, "smol-high": 19 }, STARTING, ["smol-high"]), true);
 });
 
-test("fit: a table that moves to stage 2 judges its rows over the stage-2 cells too, so re-fitting it with itself as the prior reproduces it", () => {
+test("fit: the fit adds no Cell — the table's `cells` are the prior's, whatever the guard tripped or a row adopted", () => {
+  const input = cellInput([["slow-high", 10], ["smol-high", 2]]);
+  for (const tripped of [[], ["task-high"], ["slow-high"], ["smol-high"]]) {
+    const next = fitDirect(input, { n: startingAtN, tripped });
+    assert.deepEqual(next.cells, STARTING, `tripped: ${tripped.join(", ") || "none"}`);
+    assert.equal(next.burn_in, false, `tripped: ${tripped.join(", ") || "none"}: a trip neither ends burn-in nor holds it open`);
+  }
+});
+
+test("fit: a table holding Cells beyond the starting ones judges its rows over every one of them, and re-fitting it with itself as the prior reproduces it", () => {
+  const prior = baseTable({ burn_in: true, cells: [...STARTING, "slow-medium", "task-max"] });
   const input = cellInput([["slow-high", 10], ["smol-high", 2], ["task-high", 10]]);
-  const T = fitDirect(input, { n: stage1AtN });
-  assert.equal(T.stage, 2);
-  assert.deepEqual(T.cells, [...STAGE1, "slow-medium", "task-max"]);
+  const T = fitTable({ prior, ...direct(input), guard: { tripped: [], n: startingAtN, window_start: null } });
+  assert.deepEqual([T.cells, T.burn_in], [prior.cells, false], "the two Cells with no merged PR keep no burn-in on");
   assert.deepEqual(Object.keys(T.reasons.cost["*"].cells).sort(), ["slow-medium", "smol-high", "task-high", "task-max"], "the `cost` record judges every cell but its base");
-  assert.deepEqual(T.reasons.cost["*"].cells["slow-medium"].verdict, "too-few");
+  assert.equal(T.reasons.cost["*"].cells["slow-medium"].verdict, "too-few");
   const again = fitTable({ prior: T, ...direct(input), guard: { ...T.guard, window_start: T.window_start } });
   assert.deepEqual(again, T);
 });
 
-test("fit: stage 2 does not add an effort cell the table already holds", () => {
-  const prior = baseTable({ cells: [...STAGE1, "slow-medium"] });
-  const n = { ...stage1AtN, "slow-medium": 20 };
-  const next = fitTable({ prior, ...direct(cellInput([["slow-high", 10], ["smol-high", 2]])), guard: { tripped: [], n, window_start: null } });
-  assert.equal(next.stage, 2);
-  assert.deepEqual(next.cells, [...STAGE1, "slow-medium", "task-max"]);
-});
-
-test("fit: stage 2 adds no effort cell on a role the table holds no stage-1 cell for", () => {
+test("fit: burn_in reads the starting Cells even when the table's `cells` lacks one — task-high, here, holds it on until it has MIN_N merged PRs", () => {
   const prior = baseTable({ cells: ["slow-high", "smol-high"] });
-  const n = { "slow-high": 20, "smol-high": 20 };
-  const next = fitTable({ prior, ...direct(cellInput([["slow-high", 10], ["smol-high", 2]])), guard: { tripped: [], n, window_start: null } });
-  assert.equal(next.stage, 2);
-  assert.deepEqual(next.cells, ["slow-high", "smol-high", "slow-medium"]);
+  const input = cellInput([["slow-high", 10], ["smol-high", 2]]);
+  const guard = (n) => ({ tripped: [], n, window_start: null });
+  assert.equal(fitTable({ prior, ...direct(input), guard: guard({ "slow-high": 20, "smol-high": 20 }) }).burn_in, true);
+  assert.equal(fitTable({ prior, ...direct(input), guard: guard(startingAtN) }).burn_in, false);
 });
 
 // Pulls by spec entry, each its own ticket: `merged` Pulls ruled a pass, the first `failed` of them minting a
@@ -2288,7 +2301,7 @@ test("fit: two qualifiers — the reliably cheaper wins whatever the fail rates;
 });
 
 test("fit: three qualifiers — a cell another qualifier is reliably cheaper than never wins, whatever its fail rate", () => {
-  const prior = baseTable({ cells: [...STAGE1, "task-max"] });
+  const prior = baseTable({ cells: [...STARTING, "task-max"] });
   const r = fitRows([
     { cell: "slow-high" }, { cell: "smol-high", usd: 3, failed: 2 }, { cell: "task-max", usd: [1, 7], failed: 1 }, { cell: "task-high", usd: 6 },
   ], {}, prior).reasons.cost["*"];
@@ -2418,14 +2431,13 @@ test("fit: a node no Pull went through holds its parent's cost and speed rows, e
   assert.equal(validateTable(next), next, "the table the fit writes is a valid tree");
 });
 
-test("fit: with every stage-1 cell at MIN_N, stage 2 opens when only the speed `*` row has left slow-high", () => {
+test("fit: with every starting Cell at MIN_N, burn-in is over whether the speed `*` row has left slow-high or no row has, and the fit adds no Cell", () => {
   const input = rowInput([{ cell: "slow-high", work: 100 }, { cell: "task-high", work: 30 }, { cell: "smol-high", work: 100 }]);
   const next = fitTable({ prior: baseTable({ burn_in: true }), ...direct(input), guard: atN });
   assert.deepEqual([next.rows.cost["*"], next.rows.speed["*"]], ["slow-high", "task-high"]);
-  assert.equal(next.stage, 2);
-  assert.deepEqual(next.cells, [...STAGE1, "slow-medium", "task-max"]);
+  assert.deepEqual([next.burn_in, next.cells], [false, STARTING]);
   const neither = fitTable({ prior: baseTable({ burn_in: true }), ...direct(rowInput([{ cell: "slow-high" }, { cell: "task-high" }, { cell: "smol-high" }])), guard: atN });
-  assert.deepEqual([neither.rows.cost["*"], neither.rows.speed["*"], neither.stage], ["slow-high", "slow-high", 1]);
+  assert.deepEqual([neither.rows.cost["*"], neither.rows.speed["*"], neither.burn_in, neither.cells], ["slow-high", "slow-high", false, STARTING]);
 });
 
 test("route: a speed run routes by the speed rows and a cost run by the cost rows; the exploration draw is the same under both", () => {
@@ -2488,7 +2500,7 @@ test("route: a ticket missing the input a split reads follows the node's own row
   assert.deepEqual([undated.stratum, undated.policy, undated.cell, undated.reason], ["*", "slow-high", "slow-high", "ok"], "the root's own row");
   // One level down, the node's own row is that node's, not the root's.
   const nodes = { "*": "slow-high", [ABOVE]: "task-high", [BELOW]: "smol-high", [`${ABOVE}&age_days>3`]: "slow-medium", [`${ABOVE}&age_days<=3`]: "slow-high" };
-  const deep = treeOf({ ...SPLITS, [ABOVE]: { input: "age_days", cut: 3 } }, nodes, { cells: [...STAGE1, "slow-medium"] });
+  const deep = treeOf({ ...SPLITS, [ABOVE]: { input: "age_days", cut: 3 } }, nodes, { cells: [...STARTING, "slow-medium"] });
   const lost = parseRouting(routeIn({ arm: "A", table: deep, issue: issueOf(5000, { createdAt: "not a date" }) }).line);
   assert.deepEqual([lost.stratum, lost.cell], [ABOVE, "task-high"], "stopped at the node whose split it lacks the input for");
 });
@@ -2562,7 +2574,7 @@ test("fit: a speed row with no judged candidate holds the cost row's cell", () =
 // rowDispatch: what the cockpit shows is what route does
 // ---------------------------------------------------------------------------
 
-const ROW_CELLS = [...STAGE1, "slow-medium"];
+const ROW_CELLS = [...STARTING, "slow-medium"];
 // A two-leaf table whose every row differs: below the cut task-high under cost and speed, above it smol-high under
 // cost and slow-medium under speed, and the root's own rows slow-high and task-high.
 const rowTable = (over = {}) => twoLeaf(
@@ -2600,6 +2612,7 @@ test("rowDispatch and route agree for every Objective × Stratum, guard state an
               assert.equal(r.by, rd.draw.by, `${at} row ${implRow}: by`);
               assert.equal(r.draw.K, rd.draw.cells.length, `${at} row ${implRow}: K`);
               assert.ok(rd.draw.cells.includes(r.cell), `${at} row ${implRow}: ${r.cell} is drawn from ${rd.draw.cells}`);
+              if (burn_in) assert.ok(rd.draw.cells.every((c) => STARTING.includes(c)), `${at} row ${implRow}: burn-in draws the starting Cells alone`);
               assert.equal(r.cell, drawCell({ session: SESSION, ticket: 40 + implRow, policyCell: null, cells: rd.draw.cells }).cell, at);
             } else {
               assert.deepEqual([r.draw, r.by, r.cell], [null, null, rd.policy], `${at} row ${implRow}: not drawn`);
@@ -2615,11 +2628,36 @@ test("rowDispatch and route agree for every Objective × Stratum, guard state an
   }
 });
 
+test("route: burn-in draws only the starting Cells, whatever `cells` the table lists — a tripped starting Cell is left out, and a tripped Cell burn-in never drew costs the draw nothing", () => {
+  const table = baseTable({ burn_in: true, cells: [...STARTING, "slow-medium", "task-max"] });
+  const drawn = (tripped) => Array.from({ length: 60 }, (_, i) => parseRouting(route({
+    session: SESSION, ticket: i + 1, arm: "A", implRow: i + 1, issue: issue(), guard: readGuard(guardFile({ tripped })), table, objective: "cost",
+  }).line));
+  const cellsOf = (routings) => [...new Set(routings.map((r) => r.cell))].sort();
+  const open = drawn([]);
+  assert.deepEqual(cellsOf(open), [...STARTING].sort(), "every starting Cell is drawn, and no other");
+  assert.ok(open.every((r) => r.by === "burn-in" && r.draw.K === 3 && r.reason === "ok"));
+  const smol = drawn(["smol-high"]);
+  assert.deepEqual(cellsOf(smol), ["slow-high", "task-high"]);
+  assert.ok(smol.every((r) => r.draw.K === 2 && r.reason === "guard-tripped"), "the Routing says the guard left a Cell out");
+  const outside = drawn(["slow-medium", "task-max"]);
+  assert.deepEqual(cellsOf(outside), [...STARTING].sort());
+  assert.ok(outside.every((r) => r.draw.K === 3 && r.reason === "ok"), "a Cell burn-in does not draw is no Cell the guard left out of it");
+  const all = drawn(STARTING);
+  assert.ok(all.every((r) => r.draw === null && r.cell === "slow-high"), "every starting Cell tripped: no draw, and never a Cell outside them");
+});
+
+test("the starting Cells are the three models at `high`, in a list no caller can change", () => {
+  assert.deepEqual([...STARTING_CELLS], ["slow-high", "task-high", "smol-high"]);
+  assert.ok(Object.isFrozen(STARTING_CELLS), "a caller cannot move the set burn-in covers");
+});
+
 test("rowDispatch: no guard dispatches the default Cell only, whatever the table says; a guard that holds nothing back is the table", () => {
   const table = rowTable({ burn_in: true });
   assert.deepEqual(rowDispatch({ table, guard: null, objective: "cost", stratum: BELOW }), { policy: "slow-high", reason: "guard-missing", draw: null });
   const none = rowDispatch({ table, guard: row5({}), objective: "cost", stratum: BELOW });
-  assert.deepEqual(none, { policy: "task-high", reason: "ok", draw: { by: "burn-in", cells: ROW_CELLS } });
+  // slow-medium is one of the table's Cells, and burn-in draws the starting Cells alone.
+  assert.deepEqual(none, { policy: "task-high", reason: "ok", draw: { by: "burn-in", cells: STARTING } });
 });
 
 test("rowDispatch: after burn-in the draw leaves out the cost row's Cell, under either Objective, and the tripped", () => {
@@ -2636,6 +2674,22 @@ test("rowDispatch: no Cell left to draw is no draw", () => {
   const all = row5({ tripped: ["task-high", "smol-high", "slow-medium"] });
   assert.equal(rowDispatch({ table, guard: all, objective: "cost", stratum: ABOVE }).draw, null);
   assert.equal(rowDispatch({ table: rowTable({ burn_in: true }), guard: row5({ tripped: ROW_CELLS }), objective: "cost", stratum: ABOVE }).draw, null);
+  // Burn-in draws the starting Cells and no other: with every one tripped, the table's untripped slow-medium is no fallback.
+  const startingTripped = row5({ tripped: STARTING });
+  assert.equal(rowDispatch({ table: rowTable({ burn_in: true }), guard: startingTripped, objective: "cost", stratum: ABOVE }).draw, null);
+  assert.deepEqual(rowDispatch({ table: rowTable(), guard: startingTripped, objective: "cost", stratum: ABOVE }).draw, { by: "every-5th", cells: ["slow-medium"] }, "after burn-in the table's own Cells are the draw");
+});
+
+test("burn-in is one set: a Cell holds the fit's burn_in open exactly when burn-in draws it, whatever else the table lists", () => {
+  const table = baseTable({ burn_in: true, cells: ROW_CELLS });
+  const drawn = rowDispatch({ table, guard: row5({}), objective: "cost", stratum: "*" }).draw.cells;
+  assert.deepEqual([...drawn].sort(), [...STARTING].sort());
+  for (const cell of ROW_CELLS) {
+    // Every Cell at MIN_N but this one, which has none.
+    const n = Object.fromEntries(ROW_CELLS.map((c) => [c, c === cell ? 0 : 20]));
+    const fitted = fitTable({ prior: table, features: [], members: [], verdicts: [], guard: { tripped: [], n, window_start: null } });
+    assert.equal(fitted.burn_in, drawn.includes(cell), `${cell}: short alone, it ${fitted.burn_in ? "holds" : "does not hold"} burn-in on, and burn-in ${drawn.includes(cell) ? "draws" : "does not draw"} it`);
+  }
 });
 
 test("rowFor: a group without a row of its own follows `*` — as a group named by a Routing filed before the tree does", () => {

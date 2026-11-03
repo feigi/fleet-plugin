@@ -60,7 +60,7 @@ import { isDeepStrictEqual } from "node:util";
 import { isCLI } from "./is-cli.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { makeDie, defineFlags } from "./arg.mjs";
-import { CELL, OBJECTIVES, POLICY_CELL, drawCell, formatRouting, isRulePath, parseMember } from "./ledger-grammar.mjs";
+import { CELL, OBJECTIVES, POLICY_CELL, STARTING_CELLS, drawCell, formatRouting, isRulePath, parseMember } from "./ledger-grammar.mjs";
 import { objectiveFromReceipt, sessionFromReceipt } from "./phase0-receipt.mjs";
 import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
 import {
@@ -81,8 +81,10 @@ const EXPLORE_EVERY = 5;
 export const MIN_N = 20;
 const ADOPT_RATIO = 0.75;
 export const FIT_EVERY_MERGED = 50;
-// Stage 2 adds the effort cells on the roles whose stage-1 cell survived.
-const STAGE2 = Object.freeze([{ cell: "slow-medium", survives: "slow-high" }, { cell: "task-max", survives: "task-high" }]);
+// The starting Cells short of MIN_N merged PRs in a guard's `n`, each with its
+// count, in their order: burn-in holds while any is. A Cell the guard has no
+// count for has 0.
+export const shortStartingCells = (n) => STARTING_CELLS.map((c) => [c, n[c] ?? 0]).filter(([, k]) => k < MIN_N);
 const KINDS = new Set(["bug", "enhancement", "documentation"]);
 const DAY_MS = 86_400_000;
 
@@ -350,7 +352,6 @@ export function validateTable(t) {
     }
   }
   if (typeof t.burn_in !== "boolean") return bad("`burn_in` is not a boolean");
-  if (!Number.isInteger(t.stage) || t.stage < 1) return bad("`stage` is not a positive integer");
   const cl = t.classifier;
   if (cl === null || typeof cl !== "object") return bad("`classifier` is not an object");
   if (cl.b !== null && cl.b !== "haiku" && cl.b !== "jev") return bad("`classifier.b` is not null, \"haiku\" or \"jev\"");
@@ -375,12 +376,19 @@ export function bArmLive(table, objective) {
 export const rowFor = (rows, stratum) => rows[stratum] ?? rows["*"];
 
 /**
+ * The Cells an exploring Pull may draw, before the guard's tripped Cells (and, after burn-in, the policy Cell) leave
+ * any out: burn-in draws the starting Cells, whatever `cells` the table holds, and a draw after it the table's own.
+ * The fit judges `burn_in` over the same starting Cells, so the Cells that end burn-in are the Cells it draws.
+ */
+const drawPool = (table) => (table.burn_in ? STARTING_CELLS : table.cells);
+
+/**
  * What `route` does with one row under one guard, with no per-Pull input.
  * `guard` is readGuard's answer or null. `policy` is the row's Cell, or the
  * default cell when there is no guard or the row's Cell is tripped; `reason`
  * is `guard-missing`, `table-cell-tripped` or `ok`. `draw` is what an
  * exploring Pull picks from — `by` `burn-in` (every Pull) or `every-5th` —
- * over `cells`: the table's Cells less the tripped, and on an every-5th draw
+ * over `cells`: drawPool()'s Cells less the tripped, and on an every-5th draw
  * less the `cost` row's Cell for the stratum too, as the guard leaves it (the
  * default cell when that row's Cell is tripped), whichever objective routes
  * the row. It is null with no guard and when no Cell is left to draw.
@@ -392,7 +400,7 @@ export function rowDispatch({ table, guard, objective, stratum }) {
   const adjust = (cell) => (tripped.has(cell) ? POLICY_CELL : cell);
   const row = rowFor(table.rows[objective], stratum);
   const by = table.burn_in ? "burn-in" : "every-5th";
-  const left = table.cells.filter((c) => !tripped.has(c));
+  const left = drawPool(table).filter((c) => !tripped.has(c));
   const cells = table.burn_in ? left : left.filter((c) => c !== adjust(rowFor(table.rows.cost, stratum)));
   return {
     policy: adjust(row),
@@ -531,7 +539,7 @@ export function route({
     const exploring = table.burn_in || (implRow % EXPLORE_EVERY === 0 && !chainHead);
     if (exploring) {
       const policyCell = table.burn_in ? null : drawRow.policy;
-      if (table.cells.some((c) => c !== policyCell && guard.tripped.includes(c))) degrade("guard-tripped");
+      if (drawPool(table).some((c) => c !== policyCell && guard.tripped.includes(c))) degrade("guard-tripped");
       if (drawRow.draw !== null) {
         // rowDispatch already left the policy Cell out of `cells`: nothing more to withhold.
         const d = drawCell({ session, ticket, policyCell: null, cells: drawRow.draw.cells });
@@ -772,7 +780,10 @@ function judgeSpeedRow(est, pulls, cells, tripped, costCell) {
  * `reasons.speed` holds `judgeSpeedRow()`'s record for each node with a `cost`
  * row of its own (the root always has one), from that row's cell, the base when
  * the record has no cell; a node with none holds its parent's `speed` row and
- * an `unjudged` record.
+ * an `unjudged` record. `cells` is the prior's: the fit adds no Cell. `burn_in`
+ * holds until every starting Cell has MIN_N merged PRs on its newest generation
+ * (`guard.n`, which starts again at 0 when a role's model changes): no other
+ * Cell the table holds ends it or holds it, whatever its merged PRs.
  */
 export function fitTable({ prior, features, members, verdicts, guard, commit = null }) {
   const window = guard.window_start ?? prior.window_start ?? null;
@@ -781,44 +792,27 @@ export function fitTable({ prior, features, members, verdicts, guard, commit = n
   const { estimates, pulls } = estimate(units, order, nodes);
   const tripped = new Set(guard.tripped);
 
-  let { stage, cells } = prior;
-  cells = [...cells];
-  // The rows and their reasons over `cells`: a fitted table's `reasons` cover exactly its `cells`.
-  const judgeRows = () => {
-    const rows = { cost: {}, speed: {} };
-    const reasons = { cost: {}, speed: {} };
-    for (const s of nodes) {
-      const up = parentOf(s);
-      const cost = judgeRow(estimates[s], pulls[s], cells, tripped);
-      const own = cost.cell !== null || up === null;
-      const costCell = cost.cell ?? (up === null ? POLICY_CELL : rows.cost[up]);
-      const speed = own ? judgeSpeedRow(estimates[s], pulls[s], cells, tripped, costCell) : unjudged();
-      const speedCell = speed.cell ?? (own ? costCell : rows.speed[up]);
-      rows.cost[s] = costCell;
-      rows.speed[s] = speedCell;
-      reasons.cost[s] = { ...cost, cell: costCell };
-      reasons.speed[s] = { ...speed, cell: speedCell };
-    }
-    return { rows, reasons };
-  };
-  let { rows, reasons } = judgeRows();
-  const atN = (c) => (guard.n[c] ?? 0) >= MIN_N;
-  const adopted = Object.values(rows).some((set) => set["*"] !== POLICY_CELL);
-  if (stage === 1 && cells.every(atN) && (adopted || cells.some((c) => tripped.has(c)))) {
-    stage = 2;
-    for (const { cell, survives } of STAGE2) {
-      if (!cells.includes(cell) && cells.includes(survives) && !tripped.has(survives)) cells.push(cell);
-    }
-    // The stage-2 cells were added after the rows were judged: judge the rows again over the new `cells`.
-    ({ rows, reasons } = judgeRows());
+  // The rows and their reasons over the table's `cells`: a fitted table's `reasons` cover exactly its `cells`.
+  const rows = { cost: {}, speed: {} };
+  const reasons = { cost: {}, speed: {} };
+  for (const s of nodes) {
+    const up = parentOf(s);
+    const cost = judgeRow(estimates[s], pulls[s], prior.cells, tripped);
+    const own = cost.cell !== null || up === null;
+    const costCell = cost.cell ?? (up === null ? POLICY_CELL : rows.cost[up]);
+    const speed = own ? judgeSpeedRow(estimates[s], pulls[s], prior.cells, tripped, costCell) : unjudged();
+    const speedCell = speed.cell ?? (own ? costCell : rows.speed[up]);
+    rows.cost[s] = costCell;
+    rows.speed[s] = speedCell;
+    reasons.cost[s] = { ...cost, cell: costCell };
+    reasons.speed[s] = { ...speed, cell: speedCell };
   }
   return {
     window_start: window,
     fitted_commit: commit,
     n_rows: units.length,
-    stage,
-    cells,
-    burn_in: !cells.every(atN),
+    cells: prior.cells,
+    burn_in: shortStartingCells(guard.n).length > 0,
     splits: prior.splits,
     rows,
     classifier: prior.classifier,
@@ -1072,7 +1066,7 @@ function main() {
   const next = joined(() => fitTable({ prior: table, features, members, verdicts, guard, commit: sha }));
   writeFileSync(`${tablePath}.tmp`, `${JSON.stringify(next, null, 2)}\n`);
   renameSync(`${tablePath}.tmp`, tablePath);
-  process.stdout.write(`${NAME}: fitted ${next.n_rows} Pulls at ${short(sha)}; rows ${JSON.stringify(next.rows)}; burn_in ${next.burn_in}; stage ${next.stage}; cells ${cellCounts(next.estimates)}\n${rowLines(next.reasons)}`);
+  process.stdout.write(`${NAME}: fitted ${next.n_rows} Pulls at ${short(sha)}; rows ${JSON.stringify(next.rows)}; burn_in ${next.burn_in}; cells ${cellCounts(next.estimates)}\n${rowLines(next.reasons)}`);
 }
 
 if (isCLI(import.meta.url)) main();

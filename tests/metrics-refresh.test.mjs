@@ -352,17 +352,35 @@ test("a phase 0 over fixture records writes router-fit.json beside the fresh gua
   assert.deepEqual(fit.tsv_blobs, guard.tsv_blobs, "the same working-tree files the guard read, by the same keys");
   assert.equal(fit.tsv_blobs["docs/metrics/tier-outcomes.tsv"], git(f.repo, ["hash-object", "docs/metrics/tier-outcomes.tsv"]));
   assert.deepEqual(fit.prior, {
-    fitted_commit: SHIPPED.fitted_commit, version: INSTALLED_VERSION, stage: SHIPPED.stage, cells: SHIPPED.cells,
+    fitted_commit: SHIPPED.fitted_commit, version: INSTALLED_VERSION, cells: SHIPPED.cells,
     classifier: SHIPPED.classifier, splits: SHIPPED.splits, window_start: SHIPPED.window_start,
   });
   assert.equal(validateTable(fit.table) instanceof Error, false, "route reads it through validateTable");
   assert.equal(fit.table.fitted_commit, null, "never committed: no commit names it");
   assert.equal(fit.table.n_rows, 2);
   assert.equal(fit.table.window_start, guard.window_start);
-  assert.match(r.stdout, /metrics-refresh: fit: fitted 2 Pulls, stage 1, in burn-in; \.fleet\/router-fit\.json computed /);
+  assert.match(r.stdout, /metrics-refresh: fit: fitted 2 Pulls, in burn-in; \.fleet\/router-fit\.json computed /);
   assert.equal(existsSync(join(f.repo, `${FIT}.tmp`)), false, "the temp file was renamed into place");
   assert.equal(git(f.repo, ["status", "--porcelain", "--ignored=no"]), "", "nothing tracked changed: the Fit is never committed");
   assert.equal(git(f.repo, ["check-ignore", FIT]), FIT, "the Fit file is ignored, so a Close-out PR never carries it");
+});
+
+test("a Fit over every starting Cell at MIN_N merged PRs is out of burn-in, says nothing of it on its line, and adds no Cell", () => {
+  const rows = corpus();
+  const prs = [];
+  for (const [first, cell] of [[1000, "slow-high"], [2000, "task-high"], [3000, "smol-high"]]) {
+    for (let i = 0; i < MIN_N; i++) {
+      ruled(rows, { ticket: first + i, cell });
+      prs.push({ number: first + 5000 + i, state: "MERGED", mergedAt: `${DAY}T12:00:00Z` });
+    }
+  }
+  const f = fixture({ rows, prs });
+  const r = f.run();
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /metrics-refresh: fit: fitted 60 Pulls; \.fleet\/router-fit\.json computed /);
+  const { table } = JSON.parse(readFileSync(join(f.repo, FIT), "utf8"));
+  assert.equal(table.burn_in, false);
+  assert.deepEqual(table.cells, SHIPPED.cells);
 });
 
 test("the next route call routes by the Fit phase 0 wrote", () => {
@@ -432,8 +450,8 @@ test("a fit that cannot run throws before the rename, so the old file stays", ()
   const before = readFileSync(join(f.repo, FIT), "utf8");
   const guard = JSON.parse(readFileSync(join(f.repo, GUARD), "utf8"));
   const bad = join(f.root, "router-table.json");
-  writeFileSync(bad, JSON.stringify({ ...SHIPPED, stage: 0 }));
-  assert.throws(() => writeFit(f.repo, guard, { tablePath: bad }), /router table: `stage` is not a positive integer/);
+  writeFileSync(bad, JSON.stringify({ ...SHIPPED, burn_in: "no" }));
+  assert.throws(() => writeFit(f.repo, guard, { tablePath: bad }), /router table: `burn_in` is not a boolean/);
   assert.throws(() => writeFit(f.repo, { ...guard, cells: "none" }), /is not a guard the router reads/);
   rmSync(join(f.repo, "docs", "metrics", "ticket-features.tsv"));
   assert.throws(() => writeFit(f.repo, guard), /ENOENT/);

@@ -135,8 +135,13 @@ test("the exploration section counts the rate off the ledger's impl- rows, and a
   assert.doesNotMatch(`${dispatch()}\n${slice}`, /Until\s+the\s+router\s+draws/, "the dispatch or exploration section names a stand-in exploration cell again");
   assert.match(
     slice,
-    /While\s+the\s+table's\s+`burn_in`\s+is\s+true\s+every\s+Pull\s+draws,\s+over\s+every\s+cell,\s+the\s+policy\s+cell\s+included/,
-    "the exploration section no longer says burn-in draws on every Pull, over every cell",
+    /While\s+the\s+table's\s+`burn_in`\s+is\s+true\s+every\s+Pull\s+draws,\s+over\s+the\s+starting\s+cells\s+\(the\s+three\s+models\s+at\s+`high`\)\s+the\s+guard\s+has\s+not\s+tripped,\s+the\s+policy\s+cell\s+included/,
+    "the exploration section no longer says burn-in draws on every Pull, over the starting cells the guard has not tripped",
+  );
+  assert.match(
+    slice,
+    /a\s+cell\s+the\s+table\s+lists\s+beyond\s+them\s+is\s+never\s+drawn/,
+    "the exploration section no longer says burn-in never draws a cell the table lists beyond the starting ones",
   );
   // The roll: a Pull that lands on a chain head passes the exploration cell to
   // the next Pull rather than skipping it, which is the rule ADR 0013 §6 states

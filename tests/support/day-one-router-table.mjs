@@ -1,5 +1,5 @@
 // The day-one router table — plugin/scripts/router-table.json as it was before
-// any fit (stage 1, burn-in, every row slow-high, the one-node tree: no split) —
+// any fit (burn-in, every row slow-high, the one-node tree: no split) —
 // as a frozen literal.
 //
 // Tests that need the table's contents read this, never the shipped file: a
@@ -26,7 +26,6 @@ export const DAY_ONE_TABLE = deepFreeze({
   window_start: null,
   fitted_commit: null,
   n_rows: 0,
-  stage: 1,
   cells: ["slow-high", "task-high", "smol-high"],
   burn_in: true,
   splits: {},

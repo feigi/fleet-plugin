@@ -70,8 +70,8 @@
 // `guard` (the guard it used, as the router reads it: its `computed_at`,
 // `tripped`, per-Cell `n` and `window_start`), `tsv_blobs` (the git blob id of
 // each TSV it read, keyed by path as the guard keys its own), `prior` (the
-// starting table's `fitted_commit`, `stage`, `cells`, `classifier`, `splits`
-// and `window_start`, and the install's `package.json` `version`) and the
+// starting table's `fitted_commit`, `cells`, `classifier`, `splits` and
+// `window_start`, and the install's `package.json` `version`) and the
 // fitted `table`. `ticket-router.mjs route` routes by that `table`, read
 // beside the guard; nothing commits the file. The Fit is a pure function of
 // those records: the TSVs at the recorded blob ids, the guard and the prior
@@ -318,7 +318,6 @@ export function writeFit(repo, written, { tablePath = DEFAULT_TABLE, packagePath
     prior: {
       fitted_commit: prior.fitted_commit,
       version: installVersion(packagePath),
-      stage: prior.stage,
       cells: prior.cells,
       classifier: prior.classifier,
       splits: prior.splits,
@@ -342,7 +341,7 @@ function fit(repo, written) {
   } catch (e) {
     return say(`fit: failed — ${e.message}`);
   }
-  say(`fit: fitted ${p.table.n_rows} Pull${p.table.n_rows === 1 ? "" : "s"}, stage ${p.table.stage}${p.table.burn_in ? ", in burn-in" : ""}; ${FIT} computed ${p.computed_at}`);
+  say(`fit: fitted ${p.table.n_rows} Pull${p.table.n_rows === 1 ? "" : "s"}${p.table.burn_in ? ", in burn-in" : ""}; ${FIT} computed ${p.computed_at}`);
 }
 
 function main() {
