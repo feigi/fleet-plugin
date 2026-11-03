@@ -71,7 +71,7 @@ layer underneath the [Implementer](implementer.md) role.
   replacing today's fixed exploration cell.
   *Amended (#4247): `ticket-router.mjs` builds that design as
   [`docs/specs/2026-11-01-self-refining-router-design.md`](../specs/2026-11-01-self-refining-router-design.md)
-  amends it: it routes by the repository's own Fit, recomputed at every phase
-  0 and kept in `.fleet/`, or by the starting table while there is none, and
-  each group of the table's tree explores around its own `cost` row Cell
-  (§ 2.3, § 2.6).*
+  amends it: it routes by the repository's own Fit, recomputed at each phase 0
+  whose cost guard duty writes a guard and kept in `.fleet/`, or by the
+  starting table while there is none, and each group of the table's tree
+  explores around its own `cost` row Cell (§ 2.3, § 2.6).*

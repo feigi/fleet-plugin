@@ -771,10 +771,11 @@ merge. A no-change fit still lands (`estimates` moves; reviewers watch n
 climb). Never a maintainer-run obligation (`#1111`). The fit never moves
 `WINDOW_START`.
 *Amended (#4247): no re-fit runs on a cadence and no chore PR carries a table:
-`metrics-refresh.mjs` computes the Fit at every phase 0 over the repository's
-own records and writes it to `.fleet/router-fit.json`, where it routes that
-run, and nothing commits it. `ticket-router.mjs` has no `fit` or `--due` mode,
-and the repo-local hook has no re-fit duty
+`metrics-refresh.mjs` computes the Fit over the repository's own records at
+each phase 0 whose cost guard duty writes a guard, and writes it to
+`.fleet/router-fit.json`, where it routes that run, and nothing commits it.
+`ticket-router.mjs` has no `fit` or `--due` mode, and the repo-local hook has
+no re-fit duty
 (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.3, § 2.9).*
 
 **Check — `ticket-router.mjs --check`** (CI, alongside `tier-roles.mjs
@@ -866,8 +867,10 @@ Cell evidence tab, which calls it too, cannot disagree with routing.
 Its `draw.cells` are the starting Cells less the tripped during burn-in and,
 after it, the group's exploration Cells around its `cost` row Cell that
 `install` runs and the guard has not tripped, not the table's Cells less the
-tripped and the `cost` row's
-(`docs/specs/2026-11-01-self-refining-router-design.md` § 2.6).*
+tripped and the `cost` row's. `route` calls it twice, for the row of the run's
+Objective and for the `cost` row its draw is centred on; there is no base row,
+since a live arm B Pull records its sizing verdict and routes as an A Pull does
+(R2; `docs/specs/2026-11-01-self-refining-router-design.md` § 2.6).*
 
 Guard/table asymmetry, stated on purpose: the guard is pooled, the table
 per-stratum; a cell evicted pooled cannot win a stratum. Conservative by

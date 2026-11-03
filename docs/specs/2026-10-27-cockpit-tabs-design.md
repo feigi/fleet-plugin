@@ -205,10 +205,12 @@ which answers 404 (measured in diagram-docs' checkout).
 | **Normal** | a guard and a Preview fit | § 5.2 | § 5.2 | § 5.3 |
 
 *Amended (#4247): the Routes now and Evidence favours columns are one view of
-the Fit that routes the run: with no Fit read it is the starting table and
-says "no Fit yet: the next phase 0 writes one", and with no cost guard it says
-"no cost guard: every Pull runs at slow-high, the default Cell"; the guard
-column stands (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.8).*
+the Fit that routes the run: with no Fit read it is the starting table, which
+says "no Fit yet: the next phase 0 writes one" when there is no Fit file and
+"the Fit is not read: <why>" when the file cannot be read or fails validation,
+and with no cost guard it says "no cost guard: every Pull runs at slow-high,
+the default Cell"; the guard column stands
+(`docs/specs/2026-11-01-self-refining-router-design.md` § 2.8).*
 
 **No cost guard: the guard section's heading** quotes metrics-refresh's own
 line, with its time, from the newest `metrics` step in the phase 0 and
@@ -243,9 +245,10 @@ and any trust labels for that side.
   "Preview fit · this repository's runs · computed <t> · 198 Pulls" and
   "stage 2: slow-medium and task-max have 0 of the 20 merged PRs each needs".
   *Amended (#4247): there is one heading, "The Fit that routes this run", with
-  one source line (`Fit · computed <time> · <n> Pulls`, or "starting table ·
-  no Fit yet: the next phase 0 writes one"), one dispatch heading and the
-  Fit's trust labels, not a pair of sides
+  one source line (`Fit · computed <time> · <n> Pulls`; with no Fit file,
+  "starting table · no Fit yet: the next phase 0 writes one"; with one it
+  cannot read or validate, "starting table · the Fit is not read: <why>"),
+  one dispatch heading and the Fit's trust labels, not a pair of sides
   (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.8).*
 
 **Burn-in headings**, each from its own side's table (`burn_in`, `stage`,
@@ -515,10 +518,10 @@ fields the fit recomputes, or only `fitted_commit` and `version`, raises no
 label, because the next phase 0's refit would come out the same. The words
 name the prior: "fitted against <version, fitted_commit>; the next phase 0
 refits".
-*Amended (#4247): retired: the Fit is computed at every phase 0 from the
-starting table beside the scripts, and the tab raises no label for a prior
-that differs from it (`docs/specs/2026-11-01-self-refining-router-design.md`
-§ 2.8).*
+*Amended (#4247): retired: the Fit is computed at each phase 0 whose cost
+guard duty writes a guard, from the starting table beside the scripts, and
+the tab raises no label for a prior that differs from it
+(`docs/specs/2026-11-01-self-refining-router-design.md` § 2.8).*
 
 **The Preview fit's newest refit failed.** (amended by #4020: this signal's
 table row and this paragraph.) It reads the newest `metrics` step of the
