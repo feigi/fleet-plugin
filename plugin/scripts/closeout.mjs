@@ -601,13 +601,16 @@ function readCi(n, cwd, timeoutMs) {
 // call's start, reads the PR every POLL_MS, sleeps only while READ_MS is left
 // after the sleep for the reads that follow it, and stops waiting BOUND_MS
 // after its first run. CLOSEOUT_CALL_MS and CLOSEOUT_POLL_MS can only shorten
-// theirs.
+// theirs. CLOSEOUT_POLLS, a positive integer, is the most passes the step makes
+// in one call, a pass whose read fails included; anything else is no cap. Like
+// the other two, it can only end the wait sooner.
 const shorter = (name, ms) => {
   const v = Number(process.env[name]);
   return Number.isInteger(v) && v > 0 && v < ms ? v : ms;
 };
 const CALL_MS = shorter("CLOSEOUT_CALL_MS", 4 * 60_000);
 const POLL_MS = shorter("CLOSEOUT_POLL_MS", 30_000);
+const POLLS = shorter("CLOSEOUT_POLLS", Infinity);
 const READ_MS = CALL_MS / 8;
 const BOUND_MS = 30 * 60_000;
 const BOUND = "the 30-min bound";
@@ -658,7 +661,7 @@ function stepMerge({ receipt, save, started }) {
   // What the call's one `gh pr merge` answered, kept for every later poll so a
   // failed merge's own words reach the NEED line and the bound.
   let asked = null;
-  while (Date.now() < deadline) {
+  for (let passes = 1; Date.now() < deadline; passes++) {
     const pr = readPr(n, cwd, budget());
     if (pr.unreadable) last = { at: "gh unreadable until the bound", why: pr.unreadable };
     else if (pr.state === "MERGED") return merged(pr.headRefOid);
@@ -683,7 +686,7 @@ function stepMerge({ receipt, save, started }) {
       }
     }
     if (Date.now() >= bound) return atBound(last);
-    if (Date.now() + POLL_MS + READ_MS >= deadline) break;
+    if (passes >= POLLS || Date.now() + POLL_MS + READ_MS >= deadline) break;
     Atomics.wait(IDLE, 0, 0, POLL_MS);
   }
   if (Date.now() >= bound) return atBound(last);
