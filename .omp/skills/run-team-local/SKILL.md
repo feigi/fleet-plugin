@@ -1,6 +1,6 @@
 ---
 name: run-team-local
-description: fleet-plugin's own self-maintenance duties after a /fleet-ctl:run-team run on this repository — role-target drift notice, router re-fit. Not called by run-team; this repo's AGENTS.md triggers it, or the operator runs it by hand.
+description: fleet-plugin's own self-maintenance duties after a /fleet-ctl:run-team run on this repository — role-target drift notice. Not called by run-team; this repo's AGENTS.md triggers it, or the operator runs it by hand.
 disable-model-invocation: true
 ---
 
@@ -21,13 +21,9 @@ node .omp/skills/run-team-local/hook.mjs
 ```
 
 Every duty is `hook.mjs`, beside this file, and every duty is safe to run
-again, so a missed run strands nothing: the next one catches up. The re-fit
-reads the corpus committed on `origin/main`, so it judges what earlier runs'
-merged metrics PRs landed, not the working tree.
+again, so a missed run strands nothing: the next one catches up.
 
 ## Duties
-
-In this order:
 
 1. **Role-target drift notice:** each `fleet-implementer-<cell>` definition's
    most recent admissible `member-outcomes.tsv` row's `model` against
@@ -35,59 +31,13 @@ In this order:
    levels that target runs at. A `tier-roles: notice:` line is reported,
    never acted on — rows pool across resolved models (spec § 2).
    `tier-roles.mjs` only supplies the target and stays blind to the metrics.
-2. **Router re-fit:** once 50 merged PRs have features rows that are not in
-   `router-table.json`'s `fitted_commit`, `ticket-router.mjs fit` runs in a
-   throwaway checkout of `origin/main` and reads the committed corpus at
-   that commit — CI's `ticket-router.mjs --check` re-fits from the commit the
-   table records — and the new table goes out
-   as a chore PR from `chore/router-fit-<date>`, labelled `patch`. In that
-   checkout the duty first runs the hook's own `pr-cost.mjs --json --guard
-   --out <tmp file>`, and that guard file is the fit's `--guard`: the duty
-   reads no `.fleet/cost-guard.json`, so a fresh checkout needs none. That
-   pr-cost reads `origin/main`'s TSVs but the hook checkout's
-   `router-table.json`, so the guard's `retire` speaks for the hook's table;
-   neither the fit nor the refusal below reads it. pr-cost's exits 0,
-   3 and 4 are guard verdicts; any other exit (a failed `gh pr list`, an
-   unreadable TSV) fails the duty, due or not, naming pr-cost on stderr, and
-   nothing is pushed. Skipped while an earlier `chore/router-fit-*` PR is
-   still open.
-   **Refuses on an incomplete record:** when a cell's newest generation
-   lists a PR in the guard's `no_ruling_prs` (merged, no Ruling) or
-   `pending_prs` (still open, or not in `gh`'s list), nothing is fitted,
-   pushed or opened, the hook exits 0, and it prints one line — also under
-   `--dry-run`, which then prints no `would open` line:
-
-   ```
-   run-team-local: router fit: <due> — record incomplete, no re-fit: merged with no Ruling PR #<a>, #<b> — run `tier-outcomes.mjs append <pr>` for each; still open PR #<c>; missing from pr-cost's list PR #<d>
-   ```
-
-   A pending PR that `gh` lists open is `still open`; any other is `missing
-   from pr-cost's list` — one a Ruling names that pr-cost's `gh pr list`, the
-   PRs created since its window start, did not return. Each part appears
-   only when it has PRs, and PRs are listed in ascending order. Run
-   `tier-outcomes.mjs append <pr>` for each merged PR named, let the open ones
-   merge or close, and run the hook again; merging or closing cannot clear a
-   PR missing from pr-cost's list, so find why its Ruling names a PR that
-   list leaves out. An older generation's PRs and Rulings given by hand
-   never block. Known limits: a Pull whose implementer rows carry no PR at
-   all cannot count toward `no_ruling`, so a PR of such a Pull merged by hand
-   without a Ruling does not stop the re-fit; and only a Pull with no Ruling
-   of its own lists `no_ruling_prs`, so a ruled Pull's further merged
-   implementer PR that no Ruling holds does not stop it either. **Never add `ready-to-merge` to the re-fit PR and never merge it
-   yourself:** it is not the run's data-only metrics PR, and it closes no
-   issue, so it waits for the next run's phase 0, which folds it in as a
-   Ticketless PR, reviews it, and stops it for a human, because
-   `router-table.json` is not an Inert diff.
 
 ## Reading it
 
 One `run-team-local: <duty>: …` line per duty on stdout, plus any
 `tier-roles: notice:` lines. Exit 0: every duty ran. Exit 1: the duty named on
-stderr failed and the ones after it did not run — fix the cause and run it
-again. Exit 2: a usage error.
+stderr failed — fix the cause and run it again. Exit 2: a usage error.
 
-`--dry-run` writes nothing to GitHub and pushes nothing — the re-fit PR prints
-as `would …` — while every local duty still runs.
 `--repo`, `--agents`, `--model-roles` and `--catalog` point the hook at a
 fixture instead of this checkout and the live omp config; `hook.mjs`'s header
 says what each one defaults to.

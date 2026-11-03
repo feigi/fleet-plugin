@@ -331,14 +331,13 @@ const COVERED_MJS = {
   // would name another repository's. Measured through evict.mjs in the same
   // evict.test.mjs case, which finds the mark in the tree's own admin dir.
   "evict-mark.mjs": 1,
-  // ONE spawn primitive, `gitBeside(path, args)`, behind both of the fit's git
+  // ONE spawn primitive, `gitBeside(path, args)`, behind both of `--check`'s git
   // reads — `rev-parse --verify` of the commit and `show <sha>:./<file>`. An
   // ambient GIT_DIR would answer both for another repository, and an ambient
   // GIT_WORK_TREE would resolve the `./` path against another work tree, so
-  // the fit and `--check` would read the wrong rows or refuse the right
-  // commit. Measured in ticket-router.test.mjs, "an ambient GIT_DIR or
-  // GIT_WORK_TREE naming another repository does not change what fit and
-  // --check read".
+  // `--check` would read the wrong rows or refuse the right commit. Measured
+  // in ticket-router.test.mjs, "an ambient GIT_DIR or GIT_WORK_TREE naming
+  // another repository does not change what --check reads".
   "ticket-router.mjs": 1,
   // ONE scrubbed env, built once and handed to every child — the `git -C
   // <worktree>` status, diff, rev-parse, reflog, cherry, log and ls-remote

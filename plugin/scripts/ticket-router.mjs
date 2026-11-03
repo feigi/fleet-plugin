@@ -40,17 +40,6 @@
 //     within OMP_READ_TIMEOUT_MS, warns and leaves the Pull no Cell to draw;
 //     a read that leaves a role no level to run at, or finds no implementer
 //     definition, warns too.
-//   fit --table <json> --features <tsv> --members <tsv> --verdicts <tsv>
-//       --guard <cost-guard.json> --commit <rev> [--due]
-//     Re-fits the table from the three TSVs as committed at `--commit` (read
-//     with `git show`, never from the working tree) and the guard, and
-//     rewrites `--table`, recording the commit's sha as `fitted_commit`, then
-//     prints the fit and one line per row of each objective's set: its cell
-//     and the reason, then each candidate's verdict and range. The TSV flags name paths inside the
-//     repository that holds them. With
-//     `--due`, writes nothing and prints `DUE=yes|no MERGED=<n>/<N>`: whether
-//     N merged PRs have landed since `fitted_commit`, counting the features
-//     rows at `--commit` that the fitted commit's features file does not hold.
 //   --check --table <json> --features <tsv> --members <tsv> --verdicts <tsv>
 //     Re-fits from the commit the table records as `fitted_commit` (an empty
 //     corpus while it is null), against the guard snapshot the table itself
@@ -62,7 +51,7 @@
 // the guard are files the caller wrote, a fitted commit is fetched by the
 // caller, and the install reads ask the local `omp`.
 
-import { readFileSync, readdirSync, writeFileSync, renameSync, appendFileSync, mkdirSync, statSync, realpathSync } from "node:fs";
+import { readFileSync, readdirSync, appendFileSync, mkdirSync, statSync, realpathSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -91,10 +80,9 @@ const EXPLORE_EVERY = 5;
 // An `omp` install read that has not answered in this many milliseconds is killed and warns as a failed read: the
 // Pull runs `route` with no timeout of its own, so a hung `omp` would otherwise hang the Pull.
 const OMP_READ_TIMEOUT_MS = 10_000;
-// The fit's adoption floor (merged PRs per side), margin, and cadence.
+// The fit's adoption floor (merged PRs per side) and margin.
 export const MIN_N = 20;
 const ADOPT_RATIO = 0.75;
-export const FIT_EVERY_MERGED = 50;
 // The starting Cells short of MIN_N merged PRs in a guard's `n`, each with its
 // count, in their order: burn-in holds while any is. A Cell the guard has no
 // count for has 0.
@@ -921,41 +909,6 @@ export function fitTable({ prior, features, members, verdicts, guard, commit = n
   };
 }
 
-/**
- * Merged PRs since the fit: pull-attribution.mjs's counted, merged Pulls on or
- * after `window_start` whose features row the fitted commit's features file
- * (`fitted`, parsed rows; empty before any fit) does not hold, matched by
- * `session` and `agent`.
- */
-export function mergedSince({ table, features, members, verdicts, fitted }) {
-  const read = new Set(fitted.map((r) => `${r.session}\0${r.agent}`));
-  return attribute({ features, members, tiers: verdicts, windowStart: table.window_start || null })
-    .filter((u) => u.status === "counted" && u.merged && !read.has(`${u.pull.session}\0${u.pull.agent}`)).length;
-}
-
-// Each cell's Pull counts over every Pull, the root's, as the fit prints them: its
-// newest generation, then each older one.
-function cellCounts(estimates) {
-  const two = (x) => (x === null ? "-" : x.toFixed(2));
-  const counts = (e) => `n=${e.n} merged=${e.merged} failed=${e.failed} usd_per_merged=${two(e.usd_per_merged)} minutes_per_merged=${two(e.minutes_per_merged)}`;
-  return Object.entries(estimates["*"] ?? {})
-    .map(([c, e]) => [
-      `${c} ${e.generation ?? "-"} ${counts(e)} excluded=${e.excluded} left_out=${e.left_out} unpriced=${e.unpriced} untimed=${e.untimed}`,
-      ...Object.entries(e.older).map(([g, o]) => `${c} ${g} (older) ${counts(o)}`),
-    ].join(", "))
-    .join(", ") || "none";
-}
-
-// One line per row the fit judged, per objective: its cell and its reason,
-// then each candidate's verdict and range.
-function rowLines(reasons) {
-  const range = (r) => (r === null ? "" : ` [${r.map((x) => x.toFixed(2)).join(", ")}]`);
-  return Object.entries(reasons).flatMap(([o, set]) => Object.entries(set).map(([s, r]) => {
-    const cells = Object.entries(r.cells).map(([c, x]) => `${c} ${x.verdict}${range(x.range)}`).join(", ");
-    return `${NAME}: row ${o} ${s} ${r.cell} ${r.reason}${cells ? ` (${cells})` : ""}\n`;
-  })).join("");
-}
-
 // ---------------------------------------------------------------------------
 // the commit a fit reads
 // ---------------------------------------------------------------------------
@@ -1000,20 +953,19 @@ function main() {
     flags: {
       session: "value", objective: "value", ticket: "value", arm: "value", "impl-row": "value", issue: "value",
       sizing: "value", guard: "value", table: "value", pending: "value", "chain-head": "bool", "model-roles": "value", catalog: "value", agents: "value",
-      features: "value", members: "value", verdicts: "value", commit: "value", check: "bool", due: "bool",
+      features: "value", members: "value", verdicts: "value", check: "bool",
     },
-    positionals: ["route", "fit"],
+    positionals: ["route"],
   });
   F.sweep();
   F.stray();
   const argv = process.argv.slice(2);
-  const mode = F.has("check") ? "check" : argv.find((a) => a === "route" || a === "fit");
-  if (!mode || (F.has("check") && argv.some((a) => a === "route" || a === "fit"))) {
-    die("usage: ticket-router.mjs route … | fit … | --check … — exactly one mode");
+  const mode = F.has("check") ? "check" : argv.find((a) => a === "route");
+  if (!mode || (F.has("check") && argv.includes("route"))) {
+    die("usage: ticket-router.mjs route … | --check … — exactly one mode");
   }
   const allowed = {
     route: ["session", "objective", "ticket", "arm", "impl-row", "issue", "sizing", "guard", "table", "pending", "chain-head", "model-roles", "catalog", "agents"],
-    fit: ["table", "features", "members", "verdicts", "guard", "commit", "due"],
     check: ["check", "table", "features", "members", "verdicts"],
   }[mode];
   const given = argv.filter((a) => a.startsWith("--")).map((a) => a.slice(2).split("=")[0]);
@@ -1157,7 +1109,7 @@ function main() {
   };
   // The join throws on a features row it cannot date or whose column a split reads holds no plain count, a booked
   // member row whose `cost` or `work_s` is not a number, and a ruling of a windowed Pull's ticket it cannot place —
-  // for `fit` and `--check` too on a Pull the fit then skips as a live B classifier's, since every windowed Pull is
+  // for `--check` too on a Pull the fit then skips as a live B classifier's, since every windowed Pull is
   // booked before that skip. Anything else it throws is a bug, never bad input, so it surfaces with its stack.
   const joined = (fit) => {
     try { return fit(); } catch (e) {
@@ -1166,40 +1118,18 @@ function main() {
     }
   };
 
-  if (mode === "check") {
-    for (const flag of ["features", "members", "verdicts"]) need(flag);
-    const fitted = fittedCommit();
-    const { features, members, verdicts } = fitted === null ? { features: [], members: [], verdicts: [] } : corpusAt(fitted);
-    const refit = joined(() => fitTable({ prior: table, features, members, verdicts, guard: { ...table.guard, window_start: table.window_start }, commit: fitted }));
-    const differ = Object.keys({ ...refit, ...table }).filter((k) => !isDeepStrictEqual(refit[k], table[k]));
-    if (differ.length) {
-      process.stderr.write(`${NAME}: ${tablePath} is not a re-fit of its own rows — differs in ${differ.map((k) => `\`${k}\``).join(", ")}; re-fitted:\n${JSON.stringify(refit, null, 2)}\n`);
-      // exitCode, not exit(): a piped stderr is written asynchronously and exit() can cut the payload off.
-      process.exitCode = 1;
-      return;
-    }
-    process.stdout.write(`${NAME}: ${tablePath} matches a re-fit of ${refit.n_rows} Pulls at ${short(fitted)}\n`);
+  for (const flag of ["features", "members", "verdicts"]) need(flag);
+  const fitted = fittedCommit();
+  const { features, members, verdicts } = fitted === null ? { features: [], members: [], verdicts: [] } : corpusAt(fitted);
+  const refit = joined(() => fitTable({ prior: table, features, members, verdicts, guard: { ...table.guard, window_start: table.window_start }, commit: fitted }));
+  const differ = Object.keys({ ...refit, ...table }).filter((k) => !isDeepStrictEqual(refit[k], table[k]));
+  if (differ.length) {
+    process.stderr.write(`${NAME}: ${tablePath} is not a re-fit of its own rows — differs in ${differ.map((k) => `\`${k}\``).join(", ")}; re-fitted:\n${JSON.stringify(refit, null, 2)}\n`);
+    // exitCode, not exit(): a piped stderr is written asynchronously and exit() can cut the payload off.
+    process.exitCode = 1;
     return;
   }
-
-  const commitArg = need("commit");
-  const sha = commitOf(commitArg);
-  if (sha === null) die(`--commit ${commitArg} is not a commit of the repository holding --features ${need("features")}`);
-  const { features, members, verdicts } = corpusAt(sha);
-  const guardPath = need("guard");
-  const guard = readGuard(readJson(guardPath));
-  if (guard === null) die(`cannot read --guard ${guardPath} as a cost guard — the fit needs its tripped cells and per-cell n`);
-  if (F.has("due")) {
-    const fitted = fittedCommit();
-    const read = fitted === null ? [] : fileAt(fitted, "features", parseFeatures);
-    const n = joined(() => mergedSince({ table, features, members, verdicts, fitted: read }));
-    process.stdout.write(`DUE=${n >= FIT_EVERY_MERGED ? "yes" : "no"} MERGED=${n}/${FIT_EVERY_MERGED}\n`);
-    return;
-  }
-  const next = joined(() => fitTable({ prior: table, features, members, verdicts, guard, commit: sha }));
-  writeFileSync(`${tablePath}.tmp`, `${JSON.stringify(next, null, 2)}\n`);
-  renameSync(`${tablePath}.tmp`, tablePath);
-  process.stdout.write(`${NAME}: fitted ${next.n_rows} Pulls at ${short(sha)}; rows ${JSON.stringify(next.rows)}; burn_in ${next.burn_in}; cells ${cellCounts(next.estimates)}\n${rowLines(next.reasons)}`);
+  process.stdout.write(`${NAME}: ${tablePath} matches a re-fit of ${refit.n_rows} Pulls at ${short(fitted)}\n`);
 }
 
 if (isCLI(import.meta.url)) main();

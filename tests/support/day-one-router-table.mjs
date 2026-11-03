@@ -1,13 +1,13 @@
-// The day-one router table — plugin/scripts/router-table.json as it was before
-// any fit (burn-in, every row slow-high, the one-node tree: no split) —
-// as a frozen literal.
+// The day-one router table — the starting table (burn-in, every row slow-high,
+// the one-node tree: no split) — as a frozen literal.
 //
-// Tests that need the table's contents read this, never the shipped file: a
-// re-fit PR moves the shipped table, and a test pinned to it would fail that
-// PR for a reason the fit does not own. What every shipped table must satisfy
-// is checked by "route: the checked-in table is valid" in
-// ticket-router.test.mjs. That the shipped table can be reproduced is CI's
-// `Router table check`.
+// The shipped plugin/scripts/router-table.json is this table, and no re-fit
+// PR moves it: it changes only by an ordinary change. "route: the shipped
+// table is the starting table" in ticket-router.test.mjs holds the two equal,
+// and "route: the checked-in table is valid" there checks what every shipped
+// table must satisfy. CI's `Router table check` still re-fits it, from no
+// commit while `fitted_commit` is null. Tests that need the table's contents
+// read this literal.
 //
 // Where the code under test reads the installed table from a scripts
 // directory, `dayOneScripts()` is a copy of plugin/scripts holding this table.
@@ -44,8 +44,8 @@ let copy = null;
 /**
  * A copy of plugin/scripts, plugin/agents and plugin/package.json under a temp
  * directory, with the day-one table installed as its router-table.json — a
- * scripts directory whose installed table does not move when a re-fit changes
- * the shipped one, and which reads the shipped definitions from `../agents`.
+ * scripts directory whose installed table is this literal whatever the shipped
+ * one holds, and which reads the shipped definitions from `../agents`.
  * Made once per process, removed when it exits.
  * @returns {string} the scripts directory, which a script run from it reads its table beside
  */
