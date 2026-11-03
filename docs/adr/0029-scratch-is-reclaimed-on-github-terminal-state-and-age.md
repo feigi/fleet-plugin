@@ -7,7 +7,15 @@ scratch root lives and left its cleanup to #2316. Amended by #3317: decisions
 1 and 3 are extended by decision 11, the sibling keys. Amended by #3403:
 decision 5 also keeps an OPEN ticket's `impl-<N>/` while a claim worktree
 under `.worktrees/` still stands for it, and judges it by the 7-day rule once
-none does.
+none does. Amended by #4112: decision 11 judges a sibling key by the checkout it
+records, not by age alone — the key's top-level `checkout-path` names the
+absolute, canonical checkout its hash is taken over, and the sibling pass writes
+its own key's file under `--apply` and no other; a key with no valid file, whose
+checkout still exists, or whose checkout and the directory that held it are both
+gone is kept, and a key is removed whole only when its checkout is gone, that
+directory is present and nothing under it changed in 7 days, the whole verdict
+taken again just before removal; it asks GitHub nothing, and the root sweep
+never judges `checkout-path`.
 
 ## Context
 

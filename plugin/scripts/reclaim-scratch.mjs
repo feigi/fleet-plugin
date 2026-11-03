@@ -20,11 +20,13 @@
 // judged against this one's numbers.
 //
 // `--siblings` is the sibling pass, its own invocation: `--root` names the
-// live key, and the pass judges the other key-shaped directories beside it by
-// age alone (judgeSiblings below), judging each again just before `--apply`
-// removes it. Any other key passed as `--root` would put the real live key
-// among the judged siblings. It reads no ledger and is never combined with
-// --pr or --after-rotate.
+// live key, and the pass judges the other key-shaped directories beside it
+// (judgeSiblings below) by the checkout each records and by age, judging each
+// again just before `--apply` removes it. Under `--apply` it first writes the
+// live key's own `checkout-path`, and only that. Any other key passed as
+// `--root` would put the real live key among the judged siblings. It reads no
+// ledger, asks GitHub nothing, and is never combined with --pr or
+// --after-rotate.
 //
 // THE ROOT SWEEP judges every entry directly under `--root`:
 //   pr<M>/, dispositions-fix-pr-<M>[-x].json
@@ -74,6 +76,9 @@
 //   nothing
 //            removed when idle past the retention and no live token's name
 //            appears in the entry's name.
+//   checkout-path
+//            never judged: the sibling pass's record of the checkout the key
+//            belongs to, neither removed nor listed.
 // "Idle past the retention" is the newest mtime ANYWHERE under the entry
 // older than 7 days — never the top-level mtime alone, which a write deep
 // inside does not move. A directory that cannot be listed or searched counts
@@ -109,6 +114,8 @@
 // Prints ONE JSON line on stdout once the sweep is done:
 //   {"applied":<bool>,"ledger":<abs path|null>,"removed":[{"path","reason"}],
 //    "kept":[{"path","reason"}],"failed":[{"path","error"}]}
+// The sibling pass's kept entries also carry "idle": true when nothing under
+// the key was found modified within the retention, false otherwise.
 // `ledger` is the file read, or null when none was (`--pr` mode, or
 // `--after-rotate` with no file) — so "never read" stays distinct from "read
 // and found empty". A dry run prints the same receipt with "applied":false,
@@ -121,7 +128,8 @@
 // other than ENOENT. Nothing is removed before a refusal.
 
 import { spawnSync } from "node:child_process";
-import { lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { lstatSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineFlags, isDigits, makeDie, writeAll } from "./arg.mjs";
@@ -133,6 +141,9 @@ import { liveOnLedger, parseMember, REVIEWER } from "./ledger-grammar.mjs";
 import { REVIEWS_DIR, reviewTargets } from "./run-records.mjs";
 
 const NAME = "reclaim-scratch";
+// The file at a key's top level naming the checkout the key's hash is taken
+// over: one line, an absolute path.
+export const CHECKOUT_FILE = "checkout-path";
 const die = makeDie(NAME);
 const DAY_MS = 24 * 60 * 60 * 1000;
 export const RETENTION_MS = 7 * DAY_MS;
@@ -392,6 +403,8 @@ function judgeRoot(root, names, live, now, listing, checkout) {
   // idle directory.
   const entries = [];
   for (const name of names) {
+    // The sibling pass's record of whose key this is: never this sweep's to judge.
+    if (name === CHECKOUT_FILE) continue;
     const path = join(root, name);
     let isDir = false;
     try {
@@ -528,11 +541,10 @@ function staleRunRoots(parent, cutoff, kept) {
 }
 
 // THE SIBLING PASS judges every key-shaped directory directly under the scratch
-// parent of `root`, other than the live key, by age alone: one with nothing
-// modified within the retention goes whole; one with anything fresh stays whole,
-// and so does one with any part that could not be read, since what that part
-// holds is unknown. Other entries under the parent, links and the live key are
-// not judged at all. The keys are judged in name order.
+// parent of `root`, other than the live key, by the checkout its
+// `checkout-path` names (judgeSibling below) and by age. Other entries under
+// the parent, links and the live key are not judged at all. The keys are
+// judged in name order.
 function judgeSiblings(root, cutoff) {
   const parent = dirname(root);
   const live = basename(root);
@@ -550,18 +562,98 @@ function judgeSiblings(root, cutoff) {
       failed.push({ path, error: e.message });
       continue;
     }
-    (verdict.idle ? remove : kept).push({ path, reason: verdict.reason });
+    if (verdict.remove) remove.push({ path, reason: verdict.reason });
+    else kept.push({ path, reason: verdict.reason, idle: verdict.idle });
   }
   return { remove, kept, failed };
 }
 
-// One sibling key's verdict: `idle` only when nothing under it is fresh and
-// every part of it could be read.
+// A read of `checkout-path` that leaves no file to judge, rather than an error.
+const NO_CHECKOUT_FILE = new Set(["ENOENT", "ENOTDIR", "EISDIR", "EACCES", "EPERM"]);
+
+// The checkout `key`'s `checkout-path` names: `{ checkout }`; `{ none }`, why
+// there is no valid file — missing, unreadable, anything but one absolute
+// path, or a path whose sha256 does not start with the key's 8-hex suffix;
+// or `{ error }` for any other failure to read it.
+function checkoutOf(key) {
+  let text;
+  try {
+    text = readFileSync(join(key, CHECKOUT_FILE), "utf8");
+  } catch (e) {
+    if (NO_CHECKOUT_FILE.has(e.code)) return { none: e.code === "ENOENT" ? `${CHECKOUT_FILE} is missing` : `${CHECKOUT_FILE} cannot be read (${e.code})` };
+    return { error: `its ${CHECKOUT_FILE} cannot be read: ${e.message}` };
+  }
+  const line = text.endsWith("\n") ? text.slice(0, -1) : text;
+  if (line.includes("\n") || !isAbsolute(line)) return { none: `${CHECKOUT_FILE} holds no single absolute path` };
+  const suffix = basename(key).slice(-8);
+  if (!createHash("sha256").update(line).digest("hex").startsWith(suffix)) return { none: `${line} does not hash to the key's suffix ${suffix}` };
+  return { checkout: line };
+}
+
+// Whether anything exists at `p` (lstat): true, false, or the error that
+// leaves it unknown.
+function existsAt(p) {
+  try {
+    lstatSync(p);
+    return true;
+  } catch (e) {
+    if (e.code === "ENOENT" || e.code === "ENOTDIR") return false;
+    return e;
+  }
+}
+
+// One sibling key's verdict, `{remove, reason, idle}`. `idle` is whether
+// nothing under the key was found modified within the retention, searched for
+// every key. Removed only when its checkout file is valid, nothing exists at
+// the checkout it names, the directory that held that checkout does exist,
+// nothing under the key is fresh and every part of it could be read. A key
+// whose checkout still exists is its own phase 0's to reclaim; one whose
+// checkout's parent is gone too may sit on an unplugged drive.
 function judgeSibling(path, cutoff) {
   const unreadable = [];
-  if (freshUnder(path, cutoff, unreadable) !== null) return { idle: false, reason: "sibling key modified within 7 days" };
-  if (unreadable.length > 0) return { idle: false, reason: `sibling key could not be read whole (${unreadable[0]})` };
-  return { idle: true, reason: "sibling key idle past 7 days" };
+  const idle = freshUnder(path, cutoff, unreadable) === null;
+  const keep = (reason) => ({ remove: false, reason, idle });
+  const found = checkoutOf(path);
+  if (found.error !== undefined) return keep(found.error);
+  if (found.none !== undefined) return keep(`no checkout file: ${found.none}`);
+  const { checkout } = found;
+  const at = existsAt(checkout);
+  if (at instanceof Error) return keep(`whether its checkout ${checkout} exists cannot be told: ${at.message}`);
+  if (at) return keep(`its checkout ${checkout} still exists, so its own phase 0 reclaims it`);
+  const held = dirname(checkout);
+  const up = existsAt(held);
+  if (up instanceof Error) return keep(`whether ${held}, the directory that held its checkout ${checkout}, exists cannot be told: ${up.message}`);
+  if (!up) return keep(`neither its checkout ${checkout} nor ${held}, the directory that held it, exists`);
+  if (!idle) return keep("sibling key modified within 7 days");
+  if (unreadable.length > 0) return keep(`sibling key could not be read whole (${unreadable[0]})`);
+  return { remove: true, reason: `its checkout ${checkout} is gone and nothing under it changed in 7 days`, idle };
+}
+
+// The live key's own `checkout-path`, written when it is missing or says
+// anything but this workspace's canonical path: a temp file in the key,
+// renamed over it. A failure is returned as a failed[] entry, null otherwise.
+function writeCheckout(root) {
+  const file = join(root, CHECKOUT_FILE);
+  let checkout;
+  try {
+    checkout = dirname(fleetFile(null, { canonicalise: true }));
+  } catch (e) {
+    return { path: file, error: e.message };
+  }
+  if (checkoutOf(root).checkout === checkout) return null;
+  const tmp = join(root, `.${CHECKOUT_FILE}.${process.pid}.tmp`);
+  try {
+    writeFileSync(tmp, `${checkout}\n`);
+    renameSync(tmp, file);
+  } catch (e) {
+    try {
+      rmSync(tmp, { force: true });
+    } catch {
+      // left for the root sweep to age out
+    }
+    return { path: file, error: e.message };
+  }
+  return null;
 }
 
 function main() {
@@ -620,6 +712,10 @@ function main() {
       failed.push({ path: parent, error: e.message });
     }
   } else if (siblings) {
+    if (apply) {
+      const wrote = writeCheckout(root);
+      if (wrote !== null) failed.push(wrote);
+    }
     try {
       const judged = judgeSiblings(root, now - RETENTION_MS);
       remove = judged.remove;
@@ -653,11 +749,12 @@ function main() {
     let error;
     try {
       // A sibling key belongs to another workspace's runs, which can write to it
-      // while an earlier key is still being removed: it is judged again here, so
-      // a key that turned fresh since the pass judged it is kept.
+      // or bring its checkout back while an earlier key is still being removed:
+      // its whole verdict is taken again here, so a key no longer removable is
+      // kept.
       const again = siblings ? judgeSibling(entry.path, now - RETENTION_MS) : null;
-      if (again !== null && !again.idle) {
-        kept.push({ path: entry.path, reason: again.reason });
+      if (again !== null && !again.remove) {
+        kept.push({ path: entry.path, reason: again.reason, idle: again.idle });
         continue;
       }
       error = removeEntry(entry.path);
