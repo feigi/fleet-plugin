@@ -81,6 +81,13 @@ if [ "$1 $2" = "pr list" ]; then
   if [ -r '${join(ghDir, "queue.json")}' ]; then cat '${join(ghDir, "queue.json")}'; else echo '[]'; fi
   exit 0
 fi
+if [ "$1 $2" = "issue view" ]; then
+  [ "$4 $5" = "--json labels" ] || { echo "gh stub: unexpected gh $*" >&2; exit 64; }
+  f='${ghDir}'/"issue-$3.json"
+  [ -r "$f" ] || { echo "gh stub: no issue $3" >&2; exit 1; }
+  cat "$f"
+  exit 0
+fi
 [ "$1 $2" = "pr view" ] || { echo "gh stub: unexpected gh $*" >&2; exit 64; }
 f='${ghDir}'/"$3.json"
 [ -r "$f" ] || { echo "gh stub: no PR $3" >&2; exit 1; }
@@ -120,7 +127,9 @@ cat "$f"
     assert.equal(bytes(), before, "a refusal must not touch the ledger");
     return r;
   };
-  return { root, work, fleet, file, reports, env, git, head, stray, run, cli, ok, bytes, report, pr, queue, settle, settled, refused };
+  // Issue `n`'s `gh issue view --json labels` answer: `body`.
+  const issue = (n, body) => writeFileSync(join(ghDir, `issue-${n}.json`), JSON.stringify(body));
+  return { root, work, fleet, file, reports, env, git, head, stray, run, cli, ok, bytes, report, pr, issue, queue, settle, settled, refused };
 }
 
 const implReport = (f, over = {}) => ({
@@ -142,6 +151,8 @@ const botReport = (f, over = {}) => ({
 });
 
 const dispatched = (f, member) => f.ok("read").dispatched.find((e) => e.split("=")[0] === member);
+// Every `gh issue view` the stub was asked, one command line each.
+const issueReads = (f) => (existsSync(join(f.root, "gh.log")) ? readFileSync(join(f.root, "gh.log"), "utf8").split("\n").filter((l) => l.startsWith("issue view")) : []);
 
 // -- impl-N=PR#M --------------------------------------------------------------
 
@@ -157,11 +168,13 @@ test("impl-N=PR#M: a head on the branch and an OPEN PR closing N settles", () =>
       { name: `verify-sha.sh ${CLAIM} ${f.head} exits 0`, ok: true },
       { name: "PR #6 reads OPEN", ok: true },
       { name: "PR #6 closes #5", ok: true },
+      { name: "PR #6 closes no ticket another claim holds (in-progress: none)", ok: true },
       { name: `PR #6's head is ${CLAIM} (GitHub: ${CLAIM})`, ok: true },
     ],
   });
   assert.equal(dispatched(f, "impl-5"), "impl-5=PR#6");
   assert.match(readFileSync(join(f.root, "gh.log"), "utf8"), /^pr view 6 --json state,closingIssuesReferences,url,headRefName$/m);
+  assert.deepEqual(issueReads(f), [], "a single-ticket PR reads no issue");
 });
 
 test("impl-N=PR#M: a PR headed on another branch is exit 3, naming the check and the head GitHub reported, and writes nothing", () => {
@@ -228,6 +241,122 @@ test("impl-N=PR#M: a PR whose only reference to #N is another repository's is ex
   f.report("impl-5", implReport(f));
   f.pr(6, { state: "OPEN", closingIssuesReferences: [ref(5, "other-org/other-repo")] });
   f.refused("impl-5", 3, /failed: PR #6 closes #5/);
+});
+
+test("impl-N=PR#M: a PR that is not OPEN, or does not close #N, is exit 3 for that check, no other reference's issue read", () => {
+  for (const [view, why] of [
+    [{ state: "CLOSED", closingIssuesReferences: [ref(5), ref(7)] }, /failed: PR #6 reads OPEN/],
+    [{ state: "OPEN", closingIssuesReferences: [ref(55), ref(7)] }, /failed: PR #6 closes #5/],
+  ]) {
+    const f = fixture();
+    f.ok("dispatch", "5", "impl-5");
+    f.report("impl-5", implReport(f));
+    // No answer file for issue 7 or 55: reading either would be exit 2.
+    f.pr(6, view);
+    f.refused("impl-5", 3, why);
+    assert.deepEqual(issueReads(f), []);
+  }
+});
+
+// A claim's ticket is closed only by the claim's own PR: a PR closing a ticket
+// whose issue carries the Label map's in-progress string is refused. The own
+// ticket is never read, so a single-ticket PR reads no map and no issue.
+
+test("impl-N=PR#M: a PR closing a ticket whose issue carries in-progress is exit 3, naming that ticket, and writes nothing", () => {
+  const f = fixture();
+  f.ok("dispatch", "5", "impl-5");
+  f.report("impl-5", implReport(f));
+  f.pr(6, { state: "OPEN", closingIssuesReferences: [ref(5), ref(7)] });
+  f.issue(7, { labels: [{ name: "bug" }, { name: "in-progress" }] });
+  f.refused("impl-5", 3, /failed: PR #6 closes no ticket another claim holds \(in-progress: #7\)/);
+  assert.equal(dispatched(f, "impl-5"), "impl-5", "the member stays dispatched, unsettled");
+  assert.deepEqual(issueReads(f), ["issue view 7 --json labels"], "the own ticket's issue is never read");
+});
+
+test("impl-N=PR#M: every closed ticket another claim holds is named, and one it does not hold is not", () => {
+  const f = fixture();
+  f.ok("dispatch", "5", "impl-5");
+  f.report("impl-5", implReport(f));
+  f.pr(6, { state: "OPEN", closingIssuesReferences: [ref(5), ref(7), ref(8), ref(9)] });
+  f.issue(7, { labels: [{ name: "in-progress" }] });
+  f.issue(8, { labels: [{ name: "bug" }] });
+  f.issue(9, { labels: [{ name: "in-progress" }] });
+  f.refused("impl-5", 3, /failed: PR #6 closes no ticket another claim holds \(in-progress: #7, #9\)/);
+});
+
+test("impl-N=PR#M: a PR closing a second ticket nobody holds settles, the check reading none", () => {
+  const f = fixture();
+  f.ok("dispatch", "5", "impl-5");
+  f.report("impl-5", implReport(f));
+  f.pr(6, { state: "OPEN", closingIssuesReferences: [ref(5), ref(7)] });
+  f.issue(7, { labels: [{ name: "bug" }] });
+  const receipt = f.settled("impl-5");
+  assert.equal(receipt.outcome, "PR#6");
+  assert.deepEqual(receipt.checks.find((c) => c.name.includes("another claim holds")), { name: "PR #6 closes no ticket another claim holds (in-progress: none)", ok: true });
+  assert.equal(dispatched(f, "impl-5"), "impl-5=PR#6");
+});
+
+test("impl-N=PR#M: the in-progress string is the Label map's, so a map spelling the role wip refuses wip and not in-progress", () => {
+  const f = fixture();
+  seedLabelMap(f.work, { roles: { "in-progress": "wip" } });
+  f.ok("dispatch", "5", "impl-5");
+  f.report("impl-5", implReport(f));
+  f.pr(6, { state: "OPEN", closingIssuesReferences: [ref(5), ref(7)] });
+  f.issue(7, { labels: [{ name: "in-progress" }] });
+  assert.equal(f.settled("impl-5").outcome, "PR#6");
+  const g = fixture();
+  seedLabelMap(g.work, { roles: { "in-progress": "wip" } });
+  g.ok("dispatch", "5", "impl-5");
+  g.report("impl-5", implReport(g));
+  g.pr(6, { state: "OPEN", closingIssuesReferences: [ref(5), ref(7)] });
+  g.issue(7, { labels: [{ name: "wip" }] });
+  g.refused("impl-5", 3, /failed: PR #6 closes no ticket another claim holds \(in-progress: #7\)/);
+});
+
+test("could not look: an issue read that fails, or answers without a labels array, is exit 2 and writes nothing", () => {
+  const f = fixture();
+  f.ok("dispatch", "5", "impl-5");
+  f.report("impl-5", implReport(f));
+  f.pr(6, { state: "OPEN", closingIssuesReferences: [ref(5), ref(7)] });
+  // No answer file for issue 7: the stub exits 1.
+  f.refused("impl-5", 2, /could not read issue #7's labels — gh issue view 7 --json labels exited 1: gh stub: no issue 7; nothing written/);
+  for (const body of [{}, { labels: null }, { labels: "in-progress" }, { labels: ["in-progress"] }, { labels: [{}] }]) {
+    f.issue(7, body);
+    f.refused("impl-5", 2, /could not read issue #7's labels — gh issue view 7 --json labels printed no list of named labels.*; nothing written/);
+  }
+  writeFileSync(join(f.root, "gh", "issue-7.json"), "<html>rate limited</html>");
+  f.refused("impl-5", 2, /could not read issue #7's labels — gh issue view 7 --json labels printed no list of named labels/);
+  assert.equal(dispatched(f, "impl-5"), "impl-5");
+});
+
+test("could not look: a PR closing a ticket besides its own with no Label map is exit 2 naming ensure, and a single-ticket PR still settles", () => {
+  const f = fixture();
+  rmSync(join(f.fleet, "labels.json"), { force: true });
+  f.ok("dispatch", "5", "impl-5");
+  f.report("impl-5", implReport(f));
+  f.pr(6, { state: "OPEN", closingIssuesReferences: [ref(5), ref(7)] });
+  f.issue(7, { labels: [] });
+  f.refused("impl-5", 2, /settle impl-5 --from-report: no Label map at .*label-map\.mjs ensure.*; nothing written/);
+  f.pr(6, { state: "OPEN", closingIssuesReferences: [ref(5)] });
+  assert.equal(f.settled("impl-5").outcome, "PR#6");
+});
+
+test("impl-N=PR#M: the claim's own ticket carrying in-progress never refuses it, nor a replacement impl-N-x", () => {
+  const f = fixture();
+  f.ok("dispatch", "5", "impl-5");
+  f.report("impl-5", implReport(f));
+  f.pr(6, { state: "OPEN", closingIssuesReferences: [ref(5)] });
+  f.issue(5, { labels: [{ name: "in-progress" }] });
+  assert.equal(f.settled("impl-5").outcome, "PR#6");
+  const g = fixture();
+  g.ok("dispatch", "5", "impl-5");
+  g.ok("settle", "impl-5", "killed");
+  g.ok("dispatch", "5", "impl-5-b");
+  g.report("impl-5-b", implReport(g, { member: "impl-5-b" }));
+  g.pr(6, { state: "OPEN", closingIssuesReferences: [ref(5)] });
+  g.issue(5, { labels: [{ name: "in-progress" }] });
+  assert.equal(g.settled("impl-5-b").outcome, "PR#6");
+  assert.deepEqual(issueReads(g), [], "the own ticket's issue is never read");
 });
 
 test("could not look: a closing reference with neither a url nor a repository is exit 2", () => {

@@ -14,9 +14,12 @@ literal outcome
 Implement ticket <N>. You are ALREADY in worktree `<abs-path>`, whose PR branch is
 `<branch>`: commit on it and open your PR from it, even when the ticket below names
 another branch; the settle refuses a PR from any other branch. If the ticket names
-one, say in the PR body that you used `<branch>`. Your scratch directory is
-`<scratch>/impl-<N>/`; outside the worktree, write nowhere else but your report file
-below.
+one, say in the PR body that you used `<branch>`. Label names in this file are roles;
+the Label map gives the string to type; a member never derives the map. Close no ticket
+another claim holds — one whose issue carries the in-progress label — even when the
+ticket below asks for one PR with it: write `Refs #M` instead; the settle refuses a PR
+that closes one. Your scratch directory is `<scratch>/impl-<N>/`; outside the worktree,
+write nowhere else but your report file below.
 
 The ticket, pasted verbatim from the controller's own read — its title, the
 `## Agent Brief` comment or the issue body, whichever carries the brief, and its

@@ -44,7 +44,8 @@ release and reap find the claim through that branch, and the implementer's settl
 a PR from any other.
 A fleet claim is `implementer/<N>-impl-<N>` in `.worktrees/<N>-impl-<N>`: one per ticket,
 named for the ticket's first implementer, and every later implementer of the ticket works
-in it.
+in it. A claim's ticket is closed only by the claim's own PR: a fleet PR closes no ticket
+another claim holds.
 _Avoid_: lock, reservation, assignment
 
 **Release**:

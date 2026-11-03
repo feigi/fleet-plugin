@@ -19,7 +19,7 @@ import { computeBoard } from "../plugin/scripts/compute-board.mjs";
 import { deriveRun, LedgerError } from "../plugin/scripts/fleet-tick.mjs";
 import { rowPr } from "../plugin/scripts/ledger-grammar.mjs";
 import { rendering, renderBrief } from "./support/rendered-brief.mjs";
-import { writeQueueGh, closes, titled, failsOn, ghCalls, ref, prUrl, labelled, defines } from "./support/queue-gh.mjs";
+import { writeQueueGh, closes, titled, failsOn, ghCalls, ref, prUrl, labelled, defines, issueLabelled } from "./support/queue-gh.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { identityRoles } from "./support/label-map-seed.mjs";
 
@@ -1623,6 +1623,92 @@ test("a ruling the body fails and an own-record reference are both named in the 
   f.refused(["dispatch", "3606", "finisher-pr-3606"], /finisher-pr-3606: PR #3606 does not close #3545, ruled closed_own_ticket=yes .*; PR #3606 closes #3637, its own suggestion-band record/);
 });
 
+// A claim's ticket is closed only by the claim's own PR: a closing reference,
+// beyond the PR's own tickets, whose issue carries the Label map's in-progress
+// string refuses the finisher, one line per ticket.
+
+test("a PR closing its own ticket and one another claim holds is refused, naming it and the rephrasing, and dispatched once the other is unclaimed", (t) => {
+  const f = fixture(t);
+  f.put("3545", RULED_ROW);
+  f.rule(3606, "3545", "yes", [3545, 3637]);
+  // The own ticket carries in-progress through its own claim: never refused for it.
+  issueLabelled(f.bin, 3545, ["in-progress"]);
+  issueLabelled(f.bin, 3637, ["bug", "in-progress"]);
+  f.refused(["dispatch", "3606", "finisher-pr-3606"], /finisher-pr-3606: PR #3606 closes #3637, which another claim holds — rephrase it as "Refs #3637" — not dispatching finisher-pr-3606/);
+  assert.deepEqual(f.read().dispatched, []);
+  issueLabelled(f.bin, 3637, ["bug"]);
+  assert.equal(f.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher");
+});
+
+test("each ticket another claim holds is a failure line of its own, beside the ruling's", (t) => {
+  const f = fixture(t);
+  f.put("3545", RULED_ROW);
+  f.rule(3606, "3545", "yes", [3637, 3638, 3639]);
+  issueLabelled(f.bin, 3637, ["in-progress"]);
+  issueLabelled(f.bin, 3639, ["in-progress"]);
+  f.refused(["dispatch", "3606", "finisher-pr-3606"],
+    /PR #3606 does not close #3545, ruled closed_own_ticket=yes .*; PR #3606 closes #3637, which another claim holds — rephrase it as "Refs #3637"; PR #3606 closes #3639, which another claim holds — rephrase it as "Refs #3639" — not dispatching/);
+});
+
+test("the in-progress string is the Label map's: a map spelling the role wip refuses wip on a closed ticket and lets in-progress through", (t) => {
+  const f = fixture(t);
+  seedLabelMap(f.root, { roles: { "in-progress": "wip" } });
+  f.put("3545", RULED_ROW);
+  f.rule(3606, "3545", "yes", [3545, 3637]);
+  issueLabelled(f.bin, 3637, ["in-progress"]);
+  assert.equal(f.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher");
+  const g = fixture(t);
+  seedLabelMap(g.root, { roles: { "in-progress": "wip" } });
+  g.put("3545", RULED_ROW);
+  g.rule(3606, "3545", "yes", [3545, 3637]);
+  issueLabelled(g.bin, 3637, ["wip"]);
+  g.refused(["dispatch", "3606", "finisher-pr-3606"], /PR #3606 closes #3637, which another claim holds/);
+});
+
+// A PR a run inherited carries no settled token, so its own tickets come off
+// its head: a claim branch's ticket is that claim's own, in-progress or not.
+const INHERITED_ROW = `PR#3606 · inherited (closes #3545) · review=member:review-pr-3606 · reviewed=${GATE_HEAD}:0/0/0:${GATE_RUN}`;
+
+test("an inherited PR headed by a claim branch closes that claim's in-progress ticket and is dispatched; headed by no claim branch it is refused", (t) => {
+  for (const head of ["implementer/3545-impl-3545", "implementer/3545-impl-3545-b"]) {
+    const f = fixture(t);
+    f.put("3606", INHERITED_ROW);
+    closes(f.bin, 3606, [3545], head);
+    issueLabelled(f.bin, 3545, ["in-progress"]);
+    assert.equal(f.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher", head);
+  }
+  for (const head of ["feature/topic", "implementer/3546-impl-3546", "implementer/3545-impl-3546"]) {
+    const f = fixture(t);
+    f.put("3606", INHERITED_ROW);
+    closes(f.bin, 3606, [3545], head);
+    issueLabelled(f.bin, 3545, ["in-progress"]);
+    f.refused(["dispatch", "3606", "finisher-pr-3606"], /finisher-pr-3606: PR #3606 closes #3545, which another claim holds — rephrase it as "Refs #3545"/);
+    assert.deepEqual(f.read().dispatched, [], head);
+  }
+});
+
+test("an inherited PR headed by a claim branch is still refused for another claim's ticket, and only for that one", (t) => {
+  const f = fixture(t);
+  f.put("3606", INHERITED_ROW);
+  closes(f.bin, 3606, [3545, 3637], "implementer/3545-impl-3545");
+  issueLabelled(f.bin, 3545, ["in-progress"]);
+  issueLabelled(f.bin, 3637, ["in-progress"]);
+  // The claim's own #3545 is no failure line, so #3637's is the first and only one.
+  f.refused(["dispatch", "3606", "finisher-pr-3606"], /ledger: finisher-pr-3606: PR #3606 closes #3637, which another claim holds — rephrase it as "Refs #3637" — not dispatching/);
+  assert.deepEqual(f.read().dispatched, []);
+});
+
+test("an issue read that answers without a labels array refuses the finisher, naming the read, and writes nothing", (t) => {
+  for (const answer of ['{"title":"issue 3637"}', '{"title":"issue 3637","labels":null}', '{"title":"issue 3637","labels":["in-progress"]}', '{"labels":[]}']) {
+    const f = fixture(t);
+    f.put("3545", RULED_ROW);
+    f.rule(3606, "3545", "yes", [3545, 3637]);
+    issueLabelled(f.bin, 3637, answer);
+    f.refused(["dispatch", "3606", "finisher-pr-3606"], /dispatch finisher-pr-3606: could not look — gh issue view 3637 --json title,labels printed no (title|list of named labels)/);
+    assert.deepEqual(f.read().dispatched, []);
+  }
+});
+
 test("every ticket claiming the PR is checked against the body, not only the first", (t) => {
   const f = fixture(t);
   f.put("3545", RULED_ROW);
@@ -1671,7 +1757,7 @@ test("a gh pr view that fails refuses the finisher, naming the read, and writes 
   f.put("3545", RULED_ROW);
   f.rule(3606, "3545");
   failsOn(f.bin, "pr", 3606);
-  f.refused(["dispatch", "3606", "finisher-pr-3606"], /dispatch finisher-pr-3606: could not look — gh pr view 3606 --json closingIssuesReferences,url exited 1/);
+  f.refused(["dispatch", "3606", "finisher-pr-3606"], /dispatch finisher-pr-3606: could not look — gh pr view 3606 --json closingIssuesReferences,url,headRefName exited 1/);
   assert.deepEqual(f.read().dispatched, []);
 });
 
@@ -1681,7 +1767,7 @@ test("a gh issue view that fails refuses the finisher, naming the read, and writ
   f.rule(3606, "3545");
   closes(f.bin, 3606, [3545]);
   failsOn(f.bin, "issue", 3545);
-  f.refused(["dispatch", "3606", "finisher-pr-3606"], /dispatch finisher-pr-3606: could not look — gh issue view 3545 --json title exited 1/);
+  f.refused(["dispatch", "3606", "finisher-pr-3606"], /dispatch finisher-pr-3606: could not look — gh issue view 3545 --json title,labels exited 1/);
   assert.deepEqual(f.read().dispatched, []);
 });
 
@@ -1713,7 +1799,7 @@ test("another repository's reference numbered as the PR's suggestion-band record
   closes(f.bin, 3606, [3545, ref(3637, FOREIGN)]);
   titled(f.bin, 3637, "PR #3606 review: the suggestion band, checked");
   assert.equal(f.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher");
-  assert.deepEqual(ghCalls(f.bin).filter((c) => c.startsWith("issue view")), ["issue view 3545 --json title"]);
+  assert.deepEqual(ghCalls(f.bin).filter((c) => c.startsWith("issue view")), ["issue view 3545 --json title,labels"]);
 });
 
 test("a reference with a repository and no url, or an empty one, is placed by its repository", (t) => {
@@ -1756,18 +1842,18 @@ test("duplicate references to one of the PR's own issues look its title up once"
   f.rule(3606, "3545");
   closes(f.bin, 3606, [3545, 3545]);
   assert.equal(f.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher");
-  assert.deepEqual(ghCalls(f.bin).filter((c) => c.startsWith("issue view")), ["issue view 3545 --json title"]);
+  assert.deepEqual(ghCalls(f.bin).filter((c) => c.startsWith("issue view")), ["issue view 3545 --json title,labels"]);
 });
 
 test("a reference that cannot be placed or numbered refuses the finisher, naming the read, and writes nothing", (t) => {
   const { url: _url, repository: _repository, ...unplaced } = ref(3545);
   const blank = { ...ref(3545), url: "", repository: { ...ref(3545).repository, name: "" } };
   const { number: _number, ...unnumbered } = ref(3545);
-  const unplacedWhy = /dispatch finisher-pr-3606: could not look — gh pr view 3606 --json closingIssuesReferences,url answered a reference to #3545 with neither a url nor a repository; nothing written/;
+  const unplacedWhy = /dispatch finisher-pr-3606: could not look — gh pr view 3606 --json closingIssuesReferences,url,headRefName answered a reference to #3545 with neither a url nor a repository; nothing written/;
   for (const [refs, why] of [
     [[unplaced], unplacedWhy],
     [[blank], unplacedWhy],
-    [[unnumbered], /dispatch finisher-pr-3606: could not look — gh pr view 3606 --json closingIssuesReferences,url answered a reference with no issue number; nothing written/],
+    [[unnumbered], /dispatch finisher-pr-3606: could not look — gh pr view 3606 --json closingIssuesReferences,url,headRefName answered a reference with no issue number; nothing written/],
   ]) {
     const f = fixture(t);
     f.put("3545", RULED_ROW);
@@ -1783,10 +1869,10 @@ test("a PR url that is not PR M's own refuses the finisher, naming the read, and
   const f = fixture(t);
   f.put("3545", RULED_ROW);
   f.rule(3606, "3545");
-  const own = { closingIssuesReferences: [ref(3545)] };
+  const own = { closingIssuesReferences: [ref(3545)], headRefName: "feature/topic" };
   for (const body of [own, { ...own, url: prUrl(3607) }, { ...own, url: prUrl(36060) }, { ...own, url: `${prUrl(3606)}/files` }]) {
     writeFileSync(join(f.bin, "pr-3606.json"), JSON.stringify(body));
-    f.refused(["dispatch", "3606", "finisher-pr-3606"], /dispatch finisher-pr-3606: could not look — gh pr view 3606 --json closingIssuesReferences,url answered (without a usable url|url \S+\/pull\/(3607|36060|3606\/files), not PR #3606's)/);
+    f.refused(["dispatch", "3606", "finisher-pr-3606"], /dispatch finisher-pr-3606: could not look — gh pr view 3606 --json closingIssuesReferences,url,headRefName answered (without a usable url|url \S+\/pull\/(3607|36060|3606\/files), not PR #3606's)/);
     assert.deepEqual(f.read().dispatched, []);
   }
 });
@@ -1840,6 +1926,19 @@ test("a PR with no release label whose only closing reference is its own suggest
   f.refused(["dispatch", "3631", "finisher-pr-3631"],
     /finisher-pr-3631: PR #3631 closes #3637, its own suggestion-band record — rephrase the mention as "Refs #3637" or "issue #3637" — not dispatching finisher-pr-3631/);
   assert.deepEqual(f.read().dispatched, []);
+});
+
+test("a Ticketless PR closing a ticket another claim holds is refused, naming it, and one closing it unclaimed is dispatched", (t) => {
+  const f = fixture(t);
+  f.put("3631", UNTICKETED_ROW);
+  labelled(f.bin, 3631, ["patch"]);
+  closes(f.bin, 3631, [3637]);
+  issueLabelled(f.bin, 3637, ["in-progress"]);
+  f.refused(["dispatch", "3631", "finisher-pr-3631"],
+    /finisher-pr-3631: PR #3631 closes #3637, which another claim holds — rephrase it as "Refs #3637" — not dispatching finisher-pr-3631/);
+  assert.deepEqual(f.read().dispatched, []);
+  issueLabelled(f.bin, 3637, ["bug"]);
+  assert.equal(f.ok("dispatch", "3631", "finisher-pr-3631").agent, "fleet-finisher");
 });
 
 test("a finisher settled halted:human is accepted on the ledger, and the tick dispatches nothing for its PR", (t) => {
