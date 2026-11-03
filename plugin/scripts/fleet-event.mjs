@@ -80,12 +80,16 @@
 //       records it refused, unless the rows already carry it (a reading that
 //       is missing or is not that refusal is a NEED, nothing written).
 //       For each `refused[]` entry whose reason is `head-moved-after-label`
-//       the label comes off, as `label-off <pr>` below does, unless the PR is
-//       not open, no longer carries `ready-to-merge`, or its newest
+//       the label comes off, as `label-off <pr>` below does, unless the
+//       ledger already holds the bot settled (a replayed report never takes
+//       off a label put back since), or the PR is not open, no longer
+//       carries `ready-to-merge`, or its newest
 //       `ready-to-merge-head:` record names its current head (a newer audit
 //       covers it); then one PR comment names the bot, the recorded head (or
 //       that there is none) and the PR's head, skipped when the PR already
-//       carries it. A PR that cannot be read is a NEED, nothing written. The
+//       carries it. A PR that cannot be read is a NEED, nothing written; a
+//       comment that fails to post is a NEED carrying its text, since the
+//       label is off by then and no re-run reaches the comment again. The
 //       bot itself leaves the label alone; the fresh finisher dispatches
 //       onto a PR with none. Then `settle --from-report`.
 //       Every other refusal reason writes nothing. The reap and the reclaim
@@ -129,10 +133,13 @@
 //       `ledger.mjs token <pr> label-off=<attempt>`, no token when no attempt
 //       settled `labelled` (a hand label) or a token already names it. Then
 //       `gh pr edit <pr> --remove-label` and a read of the PR's labels. The
-//       token always lands before the removal. A failed write, or a read-back
-//       that still carries the label, is a `NEED label-off PR #<pr> …`
-//       naming this command; a re-run removes the label and adds no second
-//       token.
+//       token always lands before the removal. A refused token write, a
+//       failed removal, or a read-back that does not answer or still carries
+//       the label, is a `NEED label-off PR #<pr> …` naming this command, the
+//       label left on when the token is refused; a re-run removes the label
+//       and adds no second token. A latest attempt still live is a NEED once
+//       the label is off: no token can name it yet, so run the command again
+//       once it settles.
 //   conflict <pr>
 //       The tick's `CONFLICT` line for the PR, recorded: `ledger.mjs token
 //       <pr> conflict-hold:#<pr>`, no note beside it (`token` refuses any
@@ -359,6 +366,18 @@ class Event {
     this.note(`${what} refused (${r.how})`);
   }
 
+  // `ledger.mjs token <pr> <tok>`, noted, or refused as refuse() keeps it.
+  // False when the ledger refused it.
+  token(pr, tok) {
+    const w = node("ledger.mjs", ["token", String(pr), tok]);
+    if (w.status !== 0) {
+      this.refuse(`token #${pr} ${tok}`, w);
+      return false;
+    }
+    this.note(`#${pr} ${tok}`);
+    return true;
+  }
+
   report(member) {
     return readReportIn(reportsDir(this.scratch), member);
   }
@@ -414,15 +433,16 @@ class Event {
     return { labels: (v.labels ?? []).map((l) => l?.name), bodies: v.comments.map((c) => String(c?.body ?? "").trim()), state: v.state ?? null };
   }
 
-  // `gh <noun> comment <n> --body <body>` unless `seen` already holds it.
-  comment(noun, n, body, seen, what) {
+  // `gh <noun> comment <n> --body <body>` unless `seen` already holds it. A
+  // failed post is a NEED, `remedy` appended when the caller can name one.
+  comment(noun, n, body, seen, what, remedy = null) {
     if (seen.bodies.includes(body.trim())) {
       this.note(`${what} already on #${n}`);
       return true;
     }
     const r = gh([noun, "comment", String(n), "--body", body]);
     if (r.status !== 0) {
-      this.need(`${what} #${n} — gh ${noun} comment failed: ${said(r)}`);
+      this.need(`${what} #${n} — gh ${noun} comment failed: ${said(r)}${remedy === null ? "" : `; ${remedy}`}`);
       return false;
     }
     this.note(`${what} posted on #${n}`);
@@ -723,13 +743,21 @@ function prView(ev, pr, what) {
 }
 
 // A merge bot's `head-moved-after-label` refusal ends the label: PR `pr` is
-// taken off the queue for a fresh finisher, unless it is no longer open,
-// no longer carries the label, or its newest `ready-to-merge-head:` record
+// taken off the queue for a fresh finisher, unless the ledger already holds
+// the bot settled — a replayed report, which must not take off a label put
+// back since — or the PR is no longer open, no longer carries the label, or
+// its newest `ready-to-merge-head:` record
 // names its current head (a newer audit covers it — labelled-head.mjs's route
 // `current`). Then one comment names the bot, the recorded head and the
-// PR's head, skipped when the PR already carries it.
+// PR's head, skipped when the PR already carries it. A comment that fails to
+// post is a NEED carrying its text: the label is off by then, so no re-run
+// reaches the comment again.
 function movedAfterLabel(ev, member, pr) {
   const what = `take-off PR #${pr} ${MOVED}`;
+  if (settledOutcome(ev.ledger, member) !== null) {
+    ev.note(`#${pr} ${MOVED}: ${member} already settled, label left`);
+    return;
+  }
   const ready = ev.labels["ready-to-merge"];
   const view = prView(ev, pr, `${what} — if it is open and labelled, run fleet-event.mjs label-off ${pr}`);
   if (view === null) return;
@@ -747,9 +775,11 @@ function movedAfterLabel(ev, member, pr) {
     return;
   }
   if (!takeLabelOff(ev, pr)) return;
-  const body = `**${member} refused this PR \`${MOVED}\`; \`${ready}\` came off for a fresh finisher.**\n\n`
-    + `- recorded head: ${record ?? "none recorded"}\n- PR head: ${view.head}`;
-  ev.comment("pr", pr, body, view, `${MOVED} comment`);
+  const headline = `${member} refused this PR \`${MOVED}\`; \`${ready}\` came off for a fresh finisher`;
+  const heads = [`recorded head: ${record ?? "none recorded"}`, `PR head: ${view.head}`];
+  const body = `**${headline}.**\n\n${heads.map((h) => `- ${h}`).join("\n")}`;
+  ev.comment("pr", pr, body, view, `${MOVED} comment`,
+    `the label is already off, so no re-run posts it: comment it by hand — ${headline} (${heads.join("; ")})`);
 }
 
 // `label-off=<attempt>` on PR `pr`'s row, then `ready-to-merge` off the PR,
@@ -757,23 +787,26 @@ function movedAfterLabel(ev, member, pr) {
 // `labelled`, read as the tick reads attempts — after the highest attempt a
 // `label-off=` already names — so none is written for a label no finisher
 // applied, nor a second for an attempt a token already names. The token lands
-// before the removal. False when the label could not be taken off (a NEED
-// naming the command is printed, or the token's refusal passes through).
+// before the removal. False when the label could not be taken off: a NEED
+// naming the command is printed, beside the token's own refusal when the
+// ledger refused it.
+// A latest attempt still live is a NEED once the label is off: no token can
+// name it yet, and should it settle `labelled` the tick would read the
+// removal as its miss, so the command is to be run again once it settles.
 function takeLabelOff(ev, pr) {
   const ready = ev.labels["ready-to-merge"];
   const again = `run fleet-event.mjs label-off ${pr} again`;
-  const stretch = latestFinisherAttempts(ev.ledger, new Set([pr])).find((u) => u.pr === pr);
+  const stretch = latestFinisherAttempts(ev.ledger, new Set([pr]))[0];
   const attempt = stretch?.attempts.filter((a) => a.outcome === "labelled").at(-1)?.name;
+  const live = stretch?.outcome === null ? stretch.attempts.at(-1).name : null;
   if (attempt === undefined) {
     ev.note(`#${pr}: no finisher attempt settled labelled since the last label-off=, none written`);
   } else {
     const tok = `label-off=${attempt}`;
-    const w = node("ledger.mjs", ["token", String(pr), tok]);
-    if (w.status !== 0) {
-      ev.refuse(`token #${pr} ${tok}`, w);
+    if (!ev.token(pr, tok)) {
+      ev.need(`label-off PR #${pr} — the ledger refused ${tok}, so ${ready} is left on; ${again}`);
       return false;
     }
-    ev.note(`#${pr} ${tok}`);
   }
   const e = gh(["pr", "edit", String(pr), "--remove-label", ready]);
   if (e.status !== 0) {
@@ -799,6 +832,7 @@ function takeLabelOff(ev, pr) {
     return false;
   }
   ev.note(`#${pr} ${ready} taken off`);
+  if (live !== null) ev.need(`label-off PR #${pr} — ${live} is still live, so no label-off= names it; once it settles, ${again}`);
   return true;
 }
 
@@ -831,9 +865,7 @@ function park(ev, member, pr, reason) {
     ev.note(`#${pr} already ${tok}`);
     return;
   }
-  const w = node("ledger.mjs", ["token", String(pr), tok]);
-  if (w.status === 0) ev.note(`#${pr} ${tok}`);
-  else ev.refuse(`token #${pr} ${tok}`, w);
+  ev.token(pr, tok);
 }
 
 // `p` with its symlinks resolved, or as written when it does not exist yet.
@@ -943,9 +975,7 @@ function ci(ev, pr) {
     ev.note(`#${pr} already ${tok}`);
     return;
   }
-  const w = node("ledger.mjs", ["token", String(pr), tok]);
-  if (w.status === 0) ev.note(`#${pr} ${tok}`);
-  else ev.refuse(`token #${pr} ${tok}`, w);
+  ev.token(pr, tok);
 }
 
 // A second hold on a row that already answered one is the same word spelled
@@ -963,9 +993,7 @@ function conflict(ev, pr) {
     ev.note(`#${pr} conflict hold refused (row already holds)`);
     return;
   }
-  const w = node("ledger.mjs", ["token", String(pr), tok]);
-  if (w.status === 0) ev.note(`#${pr} ${tok}`);
-  else ev.refuse(`token #${pr} ${tok}`, w);
+  ev.token(pr, tok);
 }
 
 function drain(ev, reason) {

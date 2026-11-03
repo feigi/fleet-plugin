@@ -2194,7 +2194,7 @@ async function closingRefusals(member, { tickets, ruling, tsv }) {
 // other PR's bump is not picked here, and neither is which of several labels
 // stays. A read the check needs dies, naming the labels it could not read,
 // and writes nothing.
-function releaseLabelRefusal(member, tickets, refs) {
+function labelRefusal(member, tickets, refs) {
   const pr = member.number;
   const where = `dispatch ${member.name}`;
   const { prLabels, repoLabels, repoDir } = checkReaders(where);
@@ -2220,12 +2220,13 @@ function releaseLabelRefusal(member, tickets, refs) {
 }
 
 // The tracker's string for the `ready-to-merge` Label role, off the Label map
-// of the repository `dir` belongs to (label-map.mjs). Only the two paths that
-// compare or list that label read it — `dispatch merge-bot`'s queueSnapshot()
-// and settle --from-report's finisher and merge-bot checks — so every other
-// verb runs with no map at all. A map that cannot be read, or no repository
-// to find one in, is exit 2 under `where`, carrying the reader's message (an
-// absent or invalid map's names `label-map.mjs ensure`); nothing written.
+// of the repository `dir` belongs to (label-map.mjs). Only the paths that
+// compare or list that label read it — `dispatch merge-bot`'s queueSnapshot(),
+// `dispatch finisher-pr-M`'s labelRefusal() and settle --from-report's
+// finisher and merge-bot checks — so every other verb runs with no map at all.
+// A map that cannot be read, or no repository to find one in, is exit 2 under
+// `where`, carrying the reader's message (an absent or invalid map's names
+// `label-map.mjs ensure`); nothing written.
 function readyLabel(dir, where) {
   try {
     return readLabelMap({ cwd: dir })["ready-to-merge"];
@@ -2413,7 +2414,7 @@ async function runDispatch() {
   // PR's closing references must match that ruling and exclude its own
   // suggestion-band record, and the PR must carry no `ready-to-merge` and
   // exactly one release label, all read off gh from the ledger's repository; see closingRefusals() and
-  // releaseLabelRefusal(). Refused here, before anything is written, so no
+  // labelRefusal(). Refused here, before anything is written, so no
   // check can be skipped by forgetting to run it.
   if (member.family === "finisher-pr") {
     const fold = tickFold("conflict hold and dispositions verdict");
@@ -2427,8 +2428,8 @@ async function runDispatch() {
     const ruled = await rulingOf(member.number);
     if (ruled.refusal !== null) die(`${member.name}: ${ruled.refusal} — not dispatching ${member.name}`);
     const closing = await closingRefusals(member, ruled);
-    const labelled = releaseLabelRefusal(member, ruled.tickets, closing.refs);
-    const failures = labelled === null ? closing.failures : [...closing.failures, labelled];
+    const labelFailure = labelRefusal(member, ruled.tickets, closing.refs);
+    const failures = labelFailure === null ? closing.failures : [...closing.failures, labelFailure];
     if (failures.length > 0) die(`${member.name}: ${failures.join("; ")} — not dispatching ${member.name}`);
   }
   // Every error caught here carries its own cause and remedy — a row's `tier=` or `cell=`
@@ -2737,7 +2738,8 @@ function recordFiled(id, subject) {
 // `ready-to-merge` in both rows is the Label map's string for the role, read
 // by readyLabel() only when one of the two checks runs: on a finisher's
 // `labelled`, and on a merge bot's report that leaves a PR queued at dispatch
-// without a verdict.
+// without a verdict. Outside settle, `dispatch finisher-pr-M` reads it too,
+// to refuse a finisher onto a labelled PR (labelRefusal()).
 //
 // THE CHECK-STEP RECORD, for `impl-N=PR#M` and `fix-pr-M=applied:<head>`:
 // recipe-check.mjs writes `<reports>/<member>.check.json` on the member's

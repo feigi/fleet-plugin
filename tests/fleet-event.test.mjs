@@ -1176,6 +1176,19 @@ test("merge-bot-report refusing a labelled PR head-moved-after-label writes labe
   assert.equal(f.gh().pr[89].comments.length, 2);
 });
 
+test("merge-bot-report replayed after its bot settled leaves a label put back by hand since the take-off", () => {
+  const f = movedFixture();
+  assert.equal(f.run(["merge-bot-report", "merge-bot-1"]).status, 0);
+  const state = f.gh();
+  state.pr[89].labels = [READY, "patch"];
+  f.setGh(state);
+  const again = f.run(["merge-bot-report", "merge-bot-1"]);
+  assert.equal(again.status, 0, again.err + again.stdout);
+  assert.deepEqual(f.gh().pr[89].labels, [READY, "patch"]);
+  assert.ok(!again.order.includes("gh pr edit 89"), again.order.join("\n"));
+  assert.deepEqual(tokensOf(f), ["label-off=finisher-pr-89"]);
+});
+
 test("merge-bot-report takes the Label map's string off, not the role's name", () => {
   const f = movedFixture({ labels: { "ready-to-merge": "queue ok" }, item: { labels: ["queue ok", "patch"] } });
   const r = f.run(["merge-bot-report", "merge-bot-1"]);
@@ -1239,6 +1252,13 @@ test("merge-bot-report writes no second label-off= when a token already names th
   assert.deepEqual(tokensOf(later), ["label-off=finisher-pr-89", "label-off=finisher-pr-89-b"]);
 });
 
+test("two labelled attempts with no label-off= between them: the take-off names the later one", () => {
+  const f = movedFixture({ rows: ["#413 impl-413=PR#89 · finisher-pr-89=labelled · finisher-pr-89-b=labelled"] });
+  const r = f.run(["merge-bot-report", "merge-bot-1"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.deepEqual(tokensOf(f), ["label-off=finisher-pr-89-b"]);
+});
+
 test("a labelled finisher followed by a halted:past-pin attempt: the take-off names the labelled attempt", () => {
   const f = movedFixture({ rows: ["#413 impl-413=PR#89 · finisher-pr-89=labelled · finisher-pr-89-b=halted:past-pin"] });
   const r = f.run(["merge-bot-report", "merge-bot-1"]);
@@ -1274,6 +1294,38 @@ test("a failed removal is a NEED naming fleet-event.mjs label-off, the token alr
   assert.deepEqual(tokensOf(f), ["label-off=finisher-pr-89"], "a re-run adds no second token");
 });
 
+test("merge-bot-report: a take-off comment that fails to post is a NEED carrying its text, since a re-run finds the label off and posts nothing", () => {
+  const f = movedFixture();
+  writeFileSync(join(f.stubs, "gh-fail.json"), JSON.stringify(["pr comment"]));
+  const first = f.run(["merge-bot-report", "merge-bot-1"]);
+  assert.equal(first.status, 4, first.err + first.stdout);
+  assert.ok(first.stdout.includes(`NEED ${MOVED} comment #89 — gh pr comment failed: gh boom; the label is already off, so no re-run posts it: `
+    + `comment it by hand — merge-bot-1 refused this PR \`${MOVED}\`; \`${READY}\` came off for a fresh finisher (recorded head: ${HEAD_B}; PR head: ${HEAD})`), first.stdout);
+  assert.deepEqual(f.gh().pr[89].labels, ["patch"]);
+
+  rmSync(join(f.stubs, "gh-fail.json"));
+  const again = f.run(["merge-bot-report", "merge-bot-1"]);
+  assert.equal(again.status, 0, again.err + again.stdout);
+  assert.ok(!again.order.includes("gh pr comment 89"), again.order.join("\n"));
+  assert.deepEqual(f.gh().pr[89].comments, [record(HEAD_B)], "only the NEED ever carried the comment's text");
+});
+
+test("a take-off while the PR's latest finisher attempt is still live is a NEED to run label-off again once it settles; run then, it names that attempt", () => {
+  const f = movedFixture({ rows: ["#413 impl-413=PR#89 · finisher-pr-89"] });
+  const first = f.run(["merge-bot-report", "merge-bot-1"]);
+  assert.equal(first.status, 4, first.err + first.stdout);
+  assert.ok(first.stdout.includes("NEED label-off PR #89 — finisher-pr-89 is still live, so no label-off= names it; once it settles, run fleet-event.mjs label-off 89 again"), first.stdout);
+  assert.deepEqual(tokensOf(f), []);
+  assert.deepEqual(f.gh().pr[89].labels, ["patch"]);
+  assert.ok(first.order.includes(`settle merge-bot-1 --from-report --reports ${join(f.scratch, "reports")}`));
+
+  writeFileSync(join(f.fleet, "ledger.md"), ledgerText({ rows: [LABELLED_ROW], dispatched: ["merge-bot-1=done"] }));
+  const again = f.run(["label-off", "89"]);
+  assert.equal(again.status, 0, again.err + again.stdout);
+  assert.ok(!again.stdout.includes("NEED"), again.stdout);
+  assert.deepEqual(tokensOf(f), ["label-off=finisher-pr-89"]);
+});
+
 test("label-off is a NEED when the read-back still carries the label", () => {
   const f = fixture({ rows: [LABELLED_ROW] });
   f.setGh({ issue: {}, pr: { 89: { labels: [READY, "patch"], comments: [], sticky: true } } });
@@ -1281,6 +1333,27 @@ test("label-off is a NEED when the read-back still carries the label", () => {
   assert.equal(r.status, 4, r.err + r.stdout);
   assert.ok(r.stdout.includes(`NEED label-off PR #89 — it still carries ${READY} after the removal; run fleet-event.mjs label-off 89 again`), r.stdout);
   assert.deepEqual(r.order.slice(0, 4), ["ledger token 89 label-off=finisher-pr-89", "gh pr edit 89", "gh pr view 89", TICK]);
+});
+
+test("label-off whose label-off= token the ledger refuses is a NEED naming the command, the label left on; run again, it writes the token and takes the label off", () => {
+  const f = fixture({ rows: [LABELLED_ROW] });
+  f.setGh({ issue: {}, pr: { 89: { labels: [READY, "patch"], comments: [] } } });
+  chmodSync(f.fleet, 0o555);
+  let first;
+  try {
+    first = f.run(["label-off", "89"]);
+  } finally {
+    chmodSync(f.fleet, 0o755);
+  }
+  assert.equal(first.status, 2, first.err + first.stdout);
+  assert.ok(first.stdout.includes(`NEED label-off PR #89 — the ledger refused label-off=finisher-pr-89, so ${READY} is left on; run fleet-event.mjs label-off 89 again`), first.stdout);
+  assert.ok(!first.order.includes("gh pr edit 89"), first.order.join("\n"));
+  assert.deepEqual(f.gh().pr[89].labels, [READY, "patch"]);
+
+  const again = f.run(["label-off", "89"]);
+  assert.equal(again.status, 0, again.err + again.stdout);
+  assert.deepEqual(tokensOf(f), ["label-off=finisher-pr-89"]);
+  assert.deepEqual(f.gh().pr[89].labels, ["patch"]);
 });
 
 test("merge-bot-report with a PR it cannot read is a NEED, writing nothing but the settle", () => {
