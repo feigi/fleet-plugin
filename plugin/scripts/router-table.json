@@ -1,184 +1,47 @@
 {
-  "window_start": "2026-10-03",
-  "fitted_commit": "e5040b9a96d304b3ce8a40c2b2d35b143f66d450",
-  "n_rows": 268,
+  "window_start": null,
+  "fitted_commit": null,
+  "n_rows": 0,
   "cells": [
     "slow-high",
     "task-high",
-    "smol-high",
-    "slow-medium",
-    "task-max"
+    "smol-high"
   ],
-  "burn_in": false,
+  "burn_in": true,
   "splits": {},
   "rows": {
     "cost": {
-      "*": "task-high"
+      "*": "slow-high"
     },
     "speed": {
-      "*": "task-high"
+      "*": "slow-high"
     }
   },
   "classifier": {
     "b": null,
     "tau": null
   },
-  "estimates": {
-    "*": {
-      "slow-high": {
-        "generation": "claude-opus-5-5",
-        "n": 104,
-        "merged": 104,
-        "by_hand": 0,
-        "claims": 104,
-        "failed": 20,
-        "usd_per_merged": 14.5057,
-        "minutes_per_merged": 121.3343,
-        "fail_rate": 0.1923,
-        "fix_rounds": 1.2019,
-        "review_findings": null,
-        "left_out": 0,
-        "unpriced": 0,
-        "untimed": 0,
-        "excluded": 0,
-        "older": {}
-      },
-      "smol-high": {
-        "generation": "claude-haiku-5-5",
-        "n": 32,
-        "merged": 32,
-        "by_hand": 1,
-        "claims": 32,
-        "failed": 18,
-        "usd_per_merged": 11.0567,
-        "minutes_per_merged": 110.2854,
-        "fail_rate": 0.5625,
-        "fix_rounds": 1.4063,
-        "review_findings": null,
-        "left_out": 0,
-        "unpriced": 1,
-        "untimed": 0,
-        "excluded": 5,
-        "older": {
-          "claude-haiku-4-5": {
-            "n": 21,
-            "merged": 21,
-            "by_hand": 0,
-            "claims": 21,
-            "failed": 17,
-            "usd_per_merged": 11.7687,
-            "minutes_per_merged": 116.2341,
-            "fail_rate": 0.8095,
-            "fix_rounds": 1.5238,
-            "review_findings": null,
-            "left_out": 0,
-            "unpriced": 0,
-            "untimed": 0
-          }
-        }
-      },
-      "task-high": {
-        "generation": "claude-sonnet-5-5",
-        "n": 104,
-        "merged": 104,
-        "by_hand": 1,
-        "claims": 104,
-        "failed": 28,
-        "usd_per_merged": 10.2778,
-        "minutes_per_merged": 102.8827,
-        "fail_rate": 0.2692,
-        "fix_rounds": 1.2019,
-        "review_findings": null,
-        "left_out": 0,
-        "unpriced": 0,
-        "untimed": 0,
-        "excluded": 1,
-        "older": {}
-      }
-    }
-  },
+  "estimates": {},
   "reasons": {
     "cost": {
       "*": {
-        "cell": "task-high",
-        "reason": "sole-qualifier",
-        "cells": {
-          "task-high": {
-            "verdict": "qualifies",
-            "under_floor": false,
-            "bar": 0.3423,
-            "range": [
-              -6.51,
-              -2.04
-            ]
-          },
-          "smol-high": {
-            "verdict": "tripped",
-            "under_floor": null,
-            "bar": null,
-            "range": null
-          },
-          "slow-medium": {
-            "verdict": "too-few",
-            "under_floor": null,
-            "bar": null,
-            "range": null
-          },
-          "task-max": {
-            "verdict": "too-few",
-            "under_floor": null,
-            "bar": null,
-            "range": null
-          }
-        },
+        "cell": "slow-high",
+        "reason": "unjudged",
+        "cells": {},
         "pairs": []
       }
     },
     "speed": {
       "*": {
-        "cell": "task-high",
-        "reason": "no-qualifier",
-        "cells": {
-          "slow-high": {
-            "verdict": "too-slow",
-            "under_floor": false,
-            "bar": 0.3423,
-            "range": [
-              3.17,
-              35.03
-            ]
-          },
-          "smol-high": {
-            "verdict": "tripped",
-            "under_floor": null,
-            "bar": null,
-            "range": null
-          },
-          "slow-medium": {
-            "verdict": "too-few",
-            "under_floor": null,
-            "bar": null,
-            "range": null
-          },
-          "task-max": {
-            "verdict": "too-few",
-            "under_floor": null,
-            "bar": null,
-            "range": null
-          }
-        },
+        "cell": "slow-high",
+        "reason": "unjudged",
+        "cells": {},
         "pairs": []
       }
     }
   },
   "guard": {
-    "tripped": [
-      "smol-high"
-    ],
-    "n": {
-      "slow-high": 104,
-      "smol-high": 32,
-      "task-high": 104
-    }
+    "tripped": [],
+    "n": {}
   }
 }

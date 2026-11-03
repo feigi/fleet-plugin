@@ -77,11 +77,10 @@
 // those records: the TSVs at the recorded blob ids, the guard and the prior
 // fit to the same table again. With no records it is the starting table's
 // fit, as any other. It is called in-process because a fit has no verdict
-// for an exit status to carry, and the `fit` CLI reads the TSVs only as
-// committed. It never fails the run: an error prints `metrics-refresh: fit:
-// failed — <why>`, leaves the old file in place, so the run routes by the
-// last Fit that computed, and leaves the exit status as the other duties set
-// it. That line stays on stdout: the cockpit reads it off the receipts'
+// for an exit status to carry. It never fails the run: an error prints
+// `metrics-refresh: fit: failed — <why>`, leaves the old file in place, so the
+// run routes by the last Fit that computed, and leaves the exit status as the
+// other duties set it. That line stays on stdout: the cockpit reads it off the receipts'
 // `metrics` step, and close-out's receipt keeps only stdout from a run that
 // exits 0.
 //
