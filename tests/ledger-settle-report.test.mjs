@@ -503,6 +503,25 @@ test("fix-pr-M=no-op: after two applied: pushes, the later fix-applier's head is
   assert.deepEqual(f.settled("fix-pr-6-c").checks, [{ name: appliedCheck(second, f.head.slice(0, 12)), ok: true }]);
 });
 
+test("fix-pr-M=no-op: after a row rewrite puts the later fix-applier's applied: token before the earlier one's, the later head is still the one required", () => {
+  const f = fixture();
+  returnReview(f, f.head);
+  const first = landApplied(f, "fix-pr-6");
+  const second = landApplied(f, "fix-pr-6-b");
+  const earlier = `fix-pr-6=applied:${first}`;
+  const later = `fix-pr-6-b=applied:${second}`;
+  const row = f.ok("read").rows.find((r) => r.includes(later));
+  assert.ok(row.indexOf(earlier) !== -1 && row.indexOf(earlier) < row.indexOf(later), row);
+  const [key, ...text] = row.replace(earlier, "\0").replace(later, earlier).replace("\0", later).split(" ");
+  f.ok("row", key, text.join(" "));
+  assert.ok(f.ok("read").rows.some((r) => r.indexOf(later) !== -1 && r.indexOf(later) < r.indexOf(earlier)), "the rewrite landed");
+  reportNoOp(f, "fix-pr-6-c");
+  putFeatOn(f, first);
+  f.refused("fix-pr-6-c", 3, new RegExp(`failed: ${appliedCheck(second, f.head.slice(0, 12))}`));
+  putFeatOn(f, second);
+  assert.deepEqual(f.settled("fix-pr-6-c").checks, [{ name: appliedCheck(second, f.head.slice(0, 12)), ok: true }]);
+});
+
 test("fix-pr-M=no-op: an applied: push followed by a newer reviewed= — the newer review's head is the one required", () => {
   const f = fixture();
   returnReview(f, f.head);

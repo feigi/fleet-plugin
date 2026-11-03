@@ -1400,9 +1400,9 @@ test("deriveRun: a second review at the same head is answered by none of the fir
 
 // A PR's `fleetHead`, on its `reviewed[]` entry: the head its branch stands at
 // as the ledger knows it. A returned review sets it to that review's head, and
-// each fix-applier that landed `applied:<head>` after the review moves it to
-// that head; `no-op` pushes nothing, and a `failed`, `killed` or live member
-// has no head the ledger knows.
+// of the fix-appliers that landed `applied:<head>` after the review, the one
+// with the greatest retry suffix moves it to its head; `no-op` pushes nothing,
+// and a `failed`, `killed` or live member has no head the ledger knows.
 const REVIEW_1 = "reviewed=abc1234:1/0/0:run-abc1234r";
 const REVIEW_2 = "review=wf:x reviewed=fedcba9:0/0/0:run-fedcba9r";
 const fleetHeadOf = (...tokens) => run({ rows: [`#20 impl-20=PR#21 → PR#21 · ${tokens.join(" · ")}`] }, [pr(21)]).reviewed.find((x) => x.pr === 21)?.fleetHead;
@@ -1416,6 +1416,18 @@ test("deriveRun: a returned review's fleetHead is its own head, and each applied
 test("deriveRun: a newer reviewed= resets the fleetHead to its own head, whatever landed before it", () => {
   assert.equal(fleetHeadOf(REVIEW_1, "fix-pr-21=applied:def5678", REVIEW_2), "fedcba9");
   assert.equal(fleetHeadOf(REVIEW_1, "fix-pr-21=applied:def5678", REVIEW_2, "fix-pr-21-b=applied:0123abc"), "0123abc", "and an applied: after it moves it again");
+});
+
+test("deriveRun: the fleetHead is the head of the landed fix-applier with the greatest retry suffix, wherever a row rewrite put its token", () => {
+  assert.equal(fleetHeadOf(REVIEW_1, "fix-pr-21-b=applied:0123abc", "fix-pr-21=applied:def5678"), "0123abc", "a -b retry's token before the older one's");
+  // Settled in `## Dispatched` alone, the older member lands where its bare
+  // copy sits — after the -b token here — and still names no later push.
+  const bareAfter = run({ rows: [`#20 impl-20=PR#21 → PR#21 · ${REVIEW_1} · fix-pr-21-b=applied:0123abc · fix-pr-21`], dispatched: ["fix-pr-21=applied:def5678"] }, [pr(21)]);
+  assert.equal(bareAfter.reviewed[0].fleetHead, "0123abc");
+});
+
+test("deriveRun: a retry suffix is compared only among fix-appliers landed since the latest reviewed=", () => {
+  assert.equal(fleetHeadOf(REVIEW_1, "fix-pr-21-b=applied:0123abc", REVIEW_2, "fix-pr-21=applied:def5678"), "def5678");
 });
 
 test("deriveRun: only an applied: outcome moves the fleetHead — no-op, failed, killed and a live fix-applier leave it", () => {

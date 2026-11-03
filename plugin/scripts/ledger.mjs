@@ -2713,9 +2713,10 @@ function recordFiled(id, subject) {
 //                             holds for <head>
 //   fix-pr-M=no-op            origin's refs/heads/<branch> is PR M's fleet
 //                             head, as the tick folds it: the head of the
-//                             latest applied:<head> a fix-applier landed since
-//                             PR M's latest reviewed=, else the head that
-//                             reviewed= names
+//                             applied:<head> the fix-applier with the
+//                             greatest retry suffix landed since PR M's
+//                             latest reviewed=, else the head that reviewed=
+//                             names
 //   finisher-pr-M=labelled    PR M's labels carry ready-to-merge, and so does
 //                             the report's labelsReadBack
 //   finisher-pr-M=halted:<c>  cause is in the halted:<cause> vocabulary and
@@ -2917,7 +2918,8 @@ async function runSettleFromReport() {
       }
       // An earlier fix-applier's push moved the branch past the head the latest
       // review names, so the head required is the fold's `fleetHead`, which
-      // is that review's head until an `applied:` lands after it.
+      // is that review's head until an `applied:` lands after it. The fold
+      // writes it lowercase, so only origin's head needs lowercasing.
       const review = fold.reviewed.find((r) => r.pr === live.number);
       if (review === undefined) {
         check(`PR #${live.number}'s row names a reviewed= head`, false);
@@ -2928,7 +2930,7 @@ async function runSettleFromReport() {
           ? `the head PR #${live.number}'s latest reviewed= names`
           : `the head PR #${live.number}'s latest applied: names, landed since its latest reviewed= ${review.head}`;
         check(`origin refs/heads/${report.branch} is ${required}, ${why}`,
-          head !== null && head.toLowerCase().startsWith(required.toLowerCase()));
+          head !== null && head.toLowerCase().startsWith(required));
       }
     } else {
       outcome = "failed";

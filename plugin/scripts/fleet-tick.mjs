@@ -846,13 +846,19 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
     // are not in it, and a `reviewed=` empties it, as it resets `reviewFixed`.
     // `reviewedHead`/`reviewedRun`: the latest `reviewed=<head>:…:<run>`.
     // `fleetHead`: the head the PR's branch stands at as the ledger knows it,
-    // lowercase. A `reviewed=` sets it to that review's head, and each
-    // fix-applier that lands `applied:<head>` after it — in row order, once per
-    // member however many copies of its token the rows carry (`fixLanded`) —
-    // sets it to that head. A `no-op` landing pushed nothing, and a member
-    // settled `failed` or `killed`, or still live, never lands: none of them
-    // moves it. `ledger.mjs settle --from-report` checks a fix-applier's
-    // `no-op` against it.
+    // lowercase. A `reviewed=` sets it to that review's head; after it, the
+    // fix-applier that landed `applied:<head>` (`fixLanded` decides which
+    // landed after it, by row position, once per member however many copies
+    // of its token the rows carry) with the greatest retry suffix
+    // ("" < "b" < "c" …) sets it to that head — never the one whose token sits
+    // last in the row text: `dispatch` refuses a second live fix-applier on a
+    // PR, so a later suffix landed later, and a row rewrite can put a `-b`
+    // retry's token before the older one's. `fleetRetry` is the retry suffix
+    // of the fix-applier that set it, null while a `reviewed=` did. A `no-op`
+    // landing pushed nothing, and a member settled `failed` or `killed`, or
+    // still live, never lands: none of them moves it.
+    // `ledger.mjs settle --from-report` checks a fix-applier's `no-op`
+    // against it.
     // `pastPinHalt`: the latest
     // finisher since that review settled `halted:past-pin` — any
     // later finisher attempt, live or settled, replaces it, and a later
@@ -866,7 +872,7 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
     const st = (pr !== null && byPr.get(pr)) || {
       inFlight: false, reviewedAny: false, survived: 0, unverified: 0, reviewFixed: false,
       fixMembers: new Set(), fixLanded: new Set(), conflictLanded: new Set(), fixFailed: new Set(),
-      conflictOpen: false, reviewedHead: null, reviewedRun: null, fleetHead: null, pastPinHalt: false, dispositions: [], workers: new Set(),
+      conflictOpen: false, reviewedHead: null, reviewedRun: null, fleetHead: null, fleetRetry: null, pastPinHalt: false, dispositions: [], workers: new Set(),
       finishers: new Set(), parked: [],
     };
     // The finisher-pr token currently deciding `pastPinHalt`, picked by
@@ -923,7 +929,10 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
           const placed = t.outcome !== null || !settledInRow.has(t.name);
           if ((o === "no-op" || /^applied:/.test(o)) && !st.fixLanded.has(t.name) && placed) {
             st.fixLanded.add(t.name);
-            if (o !== "no-op") st.fleetHead = o.slice("applied:".length).toLowerCase();
+            if (o !== "no-op" && (st.fleetRetry === null || (t.retry ?? "") > st.fleetRetry)) {
+              st.fleetHead = o.slice("applied:".length).toLowerCase();
+              st.fleetRetry = t.retry ?? "";
+            }
             if (st.conflictOpen) {
               st.conflictOpen = false;
               st.conflictLanded.add(t.name);
@@ -967,7 +976,7 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
         const head = m[1].toLowerCase();
         Object.assign(st, {
           inFlight: false, reviewedAny: true, survived: Number(m[2]), unverified: Number(m[4]), reviewFixed: false,
-          reviewedHead: head, reviewedRun: m[5], fleetHead: head, pastPinHalt: false, fixFailed: new Set(),
+          reviewedHead: head, reviewedRun: m[5], fleetHead: head, fleetRetry: null, pastPinHalt: false, fixFailed: new Set(),
         });
       } else if (labelOffMember(tok) === null) {
         if (!lenient) throw new LedgerError(`${where}: '${tok}' is not label-off=<finisher-pr member> — fix the row with \`ledger.mjs row\``);
