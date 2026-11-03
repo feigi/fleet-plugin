@@ -151,3 +151,14 @@ test("an unrecognized argument exits 2, names the argument on stderr, and prints
   assert.match(r.stderr, /fleet-provenance: unrecognized argument --bogus/);
   assert.equal(r.stdout, "");
 });
+
+test("several arguments still exit 2, and stderr names only the first", () => {
+  const { home } = fakeInstall();
+  const r = spawnSync(process.execPath, [PROVENANCE, "--bogus", "--other"], {
+    encoding: "utf8",
+    env: { HOME: home, PATH: process.env.PATH },
+  });
+  assert.equal(r.status, 2, `status ${r.status}: ${r.stdout}${r.stderr}`);
+  assert.equal(r.stderr, "fleet-provenance: unrecognized argument --bogus\n");
+  assert.equal(r.stdout, "");
+});
