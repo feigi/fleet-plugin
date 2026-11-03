@@ -21,7 +21,8 @@
 //     `wt_op_state` reads, which reap.sh reads too;
 //   - this script's own cwd is inside it;
 //   - a live member token holds it (below);
-//   - it carries the mark already;
+//   - it carries the mark and ignores nothing but the runner, or its ignored
+//     paths cannot be listed;
 //   - `git status --porcelain -uall` in it is non-empty;
 //   - HEAD moved or a restore ran in it within IDLE_MS: the newer of the
 //     newest entry of the tree's own HEAD reflog (`logs/HEAD` in its admin
@@ -31,7 +32,10 @@
 //   - anything about it cannot be read — its `.git`, its admin dir, a status,
 //     a reflog. A worktree listing that cannot be read keeps the whole
 //     `.worktrees/` directory, with that reason.
-// Every other candidate is evicted.
+// Every other candidate is evicted. A tree that carries the mark and still
+// holds ignored paths — a removal that partly failed, a restore's partial
+// install, a restore still installing, an install by hand — meets the rest of
+// those rules like an unmarked one, and when none holds it is evicted again.
 //
 // LIVE TOKENS. The ledger's live tokens (ledger-grammar.mjs's liveOnLedger())
 // of the members that work a claim tree's ticket or PR — `impl-<N>`,
@@ -49,11 +53,13 @@
 // an absent ledger is no live token. Only ENOENT is absence.
 //
 // `--apply` judges each tree to evict again, writes the mark (EVICTED, a file
-// in the tree's git admin dir), then removes every ignored path but the
-// runner through reclaim-scratch.mjs's one removal sequence. Tracked files,
-// HEAD, the branch and the registration are not touched. Best-effort per
-// tree: a tree whose mark cannot be written, or a path in it that cannot be
-// removed, lands in `failed` and keeps its mark; the sweep goes on.
+// in the tree's git admin dir) unless the tree carries it already, then removes
+// every ignored path but the runner through reclaim-scratch.mjs's one removal
+// sequence. Tracked files, HEAD, the branch and the registration are not
+// touched. Best-effort per tree: a tree whose mark cannot be written, or a path
+// in it that cannot be removed, lands in `failed`; the sweep goes on. A mark
+// written stays as written, and a path that cannot be removed is tried again,
+// and named in `failed` again, on every sweep until it is gone.
 //
 // Prints ONE JSON line:
 //   {"applied","ledger":<abs path|null>,"evicted":[{"path","reason","ignored"}],
@@ -73,11 +79,14 @@
 // inside the repository only against origin/main, so the tree's own change, a
 // tree behind origin/main or a later word of the command can each produce it.
 // A status that is not empty BEFORE it refuses in words of its own, before
-// anything runs: that change is no Install step's. Only once the status after
-// it is empty does it write the restore time (RESTORED) and then remove the
-// mark; every refusal leaves the mark. A tree with no mark refuses: there is
-// nothing to restore. Without `--apply` it runs nothing and prints the command
-// it would run. Prints
+// anything runs: that change is no Install step's. Once the checks ahead of
+// the Install step pass, and before it starts, it writes the restore time
+// (RESTORED), so the tree is held for IDLE_MS from the restore's start; a time
+// that cannot be written refuses before the Install step runs. Only once the
+// status after the Install step is empty does it remove the mark; every
+// refusal leaves the mark. A tree with no mark refuses: there is nothing to
+// restore. Without `--apply` it runs nothing and prints the command it would
+// run. Prints
 // `{"applied","worktree","install"}`; exit 0 restored (or would), 2 refused.
 //
 // That install sequence is `installIn()`, exported: finisher-tree.mjs runs the
@@ -314,7 +323,17 @@ function judge(w, ctx) {
   if (held !== null) return { kept: held };
   const mark = evictionMark(w.path);
   if (mark.unknown !== undefined) return { kept: mark.unknown };
-  if (mark.marked) return { kept: `already evicted: ${join(mark.dir, EVICTED)} is there` };
+  // A marked tree is judged like any other once it is known to hold ignored
+  // paths; one that holds none is the eviction done.
+  let ignored;
+  if (mark.marked) {
+    try {
+      ignored = ignoredPaths(w.path);
+    } catch (e) {
+      return { kept: e.message };
+    }
+    if (ignored.length === 0) return { kept: `already evicted: ${join(mark.dir, EVICTED)} is there` };
+  }
   const status = git(w.path, ["status", "--porcelain", "-uall"]);
   if (status.error || status.status !== 0) return { kept: `cannot read its status (${how(status)})` };
   if (status.stdout !== "") return { kept: `git status is not clean (first: ${status.stdout.split("\n")[0]})` };
@@ -329,22 +348,27 @@ function judge(w, ctx) {
   const last = Math.max(moved, restored ?? 0);
   const what = restored !== null && restored >= moved ? "restored" : "HEAD last moved";
   if (!isIdle(ctx.now, last)) return { kept: `${what} ${new Date(last).toISOString()}, within ${IDLE_MS / DAY_MS} days` };
-  let ignored;
-  try {
-    ignored = ignoredPaths(w.path);
-  } catch (e) {
-    return { kept: e.message };
+  if (!mark.marked) {
+    try {
+      ignored = ignoredPaths(w.path);
+    } catch (e) {
+      return { kept: e.message };
+    }
+    if (ignored.length === 0) return { kept: `it ignores nothing but ${RUNNER}` };
   }
-  if (ignored.length === 0) return { kept: `it ignores nothing but ${RUNNER}` };
-  return { evict: { reason: `${what} ${new Date(last).toISOString()}, over ${IDLE_MS / DAY_MS} days ago`, ignored, dir: admin.dir } };
+  const idle = `${what} ${new Date(last).toISOString()}, over ${IDLE_MS / DAY_MS} days ago`;
+  return { evict: { reason: mark.marked ? `already evicted, ignored paths left — ${idle}` : idle, ignored, dir: admin.dir, marked: mark.marked } };
 }
 
-// Mark the tree, then remove each ignored path in it; null, or the error.
+// Mark the tree, unless it carries the mark already, then remove each ignored
+// path in it; null, or the error.
 function evictTree(path, verdict, now) {
-  try {
-    writeFileSync(join(verdict.dir, EVICTED), `${new Date(now).toISOString()}\n`);
-  } catch (e) {
-    return `could not write ${join(verdict.dir, EVICTED)} (${e.code ?? e.message}), so nothing was removed`;
+  if (!verdict.marked) {
+    try {
+      writeFileSync(join(verdict.dir, EVICTED), `${new Date(now).toISOString()}\n`);
+    } catch (e) {
+      return `could not write ${join(verdict.dir, EVICTED)} (${e.code ?? e.message}), so nothing was removed`;
+    }
   }
   const errors = [];
   for (const p of verdict.ignored) {
@@ -403,17 +427,21 @@ function sweep({ afterRotate, apply }) {
  *   derive         derive-testcmd.sh would not name the Install step
  *   status-before  the tree state could not be read before the Install step
  *   dirty-before   the tree was not clean before it: nothing ran
+ *   before-run     `beforeRun` refused: nothing ran
  *   not-run        the Install step could not be started, or exited 126 or 127
  *   failed         it was killed by a signal, or exited non-zero
  *   status-after   the tree state could not be read after it
  *   dirtied        it left the tree changed
  * `verb` names the operation in the dirty-before refusal, and `retry` whether
  * that refusal tells its reader to clear the change and run the operation again:
- * a restore's caller may, the finisher may not. `install` is null in a refusal
- * that came before the command was read. Nothing here writes a mark or a
- * restore time, and it never exits the process.
+ * a restore's caller may, the finisher may not. `beforeRun`, when given, is
+ * called with `apply` set, after every check ahead of the Install step has
+ * passed and just before it starts; it returns null, or the message of a
+ * refusal, which then keeps the Install step from running. `install` is null in
+ * a refusal that came before the command was read. Nothing here writes a mark
+ * or a restore time, and it never exits the process.
  */
-export function installIn(tree, apply, { verb = "restore", retry = true } = {}) {
+export function installIn(tree, apply, { verb = "restore", retry = true, beforeRun = () => null } = {}) {
   const refuse = (kind, message, install = null, exit = null) => ({ refusal: { kind, message, install, exit } });
   const derived = run("sh", [join(SCRIPT_DIR, "derive-testcmd.sh"), tree, "install", "--at", "origin/main"]);
   const install = String(derived.stdout ?? "").replace(/\n$/, "");
@@ -429,6 +457,8 @@ export function installIn(tree, apply, { verb = "restore", retry = true } = {}) 
     return refuse("dirty-before", `${tree} is not clean before the ${verb} (first: ${before.stdout.split("\n")[0]}) — the Install step did not run${then}`, install);
   }
   if (!apply) return { install };
+  const stopped = beforeRun();
+  if (stopped !== null) return refuse("before-run", stopped, install);
   // Through `sh -c` with `CI` unset and the output dropped, as claim-ticket.sh
   // runs it; no timeout, as there.
   const r = run("sh", ["-c", install], { cwd: tree, drop: ["CI"], stdio: "ignore", timeout: 0 });
@@ -453,18 +483,23 @@ function restore(tree, apply) {
   const mark = evictionMark(tree);
   if (mark.unknown !== undefined) die(`cannot tell whether ${tree} is evicted: ${mark.unknown}`);
   if (!mark.marked) die(`${tree} is not evicted (no ${join(mark.dir, EVICTED)}) — nothing to restore`);
-  const done = installIn(tree, apply);
-  if (done.refusal) die(done.refusal.message);
-  const { install } = done;
-  if (apply) {
-    // The restore time first: a mark removed with no time beside it would read
-    // the tree idle by its HEAD alone and evict it again at once.
-    const restored = join(mark.dir, RESTORED);
+  const restored = join(mark.dir, RESTORED);
+  // The restore time first, once the checks ahead of the Install step pass: the
+  // idle gate then holds the tree while it installs and, when the Install step
+  // is refused, for IDLE_MS after, and a mark removed with no time beside it
+  // would read the tree idle by its HEAD alone and evict it again at once.
+  const record = () => {
     try {
       writeFileSync(restored, `${new Date().toISOString()}\n`);
     } catch (e) {
-      die(`installed in ${tree}, but could not record the restore in ${restored} (${e.code ?? e.message}) — the mark stays`);
+      return `could not record the restore in ${restored} (${e.code ?? e.message}), so the Install step did not run — the mark stays`;
     }
+    return null;
+  };
+  const done = installIn(tree, apply, { beforeRun: record });
+  if (done.refusal) die(done.refusal.message);
+  const { install } = done;
+  if (apply) {
     try {
       unlinkSync(join(mark.dir, EVICTED));
     } catch (e) {

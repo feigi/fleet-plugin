@@ -40,6 +40,7 @@ const ago = (days) => new Date(Date.now() - days * DAY).toISOString();
 // dependencies back, and fails or dirties the tree when the case says so.
 const INSTALL = `#!/bin/sh
 [ -n "\${INSTALL_LOG:-}" ] && printf '%s\\n' "\${CI-unset}" > "$INSTALL_LOG"
+[ -n "\${INSTALL_SEEN:-}" ] && cp "$(git rev-parse --absolute-git-dir)/fleet-restored" "$INSTALL_SEEN"
 mkdir -p node_modules/pkg && echo restored > node_modules/pkg/index.js
 [ -n "\${INSTALL_DIRTY:-}" ] && echo dirty >> tracked.txt
 exit "\${INSTALL_EXIT:-0}"
@@ -156,6 +157,8 @@ test("dry run: an idle clean claim tree is evicted and nothing on disk changes; 
   const retry = f.claim(25);
   const marked = f.claim(15);
   writeFileSync(f.mark(marked), "then\n");
+  const markedBare = f.claim(19, { deps: false });
+  writeFileSync(f.mark(markedBare), "then\n");
   const bare = f.claim(16, { deps: false });
   const otherBranch = f.claim(17, { branch: "feature/seventeen" });
   const otherName = f.claim(18, { name: "review-18" });
@@ -173,9 +176,13 @@ test("dry run: an idle clean claim tree is evicted and nothing on disk changes; 
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.json.applied, false);
   assert.equal(r.json.ledger, f.ledgerPath);
-  assert.deepEqual(paths(r.json.evicted), [idle]);
-  assert.deepEqual(r.json.evicted[0].ignored, ["build.log", "dist/", "node_modules/", "pkg/node_modules/"]);
-  assert.match(r.json.evicted[0].reason, /^HEAD last moved .*, over 7 days ago$/);
+  assert.deepEqual(paths(r.json.evicted), [idle, marked]);
+  const first = r.json.evicted.find((e) => e.path === idle);
+  assert.deepEqual(first.ignored, ["build.log", "dist/", "node_modules/", "pkg/node_modules/"]);
+  assert.match(first.reason, /^HEAD last moved .*, over 7 days ago$/);
+  const again = r.json.evicted.find((e) => e.path === marked);
+  assert.deepEqual(again.ignored, ["build.log", "dist/", "node_modules/", "pkg/node_modules/"]);
+  assert.match(again.reason, /^already evicted, ignored paths left — HEAD last moved .*, over 7 days ago$/);
   assert.deepEqual(files(idle), before, "a dry run changed the tree");
   assert.equal(existsSync(f.mark(idle)), false, "a dry run wrote the mark");
   assert.deepEqual(r.json.failed, []);
@@ -190,11 +197,11 @@ test("dry run: an idle clean claim tree is evicted and nothing on disk changes; 
   assert.equal(reasonOf(kept, fix), "held by the live fix-pr-123 on row #23");
   assert.equal(reasonOf(kept, finisher), "held by the live finisher-pr-124 on row #24");
   assert.equal(reasonOf(kept, retry), "held by the live fix-pr-125-b on row #25");
-  assert.match(reasonOf(kept, marked), /^already evicted: .*fleet-evicted is there$/);
+  assert.match(reasonOf(kept, markedBare), /^already evicted: .*fleet-evicted is there$/);
   assert.equal(reasonOf(kept, bare), "it ignores nothing but agent-test");
   assert.equal(reasonOf(kept, otherBranch), "not a claim tree: it is on feature/seventeen, not implementer/17-impl-17");
   assert.equal(reasonOf(kept, otherName), "not a claim tree: its directory is not named <N>-impl-<N>[-x]");
-  assert.deepEqual(paths(kept), [fresh, dirty, rebase, cwd, marked, bare, otherBranch, otherName, impl, review, fix, finisher, retry].sort());
+  assert.deepEqual(paths(kept), [fresh, dirty, rebase, cwd, markedBare, bare, otherBranch, otherName, impl, review, fix, finisher, retry].sort());
 });
 
 test("a live fix-pr-<M> on a fold-in row closing #N keeps tree N alone", (t) => {
@@ -294,6 +301,130 @@ test("--apply: a tree a path of which cannot be removed is named in failed and k
   assert.ok(existsSync(f.mark(wt)));
 });
 
+// A tree whose `pkg/node_modules` cannot be removed on the first sweep: `pkg`
+// is read-only, the other installed paths go.
+function partlyRemoved(t, n) {
+  const f = fixture(t);
+  const wt = f.claim(n);
+  f.ledger([]);
+  chmodSync(join(wt, "pkg"), 0o555);
+  const first = f.run(["--apply"]);
+  assert.equal(first.status, 0, first.stderr);
+  assert.deepEqual(paths(first.json.failed), [wt]);
+  assert.match(first.json.failed[0].error, /^could not remove pkg\/node_modules\//);
+  return { f, wt, markText: readFileSync(f.mark(wt), "utf8") };
+}
+
+test("a marked tree whose removal partly failed is removed again, its mark as first written, and then kept", (t) => {
+  const { f, wt, markText } = partlyRemoved(t, 52);
+  chmodSync(join(wt, "pkg"), 0o755);
+  const head = git(wt, ["rev-parse", "HEAD"]);
+  const branch = git(wt, ["symbolic-ref", "HEAD"]);
+
+  const r = f.run(["--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r.json.evicted), [wt]);
+  assert.match(r.json.evicted[0].reason, /^already evicted, ignored paths left — HEAD last moved .*, over 7 days ago$/);
+  assert.deepEqual(r.json.evicted[0].ignored, ["pkg/node_modules/"]);
+  assert.deepEqual(r.json.failed, []);
+  assert.deepEqual(files(wt), [".gitignore", "agent-test", "install.sh", "pkg", "pkg/keep.txt", "tracked.txt"]);
+  assert.equal(git(wt, ["rev-parse", "HEAD"]), head);
+  assert.equal(git(wt, ["symbolic-ref", "HEAD"]), branch);
+  assert.equal(git(wt, ["status", "--porcelain", "-uall"]), "");
+  assert.ok(git(f.repo, ["worktree", "list", "--porcelain"]).includes(`worktree ${wt}`), "the registration went");
+  assert.equal(readFileSync(f.mark(wt), "utf8"), markText);
+
+  const third = f.run(["--apply"]);
+  assert.match(reasonOf(third.json.kept, wt), /^already evicted: .*fleet-evicted is there$/);
+  assert.deepEqual(third.json.evicted, []);
+});
+
+test("a marked tree whose removal keeps failing is named in failed on every sweep, its mark untouched", (t) => {
+  const { f, wt, markText } = partlyRemoved(t, 53);
+
+  for (let i = 0; i < 2; i++) {
+    const r = f.run(["--apply"]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(r.json.evicted, []);
+    assert.deepEqual(paths(r.json.failed), [wt]);
+    assert.match(r.json.failed[0].error, /^could not remove pkg\/node_modules\//);
+    assert.equal(readFileSync(f.mark(wt), "utf8"), markText);
+  }
+});
+
+test("a retry never fails on the mark write: the mark is not written again", (t) => {
+  const { f, wt } = partlyRemoved(t, 54);
+  chmodSync(join(wt, "pkg"), 0o755);
+  rmSync(f.mark(wt));
+  writeFileSync(f.mark(wt), "first\n");
+  chmodSync(f.mark(wt), 0o444);
+
+  const r = f.run(["--apply"]);
+
+  assert.deepEqual(paths(r.json.evicted), [wt], r.stderr);
+  assert.deepEqual(r.json.failed, []);
+  assert.equal(readFileSync(f.mark(wt), "utf8"), "first\n");
+});
+
+test("a dry run names a marked tree with ignored paths left and changes nothing", (t) => {
+  const { f, wt, markText } = partlyRemoved(t, 55);
+  chmodSync(join(wt, "pkg"), 0o755);
+  const before = files(wt);
+
+  const r = f.run([]);
+
+  assert.equal(r.json.applied, false);
+  assert.deepEqual(paths(r.json.evicted), [wt]);
+  assert.match(r.json.evicted[0].reason, /^already evicted, ignored paths left — /);
+  assert.deepEqual(r.json.evicted[0].ignored, ["pkg/node_modules/"]);
+  assert.deepEqual(files(wt), before);
+  assert.equal(readFileSync(f.mark(wt), "utf8"), markText);
+});
+
+test("every other keep-rule holds a marked tree with ignored paths left, and nothing in it is removed", (t) => {
+  const f = fixture(t);
+  const live = f.claim(71);
+  const dirty = f.claim(72);
+  writeFileSync(join(dirty, "tracked.txt"), "changed\n");
+  const restored = f.claim(73);
+  writeFileSync(join(f.admin(restored), RESTORED), `${ago(1)}\n`);
+  const moved = f.claim(74, { days: 1 });
+  for (const wt of [live, dirty, restored, moved]) writeFileSync(f.mark(wt), "then\n");
+  f.ledger(["#71 impl-71"], ["impl-71"]);
+  const before = new Map([live, dirty, restored, moved].map((wt) => [wt, files(wt)]));
+
+  for (const args of [[], ["--apply"]]) {
+    const r = f.run(args);
+
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(r.json.evicted, []);
+    assert.deepEqual(r.json.failed, []);
+    assert.equal(reasonOf(r.json.kept, live), "held by the live impl-71");
+    assert.match(reasonOf(r.json.kept, dirty), /^git status is not clean \(first:  M tracked\.txt\)$/);
+    assert.match(reasonOf(r.json.kept, restored), /^restored .*, within 7 days$/);
+    assert.match(reasonOf(r.json.kept, moved), /^HEAD last moved .*, within 7 days$/);
+    for (const [wt, was] of before) assert.deepEqual(files(wt), was, `${args.join(" ")} removed something in ${wt}`);
+  }
+});
+
+test("a marked tree whose ignored paths cannot be listed is kept with the listing error", (t) => {
+  const f = fixture(t);
+  const wt = f.claim(75);
+  f.ledger([]);
+  writeFileSync(f.mark(wt), "then\n");
+  writeFileSync(join(f.admin(wt), "index"), "not an index\n");
+
+  for (const args of [[], ["--apply"]]) {
+    const r = f.run(args);
+
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(r.json.evicted, []);
+    assert.match(reasonOf(r.json.kept, wt), /^git ls-files --ignored failed /);
+    assert.ok(existsSync(join(wt, "node_modules")), `${args.join(" ")} removed something`);
+  }
+});
+
 test("a missing ledger refuses without --after-rotate and reads as no live token with it", (t) => {
   const f = fixture(t);
   const wt = f.claim(52);
@@ -370,6 +501,18 @@ test("--restore --apply runs the Install step with CI unset, clears the mark and
   assert.ok(Date.now() - at < 60_000, "no fresh restore time");
 });
 
+test("--restore --apply writes the restore time before the Install step starts", (t) => {
+  const { f, wt } = evicted(t);
+  const seen = join(f.dir, "restored.seen");
+
+  const r = f.run(["--restore", wt, "--apply"], { env: { INSTALL_SEEN: seen } });
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(existsSync(seen), "the Install step found no restore time");
+  assert.equal(readFileSync(seen, "utf8"), readFileSync(join(f.admin(wt), RESTORED), "utf8"));
+  assert.equal(existsSync(f.mark(wt)), false);
+});
+
 test("--restore without --apply runs nothing and names the command", (t) => {
   const { f, wt, log } = evicted(t);
 
@@ -379,6 +522,7 @@ test("--restore without --apply runs nothing and names the command", (t) => {
   assert.deepEqual(r.json, { applied: false, worktree: wt, install: "sh install.sh" });
   assert.equal(existsSync(log), false);
   assert.ok(existsSync(f.mark(wt)));
+  assert.equal(existsSync(join(f.admin(wt), RESTORED)), false);
 });
 
 test("a restore whose install fails, does not run, or dirties the tree refuses and leaves the mark", (t) => {
@@ -391,6 +535,7 @@ test("a restore whose install fails, does not run, or dirties the tree refuses a
     [{ INSTALL_DIRTY: "1" }, (wt) => `the Install step 'sh install.sh' changed the tree in ${wt} (first:  M tracked.txt) — ${REDERIVE}`],
   ];
   for (const [env, said] of cases) {
+    const start = Date.now();
     const { f, wt } = evicted(t);
 
     const r = f.run(["--restore", wt, "--apply"], { env });
@@ -399,7 +544,8 @@ test("a restore whose install fails, does not run, or dirties the tree refuses a
     assert.equal(r.stdout, "");
     assert.equal(r.stderr, `\nevict: ${said(wt)}\n`);
     assert.ok(existsSync(f.mark(wt)), `${JSON.stringify(env)} took the mark`);
-    assert.equal(existsSync(join(f.admin(wt), RESTORED)), false);
+    const at = Date.parse(readFileSync(join(f.admin(wt), RESTORED), "utf8").trim());
+    assert.ok(at >= start, `${JSON.stringify(env)} left no restore time from the restore's start`);
   }
 });
 
@@ -417,6 +563,55 @@ test("a restore of a tree already dirty before it refuses before the Install ste
     assert.ok(existsSync(f.mark(wt)), `${args.join(" ")} took the mark`);
     assert.equal(existsSync(join(f.admin(wt), RESTORED)), false);
   }
+});
+
+test("a refused restore holds the tree for 7 days, then the sweep removes what its install left", (t) => {
+  const { f, wt } = evicted(t);
+  const start = Date.now();
+  assert.equal(f.run(["--restore", wt, "--apply"], { env: { INSTALL_EXIT: "1" } }).status, 2);
+  assert.ok(Date.parse(readFileSync(join(f.admin(wt), RESTORED), "utf8").trim()) >= start, "a restore time before the restore started");
+
+  const held = f.run(["--apply"]);
+  assert.match(reasonOf(held.json.kept, wt), /^restored .*, within 7 days$/);
+  assert.ok(existsSync(join(wt, "node_modules")), "a held tree lost its install");
+
+  writeFileSync(join(f.admin(wt), RESTORED), `${ago(8)}\n`);
+  const dry = f.run([]);
+  assert.deepEqual(paths(dry.json.evicted), [wt]);
+  assert.match(dry.json.evicted[0].reason, /^already evicted, ignored paths left — restored .*, over 7 days ago$/);
+  const due = f.run(["--apply"]);
+  assert.deepEqual(paths(due.json.evicted), [wt]);
+  assert.deepEqual(due.json.failed, []);
+  assert.equal(existsSync(join(wt, "node_modules")), false);
+  assert.ok(existsSync(f.mark(wt)), "the mark is gone");
+});
+
+test("a restore with no Install step derived writes no restore time", (t) => {
+  const f = fixture(t);
+  const wt = f.claim(68);
+  f.ledger([]);
+  assert.deepEqual(paths(f.run(["--apply"]).json.evicted), [wt]);
+
+  const r = f.run(["--restore", wt, "--apply"]);
+
+  assert.equal(r.status, 2);
+  assert.equal(existsSync(join(f.admin(wt), RESTORED)), false);
+  assert.ok(existsSync(f.mark(wt)));
+});
+
+test("a restore time that cannot be written refuses before the Install step runs and leaves the mark", (t) => {
+  const { f, wt, log } = evicted(t);
+  const restored = join(f.admin(wt), RESTORED);
+  mkdirSync(restored);
+
+  const r = f.run(["--restore", wt, "--apply"], { env: { INSTALL_LOG: log } });
+
+  assert.equal(r.status, 2, r.stderr);
+  assert.equal(r.stdout, "");
+  assert.ok(r.stderr.startsWith(`\nevict: could not record the restore in ${restored} (`), r.stderr);
+  assert.match(r.stderr, /\), so the Install step did not run — the mark stays\n$/);
+  assert.equal(existsSync(log), false, "the Install step ran");
+  assert.ok(existsSync(f.mark(wt)));
 });
 
 test("a restore whose mark cannot be removed says the restore time was recorded and the mark stays", (t) => {
