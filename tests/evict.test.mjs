@@ -408,6 +408,23 @@ test("every other keep-rule holds a marked tree with ignored paths left, and not
   }
 });
 
+test("a marked tree whose ignored paths cannot be listed is kept with the listing error", (t) => {
+  const f = fixture(t);
+  const wt = f.claim(75);
+  f.ledger([]);
+  writeFileSync(f.mark(wt), "then\n");
+  writeFileSync(join(f.admin(wt), "index"), "not an index\n");
+
+  for (const args of [[], ["--apply"]]) {
+    const r = f.run(args);
+
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(r.json.evicted, []);
+    assert.match(reasonOf(r.json.kept, wt), /^git ls-files --ignored failed /);
+    assert.ok(existsSync(join(wt, "node_modules")), `${args.join(" ")} removed something`);
+  }
+});
+
 test("a missing ledger refuses without --after-rotate and reads as no live token with it", (t) => {
   const f = fixture(t);
   const wt = f.claim(52);
@@ -505,6 +522,7 @@ test("--restore without --apply runs nothing and names the command", (t) => {
   assert.deepEqual(r.json, { applied: false, worktree: wt, install: "sh install.sh" });
   assert.equal(existsSync(log), false);
   assert.ok(existsSync(f.mark(wt)));
+  assert.equal(existsSync(join(f.admin(wt), RESTORED)), false);
 });
 
 test("a restore whose install fails, does not run, or dirties the tree refuses and leaves the mark", (t) => {

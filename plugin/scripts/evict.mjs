@@ -325,7 +325,7 @@ function judge(w, ctx) {
   if (mark.unknown !== undefined) return { kept: mark.unknown };
   // A marked tree is judged like any other once it is known to hold ignored
   // paths; one that holds none is the eviction done.
-  let ignored = null;
+  let ignored;
   if (mark.marked) {
     try {
       ignored = ignoredPaths(w.path);
@@ -348,7 +348,7 @@ function judge(w, ctx) {
   const last = Math.max(moved, restored ?? 0);
   const what = restored !== null && restored >= moved ? "restored" : "HEAD last moved";
   if (!isIdle(ctx.now, last)) return { kept: `${what} ${new Date(last).toISOString()}, within ${IDLE_MS / DAY_MS} days` };
-  if (ignored === null) {
+  if (!mark.marked) {
     try {
       ignored = ignoredPaths(w.path);
     } catch (e) {
@@ -357,13 +357,13 @@ function judge(w, ctx) {
     if (ignored.length === 0) return { kept: `it ignores nothing but ${RUNNER}` };
   }
   const idle = `${what} ${new Date(last).toISOString()}, over ${IDLE_MS / DAY_MS} days ago`;
-  return { evict: { reason: mark.marked ? `already evicted, ignored paths left — ${idle}` : idle, ignored, dir: admin.dir, retry: mark.marked } };
+  return { evict: { reason: mark.marked ? `already evicted, ignored paths left — ${idle}` : idle, ignored, dir: admin.dir, marked: mark.marked } };
 }
 
 // Mark the tree, unless it carries the mark already, then remove each ignored
 // path in it; null, or the error.
 function evictTree(path, verdict, now) {
-  if (!verdict.retry) {
+  if (!verdict.marked) {
     try {
       writeFileSync(join(verdict.dir, EVICTED), `${new Date(now).toISOString()}\n`);
     } catch (e) {
@@ -441,7 +441,7 @@ function sweep({ afterRotate, apply }) {
  * a refusal that came before the command was read. Nothing here writes a mark
  * or a restore time, and it never exits the process.
  */
-export function installIn(tree, apply, { verb = "restore", retry = true, beforeRun = null } = {}) {
+export function installIn(tree, apply, { verb = "restore", retry = true, beforeRun = () => null } = {}) {
   const refuse = (kind, message, install = null, exit = null) => ({ refusal: { kind, message, install, exit } });
   const derived = run("sh", [join(SCRIPT_DIR, "derive-testcmd.sh"), tree, "install", "--at", "origin/main"]);
   const install = String(derived.stdout ?? "").replace(/\n$/, "");
@@ -457,7 +457,7 @@ export function installIn(tree, apply, { verb = "restore", retry = true, beforeR
     return refuse("dirty-before", `${tree} is not clean before the ${verb} (first: ${before.stdout.split("\n")[0]}) — the Install step did not run${then}`, install);
   }
   if (!apply) return { install };
-  const stopped = beforeRun === null ? null : beforeRun(install);
+  const stopped = beforeRun();
   if (stopped !== null) return refuse("before-run", stopped, install);
   // Through `sh -c` with `CI` unset and the output dropped, as claim-ticket.sh
   // runs it; no timeout, as there.

@@ -11,7 +11,8 @@ when none holds it, its ignored paths are removed again with the mark left as
 written, and one that still cannot be removed is named in `failed` on every
 sweep (decision 5); a restore records its time just before its Install step
 runs, not once the tree is clean (decision 6), so a restore still installing,
-or one refused, holds the tree for 7 days.
+or one refused after the checks ahead of the Install step, holds the tree for
+7 days.
 
 ## Context
 
