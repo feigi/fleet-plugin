@@ -63,7 +63,7 @@ import { CELL, OBJECTIVES, POLICY_CELL, STARTING_CELLS, drawCell, formatRouting,
 import { objectiveFromReceipt, sessionFromReceipt } from "./phase0-receipt.mjs";
 import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
 import {
-  AttributionError, FEATURE_COLUMNS, OPTIONAL_COLUMNS, TRIP_POINTS, attribute, bootUnit, bootstrapDiffCI, generations, parseFeatures, tally, underFloor,
+  AttributionError, FEATURE_COLUMNS, OPTIONAL_COLUMNS, TRIP_POINTS, attribute, compareCells, generations, parseFeatures, tally,
 } from "./pull-attribution.mjs";
 import { RulingError, parseTierOutcomes } from "./tier-outcomes.mjs";
 import { LINE_REF, briefPaths, briefText } from "./ticket-text.mjs";
@@ -754,35 +754,42 @@ const JUDGE = Object.freeze({
 const unjudged = () => ({ cell: null, reason: "unjudged", cells: {}, pairs: [] });
 
 /**
- * One row's cell under one objective — a node's of the tree — and
- * why. The quality floor is held twice: pooled by the guard, whose trip takes
- * a cell out of every row and out of the exploration draw, and per row by the
- * fit, which refuses a cell under the floor that row alone. The floor is
- * measured against the default cell under both objectives. Every figure read
- * is the cell's newest generation's, the default cell's included. `est` and
- * `pulls` are the row's `estimate()` figures and counted Pulls; `baseCell` is
- * the cell the row holds unless a candidate qualifies: the default cell under
- * `cost`, the `cost` row's cell under `speed`. The figure is $ per merged PR
- * under `cost` and minutes of work time per merged PR under `speed`.
+ * One row's cell under one objective — a node's of the tree — and why. The
+ * quality floor is held twice: by the guard over every group's Pulls together,
+ * whose trip takes a cell out of every row and out of the exploration draw,
+ * and per row by the fit, which refuses a cell under the floor that row alone.
+ * The floor is measured against the default cell under both objectives. Every
+ * figure read is the cell's newest generation's, the default cell's included,
+ * and every comparison is `compareCells`': two cells over the stretches in
+ * which both were drawn, the stretches pooled, so a base's other weeks move
+ * no verdict and a shift that hits every cell at once cancels. `pulls` holds
+ * the row's counted Pulls per cell (`estimate()`'s); `baseCell` is the cell
+ * the row holds unless a candidate qualifies: the default cell under `cost`,
+ * the `cost` row's cell under `speed`. The figure is $ per merged PR under
+ * `cost` and minutes of work time per merged PR under `speed`.
  *
  * A candidate is a cell of `cells` other than the base. Its `verdict`, the
  * first that applies: `tripped` by the guard; `too-few`, under MIN_N merged
- * PRs in the row; `under-floor` against the default cell there; `too-dear`
- * (`cost`) or `too-slow` (`speed`), above ADOPT_RATIO of the base's figure;
- * `not-reliably-cheaper` or `not-reliably-faster`, its `range` does not lie
- * wholly below zero (its upper end, as `bootstrapDiffCI` returns it, is not
- * below zero) or there is none; else it `qualifies`. A candidate past
- * `too-few` records whether it is `under_floor`, the floor's `bar` (the
- * default cell's fail rate plus TRIP_POINTS, rounded as a fail rate is, for
- * reading only: the floor compares counts) and its `range`, the bootstrap 95%
- * range of (candidate − base) figure over those Pulls; the others record null
- * for each.
+ * PRs in the row, on either side, in the stretches it shares with the base or
+ * with the default cell (none shared, none counted); `under-floor` against the
+ * default cell there; `too-dear` (`cost`) or `too-slow` (`speed`), above
+ * ADOPT_RATIO of the base's figure, both figures over the stretches it shares
+ * with the base; `not-reliably-cheaper` or `not-reliably-faster`, its `range`
+ * does not lie wholly below zero (its upper end, as `bootstrapDiffCI` returns
+ * it, is not below zero) or there is none; else it `qualifies`. A candidate
+ * past `too-few` records whether it is `under_floor`, the floor's `bar` (the
+ * default cell's fail rate over the stretches it shares with the candidate,
+ * plus TRIP_POINTS, rounded as a fail rate is, for reading only: the floor
+ * compares counts) and its `range`, the bootstrap 95% range of (candidate −
+ * base) figure over the Pulls of those stretches; the others record null for
+ * each.
  *
  * Several qualifiers: each pair records the range of (the better by the
- * figure, else by name − the other) in `pairs`, naming the better side
- * `cheaper` or `faster`, and a qualifier another is reliably better than is
- * dropped. Among the rest the lower fail rate, compared in counts, wins, then
- * the lower figure, then the name.
+ * figure, else by name − the other) in `pairs`, the pair compared over the
+ * stretches it shares, naming the better side `cheaper` or `faster`, and a
+ * qualifier another is reliably better than is dropped. Among the rest the
+ * lower fail rate wins, then the lower figure, then the name; each is the
+ * qualifier's gap to the base over the stretches it shares with it.
  *
  * `reason`, why the row holds `cell`: `unjudged` (the default cell or the
  * base, or every untripped candidate, is under MIN_N merged PRs; `cell` is
@@ -791,31 +798,41 @@ const unjudged = () => ({ cell: null, reason: "unjudged", cells: {}, pairs: [] }
  * dropped), or what put it ahead of the next of the rest: `lower-fail-rate`,
  * `lower-usd` or `fewer-minutes`, or `name`.
  */
-function judge(objective, est = {}, pulls, cells, tripped, baseCell) {
+function judge(objective, pulls = {}, cells, tripped, baseCell) {
   const { figure, metric, over, unreliable, better, reliably, ahead } = JUDGE[objective];
   const record = unjudged();
-  const floor = est[POLICY_CELL];
-  const base = est[baseCell];
-  if (!floor || floor.merged < MIN_N || !base || base.merged < MIN_N) return record;
+  const pullsOf = (c) => pulls[c] ?? [];
+  const mergedOf = (c) => pullsOf(c).filter((u) => u.merged).length;
+  // A default cell or base short of MIN_N merged PRs has none to give any candidate, whichever stretches they share.
+  if (mergedOf(POLICY_CELL) < MIN_N || mergedOf(baseCell) < MIN_N) return record;
   // JSON writes −0 as 0, so a recorded end is 0 either way; `--check` compares the two.
-  const units = (c) => pulls[c].map((u) => bootUnit(u, metric));
-  const range = (a, b) => bootstrapDiffCI(units(a), units(b))?.map((x) => x + 0) ?? null;
+  const range = (m) => m.range(metric)?.map((x) => x + 0) ?? null;
   const reliablyBelow = (r) => r !== null && r[1] < 0;
-  const bar = round4(floor.failed / floor.claims + TRIP_POINTS / 100);
+  // A matched figure as the table prints one, four places; none is unknown, past every figure that is known.
+  const printed = (side) => (side[figure] === null ? Infinity : round4(side[figure]));
+  const enough = (m) => m.cell.merged >= MIN_N && m.base.merged >= MIN_N;
+  const against = new Map();
   const qualifiers = [];
   let judged = false;
   for (const c of cells) {
     if (c === baseCell) continue;
-    const e = est[c];
-    if (tripped.has(c) || !e || e.merged < MIN_N) {
-      record.cells[c] = { verdict: tripped.has(c) ? "tripped" : "too-few", under_floor: null, bar: null, range: null };
+    if (tripped.has(c)) {
+      record.cells[c] = { verdict: "tripped", under_floor: null, bar: null, range: null };
+      continue;
+    }
+    const vsBase = compareCells(pullsOf(c), pullsOf(baseCell));
+    const vsFloor = baseCell === POLICY_CELL ? vsBase : compareCells(pullsOf(c), pullsOf(POLICY_CELL));
+    if (!enough(vsBase) || !enough(vsFloor)) {
+      record.cells[c] = { verdict: "too-few", under_floor: null, bar: null, range: null };
       continue;
     }
     judged = true;
-    const under = underFloor(e, floor);
-    const r = range(c, baseCell);
+    against.set(c, vsBase);
+    const under = vsFloor.underFloor;
+    const bar = vsFloor.base.fail_rate === null ? null : round4(vsFloor.base.fail_rate + TRIP_POINTS / 100);
+    const r = range(vsBase);
     const verdict = under ? "under-floor"
-      : e[figure] > ADOPT_RATIO * base[figure] ? over
+      : printed(vsBase.cell) > ADOPT_RATIO * printed(vsBase.base) ? over
         : reliablyBelow(r) ? "qualifies" : unreliable;
     record.cells[c] = { verdict, under_floor: under, bar, range: r };
     if (verdict === "qualifies") qualifiers.push(c);
@@ -823,36 +840,40 @@ function judge(objective, est = {}, pulls, cells, tripped, baseCell) {
   if (!judged) return record;
   if (qualifiers.length === 0) return { ...record, cell: baseCell, reason: "no-qualifier" };
 
-  const of = (c) => est[c][figure];
   const byName = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
-  const failCmp = (a, b) => est[a].failed * est[b].claims - est[b].failed * est[a].claims;
+  // A qualifier's gap to the base in fail rate, and in the figure, over the stretches they share.
+  const failGap = (c) => against.get(c).cell.fail_rate - against.get(c).base.fail_rate;
+  const figureGap = (c) => printed(against.get(c).cell) - printed(against.get(c).base);
   const named = [...qualifiers].sort(byName);
   const dropped = new Set();
   for (let i = 0; i < named.length; i++) {
     for (let j = i + 1; j < named.length; j++) {
-      const [win, other] = of(named[j]) < of(named[i]) ? [named[j], named[i]] : [named[i], named[j]];
-      const r = range(win, other);
+      const pair = compareCells(pullsOf(named[i]), pullsOf(named[j]));
+      const flip = printed(pair.base) < printed(pair.cell);
+      const [win, other] = flip ? [named[j], named[i]] : [named[i], named[j]];
+      const r = range(flip ? compareCells(pullsOf(win), pullsOf(other)) : pair);
       record.pairs.push({ [better]: win, other, range: r });
       if (reliablyBelow(r)) dropped.add(other);
     }
   }
   // The best qualifier, by the figure then name, is never dropped, so the rest is never empty.
-  const [win, next] = named.filter((c) => !dropped.has(c)).sort((a, b) => failCmp(a, b) || of(a) - of(b) || byName(a, b));
+  const [win, next] = named.filter((c) => !dropped.has(c))
+    .sort((a, b) => byName(failGap(a), failGap(b)) || byName(figureGap(a), figureGap(b)) || byName(a, b));
   const reason = qualifiers.length === 1 ? "sole-qualifier"
     : next === undefined ? reliably
-      : failCmp(win, next) !== 0 ? "lower-fail-rate"
-        : of(win) !== of(next) ? ahead : "name";
+      : failGap(win) !== failGap(next) ? "lower-fail-rate"
+        : figureGap(win) !== figureGap(next) ? ahead : "name";
   return { ...record, cell: win, reason };
 }
 
 /** A `cost` row: `judge()` from the default cell, by $ per merged PR. */
-function judgeRow(est, pulls, cells, tripped) {
-  return judge("cost", est, pulls, cells, tripped, POLICY_CELL);
+function judgeRow(pulls, cells, tripped) {
+  return judge("cost", pulls, cells, tripped, POLICY_CELL);
 }
 
 /** A `speed` row: `judge()` from the `cost` row's cell, by minutes of work time per merged PR. */
-function judgeSpeedRow(est, pulls, cells, tripped, costCell) {
-  return judge("speed", est, pulls, cells, tripped, costCell);
+function judgeSpeedRow(pulls, cells, tripped, costCell) {
+  return judge("speed", pulls, cells, tripped, costCell);
 }
 
 /**
@@ -884,10 +905,10 @@ export function fitTable({ prior, features, members, verdicts, guard, commit = n
   const reasons = { cost: {}, speed: {} };
   for (const s of nodes) {
     const up = parentOf(s);
-    const cost = judgeRow(estimates[s], pulls[s], prior.cells, tripped);
+    const cost = judgeRow(pulls[s], prior.cells, tripped);
     const own = cost.cell !== null || up === null;
     const costCell = cost.cell ?? (up === null ? POLICY_CELL : rows.cost[up]);
-    const speed = own ? judgeSpeedRow(estimates[s], pulls[s], prior.cells, tripped, costCell) : unjudged();
+    const speed = own ? judgeSpeedRow(pulls[s], prior.cells, tripped, costCell) : unjudged();
     const speedCell = speed.cell ?? (own ? costCell : rows.speed[up]);
     rows.cost[s] = costCell;
     rows.speed[s] = speedCell;

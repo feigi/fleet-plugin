@@ -727,10 +727,12 @@ _Avoid_: spec ticket, sub-issue, child ticket
 
 **Quality floor**:
 How far a Cell's fail rate (false claims over claims) may rise above
-`slow-high`'s before the Cell is refused: under 15 points. The cost guard
+`slow-high`'s before the Cell is refused: under 15 points. Both holders read
+the two Cells only over the stretches in which both were drawn — a stretch is
+a UTC calendar week of run date, cut where the recorded plugin version
+changes — each stretch on its own and the stretches pooled. The cost guard
 holds it over every ticket together and trips the Cell. The Router's Fit also
-holds it within each Stratum's rows, afresh at every Fit and comparing the two
-Cells only over the stretches in which both were drawn, and refuses the Cell
+holds it within each Stratum's rows, afresh at every Fit, and refuses the Cell
 only for that row; the Cell still takes Exploration Pulls.
 _Avoid_: veto, quality gate
 

@@ -2859,3 +2859,144 @@ test("rowDispatch and route agree on arm B: a sizing label moves neither the pol
   assert.equal(r.draw.K, below.draw.cells.length);
   assert.deepEqual({ ...r, sized: null }, parseRouting(route({ ...args, arm: "A" }).line), "arm A's Routing but for the label");
 });
+
+// ---------------------------------------------------------------------------
+// Time-matched rows: two cells compared only over the weeks both were drawn
+// ---------------------------------------------------------------------------
+
+// The Mondays of three weeks, the weeks a Pull's run_date falls in.
+const MON1 = "2026-10-05", MON2 = "2026-10-12", MON3 = "2026-10-19";
+// Pulls by week: each spec is `n` Pulls of `cell` dated `date`, each opening a PR that cost `usd` over `work` seconds, the
+// first `fails` ruled a false claim; `session` and `model` place a generation.
+function weeks(specs) {
+  const features = [];
+  const members = [];
+  const verdicts = [];
+  let ticket = 2000;
+  for (const { cell, date, n, usd = 1, work = 60, fails = 0, session = SESSION, model = "m" } of specs) {
+    for (let i = 0; i < n; i++, ticket++) {
+      const f = featureRow({ ticket: String(ticket), chosen_cell: cell, exploration_draw: "1/3", run_date: date, session });
+      features.push(f);
+      members.push(implementer(f, { pr: String(ticket + 10000), cost: String(usd), work_s: String(work), ending: "pr", model, dispatch_model: model }));
+      verdicts.push(ruled(ticket, ticket + 10000, { run_date: date, minted_false_claim: i < fails ? "yes" : "no" }));
+    }
+  }
+  return { features, members, verdicts };
+}
+const fitWeeks = (specs, guard = {}) => fitDirect(weeks(specs), guard);
+// What a row's judgement says of each set, `bar` left out: it is the base's own fail rate over the weeks shared, which a shift moves.
+const judged = (table) => Object.fromEntries(["cost", "speed"].map((set) => {
+  const r = table.reasons[set]["*"];
+  return [set, { cell: r.cell, reason: r.reason, pairs: r.pairs, cells: Object.fromEntries(Object.entries(r.cells).map(([c, x]) => [c, [x.verdict, x.under_floor, x.range]])) }];
+}));
+const TOO_FEW = { verdict: "too-few", under_floor: null, bar: null, range: null };
+
+test("fit: a cell drawn in one week is judged against the base's Pulls of that week alone — the base's other weeks, far cheaper and cleaner, move no verdict", () => {
+  const drawn = [
+    { cell: "slow-high", date: MON1, n: 25, usd: 10, fails: 6 },
+    { cell: "slow-high", date: MON2, n: 25, usd: 10, fails: 5 },
+    { cell: "smol-high", date: MON2, n: 25, usd: 6, fails: 5 },
+  ];
+  const alone = fitWeeks(drawn);
+  // Over its whole run the base would read $6.44 and 11 false claims in 90: smol-high's $6 is 0.93 of it, past the 0.75 bar.
+  const later = fitWeeks([...drawn, { cell: "slow-high", date: MON3, n: 40, usd: 2 }]);
+  assert.equal(alone.rows.cost["*"], "smol-high");
+  assert.deepEqual(alone.reasons.cost["*"].cells["smol-high"], { verdict: "qualifies", under_floor: false, bar: 0.35, range: [-4, -4] });
+  // The default cell is a candidate of the speed set too, held to the floor against itself: the weeks it shares with itself are all its own, so its `bar` is the one thing a later week moves.
+  assert.deepEqual([later.rows, judged(later), later.reasons.cost], [alone.rows, judged(alone), alone.reasons.cost], "Pulls of the base alone in a later week change no verdict");
+  assert.equal(later.estimates["*"]["slow-high"].n, 90, "they are in the base's own figures all the same");
+});
+
+test("fit: a cell with no week in common with the base is not judged, however cheap and clean: too-few, the base kept, the row unjudged", () => {
+  const next = fitWeeks([{ cell: "smol-high", date: MON1, n: 25, usd: 1 }, { cell: "slow-high", date: MON2, n: 25, usd: 10, fails: 5 }]);
+  assert.deepEqual(next.rows.cost, { "*": "slow-high" });
+  assert.deepEqual(next.reasons.cost["*"], { cell: "slow-high", reason: "unjudged", cells: { "task-high": TOO_FEW, "smol-high": TOO_FEW }, pairs: [] });
+});
+
+test("fit: MIN_N counts the merged PRs of the weeks both cells were drawn in, not the cell's whole run", () => {
+  const specs = (shared) => [
+    { cell: "slow-high", date: MON2, n: 25, usd: 10, fails: 5 },
+    { cell: "smol-high", date: MON1, n: 20, usd: 2, fails: 4 },
+    { cell: "smol-high", date: MON2, n: shared, usd: 2, fails: shared / 5 },
+  ];
+  const few = fitWeeks(specs(10));
+  assert.equal(few.estimates["*"]["smol-high"].merged, 30, "30 merged PRs of its own");
+  assert.deepEqual(few.reasons.cost["*"].cells["smol-high"], TOO_FEW, "10 of them where the base was drawn");
+  const enough = fitWeeks(specs(20));
+  assert.equal(enough.reasons.cost["*"].cells["smol-high"].verdict, "qualifies");
+  assert.equal(enough.rows.cost["*"], "smol-high");
+});
+
+test("fit: adding the same shift to every cell's Pulls within each week, a different one in each, leaves every verdict, floor decision and range as they were", () => {
+  // Every cell fails the same share of its claims in both weeks and costs the same, but each was drawn in a different mix of the two.
+  const mix = { "slow-high": [30, 10], "task-high": [10, 30], "smol-high": [20, 20] };
+  const base = { "slow-high": { usd: 10, work: 6000, rate: 20 }, "task-high": { usd: 2, work: 600, rate: 30 }, "smol-high": { usd: 2, work: 600, rate: 50 } };
+  const specs = (shift) => Object.entries(mix).flatMap(([cell, ns]) => [MON1, MON2].map((date, k) => ({
+    cell, date, n: ns[k], usd: base[cell].usd + shift[k].usd, work: base[cell].work + shift[k].work,
+    fails: (ns[k] * (base[cell].rate + shift[k].rate)) / 100,
+  })));
+  const none = [{ usd: 0, work: 0, rate: 0 }, { usd: 0, work: 0, rate: 0 }];
+  // 10 more points of false claims, $3 and two minutes a Pull in the first week; 30 points, $20 and twenty minutes in the second.
+  const shifted = [{ usd: 3, work: 120, rate: 10 }, { usd: 20, work: 1200, rate: 30 }];
+  const before = fitWeeks(specs(none));
+  const after = fitWeeks(specs(shifted));
+  assert.deepEqual(judged(after), judged(before));
+  assert.equal(before.reasons.cost["*"].cells["task-high"].verdict, "qualifies", "10 points over the base, within the floor, and a fifth of its cost");
+  assert.equal(before.reasons.cost["*"].cells["smol-high"].verdict, "under-floor");
+  assert.notEqual(after.reasons.cost["*"].cells["task-high"].bar, before.reasons.cost["*"].cells["task-high"].bar, "the shift did move the base's own fail rate");
+  assert.deepEqual([after.rows.cost["*"], after.rows.speed["*"]], ["task-high", "task-high"]);
+});
+
+test("fit: the cost the row weighs is the matched one: a cell cheaper than the base where both ran is adopted, though the base's whole run is cheaper than it", () => {
+  // The base ran at $10 where smol-high did and at $1 in the week after, so its whole run reads $3.65 against smol-high's $6.
+  const next = fitWeeks([
+    { cell: "slow-high", date: MON1, n: 25, usd: 10 },
+    { cell: "slow-high", date: MON2, n: 60, usd: 1 },
+    { cell: "smol-high", date: MON1, n: 25, usd: 6 },
+  ]);
+  assert.equal(next.estimates["*"]["slow-high"].usd_per_merged, 3.6471);
+  assert.equal(next.reasons.cost["*"].cells["smol-high"].verdict, "qualifies");
+  assert.equal(next.rows.cost["*"], "smol-high");
+});
+
+test("fit: qualifiers are ranked by their gap to the base over the weeks they share with it, not by their own whole-run fail rates", () => {
+  // task-high fails 36% against the base's 40% in the week they share; smol-high 8% against the base's 4% in another.
+  const next = fitWeeks([
+    { cell: "slow-high", date: MON1, n: 25, usd: 10, fails: 10 },
+    { cell: "slow-high", date: MON2, n: 25, usd: 10, fails: 1 },
+    { cell: "task-high", date: MON1, n: 25, usd: 5, fails: 9 },
+    { cell: "smol-high", date: MON2, n: 25, usd: 5, fails: 2 },
+  ]);
+  assert.equal(next.reasons.cost["*"].cells["task-high"].verdict, "qualifies");
+  assert.equal(next.reasons.cost["*"].cells["smol-high"].verdict, "qualifies");
+  assert.deepEqual(next.reasons.cost["*"].pairs, [{ cheaper: "smol-high", other: "task-high", range: null }], "the two share no week to be compared in: neither is dropped");
+  assert.deepEqual([next.rows.cost["*"], next.reasons.cost["*"].reason], ["task-high", "lower-fail-rate"], "4 points under the base beats 4 over it, though smol-high's own 8% is the lower rate");
+});
+
+test("fit: the speed row compares a cell with the cost row's cell over the weeks they share", () => {
+  // task-high takes the cost row. smol-high ran only in the second week, in 50 minutes a Pull to task-high's 100 there and 10 in the first.
+  const next = fitWeeks([
+    { cell: "slow-high", date: MON1, n: 25, usd: 10, work: 6000, fails: 5 },
+    { cell: "slow-high", date: MON2, n: 25, usd: 10, work: 6000, fails: 5 },
+    { cell: "task-high", date: MON1, n: 25, usd: 5, work: 600, fails: 5 },
+    { cell: "task-high", date: MON2, n: 25, usd: 5, work: 6000, fails: 5 },
+    { cell: "smol-high", date: MON2, n: 25, usd: 9.5, work: 3000, fails: 5 },
+  ]);
+  assert.deepEqual([next.rows.cost["*"], next.reasons.cost["*"].cells["smol-high"].verdict], ["task-high", "too-dear"]);
+  assert.equal(next.estimates["*"]["task-high"].minutes_per_merged, 55, "task-high's own run reads 55 minutes a PR: smol-high's 50 is 0.91 of it");
+  assert.deepEqual([next.reasons.speed["*"].cells["smol-high"].verdict, next.reasons.speed["*"].cells["smol-high"].range, next.rows.speed["*"]], ["qualifies", [-50, -50], "smol-high"]);
+});
+
+test("fit: a cell's older generation is reported beside the newest and is never pooled into the time-matched comparison", () => {
+  const newest = [
+    { cell: "slow-high", date: MON2, n: 25, usd: 10, fails: 5 },
+    { cell: "smol-high", date: MON2, n: 25, usd: 5, fails: 5, session: "2026-10-13T09-00-00-000Z_x", model: "model-b" },
+  ];
+  const older = { cell: "smol-high", date: MON2, n: 25, usd: 50, fails: 25, session: "2026-10-12T09-00-00-000Z_x", model: "model-a" };
+  const alone = fitWeeks(newest);
+  const both = fitWeeks([older, ...newest]);
+  assert.equal(both.estimates["*"]["smol-high"].generation, "model-b");
+  assert.equal(both.estimates["*"]["smol-high"].older["model-a"].n, 25, "reported beside the newest");
+  assert.deepEqual([both.rows, both.reasons], [alone.rows, alone.reasons], "and pooled into nothing");
+  assert.equal(both.rows.cost["*"], "smol-high");
+});

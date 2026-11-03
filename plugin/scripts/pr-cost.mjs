@@ -55,13 +55,25 @@
 // so a cell that abandons work carries that spend; `median_usd` over the
 // merged Pulls alone, descriptive; `router_usd`, the Pulls' own routing cost,
 // summed and never in their spend. `usd_diff_ci95` is a bootstrap 95% interval
-// on `mean_usd` minus the baseline's — printed to be read, never judged on.
-// Then the `left_out`, `unpriced` and `untimed` Pull counts, and the cell's
-// `excluded` count, which no generation owns. The baseline, the guard file's
-// cells and every trip are each cell's newest generation alone, so a cell
-// whose model changed is judged afresh once its new generation reaches MIN_N
-// merged PRs. Each older generation prints on its own line beside the newest,
-// with no verdict and no interval.
+// on the $ per merged PR difference from the baseline, over the stretches in
+// which both were drawn (TIME-MATCHED, below) — printed to be read, never
+// judged on. Then the `left_out`, `unpriced` and `untimed` Pull counts, and the
+// cell's `excluded` count, which no generation owns. The baseline, the guard
+// file's cells and every trip are each cell's newest generation alone, so a
+// cell whose model changed is judged afresh once its new generation reaches
+// MIN_N merged PRs. Each older generation prints on its own line beside the
+// newest, with no verdict and no interval.
+//
+// TIME-MATCHED. The figures above are each cell's own, over every Pull of its
+// generation in the window. A trip is not read off them: a cell is compared
+// with the baseline only over the stretches (pull-attribution.mjs's
+// STRETCHES) in which both were drawn, each stretch compared on its own and
+// the stretches pooled, so a shift that hits every cell at once cancels, and
+// the baseline's other weeks, in which the cell never ran, move no verdict.
+// MIN_N counts each side's merged PRs in those stretches. A cell with MIN_N
+// merged PRs of its own that is short of them there, or shares no stretch
+// with the baseline, is not judged and never trips: its line says
+// `unmatched`, and the report's `unmatched` lists it.
 //
 // THE GUARD FILE keeps each cell's whole entry as the report computed it —
 // `n` (its `n_merged`, which readers key on) beside every figure above and its
@@ -87,7 +99,7 @@ import { gitEnv } from "./git-env.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
-import { AttributionError, TRIP_POINTS, attribute, bootUnit, bootstrapDiffCI, parseFeatures, tally, underFloor } from "./pull-attribution.mjs";
+import { AttributionError, TRIP_POINTS, attribute, compareCells, parseFeatures, tally } from "./pull-attribution.mjs";
 import { STARTING_CELLS } from "./ledger-grammar.mjs";
 import { RulingError, parseTierOutcomes } from "./tier-outcomes.mjs";
 
@@ -95,7 +107,9 @@ const NAME = "pr-cost";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 
 // The guard's window opens here and never rolls: it is reset only by editing
-// this constant in a reviewed change.
+// this constant in a reviewed change. It is the lower bound of the Pulls the
+// guard reads; the baseline is not cumulative over it, for a cell is compared
+// with the baseline only over the stretches in which both were drawn.
 export const WINDOW_START = "2026-10-03";
 export const BASELINE_CELL = "slow-high";
 export const MIN_N = 20;
@@ -150,17 +164,25 @@ function median(xs) {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
-// The trip rule: the quality floor (pull-attribution.mjs's `underFloor`, in
-// integer counts), or a mean $ at least the baseline's. Each side is
-// `{ claims, failed, mean_usd }`.
+// Whether `m`, `compareCells`' comparison of a cell with the baseline, has MIN_N merged PRs on each side. They are
+// counted over the stretches both were drawn in, so a cell is never judged on a handful of matched Pulls because
+// it has many unmatched ones.
+const judged = (m) => m.cell.merged >= MIN_N && m.base.merged >= MIN_N;
+
+// The trip rule, over the stretches in which both cells were drawn (`cell` and `base` are the two cells' newest
+// generations' counted Pulls, as `compareCells` reads them): the cell's fail rate TRIP_POINTS or more points above
+// the baseline's, in integer counts, or its $ per merged PR at least the baseline's. The $ leg takes the unrounded
+// figures: the cent-rounded ones are for display, and a trip is sticky, so a cell cheaper by under half a cent
+// must not trip on rounding alone. A cell that shares no stretch with the baseline, or has under MIN_N merged PRs
+// on either side in those it shares, is not judged and does not trip.
 export function trips(cell, base) {
-  return underFloor(cell, base) || cell.mean_usd >= base.mean_usd;
+  const m = compareCells(cell, base);
+  return judged(m) && (m.underFloor || (m.cell.usd_per_merged !== null && m.cell.usd_per_merged >= m.base.usd_per_merged));
 }
 
 export function computeReport({ members, tiers, features, prs, routerTable = null, pricing = null, windowStart = WINDOW_START }) {
   const units = attribute({ features, members, tiers, prs, windowStart });
   const tallies = new Map(tally(units).map((t) => [t.cell, t]));
-  const bootUnits = (g) => g.pulls.map((u) => bootUnit(u));
   const meanUsd = (t) => (t.merged ? t.spend / t.merged : null);
   const base = tallies.get(BASELINE_CELL) ?? null;
   // The PRs behind each generation's `no_ruling` and `pending` counts, as the
@@ -194,7 +216,7 @@ export function computeReport({ members, tiers, features, prs, routerTable = nul
       pending: g.pending,
       pending_prs: prList(held?.pending_prs),
       router_usd: round(g.pulls.reduce((s, u) => s + routerUsd(u.pull), 0), 4),
-      usd_diff_ci95: !newest || cell === BASELINE_CELL || !base ? null : bootstrapDiffCI(bootUnits(g), bootUnits(base)),
+      usd_diff_ci95: !newest || cell === BASELINE_CELL || !base ? null : compareCells(g.pulls, base.pulls).range("usd"),
       left_out: g.left_out,
       unpriced: g.unpriced,
       untimed: g.untimed,
@@ -209,14 +231,15 @@ export function computeReport({ members, tiers, features, prs, routerTable = nul
   // The guard, over each cell's newest generation alone.
   const b = figures.find((f) => f.cell === BASELINE_CELL) ?? { generation: null, n_merged: 0, mean_usd: null, fail_rate: null };
   const baseline = { cell: BASELINE_CELL, generation: b.generation, n: b.n_merged, mean_usd: b.mean_usd, fail_rate: b.fail_rate };
-  // The $ leg takes the unrounded means: the cent-rounded figures are for
-  // display, and a trip is sticky, so a cell cheaper by under half a cent
-  // must not trip on rounding alone. The fail leg reads the claims.
-  const quality = (t) => ({ claims: t.claims, failed: t.failed, mean_usd: meanUsd(t) });
+  // Each cell is held to the baseline over the stretches in which both were drawn (`compareCells`): `trips` is the
+  // rule, and `judged` whether MIN_N merged PRs a side there let it apply. A cell short of them is `unmatched`.
   const tripped = [];
+  const unmatched = [];
   if (baseline.n >= MIN_N) {
     for (const t of tallies.values()) {
-      if (t.cell !== BASELINE_CELL && t.merged >= MIN_N && trips(quality(t), quality(base))) tripped.push(t.cell);
+      if (t.cell === BASELINE_CELL || t.merged < MIN_N) continue;
+      if (trips(t.pulls, base.pulls)) tripped.push(t.cell);
+      else if (!judged(compareCells(t.pulls, base.pulls))) unmatched.push(t.cell);
     }
   }
   const verdict = baseline.n < MIN_N ? "none" : tripped.length ? "tripped" : "ok";
@@ -230,6 +253,7 @@ export function computeReport({ members, tiers, features, prs, routerTable = nul
     baseline,
     cells: figures,
     tripped,
+    unmatched,
     verdict,
     retire,
     pending: [...new Set(units.filter((u) => u.status === "pending").map((u) => u.pendingPr))].sort((x, y) => Number(x) - Number(y)),
@@ -295,12 +319,15 @@ const TSV_COLUMNS = [
   "excluded", "left_out", "unpriced", "untimed", "guard",
 ];
 
-// One line per cell's newest generation, carrying the guard's verdict on it,
-// then one per older generation of that cell, which carries none.
+// One line per cell's newest generation, carrying the guard's verdict on it:
+// `tripped`, `ok`, `unmatched` (merged PRs enough of its own, too few in the
+// stretches it shares with the baseline to be judged) or `n<MIN_N`; then one
+// per older generation of that cell, which carries none.
 export function formatReport(report) {
   const guardOf = (f) => {
     if (f.cell === BASELINE_CELL) return "baseline";
     if (report.tripped.includes(f.cell)) return "tripped";
+    if (report.unmatched.includes(f.cell)) return "unmatched";
     return f.n_merged >= MIN_N && report.verdict !== "none" ? "ok" : `n<${MIN_N}`;
   };
   const cell = (v) => (v === null || v === undefined ? "" : Array.isArray(v) ? `[${v.join(", ")}]` : String(v));

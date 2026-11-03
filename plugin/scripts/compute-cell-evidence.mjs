@@ -210,9 +210,11 @@ function mergedFigure(e, g, isBase) {
 }
 
 // The fail rate with its gap to the baseline's and to the floor, worked from the
-// claim and failure counts. Whole counts and the integer cross-product are what
-// the guard itself judges by (`underFloor`), so a gap near the floor reads the
-// way the guard rules; a rounded rate never enters it.
+// claim and failure counts of the Cell's whole generation. Whole counts and the
+// integer cross-product are what the guard itself judges by, so a rounded rate
+// never enters it. The guard holds a Cell to the baseline only over the stretches
+// both were drawn in, so a gap read from the whole generations can differ from
+// the one the guard ruled on, and `tripped` is what it ruled.
 function failFigure(e, g, baseEntry, isBase) {
   const claims = count(e.n_claims);
   const failed = count(e.n_failed);

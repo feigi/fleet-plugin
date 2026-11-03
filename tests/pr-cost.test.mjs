@@ -42,20 +42,20 @@ const tier = (o) => ({
   sizing: "light", profile: "small", loc: "10", files: "1", ...o,
 });
 
-// A whole ruled PR: one Pull at `cell` costing `usd`, its verdict, its state.
-function addPr(w, { ticket, pr, cell, usd, fail = false, state = "MERGED", agent = `impl-${ticket}` }) {
+// A whole ruled PR: one Pull at `cell` dated `date` costing `usd`, its verdict, its state.
+function addPr(w, { ticket, pr, cell, usd, fail = false, state = "MERGED", agent = `impl-${ticket}`, date = DAY }) {
   const level = cell.split("-")[1];
-  w.features.push(pull({ ticket: String(ticket), agent, chosen_cell: cell }));
+  w.features.push(pull({ ticket: String(ticket), agent, chosen_cell: cell, run_date: date }));
   w.members.push(member({ agent, ticket: String(ticket), cost: usd, effort: level, subagentType: `fleet-implementer-${cell}`, pr: String(pr) }));
   w.tiers.push(tier({ pr: String(pr), ticket: String(ticket), minted_false_claim: fail ? "yes" : "no" }));
   w.prs.push({ number: pr, state, mergedAt: state === "MERGED" ? `${DAY}T12:00:00Z` : null });
 }
-// `n` merged PRs at `cell`, `failures` of them failing the floor, each costing `usd`.
+// `n` merged PRs at `cell` dated `date`, `failures` of them failing the floor, each costing `usd`.
 let nextTicket = 1000;
-function addCell(w, cell, n, failures, usd) {
+function addCell(w, cell, n, failures, usd, date = DAY) {
   for (let i = 0; i < n; i++) {
     const t = nextTicket++;
-    addPr(w, { ticket: t, pr: t + 5000, cell, usd, fail: i < failures });
+    addPr(w, { ticket: t, pr: t + 5000, cell, usd, fail: i < failures, date });
   }
 }
 
@@ -450,13 +450,18 @@ test("the retire condition holds once every non-default starting Cell has trippe
   assert.equal(computeReport({ ...parsed(w), routerTable: sets({ "*": "slow-high" }) }).retire, true, "every row of both sets at the default is no adoption");
 });
 
+// `n` counted Pulls in one stretch, merged, one claim apiece, the first `failed` of them a false claim, each spending `usd`.
+const pulls = (n, failed, usd, stretch = "2026-10-05/0") => Array.from({ length: n }, (_, i) => ({
+  stretch, merged: true, claims: 1, falseClaims: i < failed ? 1 : 0, spend: usd, workS: 60,
+}));
+
 test("trips() takes the 15-point margin in counts, so 3 of 20 is exactly the margin", () => {
-  const base = { claims: 20, failed: 4, mean_usd: 10 };
-  assert.equal(trips({ claims: 20, failed: 7, mean_usd: 1 }, base), true, "7 of 20 failing vs 4 of 20 is +15 points");
-  assert.equal(trips({ claims: 20, failed: 6, mean_usd: 1 }, base), false, "6 of 20 vs 4 of 20 is +10 points");
-  assert.equal(trips({ claims: 40, failed: 14, mean_usd: 1 }, base), true, "35% vs 20% across different n");
-  assert.equal(trips({ claims: 20, failed: 0, mean_usd: 10 }, base), true, "equal $ trips");
-  assert.equal(trips({ claims: 20, failed: 0, mean_usd: 9.99 }, base), false);
+  const base = pulls(20, 4, 10);
+  assert.equal(trips(pulls(20, 7, 1), base), true, "7 of 20 failing vs 4 of 20 is +15 points");
+  assert.equal(trips(pulls(20, 6, 1), base), false, "6 of 20 vs 4 of 20 is +10 points");
+  assert.equal(trips(pulls(40, 14, 1), base), true, "35% vs 20% across different n");
+  assert.equal(trips(pulls(20, 0, 10), base), true, "equal $ trips");
+  assert.equal(trips(pulls(20, 0, 9.99), base), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -610,9 +615,9 @@ test("the A/B report is underpowered until B disagrees with the policy on MIN_N 
 });
 
 test("trips() draws the 15-point line at counts that are not multiples of 5", () => {
-  const base = { claims: 20, failed: 0, mean_usd: 10 };
-  assert.equal(trips({ claims: 50, failed: 7, mean_usd: 1 }, base), false, "7 of 50 failing is +14 points");
-  assert.equal(trips({ claims: 100, failed: 15, mean_usd: 1 }, base), true, "15 of 100 failing is +15 points");
+  const base = pulls(20, 0, 10);
+  assert.equal(trips(pulls(50, 7, 1), base), false, "7 of 50 failing is +14 points");
+  assert.equal(trips(pulls(100, 15, 1), base), true, "15 of 100 failing is +15 points");
 });
 
 test("the table labels a non-baseline cell under MIN_N as n<MIN_N rather than ok", () => {
@@ -1007,4 +1012,95 @@ test("guardFile with no blob ids keeps an empty tsv_blobs, and sorts the ones it
   const rep = computeReport(parsed(w));
   assert.deepEqual(guardFile(rep, "t").tsv_blobs, {});
   assert.deepEqual(Object.keys(guardFile(rep, "t", { b: "2", a: "1" }).tsv_blobs), ["a", "b"]);
+});
+
+// ---------------------------------------------------------------------------
+// Time-matched trips: a cell is held to the baseline of the weeks both were drawn in.
+
+// The Mondays of three weeks, after the window opens.
+const MON1 = "2026-10-05", MON2 = "2026-10-12", MON3 = "2026-10-19";
+
+test("--guard: a cell drawn in one week is held to the baseline's Pulls of that week alone, whatever the baseline did in its others", () => {
+  const w = world();
+  addCell(w, "slow-high", MIN_N, 6, 10, MON1);       // 30% in the week smol-high ran
+  addCell(w, "slow-high", MIN_N, 0, 10, MON2);       // and none in the next, so over its whole run 15%
+  addCell(w, "smol-high", MIN_N, 8, 3, MON1);        // 40%: +10 points where it ran, +25 on the whole run
+  const r = runCli(w);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual([r.guard.tripped, r.guard.verdict], [[], "ok"]);
+  assert.deepEqual(r.guard.cells.find((c) => c.cell === "smol-high").usd_diff_ci95, [-7, -7], "the interval is the matched one: $3 against $10");
+  assert.match(r.stdout, /^smol-high\t.*\tok$/m);
+  // The baseline's own figures are its whole run's.
+  assert.deepEqual(r.guard.baseline, { cell: "slow-high", generation: "claude-opus-5", n: 40, mean_usd: 10, fail_rate: 0.15 });
+});
+
+test("--guard: Pulls of the baseline alone in a later week neither trip a cell nor un-trip one", () => {
+  const w = world();
+  addCell(w, "slow-high", MIN_N, 4, 10, MON1);       // 20%
+  addCell(w, "smol-high", MIN_N, 8, 3, MON1);        // 40%: +20 points, tripped
+  assert.deepEqual(computeReport(parsed(w)).tripped, ["smol-high"]);
+  // A later week the baseline failed every PR in, at $50: its whole run now reads 60% and $30, past smol-high's 40% and $3.
+  addCell(w, "slow-high", MIN_N, MIN_N, 50, MON3);
+  const r = runCli(w);
+  assert.equal(r.status, 3, r.stderr);
+  assert.deepEqual(r.guard.tripped, ["smol-high"]);
+  assert.equal(r.guard.baseline.fail_rate, 0.6, "it is in the baseline's own figures all the same");
+});
+
+test("--guard: a cell that shares no week with the baseline is not judged and never tripped, however bad, and its line says unmatched", () => {
+  const w = world();
+  addCell(w, "slow-high", MIN_N, 0, 10, MON2);
+  addCell(w, "smol-high", MIN_N, MIN_N, 99, MON1);
+  const r = runCli(w);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual([r.guard.tripped, r.guard.verdict], [[], "ok"]);
+  assert.deepEqual(r.guard.cells.find((c) => c.cell === "smol-high").usd_diff_ci95, null);
+  assert.match(r.stdout, /^smol-high\t.*\tunmatched$/m);
+  assert.deepEqual(JSON.parse(runCli(w, ["--json"]).stdout).unmatched, ["smol-high"]);
+  assert.equal("unmatched" in r.guard, false, "the guard file is the file it was");
+});
+
+test("--guard: MIN_N counts the merged PRs of the weeks both were drawn in, not a cell's whole run", () => {
+  const build = (shared) => {
+    const w = world();
+    addCell(w, "slow-high", MIN_N, 0, 10, MON2);
+    addCell(w, "smol-high", MIN_N, 0, 3, MON1);               // 20 merged PRs of its own, where the baseline was not drawn
+    addCell(w, "smol-high", shared, shared, 3, MON2);         // every one of them failing, where it was
+    return computeReport(parsed(w));
+  };
+  const few = build(MIN_N - 1);
+  assert.deepEqual([few.tripped, few.unmatched], [[], ["smol-high"]], "39 merged PRs of its own, 19 of them matched");
+  assert.equal(few.cells.find((c) => c.cell === "smol-high").n_merged, 39);
+  const enough = build(MIN_N);
+  assert.deepEqual([enough.tripped, enough.unmatched], [["smol-high"], []]);
+});
+
+test("--guard: adding the same shift to every cell's Pulls within each week, a different one in each, leaves every trip as it was", () => {
+  // Each cell fails the same share of its claims in both weeks and costs the same, but each was drawn in a different mix of the two.
+  const mix = { "slow-high": [30, 10], "task-high": [10, 30], "smol-high": [20, 20] };
+  const level = { "slow-high": { usd: 10, rate: 20 }, "task-high": { usd: 2, rate: 30 }, "smol-high": { usd: 2, rate: 50 } };
+  const build = (shift) => {
+    const w = world();
+    for (const [cell, ns] of Object.entries(mix)) {
+      [MON1, MON2].forEach((date, k) => addCell(w, cell, ns[k], (ns[k] * (level[cell].rate + shift[k].rate)) / 100, level[cell].usd + shift[k].usd, date));
+    }
+    return computeReport(parsed(w));
+  };
+  const before = build([{ usd: 0, rate: 0 }, { usd: 0, rate: 0 }]);
+  // 10 more points of false claims and $3 a PR in the first week; 30 points and $20 in the second.
+  const after = build([{ usd: 3, rate: 10 }, { usd: 20, rate: 30 }]);
+  assert.deepEqual(before.tripped, ["smol-high"], "+30 points where task-high's +10 is within the floor and its $2 under the baseline's $10");
+  assert.deepEqual([after.tripped, after.unmatched, after.verdict], [["smol-high"], [], "tripped"]);
+  assert.notEqual(after.baseline.fail_rate, before.baseline.fail_rate, "the shift did move the baseline's own figures");
+});
+
+test("trips() holds a cell to MIN_N merged PRs on each side in the stretches it shares, and is never true of a cell that shares none", () => {
+  const base = pulls(20, 0, 10);
+  assert.equal(trips(pulls(19, 19, 1), base), false, "19 merged PRs, however bad");
+  assert.equal(trips(pulls(20, 20, 1), pulls(19, 0, 10)), false, "a baseline of 19");
+  assert.equal(trips(pulls(20, 20, 1, "2026-10-12/0"), base), false, "no stretch in common");
+  assert.equal(trips(pulls(20, 20, 1), base), true);
+  // Merged only in different stretches, the two share none that carries a figure to compare: nothing trips.
+  const unmerged = (units) => units.map((u) => ({ ...u, merged: false, claims: 0, falseClaims: 0 }));
+  assert.equal(trips([...pulls(20, 20, 1, "a"), ...unmerged(pulls(5, 0, 1, "b"))], [...unmerged(pulls(5, 0, 10, "a")), ...pulls(20, 0, 10, "b")]), false);
 });
