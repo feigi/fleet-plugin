@@ -277,10 +277,11 @@ function treeNodes(splits) {
 export function stratumOf(table, m) {
   let node = "*";
   while (Object.hasOwn(table.splits, node)) {
-    const { input, cut } = table.splits[node];
-    const v = inputOf(input, m);
+    const split = table.splits[node];
+    const v = inputOf(split.input, m);
     if (v === null) break;
-    node = childrenOf(node, table.splits[node])[(INPUTS[input] === "kind" ? v === cut : v > cut) ? 0 : 1];
+    const [holds, other] = childrenOf(node, split);
+    node = (INPUTS[split.input] === "kind" ? v === split.cut : v > split.cut) ? holds : other;
   }
   return node;
 }
@@ -314,7 +315,9 @@ export function validateTable(t) {
     if (Object.keys(s).length !== 2) return bad(`\`${at}\` is not \`{ input, cut }\``);
   }
   const nodes = treeNodes(t.splits);
-  const unreached = Object.keys(t.splits).find((path) => !nodes.includes(path));
+  // The first key of `o` that names no node of the tree.
+  const offTree = (o) => Object.keys(o).find((key) => !nodes.includes(key));
+  const unreached = offTree(t.splits);
   if (unreached !== undefined) return bad(`\`splits[${JSON.stringify(unreached)}]\` sits at no node of the tree`);
   // `rows` and `reasons` are each keyed by objective, then by the nodes of the tree.
   for (const field of ["rows", "reasons"]) {
@@ -324,12 +327,12 @@ export function validateTable(t) {
     for (const o of OBJECTIVES) {
       const set = t[field][o];
       if (!isObject(set)) return bad(`\`${field}.${o}\` is not an object`);
-      const k = Object.keys(set).find((key) => !nodes.includes(key));
+      const k = offTree(set);
       if (k !== undefined) return bad(`\`${field}.${o}\` key ${JSON.stringify(k)} is not a node of the tree`);
     }
   }
   if (isObject(t.estimates)) {
-    const k = Object.keys(t.estimates).find((key) => !nodes.includes(key));
+    const k = offTree(t.estimates);
     if (k !== undefined) return bad(`\`estimates\` key ${JSON.stringify(k)} is not a node of the tree`);
   }
   for (const o of OBJECTIVES) {

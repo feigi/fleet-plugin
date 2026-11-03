@@ -33,7 +33,7 @@
 // fleet-tick.mjs's I/O and main() never run here, main() being guarded on
 // argv[1].
 import { assessBeat, isStalled, isReported, stallReport, NO_OWNER } from "./fleet-state.mjs";
-import { parseToken, rowPr, premisesOf, HALT_CAUSES, REVIEW, CELL, POLICY_CELL, parseRoutedEntry, tierValues, cellValues } from "./ledger-grammar.mjs";
+import { parseToken, rowPr, premisesOf, HALT_CAUSES, REVIEW, CELL, POLICY_CELL, parseRoutedEntry, tierValues, cellValues, isRulePath } from "./ledger-grammar.mjs";
 import { latestFinisherAttempts, foldLedger, pastPinDue } from "./fleet-tick.mjs";
 import { computeCellEvidence } from "./compute-cell-evidence.mjs";
 import { admissibleRow, lastSegment } from "./pull-attribution.mjs";
@@ -340,6 +340,14 @@ function implementersOf(row, issue) {
     .map((t) => t.name);
 }
 
+// The policy row a Routing links to: its group's, else the `*` row — for a group the table holds no row for, and for
+// a word filed before the table was a tree (`light`, `heavy`, `unknown`), which names no place on Cell evidence. With
+// no table read, a rule path is linked as filed.
+function rowHref(r, table) {
+  const own = isRulePath(r.stratum) && (table === null || Object.hasOwn(table.rows[r.objective], r.stratum));
+  return `#cells/row/${r.objective}/${own ? r.stratum : "*"}`;
+}
+
 // The words of a recorded reason, after the draw's, and whether they name the
 // policy row. `REASON` keeps only the first thing that went wrong, and nothing
 // here guesses the rest.
@@ -350,12 +358,11 @@ function reasonWords(r, table) {
     case "ok": {
       if (drawn) return [];
       const follows = table !== null && !Object.hasOwn(table.rows[r.objective], r.stratum);
-      const href = `#cells/row/${r.objective}/${follows ? "*" : r.stratum}`;
-      return [part(`${row}, ${r.stratum}`, { href }), ...(follows ? [part("follows *")] : [])];
+      return [part(`${row}, ${r.stratum}`, { href: rowHref(r, table) }), ...(follows ? [part("follows *")] : [])];
     }
     case "table-cell-tripped": {
       const named = r.tripped.length === 1 ? `${row}'s ${r.tripped[0]}` : `${row}'s Cell (one of ${r.tripped.join(", ")})`;
-      return [part(`${named} tripped${drawn ? "" : ": default Cell"}`, { href: `#cells/row/${r.objective}/${r.stratum}` })];
+      return [part(`${named} tripped${drawn ? "" : ": default Cell"}`, { href: rowHref(r, table) })];
     }
     case "guard-tripped":
       return [part(drawn ? `left out as tripped: ${r.tripped.join(", ")}` : "every other Cell tripped: no draw")];

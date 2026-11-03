@@ -1754,6 +1754,37 @@ test("fit: a Slice's Pull is booked in the group of its parent, as it was routed
   assert.equal(next.estimates["parent<=0"]["smol-high"].n, 1);
 });
 
+test("fit: an inner node's estimates are over every Pull that went through it — its own group's and each group's below it", () => {
+  // Over DEEP: a bug below the cut ends at the leaf KIND_BELOW; a ticket with a blank kind stops at BELOW, the inner node.
+  const bug = exploring({ ticket: "1", chosen_cell: "task-high", brief_chars: "100", kind: "bug" });
+  const blank = exploring({ ticket: "2", chosen_cell: "task-high", brief_chars: "100", kind: "", session: SESSION2 });
+  const next = fitTable({ prior: treeOf(DEEP, DEEP_NODES, { burn_in: true }), ...direct({ features: [bug, blank], members: [], verdicts: [] }), guard: atN });
+  assert.equal(next.estimates[KIND_BELOW]["task-high"].n, 1, "the leaf: its own group's Pull");
+  assert.equal(next.estimates[BELOW]["task-high"].n, 2, "the inner node: its own group's Pull and the one below it");
+  assert.equal(next.estimates["*"]["task-high"].n, 2);
+  assert.equal(next.estimates[NOT_KIND_BELOW], undefined, "a node no Pull went through has none");
+});
+
+test("fit: a node with no row of its own holds its parent's — the node one test up its path, at any depth", () => {
+  // A third level under DEEP: KIND_BELOW splits on criteria. Every Pull carries one criterion, so the node past
+  // that cut, three tests deep, has no Pull and holds its parent's rows. The bugs make smol-high KIND_BELOW's row;
+  // smol-high's false claims on enhancements keep BELOW, one test further up, on slow-high.
+  const PAST = `${KIND_BELOW}&criteria>2`;
+  const prior = treeOf({ ...DEEP, [KIND_BELOW]: { input: "criteria", cut: 2 } }, [...DEEP_NODES, PAST, `${KIND_BELOW}&criteria<=2`], { burn_in: true });
+  const { features, members, verdicts } = adoptionInput({ cheapFails: false });
+  for (let ticket = 500; ticket < 520; ticket++) {
+    const f = featureRow({ ticket: String(ticket), chosen_cell: "smol-high", exploration_draw: "1/3", kind: "enhancement" });
+    features.push(f);
+    members.push(implementer(f, { pr: String(ticket + 1000), cost: "2", ending: "pr" }));
+    verdicts.push(ruled(ticket, ticket + 1000, { minted_false_claim: "yes" }));
+  }
+  const next = fitTable({ prior, ...direct({ features, members, verdicts }), guard: atN });
+  assert.deepEqual([next.rows.cost[BELOW], next.rows.cost[KIND_BELOW]], ["slow-high", "smol-high"], "the fixture: the two ancestors hold different rows");
+  assert.equal(next.reasons.cost[PAST].reason, "unjudged", "no Pull went through it");
+  assert.equal(next.rows.cost[PAST], "smol-high", "its parent's cost row, not BELOW's");
+  assert.equal(next.rows.speed[PAST], next.rows.speed[KIND_BELOW], "its parent's speed row");
+});
+
 test("fit: a features row whose run_date is blank is no input row", () => {
   // route() writes a blank run_date for a session id with no date prefix; ticket 9's blank row sits in another cell.
   const features = [

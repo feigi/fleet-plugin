@@ -122,8 +122,10 @@ test("cellLine: the Stratum is the group's rule path, and no brief length is set
   }
 });
 
-test("cellLine: under arm B the Stratum reads its sizing label", () => {
+test("cellLine: under arm B the Stratum reads its sizing label, ahead of a brief that was not read", () => {
   assert.equal(lines(undrawn({ stratum: RULE, sized: "heavy" }))[1], `${RULE}: sized heavy · claude-haiku-5-5 · high`);
+  assert.equal(lines(undrawn({ stratum: "*", sized: "heavy", brief: null, criteria: null, reason: "no-issue-json" }))[1], "*: sized heavy · claude-haiku-5-5 · high",
+    "the label arm B gave the Pull, not the brief nobody read");
 });
 
 test("cellLine: a Slice's line names its parent after the Stratum, and arm B's label still stands for its Pull", () => {
@@ -144,6 +146,20 @@ test("cellLine: a Routing filed before the tree reads its old word as the Stratu
     ], stratum);
   }
   assert.equal(lines(undrawn({ stratum: "unknown", brief: null, criteria: null, reason: "no-issue-json" }))[1], "unknown: no brief read · claude-haiku-5-5 · high");
+});
+
+test("cellLine: the policy row's link lands on the `*` row for a group the table has no row for, and for an old word with or without a table", () => {
+  const star = { rows: { cost: { "*": "slow-high" }, speed: { "*": "slow-high" } } };
+  const tripped = { reason: "table-cell-tripped", tripped: ["task-high"] };
+  assert.equal(lines(undrawn(tripped, star))[0], "slow-high<#cells/slow-high@claude-haiku-5-5> · cost row's task-high tripped: default Cell<#cells/row/cost/*>",
+    "a group the table has no row for");
+  for (const stratum of ["light", "heavy", "unknown"]) {
+    for (const table of [star, null]) {
+      assert.equal(lines(undrawn({ ...tripped, stratum }, table))[0], "slow-high<#cells/slow-high@claude-haiku-5-5> · cost row's task-high tripped: default Cell<#cells/row/cost/*>",
+        `${stratum}, tripped, ${table === null ? "no table" : "a table"}`);
+    }
+    assert.equal(lines(undrawn({ stratum }, null))[0], `slow-high<#cells/slow-high@claude-haiku-5-5> · cost row, ${stratum}<#cells/row/cost/*>`, `${stratum}, ok, no table`);
+  }
 });
 
 // -- the model -----------------------------------------------------------------

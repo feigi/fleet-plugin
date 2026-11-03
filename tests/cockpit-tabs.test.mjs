@@ -65,7 +65,8 @@ test("routeHash: #cells opens Cell evidence, a section, a Cell or a generation o
 });
 
 // What a policy row is named by: the root, or a group's rule path, as the Routing line's STRATUM names it.
-const GROUPS = ["*", "brief_chars>4047", "brief_chars<=4047", "kind=bug", "kind!=bug", "parent>0", "brief_chars>4047&kind=bug", "brief_chars<=4047&criteria>5.5"];
+const GROUPS = ["*", "brief_chars>4047", "brief_chars<=4047", "kind=bug", "kind!=bug", "parent>0", "brief_chars>4047&kind=bug", "brief_chars<=4047&criteria>5.5",
+  "brief_chars>4047&kind=bug&parent>0"];
 // A browser hands a fragment back with `<` and `>` percent-encoded, the rest of a rule path as it was.
 const inFragment = (s) => s.replace(/</g, "%3C").replace(/>/g, "%3E");
 
