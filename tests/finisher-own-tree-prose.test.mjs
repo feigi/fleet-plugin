@@ -145,9 +145,11 @@ test("the gate's tree is built by finisher-tree.mjs, which runs the Install step
     );
     assert.match(
       text,
-      Pin.phrase("1 no usable tree (an occupied path, a failed add, a head that is not your pin, a Recipe that could not be read, a tree dirty before the Install step), 3 the Install step did not run (exit 126 or 127, a broken Recipe), 4 the Install step failed, 5 the Install step changed the tree or left its state unreadable; exit 2 is a refusal with no receipt, a refused invocation or a receipt the script could not write"),
+      Pin.phrase("1 no usable tree (an occupied path, a failed add, a head that is not your pin, a Recipe that could not be read, a tree dirty before the Install step), 3 the Install step did not run (exit 126 or 127, the cause not established), 4 the Install step failed, 5 the Install step changed the tree or left its state unreadable; exit 2 is a refusal with no receipt, a refused invocation or a receipt the script could not write"),
       `${where} no longer names the script's distinct exit codes`,
     );
+    // An exit 126 or 127 is the shell's "cannot execute" or "not found": only the leading word was probed, and a path inside the repository only against origin/main, so it names no Recipe fault by itself.
+    assert.doesNotMatch(text, /broken Recipe/, `${where} calls the Install step's exit 126 or 127 a broken Recipe again, though nothing in it says the Recipe is at fault`);
     assert.match(text, /the script fails closed on an occupied path/, `${where} no longer says an occupied path fails closed`);
     assert.doesNotMatch(text, /`worktree add` on an occupied path fails closed into a halt/, `${where} still says the finisher's own \`worktree add\` meets an occupied path`);
   }

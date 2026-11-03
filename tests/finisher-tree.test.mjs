@@ -16,7 +16,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { REDERIVE } from "../plugin/scripts/evict.mjs";
+import { NOT_ESTABLISHED, REDERIVE } from "../plugin/scripts/evict.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/finisher-tree.mjs", import.meta.url));
 const SOURCE = readFileSync(SCRIPT, "utf8");
@@ -124,8 +124,8 @@ test("the premise: a bare detached tree at the pin cannot start the suite", (t) 
 
 test("an Install step that cannot run, one that fails, and one that changes the tree or hides its state each get their own exit and a receipt", (t) => {
   const cases = [
-    [{ INSTALL_EXIT: "127" }, 3, "not-run", 127, (tree) => `the Install step 'sh install.sh' did not run in ${tree} (exit 127: not executable or not found) — ${REDERIVE}`],
-    [{ INSTALL_EXIT: "126" }, 3, "not-run", 126, (tree) => `the Install step 'sh install.sh' did not run in ${tree} (exit 126: not executable or not found) — ${REDERIVE}`],
+    [{ INSTALL_EXIT: "127" }, 3, "not-run", 127, (tree) => `the Install step 'sh install.sh' did not run in ${tree} (exit 127: not executable or not found) — ${NOT_ESTABLISHED}`],
+    [{ INSTALL_EXIT: "126" }, 3, "not-run", 126, (tree) => `the Install step 'sh install.sh' did not run in ${tree} (exit 126: not executable or not found) — ${NOT_ESTABLISHED}`],
     [{ INSTALL_EXIT: "1" }, 4, "failed", 1, (tree) => `install failed in ${tree} (exit 1)`],
     [{ INSTALL_EXIT: "9" }, 4, "failed", 9, (tree) => `install failed in ${tree} (exit 9)`],
     [{ INSTALL_DIRTY: "1" }, 5, "dirtied", 0, (tree) => `the Install step 'sh install.sh' changed the tree in ${tree} (first:  M tracked.txt) — ${REDERIVE}`],

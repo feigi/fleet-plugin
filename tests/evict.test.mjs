@@ -15,7 +15,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { IDLE_MS, REDERIVE, isIdle, liveHolds, rowTickets } from "../plugin/scripts/evict.mjs";
+import { IDLE_MS, NOT_ESTABLISHED, REDERIVE, isIdle, liveHolds, rowTickets } from "../plugin/scripts/evict.mjs";
 import { EVICTED, RESTORED, restoreCommand } from "../plugin/scripts/evict-mark.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/evict.mjs", import.meta.url));
@@ -381,11 +381,13 @@ test("--restore without --apply runs nothing and names the command", (t) => {
   assert.ok(existsSync(f.mark(wt)));
 });
 
-test("a restore whose install fails, does not run, or dirties the tree refuses with the claim's words and leaves the mark", (t) => {
+test("a restore whose install fails, does not run, or dirties the tree refuses and leaves the mark", (t) => {
   const cases = [
     [{ INSTALL_EXIT: "1" }, (wt) => `install failed in ${wt} (exit 1)`],
-    [{ INSTALL_EXIT: "127" }, (wt) => `the Install step 'sh install.sh' did not run in ${wt} (exit 127: not executable or not found) — ${REDERIVE}`],
-    [{ INSTALL_EXIT: "126" }, (wt) => `the Install step 'sh install.sh' did not run in ${wt} (exit 126: not executable or not found) — ${REDERIVE}`],
+    // 126 is the shell's "cannot execute" and 127 its "not found"; neither says
+    // why, so neither takes the claim's words and sends its reader to re-derive.
+    [{ INSTALL_EXIT: "127" }, (wt) => `the Install step 'sh install.sh' did not run in ${wt} (exit 127: not executable or not found) — ${NOT_ESTABLISHED}`],
+    [{ INSTALL_EXIT: "126" }, (wt) => `the Install step 'sh install.sh' did not run in ${wt} (exit 126: not executable or not found) — ${NOT_ESTABLISHED}`],
     [{ INSTALL_DIRTY: "1" }, (wt) => `the Install step 'sh install.sh' changed the tree in ${wt} (first:  M tracked.txt) — ${REDERIVE}`],
   ];
   for (const [env, said] of cases) {
@@ -436,6 +438,14 @@ test("a restore whose mark cannot be removed says the restore time was recorded 
 test("REDERIVE is claim-ticket.sh's own refusal, word for word", () => {
   const line = readFileSync(CLAIM, "utf8").split("\n").find((l) => l.startsWith("rederive="));
   assert.equal(line, `rederive="${REDERIVE}"`);
+});
+
+// The Install step's leading word was probed, and a path inside the repository
+// only against origin/main, so the tree's own change, a tree behind origin/main
+// and a later word of the command can each produce an exit 126 or 127, and a
+// re-derivation proves the same Recipe on origin/main again.
+test("an exit 126 or 127 names no cause and sends nobody to re-derive, word for word", () => {
+  assert.equal(NOT_ESTABLISHED, "the cause is not established: only the command's first word was checked, and a path inside the repository only against origin/main, so the tree's own change, a tree behind origin/main, or a later word of the command could each produce this exit");
 });
 
 test("the restore command keeps a tree path with a space or a quote in it one word", () => {

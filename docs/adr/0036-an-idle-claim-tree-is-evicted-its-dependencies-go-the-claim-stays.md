@@ -2,7 +2,9 @@
 
 **Status:** Accepted. Ruled 2026-10-31 by the maintainer in a grilling session
 on #3994, against `main` at `ff574efe`. The ruling replaces the issue body's
-proposed remedy, which removed the whole worktree.
+proposed remedy, which removed the whole worktree. Amended by #4228: the
+restore no longer reports an Install step's exit 126/127 as a Recipe that no
+longer runs, as decision 6 below words it; that exit names no cause by itself.
 
 ## Context
 
