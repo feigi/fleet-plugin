@@ -69,7 +69,7 @@ import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { isCLI } from "./is-cli.mjs";
 import { gitEnv } from "./git-env.mjs";
-import { makeDie, defineFlags } from "./arg.mjs";
+import { makeDie, defineFlags, isDigits } from "./arg.mjs";
 import { CELL, OBJECTIVES, POLICY_CELL, STARTING_CELLS, drawCell, formatRouting, isRulePath, parseMember } from "./ledger-grammar.mjs";
 import { objectiveFromReceipt, sessionFromReceipt } from "./phase0-receipt.mjs";
 import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
@@ -246,9 +246,11 @@ export function namedLines(named, root) {
 // ticket of the cut's kind goes to `kind=<cut>` and any other to
 // `kind!=<cut>`. A ticket that lacks the input a split reads — its issue was not
 // read, or its column is blank — goes no further than that node, and the
-// node's own row routes it. Every node, inner nodes and root included, holds a
-// `cost` row and a `speed` row of its own, and its estimates and reasons. A
-// table with no split is the one-node tree: `*` routes every ticket.
+// node's own row routes it. A number input's column that is neither blank nor a
+// plain count (digits alone) is bad input: the walk refuses it. Every node,
+// inner nodes and root included, holds a `cost` row and a `speed` row of its
+// own, and its estimates and reasons. A table with no split is the one-node
+// tree: `*` routes every ticket.
 
 const SEP = "&";
 // Each input a split may read, and what it reads as: the columns of a ticket-features row that are known at
@@ -260,15 +262,24 @@ const INPUTS = Object.freeze({
   parent: "number", kind: "kind",
 });
 
-/** What a ticket holds for `input` — a number, or a kind — or null where it lacks it: its issue was not read, or its column is blank. */
+/**
+ * What a ticket holds for `input` — a number, or a kind — or null where it lacks it: its issue was not read, or its
+ * column is blank. Throws `AttributionError` on a number input's column that is neither blank nor a plain count: digits
+ * alone, as `issueMetrics` writes one, with no sign, exponent, radix prefix, fraction or space, and few enough to read
+ * as a finite number.
+ */
 function inputOf(input, m) {
   // A row whose issue was not read has blank metrics, `brief_chars` among them: it holds none of the inputs.
   if (m.brief_chars === undefined || m.brief_chars === "") return null;
   const s = m[input] ?? "";
   if (input === "kind") return s === "" ? null : s;
-  if (input === "parent" && s === "") return 0;
-  const n = s === "" ? NaN : Number(s);
-  return Number.isFinite(n) ? n : null;
+  if (s === "") return input === "parent" ? 0 : null;
+  const n = isDigits(s) ? Number(s) : NaN;
+  if (!Number.isFinite(n)) {
+    const row = m.ticket === undefined ? "a ticket-features row" : `ticket #${m.ticket}: a ticket-features row`;
+    throw new AttributionError(`${row}'s ${input} is '${s}', which a split reads, expected a plain count or blank`);
+  }
+  return n;
 }
 
 const child = (node, test) => (node === "*" ? test : `${node}${SEP}${test}`);
@@ -1144,10 +1155,10 @@ function main() {
     }
     return sha;
   };
-  // The join throws on a features row it cannot date, a booked member row whose `cost` or `work_s` is not a number, and a
-  // ruling of a windowed Pull's ticket it cannot place — for `fit` and `--check` too on a Pull the fit then skips
-  // as a live B classifier's, since every windowed Pull is booked before that skip. Anything else it throws is a
-  // bug, never bad input, so it surfaces with its stack.
+  // The join throws on a features row it cannot date or whose column a split reads holds no plain count, a booked
+  // member row whose `cost` or `work_s` is not a number, and a ruling of a windowed Pull's ticket it cannot place —
+  // for `fit` and `--check` too on a Pull the fit then skips as a live B classifier's, since every windowed Pull is
+  // booked before that skip. Anything else it throws is a bug, never bad input, so it surfaces with its stack.
   const joined = (fit) => {
     try { return fit(); } catch (e) {
       if (!(e instanceof RulingError || e instanceof AttributionError)) throw e;

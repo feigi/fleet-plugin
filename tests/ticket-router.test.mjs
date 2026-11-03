@@ -9,7 +9,7 @@ import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import {
   DEFAULT_TABLE, assignmentProb, bArmLive, explorationCells, installOf, installVersion, issueMetrics, route, rowDispatch, rowFor, fitTable, readGuard, stratumOf, validateTable, formatFeatureRow, mergedSince, resolveCommit, sliceParent,
 } from "../plugin/scripts/ticket-router.mjs";
-import { FEATURE_COLUMNS as COLUMNS, parseFeatures } from "../plugin/scripts/pull-attribution.mjs";
+import { AttributionError, FEATURE_COLUMNS as COLUMNS, parseFeatures } from "../plugin/scripts/pull-attribution.mjs";
 import { drawCell, CELL, STARTING_CELLS, formatRouting, parseRouting } from "../plugin/scripts/ledger-grammar.mjs";
 import { COLUMNS as MEMBER_COLUMNS, parseTsv as parseMemberTsv } from "../plugin/scripts/member-outcomes.mjs";
 import { COLUMNS as VERDICT_COLUMNS } from "../plugin/scripts/tier-outcomes.mjs";
@@ -974,7 +974,8 @@ test("stratumOf: a number split sends a ticket past the cut to its `>` group and
   assert.equal(at(table, { brief_chars: String(CUT) }), BELOW, "the cut itself is not past it");
   assert.equal(at(table, { brief_chars: "0" }), BELOW);
   assert.equal(at(table, { brief_chars: "123456" }), ABOVE);
-  assert.equal(at(table, { brief_chars: "4047.5" }), ABOVE, "a number is a number, whole or not");
+  assert.equal(at(table, { brief_chars: "5000" }), ABOVE);
+  assert.equal(at(table, { brief_chars: "04047" }), BELOW, "a plain count with a leading zero is still that count");
   for (const input of NUMBER_INPUTS) {
     const split = treeOf({ "*": { input, cut: 5 } }, ["*", `${input}>5`, `${input}<=5`]);
     assert.equal(at(split, { [input]: "6" }), `${input}>5`, input);
@@ -990,7 +991,6 @@ test("stratumOf: a ticket that lacks the input a split reads stays at that node 
   assert.equal(stratumOf(table, {}), "*", "no metrics at all");
   assert.equal(stratumOf(table, { brief_chars: "", criteria: "", kind: "", parent: "" }), "*", "the issue was not read");
   assert.equal(at(table, { brief_chars: undefined }), "*");
-  assert.equal(at(table, { brief_chars: "many" }), "*", "a column that holds no number lacks it");
   assert.equal(at(table, { brief_chars: "" }), "*");
   const age = treeOf({ "*": { input: "age_days", cut: 3 } }, ["*", "age_days>3", "age_days<=3"]);
   assert.equal(at(age, { age_days: "3" }), "age_days<=3");
@@ -999,6 +999,41 @@ test("stratumOf: a ticket that lacks the input a split reads stays at that node 
   const dirs = treeOf({ "*": { input: "dirs", cut: 1 } }, ["*", "dirs>1", "dirs<=1"]);
   assert.equal(at(dirs, { dirs: "" }), "*", "a brief that names no path spans no directory count");
   assert.equal(stratumOf(dirs, issueMetrics(issue())), "*");
+});
+
+// A features column a split reads that is neither blank nor a plain count, each a value `Number()` reads as no number
+// or as some number — or, for a digit string too long to read as a finite number, as Infinity.
+const CORRUPT_COUNTS = ["abc", "many", "Infinity", "1e400", "5e3", "0x1000", "0b1", "0o7", " 5000 ", "5000 ", "5000.5", "-5", "+5", " ", "\t", "5000\n", "9".repeat(309)];
+// A brief_chars split with a criteria split on its `<=` side.
+const CRITERIA_BELOW = treeOf({ ...SPLITS, [BELOW]: { input: "criteria", cut: 2 } }, ["*", ABOVE, BELOW, `${BELOW}&criteria>2`, `${BELOW}&criteria<=2`]);
+
+test("stratumOf refuses a column a number split reads that is neither blank nor a plain count, naming the column and value — and the row's ticket where it has one", () => {
+  const table = twoLeaf({ "*": "slow-high", [ABOVE]: "slow-high", [BELOW]: "slow-high" });
+  for (const bad of CORRUPT_COUNTS) {
+    assert.throws(() => at(table, { brief_chars: bad }), (e) => e instanceof AttributionError && e.message.includes(`brief_chars is '${bad}'`), JSON.stringify(bad));
+    assert.throws(() => at(table, { ticket: "7", brief_chars: bad }), (e) => e instanceof AttributionError && e.message.includes(`ticket #7: a ticket-features row's brief_chars is '${bad}'`), JSON.stringify(bad));
+  }
+  for (const input of NUMBER_INPUTS.filter((i) => i !== "brief_chars")) {
+    const split = treeOf({ "*": { input, cut: 5 } }, ["*", `${input}>5`, `${input}<=5`]);
+    for (const bad of CORRUPT_COUNTS) {
+      assert.throws(() => at(split, { [input]: bad }), (e) => e instanceof AttributionError && e.message.includes(`${input} is '${bad}'`), `${input} ${JSON.stringify(bad)}`);
+    }
+  }
+  // Deeper in the tree too: the walk refuses the cell the split it reaches reads.
+  assert.throws(() => at(CRITERIA_BELOW, { brief_chars: "100", criteria: "2.5" }), /criteria is '2\.5'/);
+});
+
+test("stratumOf reads past a corrupt column no split it reaches reads, and an unread issue's row, whatever its other columns hold", () => {
+  const table = twoLeaf({ "*": "slow-high", [ABOVE]: "slow-high", [BELOW]: "slow-high" });
+  const criteria = treeOf({ "*": { input: "criteria", cut: 2 } }, ["*", "criteria>2", "criteria<=2"]);
+  for (const bad of CORRUPT_COUNTS) {
+    for (const other of NUMBER_INPUTS.filter((o) => o !== "brief_chars")) assert.equal(at(table, { brief_chars: "5000", [other]: bad }), ABOVE, `${other} ${JSON.stringify(bad)}`);
+    assert.equal(stratumOf(criteria, { brief_chars: "", criteria: bad }), "*", "an unread issue holds no input");
+  }
+  // Past the cut there is no further split, so the criteria the `<=` side's split reads is never read.
+  assert.equal(at(CRITERIA_BELOW, { brief_chars: "5000", criteria: "2.5" }), ABOVE);
+  assert.equal(at(CRITERIA_BELOW, { brief_chars: "100", criteria: "3" }), `${BELOW}&criteria>2`);
+  assert.equal(at(CRITERIA_BELOW, { brief_chars: "100", criteria: "" }), BELOW);
 });
 
 test("stratumOf: a kind split sends a ticket of that kind to `kind=` and any other kind to `kind!=`; a ticket with no kind lacks the input", () => {
@@ -1992,6 +2027,54 @@ test("fit, fit --due and --check refuse at exit 2 a features row whose run_date 
   for (const args of [[...fitArgs, "--due"], fitArgs]) {
     const r = cli(args);
     assert.equal(r.status, 0, `${args.join(" ")}: ${r.stderr}`);
+  }
+});
+
+test("fit refuses a features row whose column a split reads is neither blank nor a plain count; blank or a plain count, or corrupt in a column no split reads, fits", () => {
+  const prior = twoLeaf({ "*": "slow-high", [ABOVE]: "slow-high", [BELOW]: "slow-high" });
+  const fitOver = (features) => fitTable({ prior, ...direct({ features, members: [], verdicts: [] }), guard: { tripped: [], n: {}, window_start: null } });
+  const one = exploring({ ticket: "1" });
+  for (const bad of CORRUPT_COUNTS) {
+    assert.throws(
+      () => fitOver([one, exploring({ ticket: "7", brief_chars: bad })]),
+      (e) => e instanceof AttributionError && e.message.includes(`ticket #7: a ticket-features row's brief_chars is '${bad}'`),
+      JSON.stringify(bad),
+    );
+    assert.doesNotThrow(() => fitOver([one, exploring({ ticket: "7", criteria: bad })]), `criteria ${JSON.stringify(bad)}: no split reads it`);
+  }
+  for (const fine of ["", "0", "4047", "5000"]) assert.doesNotThrow(() => fitOver([one, exploring({ ticket: "7", brief_chars: fine })]), JSON.stringify(fine));
+});
+
+test("fit and --check refuse at exit 2 a features row whose column a split reads is not a plain count, and leave the table alone; fit --due walks no tree; blanked or fixed, it fits", (t) => {
+  const split = (over = {}) => twoLeaf({ "*": "slow-high", [ABOVE]: "slow-high", [BELOW]: "slow-high" }, undefined, { burn_in: true, ...over });
+  const p = fitWorld(t, { features: [exploring({ ticket: "1" }), exploring({ ticket: "7", brief_chars: "5e3" })], members: [], verdicts: [ruled(1, 11)], table: split() });
+  // --check re-fits the commit the table records, so the table records the one holding the row.
+  writeFileSync(p.table, JSON.stringify(split({ fitted_commit: p.git("rev-parse", "HEAD") })));
+  const before = readFileSync(p.table, "utf8");
+  const fitArgs = ["fit", ...p.fitArgs, "--guard", p.guard, "--commit", "HEAD"];
+  assert.equal(cli([...fitArgs, "--due"]).status, 0, "--due counts merged PRs and walks no tree");
+  for (const args of [fitArgs, ["--check", ...p.fitArgs]]) {
+    const r = cli(args);
+    assert.equal(r.status, 2, `${args.join(" ")}: ${r.stderr}`);
+    assert.match(r.stderr, /cannot join --features .*, --members .* and --verdicts .*: ticket #7: a ticket-features row's brief_chars is '5e3', which a split reads, expected a plain count or blank/);
+    assert.equal(r.stdout, "");
+  }
+  assert.equal(readFileSync(p.table, "utf8"), before);
+  for (const fixed of ["", "5000"]) {
+    p.write({ features: [exploring({ ticket: "1" }), exploring({ ticket: "7", brief_chars: fixed })], verdicts: [ruled(1, 11)] });
+    p.commit();
+    for (const args of [[...fitArgs, "--due"], fitArgs]) {
+      const r = cli(args);
+      assert.equal(r.status, 0, `brief_chars ${JSON.stringify(fixed)}, ${args.join(" ")}: ${r.stderr}`);
+    }
+  }
+});
+
+test("parseFeatures reads past a corrupt number column: only a split's walk refuses one", () => {
+  for (const bad of CORRUPT_COUNTS.filter((b) => !b.includes("\n") && !b.includes("\t"))) {
+    const [row] = parseFeatures(tsv(COLUMNS, [featureRow({ ticket: "7", brief_chars: bad, criteria: bad })], true));
+    assert.equal(row.brief_chars, bad, JSON.stringify(bad));
+    assert.equal(row.criteria, bad, JSON.stringify(bad));
   }
 });
 
