@@ -43,9 +43,11 @@ const parsed = (w) => ({
   features: parseFeatures([FEATURE_COLUMNS.join("\t"), ...w.features.map((f) => FEATURE_COLUMNS.map((c) => f[c] ?? "").join("\t"))].join("\n")),
 });
 const prior = {
-  window_start: null, fitted_commit: null, n_rows: 0, stage: 1, cells: ["slow-high", "task-high", "smol-high"], burn_in: true,
+  window_start: null, fitted_commit: null, n_rows: 0, stage: 1, cells: ["slow-high", "task-high", "smol-high"], burn_in: true, splits: {},
   rows: { "*": "slow-high" }, classifier: { b: null, tau: null }, estimates: {}, guard: { tripped: [], n: {} },
 };
+// The prior with one split, where the old light/heavy rule drew its line on the criteria count: five or fewer is `criteria<=5`.
+const SPLIT = { ...prior, splits: { "*": { input: "criteria", cut: 5 } } };
 // One world's per-cell figures, in the guard's report and in the fit's table.
 function figures(w) {
   const p = parsed(w);
@@ -850,11 +852,11 @@ function addPulls(w, { cell, model, count, session = SESSION, usd = 1, work = 60
   }
 }
 // The guard's report on `w`, and the fit over it, fed the guard file as the fit reads one.
-function guarded(w) {
+function guarded(w, from = prior) {
   const p = parsed(w);
   const report = computeReport({ ...p, prs: w.prs });
   const guard = readGuard(guardFile(report, "t"));
-  const table = fitTable({ prior, features: p.features, members: p.members, verdicts: p.tiers, guard });
+  const table = fitTable({ prior: from, features: p.features, members: p.members, verdicts: p.tiers, guard });
   return { report, guard, table };
 }
 const baseline = (w, o = {}) => addPulls(w, { cell: "slow-high", model: "model-s", count: 20, usd: 10, ...o });
@@ -866,7 +868,7 @@ test("a cell's newest generation is judged alone: 25 merged on A then 22 on B re
   // A alone trips on both legs ($20 against the baseline's $10, 40% false claims); B alone trips on neither.
   addPulls(w, { cell: "smol-high", model: "model-a", count: 25, usd: 20, work: 1800, fails: 10 });
   addPulls(w, { cell: "smol-high", model: "model-b", count: 22, usd: 2, work: 600, session: SESSION2 });
-  const { report, guard, table } = guarded(w);
+  const { report, guard, table } = guarded(w, SPLIT);
 
   const smol = report.cells.find((c) => c.cell === "smol-high");
   assert.deepEqual([smol.generation, smol.n_merged, smol.mean_usd, smol.fail_rate], ["model-b", 22, 2, 0]);
@@ -884,7 +886,7 @@ test("a cell's newest generation is judged alone: 25 merged on A then 22 on B re
   assert.deepEqual(Object.keys(est.older), ["model-a"]);
   const older = est.older["model-a"];
   assert.deepEqual([older.n, older.usd_per_merged, older.minutes_per_merged, older.fail_rate, older.untimed], [25, 20, 30, 0.4, 0]);
-  assert.equal(table.estimates.light["smol-high"].older["model-a"].minutes_per_merged, 30, "a stratum row keeps each older generation's time too");
+  assert.equal(table.estimates["criteria<=5"]["smol-high"].older["model-a"].minutes_per_merged, 30, "a group's row keeps each older generation's time too");
   // Pooled, smol-high's $ per merged PR is (25×20 + 22×2) / 47 ≈ $11.57, over the 0.75 × $10 adoption bar; B's $2 is under it.
   assert.equal(table.rows.cost["*"], "smol-high", "the fit adopts on B's figures alone");
 });
@@ -1101,12 +1103,12 @@ test("the fit names each cell's newest generation as the guard does: ranked over
   addPulls(w, { cell: "task-high", model: "model-a", count: 21, usd: 1 });
   addPulls(w, { cell: "task-high", model: "model-c", count: 1, session: SESSION2 });
   Object.assign(w.features.at(-1), { exploration_draw: "", sizing_src: "llm" });
-  // smol-high: 25 light on A, 22 light on B, then one heavy on A, so A is newest in the light stratum too.
+  // smol-high: 25 on A and 22 on B at one criterion, then one on A at 9, past the split, so A is newest in the group it left too.
   addPulls(w, { cell: "smol-high", model: "model-a", count: 25, usd: 2 });
   addPulls(w, { cell: "smol-high", model: "model-b", count: 22, usd: 2, session: SESSION2 });
   addPulls(w, { cell: "smol-high", model: "model-a", count: 1, usd: 2, session: SESSION3 });
   w.features.at(-1).criteria = "9";
-  const { report, table } = guarded(w);
+  const { report, table } = guarded(w, SPLIT);
   const newest = Object.fromEntries(report.cells.map((c) => [c.cell, c.generation]));
   assert.deepEqual([newest["task-high"], newest["smol-high"]], ["model-c", "model-a"]);
   for (const [s, cells] of Object.entries(table.estimates)) {
@@ -1114,7 +1116,8 @@ test("the fit names each cell's newest generation as the guard does: ranked over
   }
   const task = table.estimates["*"]["task-high"];
   assert.deepEqual([task.n, task.older["model-a"].n], [0, 21]);
-  assert.deepEqual([table.estimates.light["smol-high"].n, table.estimates.light["smol-high"].older["model-b"].n], [25, 22]);
+  const few = table.estimates["criteria<=5"]["smol-high"];
+  assert.deepEqual([few.n, few.older["model-b"].n], [25, 22]);
   assert.ok(Object.values(table.rows).every((set) => Object.values(set).every((c) => c !== "task-high")), "A's 21 at $1 clear MIN_N, but A is not task-high's newest generation");
 });
 

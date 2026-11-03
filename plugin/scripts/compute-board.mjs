@@ -33,12 +33,11 @@
 // fleet-tick.mjs's I/O and main() never run here, main() being guarded on
 // argv[1].
 import { assessBeat, isStalled, isReported, stallReport, NO_OWNER } from "./fleet-state.mjs";
-import { parseToken, rowPr, premisesOf, HALT_CAUSES, REVIEW, CELL, POLICY_CELL, parseRoutedEntry, tierValues, cellValues } from "./ledger-grammar.mjs";
+import { parseToken, rowPr, premisesOf, HALT_CAUSES, REVIEW, CELL, POLICY_CELL, parseRoutedEntry, tierValues, cellValues, isRulePath } from "./ledger-grammar.mjs";
 import { latestFinisherAttempts, foldLedger, pastPinDue } from "./fleet-tick.mjs";
 import { computeCellEvidence } from "./compute-cell-evidence.mjs";
 import { admissibleRow, lastSegment } from "./pull-attribution.mjs";
 import { dispatchModel } from "./member-outcomes.mjs";
-import { HEAVY_BRIEF_CHARS, HEAVY_CRITERIA } from "./ticket-router.mjs";
 import { implementerCell, modelsEqual } from "./tier-roles.mjs";
 
 // A ledger row is freeform, controller-authored text. Two example shapes:
@@ -315,7 +314,6 @@ const isBadge = (flag) => flag === "excluded" || flag.startsWith("excluded:");
 const NOT_ON_RECORD = "not on record";
 const part = (text, o = {}) => ({ text, dim: false, href: null, sep: " · ", ...o });
 const hole = (o = {}) => part(NOT_ON_RECORD, { dim: true, ...o });
-const grouped = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 
 // A transcript's member record, as gather() keeps it, put the way the figures
 // read an implementer row (member-outcomes.mjs): its definition, its level
@@ -342,6 +340,14 @@ function implementersOf(row, issue) {
     .map((t) => t.name);
 }
 
+// The policy row a Routing links to: its group's, else the `*` row — for a group the table holds no row for, and for
+// a word filed before the table was a tree (`light`, `heavy`, `unknown`), which names no place on Cell evidence. With
+// no table read, a rule path is linked as filed.
+function rowHref(r, table) {
+  const own = isRulePath(r.stratum) && (table === null || Object.hasOwn(table.rows[r.objective], r.stratum));
+  return `#cells/row/${r.objective}/${own ? r.stratum : "*"}`;
+}
+
 // The words of a recorded reason, after the draw's, and whether they name the
 // policy row. `REASON` keeps only the first thing that went wrong, and nothing
 // here guesses the rest.
@@ -352,12 +358,11 @@ function reasonWords(r, table) {
     case "ok": {
       if (drawn) return [];
       const follows = table !== null && !Object.hasOwn(table.rows[r.objective], r.stratum);
-      const href = `#cells/row/${r.objective}/${follows ? "*" : r.stratum}`;
-      return [part(`${row}, ${r.stratum}`, { href }), ...(follows ? [part("follows *")] : [])];
+      return [part(`${row}, ${r.stratum}`, { href: rowHref(r, table) }), ...(follows ? [part("follows *")] : [])];
     }
     case "table-cell-tripped": {
       const named = r.tripped.length === 1 ? `${row}'s ${r.tripped[0]}` : `${row}'s Cell (one of ${r.tripped.join(", ")})`;
-      return [part(`${named} tripped${drawn ? "" : ": default Cell"}`, { href: `#cells/row/${r.objective}/${r.stratum}` })];
+      return [part(`${named} tripped${drawn ? "" : ": default Cell"}`, { href: rowHref(r, table) })];
     }
     case "guard-tripped":
       return [part(drawn ? `left out as tripped: ${r.tripped.join(", ")}` : "every other Cell tripped: no draw")];
@@ -368,14 +373,14 @@ function reasonWords(r, table) {
   }
 }
 
-// The Stratum and the numbers that set it: a Slice's parent sets it, ahead of the brief's numbers.
+// The Stratum — the group's rule path — with what is known of how the Pull came by it: the sizing label arm B gave
+// it, no brief read, no sizing, or the Slice it is a part of. Else the rule path alone.
 function stratumWords(r) {
   if (r.sized !== null) return `${r.stratum}: sized ${r.sized}`;
   if (r.brief === null) return `${r.stratum}: no brief read`;
   if (r.reason === "no-sizing") return `${r.stratum}: no sizing`;
   if (r.parent !== null) return `${r.stratum}: Slice of #${r.parent}`;
-  const past = (n, at) => `${n > at ? "past" : "not past"} ${grouped(at)}`;
-  return `${r.stratum}: ${grouped(r.brief)} chars (${past(r.brief, HEAVY_BRIEF_CHARS)}), ${r.criteria} criteria (${past(r.criteria, HEAVY_CRITERIA)})`;
+  return r.stratum;
 }
 
 // "<model> · <level>" off a dispatch record, holes where it carries none.
@@ -452,7 +457,7 @@ export function cellLine({ row, issue, routed = [], agents = {}, members = new M
     targets.push({ cell: rescue.at, generation: gen });
   }
 
-  // Line 2: the Stratum with its numbers, then the model and level of the
+  // Line 2: the Stratum, the group's rule path, then the model and level of the
   // Pull's first implementer at its Cell.
   const shown = recs[firstAdmissible === -1 ? 0 : firstAdmissible];
   const stratum = [routing !== null ? part(stratumWords(routing), { sep: "" }) : hole({ sep: "" }), ...modelParts(shown, " · ")];

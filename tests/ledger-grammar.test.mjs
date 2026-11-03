@@ -649,6 +649,40 @@ test("parseRouting reads every part of a Routing line, and formatRouting writes 
   }
 });
 
+// STRATUM names the group the Pull was routed to by its rule path: `*` for the root, else the tests taken from it
+// joined by `&`. A Routing filed before the tree carries light, heavy or unknown, and those lines outlive an upgrade.
+test("parseRouting reads a rule path as STRATUM, and the words a Routing filed before the tree carries", () => {
+  const paths = [
+    "*", "brief_chars>4047", "brief_chars<=4047", "brief_chars>4047.5", "brief_chars<=0", "parent>0", "kind=bug", "kind!=bug",
+    "age_days>0.30000000000000004", "brief_chars>4047&criteria<=5", "brief_chars<=4047&kind=documentation", "brief_chars>4047&kind!=enhancement",
+  ];
+  for (const stratum of [...paths, "light", "heavy", "unknown"]) {
+    const line = routingWith({ STRATUM: stratum });
+    assert.equal(parseRouting(line)?.stratum, stratum, stratum);
+    assert.equal(formatRouting(parseRouting(line)), line, stratum);
+    assert.deepEqual(parseRoutedEntry(`impl-3747 ${line}`), { member: "impl-3747", routing: parseRouting(line) }, stratum);
+  }
+});
+
+test("parseRouting refuses a STRATUM that is neither a rule path nor a word filed before the tree", () => {
+  const refused = [
+    // Empty, a placeholder, and a bare word that names no rule.
+    "", "-", "medium", "Light", "light,heavy", "brief_chars", "kind", "parent",
+    // A test with no input, no value or a value it cannot hold.
+    "brief_chars>", ">4047", "=bug", "kind=", "brief_chars>x", "brief_chars>=4047", "brief_chars<4047", "brief_chars>-1", "brief_chars>1e3",
+    "brief_chars>.5", "brief_chars>04047", "kind==bug", "kind=Bug", "Kind=bug", "kind!bug", "kind=bug2", "kind>bug", "brief_chars=4047",
+    // `*` is the root alone, never one step of a path; steps join by one `&`.
+    "**", "*&kind=bug", "kind=bug&*", "brief_chars>4047&", "&brief_chars>4047", "brief_chars>4047&&kind=bug",
+    // Whitespace is another word of the line.
+    "brief_chars>4047 kind=bug", "brief_chars> 4047", " brief_chars>4047", "brief_chars>4047 ",
+  ];
+  for (const stratum of refused) assert.equal(parseRouting(routingWith({ STRATUM: stratum })), null, JSON.stringify(stratum));
+  const parts = parseRouting(SPEC_ROUTING);
+  for (const stratum of ["", "medium", "brief_chars", "a b", "brief_chars>4047 "]) {
+    assert.throws(() => formatRouting({ ...parts, stratum }), /not a Routing/, JSON.stringify(stratum));
+  }
+});
+
 test("a Routing written before PARENT was a part still parses, as PARENT=-", () => {
   const old = "POLICY=slow-high CELL=smol-high DRAW=2/3 BY=burn-in STRATUM=heavy BRIEF=9658 CRITERIA=8 SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok";
   assert.deepEqual(parseRouting(old), parseRouting(SPEC_ROUTING));

@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { computeCellEvidence } from "../plugin/scripts/compute-cell-evidence.mjs";
 import { computeBoard } from "../plugin/scripts/compute-board.mjs";
-import { formatRouting } from "../plugin/scripts/ledger-grammar.mjs";
+import { formatRouting, isRulePath } from "../plugin/scripts/ledger-grammar.mjs";
 import { identityRoles } from "./support/label-map-seed.mjs";
 import { DAY_ONE_TABLE } from "./support/day-one-router-table.mjs";
 
@@ -64,19 +64,39 @@ test("routeHash: #cells opens Cell evidence, a section, a Cell or a generation o
   }
 });
 
-test("routeHash: #cells/row/<objective>/<stratum> opens Cell evidence at that policy row, `*` and each Stratum, under both Objectives", () => {
+// What a policy row is named by: the root, or a group's rule path, as the Routing line's STRATUM names it.
+const GROUPS = ["*", "brief_chars>4047", "brief_chars<=4047", "kind=bug", "kind!=bug", "parent>0", "brief_chars>4047&kind=bug", "brief_chars<=4047&criteria>5.5",
+  "brief_chars>4047&kind=bug&parent>0"];
+// A browser hands a fragment back with `<` and `>` percent-encoded, the rest of a rule path as it was.
+const inFragment = (s) => s.replace(/</g, "%3C").replace(/>/g, "%3E");
+
+test("routeHash: #cells/row/<objective>/<stratum> opens Cell evidence at that policy row, the root and each group's rule path, under both Objectives", () => {
   for (const o of ["cost", "speed"]) {
-    for (const s of ["*", "light", "heavy", "unknown"]) {
+    for (const s of GROUPS) {
       assert.deepEqual(routeHash(`#cells/row/${o}/${s}`), { tab: "cells", target: `row/${o}/${s}` }, `${o}/${s}`);
+      assert.deepEqual(routeHash(`#cells/row/${o}/${inFragment(s)}`), { tab: "cells", target: `row/${o}/${s}` }, `${o}/${s}: as a browser hands it back`);
+      assert.deepEqual(routeHash(`#cells/row/${o}/${encodeURIComponent(s)}`), { tab: "cells", target: `row/${o}/${s}` }, `${o}/${s}: every character encoded`);
     }
+  }
+});
+
+test("routeHash: the groups it opens a policy row for are the rule paths the ledger grammar reads, and no other word", () => {
+  const words = [...GROUPS, "light", "heavy", "unknown", "medium", "", "-", "**", "brief_chars", "brief_chars>", "brief_chars>=4047", "kind=Bug", "kind=", "*&kind=bug",
+    "brief_chars>4047&", "brief_chars>04047", "brief_chars>4047 kind=bug", "Heavy", "brief_chars>4047%"];
+  for (const s of words) {
+    assert.equal(routeHash(`#cells/row/cost/${s}`).target !== null, isRulePath(s), JSON.stringify(s));
   }
 });
 
 test("routeHash: a Cell evidence target nothing draws lands on the tab's top, and the tab still opens", () => {
   for (const h of ["#cells/", "#cells/nope", "#cells/slow-huge", "#cells/slow-high@", "#cells/slow-high@a@b", "#cells/slow-high@a/b",
     "#cells/guard/x", "#cells/Guard", "#cells/ guard", "#cells//guard", "#cells/rows/x",
-    "#cells/row", "#cells/row/", "#cells/row/cost", "#cells/row/cost/", "#cells/row/cost/heavy/x", "#cells/row/size/heavy", "#cells/row/cost/huge",
-    "#cells/row/Cost/heavy", "#cells/row//heavy", "#cells/row/cost/**", "#cells/row/cost/Heavy"]) {
+    "#cells/row", "#cells/row/", "#cells/row/cost", "#cells/row/cost/", "#cells/row/cost/brief_chars>4047/x", "#cells/row/size/brief_chars>4047", "#cells/row/cost/huge",
+    "#cells/row/Cost/*", "#cells//row/cost/*", "#cells/row//*", "#cells/row/cost/**", "#cells/row/cost/Heavy",
+    // The words a Routing filed before the tree carries name no row of any table now.
+    "#cells/row/cost/light", "#cells/row/speed/heavy", "#cells/row/cost/unknown",
+    // A rule path half spelled, and a percent escape that decodes to nothing.
+    "#cells/row/cost/brief_chars%3E", "#cells/row/cost/brief_chars%3E4047&", "#cells/row/cost/%E0%A4%A", "#cells/row/cost/brief_chars%3E4047%"]) {
     assert.deepEqual(routeHash(h), { tab: "cells", target: null }, h);
   }
 });
@@ -704,8 +724,12 @@ test("Cell evidence: the Board and Tokens panes are still filled on a tick while
 
 // -- the card's Cell line, and links both ways ----------------------------------------
 
+// A group's rule path, as `route` prints it in STRATUM: the root, and a group of the tree past a cut on the brief's length.
+const RULE = "brief_chars>4047";
+const ABOVE = RULE;
+const BELOW = "brief_chars<=4047";
 const routed = (member, o) => `${member} ${formatRouting({
-  policy: "slow-high", cell: "slow-high", draw: null, by: null, stratum: "heavy", brief: 9658, criteria: 8, parent: null,
+  policy: "slow-high", cell: "slow-high", draw: null, by: null, stratum: "*", brief: 9658, criteria: 8, parent: null,
   sized: null, objective: "cost", tripped: [], reason: "ok", ...o,
 })}`;
 const implRec = (member, cell, model) => ({ member, model, resolvedModelIdentity: `anthropic/${model}`, thinking: cell.split("-")[1], subagent_type: `fleet-implementer-${cell}` });
@@ -723,7 +747,7 @@ const linkedBoard = ({ guard, modelRoles }) => computeBoard({
       "#26 impl-26=killed impl-26-b · tier=task-max", "#27 impl-27", "#28 excluded · behind-pr:#121",
     ],
     routed: [
-      routed("impl-21", { cell: "task-high", draw: { k: 1, K: 2 }, by: "burn-in" }), routed("impl-22", { cell: "task-high", draw: { k: 1, K: 2 }, by: "burn-in" }),
+      routed("impl-21", { cell: "task-high", draw: { k: 1, K: 2 }, by: "burn-in", stratum: RULE }), routed("impl-22", { cell: "task-high", draw: { k: 1, K: 2 }, by: "burn-in" }),
       routed("impl-23", {}), routed("impl-24", { cell: "smol-high", draw: { k: 2, K: 2 }, by: "burn-in" }),
       routed("impl-25", { cell: "slow-medium", draw: { k: 1, K: 4 }, by: "burn-in" }), routed("impl-26", { cell: "smol-high", draw: { k: 2, K: 2 }, by: "burn-in" }),
       routed("impl-27", { cell: "task-high", policy: "task-high" }),
@@ -743,13 +767,13 @@ const linkedBoard = ({ guard, modelRoles }) => computeBoard({
 
 const linksIn = (n) => [...(n.tag === "a" ? [n.href] : []), ...(n.children ?? []).flatMap(linksIn)];
 
-test("a card draws its Cell line under the meta line: Cell · why, Stratum · model · level, then the mark", () => {
+test("a card draws its Cell line under the meta line: Cell · why, the group's rule path · model · level, then the mark", () => {
   const { document, render } = harness();
   render(linkedBoard({ guard: ceGuard(), modelRoles: ceRoles }));
   const [, , why, stratum] = document.getElementById("card-21").children;
   assert.deepEqual([why.className, stratum.className], ["cl", "cl"]);
   assert.equal(textOf(why).replace(/\s+/g, " ").trim(), "task-high · drawn 1 of 2: burn-in");
-  assert.equal(textOf(stratum).replace(/\s+/g, " ").trim(), "heavy: 9,658 chars (past 3,483), 8 criteria (past 5) · claude-sonnet-5-5 · high");
+  assert.equal(textOf(stratum).replace(/\s+/g, " ").trim(), `${RULE} · claude-sonnet-5-5 · high`);
   const cell = why.children.find((c) => c.tag === "a");
   assert.equal(cell.href, "#cells/task-high@claude-sonnet-5-5");
   assert.equal(cell.target, undefined, "a hash link must not open a new window");
@@ -809,12 +833,20 @@ test("a guard entry lists this run's Pulls booked to it, each with its mark", ()
 const SHIPPED_TABLE = DAY_ONE_TABLE;
 const rowsInstall = { name: "@feigi/fleet-ctl", version: "3.104.0", repository: "git+https://github.com/feigi/fleet-plugin.git", error: null };
 const policyEvidence = (o = {}) => evidence({ table: SHIPPED_TABLE, install: rowsInstall, repoUrl: "https://github.com/feigi/fleet-plugin", ...o });
+// A table fitted on 198 Pulls: the root splits on the brief's length, and the group above the cut has a row of its own.
 const FITTED_ROWS = {
   ...SHIPPED_TABLE, fitted_commit: "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d", n_rows: 198, window_start: "2026-10-03",
-  rows: { cost: { "*": "slow-high", heavy: "task-high" }, speed: { "*": "slow-high", heavy: "task-high" } },
+  splits: { "*": { input: "brief_chars", cut: 4047 } },
+  rows: { cost: { "*": "slow-high", [ABOVE]: "task-high", [BELOW]: "slow-high" }, speed: { "*": "slow-high", [ABOVE]: "task-high", [BELOW]: "slow-high" } },
   reasons: {
-    cost: { "*": { cell: "slow-high", reason: "no-qualifier", cells: { "task-high": { verdict: "not-reliably-cheaper", range: [-1.25, 0.5] } }, pairs: [] }, heavy: { cell: "task-high", reason: "sole-qualifier", cells: {}, pairs: [] } },
-    speed: { "*": { cell: "slow-high", reason: "unjudged", cells: {}, pairs: [] }, heavy: { cell: "task-high", reason: "unjudged", cells: {}, pairs: [] } },
+    cost: {
+      "*": { cell: "slow-high", reason: "no-qualifier", cells: { "task-high": { verdict: "not-reliably-cheaper", range: [-1.25, 0.5] } }, pairs: [] },
+      [ABOVE]: { cell: "task-high", reason: "sole-qualifier", cells: {}, pairs: [] }, [BELOW]: { cell: "slow-high", reason: "unjudged", cells: {}, pairs: [] },
+    },
+    speed: {
+      "*": { cell: "slow-high", reason: "unjudged", cells: {}, pairs: [] },
+      [ABOVE]: { cell: "task-high", reason: "unjudged", cells: {}, pairs: [] }, [BELOW]: { cell: "slow-high", reason: "unjudged", cells: {}, pairs: [] },
+    },
   },
   estimates: { "*": { "task-high": { generation: "claude-sonnet-5-5", merged: 60 } } },
 };
@@ -827,13 +859,24 @@ test("the policy rows come first on Cell evidence and draw each side's words and
   assert.deepEqual(host.children.map((c) => c.id).filter(Boolean), ["cells-rows", "cells-guard", "cells-declared"]);
   const text = textOf(document.getElementById("cells-rows")).replace(/\s+/g, " ");
   for (const words of ["Policy rows: Objective × Stratum", "routes now", "this repository's runs · never fitted · @feigi/fleet-ctl 3.104.0",
-    "never fitted: every Pull drawn over 3 Cells", "dispatch: drawn over 3 Cells: slow-high, task-high, smol-high", "slow-high", "unjudged",
-    "light: no row, follows *", "heavy: no row, follows *", "unknown: no row, follows *"]) {
+    "never fitted: every Pull drawn over 3 Cells", "dispatch: drawn over 3 Cells: slow-high, task-high, smol-high", "slow-high", "unjudged"]) {
     assert.ok(text.includes(words), `the rows do not draw ${JSON.stringify(words)}`);
   }
   assert.equal(text.includes("this run's Objective"), true);
   const ids = idsOf(document.getElementById("cells-rows"));
-  for (const o of ["cost", "speed"]) for (const s of ["*", "light", "heavy", "unknown"]) assert.ok(ids.includes(`cells-row-${o}-${s}`), `${o} ${s}`);
+  for (const o of ["cost", "speed"]) assert.ok(ids.includes(`cells-row-${o}-*`), `${o}: the root's row`);
+  assert.deepEqual(ids.filter((id) => id.startsWith("cells-row-") && !id.endsWith("-*")), [], "a one-node tree draws no other row");
+});
+
+test("a two-leaf tree draws a row for each group: the root, the group above the cut and the group at or below it, each with its own Cell", () => {
+  const { document, render, model } = harness();
+  render(model({ cellEvidence: policyEvidence({ table: FITTED_ROWS }) }));
+  const ids = idsOf(document.getElementById("cells-rows"));
+  for (const o of ["cost", "speed"]) for (const s of ["*", ABOVE, BELOW]) assert.ok(ids.includes(`cells-row-${o}-${s}`), `${o} ${s}`);
+  const above = textOf(document.getElementById(`cells-row-cost-${ABOVE}`)).replace(/\s+/g, " ").trim();
+  assert.ok(above.startsWith(ABOVE) && above.includes("task-high") && above.includes("sole-qualifier"), above);
+  const below = textOf(document.getElementById(`cells-row-cost-${BELOW}`)).replace(/\s+/g, " ").trim();
+  assert.ok(below.startsWith(BELOW) && below.includes("slow-high") && below.includes("unjudged"), below);
 });
 
 test("only the live run's Objective is marked, and between runs nothing is", () => {
@@ -848,22 +891,62 @@ test("only the live run's Objective is marked, and between runs nothing is", () 
   assert.deepEqual(marks(policyEvidence()), [["cost", false], ["speed", false]]);
 });
 
-test("a reason link #cells/row/<objective>/<stratum> lands on its row, in every state, collapsed or not", () => {
+test("a reason link #cells/row/<objective>/<stratum> lands on its row, in every state", () => {
   const states = {
-    "unfitted": policyEvidence(), "fitted, heavy has a row": policyEvidence({ table: FITTED_ROWS }),
-    "no cost guard": policyEvidence({ guard: { status: "missing" } }), "no table": policyEvidence({ table: null }),
+    "unfitted": [policyEvidence(), ["*"]], "fitted, two leaves": [policyEvidence({ table: FITTED_ROWS }), ["*", ABOVE, BELOW]],
+    "no cost guard": [policyEvidence({ guard: { status: "missing" } }), ["*"]], "no table": [policyEvidence({ table: null }), ["*"]],
   };
-  for (const [name, ce] of Object.entries(states)) {
+  for (const [name, [ce, strata]] of Object.entries(states)) {
     const { document, render, model, open, scrolls, tops } = harness();
     render(model({ cellEvidence: ce }));
     for (const o of ["cost", "speed"]) {
-      for (const s of ["*", "light", "heavy", "unknown"]) {
-        open(`#cells/row/${o}/${s}`);
-        assert.equal(scrolls().at(-1), `cells-row-${o}-${s}`, `${name}: ${o}/${s}`);
-        assert.ok(document.getElementById(`cells-row-${o}-${s}`).classList.contains("flash"), `${name}: ${o}/${s} flashes once`);
+      for (const s of strata) {
+        // The link as the model spells it, and as a browser hands the open hash back.
+        for (const hash of [`#cells/row/${o}/${s}`, `#cells/row/${o}/${s.replace(/</g, "%3C").replace(/>/g, "%3E")}`]) {
+          open(hash);
+          assert.equal(scrolls().at(-1), `cells-row-${o}-${s}`, `${name}: ${hash}`);
+          assert.ok(document.getElementById(`cells-row-${o}-${s}`).classList.contains("flash"), `${name}: ${hash} flashes once`);
+        }
       }
     }
     assert.deepEqual(tops(), [], `${name}: a row link fell to the tab's top`);
+  }
+});
+
+// The browser hands the open hash back with `<` and `>` percent-encoded, and a link has its own as the model spelled it.
+test("after boot(), a click on the link to the open policy row of a rule path routes it again, whichever way the hash is spelled", () => {
+  const { document, location, render, model, boot, scrolls } = harness();
+  render(model({ cellEvidence: policyEvidence({ table: FITTED_ROWS }) }));
+  location.hash = `#cells/row/cost/${BELOW.replace("<", "%3C")}`;
+  boot();
+  assert.deepEqual(scrolls(), [`cells-row-cost-${BELOW}`]);
+  const click = (href) => {
+    const e = { button: 0, defaultPrevented: false, target: { closest: () => ({ getAttribute: () => href }) }, preventDefault() { this.defaultPrevented = true; } };
+    for (const fn of document.listeners.click ?? []) fn(e);
+    return e.defaultPrevented;
+  };
+  assert.equal(click(`#cells/row/cost/${BELOW}`), true);
+  assert.deepEqual(scrolls(), [`cells-row-cost-${BELOW}`, `cells-row-cost-${BELOW}`]);
+  assert.equal(click(`#cells/row/cost/${ABOVE}`), false, "another row's link is the browser's");
+  location.hash = "#cells/row/cost/brief_chars%3E4047%";
+  assert.equal(click("#cells/row/cost/brief_chars>4047"), false, "a hash that does not decode is no link's hash");
+});
+
+test("a card's link to its policy row lands on the row of its rule path when the table holds it, and on the root's row when it does not", () => {
+  for (const [table, group, why] of [[FITTED_ROWS, ABOVE, "the table holds the group"], [SHIPPED_TABLE, "*", "the table is one node: the group follows the root"]]) {
+    const { document, render, open, scrolls, tops } = harness();
+    render(computeBoard({
+      roles: identityRoles(), routerTable: table,
+      ledger: { rows: ["#31 impl-31"], routed: [routed("impl-31", { stratum: ABOVE })], agents: {}, filed: [], ruled: [] },
+      issues: [], prs: [], ci: {}, prev: null, now: Date.now(), implementers: [implRec("impl-31", "slow-high", "claude-opus-5")],
+      guard: ceGuard(), modelRoles: ceRoles, receipts: { phase0: null, closeout: null }, agents: ceAgents,
+      install: rowsInstall, repoUrl: "https://github.com/feigi/fleet-plugin",
+    }));
+    const link = linksIn(document.getElementById("card-31")).find((h) => h.startsWith("#cells/row/"));
+    assert.equal(link, `#cells/row/cost/${group}`, why);
+    open(link);
+    assert.equal(scrolls().at(-1), `cells-row-cost-${group}`, why);
+    assert.deepEqual(tops(), [], why);
   }
 });
 
@@ -875,9 +958,8 @@ test("a row's own reason is a link to it, and a row of its own draws its Cell, r
   assert.deepEqual(link, ["#cells/row/cost/*"]);
   const text = textOf(row).replace(/\s+/g, " ");
   for (const words of ["slow-high", "no-qualifier", "task-high · n 60 · not-reliably-cheaper · 95% interval [−$1.25, $0.50]"]) assert.ok(text.includes(words), words);
-  assert.equal(document.getElementById("cells-row-cost-light").children.length, 1, "a collapsed Stratum is one line");
-  assert.equal(textOf(document.getElementById("cells-row-cost-light")).trim(), "light: no row, follows *");
-  assert.ok(textOf(document.getElementById("cells-row-cost-heavy")).includes("task-high"), "a Stratum with a row of its own keeps it");
+  assert.equal(document.getElementById(`cells-row-cost-${BELOW}`).children.length, 3, "the group, then routes now, then evidence favours: a row of its own to each");
+  assert.ok(textOf(document.getElementById(`cells-row-cost-${ABOVE}`)).includes("task-high"), "a group with a row of its own keeps it");
 });
 
 test("a candidate whose estimate carries no count reads n not checked on the page, never n 0", () => {
@@ -920,7 +1002,7 @@ const previewFit = (o = {}) => ({
   status: "ok",
   preview: {
     computed_at: "2026-10-26T19:17:40.000Z", guard_computed_at: "2026-10-26T19:17:33.000Z", tsv_blobs: { "docs/metrics/tier-outcomes.tsv": "18b6a980" },
-    prior: { fitted_commit: null, version: "3.104.0", stage: 1, cells: SHIPPED_TABLE.cells, classifier: SHIPPED_TABLE.classifier, window_start: null },
+    prior: { fitted_commit: null, version: "3.104.0", stage: 1, cells: SHIPPED_TABLE.cells, classifier: SHIPPED_TABLE.classifier, splits: SHIPPED_TABLE.splits, window_start: null },
     table: {
       ...SHIPPED_TABLE, n_rows: 235, stage: 2, cells: ["slow-high", "task-high", "smol-high", "slow-medium", "task-max"], burn_in: true,
       rows: { cost: { "*": "task-high" }, speed: { "*": "task-high" } },
@@ -963,7 +1045,7 @@ test("evidence favours' heading labels are drawn in its heading, and with no Pre
   const row = none.document.getElementById("cells-row-cost-*");
   assert.equal(row.children.length, 3);
   assert.deepEqual(row.children[2].children, [], "nothing is unknown there: the column is empty");
-  assert.equal(textOf(none.document.getElementById("cells-row-cost-light")).trim(), "light: no row, follows *");
+  assert.equal(none.document.getElementById(`cells-row-cost-${BELOW}`), null, "a one-node tree has no row for a group it does not hold");
 });
 
 test("a board.json from before the policy rows draws the tab without them, and no link to them", () => {

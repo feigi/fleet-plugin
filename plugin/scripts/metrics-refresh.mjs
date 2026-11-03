@@ -67,7 +67,7 @@
 // rename: `computed_at`, `guard_computed_at` (the guard's own `computed_at`),
 // `tsv_blobs` (the git blob id of each TSV it read, keyed by path as the guard
 // keys its own), `prior` (the installed table's `fitted_commit`, `stage`,
-// `cells`, `classifier` and `window_start`, and the install's `package.json`
+// `cells`, `classifier`, `splits` and `window_start`, and the install's `package.json`
 // `version`) and the fitted `table`. The cockpit lays it out as what the
 // evidence favours; nothing routes by it and nothing commits it. It is called
 // in-process because a fit has no verdict for an exit status to carry, and the
@@ -312,6 +312,7 @@ export function writePreview(repo, written, { tablePath = DEFAULT_TABLE, package
       stage: prior.stage,
       cells: prior.cells,
       classifier: prior.classifier,
+      splits: prior.splits,
       window_start: prior.window_start,
     },
     table,

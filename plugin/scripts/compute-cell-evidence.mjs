@@ -10,7 +10,7 @@
 // What this holds is the guard section — what the cost guard holds each
 // implementer Cell to, from the guard file and nothing recomputed, with this
 // run's Pulls booked to each Cell off the board's cards — "Declared, not
-// measured", and the policy rows: for each Objective × Stratum row, on the
+// measured", and the policy rows: for each Objective × group of the tree, on the
 // routes-now side the Cell the installed router table plus the workspace's guard
 // route to, why, and how a Pull on that row is dispatched (ticket-router.mjs's
 // rowDispatch, the function `route` itself calls), and on the evidence-favours
@@ -30,7 +30,7 @@
 // checked where its figure would show.
 
 import { isDeepStrictEqual } from "node:util";
-import { CELL, OBJECTIVES, POLICY_CELL, STRATA } from "./ledger-grammar.mjs";
+import { CELL, OBJECTIVES, POLICY_CELL } from "./ledger-grammar.mjs";
 import { costGuardFault } from "./fleet-tick.mjs";
 import { MIN_N, parseGuard, readGuard, rowDispatch } from "./ticket-router.mjs";
 import { implementerCell, modelsEqual, parseModelRoute, resolveRole } from "./tier-roles.mjs";
@@ -592,9 +592,9 @@ function behindMain(source, table, checkout) {
 }
 
 // The routes-now side of the policy rows: its heading words and every row the
-// installed table holds, `rows[objective][stratum]` — `*` and each Stratum with a
-// row of its own. `rows` is null when no table could be read, and each of its
-// rows then reads `unread`.
+// installed table holds, `rows[objective][stratum]` — one for each group of its
+// tree, the root `*` and any below it. `rows` is null when no table could be
+// read, and each of its rows then reads `unread`.
 function routesNow({ table, guard, modelRoles, install, repoUrl, checkout }) {
   const source = routesSource(table, install, repoUrl);
   const behind = behindMain(source, table, checkout);
@@ -606,7 +606,7 @@ function routesNow({ table, guard, modelRoles, install, repoUrl, checkout }) {
     labels: behind.label === null ? [] : [behind.label],
     footnotes: foot,
     rows: table === null ? null : Object.fromEntries(OBJECTIVES.map((o) => [o,
-      Object.fromEntries(["*", ...STRATA].filter((s) => Object.hasOwn(table.rows[o], s)).map((s) => [s, rowEntry(table, guard, modelRoles, o, s)])),
+      Object.fromEntries(Object.keys(table.rows[o]).map((s) => [s, rowEntry(table, guard, modelRoles, o, s)])),
     ])),
     unread: "router table not read",
   };
@@ -643,7 +643,7 @@ function refitLabel(step, p) {
 // the fit read the guard's files: fitted beside another guard, on other records,
 // or against another prior. The prior is
 // compared only on what the fit takes from it — `stage`, `cells`, `classifier`,
-// and `window_start` when the guard gives none — so a release that changes only
+// `splits`, and `window_start` when the guard gives none — so a release that changes only
 // what the fit recomputes, or `fitted_commit` and `version`, raises nothing: the
 // next phase 0's refit would come out the same.
 function previewLabels(p, raw, routed, table, records) {
@@ -655,7 +655,7 @@ function previewLabels(p, raw, routed, table, records) {
     labels.push("fitted against the installed table: not checked: no router table read");
     return labels;
   }
-  const read = ["stage", "cells", "classifier", ...(routed.window_start === null ? ["window_start"] : [])];
+  const read = ["stage", "cells", "classifier", "splits", ...(routed.window_start === null ? ["window_start"] : [])];
   const prior = isRecord(p.prior) ? p.prior : {};
   if (read.some((k) => !isDeepStrictEqual(prior[k], table[k]))) {
     const version = prior.version === "0.0.0" ? "linked checkout" : (typeof prior.version === "string" ? prior.version : "no version");
@@ -713,7 +713,7 @@ function evidenceFavours({ preview, guard, routed, table, modelRoles, step, mark
     labels: [...refitLabel(step, p), ...previewLabels(p, raw, routed, table, records)],
     footnotes: differ.length === 0 ? [] : [{ mark, text: `${list(differ)}: the guard counts merges by GitHub's state, the fit by Rulings, and the fit admits only drawn or rule-sized Pulls` }],
     rows: Object.fromEntries(OBJECTIVES.map((o) => [o,
-      Object.fromEntries(["*", ...STRATA].filter((s) => Object.hasOwn(fit.rows[o], s)).map((s) => [s, entry(o, s)])),
+      Object.fromEntries(Object.keys(fit.rows[o]).map((s) => [s, entry(o, s)])),
     ])),
     unread: null,
   };
@@ -722,12 +722,13 @@ function evidenceFavours({ preview, guard, routed, table, modelRoles, step, mark
 // The policy rows as the page lays them out, from each side built above. Pure
 // and side-agnostic: a side's shared dispatch (the one most rows have, the rest
 // showing theirs on the row), its one model-name line when every candidate it
-// names differs, a Stratum no side has a row for collapsed to one line, and the
-// Objective of the live run marked. Every row, collapsed or not, has an anchor
-// the `#cells/row/<objective>/<stratum>` link lands on. A side with no rows reads
-// its `unread` on every row, and keeps a Stratum from collapsing, since its rows
-// are not known; one whose `unread` is null has nothing to show, its cells are
-// empty, and the Strata collapse on the sides that have rows.
+// names differs, and the Objective of the live run marked. An Objective's lines
+// are the root and then each group any side holds a row for, the first side's
+// groups first: a side the group is no node of reads "no row of its own" there,
+// and follows `*`. Every row has an anchor the
+// `#cells/row/<objective>/<stratum>` link lands on. A side with no rows reads
+// its `unread` on every row; one whose `unread` is null has nothing to show, and
+// its cells are empty.
 export function policyRowsView({ sides, objective = null }) {
   const entries = (s) => (s.rows === null ? [] : OBJECTIVES.flatMap((o) => Object.values(s.rows[o])));
   const shared = sides.map((s) => {
@@ -744,28 +745,21 @@ export function policyRowsView({ sides, objective = null }) {
     dispatch: e.dispatch === shared[i] ? null : e.dispatch,
     candidates: e.candidates.map((c) => (c.model !== null && modelLine[i] !== null ? { ...c, model: { ...c.model, text: null } } : c)),
   });
-  // How many sides have rows, and whether a Stratum none of them has a row for
-  // may collapse: never while a side's rows are unknown.
-  const read = sides.filter((s) => s.rows !== null).length;
-  const collapsible = read > 0 && sides.every((s) => s.rows !== null || !s.unread);
   const cellOf = (s, e, i) => {
     if (s.rows === null) return s.unread ? { unread: s.unread } : { empty: true };
     if (e === null) return { follows: "no row of its own: follows *" };
     return show(e, i);
   };
+  const strata = (o) => ["*", ...new Set(sides.flatMap((s) => Object.keys(s.rows?.[o] ?? {})).filter((stratum) => stratum !== "*"))];
   return {
     sides: sides.map((s, i) => ({ title: s.title, source: s.source, heading: s.heading, labels: s.labels ?? [], dispatch: shared[i], modelLine: modelLine[i], footnotes: s.footnotes })),
     objectives: OBJECTIVES.map((o) => ({
       objective: o,
       live: o === objective,
-      lines: ["*", ...STRATA].map((stratum) => {
-        const line = { stratum, anchor: `cells-row-${o}-${stratum}`, href: `#cells/row/${o}/${stratum}` };
-        const own = sides.map((s) => s.rows?.[o]?.[stratum] ?? null);
-        if (stratum !== "*" && collapsible && own.every((e) => e === null)) {
-          return { ...line, collapsed: `${stratum}: ${read > 1 ? "no row on either side" : "no row"}, follows *` };
-        }
-        return { ...line, sides: sides.map((s, i) => cellOf(s, own[i], i)) };
-      }),
+      lines: strata(o).map((stratum) => ({
+        stratum, anchor: `cells-row-${o}-${stratum}`, href: `#cells/row/${o}/${stratum}`,
+        sides: sides.map((s, i) => cellOf(s, s.rows?.[o]?.[stratum] ?? null, i)),
+      })),
     })),
   };
 }

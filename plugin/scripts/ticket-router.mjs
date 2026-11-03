@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // The per-ticket router: which implementer cell a Pull dispatches. One script
-// for dispatch and for the offline fit, because the stratum rule is the one
-// function that must never read differently between the two.
+// for dispatch and for the offline fit, because the walk from a ticket's inputs
+// to its group is the one function that must never read differently between
+// the two.
 //
 //   route [--session <dir|id>] [--objective cost|speed] --ticket <N> --arm A|B
 //         --impl-row <k> --issue <issue.json> --guard <cost-guard.json>
@@ -9,7 +10,7 @@
 //         [--chain-head] [--pending <tsv>]
 //     Prints one line, the Pull's Routing (ledger-grammar.mjs owns its
 //     grammar): `POLICY=<cell> CELL=<cell> DRAW=<k/K|-> BY=<burn-in|every-5th|->
-//     STRATUM=<light|heavy|unknown> BRIEF=<chars|-> CRITERIA=<n|-> PARENT=<N|->
+//     STRATUM=<rule path> BRIEF=<chars|-> CRITERIA=<n|-> PARENT=<N|->
 //     SIZED=<light|heavy|-> OBJECTIVE=<cost|speed> TRIPPED=<cell,…|->
 //     REASON=<reason>`,
 //     routing by the objective's row set, and appends the Pull's
@@ -53,7 +54,7 @@ import { isDeepStrictEqual } from "node:util";
 import { isCLI } from "./is-cli.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { makeDie, defineFlags } from "./arg.mjs";
-import { CELL, OBJECTIVES, POLICY_CELL, STRATA, drawCell, formatRouting, parseMember } from "./ledger-grammar.mjs";
+import { CELL, OBJECTIVES, POLICY_CELL, drawCell, formatRouting, isRulePath, parseMember } from "./ledger-grammar.mjs";
 import { objectiveFromReceipt, sessionFromReceipt } from "./phase0-receipt.mjs";
 import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
 import {
@@ -68,10 +69,6 @@ export const DEFAULT_TABLE = join(SCRIPT_DIR, "router-table.json");
 // The install's own package.json, whose `version` names the plugin a Pull was routed by.
 export const INSTALL_PACKAGE = join(SCRIPT_DIR, "..", "package.json");
 
-// The free classifier's thresholds: heavy past the median brief length of
-// the tickets whose sizing verdict is known, or past five criteria.
-export const HEAVY_BRIEF_CHARS = 3483;
-export const HEAVY_CRITERIA = 5;
 // Exploration cadence after burn-in: the Pull that creates `impl-` row 5k.
 const EXPLORE_EVERY = 5;
 // The fit's adoption floor (merged PRs per side), margin, and cadence.
@@ -208,21 +205,92 @@ export function namedLines(named, root) {
   return paths.map((p) => lineEntry(p, abs, realRoot)).join(" ");
 }
 
+// ---------------------------------------------------------------------------
+// the tree — which group a ticket falls in
+// ---------------------------------------------------------------------------
+
+// The table's groups are the nodes of a tree of splits on what is known of a
+// ticket at dispatch. A group is named by its rule path (ledger-grammar.mjs
+// says how a path reads): `*` is the root, the group of every ticket before any
+// split, and a node's two children are named by the node's path and the test
+// each takes, joined by `&`. `splits` holds the tree, keyed by the path of the
+// node a split sits at:
+//
+//   "splits": { "*": { "input": "brief_chars", "cut": 4047 } }
+//
+// A split reads one input, a ticket-features column, and sends a ticket to one
+// of its two children. For an input that reads as a number, a ticket past the
+// cut goes to `<input>><cut>` and any other to `<input><=<cut>`; for `kind`, a
+// ticket of the cut's kind goes to `kind=<cut>` and any other to
+// `kind!=<cut>`. A ticket that lacks the input a split reads — its issue was not
+// read, or its column is blank — goes no further than that node, and the
+// node's own row routes it. Every node, inner nodes and root included, holds a
+// `cost` row and a `speed` row of its own, and its estimates and reasons. A
+// table with no split is the one-node tree: `*` routes every ticket.
+
+const SEP = "&";
+// Each input a split may read, and what it reads as: the columns of a ticket-features row that are known at
+// dispatch and are a count or a kind. `parent` reads as the Slice's parent number, and 0 for an issue read that
+// names none, so a cut at 0 splits Slices from the rest. The brief's paths, its title and the install's version
+// are no input: no cut of theirs is defined.
+const INPUTS = Object.freeze({
+  brief_chars: "number", criteria: "number", comments: "number", age_days: "number", paths: "number", test_paths: "number", xrefs: "number", dirs: "number",
+  parent: "number", kind: "kind",
+});
+
+/** What a ticket holds for `input` — a number, or a kind — or null where it lacks it: its issue was not read, or its column is blank. */
+function inputOf(input, m) {
+  // A row whose issue was not read has blank metrics, `brief_chars` among them: it holds none of the inputs.
+  if (m.brief_chars === undefined || m.brief_chars === "") return null;
+  const s = m[input] ?? "";
+  if (input === "kind") return s === "" ? null : s;
+  if (input === "parent" && s === "") return 0;
+  const n = s === "" ? NaN : Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+const child = (node, test) => (node === "*" ? test : `${node}${SEP}${test}`);
+/** The two children of the split at `node`, the group a test holds for first. */
+function childrenOf(node, { input, cut }) {
+  return (INPUTS[input] === "kind" ? [`kind=${cut}`, `kind!=${cut}`] : [`${input}>${cut}`, `${input}<=${cut}`]).map((test) => child(node, test));
+}
+/** The path of `node`'s parent, null for the root. */
+const parentOf = (node) => (node === "*" ? null : node.includes(SEP) ? node.slice(0, node.lastIndexOf(SEP)) : "*");
+
+/** The nodes of the tree `splits` holds, root first, then each split's two children, depth first. */
+function treeNodes(splits) {
+  const nodes = [];
+  const down = (node) => {
+    nodes.push(node);
+    if (Object.hasOwn(splits, node)) for (const c of childrenOf(node, splits[node])) down(c);
+  };
+  down("*");
+  return nodes;
+}
+
 /**
- * The `rule` classifier, over a row's metric columns: blank metrics are
- * `unknown`, a Slice (a row with a `parent`) is `heavy`, and any other row is
- * `heavy` past the brief length or the criteria count. A Slice whose metrics
- * are blank stays `unknown`, as it was routed: its issue was not read then.
+ * The group a ticket falls in: from the root, each split sends it to the child
+ * its input says, until a node has no split or the ticket lacks the input the
+ * node's split reads. `m` is the ticket's metrics row, the columns `issueMetrics`
+ * makes or a ticket-features file holds, as strings.
  */
-export function ruleStratum({ brief_chars, criteria, parent }) {
-  if (brief_chars === "" || brief_chars === undefined || criteria === "" || criteria === undefined) return "unknown";
-  if (parent) return "heavy";
-  return Number(brief_chars) > HEAVY_BRIEF_CHARS || Number(criteria) > HEAVY_CRITERIA ? "heavy" : "light";
+export function stratumOf(table, m) {
+  let node = "*";
+  while (Object.hasOwn(table.splits, node)) {
+    const split = table.splits[node];
+    const v = inputOf(split.input, m);
+    if (v === null) break;
+    const [holds, other] = childrenOf(node, split);
+    node = (INPUTS[split.input] === "kind" ? v === split.cut : v > split.cut) ? holds : other;
+  }
+  return node;
 }
 
 // ---------------------------------------------------------------------------
 // the table
 // ---------------------------------------------------------------------------
+
+const shown = (x) => (typeof x === "number" ? String(x) : JSON.stringify(x));
 
 /** A parsed table, or an Error saying why it is not one. */
 export function validateTable(t) {
@@ -232,7 +300,26 @@ export function validateTable(t) {
   if (!Array.isArray(t.cells) || t.cells.length === 0) return bad("`cells` is not a non-empty array");
   for (const c of t.cells) if (typeof c !== "string" || !CELL.test(c)) return bad(`\`cells\` holds ${JSON.stringify(c)}, not a cell token`);
   if (new Set(t.cells).size !== t.cells.length) return bad("`cells` repeats a cell");
-  // `rows` and `reasons` are each keyed by objective, then by `*` or a stratum.
+  // The tree: each split reads an input a split may read, at a cut that input can take, and sits at a node of the
+  // tree the other splits make.
+  if (!isObject(t.splits)) return bad("`splits` is not an object");
+  for (const [path, s] of Object.entries(t.splits)) {
+    const at = `splits[${JSON.stringify(path)}]`;
+    if (!isObject(s)) return bad(`\`${at}\` is not \`{ input, cut }\``);
+    if (typeof s.input !== "string" || !Object.hasOwn(INPUTS, s.input)) return bad(`\`${at}\` reads ${shown(s.input)}, which no split can read`);
+    const number = INPUTS[s.input] === "number";
+    // A number is a cut when the rule path it makes is one the Routing line can carry: no NaN, sign or exponent.
+    if (number ? typeof s.cut !== "number" || !isRulePath(childrenOf("*", s)[0]) : !KINDS.has(s.cut)) {
+      return bad(`\`${at}\` cuts ${s.input} at ${shown(s.cut)}, which is not ${number ? "a non-negative number" : "a ticket kind"}`);
+    }
+    if (Object.keys(s).length !== 2) return bad(`\`${at}\` is not \`{ input, cut }\``);
+  }
+  const nodes = treeNodes(t.splits);
+  // The first key of `o` that names no node of the tree.
+  const offTree = (o) => Object.keys(o).find((key) => !nodes.includes(key));
+  const unreached = offTree(t.splits);
+  if (unreached !== undefined) return bad(`\`splits[${JSON.stringify(unreached)}]\` sits at no node of the tree`);
+  // `rows` and `reasons` are each keyed by objective, then by the nodes of the tree.
   for (const field of ["rows", "reasons"]) {
     if (!isObject(t[field])) return bad(`\`${field}\` is not an object`);
     const stray = Object.keys(t[field]).find((o) => !OBJECTIVES.includes(o));
@@ -240,13 +327,18 @@ export function validateTable(t) {
     for (const o of OBJECTIVES) {
       const set = t[field][o];
       if (!isObject(set)) return bad(`\`${field}.${o}\` is not an object`);
-      for (const k of Object.keys(set)) {
-        if (k !== "*" && !STRATA.includes(k)) return bad(`\`${field}.${o}\` key ${JSON.stringify(k)} is not \`*\` or a stratum`);
-      }
+      const k = offTree(set);
+      if (k !== undefined) return bad(`\`${field}.${o}\` key ${JSON.stringify(k)} is not a node of the tree`);
     }
   }
+  if (isObject(t.estimates)) {
+    const k = offTree(t.estimates);
+    if (k !== undefined) return bad(`\`estimates\` key ${JSON.stringify(k)} is not a node of the tree`);
+  }
   for (const o of OBJECTIVES) {
-    if (!Object.hasOwn(t.rows[o], "*")) return bad(`\`rows.${o}\` has no \`*\` row`);
+    for (const node of nodes) {
+      if (!Object.hasOwn(t.rows[o], node)) return bad(node === "*" ? `\`rows.${o}\` has no \`*\` row` : `\`rows.${o}\` has no row for ${JSON.stringify(node)}`);
+    }
     for (const [k, v] of Object.entries(t.rows[o])) {
       if (typeof v !== "string" || !CELL.test(v)) return bad(`\`rows.${o}.${k}\` is ${JSON.stringify(v)}, not a cell token`);
     }
@@ -273,7 +365,7 @@ export function bArmLive(table, objective) {
   return table.classifier.b !== null && Object.values(table.rows[objective]).some((c) => c !== POLICY_CELL);
 }
 
-/** The row a stratum routes by: its own, else the `*` row's. */
+/** The row a group routes by: its own, else the `*` row's — as a name no node of the table holds does, such as a group a Routing filed under another table names. */
 export const rowFor = (rows, stratum) => rows[stratum] ?? rows["*"];
 
 /**
@@ -338,14 +430,12 @@ export function readGuard(raw) {
   return r.ok ? r.guard : null;
 }
 
-/** The sizing verdict on a live B Pull: `{ stratum, src, label, usd }`, or null when it is unusable. */
+/** The sizing verdict on a live B Pull: `{ src, label, usd }`, or null when it is unusable. */
 function readSizing(raw, classifier) {
   if (raw === null || typeof raw !== "object" || raw.source !== classifier.b) return null;
   const label = raw.label === "light" || raw.label === "heavy" ? raw.label : null;
   if (label === null) return null;
-  const abstains = raw.source === "jev" && classifier.tau !== null && !(Number(raw.confidence) >= classifier.tau);
   return {
-    stratum: abstains ? "unknown" : label,
     src: raw.source === "jev" ? `jev:${raw.model ?? ""}` : "haiku",
     label,
     usd: Number.isFinite(raw.usd) ? String(raw.usd) : "",
@@ -361,10 +451,12 @@ export function sessionDate(session) {
  * One Pull's routing, by `objective`'s row set. Every input is already read
  * but the paths the brief names, which `named_lines` reads under `root`, the
  * checkout. `version` is the install's, `plugin_version` on the row. The
- * exploration draw ignores the objective: it leaves out the cell
- * the `cost` set routes the Pull to — by the sizing when arm B is live for
- * the `cost` set, whichever set routes the Pull — so a Pull draws the same
- * cell under both.
+ * ticket's group is the node the tree's walk ends at (stratumOf), and the row
+ * set's row for it routes the Pull. The exploration draw ignores the objective:
+ * it leaves out the cell the `cost` set routes the group to, whichever set
+ * routes the Pull, so a Pull draws the same cell under both. A live B Pull
+ * records its sizing verdict and routes as an A Pull does: a label names no
+ * group of the tree.
  * @returns {{ line: string, row: Record<string,string> }}
  */
 export function route({
@@ -380,35 +472,29 @@ export function route({
     .slice(FEATURE_COLUMNS.indexOf("brief_chars"), FEATURE_COLUMNS.indexOf("plugin_version"))
     .filter((c) => c !== "objective").map((c) => [c, ""]));
   const m = metrics === null ? blank : { ...metrics, named_lines: namedLines(metrics.named_paths, root) };
-  const ruleS = ruleStratum(m);
+  const stratum = stratumOf(table, m);
 
-  let stratum = ruleS;
   let sizingSrc = "rule";
   let sizingPre = "";
   let routerUsd = "";
-  const sized = arm === "B" ? readSizing(sizing, table.classifier) : null;
-  const b = arm === "B" && bArmLive(table, objective);
-  if (b) {
-    const s = sized;
-    if (s === null) {
+  if (arm === "B" && bArmLive(table, objective)) {
+    const sized = readSizing(sizing, table.classifier);
+    if (sized === null) {
       degrade("no-sizing");
-      stratum = "unknown";
       sizingSrc = "";
     } else {
-      ({ stratum, src: sizingSrc, label: sizingPre, usd: routerUsd } = s);
+      ({ src: sizingSrc, label: sizingPre, usd: routerUsd } = sized);
     }
   }
 
-  const dispatch = (o, s) => rowDispatch({ table, guard, objective: o, stratum: s });
-  const policyRow = dispatch(objective, ruleS);
-  const baseRow = b ? dispatch(objective, stratum) : policyRow;
-  const costB = arm === "B" && bArmLive(table, "cost");
-  const drawRow = dispatch("cost", costB ? sized?.stratum ?? "unknown" : ruleS);
-  for (const r of [policyRow.reason, baseRow.reason]) if (r !== "ok") degrade(r);
+  const dispatch = (o) => rowDispatch({ table, guard, objective: o, stratum });
+  const policyRow = dispatch(objective);
+  const drawRow = dispatch("cost");
+  if (policyRow.reason !== "ok") degrade(policyRow.reason);
   // With no guard the default cell is the only one: the guard cannot be
   // evaded by deleting it.
   const policy = policyRow.policy;
-  let cell = baseRow.policy;
+  let cell = policy;
   let draw = null;
   let by = null;
   if (guard !== null) {
@@ -455,35 +541,39 @@ const round4 = (x) => Math.round(x * 1e4) / 1e4;
 
 /**
  * The fit's Pulls: pull-attribution.mjs's units over the window — booked as
- * routed, each to its own row's cell and stratum — restricted to rows the free
- * classifier routed plus exploration rows: a row a live B classifier routed is
- * the A/B's test set, not the fit's. The fit sees no PR state, so a Pull with
+ * routed, each to its own row's cell and group, `stratum` the walk from a
+ * features row to its group — restricted to rows the free classifier routed
+ * plus exploration rows: a row a live B classifier routed is the A/B's test
+ * set, not the fit's. The fit sees no PR state, so a Pull with
  * a Ruling is merged. A fit reads everything in the commit it is given: no row
  * is cut by date, because `--check` re-reads that same commit rather than
  * re-cutting the working tree's files. `order` ranks each cell's generations
  * over every Pull in the window, the restriction aside, so the fit names the
  * same newest generation the guard does.
  */
-function fitPulls({ features, members, verdicts, window }) {
-  const all = attribute({ features, members, tiers: verdicts, windowStart: window || null, stratum: ruleStratum });
+function fitPulls({ features, members, verdicts, window, stratum }) {
+  const all = attribute({ features, members, tiers: verdicts, windowStart: window || null, stratum });
   return { units: all.filter((u) => u.pull.exploration_draw !== "" || u.pull.sizing_src === "rule"), order: generations(all) };
 }
 
-// Per stratum and `*`, per cell, its newest generation's figures: `n` counted
+// Per node of the tree, per cell, its newest generation's figures: `n` counted
 // Pulls, `merged`, $ per merged PR, minutes of work time per merged PR, false
 // claims over claims, fix rounds per merged PR, `by_hand` (the counted merged Pulls whose
 // Ruling was given by hand), and its left-out, unpriced and
 // untimed Pull counts. Both per merged PR figures take every counted Pull,
 // merged or not, over the merged ones. Beside them the cell's
 // excluded Pull count, `generation` naming the newest generation's model, and
-// `older`, each older generation's model to its figures, newest first. Beside
-// `estimates`, `pulls`: per stratum and `*`, per cell, the newest generation's
-// counted Pulls those figures are over.
-function estimate(units, order) {
+// `older`, each older generation's model to its figures, newest first. A node's
+// Pulls are those that went through it: the Pulls of its own group and of each
+// group below it, so the root's are every Pull's. A node no Pull went through
+// has none. Beside `estimates`, `pulls`: per node, per cell, the newest
+// generation's counted Pulls those figures are over.
+function estimate(units, order, nodes) {
   const estimates = {};
   const pulls = {};
-  for (const s of units.length ? [...new Set([...units.map((u) => u.stratum), "*"])].sort() : []) {
-    const mine = s === "*" ? units : units.filter((u) => u.stratum === s);
+  for (const s of nodes) {
+    const mine = s === "*" ? units : units.filter((u) => u.stratum === s || u.stratum.startsWith(`${s}${SEP}`));
+    if (mine.length === 0) continue;
     estimates[s] = {};
     pulls[s] = {};
     for (const t of tally(mine, order)) {
@@ -539,7 +629,7 @@ const JUDGE = Object.freeze({
 const unjudged = () => ({ cell: null, reason: "unjudged", cells: {}, pairs: [] });
 
 /**
- * One row's cell under one objective — the `*` row's or a stratum's — and
+ * One row's cell under one objective — a node's of the tree — and
  * why. The quality floor is held twice: pooled by the guard, whose trip takes
  * a cell out of every row and out of the exploration draw, and per row by the
  * fit, which refuses a cell under the floor that row alone. The floor is
@@ -641,45 +731,43 @@ function judgeSpeedRow(est, pulls, cells, tripped, costCell) {
 }
 
 /**
- * The re-fit table. `guard` is `{ tripped, n, window_start }` (readGuard's
+ * The re-fit table, over the tree `prior.splits` holds: the fit makes no split
+ * and takes none away. `guard` is `{ tripped, n, window_start }` (readGuard's
  * shape); `commit` is the sha of the commit the inputs were read from, or null
  * for the empty corpus before any fit. `rows` and `reasons` hold one set per
- * objective. `reasons.cost` holds `judgeRow()`'s record for `*` and for each
- * stratum with Pulls; a stratum whose record has no cell gets no `cost` row
- * and follows `*`, and an unjudged `*` is the default cell. `reasons.speed`
- * holds `judgeSpeedRow()`'s record for each row with a `cost` row, from that
- * row's cell, and an `unjudged` record with no cell for each stratum with no
- * `cost` row: a row with a `cost` row holds a `speed` row, the base when the
- * record has no cell, and a stratum with no `cost` row has no `speed` row
- * and follows `*`.
+ * objective, and each a row or record for every node. `reasons.cost` holds
+ * `judgeRow()`'s record, its `cell` the cell the node's `cost` row holds: a
+ * node whose record has no cell holds its parent's `cost` row, as a ticket
+ * there follows the parent, and an unjudged root holds the default cell.
+ * `reasons.speed` holds `judgeSpeedRow()`'s record for each node with a `cost`
+ * row of its own (the root always has one), from that row's cell, the base when
+ * the record has no cell; a node with none holds its parent's `speed` row and
+ * an `unjudged` record.
  */
 export function fitTable({ prior, features, members, verdicts, guard, commit = null }) {
   const window = guard.window_start ?? prior.window_start ?? null;
-  const { units, order } = fitPulls({ features, members, verdicts, window });
-  const { estimates, pulls } = estimate(units, order);
+  const nodes = treeNodes(prior.splits);
+  const { units, order } = fitPulls({ features, members, verdicts, window, stratum: (row) => stratumOf(prior, row) });
+  const { estimates, pulls } = estimate(units, order, nodes);
   const tripped = new Set(guard.tripped);
 
   let { stage, cells } = prior;
   cells = [...cells];
   // The rows and their reasons over `cells`: a fitted table's `reasons` cover exactly its `cells`.
   const judgeRows = () => {
-    const star = judgeRow(estimates["*"], pulls["*"], cells, tripped);
-    const rows = { cost: { "*": star.cell ?? POLICY_CELL }, speed: {} };
-    const reasons = { cost: { "*": { ...star, cell: rows.cost["*"] } }, speed: {} };
-    for (const s of STRATA) {
-      if (!estimates[s]) continue;
-      reasons.cost[s] = judgeRow(estimates[s], pulls[s], cells, tripped);
-      if (reasons.cost[s].cell !== null) rows.cost[s] = reasons.cost[s].cell;
-    }
-    for (const s of Object.keys(reasons.cost)) {
-      const costCell = rows.cost[s];
-      if (costCell === undefined) {
-        reasons.speed[s] = unjudged();
-        continue;
-      }
-      const record = judgeSpeedRow(estimates[s], pulls[s], cells, tripped, costCell);
-      rows.speed[s] = record.cell ?? costCell;
-      reasons.speed[s] = { ...record, cell: rows.speed[s] };
+    const rows = { cost: {}, speed: {} };
+    const reasons = { cost: {}, speed: {} };
+    for (const s of nodes) {
+      const up = parentOf(s);
+      const cost = judgeRow(estimates[s], pulls[s], cells, tripped);
+      const own = cost.cell !== null || up === null;
+      const costCell = cost.cell ?? (up === null ? POLICY_CELL : rows.cost[up]);
+      const speed = own ? judgeSpeedRow(estimates[s], pulls[s], cells, tripped, costCell) : unjudged();
+      const speedCell = speed.cell ?? (own ? costCell : rows.speed[up]);
+      rows.cost[s] = costCell;
+      rows.speed[s] = speedCell;
+      reasons.cost[s] = { ...cost, cell: costCell };
+      reasons.speed[s] = { ...speed, cell: speedCell };
     }
     return { rows, reasons };
   };
@@ -701,6 +789,7 @@ export function fitTable({ prior, features, members, verdicts, guard, commit = n
     stage,
     cells,
     burn_in: !cells.every(atN),
+    splits: prior.splits,
     rows,
     classifier: prior.classifier,
     estimates,
@@ -721,7 +810,7 @@ export function mergedSince({ table, features, members, verdicts, fitted }) {
     .filter((u) => u.status === "counted" && u.merged && !read.has(`${u.pull.session}\0${u.pull.agent}`)).length;
 }
 
-// Each cell's Pull counts over every stratum, as the fit prints them: its
+// Each cell's Pull counts over every Pull, the root's, as the fit prints them: its
 // newest generation, then each older one.
 function cellCounts(estimates) {
   const two = (x) => (x === null ? "-" : x.toFixed(2));
@@ -734,14 +823,13 @@ function cellCounts(estimates) {
     .join(", ") || "none";
 }
 
-// One line per row the fit judged or skipped, per objective: its cell (`-`
-// for a stratum that follows `*`) and its reason, then each candidate's
-// verdict and range.
+// One line per row the fit judged, per objective: its cell and its reason,
+// then each candidate's verdict and range.
 function rowLines(reasons) {
   const range = (r) => (r === null ? "" : ` [${r.map((x) => x.toFixed(2)).join(", ")}]`);
   return Object.entries(reasons).flatMap(([o, set]) => Object.entries(set).map(([s, r]) => {
     const cells = Object.entries(r.cells).map(([c, x]) => `${c} ${x.verdict}${range(x.range)}`).join(", ");
-    return `${NAME}: row ${o} ${s} ${r.cell ?? "-"} ${r.reason}${cells ? ` (${cells})` : ""}\n`;
+    return `${NAME}: row ${o} ${s} ${r.cell} ${r.reason}${cells ? ` (${cells})` : ""}\n`;
   })).join("");
 }
 
