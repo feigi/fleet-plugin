@@ -39,6 +39,7 @@ import { environmentNote } from "../plugin/scripts/review-core.mjs";
 import { Pin } from "./support/prose-pin.mjs";
 import { stripComments } from "./support/strip-comments.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { makeTree } from "./support/run-tree.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 const SOURCES = [["scripts/review-core.mjs", join(REPO, "scripts", "review-core.mjs")]];
@@ -816,6 +817,40 @@ for (const [name, path] of SOURCES) {
     } finally {
       unlock(parent);
     }
+  });
+
+  // The prune also evicts the trees in a run root it keeps: a tree whose
+  // ignored path cannot be removed is named in `failed[]`, so the step prints
+  // SNAPSHOT_PRUNE_FAILED and goes on — and the other trees are still evicted.
+  test(`${name}: an eviction that fails in a kept run root prints SNAPSHOT_PRUNE_FAILED, the step continues and the other trees are evicted`, { skip: process.getuid?.() === 0 && "root ignores the read-only parent" }, (t) => {
+    const root = scratch(t, "snapshot-repo-evict-fail-");
+    const run = join(root, "pr7", "run-recentaa");
+    const healthy = makeTree(join(run, "snapshot-abc1234"));
+    const stuck = makeTree(join(run, "correctness", "copy"), { installed: ["sub/node_modules/pkg/index.js"] });
+    chmodSync(join(stuck, "sub"), 0o555);
+    try {
+      const r = spawnSync("sh", ["-c", `${renderPrune(path, root, 7)}\necho AFTER_PRUNE`], { env: pruneEnv(t), encoding: "utf8" });
+
+      assert.match(r.stdout ?? "", /SNAPSHOT_PRUNE_FAILED/, `a tree the prune could not evict went unreported: ${r.stdout}`);
+      assert.match(r.stdout ?? "", /AFTER_PRUNE/, "a failed eviction stopped the snapshot step");
+      assert.equal(r.status, 0, `a failed eviction ended the step non-zero: ${r.stderr}`);
+      assert.ok(existsSync(join(stuck, "sub", "node_modules")), "the fixture's ignored path was removed, so this case exercised no failure");
+      assert.ok(!existsSync(join(healthy, "node_modules")), "a tree beside the failing one was not evicted");
+    } finally {
+      chmodSync(join(stuck, "sub"), 0o755);
+    }
+  });
+
+  test(`${name}: a healthy prune over a kept run root evicts its trees and prints nothing`, (t) => {
+    const root = scratch(t, "snapshot-repo-evict-ok-");
+    const tree = makeTree(join(root, "pr7", "run-recentaa", "snapshot-abc1234"));
+
+    const r = spawnSync("sh", ["-c", renderPrune(path, root, 7)], { env: pruneEnv(t), encoding: "utf8" });
+
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout ?? "", "", "a healthy prune printed to the snapshot step's stdout");
+    assert.ok(!existsSync(join(tree, "node_modules")), "the prune left an installed directory in a kept run root's tree");
+    assert.ok(existsSync(join(tree, "tracked.txt")));
   });
 
   // #1616. The ref-head operand, measured where it is PRODUCED rather than

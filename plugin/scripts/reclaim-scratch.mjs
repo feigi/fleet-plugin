@@ -101,12 +101,16 @@
 // alone in GitHub's place.
 //
 // `--pr <N>` MODE is the review snapshot's prune: every directory
-// `<root>/pr<N>/run-*` idle past the retention is removed, and nothing else
-// is looked at — no ledger, no gh (a live review's own run root is seconds
-// old), no sibling under pr<N>/.
+// `<root>/pr<N>/run-*` idle past the retention is removed whole, and every
+// other one has the trees in it evicted — each directory that holds a .git of
+// its own, at any depth, loses every path git ignores in it, which is
+// evict-tree.mjs's rule: tracked files, each .git, untracked files git does not
+// ignore and everything in the run root outside a tree stay. Nothing else is
+// looked at — no ledger, no gh (a live review's own run root is seconds old
+// and holds no tree yet), no sibling under pr<N>/.
 //
-// EVERY REMOVAL, in either mode, goes through REMOVE below: owner rwx
-// restored, darwin's user-immutable and append-only flags cleared where
+// EVERY REMOVAL, in either mode, goes through evict-tree.mjs's REMOVE: owner
+// rwx restored, darwin's user-immutable and append-only flags cleared where
 // `chflags` exists, then `rm -rf` — so a fixture that dropped its own read bit
 // or flagged a file cannot wedge it. Removal is best-effort per entry: a
 // failure lands in `failed[]` and the sweep continues.
@@ -116,10 +120,12 @@
 //    "kept":[{"path","reason"}],"failed":[{"path","error"}]}
 // The sibling pass's kept entries also carry "idle": true when nothing under
 // the key was found modified within the retention, false otherwise.
+// `--pr` mode adds `"evicted":[{"path","reason","ignored"}]` after `removed`:
+// each tree that held ignored paths, `ignored` naming them.
 // `ledger` is the file read, or null when none was (`--pr` mode, or
 // `--after-rotate` with no file) — so "never read" stays distinct from "read
 // and found empty". A dry run prints the same receipt with "applied":false,
-// `removed` naming what --apply would remove.
+// `removed` and `evicted` naming what --apply would remove.
 // Exit 0 whenever the receipt is printed, failures included; 2 for a refused
 // invocation — bad arguments, no --root, a root that is not a directory, a
 // root sweep or sibling pass whose --root is not this workspace's own scratch
@@ -133,6 +139,7 @@ import { lstatSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync,
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineFlags, isDigits, makeDie, writeAll } from "./arg.mjs";
+import { evictTrees, removeEntry } from "./evict-tree.mjs";
 import { fleetFile, FleetDirUnresolvable, SCRATCH_KEY_SHAPE, scratchRoot } from "./fleet-dir.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { ghAliasedRead, how } from "./gh-aliased-read.mjs";
@@ -149,26 +156,6 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export const RETENTION_MS = 7 * DAY_MS;
 const GH_TIMEOUT_MS = 30_000;
 const MAX_BUFFER = 64 * 1024 * 1024;
-
-// The one removal sequence. `$1` is the entry. A symlink entry is unlinked
-// before anything else runs, so no chmod or chflags ever sees it: whether a
-// recursive chmod dereferences a link given as its operand differs between
-// BSD and GNU, and either would change the mode or flags of a target outside
-// the entry being removed. Links met inside a directory are left to `rm`,
-// which unlinks them without following. `chmod -R` fails
-// on a flagged directory, and `chflags -R` cannot read a mode-000 directory it
-// has just unflagged, so when the first pass fails each directory's flag and
-// mode come off together, top-down, before anything inside it is read.
-const REMOVE = [
-  'd=$1',
-  'if [ -L "$d" ]; then rm -f "$d"; exit $?; fi',
-  'chmod -R u+rwx "$d" 2>/dev/null; m=$?',
-  'if command -v chflags >/dev/null 2>&1; then',
-  '  [ $m -eq 0 ] || { chflags nouchg,nouappnd "$d"; chmod u+rwx "$d"; find "$d" -type d -exec chflags nouchg,nouappnd {} ";" -exec chmod u+rwx {} ";"; } 2>/dev/null',
-  '  chflags -R nouchg,nouappnd "$d" 2>/dev/null',
-  'fi',
-  'rm -rf "$d"',
-].join("\n");
 
 const PR_ENTRY = /^pr([1-9][0-9]*)$/;
 const IMPL_ENTRY = /^impl-([1-9][0-9]*)$/;
@@ -213,12 +200,6 @@ export function freshUnder(path, cutoff, unreadable = null) {
     for (const n of names) stack.push(join(p, n));
   }
   return null;
-}
-
-/** Remove `path` through REMOVE; null on success, else the reason. */
-export function removeEntry(path) {
-  const r = spawnSync("sh", ["-c", REMOVE, "sh", path], { encoding: "utf8" });
-  return r.error || r.status !== 0 ? how(r) : null;
 }
 
 // The ledger's rows and `## Dispatched` entries, read through `ledger.mjs
@@ -705,6 +686,8 @@ function main() {
 
   const now = Date.now();
   let ledger = null;
+  // `--pr` mode's evictions; null in every other mode.
+  let evicted = null;
   let remove;
   let kept = [];
   const failed = [];
@@ -715,6 +698,13 @@ function main() {
     } catch (e) {
       remove = [];
       failed.push({ path: parent, error: e.message });
+    }
+    // `--pr` mode also evicts the trees in every run root it keeps.
+    evicted = [];
+    for (const run of kept) {
+      const done = evictTrees(run.path, { apply });
+      for (const t of done.evicted) evicted.push({ path: t.path, reason: "a tree in a kept review run root", ignored: t.ignored });
+      failed.push(...done.failed);
     }
   } else if (siblings) {
     if (apply) {
@@ -769,7 +759,8 @@ function main() {
     if (error === null) removed.push(entry);
     else failed.push({ path: entry.path, error });
   }
-  writeAll(1, `${JSON.stringify({ applied: apply, ledger, removed, kept, failed })}\n`);
+  const receipt = { applied: apply, ledger, removed, ...(evicted === null ? {} : { evicted }), kept, failed };
+  writeAll(1, `${JSON.stringify(receipt)}\n`);
 }
 
 if (isCLI(import.meta.url)) main();

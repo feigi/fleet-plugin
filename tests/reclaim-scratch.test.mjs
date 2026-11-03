@@ -10,13 +10,14 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
-  chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync,
+  appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync,
   symlinkSync, utimesSync, writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { gitIn, makeTree } from "./support/run-tree.mjs";
 import { freshUnder } from "../plugin/scripts/reclaim-scratch.mjs";
 import { scratchRoot } from "../plugin/scripts/fleet-dir.mjs";
 
@@ -865,8 +866,225 @@ test("(8) --pr <N> on a PR with no pr<N>/ yet answers an empty receipt", (t) => 
   const f = fixture(t);
   const r = f.run(["--pr", "9", "--root", f.root, "--apply"]);
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(r.out, { applied: true, ledger: null, removed: [], kept: [], failed: [] });
+  assert.deepEqual(r.out, { applied: true, ledger: null, removed: [], evicted: [], kept: [], failed: [] });
 });
+
+// ----------------------------------------------------------------------------
+// `--pr <N>` also evicts the trees in the run roots it keeps: every directory
+// that holds a .git of its own loses every path git ignores in it.
+
+// A PR's run root of the shape a review leaves: the snapshot, a specialist's
+// copy, a refuter's copy two levels down — each a tree with an installed
+// directory — and the run root's own files. One copy holds a mutant, an
+// untracked file git does not ignore.
+function reviewRunRoot(f, pr = 7, name = "run-abcdefgh") {
+  const run = join(f.root, `pr${pr}`, name);
+  mkdirSync(run, { recursive: true });
+  const trees = [
+    makeTree(join(run, "snapshot-abc1234")),
+    makeTree(join(run, "correctness", "copy"), { untracked: ["mutant.txt"] }),
+    makeTree(join(run, "verify-correctness", "finding-1", "copy")),
+  ];
+  const files = ["review.json", "install.log", "status.txt"].map((n) => join(run, n));
+  for (const p of files) writeFileSync(p, "kept\n");
+  return { run, trees, files };
+}
+const installedDir = (tree) => join(tree, "node_modules");
+
+test("(8) --pr <N> --apply evicts the ignored paths of every tree in a run root it keeps, and nothing else", (t) => {
+  const f = fixture(t);
+  const { run, trees, files } = reviewRunRoot(f);
+
+  const r = f.run(["--pr", "7", "--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.failed, []);
+  assert.deepEqual(r.out.removed, []);
+  assert.deepEqual(paths(r.out.evicted), [...trees].sort());
+  for (const e of r.out.evicted) assert.deepEqual(e.ignored, ["node_modules/"]);
+  for (const tree of trees) {
+    assert.ok(!existsSync(installedDir(tree)), `${tree} kept its installed directory`);
+    for (const kept of [".git", ".gitignore", "tracked.txt", join("sub", "tracked.txt")]) assert.ok(existsSync(join(tree, kept)), `${join(tree, kept)} was removed`);
+    assert.equal(gitIn(tree, "status", "--porcelain", "--ignored").replace("?? mutant.txt", "").trim(), "", "a tracked file changed");
+  }
+  assert.ok(existsSync(join(trees[1], "mutant.txt")), "an untracked file git does not ignore was removed");
+  for (const p of files) assert.ok(existsSync(p), `${p} was removed`);
+  assert.deepEqual(paths(r.out.kept), [run]);
+});
+
+test("(8) --pr <N> without --apply changes nothing and names what --apply would evict", (t) => {
+  const f = fixture(t);
+  const { trees, files } = reviewRunRoot(f);
+
+  const dry = f.run(["--pr", "7", "--root", f.root]);
+
+  assert.equal(dry.status, 0, dry.stderr);
+  assert.equal(dry.out.applied, false);
+  for (const tree of trees) assert.ok(existsSync(join(installedDir(tree), "pkg", "index.js")), `the dry run removed in ${tree}`);
+  for (const p of files) assert.ok(existsSync(p));
+  assert.deepEqual(paths(dry.out.evicted), [...trees].sort());
+  const wet = f.run(["--pr", "7", "--root", f.root, "--apply"]);
+  assert.deepEqual({ ...dry.out, applied: true }, wet.out);
+  for (const tree of trees) assert.ok(!existsSync(installedDir(tree)));
+});
+
+test("(8) --pr <N>: a run root idle 8 d is removed whole, its trees never named as evicted, and a fresh one beside it is evicted", (t) => {
+  const f = fixture(t);
+  const old = reviewRunRoot(f, 7, "run-oldoldol");
+  f.age(old.run, 8);
+  const fresh = reviewRunRoot(f, 7, "run-freshfre");
+
+  const r = f.run(["--pr", "7", "--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r.out.removed), [old.run]);
+  assert.ok(!existsSync(old.run));
+  assert.deepEqual(paths(r.out.evicted), [...fresh.trees].sort());
+  assert.deepEqual(r.out.failed, []);
+});
+
+test("(8) --pr <N> touches only the PR's run-* roots: a fix round root, a mutate copy, a finish tree and another PR's run root keep their installed directories", (t) => {
+  const f = fixture(t);
+  const mine = reviewRunRoot(f, 7);
+  const others = [
+    makeTree(join(f.root, "pr7", "fix-abcdefgh", "round-1")),
+    makeTree(join(f.root, "pr7", "mutate")),
+    makeTree(join(f.root, "pr7", "finish-impl-4076")),
+    makeTree(join(f.root, "pr7", "merge-bot-1", "copy")),
+    ...reviewRunRoot(f, 8, "run-otherppp").trees,
+    makeTree(join(f.root, "pr70", "run-abcdefgh", "snapshot-abc1234")),
+  ];
+
+  const r = f.run(["--pr", "7", "--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r.out.evicted), [...mine.trees].sort());
+  for (const tree of others) assert.ok(existsSync(join(installedDir(tree), "pkg", "index.js")), `--pr 7 evicted ${tree}`);
+});
+
+test("(8) --pr <N> strips no directory that resolves to an enclosing repository", (t) => {
+  const f = fixture(t);
+  // pr7/ is itself a repository whose rules ignore node_modules/ at any depth
+  // and whose own installed directory sits beside the run roots.
+  const partition = join(f.root, "pr7");
+  mkdirSync(partition, { recursive: true });
+  gitIn(partition, "init", "-q");
+  writeFileSync(join(partition, ".gitignore"), "node_modules/\n");
+  mkdirSync(join(partition, "node_modules", "own"), { recursive: true });
+  writeFileSync(join(partition, "node_modules", "own", "i.js"), "x");
+  const run = join(partition, "run-abcdefgh");
+  // A directory with no .git of its own, and one whose .git git cannot read:
+  // each resolves to the enclosing repository.
+  const plain = join(run, "plain");
+  const broken = join(run, "broken");
+  for (const d of [plain, broken]) {
+    mkdirSync(join(d, "node_modules", "x"), { recursive: true });
+    writeFileSync(join(d, "node_modules", "x", "i.js"), "x");
+  }
+  mkdirSync(join(broken, ".git"));
+
+  const r = f.run(["--pr", "7", "--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.evicted, []);
+  assert.deepEqual(r.out.failed, []);
+  for (const d of [plain, broken, partition]) assert.ok(existsSync(join(d, "node_modules")), `${d} lost its node_modules`);
+  assert.ok(existsSync(join(partition, "node_modules", "own", "i.js")));
+});
+
+test("(8) --pr <N> removes an ignored symlink and leaves its target, and never follows a link out of the run root", (t) => {
+  const f = fixture(t);
+  const { run, trees } = reviewRunRoot(f);
+  const outside = join(f.base, "outside");
+  mkdirSync(outside);
+  writeFileSync(join(outside, "keep.txt"), "kept");
+  // `*.log` ignores the link; the second link is no ignored path of anyone's
+  // and reaches a tree that holds an installed directory.
+  symlinkSync(outside, join(trees[0], "ignored.log"));
+  const elsewhere = makeTree(join(f.base, "elsewhere"));
+  symlinkSync(elsewhere, join(run, "link-to-a-tree"));
+
+  const r = f.run(["--pr", "7", "--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.failed, []);
+  assert.equal(lstatSyncOrNull(join(trees[0], "ignored.log")), null, "the ignored link survived");
+  assert.ok(existsSync(join(outside, "keep.txt")), "the link's target was removed");
+  assert.ok(existsSync(join(elsewhere, "node_modules", "pkg", "index.js")), "a link out of the run root was followed");
+  assert.ok(lstatSyncOrNull(join(run, "link-to-a-tree")) !== null, "a link that is no ignored path was removed");
+});
+
+test("(8) --pr <N>: a repository inside an ignored directory goes with that directory, and is no tree of its own", (t) => {
+  const f = fixture(t);
+  const tree = makeTree(join(f.root, "pr7", "run-abcdefgh", "snapshot-abc1234"));
+  const dep = join(tree, "node_modules", "from-git");
+  mkdirSync(dep, { recursive: true });
+  gitIn(dep, "init", "-q");
+  writeFileSync(join(dep, ".gitignore"), "build/\n");
+  mkdirSync(join(dep, "build"));
+  writeFileSync(join(dep, "build", "out.js"), "x");
+
+  const dry = f.run(["--pr", "7", "--root", f.root]);
+  assert.deepEqual(paths(dry.out.evicted), [tree]);
+  assert.deepEqual(dry.out.failed, []);
+  const r = f.run(["--pr", "7", "--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r.out.evicted), [tree]);
+  assert.deepEqual(r.out.evicted[0].ignored, ["node_modules/"]);
+  assert.deepEqual(r.out.failed, []);
+  assert.ok(!existsSync(join(tree, "node_modules")));
+});
+
+test("(8) --pr <N>: a tree whose ignored path cannot be removed is named in failed with its error, and the other trees are still evicted", { skip: process.getuid?.() === 0 && "root ignores the read-only parent" }, (t) => {
+  const f = fixture(t);
+  const { trees } = reviewRunRoot(f);
+  const stuck = makeTree(join(f.root, "pr7", "run-abcdefgh", "zz-stuck"), { installed: ["sub/node_modules/pkg/index.js"] });
+  chmodSync(join(stuck, "sub"), 0o555);
+
+  const r = f.run(["--pr", "7", "--root", f.root, "--apply"]);
+  chmodSync(join(stuck, "sub"), 0o755);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r.out.failed), [stuck]);
+  assert.match(r.out.failed[0].error, /^could not remove sub\/node_modules\//);
+  assert.deepEqual(paths(r.out.evicted), [...trees].sort());
+  for (const tree of trees) assert.ok(!existsSync(installedDir(tree)), `${tree} was not evicted after another tree failed`);
+  assert.ok(existsSync(join(stuck, "sub", "node_modules")));
+});
+
+test("(8) --pr <N>: a second pass over an evicted run root evicts nothing and reports no failure", (t) => {
+  const f = fixture(t);
+  reviewRunRoot(f);
+  const first = f.run(["--pr", "7", "--root", f.root, "--apply"]);
+  assert.equal(first.out.evicted.length, 3);
+
+  const second = f.run(["--pr", "7", "--root", f.root, "--apply"]);
+
+  assert.equal(second.status, 0, second.stderr);
+  assert.deepEqual(second.out.evicted, []);
+  assert.deepEqual(second.out.failed, []);
+});
+
+test("(8) --pr <N>: the runner a tree tracks or ignores is never listed as an ignored path", (t) => {
+  const f = fixture(t);
+  const tree = makeTree(join(f.root, "pr7", "run-abcdefgh", "snapshot-abc1234"), { installed: ["agent-test"] });
+  appendFileSync(join(tree, ".gitignore"), "agent-test\n");
+
+  const r = f.run(["--pr", "7", "--root", f.root, "--apply"]);
+
+  assert.deepEqual(r.out.evicted, []);
+  assert.ok(existsSync(join(tree, "agent-test")));
+});
+
+const lstatSyncOrNull = (p) => {
+  try {
+    return lstatSync(p);
+  } catch (e) {
+    if (e.code === "ENOENT") return null;
+    throw e;
+  }
+};
 
 test("(9) every refused invocation exits 2 and touches nothing", (t) => {
   const f = fixture(t);

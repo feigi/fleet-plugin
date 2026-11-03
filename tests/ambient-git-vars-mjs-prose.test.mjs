@@ -319,7 +319,7 @@ const COVERED_MJS = {
   // another repository's main.
   "reclaim-scratch.mjs": 2,
   // ONE scrubbed env, in `run()`, behind every child the script starts: its
-  // git reads (the worktree listing, each tree's status, its ignored paths,
+  // git reads (the worktree listing, each tree's status,
   // HEAD's commit date), the `wt_op_state` shell, `derive-testcmd.sh` and the
   // Install step. An ambient GIT_DIR would list, judge and empty another
   // repository's trees. Measured in evict.test.mjs, "an ambient GIT_DIR and
@@ -331,6 +331,13 @@ const COVERED_MJS = {
   // would name another repository's. Measured through evict.mjs in the same
   // evict.test.mjs case, which finds the mark in the tree's own admin dir.
   "evict-mark.mjs": 1,
+  // ONE scrubbed env, behind `git()`'s two reads — `ls-files --ignored`, which
+  // lists what an eviction removes, and `rev-parse --show-toplevel`, which
+  // decides whether a directory is a tree. An ambient GIT_DIR would list and
+  // remove another repository's ignored paths, and name it the toplevel of
+  // every directory. Measured in evict-tree.test.mjs, "an ambient GIT_DIR and
+  // GIT_WORK_TREE naming another repository change nothing".
+  "evict-tree.mjs": 1,
   // ONE spawn primitive, `gitBeside(path, args)`, behind both of `--check`'s git
   // reads — `rev-parse --verify` of the commit and `show <sha>:./<file>`. An
   // ambient GIT_DIR would answer both for another repository, and an ambient
