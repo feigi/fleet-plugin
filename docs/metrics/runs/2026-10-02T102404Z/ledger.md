@@ -1,0 +1,885 @@
+# Fleet run ledger
+
+## Rows
+
+- #1716 impl-1716=PR#1867 · class=routine · review=member:review-pr-1867=failed · review=fallback:review-pr-1867-b · reviewed=cc1dd43:0/1/2
+- #1756 impl-1756=PR#1868 · class=correction · review=member:review-pr-1868=failed · review=fallback:review-pr-1868-b · reviewed=99585de:0/6/3
+- #1859 review=member:review-pr-1859=failed · review=fallback:review-pr-1859-b · reviewed=4135941:0/6/0
+- #1839 impl-1839=PR#1869 · class=routine · review=member:review-pr-1869=failed · review=fallback:review-pr-1869-b · reviewed=ecbb3ce:0/6/1
+- #1841 impl-1841=PR#1883 · class=routine · tier=alt · review=member:review-pr-1883=failed · review=fallback:review-pr-1883-b · reviewed=731e71f:0/0/0
+- #1843 impl-1843=PR#1912 · class=routine · review=member:review-pr-1912=failed · review=fallback:review-pr-1912-b · reviewed=5cb0a93:0/2/0
+- #1845 impl-1845=PR#1870 · class=correction · review=member:review-pr-1870=failed · review=fallback:review-pr-1870-b · reviewed=fc2334a:0/2/0
+- #1850 impl-1850=PR#1875 · class=routine · tier=alt · review=member:review-pr-1875=failed · review=fallback:review-pr-1875-b · reviewed=95f4210:0/11/0
+- #1846 impl-1846=PR#1877 · class=correction · review=member:review-pr-1877=failed · review=fallback:review-pr-1877-b · reviewed=cde4feb:0/1/0
+- #1851 impl-1851=PR#1892 · class=routine · review=member:review-pr-1892=failed · review=fallback:review-pr-1892-b · reviewed=fd2f3f3:0/13/1
+- #1852 impl-1852=PR#1893 · class=routine · review=member:review-pr-1893=failed · review=fallback:review-pr-1893-b · reviewed=f175a41:0/1/1
+- #1853 impl-1853=PR#1900 · class=correction · review=member:review-pr-1900=failed · review=fallback:review-pr-1900-b · reviewed=deccd82:0/2/2
+- #1854 impl-1854=PR#1901 · class=routine · review=member:review-pr-1901=failed · review=fallback:review-pr-1901-b · reviewed=27d2784:0/6/0
+- #1855 impl-1855=PR#1880 · class=routine · review=member:review-pr-1880=failed · review=fallback:review-pr-1880-b · reviewed=58e85bd:0/5/5
+- #1842 impl-1842=PR#1891 · class=routine · review=member:review-pr-1891=failed · review=fallback:review-pr-1891-b · reviewed=8b87ecf:0/12/0
+- #1856 impl-1856=PR#1907 · class=routine · review=member:review-pr-1907=failed · review=fallback:review-pr-1907-b · reviewed=34cd170:0/7/1
+- #1861 impl-1861=PR#1881 · class=correction · review=member:review-pr-1881=failed · review=fallback:review-pr-1881-b · reviewed=149fb63:0/2/0
+- #1757 impl-1757=PR#1882 · class=routine · review=member:review-pr-1882=failed · review=fallback:review-pr-1882-b · reviewed=8982318:0/2/0
+- #910 impl-910=PR#1890 · class=routine · review=member:review-pr-1890=failed · review=fallback:review-pr-1890-b · reviewed=54526da:0/1/2
+- #1717 impl-1717=PR#1889 · class=routine · review=member:review-pr-1889=failed · review=fallback:review-pr-1889-b · reviewed=85a0721:0/2/1
+- #1862 impl-1862=PR#1908 · class=correction · review=member:review-pr-1908=failed · review=fallback:review-pr-1908-b · reviewed=2c4b6e9:0/2/0
+- #1865 impl-1865=PR#1909 · class=correction · review=member:review-pr-1909=failed · review=fallback:review-pr-1909-b · reviewed=730a300:0/1/0
+- #1840 impl-1840=PR#1913 · class=routine · review=member:review-pr-1913=failed · review=fallback:review-pr-1913-b · reviewed=0ff4700:0/6/0
+- #1844 impl-1844=PR#1922 · class=routine · review=member:review-pr-1922=failed · review=fallback:review-pr-1922-b · reviewed=aa325f1:0/1/1
+- #1866 impl-1866=PR#1982 · class=correction · review=member:review-pr-1982=failed · review=fallback:review-pr-1982-b · reviewed=f44f81b:0/5/0
+- #1872 impl-1872=PR#1914 · class=routine · review=member:review-pr-1914=failed · review=fallback:review-pr-1914-b · reviewed=a12d5dd:0/1/1
+- #1873 impl-1873=PR#1915 · class=routine · review=member:review-pr-1915=failed · review=fallback:review-pr-1915-b · reviewed=7e257a0:0/1/2
+- #1874 impl-1874=PR#1924 · class=routine · review=member:review-pr-1924=failed · review=fallback:review-pr-1924-b · reviewed=ae4f9cf:0/1/1
+- #1878 impl-1878=PR#1927 · class=routine
+- #1879 impl-1879=PR#1917 · class=routine · review=member:review-pr-1917=failed · review=fallback:review-pr-1917-b · reviewed=c26f19c:0/0/0
+- #1884 impl-1884=PR#1918 · class=routine · review=member:review-pr-1918=failed · review=fallback:review-pr-1918-b · reviewed=5d8b7a8:0/0/0
+- #1885 impl-1885=PR#1929 · class=routine · tier=alt · review=member:review-pr-1929=failed · review=fallback:review-pr-1929-b · reviewed=a084f2e:0/1/0
+- #1886 impl-1886=PR#1930 · class=routine · review=member:review-pr-1930=failed · review=fallback:review-pr-1930-b · reviewed=8847a47:0/0/3
+- #1887 impl-1887=PR#1936 · class=routine · review=member:review-pr-1936=failed · review=fallback:review-pr-1936-b · reviewed=80e6bcd:0/2/1
+- #1888 impl-1888=PR#1931 · class=routine · review=member:review-pr-1931=failed · review=fallback:review-pr-1931-b · reviewed=f055259:0/8/0
+- #1894 impl-1894=PR#1933 · class=routine · review=member:review-pr-1933=failed · review=fallback:review-pr-1933-b · reviewed=6384e7f:0/1/2
+- #1895 impl-1895=PR#1934 · class=routine · review=member:review-pr-1934=failed · review=fallback:review-pr-1934-b · reviewed=95c79c6:0/2/2
+- #1896 impl-1896=PR#1946 · class=routine · tier=alt · review=member:review-pr-1946=failed · review=fallback:review-pr-1946-b · reviewed=d41af4b:0/1/3
+- #1898 impl-1898=PR#1939 · class=routine · review=member:review-pr-1939=failed · review=fallback:review-pr-1939-b · reviewed=20d3e45:1/1/4 · fix-pr-1939=applied:20d3e45
+- #1903 impl-1903=PR#1942 · class=routine · review=member:review-pr-1942=failed · review=fallback:review-pr-1942-b · reviewed=790217c:0/1/4
+- #1905 impl-1905=PR#1944 · class=routine · review=member:review-pr-1944=failed · review=fallback:review-pr-1944-b · reviewed=6df1719:0/1/9
+- #1906 impl-1906=PR#1955 · class=routine · review=member:review-pr-1955=failed · review=fallback:review-pr-1955-b · reviewed=18cb3fb:0/1/3
+- #1910 impl-1910=PR#1947 · class=routine · review=member:review-pr-1947=failed · review=fallback:review-pr-1947-b · reviewed=e7fd8ae:0/2/3
+- #1916 impl-1916=PR#1967 · class=routine · tier=alt · review=member:review-pr-1967=failed · review=fallback:review-pr-1967-b · reviewed=68ed8d8:0/4/0
+- #1919 impl-1919=PR#1966 · class=routine · review=member:review-pr-1966=failed · review=fallback:review-pr-1966-b · reviewed=7f57495:1/5/0
+- #1920 impl-1920=PR#1971 · class=routine · review=member:review-pr-1971=failed · review=fallback:review-pr-1971-b · fix-pr-1971=applied:41f2049 · reviewed=41f2049:3/1/6
+- #1923 impl-1923=PR#1965 · class=routine · review=member:review-pr-1965=failed · review=fallback:review-pr-1965-b · reviewed=f3edf6e:0/0/0
+- #1925 impl-1925=PR#1949 · class=routine · review=member:review-pr-1949=failed · review=fallback:review-pr-1949-b · reviewed=7bdd359:0/1/6
+- #1926 impl-1926=PR#1968 · class=routine · review=member:review-pr-1968=failed · review=fallback:review-pr-1968-b · reviewed=bf5b859:0/7/0
+- #1928 impl-1928=PR#1969 · class=routine · review=member:review-pr-1969=failed · review=fallback:review-pr-1969-b · reviewed=ea14040:3/8/0
+- #1932 impl-1932=PR#1953 · class=routine · review=member:review-pr-1953=failed · review=fallback:review-pr-1953-b · reviewed=5714aab:0/0/0
+- #1935 impl-1935=PR#1960 · class=routine · tier=alt · review=member:review-pr-1960=failed · review=fallback:review-pr-1960-b · reviewed=38b6832:0/0/0
+- #1940 impl-1940=PR#1985 · class=routine · review=member:review-pr-1985=failed · review=fallback:review-pr-1985-b · reviewed=8942ed3:3/9/1 · fix-pr-1985=applied:8942ed3
+- #1941 impl-1941=PR#1964 · class=routine · review=member:review-pr-1964=failed · review=fallback:review-pr-1964-b · reviewed=9f20745:0/2/1
+- #1943 impl-1943=PR#1963 · class=routine · review=member:review-pr-1963=failed · review=fallback:review-pr-1963-b · reviewed=f1d53a0:0/1/1 · fix-pr-1963=applied:f1d53a0
+- #1945 impl-1945=PR#1984 · class=routine · tier=alt · review=member:review-pr-1984=failed · review=fallback:review-pr-1984-b · reviewed=abaa03f:2/9/1 · fix-pr-1984=applied:abaa03fe
+- #1950 impl-1950=PR#1972 · class=routine · review=member:review-pr-1972=failed · review=fallback:review-pr-1972-b · reviewed=b8a546f:0/1/1
+- #1954 impl-1954=PR#1974 · class=routine · tier=alt · review=member:review-pr-1974=failed · review=fallback:review-pr-1974-b · fix-pr-1974=applied:fc7e445c · reviewed=fc7e445c:1/13/0
+- #1956 impl-1956=PR#1977 · class=routine · review=member:review-pr-1977=failed · review=fallback:review-pr-1977-b · reviewed=450cfbc9:1/0/9 · fix-pr-1977=applied:450cfbc98e028ffc492cfbe73bde0724526cf91b
+- #1957 impl-1957=PR#1979 · class=routine · review=member:review-pr-1979=failed · review=fallback:review-pr-1979-b · reviewed=eda3c75:1/2/1
+- #1958 impl-1958=PR#1986 · class=routine · review=member:review-pr-1986=failed · review=fallback:review-pr-1986-b · reviewed=2494fb9:0/10/0
+- #1959 impl-1959=PR#1993 · class=routine · review=member:review-pr-1993=failed · review=fallback:review-pr-1993-b · reviewed=389fdac:1/3/0 · fix-pr-1993=applied:389fdac · rebased=d106ef6 (conflict vs #1984/#1985/#1990/#1994, resolved by rebase-pr-1993)
+- #1961 impl-1961=PR#1996 · class=routine · tier=alt · review=member:review-pr-1996=failed · review=fallback:review-pr-1996-b · reviewed=c55a632:2/6/1 · fix-pr-1996=applied:c55a632b18341a258a8077fa3f2d8f9c63ab4fca
+- #1962 impl-1962=PR#2007 · class=routine · review=member:review-pr-2007=failed · review=fallback:review-pr-2007-b · reviewed=3966023c:4/2/1 · fix-pr-2007=applied:3966023c44e4bcb423a83bd3023d2feebe4f1303
+- #1970 impl-1970=PR#1997 · class=routine · review=member:review-pr-1997=failed · review=fallback:review-pr-1997-b · reviewed=a4b34540:3/0/1 · fix-pr-1997=applied:a4b34540fa7bd20753ad9d2d375c5483238d707d
+- #1973 impl-1973=PR#1980 · class=routine · review=member:review-pr-1980=failed · review=fallback:review-pr-1980-b · reviewed=f39e1b4:0/0/0
+- #1975 impl-1975=PR#1995 · class=routine · review=member:review-pr-1995=failed · review=fallback:review-pr-1995-b · reviewed=628af877:7/1/0 · fix-pr-1995=applied:628af877a7ede138ddd35f898205cac9dcf53827
+- #1976 impl-1976=PR#2008 · class=routine · review=member:review-pr-2008=failed · review=fallback:review-pr-2008-b · reviewed=3b355a5e:0/8/0
+- #1981 impl-1981=PR#1998 · class=routine · review=member:review-pr-1998=failed · review=fallback:review-pr-1998-b · reviewed=55b331f6:0/19/5 · fix-pr-1998=applied:55b331f6
+- #1978 impl-1978=PR#1990 · class=routine · review=member:review-pr-1990=failed · review=fallback:review-pr-1990-b · reviewed=0712584:1/2/1 · fix-pr-1990=applied:0712584
+- #1988 impl-1988=PR#1994 · class=routine · review=member:review-pr-1994=failed · review=fallback:review-pr-1994-b · reviewed=e8608fd0:2/2/0 · fix-pr-1994=applied:e8608fd09b3f87fabc2073cc2ed919ca20de8fbd
+- #1989 impl-1989=PR#2009 · class=routine · review=member:review-pr-2009=failed · review=fallback:review-pr-2009-b · reviewed=b59c3297:1/0/0 · fix-pr-2009=applied:79e259dbbb79ef870936969e57080180df213629
+- #1991 impl-1991=PR#2001 · class=routine · review=member:review-pr-2001=failed · review=fallback:review-pr-2001-b · reviewed=b8ad24b0:3/6/5 · fix-pr-2001=applied:b8ad24b023ad67b2519a43cefdfb1f3859239c6c
+- #1992 impl-1992=PR#2010 · class=routine · review=member:review-pr-2010=failed · review=fallback:review-pr-2010-b · reviewed=b382813e:1/2/0 · fix-pr-2010=applied:b382813ee0b63413d9353d0ebc98656dcec5725c
+- #1999 impl-1999=PR#2014 · class=routine · review=member:review-pr-2014=failed · review=fallback:review-pr-2014-b · reviewed=98ab7ba0:7/0/0 · fix-pr-2014=applied:98ab7ba073c3b0527b2f77ce519abfc2205fbebe
+- #2000 impl-2000=PR#2005 · class=routine · tier=alt · review=member:review-pr-2005=failed · review=fallback:review-pr-2005-b · reviewed=409a7c34:2/0/5 · fix-pr-2005=applied:409a7c3444ac2f4d1e96e9958e02dd6b0367dc19
+- #2002 impl-2002=PR#2016 · class=routine · review=member:review-pr-2016=failed · review=fallback:review-pr-2016-b · reviewed=bde5e3b1:9/0/0 · fix-pr-2016=applied:bde5e3b13d221da4899b54823377dd98bb5f0282
+- #2003 impl-2003=PR#2011 · class=routine · tier=alt · review=member:review-pr-2011=failed · review=fallback:review-pr-2011-b · reviewed=254330b5:1/5/4 · fix-pr-2011=applied:254330b5
+- #2004 impl-2004=PR#2012 · class=routine · review=member:review-pr-2012=failed · review=fallback:review-pr-2012-b · reviewed=76ef162b:0/6/5 · fix-pr-2012=applied:76ef162b
+- #2006 impl-2006=PR#2015 · class=routine · review=member:review-pr-2015=failed · review=fallback:review-pr-2015-b · reviewed=19602c91:2/3/0 · fix-pr-2015=applied:19602c917e498dea62492fede3417eecb2b73640
+- #2013 impl-2013=PR#2017 · class=routine · review=member:review-pr-2017=failed · review=fallback:review-pr-2017-b · reviewed=b908002:3/21/0 · fix-pr-2017=applied:b9080026fd69b66ff876ebdde7ce708f27353b01
+- #1876 impl-1876=PR#2020 · review=member:review-pr-2020=failed · review=fallback:review-pr-2020-b · reviewed=81ac0326:5/16/3 · fix-pr-2020=applied:81ac032661b350d0f0eb90b1ac439efac4a11d8d
+- #1899 impl-1899=PR#2018 · review=member:review-pr-2018=failed · review=fallback:review-pr-2018-b · reviewed=fa456017:8/8/1 · fix-pr-2018=applied:fa45601772099221c4ace0f1c38af22bddd1c8d3
+- #1904 impl-1904=PR#2019 · review=member:review-pr-2019=failed · review=fallback:review-pr-2019-b · reviewed=e332080:0/10/0 · fix-pr-2019=applied:e332080208643c629bdc920605ce628dfccd904e
+- #1948 impl-1948=PR#2022 · review=member:review-pr-2022=failed · review=fallback:review-pr-2022-b · reviewed=e9659623:2/15/0 · fix-pr-2022=applied:f926d64fee3906bb1ba640f81d5376a24f2806ec (rebased ac618629->f926d64f, base moved to 19c33611)
+- #1952 impl-1952=PR#2023 · tier=alt · review=member:review-pr-2023=failed · review=fallback:review-pr-2023-b · reviewed=46a0c804:0/4/3 · fix-pr-2023=applied:46a0c80454fbe0fdf9052d2f2f3b41d773421597 (rebased 3f147f66->46a0c804, base moved onto main; hand-dispatched review — fleet-review-runner failed twice, 85/85 deterministic this run; 3 unnamed specialists fanned out, 1 survivor applied (prose-set floor missed a single-directory drop) + 1 stale comment fixed, 4 refuted, 2 filed as #2025/#2026, 1 commit-message wording nit deferred; check=SUCCESS, rebase-check=SUCCESS, labelled patch+ready-to-merge)
+- #2021 impl-2021=PR#2024 · review=member:review-pr-2024=failed · review=fallback:review-pr-2024-b · reviewed=a68eb86e:2/2/0 · fix-pr-2024=applied:a68eb86e63fd52db507963e010f30bd541bc6fe2 (hand-dispatched review — fleet-review-runner failed twice, 86/86 deterministic this run; 3 unnamed specialists fanned out (correctness, tests, comments); independently reproduced the V8 (?-i:) non-first-alternative case-fold quirk in a standalone script, confirmed zero diff to prose-pin.mjs's sentences() against merge-base 19c33611, and ran 2 novel cross-splitter edge-case probes myself before adjudicating; 1 survivor applied (mid-sentence #2021 jsonCountFault fixture used a plain-space closer, so sentences() — not countSentenceBoundary — was doing the splitting; switched to the sibling test's `]` closer), 1 deferred and filed as #2043 (two pre-existing cross-splitter drifts, windowReleaseCountFault guard-fold + closer-set mismatch, neither introduced by this PR), 2 refuted (Node22 `(?-i:)` SyntaxError — disclosed dev-runtime requirement; 'guard moved inside only caught at e.g' comment claim — reconciled against the per-alternative-guard mutant construction that matches the comment's own stated mechanism, holds); check=SUCCESS on a68eb86e (original f0268bed also green, 3495/3501 pass 6 skip per CI log), rebase-check=FAILURE (stale-base only, not this repo's gate), labelled patch+ready-to-merge)
+- #1987 impl-1987=PR#2028 · review=member:review-pr-2028=failed · review=fallback:review-pr-2028-b · reviewed=d2230145:4/2/1 · fix-pr-2028=applied:d2230145702a064a32112510f5a10ab654c79850 (hand-dispatched review — fleet-review-runner failed twice, 87/87 deterministic this run; 3 unnamed specialists fanned out (correctness, tests, comments); independently reproduced the PR's own corpus-diff claim (16 splits: 1 real + 15 code) and the shipped guard's claim (1 split, 0 false positives) against the exact merge-base commit myself before dispatch, and independently verified CI's 3494/3500 claim — the 6 skips are 'no zsh on PATH'/'no claude binary on PATH', unrelated and pre-existing at the merge-base too; 4 survivors applied: (1) a single unspaced jq index behind a word (`.jobs.[0] | …`) is the same shape as a real marker and still splits wrongly — comment's 'empty or spaced' claim corrected, documented as a known gap; (2) a closing quote/paren that itself follows the terminator before the marker (`"stop."[1]`) still merges, undocumented — now documented as a known gap; (3) the doc comment omitted 'a digit' from the accepted preceding-character class despite the regex and an existing test (`at 12.[1]`) exercising it — added; (4) no accept-side fixture pinned the guard's straight-double-quote exclusion (only single-quote covered) — added a `jq ".[0] | .x"` fixture; 2 refuted: the 15/16-vs-17/18 corpus-count discrepancy two specialists independently found is a rejected-regex bracket-placement artifact, not a PR error — reproduced 16/15+1 exactly at the PR's own stated placement ('after the closing marks'), 18/17 only with the alternative, unstated placement both specialists used; and an unverified-by-CI 'removes none' comment claim, true today, flagged suggestion-only, no action requested; 1 deferred: combining-mark (\\p{M}) word endings still merge, filed as #2041, zero live impact; no functional/regex change shipped, only comment accuracy + one test fixture, 273/273 local; rebased d2230145<-11b21e2b (base moved forward to 7e1d37aa mid-review, no conflicts); check=SUCCESS, rebase-check=SUCCESS, labelled patch+ready-to-merge)
+- #2025 impl-2025=PR#2047 · review=member:review-pr-2047=failed · review=fallback:review-pr-2047-b · reviewed=1b84accd:2/11/0 · fix-pr-2047=applied:468c09110ae3100368ec9b6fd90c13c7fc253f61 (hand-dispatched review — fleet-review-runner failed twice, 89/89 deterministic this run; 3 unnamed specialists fanned out (correctness, tests, comments); independently verified the baseline (14 sh/36 js/2 null over 52 tracked) and the .html/.json null-classification rationale against classifyScript() myself before dispatch, then ran 2 novel edge-case probes on the shipped kindFloorShortfalls: (a) a coordinated sh 14->8 + js 36->21 drop lands exactly on both per-kind floors while the aggregate stays at 31>30 — real gap, but out of scope for this ticket's stated 'one-kind drop' claim, filed as #2052; (b) a classifyScript bug misrouting .sh to a third kind (not null) is still caught, confirmed by direct execution; 1 survivor applied (new comment's literal 'no-wave.test.mjs' citation tripped no-wave.test.mjs's own retired-word sweep — CI's check job was red on push, confirmed independently via the check-job log and the comments specialist's own run; reworded to cite #1821 instead of the filename — same defect class #2026/PR#2029 hit); 11 refuted (2 correctness + 5 tests confirmatory findings, 4 comment-accuracy confirmations, all no-fix-needed); check=SUCCESS, rebase-check=SUCCESS, labelled patch+ready-to-merge)
+- #2026 impl-2026=PR#2029 · review=member:review-pr-2029=failed · review=fallback:review-pr-2029-b · reviewed=91ac8bd0:2/1/0 · fix-pr-2029=applied:5acff432f3fa435582a0b14fe31989dbca74e0ac (hand-dispatched review — fleet-review-runner failed twice, 88/88 deterministic this run; 3 unnamed specialists fanned out (correctness, tests, comments); independently re-verified implementer's baseline (skills=8/commands=3/agents=13) and both claimed-surviving mutants against the real patched file myself before dispatch; 2 survivors applied: (1) new comment's literal 'no-wave.test.mjs' reference tripped no-wave.test.mjs's own retired-word sweep — CI's check job was red on push, found independently of the specialists, reworded to drop the filename; (2) agents/fleet-review-* exclude mutant comment said 13→3, actual measured 13→4 (confirmed independently by both correctness and comments specialists) — corrected; 1 deferred, filed as #2044 (per-directory floor doesn't catch a 1-file-per-directory thinning mutant, confirmed by execution from both correctness's commands-specific case and tests's general case); 1 refuted (60%-ratio-source attribution to no-wave.test.mjs called an overclaim by comments specialist, not actionable, left as pushed since the same edit already softened it); check=SUCCESS, rebase-check=FAILURE (currency gate only, 6 behind main — not labeling-blocking per doc); labelled patch+ready-to-merge)
+- #1983 impl-1983=PR#2048 · review=member:review-pr-2048=failed · review=fallback:review-pr-2048-b · reviewed=bcf7b752:8/6/0 · fix-pr-2048=applied:ce8839f7ad3f301d5f3697a2edcf3407f28a8c62 (hand-dispatched review — fleet-review-runner failed twice, 90/90 deterministic this run; 3 unnamed specialists fanned out (correctness, tests, comments); independently reproduced all 6 sites' sentences()+[\\s\\S] fix against the ticket's own repro myself, and ran a novel offset-rebuild stress on implementer-model-tier's rebindingsOutside before either report arrived — same shape correctness's finding later confirmed. 2 correctness survivors applied: rebindingsOutside's note-swallow miss (a restoration glued onto the revert note's closing `**` with no whitespace break lands in the note's own sentence and its own `class=routine`/`sonnet` pair anchors a match whose gap swallows the restoration — fixed by masking the note's span before matching, citationFault's technique) and tier-outcomes-header's widened `assert.match(sentence, /member/i)` (the ticket's own extraction change silently widened this PRE-EXISTING positive check from a 120-char window to the whole ~326-char sentence, letting a misattribution pass — re-bound to `/`sizing`[\\s\\S]{0,40}member/i`). 6 comments survivors applied: the RESIDUAL disclosure's "none of those shapes is in this slice today" was false for `.**` specifically (present but harmless in 5 of 6 slices) across all 5 files, plus one imprecise hand-count (27→20 chars). 6 refuted (5 tests-dimension, all "no defect found"; 1 comments "positive verification"). 0 filed — nothing surfaced outside the ticket's own 5 files. 148/148 (144 original + 4 new regression tests) green on the 5 files + prose-pin.test.mjs; full node --test 3048/3048 pass outside 4 unrelated files that cancelled under this session's known concurrent-fleet-load hang (claim/inflight/reap/release-ticket); check=SUCCESS, rebase-check=SUCCESS, install-and-smoke=SUCCESS, npm-name-gate=SUCCESS, validate-claude=SUCCESS, smoke-omp=SUCCESS (6/6), labelled patch+ready-to-merge)
+- #2040 impl-2040=PR#2050 · review=member:review-pr-2050=failed · review=fallback:review-pr-2050-b · reviewed=0f0fbc07:4/21/0 · fix-pr-2050=applied:c4798f440ac0ff8cf3817cbaed05ad3f0065c006 (hand-dispatched review — fleet-review-runner failed twice, 93/93 deterministic this run; 3 unnamed specialists fanned out (correctness, tests, comments); independently reproduced every core.worktree redirect shape in the ticket and the PR's own table against real git repos, plus my own adversarial sweep (GIT_DIR/GIT_WORK_TREE env overrides, multi-hop symlink chains, nested worktrees-of-worktrees, CRLF/whitespace, trailing slash, `..`, case/Unicode spellings on a real case-sensitive volume) — all refuted except two: the PR's own claimed M5 regression test ("foreign */.git names $wt back") was never actually committed, so the pre-existing owner-check gap it claims to close still survived the shipped suite 120/120; and a genuine clean:true false positive via `$(...)` stripping ALL trailing newlines, letting a core.worktree target whose real name ends in a literal LF string-match $wt through the new working-tree compare — reproduced live ({"clean":true} rc 0 over real uncommitted work), independently found by the correctness specialist and confirmed by me and by the tests specialist. Committed the missing test plus a sentinel-capture fix (`&& echo x` / `${var%?x}` on wt_real, the if-branch owner, and top); full suite 122/122 (was 120/120), each new test verified to fail against its own un-fixed mutant and pass against the fix. Corrected the PR body's mutation-table undercounts (M1 kills 6 not 5, M2 kills 89 not 9 — reran both myself, exact match). CI's `check` job green (3m47s) on the pushed SHA; labelled ready-to-merge alongside the existing patch label.)
+- #2043 impl-2043=PR#2049 · review=member:review-pr-2049=failed · review=fallback:review-pr-2049-b · reviewed=19a20dfa:1/2/0 · fix-pr-2049=no-op (hand-dispatched review — fleet-review-runner failed twice, 91/91 deterministic this run; 3 unnamed specialists fanned out (correctness, tests, comments); independently traced jsonCountFault's real sentences()-then-COUNT_SENTENCE_BOUNDARY call order and found #2043's own "sentences() runs first, never changes the result" scoping claim FALSE via a concrete _e.g._ repro — filed #2053, ready-for-agent, out of this ticket's scope; ran 2 novel edge-case probes myself (digit-guard+tag-case-fold composed in one split call; the untested straight-apostrophe closer) before adjudicating, both composed correctly; tests specialist mutation-verified all 4 production hunks, 0 findings; comments specialist verified every claim, 0 blocking; correctness specialist's 1 survivor (COUNT_SENTENCE_BOUNDARY/SENTENCE_END still disagree on closers embedding their own abbreviation+period) confirmed real and reproduced independently, ruled pre-existing/deeper-than-#2043's-closer-width-remedy and out of this PR's scope — filed #2054, ready-for-agent; 2 below-claim-bar items closed into #2055; 0 findings applied — code already correct as implementer left it, 194/194 pass, CI green (check/rebase-check/smoke-omp/validate-claude/npm-name-gate/install-and-smoke all success, 0 behind main), labelled patch + ready-to-merge)
+- #2044 impl-2044=PR#2051 · review=member:review-pr-2051=failed · review=fallback:review-pr-2051-b · reviewed=f58c8429:3/9/1 · fix-pr-2051=applied:7a9f4c310ffeb004af280818a3865ba5cfc665f6 (hand-dispatched review — fleet-review-runner failed twice, 92/92 deterministic this run; 3 unnamed specialists fanned out (correctness, tests, comments); independently verified the core design choice myself before dispatch — confirmed listIndependently()'s manual per-level recursion is a genuinely different code path from walk()'s native {recursive:true} form, not a cosmetic wrapper, via two novel edge-case probes: a symlinked directory (walk() follows it, the manual recursion doesn't — same divergence correctness's own specialist found independently) and a permission-denied nested subdirectory (walk()'s single try/catch zeroes the WHOLE top-level directory's contribution on any nested EACCES; the manual per-level try/catch only loses the blocked subtree, so the check correctly reports the readable siblings walk() lost as missing rather than reconciling silently); 1 survivor applied (comments: the new fixture test's title/lead comment named only 2 of its 3 assertions -- extended to name the extra/duplicate case too); 2 survivors deferred and filed as #2056 (needs-triage: walk()/listIndependently() disagree on a symlinked directory, latent, fails loud not silent) and #2057 (ready-for-agent: the exact check's expected-directory-list comes from the same MD_DIRS/JS_DIRS it's checking, so a JS_DIRS-emptying mutant combined with a future exception-list edit would pass 20/20 -- real, pre-existing, out of this ticket's stated scope); 1 test-design finding refuted (already covered by this file's own pre-existing header); 9 suggestion-band findings (0-refuter budget, never applied) filed and closed together as #2058; check=SUCCESS, rebase-check=SUCCESS, labelled patch+ready-to-merge)
+- #2053 impl-2053=PR#2060 · review=member:review-pr-2060=failed · review=fallback:review-pr-2060-b · reviewed=b326ee71:2/13/0 · fix-pr-2060=applied:b164205f5f30fb331a0f0ffa728d004b606dfdf4 (hand-dispatched review — fleet-review-runner failed twice, 94/94 deterministic this run; 3 unnamed specialists fanned out (correctness, tests, comments) against a snap-ro + per-mutating-specialist private copy. FIRST PRIORITY resolved myself before dispatch: board.test.mjs's mid-run hang caveat — reproduced neither on unpatched origin/main (54b6c691, 174/174 in isolation) nor on patched HEAD (174/174), and ran the full suite clean four separate times (3548/3548, 0 fail/cancelled, twice by me and once each by the correctness specialist and in the post-fix worktree) — board.test.mjs has zero import-path dependency on prose-pin.mjs and the file itself hardcodes port 8123 in several tests, so the hang is fleet-load port contention, not a regression; CI's own check job corroborates (green both before and after my push). Independently re-verified the "3 copies, all fixed" claim via my own repo-wide regex sweep (exact 3: sentences(), COUNT_SENTENCE_BOUNDARY, SENTENCE_END) and the corpus-diff claim via my own old-vs-new split rerun over all 338 tracked files (2 files affected, 3 distinct italic-abbreviation fixture instances, zero live-prose splits moved — matches once measured as fixture instances rather than raw split-count delta of 4). Ran 2 novel edge probes myself: the disclosed snake_case tradeoff confirmed real for all 5 abbreviations via direct repro, with 0 live occurrences anywhere in the tracked repo; an underscore+digit composition (`_2vs.`) confirmed the guard checks only the single immediately-preceding character, no compounding defect. 2 survivors applied, each independently found by 2 of the 3 specialists: (1) correctness+comments both flagged the new tradeoff comment naming only 2 of the 5 abbreviations (`_vs.`/`_cf.`) when all 5 share the identical cost — reworded to name all five; (2) tests flagged (severity important) that the disclosed tradeoff had zero fixture coverage anywhere in the suite — added a locked-in fixture mirroring #1899's own accept/cost pair in the same test file. Remaining findings (6 comments confirmations, 4 further tests-dimension suggestions on mutation-kill detail, an asymmetric non-italic loop element, guard-composition confirmation, assert.match reuse) refuted as non-actionable — no defect, just confirmation or redundant-coverage commentary. node --test 3548/3548 pass both pre- and post-fix; check=SUCCESS, rebase-check=failure(behind=3, 0 merge commits, staleness-only — excluded from the label gate per convention), labelled patch+ready-to-merge; merge-bot rebased b164205f->b7cffc54 post-label (content unchanged, CI re-ran green incl. rebase-check, behind 3->0), PR MERGED)
+- #2054 impl-2054=PR#2062 · tier=alt · review=member:review-pr-2062=failed · review=fallback:review-pr-2062-b · reviewed=465605d2:2/0/1 · fix-pr-2062=applied:546e3255ccc9d73630e353f036cde3c832c29785 (merge-conflict-resolved:ef82065a1a028ca558b2a8ee4957d802c995d3c7 -- dispatched by controller at user request, @slow-tier fleet-implementer, resolved PR#2062 vs PR#2060 insertion-point conflict in ci-comment-rot-prose.test.mjs by keeping both #2053 and #2054 test blocks; CI green, mergeStateStatus=CLEAN, independently SHA-verified) (hand-dispatched review — fleet-review-runner failed twice, 96/96 deterministic this run; 3 unnamed specialists fanned out (correctness, tests, comments); independently reproduced the ticket's own backtracking claim (two abbreviations at different distances from the terminator: OLD binds the wrong inner one and fails to split, NEW binds correctly), its generalization to 3-5 embedded abbreviations, and a direct textual diff confirming COUNT_SENTENCE_BOUNDARY's new guard clause is structurally identical to SENTENCE_END's own (the only difference, a (?-i:) case-toggle, is needed only because SENTENCE_END's own consumers add the engine `i` flag that COUNT_SENTENCE_BOUNDARY never carries); correctness found a real, explicitly-advisory ReDoS-adjacent backtracking hazard in the shared closer-set's overlapping alternatives newly reachable through the guard's must-accept side (timed evidence, deferred+filed as #2063, not blocking); tests reproduced the 4-mutant kill matrix plus 3 of its own and correctly self-refuted a minor sub-guard-coverage observation as not attributable to this PR; comments found and I applied a real fix — the PR's own new-test comment blamed pre-#2043's non-split on "a plain char class can't span `](`/`][` at all", but `]`/`)` were already class members and the terminator-lookbehind still found the same boundary, so the guard (already this same buggy shape) was independently blocking it there too, verified against the literal pre-#2043 regex; applied=1 (comment-only correction) · defer+filed=1 (#2063) · refuted=1 (tests' sub-guard-coverage note) · head=546e3255ccc9d73630e353f036cde3c832c29785(pushed) · ci=green(7/7 required jobs, 0 behind) · labelled patch+ready-to-merge)
+- #2057 impl-2057=PR#2061 · review=member:review-pr-2061=failed · review=fallback:review-pr-2061-b · reviewed=a014628a:2/3/0 · fix-pr-2061=applied:a014628a4526404470c622e2bdf54f6dee64fa17 (hand-dispatched review — fleet-review-runner failed twice, 95/95 deterministic this run; 3 unnamed specialists fanned out (correctness, tests, comments); independently verified the design-rejection reasoning myself before dispatch by reconstructing the pre-#2057 test file + the ticket's rejected deepEqual-pin remedy in a scratch copy and running mutant C (listFiles ignoring JS_DIRS, constant intact) against it — confirmed walkDiscrepancy's pre-existing #2044 independent-listing mechanism already caught that mutant regardless of which remedy was chosen, so the shipped WALK_SCOPE design's real value is decoupling from implementation details, not that specific mutant; also ran 2 novel edge probes myself: WALK_SCOPE going stale relative to a real MD_DIRS addition fails LOUDLY with an exact extra:[...] file list (a genuine tripwire), and the workflows/-floor gap explicitly left out of scope is confirmed byte-for-byte orthogonal (identical single incidental failure on a full workflows/*.js deletion, pre- and post-fix). 2 survivors applied: (1) major — JS_DIRS widened into commands/skills/agents (already MD-scoped, zero .js files today) passed 20/20 fully undetected, because MD_DIRS gets structural protection via the floors key-parity assert but JS_DIRS had none; re-imported JS_DIRS for one value-only assertion (WALK_SCOPE must equal {MD_DIRS,JS_DIRS} verbatim) without touching walkDiscrepancy's own WALK_SCOPE-only oracle, closing the gap while preserving the fix's independence design; (2) patch — the WALK_SCOPE comment undercounted mutant A's (JS_DIRS=[]) failing tests as "both" (2) when a third (KNOWN_EQUALITY_EXCEPTIONS membership, incidental) also reds at 17/20, found independently by 2 of the 3 specialists; reworded. 1 correctness-specialist nitpick (fixture-widening comment overgeneralizes) refuted as low-confidence non-defect, superseded by the new comment's own more precise treatment of the same nuance. 0 filed/deferred — every survivor was in scope of #2057's own scope-LIST class; check=SUCCESS, rebase-check=SUCCESS (behind=0), labelled patch+ready-to-merge)
+- #2063 impl-2063=PR#2075 · review=member:review-pr-2075=failed · review=fallback:review-pr-2075-b · reviewed=9193613c:0/8/0 · fix-pr-2075=no-op
+- #2027 impl-2027=PR#2065 · review=member:review-pr-2065=failed · review=fallback:review-pr-2065-b · reviewed=e212b528:1/8/3 · fix-pr-2065=applied:408ba30a4d09fd06939d14e0ef6ea4210086cfd5 (hand-dispatched review — fleet-review-runner failed twice, 97/97 deterministic this run; 3 unnamed specialists fanned out (correctness, tests, comments) against a snap-ro + one private mutating copy. Independently reran the agreement-fuzz claim over the full 2250-combo grid: the documented `»` divergence is one case of an already-disclosed "any non-ASCII punctuation" class — em-dash/currency/math-operator diverge the same documented way, nothing undocumented; also found (correctness's specialist independently too) a second, pre-existing CLOSING_MARKUP-richness divergence unrelated to footnote markers, confirmed via the old SENTENCE_END, out of #2027's scope (2 unverified). Corpus diff over the real 323-file merge-base tree (not the PR's own new fixture text, which inflated correctness's separate 22-count): 3 added/0 removed, not the claimed 5/0 — direction and comment-only scope both hold, exact count not reproduced (1 unverified). Sibling-consumer probe (own + tests specialist, independently): UNSCOPED_MERGE_SENTENCE/windowReleaseCountFault were only exercised through the single simplest marker — reproduced myself (isolated test-name-pattern run stayed green under 3 mutations that broke general footnote handling) — survived, applied: extended both to the same marker/preceding-char variety as UNSCOPED_DRIFT_SENTENCE, plus tests' asterisk-guard accidental-kill fixture (line 1513), also reproduced and applied. Tests' other 3 "critical" items were mutation-kill confirmations, not defects — refuted. 135/135 scoped, 202/202 with prose-pin.test.mjs, CI check green before and after.)
+- #2041 impl-2041=PR#2066 · review=member:review-pr-2066=failed · review=fallback:review-pr-2066-b · reviewed=7449fbc:2/8/0 · fix-pr-2066=applied:7449fbc
+- #2042 impl-2042=PR#2068 · review=member:review-pr-2068=failed · review=fallback:review-pr-2068-b · reviewed=7a1517b3:1/9/0 · fix-pr-2068=applied:7a1517b37f34de270ee32317eaf5e398e8ea523c (hand-dispatched review — fleet-review-runner failed twice, 99/99 and 100/100 deterministic this run; 3 unnamed specialists fanned out (correctness, tests, comments); independently mutation-verified the implementer's 3 unreached-mutant claims on a private scratch copy (rev-parse-failure masked by the pre-existing dirty check; cd-failure unreachable behind the -f gate; no-sentinel-on-canon-side survives but fails safe, confirmed by constructing it) and built 2 novel edge cases beyond the implementer's 9 — a whole-$wt-itself symlink swap onto another valid worktree (real gap, fails safe via git's own back-pointer refusal, filed #2074) and a relative-path rev-parse --show-toplevel answer (confirmed impossible, git always answers absolute); correctness specialist found, and I independently reproduced end-to-end against the real script, a genuine NFC/NFD Unicode-normalization false-keep regression vs main (filed #2072) plus release-ticket.sh's own reference guard still missing #2040's sentinel (filed #2073, independently found by me too); comments specialist found one real #128→#74 misattribution for release-ticket.sh's -f gate, applied; tests specialist found 0 defects, mutation-verified every new fixture actually pins the fix; 125/125 reap.test.mjs + 812/812 across 21 other reap.sh-touching test files, shellcheck clean (same 5 pre-existing findings as main); rebased onto origin/main after push (rebase-check requires currency on push, was BEHIND before) · ci=green(7/7 jobs, 0 behind) · labelled patch+ready-to-merge)
+- #2046 impl-2046=PR#2067 · tier=alt · review=member:review-pr-2067=failed · review=fallback:review-pr-2067-b · reviewed=e9ccaba5:4/11/0 · fix-pr-2067=applied:e9ccaba54951cd15c319e2b89739ea250e3c0ced (hand-dispatched review — fleet-review-runner failed twice, 99/99 and 100/100 deterministic this run; 3 unnamed specialists fanned out (correctness, tests, comments) against a comment-only diff, no mutation needed; independently re-verified all four correctness claims myself before dispatch (git-dir scoping, --write-runner exposure, show-toplevel-defeat reasoning, divergence-walk fixture) and confirmed 113/113 + zero-executable-line diff by direct re-run; 2 survivors applied (line-distance-prose gate trip from 'a few lines further down', reworded to name the construct; an inaccurate 'gap unavailable to close for $dest' closing clause, corrected), 5 refuted, 1 filed as #2071 (--write-runner's #1262 tracked-path guard is spoofable via the same core.worktree redirection, out of this ticket's comment-only scope); 113/113 still green post-fix; check=SUCCESS, rebase-check=stale-behind-count-only (not rebased, per policy), labelled patch+ready-to-merge)
+- #491 impl-491=PR#2070 · review=member:review-pr-2070=failed · review=fallback:review-pr-2070-b · reviewed=290c3e1a:3/1/0 · fix-pr-2070=applied:290c3e1ae18b5829253b073709edf534772525d5 (hand-dispatched review — fleet-review-runner failed twice, 101/101 deterministic this run; 3 unnamed specialists fanned out (correctness, tests, comments) against a snap-ro, tree-hash-verified byte-identical to the PR head; independently reproduced 3 of the implementer's claimed mutation pairs myself, both directions each — pending-gutted-and-restated-inverted-in-same-paragraph: GREEN on main/RED on PR; hard-wrapped force-push+reason-string span: RED on main/GREEN on PR; no-ci-edge sibling-bullet-insertion: GREEN on main/RED on PR — confirmed THE CEILING claim (negating sentence beside an intact span stays green on PR) and confirmed the migrated bullet() calls in review-path-default.test.mjs and no-ci-gate-prose.test.mjs are byte-identical to the deleted #747 local implementation against the real SKILL.md no-ci-edge anchor pair; built 2 novel bullet() edge cases beyond the implementer's own tests — mixed tab/space indent: confirmed a latent character-count-vs-visual-column asymmetry, unreachable today (no tabs in any repo markdown); sibling-opens-its-own-nested-list: confirmed robust, clamps correctly regardless; apply=2 (comments: prose-pin.mjs:9 and ci-state-prose.test.mjs:34 both said "three keyword regexes" when one of the three pending-scope checks is a plain .includes() substring match, not a regex — reworded to "three independent checks (two regexes and a substring match)"); defer+filed=1 as #2077 (correctness: bullet()'s `to`-bound doesn't clamp at a non-list block — a relocated paragraph or new heading between the item and `to` still escapes, reproduced identically on both branches so not a regression, unreachable via any real anchor today; bundled with a leading/trailing-newline anchor indent-math edge case, an optional exactly-once-assert hardening nit, and my own mixed-indent finding above); refuted=1 (tests: the 3rd new bullet() unit test "missing-anchor throws" only ever exercises between()'s delegated throw — true, but it is the ticket's own required "missing-anchor-throws" deliverable and bullet() has no throw path of its own to substitute, so kept as-is); tests specialist independently ran the FULL suite to completion in the snapshot — 3557/3557 pass in ~235s, exactly matching the PR's claim (my own two local full-suite attempts hung/timed out under this session's concurrent fleet load, so I fell back to CI's own green `check` job as authoritative, corroborated by the specialist's clean completed run)) · head=290c3e1ae18b5829253b073709edf534772525d5(pushed) · ci=green(check job SUCCESS on the pushed head; rebase-check failed only because the branch is BEHIND main, the merge-bot's job to resolve, not a labeling gate) · labelled patch+ready-to-merge
+- #2056 impl-2056=PR#2069 · review=member:review-pr-2069=failed · review=fallback:review-pr-2069-b · reviewed=25451b3b:3/7/0 · fix-pr-2069=applied:174744b8ee9fa697b78f94afbb46c5373b826f2c (hand-dispatched review — fleet-review-runner failed twice, 102/102 deterministic this run; 3 unnamed specialists fanned out (correctness, tests, comments) against a snap-ro + 2 private mutating copies; independently verified the ruling itself against #2056's own Agent Brief (keep the asymmetry, option (a), not option (b) — confirmed, not a misreading) and reproduced walk()'s symlink-following behavior myself in a real sandbox (Node v26.10.0) before dispatch, then independently re-ran all 3 of the implementer's claimed mutations (oracle-follows-symlinks 21/22 new-test-only; walk-stops-following 21/22 premise-assertion; walkDiscrepancy-stops-flagging 20/22 both tests) and got identical counts on every one. 2 novel edge cases beyond the implementer's: a symlink to a directory entirely OUTSIDE the scanned tree (still followed, but the file is scanned exactly ONCE via the symlink alone, not "twice under two paths" as the PR's new comment claimed for every case — confirmed independently and again by the comments specialist); and a circular symlink (a single self-referencing link terminates at an OS/libuv depth cutoff — 32-41 entries, no hang — but a SECOND link forming a two-branch cycle back into the same loop hangs indefinitely, exit 124, confirmed twice independently, once by the correctness specialist and once by me). 3 survivors: 2 applied (comment-only, narrowing both the Node-version-unqualified "DOES follow" claim — true only on Node >=22, engines.node floor is 20.11.0 — and the "scanned twice under two paths" overgeneralization) pushed as 174744b8; 1 deferred+filed as #2076 (the two-branch circular-symlink hang — genuine, reproduced, but production walk() changes are explicitly out of #2056's own scope, so filed rather than fixed here). 7 findings refuted as non-actionable (3 tests-dimension: premise-assertion redundancy confirmed-intentional, no-symlinked-file-gap confirmed-non-issue, no-outside-tree-gap confirmed-unreachable-by-production-code; 4 comments-dimension: walkDiscrepancy comment accurate, premise-comment accurate, #2056 cross-references accurate, pre-existing stale MUTATION RECORD header block not attributable to this diff). 22/22 pass before and after the fix; ci=green(6/6 jobs, 0 behind) on 174744b8; labelled patch+ready-to-merge.
+- #531 impl-531=PR#2080 · review=member:review-pr-2080=failed · review=fallback:review-pr-2080-b · reviewed=a4372526:9/3/1 · fix-pr-2080=applied:a4372526e22dca680a97d487d9a82a92dc60a106 (hand-dispatched review — fleet-review-runner failed twice, environment-wide, 104/104 deterministic this run; 3 unnamed specialists fanned out (correctness, tests, comments) against a snap-ro + 2 private mutating copies; personally ran real-subprocess adversarial scenarios (SIGKILL mid-write, 20-way reap race, EPERM/pid-reuse/unparseable holders, up to 40 concurrent writers) and independently re-measured the PR's own race numbers (pre-fix 3-6/8 kept across three reviewers, matching the claimed 2-5/8; post-fix 8/8x10, 2/2x40, 40w clean); applied 3 code fixes plus 2 broadened comments — a dangling-symlink 100% CPU spin that skipped the 10s deadline, an uncaught ENOENT crash in the reap unlink, and an overclaimed only-SIGKILL comment (SIGQUIT/SIGABRT also bypass exit, confirmed) — with 3 new regression tests, full suite 3582/3582, rebased 080fb9b0->a4372526 (no ledger.mjs overlap); refuted both claimed-survived mutants and the pre-fix measurement range as accurate, not overclaims; 1 unverified (reap re-read's exact-match never re-checks isDead(), a compound pid-reuse-in-window race neither reviewer could force); filed #2085/#2086/#2087/#2088 for the rest; confident the lock primitive is safe for continued fleet use) · head=a4372526e22dca680a97d487d9a82a92dc60a106(pushed, rebased) · ci=green(7/7 jobs, 0 behind) · labelled patch+ready-to-merge
+- #622 impl-622=PR#2079 · review=member:review-pr-2079=failed · review=fallback:review-pr-2079-b · reviewed=9f709429:2/0/0 · fix-pr-2079=applied:d0eccd0b (hand-dispatched review — fleet-review-runner failed twice, environment-wide, 105/105 deterministic this run; 3 unnamed specialists fanned out correctness/tests/comments against the committed diff; independently reproduced red-before/green-after against the ticket's own shim fixture in a base-commit worktree copy, re-verified shellcheck -x -S warning clean and the guard-inverted mutant's exact 90/125 kill count; 2 novel edge cases beyond the implementer's: a transient (single-call, not pass-wide) listing failure across 3 [gone] branches, confirming only the branch whose own call failed is kept while the others reap normally — matches the per-branch-re-read design, not a sticky/hoisted one; and an rc-0 listing with a corrupted worktree HEAD silently dropping its branch line, reproduced against this PR's own code and confirmed to be the distinct, already-filed #2078 hazard (not overlapping, correctly out of this PR's scope) — also confirmed by code-path reading that this guard's `continue` always precedes #2042/PR#2068's wt_linkage_why in the same iteration, so the two compose without a double-report. 0 correctness findings, 0 comment findings; 2 tests-dimension coverage gaps survived refutation and were applied (missing feature/a-merged stderr assertion; new 3-branch transient-vs-sticky regression test proving the per-branch re-read is load-bearing) · refuted=0 · rebased onto origin/main after main advanced underneath the PR (required by rebase-check, which failed once pre-rebase and passed after) · 126/126 reap.test.mjs alone, 141/141 combined, before and after · ci=green(7/7 jobs, 0 behind) on d0eccd0b · labelled patch+ready-to-merge.
+- #2072 impl-2072=PR#2093 · class=fix · reviewed=f92a3450:2/2/0 · fix-pr-2093=applied:4e809436e6d7c3ba0b8a2fc15712cf0d600525e3 (hand-dispatched review — fleet-review-runner failed twice, environment-wide, 110/110 deterministic this run; 3 unnamed specialists fanned out correctness/tests/comments against a snap-ro plus a private mutating copy; personally reproduced the NFD divergence myself with a fresh real fixture (worktree list's precomposed café=caf+c3a9 vs rev-parse --show-toplevel's on-disk NFD cafe+65cc81 for one physical directory, same inode) and end-to-end smoke-tested the actual reap.sh both reaping the NFD worktree and refusing to delete its own NFD cwd; correctness independently reconstructed 3 more adversarial fixtures (two-level-nested, non-ASCII branch name, a real second APFS volume for cross-device) confirming holds_cwd never matches less than the byte-prefix guard it replaces; survived=2 (holds_cwd read a `[` error the same as a clean non-match, failing open where wt_linkage_why two lines above it explicitly fails closed — fixed by capturing the compare's own rc and refusing on >=2 too; wt_linkage_why's own comment overclaimed -ef as "XSI in POSIX.1-2017" — the Open Group's actual 2017 test(1p) spec defines no -ef/-nt/-ot in any form, base or XSI, only added in POSIX.1-2024 via Austin Group bug 375 — corrected) refuted=2 (a $wt-deleted-mid-run race the old guard would lose control of identically, same catastrophic outcome either way; a "151 vs 134" test-count read as a discrepancy that is in fact correct once the exact 3-file testCmd combination the PR names is run — reconfirmed 151/151 myself before and after every fix); also caught and fixed the one thing no specialist was asked to chase — shellcheck -S warning's SC3013 on both new -ef sites was already failing CI on arrival, which meant check's own Tests step had never actually run pre-fix; head=4e809436(pushed, rebased 0-behind) · ci=green(6/6 jobs, run-bound) · labelled patch+ready-to-merge)
+- #2073 impl-2073=PR#2084 · review=member:review-pr-2084=failed · review=fallback:review-pr-2084-b · reviewed=19a91880:1/1/0 · fix-pr-2084=applied:19a91880a808f813271f36d817a764d53d19bd93 (hand-dispatched review — fleet-review-runner failed twice, 106/106 deterministic this run; 3 unnamed specialists fanned out correctness/tests/comments; independently reproduced the implementer's M2 'equivalent mutant' claim myself via the full script rather than the compare in isolation and found it false for a hand-tampered symlinked $wt whose real target ends in a newline — exit 1 becomes exit 2 with a fabricated linkage-mismatch blocker — confirmed by 2/3 specialists (correctness, comments); corrected the comment's overclaim and added a regression test that kills that mutant; rebased onto main mid-review to clear a rebase-check failure caused by #2080 landing during the long review; CI still running at report time, ready-to-merge withheld pending green)
+- #2074 excluded · relabelled-ready-for-human
+- #2076 impl-2076=PR#2090 · review=member:review-pr-2090=failed · review=fallback:review-pr-2090-b · reviewed=02948f5a:9/2/1 · fix-pr-2090=applied:738a313b33057db65bc88b3bce5735a67f387bd3 (hand-dispatched review — fleet-review-runner failed twice, environment-wide, 108/108 deterministic this run; 3 unnamed specialists fanned out correctness/tests/comments against a snap-ro + 2 private mutating copies; independently reconstructed real adversarial symlink topologies myself too — mutual A<->B, self-referencing, 3-ring, two-independent-cycles — all correctly refused; confirmed via Docker node:20/21/22 that walk() now following symlinks on 20/21 has no other caller and CI never runs those versions; applied a bigint statSync precision fix plus a comment-quote/placement fix, added 3 regression tests; refuted the tests specialist's 36/36-is-false claim (25+11 across both consumer files, matches) and a ticket-vs-PR measurement mismatch (32/41 vs 96/64 — same fixture, files-vs-total-dirents, not a contradiction); deferred+filed #2096 (other native readdirSync call sites share the pre-#2076 hang class, ready-for-agent) and #2097 (dev:ino bind-mount/exotic-fs edge cases, pre-existing acyclic-DAG blowup and EACCES-drops-whole-scope, needs-triage))
+- #2077 impl-2077=PR#2091 · review=member:review-pr-2091=failed · review=fallback:review-pr-2091-b · reviewed=d845ab15:1/2/8 · fix-pr-2091=applied:d3d6081f14912d52b9b9631dc894c6cce2df6f9c (hand-dispatched review — fleet-review-runner failed twice, environment-wide, 109/109 deterministic this run; 3 unnamed specialists fanned out (correctness, tests, comments) against a snap-ro, tree-hash-verified byte-identical to the PR head, plus 2 private mutating copies; correctness specifically hand-verified tab-stop-4 column math against a CommonMark oracle (22 cases, 0 discrepancies) and confirmed neither documented "deliberate limitation" is exercised by either real call site (both anchor one top-level SKILL.md item, CommonMark-diffed across 31 fixtures); 2 refuters per important finding (6 total) — 1 survived (ITEM_MARKER missed a bare-marker sibling, confirmed against a CommonMark render), 2 refuted 4/4 (stale-comment claims still true, just incomplete); personally re-verified the survivor and independently found+verified a second real gap (PARAGRAPH_INTERRUPT missed spaced thematic breaks) before applying both; 8 suggestion-band findings (0 refuters by design) personally checked by execution and deferred as #2098/#2099 (ready-for-agent) and #2100 (needs-triage, unverified even by its own specialist); the fix push needed a rebase onto origin/main (12 commits drifted since this branch's original green) before CI would pass — full 3602-test suite green pre- and post-rebase, scoped 96/96; ci-state.mjs verdict=green on d3d6081f, behind=0, check job success; labelled patch+ready-to-merge.)
+- #593 impl-593=PR#2101 · class=meta · tier=alt · review=member:review-pr-2101=failed · review=fallback:review-pr-2101-b · reviewed=2f4b6d1b:3/1/3 (5 specialists convergent on docs-only entry prose defects; A/C/D applied, B/E-half deferred+filed #2106/#2107, SF-4 filed #2108; ci=green(6/6 jobs,0 behind); labelled patch+ready-to-merge)
+- #1077 impl-1077=killed · class=types · impl-1077-b=PR#2105 · review=fallback:review-pr-2105-b (fleet-review-runner known-broken, skipped straight to fallback per #2102/PR#2103 still open) · reviewed=c2250bb1:3/0/3 (kind-validation + valueFlags-dedup applied+refuted-survived; stale doc premise + snapshot-desync deferred+filed #2113/#2114; ci=green) · fix-pr-2105=killed (erroneous test dispatch, no real member) · finisher-pr-2105=labelled (ready-to-merge, minor)
+- #1087 impl-1087=PR#2104 · class=comments · review=member:review-pr-2104=failed · review=fallback:review-pr-2104-b · reviewed=44fd5e8c:2/0/2 (exit-status-ambiguity + doesNotMatch bsd/ripgrep gap applied+refuted-survived; hand-over-enum gap deferred+filed #2109; suggestion band checked, filed+closed #2110; ci=green; behind:4 staleness only, not inferred as red; labelled patch+ready-to-merge)
+- #2102 impl-2102=PR#2103 · class=correctness · dispatched-by=controller (self-implemented, fold-in per user request) · review=member:review-pr-2103=failed · review=fallback:review-pr-2103-b · reviewed=8861d990:2/0/6 (fallback found pushed commit covered only 1 of 3 required pieces, completed remaining work itself; 2 important findings applied+refuted-survived, 0 deferred; ci check=green, rebase-check=behind:4 expected/not-blocking; patch label applied) · finisher-pr-2103=labelled
+- #2111 PR#2111 · class=meta · dispatched-by=controller (fold-in per user request, maintainer-authored omp-only-cutover; no linked ticket) · release-label=major applied by controller · live ruleset updated by controller from this PR own spec (dropped validate-claude requirement, ADR 0007) · review=fallback:review-pr-2111-b · reviewed=ca4e906c:7/0/17 (7 critical/important applied+refuted-survived; 3 deferred+filed #2122/#2123/#2124; suggestion band checked, filed+closed #2125) · resolved=resolver-pr-2111:26851edc (conflict vs main after #2103/#2105 merged mid-review; 5 files real-conflicted, 4 reconciled preserving both intents, 1 genuinely incompatible resolved per cutover goal with trade-off noted — tier-roles.mjs drops #2105 json/merge flags since this branch already deleted those modes; squash-rebased to 1 commit — rebase-check forbids merge commits, individual 15-commit replay judged too risky across 5 conflicting commits; suite 3380/3380 both before/after) · ci=green, mergeState=CLEAN · finisher-pr-2111=labelled
+- #2094 impl-2094=PR#2121 · class=fix · review=fallback:review-pr-2121-b · reviewed=af82809d:3/0/1 (3 comment/simplify fixes applied+refuted-survived, 1 cosmetic deferred+filed #2126; downstream-compare enumeration spot-checked, no gap; ci=green; patch label present) · finisher-pr-2121=failed · finisher-pr-2121-b=labelled
+- #2112 PR#2112 · class=meta · dispatched-by=controller (fold-in per user request, maintainer-authored docs/consumer-requirements; no linked ticket) · controller applied 2 of feigi own review comments + ADR renumber 0014->0015 + dropped stale Claude timing figure · rebased twice · review=fallback:review-pr-2112-b · reviewed=14dc7d5b:13/0/1 (13 accuracy findings applied; 1 deferred+filed #2128; ci=green; ready-to-merge+patch) · merge-bot-68 held: GitHub blocked on 2 unresolved review-thread conversations (feigi own comments, both already addressed in content) — controller resolved both threads via graphql resolveReviewThread
+- #1106 impl-1106=PR#2135 · class=correction · tier-cadence=row115-required-alt-dispatched-default-uncorrected · ci=36430366075:1:success · review=member:review-pr-2135 · reviewed=ffe34738:0/0/8 · finisher-pr-2135=labelled · filed:#2141,#2142 · merge-bot-2=done · MERGED:ad580e5c
+- #1111 impl-1111=PR#2140 · class=correction · flaky-inflight-test-preexisting-on-main · reviewed=46f67529:2/0/7 · fix-pr-2140=applied:313122fc · finisher-pr-2140=labelled · merge-bot-5=done · MERGED
+- #1118 impl-1118=PR#2137 · class=correction · sizing-timing=post-impl · ci=36431869075:1:success · reviewed=8cfb0ac0:1/0/7 · fix-pr-2137=no-op · filed:#2153,#2154 · finisher-pr-2137=labelled · merge-bot-4=done · MERGED
+- #2071 impl-2071=PR#2138 · class=routine · sizing-timing=post-impl · ci=36434075047:1:success · reviewed=53ed47eb:0/2/14 · finisher-pr-2138=labelled · merge-bot-3=done · MERGED
+- #2136 merge-bot-1=done · ci=36431224968:1:success · reviewed=de2b570b:5/0/3 · fix-pr-2136=applied:1ad76f3d · finisher-pr-2136=labelled · merge-bot-5=done · MERGED
+- #2078 impl-2078=PR#2143 · class=routine · reviewed=45b95433:2/1/11 · fix-pr-2143=applied:d3f7c03b · filed:#2156,#2157 · finisher-pr-2143=failed · halt:ci-real-bug-wt_registry_why · fix-pr-2143-ci=applied:4c47b42f · incident:accidental-reap-main-checkout-verified-harmless · maintainer-label-removed:predated-fix · finisher-pr-2143b=labelled · merged=2cf028f0 · reaped
+- #2086 impl-2086=PR#2155 · class=correction · tier=alt · reviewed=7d2ac680:3/0/8 · fix-pr-2155=applied:d9d3630e · filed:#2162,#2163 · finisher-pr-2155=labelled · merge-bot-6=done · MERGED
+- #2087 impl-2087=PR#2152 · class=routine · reviewed=acdbc7ef:2/1/14 · fix-pr-2152=applied:97442231 · finisher-pr-2152=labelled · merge-bot-5=done · MERGED
+- #2088 impl-2088=PR#2145 · class=routine · reviewed=7f960c64:3/0/12 · fix-pr-2145=applied:6993c966 · filed:#2158 · finisher-pr-2145=labelled · merge-bot-5=done · MERGED
+- #2135 merge-bot-2=done dispatched for PR#2135 (tracked on #1106's own row)
+- #2100 impl-2100=PR#2161 · class=correction · merged=709daadf
+- #2108 impl-2108=PR#2160 · class=routine · sizing=heavy · reviewed=9cd893b4:2/1/14 · fix-pr-2160=applied:04681a32 · filed:#2168,#2169,#2170 · finisher-pr-2160=labelled · dispatched-to:merge-bot-80
+- #2109 impl-2109=PR#2159 · class=correction · tier=alt · reviewed=318b75c4:1/0/7 · fix-pr-2159=applied:e8533815 · finisher-pr-2159=labelled · finisher-pr-2159b=reconfirmed:8245642b · refused-by:merge-bot-76:label-not-cycled · controller-cycled-label · merged=6a9b1037
+- #2095 impl-2095=PR#2165 · class=correction · reviewed=39fb7322:6/1/12 · fix-pr-2165=applied:896c0a30 · finisher-pr-2165=labelled · merged=90993537 · reaped
+- #2098 impl-2098=PR#2183 · class=correction · reviewed=69499808:2/0/7 · fix-pr-2183=applied:86ba11ce · finisher-pr-2183=labelled · merged=0e9fefe9 · reaped
+- #2099 excluded · relabelled-ready-for-human
+- #2106 impl-2106=PR#2167 · class=correction · reviewed=cecb7da6:0/0/2 · finisher-pr-2167=labelled · merged=5dd4960e
+- #2113 impl-2113=PR#2171 · class=correction · reviewed=868229b3:0/0/2 · finisher-pr-2171=labelled · maintainer-edit:ce000a8d · finisher-pr-2171b=labelled-cycled · merged=239fbda2 · reaped
+- #2114 impl-2114=PR#2172 · class=routine · reviewed=97d91883:1/0/11 · fix-pr-2172=applied:c1f0fadd · finisher-pr-2172=labelled · merged=1a374a1b · reaped
+- #2117 impl-2117=PR#2212 · class=routine · review=member:review-pr-2212 · reviewed=efa4ede5:8/0/16 · fix-pr-2212=applied:bc724186 · fix-pr-2212-b=applied:e91992e6 · fix-pr-2212-c=applied:34fbd805 · finisher-pr-2212=labelled
+- #2124 impl-2124=PR#2173 · class=routine · tier=alt · reviewed=0240e323:0/0/4 · finisher-pr-2173=labelled · filed:#2176 · merged=fd57d171
+- #2126 impl-2126=PR#2174 · class=correction · reviewed=a3828a3d:0/0/5 · finisher-pr-2174=labelled · merged=4e0f88ed · reaped
+- #2139 impl-2139=PR#2179 · class=correction · reviewed=7642fce4:0/0/10 · controller-verified:288/288-scoped · finisher-pr-2179=labelled · merged=c8813385 · reaped
+- #2162 impl-2162=PR#2178 · class=correction · reviewed=0a767d3f:0/0/7 · finisher-pr-2178=labelled · merged=bde13200 · reaped
+- #2163 impl-2163=PR#2175 · class=correction · reviewed=622dcc33:4/0/7 · fix-pr-2175=applied:0ca03cd9 · filed:#2185 · finisher-pr-2175=labelled · merged=1f4dcb81 · reaped
+- #2158 impl-2158=PR#2182 · class=correction · tier=alt · reviewed=83bbb8af:2/0/4 · fix-pr-2182=applied:0ee1f23d · filed:#2187 · finisher-pr-2182=labelled · merged=8ef5f951 · reaped
+- #2130 impl-2130=PR#2180 · class=correction · reviewed=529a408a:2/0/4 · fix-pr-2180=applied:582deeef · finisher-pr-2180=labelled · merged=dabc8e05 · reaped
+- #2176 impl-2176=PR#2181 · class=correction · reviewed=4157f52e:0/0/3 · finisher-pr-2181=labelled · merged=7826c8a1 · reaped
+- #2129 excluded · deferred-to-session-end-per-user · core-infra-risk
+- #2131 excluded · deferred-to-session-end-per-user · core-infra-risk
+- #2132 excluded · deferred-to-session-end-per-user · core-infra-risk
+- #2133 excluded · deferred-to-session-end-per-user · core-infra-risk
+- #2134 excluded · deferred-to-session-end-per-user · core-infra-risk
+- #2146 excluded · deferred-to-session-end-per-user · core-infra-risk
+- #2147 excluded · deferred-to-session-end-per-user · core-infra-risk
+- #2148 excluded · deferred-to-session-end-per-user · core-infra-risk
+- #2083 impl-2083=PR#2248 · class=correction · review=member:review-pr-2248 · reviewed=92c34b6f:2/0/13 · fix-pr-2248=applied:9a9a5bbc · finisher-pr-2248=labelled
+- #2064 impl-2064=PR#2193 · class=enhancement · sizing=heavy · reviewed=968996a1:4/0/11 · fix-pr-2193=applied:8167b63e · finisher-pr-2193=labelled · controller-independently-verified:findings-2,4 · merged=9e6e251d · post-merge-tick-verified · reaped
+- #2118 excluded · deferred-to-session-end-per-user · core-infra-risk
+- #2120 excluded · deferred-to-session-end-per-user · core-infra-risk
+- #2081 excluded · relabelled-ready-for-human
+- #2082 excluded · relabelled-ready-for-human
+- #2085 excluded · relabelled-ready-for-human
+- #2096 excluded · relabelled-ready-for-human
+- #2119 excluded · relabelled-ready-for-human
+- #2122 excluded · relabelled-ready-for-human
+- #2123 excluded · relabelled-ready-for-human
+- #2128 excluded · relabelled-ready-for-human
+- #2153 excluded · relabelled-ready-for-human
+- #2156 excluded · relabelled-ready-for-human
+- #2144 excluded · relabelled-ready-for-human
+- #2168 excluded · relabelled-ready-for-human
+- #2177 excluded · relabelled-ready-for-human
+- #2186 impl-2186=PR#2190 · class=correction · reviewed=9be4737e:1/0/4 · filed:#2191 · fix-pr-2190=no-op · finisher-pr-2190=labelled · merged=c83f5af4 · reaped
+- #2187 impl-2187=PR#2188 · class=correction · tier=alt · reviewed=7dd33a73:3/0/3 · filed:#2189,#2192 · fix-pr-2188=applied:75d5ed8e · finisher-pr-2188=labelled · merged=163f15d8 · reaped
+- #2198 review=member:review-pr-2198 · reviewed=8bc7a615:2/0/7 · fix-pr-2198=applied:9672e8a6 · finisher-pr-2198=labelled
+- #1132 impl-1132=PR#2199 · class=correction · review=member:review-pr-2199 · reviewed=3090cc8e:3/0/6 · fix-pr-2199=applied:2d4da60f · finisher-pr-2199=failed · fix-pr-2199-b=no-op · finisher-pr-2199-b=labelled
+- #1150 impl-1150=PR#2200 · class=correction · review=member:review-pr-2200 · reviewed=1952da5b:3/1/5 · fix-pr-2200=applied:489cc3b6 · finisher-pr-2200=labelled
+- #2192 impl-2192=PR#2201 · class=correction · review=member:review-pr-2201 · reviewed=d834cb47:0/0/2 · finisher-pr-2201=labelled
+- #2195 impl-2195=PR#2290 · class=routine · review=member:review-pr-2290 · reviewed=fd13f1aa:0/0/9 · finisher-pr-2290=labelled
+- #2196 impl-2196=PR#2289 · class=routine · review=member:review-pr-2289 · reviewed=5fcbc74c:4/0/13 · fix-pr-2289=applied:a73864e1df55de61b1d261cdabdd9d9609374d73 · finisher-pr-2289=failed · finisher-pr-2289-b=labelled
+- #2197 impl-2197=bailed · class=routine
+- #2189 impl-2189=PR#2204 · class=correction · review=member:review-pr-2204 · reviewed=40f9114a:7/0/2 · fix-pr-2204=applied:e9cba4b6 · finisher-pr-2204=labelled
+- #2169 impl-2169=PR#2205 · class=correction · review=member:review-pr-2205 · reviewed=7115b104:2/1/3 · fix-pr-2205=applied:9002ad00 · finisher-pr-2205=labelled
+- #2203 impl-2203=PR#2356 · class=routine · review=member:review-pr-2356 · fix-pr-2356=applied:53b9fa62
+- #2141 impl-2141=PR#2211 · class=correction · review=member:review-pr-2211 · reviewed=def47727:0/1/5 · finisher-pr-2211=labelled
+- #1398 impl-1398=PR#2223 · class=correction · review=member:review-pr-2223 · reviewed=0fca8b8c:2/1/19 · fix-pr-2223=applied:fc841b12 · finisher-pr-2223=labelled
+- #1411 impl-1411=PR#2246 · class=routine · review=member:review-pr-2246 · reviewed=874ccd8c:5/1/14 · fix-pr-2246=applied:ac001120 · finisher-pr-2246=labelled
+- #2210 impl-2210=PR#2298 · class=routine · review=member:review-pr-2298 · reviewed=ca39b18c:7/0/14 · fix-pr-2298=applied:9d8b29c2a864734b74f8d68fda21b05f89f12d21 · finisher-pr-2298=labelled · finisher-pr-2298-b=labelled · finisher-pr-2298-c=labelled
+- #2206 impl-2206=PR#2214 · class=correction · review=member:review-pr-2214 · reviewed=c5e80072:0/0/3 · finisher-pr-2214=labelled
+- #2209 impl-2209=PR#2213 · class=routine · review=member:review-pr-2213 · reviewed=a1bd30b9:4/0/11 · fix-pr-2213=applied:0e284c03 · finisher-pr-2213=labelled
+- #2202 review=member:review-pr-2202 · reviewed=e856d4e0:0/0/4 · finisher-pr-2202=labelled
+- #1194 → PR#2215 · review=member:review-pr-2215 · reviewed=e764ec9f:1/0/3 · fix-pr-2215=applied:805d7af1 · finisher-pr-2215=labelled
+- #2218 impl-2218=PR#2253 · class=correction · review=member:review-pr-2253 · reviewed=ce98f422:4/0/10 · fix-pr-2253=applied:1fb367da · finisher-pr-2253=labelled
+- #2215 folded into #1194's row, see there — stray duplicate row, do not use
+- #2221 impl-2221=PR#2224 · class=routine · review=member:review-pr-2224 · reviewed=339b0682:1/0/8 · fix-pr-2224=applied:d9d1dce7 · finisher-pr-2224=labelled
+- #2222 review=member:review-pr-2222 · reviewed=f3942c32:5/0/5 · fix-pr-2222=applied:9064e3a7 · finisher-pr-2222=labelled
+- #2225 review=member:review-pr-2225 · reviewed=954ad4ec:6/0/7 · fix-pr-2225=applied:47f994ca · finisher-pr-2225=labelled
+- #2231 impl-2231=PR#2245 · class=routine · review=member:review-pr-2245 · reviewed=fc95e79d:3/0/1 · fix-pr-2245=applied:72aee962 · finisher-pr-2245=labelled
+- #2229 impl-2229=PR#2257 · class=correction · review=member:review-pr-2257 · reviewed=d6c1c5fd:2/0/4 · fix-pr-2257=applied:ae0b8559 · finisher-pr-2257=labelled · finisher-pr-2257-b=labelled
+- #2207 impl-2207=PR#2247 · class=routine · review=member:review-pr-2247 · reviewed=e7712094:5/0/17 · fix-pr-2247=applied:b572502a · finisher-pr-2247=labelled
+- #2217 impl-2217=PR#2251 · class=correction · review=member:review-pr-2251 · reviewed=0fe9f26b:5/0/7 · fix-pr-2251=applied:547c3c56 · finisher-pr-2251=labelled
+- #2227 PR#2292 · class=correction · dispatched-by=controller (fold-in, user-requested) · review=member:review-pr-2292 · reviewed=cc2c7915:0/0/3 · finisher-pr-2292=labelled
+- #2250 impl-2250=PR#2259 · class=correction · review=member:review-pr-2259 · reviewed=f4d9d4f9:0/0/2 · fix-pr-2259=no-op · finisher-pr-2259=labelled
+- #1697 impl-1697=PR#2260 · class=correction · review=member:review-pr-2260 · reviewed=03cf062d:3/0/11 · fix-pr-2260=applied:6cd9de13 · finisher-pr-2260=labelled · finisher-pr-2260-b=labelled
+- #2208 impl-2208=PR#2294 · class=routine · review=member:review-pr-2294 · reviewed=314c36b7:7/0/10 · fix-pr-2294=applied:1c270491a96fa9a72c18562305452bc8f27e72a5 · finisher-pr-2294=labelled · finisher-pr-2294-b=labelled · finisher-pr-2294-c=labelled
+- #2232 excluded · behind-pr:#2357
+- #2255 impl-2255=PR#2302 · class=routine · review=member:review-pr-2302 · reviewed=c11c8443:1/1/10 · fix-pr-2302=applied:ef7e2f61d77aae524c0254a6210363778d1f36fc · finisher-pr-2302=labelled
+- #2249 impl-2249=PR#2263 · class=correction · review=member:review-pr-2263 · reviewed=9898629f:0/0/4 · fix-pr-2263=no-op · finisher-pr-2263=labelled
+- #2254 impl-2254=PR#2262 · class=correction · review=member:review-pr-2262 · reviewed=d5e1854b:0/0/7 · fix-pr-2262=applied:8228ff7b · finisher-pr-2262=labelled · finisher-pr-2262-b=labelled
+- #2258 impl-2258=PR#2309 · class=routine · review=member:review-pr-2309 · reviewed=7a0c20ad:2/1/14 · fix-pr-2309=applied:211f327badc46bd05a392bc220b8caf1e305e1b2 · finisher-pr-2309=labelled
+- #2265 impl-2265=PR#2280 · class=correction · review=member:review-pr-2280 · reviewed=65ea71c4:0/0/2 · finisher-pr-2280=failed · finisher-pr-2280-b=labelled
+- #2268 impl-2268=PR#2281 · class=correction · review=member:review-pr-2281 · reviewed=a156f199:0/0/2 · finisher-pr-2281=failed · finisher-pr-2281-b=labelled
+- #2219 impl-2219=PR#2271 · class=correction · review=member:review-pr-2271 · reviewed=e88f13ba:4/1/12 · fix-pr-2271=applied:0ccf833b · finisher-pr-2271=killed · finisher-pr-2271-b=labelled
+- #2220 impl-2220=PR#2270 · class=correction · review=member:review-pr-2270 · reviewed=cca778a3:4/0/14 · fix-pr-2270=applied:5923507c · finisher-pr-2270=labelled
+- #2273 impl-2273=PR#2310 · class=correction · review=member:review-pr-2310 · reviewed=1442d82f:0/0/1 · finisher-pr-2310=failed · finisher-pr-2310-b=labelled
+- #2272 impl-2272=PR#2278 · class=correction · review=member:review-pr-2278 · reviewed=1997717d:0/0/3 · fix-pr-2278=applied:8d64a134 · finisher-pr-2278=labelled
+- #2275 excluded · behind-pr:#2271
+- #2283 impl-2283=PR#2287 · class=routine · review=member:review-pr-2287 · reviewed=b8e6f12c:2/0/12 · fix-pr-2287=applied:47fbbaf03e3bb337042f59e08ea6d363cce53349 · finisher-pr-2287=labelled · finisher-pr-2287-b=labelled
+- #1430 PR#2285 · class=routine · dispatched-by=controller (fold-in, prior-run PR) · review=member:review-pr-2285-v2 · reviewed=b9e52cd4173d68636391a53f72c56def3b7b08b6:9/1/26 · fix-pr-2285-b=applied:92d54207db9f524f022fff54eaeb13692120c50f · finisher-pr-2285=labelled
+- #2164 impl-2164=PR#2339 · class=correction · review=member:review-pr-2339 · fix-pr-2339=applied:efb5931dca97dfc162f599ab2ce73b7cee2638d6 · finisher-pr-2339
+- #2228 impl-2228=PR#2335 · class=routine · review=member:review-pr-2335 · fix-pr-2335=applied:591571f4 · finisher-pr-2335
+- #2261 impl-2261=PR#2312 · class=correction · review=member:review-pr-2312 · reviewed=8a1d6896:1/1/5 · fix-pr-2312=no-op · finisher-pr-2312=labelled
+- #2264 impl-2264=PR#2355 · class=routine · review=member:review-pr-2355 · fix-pr-2355=no-op · finisher-pr-2355=labelled · finisher-pr-2355-b=labelled
+- #2266 impl-2266=PR#2311 · class=correction · review=member:review-pr-2311 · reviewed=47566937:0/1/3 · finisher-pr-2311=labelled
+- #2277 impl-2277=PR#2357 · class=correction · review=member:review-pr-2357 · fix-pr-2357=no-op · finisher-pr-2357
+- #2296 excluded · behind-pr:#2358
+- #2313 impl-2313=PR#2319 · class=correction · review=member:review-pr-2319 · reviewed=ecda9c1b:0/0/1 · finisher-pr-2319=labelled · finisher-pr-2319-b=labelled
+- #2299 PR#2325 · class=routine · review=member:review-pr-2325 · reviewed=fd77c169763ef595c65eb07485d85013c6dc013d:3/1/12 · fix-pr-2325=applied:776c4f6a · finisher-pr-2325=labelled · finisher-pr-2325-b=labelled
+- #2300 PR#2324 · class=routine · review=member:review-pr-2324 · reviewed=e28028659970c98b6942001750ec4c5f1b046d10:1/0/2 · fix-pr-2324=applied:5af5ec0757d51e2475868c896ec5953253e2f50e · finisher-pr-2324=labelled · finisher-pr-2324-b=labelled
+- #2325 reviewed=fd77c169763ef595c65eb07485d85013c6dc013d:3/1/12
+- #2307 impl-2307=PR#2334 · class=routine · review=member:review-pr-2334 · fix-pr-2334=applied:502a1d98 · finisher-pr-2334=labelled
+- #2314 impl-2314=PR#2338 · class=routine · review=member:review-pr-2338 · fix-pr-2338=no-op · finisher-pr-2338
+- #1196 impl-1196=PR#2337 · class=routine · review=member:review-pr-2337 · fix-pr-2337=applied:f18be1e5b047d29611023577b80521972b2a2424 · finisher-pr-2337
+- #2295 impl-2295=PR#2358 · class=routine · review=member:review-pr-2358 · fix-pr-2358
+
+## Dispatched
+
+- impl-1716=PR#1867
+- impl-1756=PR#1868
+- impl-1839
+- impl-1845=PR#1870
+- merge-bot-1=done
+- impl-1850=PR#1875
+- impl-1846=PR#1877
+- merge-bot-2=done
+- impl-1855=PR#1880
+- impl-1861=PR#1881
+- impl-1757=PR#1882
+- merge-bot-3=done
+- merge-bot-4=done
+- impl-1841=PR#1883
+- impl-910=PR#1890
+- merge-bot-5=done
+- impl-1717=PR#1889
+- merge-bot-6=done
+- impl-1842=PR#1891
+- impl-1851=PR#1892
+- impl-1852=PR#1893
+- impl-1853=PR#1900
+- impl-1854=PR#1901
+- merge-bot-7=done
+- impl-1856=PR#1907
+- impl-1862=PR#1908
+- merge-bot-8=done
+- impl-1865=PR#1909
+- impl-1840=PR#1913
+- merge-bot-9=done
+- impl-1843=PR#1912
+- impl-1866=PR#1982
+- impl-1872=PR#1914
+- merge-bot-10=done
+- impl-1873=PR#1915
+- merge-bot-11=done
+- impl-1879=PR#1917
+- impl-1884=PR#1918
+- impl-1844=PR#1922
+- impl-1874=PR#1924
+- impl-1878=PR#1927
+- impl-1885=PR#1929
+- merge-bot-62=killed
+- impl-1886=PR#1930
+- impl-1888=PR#1931
+- impl-1894=PR#1933
+- impl-1895=PR#1934
+- impl-1887=PR#1936
+- merge-bot-12=done
+- merge-bot-13=done
+- merge-bot-14=done
+- impl-1898=PR#1939
+- impl-1903=PR#1942
+- merge-bot-15=done
+- merge-bot-16=done
+- impl-1905=PR#1944
+- merge-bot-17=done
+- impl-1896=PR#1946
+- impl-1910=PR#1947
+- merge-bot-18=done
+- impl-1925=PR#1949
+- impl-1932=PR#1953
+- merge-bot-19=done
+- impl-1906=PR#1955
+- merge-bot-20=done
+- impl-1935=PR#1960
+- merge-bot-21=done
+- impl-1943=PR#1963
+- merge-bot-22=done
+- fix-pr-1939=applied:20d3e45
+- impl-1941=PR#1964
+- impl-1923=PR#1965
+- merge-bot-23=done
+- fix-pr-1963=applied:f1d53a0
+- impl-1919=PR#1966
+- merge-bot-24=done
+- merge-bot-25=done
+- impl-1916=PR#1967
+- impl-1926=PR#1968
+- impl-1928=PR#1969
+- merge-bot-26=done
+- fix-pr-1966=applied:7f57495
+- impl-1920=PR#1971
+- merge-bot-27=done
+- impl-1950=PR#1972
+- fix-pr-1969=applied:ea140406
+- merge-bot-28=done
+- impl-1954=PR#1974
+- fix-pr-1972=applied:b8a546f22c840dac1a55ea7d1185fe9c1a4d26b0
+- impl-1956=PR#1977
+- fix-pr-1977=applied:450cfbc98e028ffc492cfbe73bde0724526cf91b
+- merge-bot-29=done
+- impl-1957=PR#1979
+- fix-pr-1971=applied:41f2049
+- merge-bot-30=done
+- impl-1973=PR#1980
+- fix-pr-1974=applied:fc7e445c
+- fix-pr-1979=applied:eda3c75f
+- impl-1940=PR#1985
+- impl-1945=PR#1984
+- merge-bot-31=done
+- impl-1958=PR#1986
+- merge-bot-32=done
+- impl-1978=PR#1990
+- merge-bot-33=done
+- fix-pr-1985=applied:8942ed3
+- fix-pr-1984=applied:abaa03fe
+- merge-bot-34=done
+- impl-1959=PR#1993
+- fix-pr-1990=applied:0712584401ca1991b58314fb0ceb83afb7d7f66b
+- impl-1988=PR#1994
+- fix-pr-1993=applied:389fdac5dd2957fb8522af392fbe21f59b0c508a
+- impl-1961=PR#1996
+- impl-1975=PR#1995
+- merge-bot-35=done
+- merge-bot-36=done
+- impl-1970=PR#1997
+- impl-1981=PR#1998
+- impl-1991=PR#2001
+- merge-bot-37=done
+- merge-bot-38=done
+- impl-2000=PR#2005
+- fix-pr-2001=applied:b8ad24b023ad67b2519a43cefdfb1f3859239c6c
+- merge-bot-39=done
+- merge-bot-40=done
+- impl-1962=PR#2007
+- impl-1976=PR#2008
+- impl-1989=PR#2009
+- impl-1992=PR#2010
+- impl-2003=PR#2011
+- impl-2004=PR#2012
+- fix-pr-2010=applied:b382813ee0b63413d9353d0ebc98656dcec5725c
+- merge-bot-41=done
+- fix-pr-2007=applied:3966023c44e4bcb423a83bd3023d2feebe4f1303
+- merge-bot-42=done
+- impl-2006=PR#2015
+- impl-1999=PR#2014
+- impl-2002=PR#2016
+- fix-pr-2015=applied:19602c9
+- merge-bot-43=done
+- impl-2013=PR#2017
+- merge-bot-44=done
+- impl-1876=PR#2020
+- impl-1899=PR#2018
+- impl-1904=PR#2019
+- impl-1948=PR#2022
+- impl-1952=PR#2023
+- impl-2021=PR#2024
+- fix-pr-2018=applied:fa45601772099221c4ace0f1c38af22bddd1c8d3
+- merge-bot-45=done
+- merge-bot-46=done
+- fix-pr-2019=applied:e332080208643c629bdc920605ce628dfccd904e
+- impl-1987=PR#2028
+- fix-pr-2020=applied:81ac032661b350d0f0eb90b1ac439efac4a11d8d
+- impl-2026=PR#2029
+- merge-bot-47=done
+- impl-1983=PR#2048
+- impl-2025=PR#2047
+- impl-2040=PR#2050
+- impl-2043=PR#2049
+- impl-2044=PR#2051
+- merge-bot-48=done
+- impl-2053=PR#2060
+- impl-2054=PR#2062
+- impl-2057=PR#2061
+- fix-pr-2060=applied:b164205f5f30fb331a0f0ffa728d004b606dfdf4
+- fix-pr-2062=applied:546e3255ccc9d73630e353f036cde3c832c29785
+- fix-pr-2061=applied:a014628a4526404470c622e2bdf54f6dee64fa17
+- merge-bot-49=done
+- merge-bot-50=done
+- impl-2027=PR#2065
+- merge-bot-51=done
+- impl-2041=PR#2066
+- impl-2042=PR#2068
+- merge-bot-52=done
+- impl-2046=PR#2067
+- merge-bot-53=done
+- impl-491=PR#2070
+- impl-2056=PR#2069
+- merge-bot-54=done
+- fix-pr-2066=applied:7449fbc
+- fix-pr-2067=applied:e9ccaba54951cd15c319e2b89739ea250e3c0ced
+- impl-2063=PR#2075
+- merge-bot-55=done
+- impl-531=PR#2080
+- impl-622=PR#2079
+- merge-bot-56=done
+- impl-2073=PR#2084
+- merge-bot-57=done
+- impl-2076=PR#2090
+- impl-2077=PR#2091
+- merge-bot-58=done
+- merge-bot-59=done
+- merge-bot-60=done
+- merge-bot-61=done
+- merge-bot-62
+- impl-1077-b=PR#2105
+- merge-bot-64=done
+- fix-pr-2105=killed
+- finisher-pr-2105=labelled
+- finisher-pr-2103=labelled
+- merge-bot-65=done
+- impl-2094=PR#2121
+- finisher-pr-2121=failed
+- finisher-pr-2111=labelled
+- finisher-pr-2121-b=labelled
+- merge-bot-66=done
+- merge-bot-67=killed
+- merge-bot-68=done
+- merge-bot-69=done
+- fix-pr-2137
+- finisher-pr-2138
+- merge-bot-70=done
+- finisher-pr-2137
+- fix-pr-2136
+- fix-pr-2143
+- fix-pr-2145
+- fix-pr-2152
+- fix-pr-2140
+- merge-bot-71=done
+- impl-2100=PR#2161
+- impl-2108=PR#2160
+- impl-2109=PR#2159
+- fix-pr-2155
+- merge-bot-72=done
+- merge-bot-73=done
+- finisher-pr-2161
+- impl-2095=PR#2165
+- fix-pr-2159
+- impl-2106=PR#2167
+- merge-bot-74=killed
+- fix-pr-2160
+- impl-2113=PR#2171
+- impl-2114=PR#2172
+- merge-bot-75=done
+- impl-2124=PR#2173
+- impl-2126=PR#2174
+- impl-2139=PR#2179
+- impl-2162=PR#2178
+- impl-2163=PR#2175
+- merge-bot-76=done
+- merge-bot-77=done
+- merge-bot-78=done
+- impl-2158=PR#2182
+- impl-2130=PR#2180
+- impl-2098=PR#2183
+- impl-2176=PR#2181
+- merge-bot-79=done
+- merge-bot-80=done
+- merge-bot-81=done
+- merge-bot-82=done
+- impl-2186=PR#2190
+- impl-2187=PR#2188
+- fix-pr-2188
+- merge-bot-83=done
+- impl-2064=PR#2193
+- fix-pr-2193=applied:8167b63e
+- merge-bot-84=done
+- impl-1132=PR#2199
+- impl-1150=PR#2200
+- impl-2192=PR#2201
+- fix-pr-2198=applied:9672e8a6
+- fix-pr-2199=applied:2d4da60f
+- fix-pr-2200=applied:489cc3b6
+- finisher-pr-2201=labelled
+- merge-bot-85=done
+- finisher-pr-2198=labelled
+- finisher-pr-2199=failed
+- fix-pr-2199-b=applied:2d4da60f
+- impl-2189=PR#2204
+- merge-bot-86=done
+- finisher-pr-2199-b=labelled
+- impl-2169=PR#2205
+- fix-pr-2204=applied:e9cba4b6
+- finisher-pr-2200=labelled
+- impl-2117=PR#2212
+- merge-bot-87=done
+- fix-pr-2205=applied:9002ad00
+- impl-2141=PR#2211
+- impl-2206=PR#2214
+- impl-2209=PR#2213
+- finisher-pr-2204=labelled
+- finisher-pr-2205=labelled
+- merge-bot-88=done
+- finisher-pr-2211=labelled
+- merge-bot-89=done
+- fix-pr-2212=applied:bc724186
+- impl-1398=PR#2223
+- finisher-pr-2214=labelled
+- merge-bot-90=done
+- fix-pr-2215=applied:805d7af1
+- impl-2221=PR#2224
+- fix-pr-2212-b=applied:e91992e6
+- finisher-pr-2202=labelled
+- fix-pr-2213=applied:0e284c03
+- merge-bot-91=done
+- fix-pr-2222=applied:9064e3a7
+- fix-pr-2212-c=applied:34fbd805
+- finisher-pr-2222=labelled
+- merge-bot-92=done
+- fix-pr-2223=applied:fc841b12
+- fix-pr-2224=applied:d9d1dce7
+- finisher-pr-2212=labelled
+- fix-pr-2225=applied:47f994ca
+- finisher-pr-2223=labelled
+- merge-bot-93=done
+- impl-2231=PR#2245
+- impl-1411=PR#2246
+- impl-2083=PR#2248
+- fix-pr-2245=applied:72aee962
+- impl-2207=PR#2247
+- finisher-pr-2225=labelled
+- merge-bot-94=done
+- impl-2217=PR#2251
+- fix-pr-2246=applied:ac001120
+- finisher-pr-2213=labelled
+- finisher-pr-2215=labelled
+- finisher-pr-2224=labelled
+- merge-bot-95=done
+- merge-bot-96=done
+- fix-pr-2247=applied:b572502a
+- fix-pr-2248=applied:9a9a5bbc
+- impl-2218=PR#2253
+- fix-pr-2251=applied:547c3c56
+- finisher-pr-2246=labelled
+- impl-2229=PR#2257
+- finisher-pr-2247=labelled
+- merge-bot-97=done
+- finisher-pr-2245=labelled
+- fix-pr-2253=applied:1fb367da
+- impl-1697=PR#2260
+- finisher-pr-2251=labelled
+- impl-2250=PR#2259
+- impl-2249=PR#2263
+- merge-bot-98=done
+- impl-2254=PR#2262
+- fix-pr-2257=applied:ae0b8559
+- fix-pr-2259=no-op
+- fix-pr-2263=no-op
+- fix-pr-2260=applied:6cd9de13
+- fix-pr-2262=applied:8228ff7b
+- finisher-pr-2257=labelled
+- finisher-pr-2259=labelled
+- merge-bot-99=done
+- finisher-pr-2263=labelled
+- finisher-pr-2253=labelled
+- finisher-pr-2260=labelled
+- finisher-pr-2262=labelled
+- merge-bot-100=done
+- merge-bot-101=done
+- merge-bot-102=killed
+- impl-2219=PR#2271
+- impl-2220=PR#2270
+- fix-pr-2270=applied:5923507c
+- merge-bot-103=done
+- fix-pr-2271=applied:0ccf833b
+- finisher-pr-2270=labelled
+- finisher-pr-2257-b=labelled
+- finisher-pr-2260-b=labelled
+- finisher-pr-2262-b=labelled
+- merge-bot-104=killed
+- impl-2272=PR#2278
+- merge-bot-105=done
+- fix-pr-2278=applied:8d64a134
+- finisher-pr-2271=killed
+- impl-2265=PR#2280
+- impl-2268=PR#2281
+- impl-2283=PR#2287
+- finisher-pr-2271-b=labelled
+- finisher-pr-2248=labelled
+- finisher-pr-2278=labelled
+- finisher-pr-2280=failed
+- finisher-pr-2281=failed
+- finisher-pr-2281-b=labelled
+- finisher-pr-2280-b=labelled
+- merge-bot-106=done
+- fix-pr-2285=applied:291e4692e8046583dcda3378d14a74e9918b235d
+- impl-2195=PR#2290
+- impl-2196=PR#2289
+- fix-pr-2287=applied:47fbbaf03e3bb337042f59e08ea6d363cce53349
+- impl-2197=bailed
+- impl-2208=PR#2294
+- finisher-pr-2292=labelled
+- fix-pr-2289=applied:a73864e1df55de61b1d261cdabdd9d9609374d73
+- impl-2210=PR#2298
+- finisher-pr-2290=labelled
+- merge-bot-107=done
+- fix-pr-2294=applied:1c270491a96fa9a72c18562305452bc8f27e72a5
+- finisher-pr-2289=failed
+- merge-bot-108=done
+- impl-2255=PR#2302
+- impl-2258=PR#2309
+- finisher-pr-2289-b=labelled
+- fix-pr-2302=applied:ef7e2f61d77aae524c0254a6210363778d1f36fc
+- fix-pr-2298=applied:9d8b29c2a864734b74f8d68fda21b05f89f12d21
+- finisher-pr-2294=labelled
+- merge-bot-109=done
+- impl-2273=PR#2310
+- finisher-pr-2298=labelled
+- finisher-pr-2302=labelled
+- merge-bot-110=done
+- impl-2261=PR#2312
+- impl-2266=PR#2311
+- finisher-pr-2294-b=labelled
+- finisher-pr-2298-b=labelled
+- finisher-pr-2287=labelled
+- merge-bot-111=done
+- finisher-pr-2310=failed
+- finisher-pr-2311=labelled
+- finisher-pr-2310-b=labelled
+- fix-pr-2312=no-op
+- finisher-pr-2287-b=labelled
+- finisher-pr-2294-c=labelled
+- finisher-pr-2298-c=labelled
+- finisher-pr-2312=labelled
+- fix-pr-2309=applied:211f327badc46bd05a392bc220b8caf1e305e1b2
+- merge-bot-112=done
+- finisher-pr-2309=labelled
+- impl-2313=PR#2319
+- finisher-pr-2319=labelled
+- merge-bot-113=done
+- impl-2299=PR#2325
+- impl-2300=PR#2324
+- fix-pr-2285-b=applied:92d54207db9f524f022fff54eaeb13692120c50f
+- fix-pr-2324=applied:5af5ec0757d51e2475868c896ec5953253e2f50e
+- fix-pr-2325=applied:776c4f6a
+- finisher-pr-2285=labelled
+- finisher-pr-2324=labelled
+- finisher-pr-2325=labelled
+- finisher-pr-2319-b=labelled
+- finisher-pr-2324-b=labelled
+- finisher-pr-2325-b=labelled
+- impl-2307=PR#2334
+- impl-2314=PR#2338
+- impl-2228=PR#2335
+- impl-1196=PR#2337
+- fix-pr-2334=applied:502a1d98
+- finisher-pr-2334=labelled
+- fix-pr-2335=applied:591571f4
+- fix-pr-2338=no-op
+- fix-pr-2337=applied:f18be1e5b047d29611023577b80521972b2a2424
+- fix-pr-2339=applied:efb5931dca97dfc162f599ab2ce73b7cee2638d6
+- finisher-pr-2338
+- finisher-pr-2335
+- finisher-pr-2337
+- finisher-pr-2339
+- merge-bot-114=done
+- fix-pr-2355=no-op
+- fix-pr-2356=applied:53b9fa62
+- finisher-pr-2355=labelled
+- fix-pr-2357=no-op
+- merge-bot-115
+- finisher-pr-2357
+- finisher-pr-2355-b=labelled
+- fix-pr-2358
+
+## Filed
+
+- #1871 apply-ruleset.test.mjs:346 stale 'five contexts' comment, settled at four by #1834/PR#1860 -- deferred from PR #1870 review
+- #1872 extend citation-sweep to pin ADR 0010's remaining line-number citations (board-cli.test.mjs, release.yml, release-label.yml) -- deferred from PR #1868 review
+- #1873 setupNodeComments only recognizes bare '- uses: actions/setup-node@' line, invisible to a future split name:/uses: step -- deferred from PR #1868 review
+- #1874 ADR 0010 residual pre-existing evidence rot (8-releases framing, positional setup-node reference) untouched by this PR -- deferred from PR #1868 review
+- #1876 compute-board.mjs: two ledger rows for one PR render two REVIEW cards (amendment 2a interaction) -- deferred from PR #1869 review
+- #1878 board.mjs: harness tag re-derived at each call site instead of carried as data -- deferred from PR #1867 review
+- #1879 board.mjs: no test proves Claude-path top rows carry no model key -- deferred from PR #1867 review
+- #1884 node-floor-sweep.test.mjs: non-vacuity guard passes even if fleet-run loses its shebang -- deferred from PR #1880 review
+- #1885 NODE_SHEBANG doesn't accept env's -u/--unset option form -- deferred from PR #1880 review
+- #1886 pre-existing inaccurate comment on util.styleText's since-value comparison in API_FLOORS -- deferred from PR #1880 review
+- #1887 hasNodeShebang's 256-byte read can truncate mid multi-byte UTF-8 codepoint -- deferred from PR #1880 review
+- #1888 moduleSiteBinding builds a RegExp from unescaped inputs -- deferred from PR #1880 review
+- #1895 run-merge-bot step 1's pr_head re-poll can exceed harness auto-backgrounding/timeout thresholds -- deferred from PR #1890 review
+- #1896 run-merge-bot: empty pr_head after re-poll cap exhausts isn't classified in the four-outcome prose -- deferred from PR #1890 review
+- #1894 gatherSpend's empty-directory branch cannot distinguish a wholly-corrupt omp session from an empty one -- deferred from PR #1889 review
+- #1899 windowClaimFault/pointerFault's sentences() splitter is case-insensitive, misreads capitalized abbreviation collisions -- deferred from PR #1893 review
+- #1898 citationFault() silently accepts a misquote when citing sentence contains 'e.g.' before quoted span (dangerous direction) -- found by implementer of PR #1893, not fixed
+- #1904 non-Cf invisible characters (Hangul fillers, variation selectors) still defeat refuseStrayInCheckTail's own-flag guard -- deferred from PR #1892 review
+- #1905 ADR 0010 Status line's #1753 amendment overstates release-age floor by up to a day -- deferred from PR #1900 review
+- #1906 ADR 0010 point 3's 'monthly, automerged' framing doesn't reflect #1752's major-waits-for-a-human narrowing -- deferred from PR #1900 review
+- #1916 ADR 0007 has the same unguarded line-number-citation shape (release.yml, release-label.yml) that #1872 just fixed in ADR 0010 -- deferred from PR #1914 review
+- #1923 install-root-audit.test.mjs classifyScript() also decides by shebang: a shebang-less entrypoint comes back null and the self-location rule skips it, and that rule's guard (files.length > 0) never notices -- same class of gap #1884 just fixed in node-floor-sweep.test.mjs, different suite
+- #1925 pin-drift.sh: 'scheduled for the 1st of each month' is stale since #1753 narrowed Renovate to days 1-3 -- deferred from #1874 implementation
+- #1926 compute-board.mjs: no permanent test for an out-of-grammar review= token (REVIEW.exec fallback) -- deferred from PR #1922 review
+- #1928 citation-sweep-prose.test.mjs security-release stale ban pins the old sentence's literal spelling, not the semantic claim -- a differently-worded reversion of the same false claim would pass green -- deferred from PR #1924 review
+- #1932 node-floor-sweep: lift.mjs's RegExp.escape usage (Node 24) is above the declared >=20.11.0 floor and API_FLOORS doesn't list it -- deferred from #1888 implementation
+- #1935 run-merge-bot.md: line-number citations in fleet-heartbeat.mjs:195 and review-pr-citation-prose.test.mjs:161 already stale before #1895's step-1 split -- deferred from #1895 implementation
+- #1940 ci-comment-rot-prose.test.mjs: instrument-check-prose, quiet-payload-prose, finisher-own-tree-prose share citationFault's fixed first-period-scan misquote-acceptance bug -- deferred from #1898 implementation
+- #1941 hasNodeShebang's unbounded buffer-growth loop has no cap: a pathological no-newline tracked file starting #! is read entirely into memory (verified: 300MiB file -> ~1.18GB peak RSS) -- deferred from PR #1936 review
+- #1937 run-merge-bot.md poll's second loop has no four-outcome bullet for a persistently-empty pr_head, unlike the existing empty-post bullet -- deferred from PR #1934 review
+- #1938 run-merge-bot.md cites feigi/claude-config#903 twice for the rebase/headRefOid scenario but #903 is an unrelated ledger.mjs subset-floor issue -- deferred from PR #1934 review
+- #1943 ci-vacuous-green.test.mjs header comment: 'all five globs match files today' claim is stale, ci.yml now routes 6 check-tracked.sh globs, none *.js or *.py -- deferred from #1903 implementation
+- #1945 JSON_COUNT prose guard is context-blind to whether a matched 'N files' phrase is about the tracked-JSON set, plus a sentence-boundary edge case and a 3+-word filler-padding evasion -- deferred from PR #1942 review
+- #1948 run-merge-bot-prose.test.mjs: a documented test-coverage gap in the pr_head-empty paragraph region has no pinning test reaching it, only two adjacent pinned tests bracket it -- deferred from PR #1946 review
+- #1954 node-floor-sweep: ledger.mjs (production script, not a test helper) calls Set.prototype.isSubsetOf (Node 22+), above the declared >=20.11.0 floor -- deferred from #1932 implementation
+- #1950 trackedFiles's stat-error catch moved to module load: an ELOOP or other unrecognized stat error now aborts the whole sweep file instead of failing one test inside it -- deferred from PR #1947 review
+- #1951 isRegularFile's EACCES rethrow has no mutation-testing fixture (needs a portability pass for root CI/Windows) -- deferred from PR #1947 review
+- #1952 install-root-audit's length>0 and citation-sweep's length>50 non-vacuity guards are weaker than no-wave's length>200, pre-existing not introduced by PR #1947 -- deferred from PR #1947 review
+- #1956 ci.yml check-job setup-node comment: 'the merge waits on the required checks' doesn't reflect #1752's major-waits-for-a-human narrowing -- deferred from #1906 implementation
+- #1957 citation-sweep-prose.test.mjs drift-sentence guard doesn't treat a bold heading's closing .** as a sentence boundary -- deferred from PR #1955 review
+- #1958 citation-sweep-prose.test.mjs new scope-word lookaheads lack word boundaries (e.g. 'majority' misread as scope word) -- deferred from PR #1955 review
+- #1959 citation-sweep-prose.test.mjs drift-sentence guard treats abbreviation periods (e.g./i.e./vs.) as sentence boundaries, risking a false-positive on a legitimate future edit -- deferred from PR #1955 review
+- #1961 citationFault PR #1939: doc/test-title precision nitpicks -- next-sentence-comment overclaim, undocumented ?/! boundary change, mask-guarantee overstatement for unpaired quotes, test-title overclaim -- deferred from PR #1939 review
+- #1962 citationFault: empty/malformed quoted-span citations are never checked, pre-existing shared by old and new code -- deferred from PR #1939 review
+- #1970 citation-sweep-prose.test.mjs: ADR 0010's '8 releases' count guard also pins the old sentence's spelling, not the semantic claim -- deferred from #1928 implementation
+- #1973 repo-root.mjs isRegularFile's ENAMETOOLONG/EIO 'must still throw' claim has no permanent test coverage -- deferred from PR #1972 review
+- #1973 isRegularFile: ENAMETOOLONG/EIO stat failures have no permanent pinning test -- deferred from PR #1972 review
+- #1978 pin-drift.sh's stall-bound argument doesn't account for a pending major bump waiting on a human, not the drift window -- deferred from #1956 implementation
+- #1975 setupNodeComments: block-scalar containing workflow-shaped text still reported as phantom step; quoted 'steps': key silently drops a real step -- deferred from PR #1971 review
+- #1976 ci-comment-rot-prose.test.mjs: DRY/readability simplify suggestions on the parent-walk loop and repeated job/at test literals -- deferred from PR #1971 review
+- #1981 citation-sweep-prose.test.mjs:198 SENTENCE_END misses CommonMark `1)` items, blockquote/CRLF breaks and extra closing markup -- deferred from PR #1979 review
+- #1981 citation-sweep-prose.test.mjs SENTENCE_END doesn't recognize CommonMark ordered items ')' form, blockquote paragraph breaks, CRLF blank lines, ellipsis-without-terminator, or several extra closers -- deferred from PR #1979 review
+- #1988 citation-sweep-prose.test.mjs UPDATE_TYPE scope-word heuristic: pre-existing false-negative classes (ordinary-English usage, markdown link paths, ASCII-only letter boundary) -- deferred from PR #1986 review
+- #1989 citation-sweep-prose.test.mjs UPDATE_TYPE: 2 coverage-suggestion gaps (patches-as-verb, italic+plural combination) with correct behavior but no literal pinning string -- deferred from PR #1986 review
+- #1987 sentences() silently merges two real sentences across a footnote-style bracket marker (e.g. '.[1]'), pre-existing since before #1940 (main's old splitter has the identical gap), zero occurrences in the current pinned corpus -- deferred from PR #1985 review
+- #1991 JSON_COUNT_CONTEXT's same-sentence context requirement is still too broad in a block entirely about JSON -- deferred from PR #1984 review
+- #1999 citationFault's blankParens miscounts astral characters inside a parenthesized aside (code-point-to-single-"x" blanking shortens the opaque string), silently hiding a misquote there -- pre-existing since c6fbe15f, deferred from PR #1996 review
+- #2003 windowReleaseCountFault: anaphoric release-count evasion ('8 of them'/'eight of Node's releases') bypasses RELEASE_COUNT's rigid adjacency requirement -- deferred from PR #1997 review
+- #2004 sizesTrackedSet has 5 narrower gaps (matchAll overlap swallowing, clause-before article gap, bare .json lookbehind, clause-after quote-style inconsistency, undocumented modifier-first-word ceiling) -- deferred from PR #2001 review
+- #2004 sizesTrackedSet residual gaps: matchAll non-overlap swallowing, clause-before punctuation-adjacency rigidity, bare .json context-word ambiguity, backtick-only clause-after inconsistency, undocumented first-word-modifier ceiling -- deferred from PR #2001 review
+- #2013 citationFault: a shifted quote pairing can blank the citing sentence's own terminator and pull later ci.yml prose in, falsifying the 'only the citing sentence counts' comment claim -- deferred from PR #2007 review
+- #2025 install-root-audit.test.mjs: instrument-set floor (>30) doesn't catch an all-.sh-files drop (38 survives, above floor) -- deferred from PR #2023 review
+- #2026 marked-pairs.test.mjs:301 has the same vacuous files.length > 0 non-vacuity guard shape #1952 fixed elsewhere in install-root-audit.test.mjs/scripts-path-citation-sweep.test.mjs -- deferred from PR #2023 review
+- #2044 marked-pairs.test.mjs:308-317 per-directory .md floor doesn't catch a 1-file-per-directory thinning mutant (all three dirs stay at/above their own floor) -- deferred from PR #2029 review
+- #2041 sentences()'s footnote-marker guard doesn't cover a word ending in a combining mark (\\p{M}, e.g. NFD "café" or Devanagari dependent vowel signs) -- still merges instead of splitting; zero occurrences in the current corpus -- deferred from PR #2028 review
+- #2043 two pre-existing cross-splitter drifts in the abbreviation-exemption fix family: windowReleaseCountFault's SENTENCE_END consumption doesn't fold its letter/digit guard (no `i` flag, so compound tokens like `DEvs.` misread), and countSentenceBoundary/SENTENCE_END disagree on non-bracket closing markup (`Vs.**`); both dormant, neither introduced by PR #2024 -- deferred from PR #2024 review
+- #2052 install-root-audit.test.mjs: KIND_FLOORS + the aggregate floor don't catch a coordinated multi-kind thinning (sh 14->8, js 36->21 lands exactly at both per-kind floors while the aggregate stays at 31>30, invisible to either guard) -- deferred from PR #2047 review
+- #2053 prose-pin.mjs's sentences() narrower \\b guard can flip jsonCountFault's coverage check (call order does not insulate it) -- deferred from PR #2049 review
+- #2054 COUNT_SENTENCE_BOUNDARY and SENTENCE_END still disagree on closers that embed their own abbreviation+period (](see e.g.), ][ref vs.]) -- deferred from PR #2049 review
+- #2055 PR #2049 review: the suggestion band, checked
+- #2056 marked-pairs.test.mjs: listIndependently()'s manual recursion disagrees with walk()'s native {recursive:true} form on a symlinked directory (walk() follows it, the manual recursion doesn't) -- latent (no symlinks under skills/commands/agents/workflows today), fails loud (extra) not silent -- deferred from PR #2051 review
+- #2057 marked-pairs.test.mjs: walkDiscrepancy's expected-directory list comes from the same MD_DIRS/JS_DIRS it's checking; JS_DIRS has no independent key-parity pin the way MD_DIRS does, so a JS_DIRS-emptying mutant plus an unrelated future removal of workflows/review-pr.js's KNOWN_EQUALITY_EXCEPTIONS entry would pass 20/20 -- deferred from PR #2051 review
+- #2058 PR #2051 review: the suggestion band, checked
+- #2063 COUNT_CLOSING_MARKUP's overlapping closer alternatives let the (correctly) folded #2054 guard backtrack exponentially on a guarded terminator + repeated bracket-footnote chain -- deferred from PR #2062 review
+- #2072 reap.sh: wt_linkage_why keeps a healthy worktree forever when its path is Unicode NFD-composed (core.precomposeunicode divergence between `pwd -P` and `rev-parse --show-toplevel`), confirmed a regression vs main, fails safe (kept not reaped) -- deferred from PR #2068 review
+- #2073 release-ticket.sh's own linkage guard (the "reference shape" PR #2068 mirrors) still lacks #2040's trailing-newline sentinel, open to the same nl redirect #2068 just closed for reap.sh -- deferred from PR #2068 review
+- #2074 reap.sh: wt_linkage_why doesn't catch $wt itself being swapped for a symlink to another valid worktree (compare passes, both sides resolve through it symmetrically); git worktree remove's own back-pointer refusal still saves the data -- deferred from PR #2068 review
+- #2076 walk()'s native recursive readdirSync hangs (not throws, not truncates) on a two-branch circular symlink under a scoped directory -- a single self-referencing link instead terminates at an OS/libuv depth cutoff, no hang -- deferred from PR #2069 review
+- #2106 docs/agents/triage-sweep-log.md's 2026-09-27 entry is already stale for #2100
+- #2107 Issue #2100 merge-correction comment misstates PR #2091's merge timing
+- #2108 gh issue list silently truncates to 30 results without an explicit --limit
+- #2109 SKILL.md hand-over enumerations don't mention the new settling-grep -F rule
+- #2110 PR #2104 review: the suggestion band, checked
+- #2122 frontmatter-allowlist.json still allows retired Claude Code agent keys
+- #2123 README install section omits clearing stale fleet-* task.agentModelOverrides on upgrade
+- #2124 frontmatter-check.mjs parseFrontmatter has no direct unit test for its quote-stripping
+- #2125 PR #2111 review: the suggestion band, checked
+- #2128 README Installation never places the Resolver (fleet-bootstrap)
+- #2141 Symlinked worktree path not matched in worktree-audit rule
+- #2142 Overclaimed 'always' ahead of origin/main in PR worktree text
+- #2144 reap.sh follows a garbage gitdir to a nonexistent path and incorrectly reaps the branch as established-absent while the real worktree survives orphaned
+- #2153 docs/research/external-assumptions/prose.md:18 stale SKILL.md line citation after step-7 rule insertion
+- #2154 PR #2137 review: the suggestion band, checked
+- #2158 docs/research/external-assumptions/harness-node.md line-number citations to ledger.mjs are stale after #2088's fix
+- #2162 ledger.mjs: empty-lock timeout message gives no file pointer (unlike the reap case)
+- #2163 SKILL.md's zombie-holder liveness claim has no test or code comment backing it
+- #2166 no-undo-audit.sh's owner-linkage byte compare (line ~499, [ "$owner" = "$wt_real" ]) has the same NFC/NFD divergence bug as the line-545 compare #2095 fixed
+- #2168 SKILL.md watcher pr_cap=200 REST budget gate mismatch (#2108 review)
+- #2169 triage-labels.md onhold population query missing --limit (#2108 review)
+- #2170 PR #2160 review: the suggestion band, checked
+- #2176 PR #2173 review: parseFrontmatter mismatched-quote-pair coverage gap
+- #2177 merge-bot Dispatched duplicate-name gap, found during controller session
+- #2185 ledger.test.mjs single-file test run hangs indefinitely with Promise resolution error
+- #2189 PR #2188 review: harness-node.md coverage appendix has 4 omp-cutover path-staleness entries
+- #2191 PR #2190 review: bullet() PARAGRAPH_INTERRUPT diverges from CommonMark on HTML blocks
+- #2192 frontmatter-allowlist.json Evidence-table citations rows 19-26 stale schema
+- #2203 usableDiff silently accepts a diff for a head/refHead-skewed snapshot
+- #2206 prose.md row 5 stale citation triage-labels.md:106-108 pre-existing
+- #2221 inflight.test.mjs and reap.test.mjs slow-link/budget tests flaky under real subprocess stubs
+- #2120 isolation.md and reaping.md describe the removed --write-runner bootstrap-regeneration mechanism
+- #2229 ledger/shortlist/inflight warm-up spawnSync stubs share #2221's macOS first-exec-scan flake risk
+- #2249 merge-gate.test.mjs takes 86s and cancels the full plugin/scripts test suite
+- #2250 dispatch-block-pins-prose.test.mjs:155 SHELL typo
+- #2252 PR #2247 review: the suggestion band, checked
+- #2254 derive-testcmd.sh stale doc references (#2251 docs finding)
+- #2266 derive-testcmd.sh:41-48 locale-pin comment omits the framed-length compare from its byte-sensitive construct list
+- #2267 PR #2263 review: the suggestion band, checked
+- #2268 betweenPhrases' past-the-bound message in prose-pin.mjs names the wrong line for a blank-line or whitespace-run bound match
+- #2269 PR #2260 review: the suggestion band, checked
+- #2272 no-undo-audit.sh:254 comment: worktree-audit.sh already qualifies BASE_REF (#1329), claim is stale
+- #2273 docs/adr/0018: worktree-audit.sh 'out of scope' bullet is stale after #2220
+- #2274 PR #2270 review: the suggestion band, checked
+- #2275 reap.sh: worktree-add race between holder-check re-read and update-ref -d CAS leaves a permanently undetectable broken worktree (#2219)
+- #2276 PR #2271 review: the suggestion band, checked
+- #2279 PR #2278 review: the suggestion band, checked
+- #2288 fleet-tick: a fix-pr settled on the ticket row is reset by an older reviewed= on PR M's own row, so the tick re-dispatches fix-pr forever
+- #2291 PR #2287 review: the suggestion band, checked
+- #2293 PR #2285 review: the suggestion band, checked
+- #2295 delete-merged-branch.sh: deleting a merged head branch may close or fail to retarget other open PRs that use it as head or base
+- #2296 prose.md: stale SKILL.md line-number citations and Coverage line count
+- #2297 PR #2289 review: the suggestion band, checked
+- #2299 conflict-hold fix-applier gets agent null from ledger.mjs dispatch; its definition is still recalled from SKILL prose
+- #2300 run-team SKILL.md names the finisher and merge-bot tier as haiku; their frontmatter says @smol:low
+- #2301 PR #2294 review: the suggestion band, checked
+- #2303 PR #2302 review: the suggestion band, checked
+- #2304 fleet-tick.test.mjs cancels under the full suite's default test concurrency and runs past 300s
+- #2305 main-checkout.mjs: a stray commit or branch switch in the main checkout reads clean
+- #2306 main-checkout.mjs: edits inside a nested repo already dirty at baseline are never seen
+- #2307 fleet-tick --fold-unchanged hides a persisting MAIN-CHECKOUT hold line
+- #2308 PR #2298 review: the suggestion band, checked
+- #2313 shell.md census row 72 cites inflight.sh:676-680, a port-history comment, not find behaviour
+- #2314 shell.md census Coverage footer still describes claim-ticket.sh as 1235 lines with a generated runner
+- #2317 PR #2312 review: the suggestion band, checked
+- #2318 PR #2309 review: the suggestion band, checked
+- #2326 prose.md: stale CONTEXT.md and README.md line citations (rows 51, 56, 123 and others)
+- #2327 PR #2324 review: the suggestion band, checked
+- #2340 PR #2334 review: the suggestion band, checked
+- #2347 shell.md census Coverage line counts stale against the live tree for entries other than claim-ticket.sh
+- #2349 fleet-state writeState non-atomic: a reader mid-write sees no heartbeat mark, so ledger rotate can move a live controller's ledger
+- #2350 PR #2338 review: the suggestion band, checked
+- #2351 PR #2335 review: the suggestion band, checked
+- #2352 PR #2337 review: the suggestion band, checked
+- #2353 external-assumptions: stale Claude-side entries survive ADR 0014 outside root-map § 5 (§ 9 Workflow sandbox, § 1 600 s Claude) and in prose.md
+- #2354 PR #2339 review: the suggestion band, checked
+- #2360 review-core-snapshot-path.test.mjs: absent-refHead comment cites an inversion usableDiff's comment no longer records
+- #2361 PR #2356 review: the suggestion band, checked
+- #2362 PR #2355 review: the suggestion band, checked
+- #2363 no-undo-audit.sh BASE_REF comments: 7 of 10 <script>.sh:<line> citations point at the wrong line
+
+## Ruled
+
+- #1890 record #1897 closed wontfix; promoted #1895, #1896 ready-for-agent; 0 findings applied to the PR
+- #1937 dup of #1896, closed wontfix
+- #1938 relabeled ready-for-human -- correct citation number not recoverable, needs author
+- #1951 resolved by PR #1972 (#1950), closed wontfix -- duplicate coverage
+- **merged:** #1986 (test(citation-sweep): word-bound ADR 0010's scope-word lookaheads)
+- proof: proved=true (no-rebase path, head was current)
+- merge_commit: 5797d41992d68da0349262a636a12e243c211618
+- closed: #1958 (dropped in-progress label)
+- **held:** #1985 (fix(prose pins): bound three pins by sentences(), not the first period)
+- held-behind-#1984 (shares test file plugin/scripts/ci-comment-rot-prose.test.mjs)
+- **grace period:** 15 minutes elapsed
+- no additional labels after grace completion
+- queue empty at exit
+- #2049 apply=0 (code already correct, nothing to fix) · defer+filed=2 (#2053 sentences() call-order claim refuted, #2054 COUNT_SENTENCE_BOUNDARY/SENTENCE_END residual embedded-abbreviation-closer disagreement) · below-claim-bar=2 closed into #2055 · head=19a20dfaab9a98fb1862fa8feb34f05cc9b0a1d5(unchanged, nothing pushed) · ci=green(6/6 jobs, 0 behind) · labelled patch+ready-to-merge
+- #2062 apply=1 (comments: #2054's own new-test comment misattributed pre-#2043's non-split to a char-class span limit when the guard itself, already this same buggy shape, was independently blocking it) · defer+filed=1 (#2063 correctness ReDoS-adjacent closer-alternative backtracking, advisory, not blocking) · refuted=1 (tests' sub-guard-coverage observation, not attributable to this PR) · head=546e3255ccc9d73630e353f036cde3c832c29785(pushed) · ci=green(7/7 jobs, 0 behind) · labelled patch+ready-to-merge
+- #2042 apply=1 (comments: rewritten "Reference shape" comment misattributed release-ticket.sh's own -f gate to #128 when #128's own body scopes it to reap.sh/worktree-audit.sh only; release-ticket.sh traces to #74, fixed) · defer+filed=3 (#2072 correctness Unicode NFC/NFD false-keep regression vs main, fails safe; #2073 correctness release-ticket.sh missing #2040 sentinel; #2074 correctness $wt-itself-symlink-swap uncaught, downstream backstop still safe) · refuted=0 · head=7a1517b37f34de270ee32317eaf5e398e8ea523c(pushed, rebased onto origin/main) · ci=green(7/7 jobs, 0 behind) — check job finished green after initial wrap-up · labelled patch+ready-to-merge
+- #2069 apply=2 (comment-only: qualified the Node-version-unqualified "walk() DOES follow" claim to Node>=22 (engines.node floor is 20.11.0, where it does not follow), and narrowed the "scanned twice under two paths" overgeneralization for a symlink target outside every scoped directory) . defer+filed=1 (#2076 correctness: a two-branch circular symlink hangs walks native recursive readdirSync indefinitely, unlike a single self-referencing link which safely terminates at an OS/libuv depth cutoff -- out of #2056s own scope, production walk() unchanged) . refuted=7 (3 tests-dimension: premise-assertion redundancy confirmed-intentional, symlinked-file coverage gap confirmed-non-issue, outside-scope coverage gap confirmed-unreachable-by-production-code; 4 comments-dimension: walkDiscrepancy comment accurate, premise comment accurate, #2056 cross-references accurate, pre-existing stale MUTATION RECORD header block not attributable to this diff) . head=174744b8ee9fa697b78f94afbb46c5373b826f2c(pushed) . ci=green(6/6 jobs, 3 behind -- not rebased, per policy) . labelled patch+ready-to-merge
+- #2093 merged (--merge, no-ff) 1c0d57f4501dd605c2eefa6155c1422e17cac3a9 by merge-bot-64; in-progress label dropped from #2072; no related lower-numbered PR blocked it; 15min grace, no new ready-to-merge labels
+- #2101 merged a7cb31d0 by merge-bot-65; #593 in-progress dropped
+- #2103 merged 32256183 by merge-bot-65; #2102 in-progress dropped
+- #2104 merged 5da3307c by merge-bot-65; #1087 in-progress dropped
+- #2105 merged 826548aa by merge-bot-65; #1077 in-progress dropped
+- #2121 merged 9e159a06 by merge-bot-66; #2094 in-progress dropped
+- #2111 merged ba4d2ac4 by controller (manual, user-authorized) after merge-bot-66 held on ci-state.mjs self-referential job-presence check (this PR deletes validate-claude from ci.yml, so ci-state.mjs run from main still expects it) — content fully reviewed+finisher-verified+instruments-clean beforehand; GitHub ruleset already updated from this PR own spec
+- #2112 merged 1eaac4b0 by merge-bot-69 (no-rebase); no linked issue to drop in-progress from
+- #2199 finisher-pr-2199 halted duty 2: 3 deferred findings (silent-failure/types/tests, usableDiff call-order) recorded only as a comment on #1132, the PR's own Closes-target, which duty 2 rejects as a durable home. Dispatched fix-pr-2199-b to file a proper follow-up tracker issue; re-dispatch finisher fresh once filed.

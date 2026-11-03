@@ -1,0 +1,94 @@
+{
+  "run": 1793349315467,
+  "session": "/Users/chris/.omp/agent/sessions/-dev-fleet-plugin/2026-10-30T08-34-47-860Z_01a18bf2-7fb4-702c-9d83-e59d222d1fa0",
+  "scratch": "/Users/chris/.fleet/scratch/fleet-plugin-28971265",
+  "inFlight": 5,
+  "objective": "cost",
+  "steps": {
+    "alarm": {
+      "status": "ok",
+      "at": "2026-10-30T08:35:05.204Z",
+      "output": "controller alarm armed: pid 14398, /Users/chris/dev/fleet-plugin/.fleet"
+    },
+    "branch": {
+      "status": "ok",
+      "at": "2026-10-30T08:35:05.216Z",
+      "output": "HEAD is refs/heads/main"
+    },
+    "fast-forward": {
+      "status": "ok",
+      "at": "2026-10-30T08:35:06.999Z",
+      "output": "main is level with origin/main"
+    },
+    "pin": {
+      "status": "ok",
+      "at": "2026-10-30T08:35:07.087Z",
+      "output": "instruments pinned: npm-install /Users/chris/.omp/plugins/node_modules/@feigi/fleet-ctl (version 3.127.1)"
+    },
+    "baseline": {
+      "status": "ok",
+      "at": "2026-10-30T08:35:07.238Z",
+      "output": "main-checkout baseline recorded"
+    },
+    "labels": {
+      "status": "ok",
+      "at": "2026-10-30T08:35:07.779Z",
+      "output": "label-map.mjs ensure: {\"needs-triage\":\"needs-triage\",\"needs-info\":\"needs-info\",\"ready-for-agent\":\"ready-for-agent\",\"ready-for-human\":\"ready-for-human\",\"wontfix\":\"wontfix\",\"in-progress\":\"in-progress\",\"onhold\":\"onhold\",\"ready-to-merge\":\"ready-to-merge\"}"
+    },
+    "preflight": {
+      "status": "ok",
+      "at": "2026-10-30T08:35:07.883Z",
+      "output": "preflight.mjs passed (PREFLIGHT SKIPPED: this check set already passed (/Users/chris/dev/fleet-plugin/.fleet/preflight.json; delete it to check again))"
+    },
+    "ruleset": {
+      "status": "ok",
+      "at": "2026-10-30T08:35:09.233Z",
+      "output": "the live gate matches the ruleset spec"
+    },
+    "tier-roles": {
+      "status": "ok",
+      "at": "2026-10-30T08:35:10.881Z",
+      "output": "every tier route resolves (in-flight bound 5)\ntier-roles: every definition routes to a resolvable model at a level it runs, no shadowing override"
+    },
+    "metrics": {
+      "status": "ok",
+      "at": "2026-10-30T08:35:15.320Z",
+      "output": "metrics-refresh.mjs ran\nmetrics-refresh: drain: 9 rows from .fleet/ticket-features.pending.tsv into docs/metrics/ticket-features.tsv (0 already there)\nmetrics-refresh: member-outcomes: already 23 columns\nmetrics-refresh: cost guard: verdict tripped (tripped: smol-high), pr-cost.mjs exit 3; .fleet/cost-guard.json computed 2026-10-30T08:35:15.157Z\nmetrics-refresh: preview: fitted 244 Pulls, stage 2, in burn-in; .fleet/router-preview.json computed 2026-10-30T08:35:15.166Z"
+    },
+    "cockpit": {
+      "status": "ok",
+      "at": "2026-10-30T08:35:15.321Z",
+      "output": "launched board.mjs serve, pid 17086"
+    },
+    "rotate": {
+      "status": "ok",
+      "at": "2026-10-30T08:35:15.470Z",
+      "output": "ledger rotated, run 1793349315467\narchived /Users/chris/dev/fleet-plugin/.fleet/phase0.json -> /Users/chris/dev/fleet-plugin/.fleet/phase0.2026-10-30T083515Z.json\narchived /Users/chris/dev/fleet-plugin/.fleet/closeout.json -> /Users/chris/dev/fleet-plugin/.fleet/closeout.2026-10-30T083515Z.json\narchived /Users/chris/dev/fleet-plugin/.fleet/briefs -> /Users/chris/dev/fleet-plugin/.fleet/briefs.2026-10-30T083515Z\nrotated /Users/chris/dev/fleet-plugin/.fleet/ledger.md -> /Users/chris/dev/fleet-plugin/.fleet/ledger.2026-10-30T083515Z.md"
+    },
+    "reclaim": {
+      "status": "ok",
+      "at": "2026-10-30T08:35:20.248Z",
+      "output": "scratch reclaimed"
+    },
+    "recipe": {
+      "status": "ok",
+      "at": "2026-10-30T08:35:20.704Z",
+      "output": "withheld: the Recipe's command lines can carry environment assignments"
+    },
+    "fold-in": {
+      "status": "ok",
+      "at": "2026-10-30T08:35:21.654Z",
+      "output": "0 PR(s) queued, 0 already on a carried row"
+    },
+    "stranded": {
+      "status": "ok",
+      "at": "2026-10-30T08:35:28.739Z",
+      "output": "prior dead: 1 claim(s), 0 live token(s) carried\nreport #3872 — no worktree for it in this checkout"
+    },
+    "shortlist": {
+      "status": "ok",
+      "at": "2026-10-30T08:35:32.508Z",
+      "output": "shortlist built"
+    }
+  }
+}

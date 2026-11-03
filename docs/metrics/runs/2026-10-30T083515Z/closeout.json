@@ -1,0 +1,53 @@
+{
+  "reason": "shortlist empty; all run PRs merged except #4006 parked for maintainer (main-gain)",
+  "begun": "2026-10-30T04:38:02.581Z",
+  "branch": null,
+  "pr": null,
+  "steps": {
+    "drain": {
+      "status": "ok",
+      "at": "2026-10-30T04:38:02.483Z",
+      "output": "{\"drain\":\"shortlist empty; every run PR merged except #4006, parked for maintainer (main-gain)\",\"created\":true}"
+    },
+    "release": {
+      "status": "ok",
+      "at": "2026-10-30T04:38:02.581Z",
+      "output": "no claim to release"
+    },
+    "tick": {
+      "status": "failed",
+      "at": "2026-10-30T04:38:08.772Z",
+      "output": "the tick's last line is not `ACTION: run over`: router       → DEFAULT-ONLY   (cost guard: smol-high $11.06 vs $15.10, fail 56% vs 21%, n=32/86; guard computed 2026-10-29T20:52:23.039Z)"
+    },
+    "scrape": {
+      "status": "pending",
+      "at": null,
+      "output": ""
+    },
+    "tier-outcomes": {
+      "status": "pending",
+      "at": null,
+      "output": ""
+    },
+    "metrics": {
+      "status": "pending",
+      "at": null,
+      "output": ""
+    },
+    "commit-and-pr": {
+      "status": "pending",
+      "at": null,
+      "output": ""
+    },
+    "phase0-receipt": {
+      "status": "pending",
+      "at": null,
+      "output": ""
+    },
+    "heartbeat-stop": {
+      "status": "pending",
+      "at": null,
+      "output": ""
+    }
+  }
+}

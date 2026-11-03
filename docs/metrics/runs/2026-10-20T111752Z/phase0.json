@@ -1,0 +1,83 @@
+{
+  "run": 1792422334880,
+  "session": "/Users/chris/.omp/agent/sessions/-dev-fleet-plugin/2026-10-19T15-04-42-871Z_01a154b1-8677-70f5-aac4-f0220c978651",
+  "scratch": "/Users/chris/.fleet/scratch/fleet-plugin-28971265",
+  "inFlight": 5,
+  "steps": {
+    "branch": {
+      "status": "ok",
+      "at": "2026-10-19T15:05:25.924Z",
+      "output": "HEAD is refs/heads/main"
+    },
+    "fast-forward": {
+      "status": "ok",
+      "at": "2026-10-19T15:05:27.737Z",
+      "output": "main is level with origin/main"
+    },
+    "pin": {
+      "status": "ok",
+      "at": "2026-10-19T15:05:27.877Z",
+      "output": "instruments pinned"
+    },
+    "baseline": {
+      "status": "ok",
+      "at": "2026-10-19T15:05:27.990Z",
+      "output": "main-checkout baseline recorded"
+    },
+    "preflight": {
+      "status": "ok",
+      "at": "2026-10-19T15:05:28.051Z",
+      "output": "preflight.mjs passed (PREFLIGHT SKIPPED: this check set already passed (/Users/chris/dev/fleet-plugin/.fleet/preflight.json; delete it to check again))"
+    },
+    "ruleset": {
+      "status": "ok",
+      "at": "2026-10-19T15:05:29.484Z",
+      "output": "the live gate matches the ruleset spec"
+    },
+    "tier-roles": {
+      "status": "ok",
+      "at": "2026-10-19T15:05:31.078Z",
+      "output": "every tier route resolves (in-flight bound 5)\ntier-roles: every definition routes to a resolvable model at a level it runs, no shadowing override"
+    },
+    "metrics": {
+      "status": "ok",
+      "at": "2026-10-19T15:05:34.783Z",
+      "output": "metrics-refresh.mjs ran\nmetrics-refresh: drain: nothing pending in .fleet/ticket-features.pending.tsv\nmetrics-refresh: cost guard: verdict none, pr-cost.mjs exit 4; .fleet/cost-guard.json computed 2026-10-19T15:05:34.775Z"
+    },
+    "cockpit": {
+      "status": "ok",
+      "at": "2026-10-19T15:05:34.784Z",
+      "output": "launched board.mjs serve, pid 40332"
+    },
+    "rotate": {
+      "status": "ok",
+      "at": "2026-10-19T15:05:34.883Z",
+      "output": "ledger rotated, run 1792422334880\narchived /Users/chris/dev/fleet-plugin/.fleet/phase0.json -> /Users/chris/dev/fleet-plugin/.fleet/phase0.2026-10-19T150534Z.json\narchived /Users/chris/dev/fleet-plugin/.fleet/closeout.json -> /Users/chris/dev/fleet-plugin/.fleet/closeout.2026-10-19T150534Z.json\narchived /Users/chris/dev/fleet-plugin/.fleet/briefs -> /Users/chris/dev/fleet-plugin/.fleet/briefs.2026-10-19T150534Z\nrotated /Users/chris/dev/fleet-plugin/.fleet/ledger.md -> /Users/chris/dev/fleet-plugin/.fleet/ledger.2026-10-19T150534Z.md"
+    },
+    "reclaim": {
+      "status": "ok",
+      "at": "2026-10-19T15:05:35.516Z",
+      "output": "scratch reclaimed"
+    },
+    "recipe": {
+      "status": "ok",
+      "at": "2026-10-19T15:05:35.813Z",
+      "output": "withheld: the Recipe's command lines can carry environment assignments"
+    },
+    "fold-in": {
+      "status": "ok",
+      "at": "2026-10-19T15:05:36.367Z",
+      "output": "0 PR(s) queued, 0 already on a carried row, 0 closing no issue"
+    },
+    "stranded": {
+      "status": "ok",
+      "at": "2026-10-19T15:05:37.701Z",
+      "output": "prior dead: 0 claim(s), 0 live token(s) carried"
+    },
+    "shortlist": {
+      "status": "ok",
+      "at": "2026-10-19T15:05:45.006Z",
+      "output": "shortlist built"
+    }
+  }
+}

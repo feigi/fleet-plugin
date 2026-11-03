@@ -1,0 +1,904 @@
+# Fleet run ledger
+
+## Rows
+
+- #2118 impl-2118=PR#2539 · ports=18118 · tier-ok=impl-2118:fleet-implementer-slow-high · review=member:review-pr-2539 · reviewed=ce158d4bb10cf2438d375688807055e8fd9d0164:10/0/16 · fix-pr-2539=applied:12ce0079cc0ac30d5b368d2a97d24b946b768ced · dispositions-ok=fix-pr-2539:ce158d4bb10cf2438d375688807055e8fd9d0164 · finisher-pr-2539=labelled
+- #2131 impl-2131=PR#2554 · ports=18131 · tier-ok=impl-2131:fleet-implementer-slow-high · review=member:review-pr-2554 · reviewed=0ee553f46fcf173c4d03ba72594ad42c6b57c45a:7/2/21 · fix-pr-2554=applied:7eda2496586725d32c06e4a75c1716259f1d4869 · dispositions-ok=fix-pr-2554:0ee553f46fcf173c4d03ba72594ad42c6b57c45a · finisher-pr-2554=labelled
+- #2132 impl-2132=PR#2555 · ports=18132 · tier-ok=impl-2132:fleet-implementer-slow-high · review=member:review-pr-2555 · reviewed=a534915ca26e27a402e99a50e8f86138411c4fae:10/3/21 · fix-pr-2555=applied:c162f1ac33134564054133338951b0c13d6f4042 · dispositions-ok=fix-pr-2555:a534915ca26e27a402e99a50e8f86138411c4fae · finisher-pr-2555=halted:other · finisher-pr-2555-b=labelled
+- #2506 PR#2506 · review=member:review-pr-2506 · reviewed=a97e11663f358cd65008a5e16b0c015b8f78a642:2/0/7 · fix-pr-2506=applied:a925c1099fe075624bb567580ec2b394effbf1ee · dispositions-ok=fix-pr-2506:a97e11663f358cd65008a5e16b0c015b8f78a642 · finisher-pr-2506=labelled · label-off=finisher-pr-2506 · finisher-pr-2506-b=failed · finisher-pr-2506-c=labelled
+- #2507 PR#2507 · review=member:review-pr-2507 · reviewed=24969396129e41ca879cf08054c3ae545dcf4a53:1/0/9 · fix-pr-2507=applied:50ae46e3d698f350d5142864b8f68cd9e3e3f0f7 · dispositions-ok=fix-pr-2507:24969396129e41ca879cf08054c3ae545dcf4a53 · finisher-pr-2507=labelled
+- #2508 PR#2508 · review=member:review-pr-2508 · reviewed=864040844d593e8a786ea526d35499e9c98fac23:0/0/7 · ci=37120803302:1:success · fix-pr-2508=applied:5e48f76695c50d3876feb0146a59b8c9315e9432 · dispositions-ok=fix-pr-2508:864040844d593e8a786ea526d35499e9c98fac23 · finisher-pr-2508=labelled
+- #2232 impl-2232=PR#2731 · ports=18232 · tier-ok=impl-2232:fleet-implementer-slow-high · review=member:review-pr-2731 · reviewed=0db02cf812126bc5354ff2e6ef10e9c9b941e044:3/1/16 · fix-pr-2731=applied:85e6043042376fceddf517ac0ffffa93b109503b · dispositions-ok=fix-pr-2731:0db02cf812126bc5354ff2e6ef10e9c9b941e044 · finisher-pr-2731=labelled
+- #2367 impl-2367=PR#2535 · ports=18367 · tier=task-high · tier-ok=impl-2367:fleet-implementer-task-high · review=member:review-pr-2535 · reviewed=898a7111acee2f2fd10e99183934544898804491:0/0/4 · fix-pr-2535=applied:ec70c59e436f464de100051b728edf63deafcc2a · dispositions-ok=fix-pr-2535:898a7111acee2f2fd10e99183934544898804491 · finisher-pr-2535=labelled
+- #2371 impl-2371=PR#2509 · ports=18371 · tier-ok=impl-2371:fleet-implementer-slow-high · fix-pr-2509=applied:963d67779eb2b455ff11a1028ff0a8fabaca41ee · dispositions-ok=fix-pr-2509:0d4a8588254b08c2251bbe0a79e8107aa0d15066 · finisher-pr-2509=labelled
+- #2500 PR#2500 · review=member:review-pr-2500 · reviewed=aba1782c65f2b8f756cc4c1cc3b71d714d868cd5:6/1/12 · fix-pr-2500=applied:ffce8ac447d84c93268326d481c19986a07c8e93 · dispositions-ok=fix-pr-2500:aba1782c65f2b8f756cc4c1cc3b71d714d868cd5 · finisher-pr-2500=labelled
+- #2374 impl-2374=PR#2536 · ports=18374 · tier-ok=impl-2374:fleet-implementer-slow-high · review=member:review-pr-2536 · reviewed=c11375a9045b12b808e6d64d6f341618c6ec5059:0/0/11 · fix-pr-2536=applied:deb32ba97cd8c88a7c6931198133ba944b1d8081 · dispositions-ok=fix-pr-2536:c11375a9045b12b808e6d64d6f341618c6ec5059 · finisher-pr-2536=killed · finisher-pr-2536-b=labelled
+- #2444 impl-2444=PR#2510 · ports=18444 · tier-ok=impl-2444:fleet-implementer-slow-high · review=member:review-pr-2510 · reviewed=42e62939a1a1f7ab21443b23a342787f76508664:2/0/4 · fix-pr-2510=applied:6c319408c5f1a5493927c86b19de762504cdb45a · dispositions-ok=fix-pr-2510:42e62939a1a1f7ab21443b23a342787f76508664 · finisher-pr-2510=failed · finisher-pr-2510-b=labelled
+- #2509 PR#2509 · review=member:review-pr-2509 · reviewed=0d4a8588254b08c2251bbe0a79e8107aa0d15066:0/0/5 · ci=37137742298:1:success
+- #2407 impl-2407=PR#2538 · ports=18407 · tier-ok=impl-2407:fleet-implementer-slow-high · review=member:review-pr-2538 · reviewed=ac00bbb19d76165400deb507aa501bf45f227358:0/1/6 · fix-pr-2538=no-op · dispositions-ok=fix-pr-2538:ac00bbb19d76165400deb507aa501bf45f227358 · finisher-pr-2538=labelled
+- #2421 impl-2421=PR#2654 · ports=18421 · tier=task-high · tier-ok=impl-2421:fleet-implementer-task-high · review=member:review-pr-2654 · reviewed=7e7e16d4d7fc89c955f4dbbfcfe2cf52dcf1e2b8:3/0/12 · fix-pr-2654=applied:58212fc5cf07c73fe5c56ca2e425610a0f05de5d · dispositions-ok=fix-pr-2654:7e7e16d4d7fc89c955f4dbbfcfe2cf52dcf1e2b8 · finisher-pr-2654=labelled
+- #2498 impl-2498=PR#2614 · ports=18498 · tier=task-high · tier-ok=impl-2498:fleet-implementer-task-high · review=member:review-pr-2614 · reviewed=ef23a16d9f09156279632f158d2875969e20bcae:0/0/14 · fix-pr-2614=applied:82f7429aec0ede41edf35998c4930ab6b06246c0 · dispositions-ok=fix-pr-2614:ef23a16d9f09156279632f158d2875969e20bcae · finisher-pr-2614=labelled
+- #2503 impl-2503=PR#2642 · ports=18503 · tier-ok=impl-2503:fleet-implementer-slow-high · review=member:review-pr-2642 · reviewed=9c1f824308842ed4083589d67b6fd326f6308de7:0/0/13 · fix-pr-2642=applied:b7a29b61a44a2e9921609b1c2fbcf85cc6a10802 · dispositions-ok=fix-pr-2642:9c1f824308842ed4083589d67b6fd326f6308de7 · finisher-pr-2642=labelled
+- #2466 impl-2466=PR#2511 · ports=18466 · tier-ok=impl-2466:fleet-implementer-slow-high · fix-pr-2511=applied:b4520e1ea3fbb1289574b34c8adac18d6ef969e6 · dispositions-ok=fix-pr-2511:34b286c6eaa885715a0b88b8f815cd364cd59a25 · review=member:review-pr-2511 · reviewed=34b286c6eaa885715a0b88b8f815cd364cd59a25:0/0/3 · finisher-pr-2511=labelled
+- #2510 PR#2510 → see #2444
+- #2511 PR#2511 → see #2466
+- #2467 impl-2467=PR#2519 · ports=18467 · tier-ok=impl-2467:fleet-implementer-slow-high · review=member:review-pr-2519 · reviewed=b87c82eed5bfed4d84037ecfec64220ae9fd5813:1/0/3 · fix-pr-2519=no-op · dispositions-ok=fix-pr-2519:b87c82eed5bfed4d84037ecfec64220ae9fd5813 · finisher-pr-2519=labelled
+- #2472 impl-2472=PR#2520 · ports=18472 · tier-ok=impl-2472:fleet-implementer-slow-high · review=member:review-pr-2520 · reviewed=30118850228a0600753a56919f63b2d1ca971b5a:0/0/13 · fix-pr-2520=applied:7542ee01a8a030d1cd9a043cc18e087fbad30921 · dispositions-ok=fix-pr-2520:30118850228a0600753a56919f63b2d1ca971b5a · finisher-pr-2520=labelled
+- #2519 PR#2519 → see #2467
+- #2480 impl-2480=PR#2556 · ports=18480 · tier-ok=impl-2480:fleet-implementer-slow-high · review=member:review-pr-2556 · reviewed=589e41bae37be91d38035f32efd862b5500026a1:0/0/2 · fix-pr-2556=applied:968540467cac859443847b437783d66ec340e116 · dispositions-ok=fix-pr-2556:589e41bae37be91d38035f32efd862b5500026a1 · finisher-pr-2556=labelled
+- #2482 impl-2482=PR#2575 · ports=18482 · tier-ok=impl-2482:fleet-implementer-slow-high · review=member:review-pr-2575 · reviewed=4faeaf5886f9ed267c778c423f197ff0d3a70fd4:0/0/4 · fix-pr-2575=no-op · dispositions-ok=fix-pr-2575:4faeaf5886f9ed267c778c423f197ff0d3a70fd4 · finisher-pr-2575=labelled
+- #2490 impl-2490=PR#2557 · ports=18490 · tier-ok=impl-2490:fleet-implementer-slow-high · review=member:review-pr-2557 · reviewed=136b62c9f3bd9091715bc0ba4b3c3fdd33d56afd:1/0/3 · fix-pr-2557=no-op · dispositions-ok=fix-pr-2557:136b62c9f3bd9091715bc0ba4b3c3fdd33d56afd · finisher-pr-2557=labelled
+- #2514 impl-2514=PR#2579 · ports=18514 · tier-ok=impl-2514:fleet-implementer-slow-high · review=member:review-pr-2579 · reviewed=b2aeb73f967aeeb8738e38197bd91761f024a1b2:0/0/6 · fix-pr-2579=applied:ec02a003b9267f86798394aa181c1ad8d2ba2da1 · dispositions-ok=fix-pr-2579:b2aeb73f967aeeb8738e38197bd91761f024a1b2 · finisher-pr-2579=labelled
+- #2516 impl-2516=PR#2597 · ports=18516 · tier=task-high · tier-ok=impl-2516:fleet-implementer-task-high · review=member:review-pr-2597 · reviewed=a94917991a687b370abd29f8b46719d4fc30ad12:0/0/4 · fix-pr-2597=applied:f5eb734ce59133c3c57759883657aa3693cb5c5d · dispositions-ok=fix-pr-2597:a94917991a687b370abd29f8b46719d4fc30ad12 · finisher-pr-2597=labelled
+- #2517 impl-2517=PR#2602 · ports=18517 · tier-ok=impl-2517:fleet-implementer-slow-high · review=member:review-pr-2602 · reviewed=6009a8dd1a0e0eb89fbb2783ce88dffe904f88a9:0/1/8 · fix-pr-2602=no-op · dispositions-ok=fix-pr-2602:6009a8dd1a0e0eb89fbb2783ce88dffe904f88a9 · finisher-pr-2602=labelled
+- #2512 impl-2512=tier-mismatch · ports=18512 · impl-2512: declared "@slow:high"/high resolved null/high · tier-ok=impl-2512:fleet-implementer-slow-high · impl-2512-b=PR#2528 · tier-ok=impl-2512-b:fleet-implementer-slow-high · review=member:review-pr-2528 · reviewed=b8c6024e1a08c12499cb5d422ad66a8c50ad4a03:0/0/4 · fix-pr-2528=applied:3eda7b142ad66dcf45089524ce15d6629f6555d5 · dispositions-ok=fix-pr-2528:b8c6024e1a08c12499cb5d422ad66a8c50ad4a03 · finisher-pr-2528=labelled
+- #2520 PR#2520 → see #2472
+- #2523 impl-2523=PR#2563 · ports=18523 · tier-ok=impl-2523:fleet-implementer-slow-high · review=member:review-pr-2563 · reviewed=beeafc975ffda278c74c7c27f041cb7f30594d6c:0/0/2 · fix-pr-2563=no-op · dispositions-ok=fix-pr-2563:beeafc975ffda278c74c7c27f041cb7f30594d6c · finisher-pr-2563=labelled
+- #2522 impl-2522=PR#2529 · ports=18522 · tier-ok=impl-2522:fleet-implementer-slow-high · review=member:review-pr-2529 · reviewed=824e69e964a06949608ebc68b43833cb96ad9550:0/1/8 · fix-pr-2529=applied:f93a00e560f1d165078fddc6bbcf1f9820b1eebf · dispositions-ok=fix-pr-2529:824e69e964a06949608ebc68b43833cb96ad9550 · finisher-pr-2529=labelled
+- #2525 impl-2525=PR#2567 · ports=18525 · tier-ok=impl-2525:fleet-implementer-slow-high · review=member:review-pr-2567 · reviewed=9bfa2a124ca740e6c178c3ae82dc9396d8ca3477:0/0/0 · finisher-pr-2567=labelled
+- #2531 impl-2531=PR#2533 · ports=18531 · tier-ok=impl-2531:fleet-implementer-slow-high · review=member:review-pr-2533 · reviewed=21cf45da759c6f6aad85a8704bf1a5064b8ee344:0/0/11 · fix-pr-2533=applied:5d19a56ef5bfc9a7d51ad230095df243039ba073 · dispositions-ok=fix-pr-2533:21cf45da759c6f6aad85a8704bf1a5064b8ee344 · finisher-pr-2533=labelled
+- #2541 impl-2541=PR#2564 · ports=18541 · tier-ok=impl-2541:fleet-implementer-slow-high · review=member:review-pr-2564 · reviewed=bad600919648e24bada75c4d49ab652fbd49978f:0/0/5 · fix-pr-2564=no-op · dispositions-ok=fix-pr-2564:bad600919648e24bada75c4d49ab652fbd49978f · finisher-pr-2564=labelled
+- #2542 impl-2542=PR#2607 · ports=18542 · review=member:review-pr-2607 · tier-ok=impl-2542:fleet-implementer-slow-high · review=member:review-pr-2607 · reviewed=f92ea18ea7c51310efd71bf4c6b21a9c74f27dfd:0/0/3 · fix-pr-2607=no-op · dispositions-ok=fix-pr-2607:f92ea18ea7c51310efd71bf4c6b21a9c74f27dfd · finisher-pr-2607=labelled
+- #2543 impl-2543=PR#2631 · ports=18543 · tier-ok=impl-2543:fleet-implementer-slow-high · review=member:review-pr-2631 · reviewed=f3bb49cf68a735af40cb455ede591b765b2865f7:0/0/4 · fix-pr-2631=applied:188081d73749585325aa80ab6e07410dff1b53d3 · dispositions-ok=fix-pr-2631:f3bb49cf68a735af40cb455ede591b765b2865f7 · finisher-pr-2631=labelled
+- #2552 impl-2552=PR#2558 · ports=18552 · tier-ok=impl-2552:fleet-implementer-slow-high · review=member:review-pr-2558 · reviewed=a4f05735c5a4b45b7a61bd098bfd0f778ed3bd4e:2/0/15 · fix-pr-2558=applied:0635ce21cf57e94f30fd2cc9fe000d1b7695c111 · dispositions-ok=fix-pr-2558:a4f05735c5a4b45b7a61bd098bfd0f778ed3bd4e · finisher-pr-2558=labelled
+- #2560 impl-2560=PR#2576 · ports=18560 · tier-ok=impl-2560:fleet-implementer-slow-high · review=member:review-pr-2576 · reviewed=c7f5126817af00e1ee1e63de5de7e1bef78805a9:0/0/3 · fix-pr-2576=applied:6d05f01999c09c43ac515745b1410520df721586 · dispositions-ok=fix-pr-2576:c7f5126817af00e1ee1e63de5de7e1bef78805a9 · finisher-pr-2576=labelled
+- #2561 impl-2561=PR#2608 · ports=18561 · tier-ok=impl-2561:fleet-implementer-slow-high · review=member:review-pr-2608 · reviewed=7590ee2a0e0399bd61083504999c4ced92368e97:0/0/3 · fix-pr-2608=no-op · dispositions-ok=fix-pr-2608:7590ee2a0e0399bd61083504999c4ced92368e97 · finisher-pr-2608=labelled
+- #2559 impl-2559=PR#2625 · ports=18559 · tier-ok=impl-2559:fleet-implementer-slow-high · review=member:review-pr-2625 · reviewed=ff2ee26217a8361c39e77d4d86fee5047cc62014:0/0/7 · fix-pr-2625=applied:0ccd40d96c3f5183498f024e781c485c138235ee · dispositions-ok=fix-pr-2625:ff2ee26217a8361c39e77d4d86fee5047cc62014 · finisher-pr-2625=killed · finisher-pr-2625-b=labelled
+- #2120 impl-2120=PR#2694 · ports=18120 · tier-ok=impl-2120:fleet-implementer-slow-high · review=member:review-pr-2694 · reviewed=45469480bec41eb2d69f3de4ee09c93c2cd97f3f:1/0/8 · fix-pr-2694=applied:22e067758d955fff7db07920e98b610be5000e0d · dispositions-ok=fix-pr-2694:45469480bec41eb2d69f3de4ee09c93c2cd97f3f · finisher-pr-2694=killed · finisher-pr-2694-b=labelled
+- #2566 impl-2566=bailed · ports=18566 · tier-ok=impl-2566:fleet-implementer-slow-high
+- #2545 impl-2545=PR#2580 · ports=18545 · tier-ok=impl-2545:fleet-implementer-slow-high · review=member:review-pr-2580 · reviewed=e16ae141780d1029ea67b661c9ba9054adf97e25:0/0/8 · fix-pr-2580=applied:6a6c023ce2f1b60ddcd7fbc52747668e5ac27961 · dispositions-ok=fix-pr-2580:e16ae141780d1029ea67b661c9ba9054adf97e25 · finisher-pr-2580=labelled
+- #2546 impl-2546=PR#2577 · ports=18546 · tier=task-high · tier-ok=impl-2546:fleet-implementer-task-high · review=member:review-pr-2577 · reviewed=873163a6f73a69bc72762d9b8833b40a1af35eb3:2/0/6 · fix-pr-2577=applied:d0d9f9172713bf534981e12ee0971169633dc7d0 · dispositions-ok=fix-pr-2577:873163a6f73a69bc72762d9b8833b40a1af35eb3 · finisher-pr-2577=labelled
+- #2570 impl-2570=PR#2581 · ports=18570 · tier-ok=impl-2570:fleet-implementer-slow-high · review=member:review-pr-2581 · reviewed=6e3a9464b28b5a8dd462e4cca635ca163a940020:0/1/12 · fix-pr-2581=no-op · dispositions-ok=fix-pr-2581:6e3a9464b28b5a8dd462e4cca635ca163a940020 · finisher-pr-2581=labelled
+- #2573 impl-2573=released · ports=18573 · tier-unverifiable=impl-2573:no-transcript
+- #2141 closed-already-fixed:3bf5d44f
+- #2142 impl-2142=PR#2599 · ports=18142 · tier-ok=impl-2142:fleet-implementer-slow-high · review=member:review-pr-2599 · reviewed=54a15baafc295a0e94808d86bd1ca11ab67272e6:0/0/6 · fix-pr-2599=applied:e486678d98e5bb9ded94c858532106b50ae9d07e · dispositions-ok=fix-pr-2599:54a15baafc295a0e94808d86bd1ca11ab67272e6 · finisher-pr-2599=labelled
+- #2578 impl-2578=PR#2584 · ports=18578 · tier-ok=impl-2578:fleet-implementer-slow-high · review=member:review-pr-2584 · reviewed=4b9bb4b4d19719a0741daeed7375f7ad66f73bf9:1/0/2 · fix-pr-2584=no-op · dispositions-ok=fix-pr-2584:4b9bb4b4d19719a0741daeed7375f7ad66f73bf9 · finisher-pr-2584=labelled
+- #2550 impl-2550=PR#2618 · ports=18550 · tier-ok=impl-2550:fleet-implementer-slow-high · review=member:review-pr-2618 · reviewed=30f84bbb73eb92e70f5b4b293c238a0c39f9c759:3/0/11 · fix-pr-2618=applied:3941308d14aa4a667df7b4b7a2f62849eacff9ef · dispositions-ok=fix-pr-2618:30f84bbb73eb92e70f5b4b293c238a0c39f9c759 · finisher-pr-2618=labelled
+- #2551 impl-2551=PR#2644 · ports=18551 · tier-ok=impl-2551:fleet-implementer-slow-high · review=member:review-pr-2644 · reviewed=30e26284c462b487243c7b8069b7afd026131fd9:0/1/14 · fix-pr-2644=applied:83b6e383dc3c8095d255a2abddb3f05047570a33 · dispositions-ok=fix-pr-2644:30e26284c462b487243c7b8069b7afd026131fd9 · finisher-pr-2644=labelled
+- #2571 impl-2571=PR#2662 · ports=18571 · tier-ok=impl-2571:fleet-implementer-slow-high · review=member:review-pr-2662 · reviewed=2d8ba1a73a1784d69638239996bc022d562a9571:0/0/11 · fix-pr-2662=applied:209d9a65f27a9fa9252445840ffddbfd91afcb1d · dispositions-ok=fix-pr-2662:2d8ba1a73a1784d69638239996bc022d562a9571 · finisher-pr-2662=labelled
+- #2582 impl-2582=PR#2601 · ports=18582 · tier-ok=impl-2582:fleet-implementer-slow-high · review=member:review-pr-2601 · reviewed=18d367db7b89aebfece9a6aed3698828e6b1ddab:1/0/4 · fix-pr-2601=applied:c060bcaf2c7690624a4637f998de3384c3357bcd · dispositions-ok=fix-pr-2601:18d367db7b89aebfece9a6aed3698828e6b1ddab · finisher-pr-2601=labelled
+- #2586 impl-2586=PR#2688 · ports=18586 · tier=task-high · tier-ok=impl-2586:fleet-implementer-task-high · review=member:review-pr-2688 · reviewed=0cd13bc3321308bfa64428056caff75edbb66d77:2/0/19 · fix-pr-2688=applied:7bf936f9905c6be2dbbc53d19130dcb208dfcd0f · dispositions-ok=fix-pr-2688:0cd13bc3321308bfa64428056caff75edbb66d77 · finisher-pr-2688=killed · finisher-pr-2688-b=labelled
+- #2591 impl-2591=PR#2652 · ports=18591 · tier-ok=impl-2591:fleet-implementer-slow-high · review=member:review-pr-2652 · reviewed=61a84dda7278e8be0303d0b925b091412d5ed7c0:0/0/0 · finisher-pr-2652=labelled
+- #2592 impl-2592=PR#2659 · ports=18592 · tier=task-high · tier-ok=impl-2592:fleet-implementer-task-high · review=member:review-pr-2659 · reviewed=1f39a84b4d352df75863004e7185234c69b70ce3:0/0/2 · fix-pr-2659=applied:4e262393c451f9aaf15d3625d8d0962b433d3275 · dispositions-ok=fix-pr-2659:1f39a84b4d352df75863004e7185234c69b70ce3 · finisher-pr-2659=labelled
+- #2593 impl-2593=PR#2673 · ports=18593 · tier=task-high · tier-ok=impl-2593:fleet-implementer-task-high · review=member:review-pr-2673 · reviewed=bd5f3f4055b41ff62ff6c95d9b1c4fa444f14862:0/0/3 · fix-pr-2673=no-op · dispositions-ok=fix-pr-2673:bd5f3f4055b41ff62ff6c95d9b1c4fa444f14862 · finisher-pr-2673=labelled
+- #2133 impl-2133=PR#2604 · ports=18133 · tier-ok=impl-2133:fleet-implementer-slow-high · review=member:review-pr-2604 · reviewed=0d96499ed04e607be4456891a29cae26dbcffb5e:3/3/17 · fix-pr-2604=applied:14fd208d4ec8279600f90a0d0d8fb4507ca25413 · dispositions-ok=fix-pr-2604:0d96499ed04e607be4456891a29cae26dbcffb5e · finisher-pr-2604=labelled
+- #2594 impl-2594=PR#2598 · ports=18594 · tier-ok=impl-2594:fleet-implementer-slow-high · review=member:review-pr-2598 · reviewed=8dabc9b6ede72d29441e6030d76fa97b2c87c3aa:0/0/1 · fix-pr-2598=no-op · dispositions-ok=fix-pr-2598:8dabc9b6ede72d29441e6030d76fa97b2c87c3aa · finisher-pr-2598=killed · finisher-pr-2598-b=labelled
+- #2568 impl-2568=PR#2616 · ports=18568 · tier-ok=impl-2568:fleet-implementer-slow-high · review=member:review-pr-2616 · reviewed=b7576d1f3973609efe94f502d25ae3fa4d185882:0/0/3 · fix-pr-2616=applied:a1ca9188d3de824caa3b9eda8778f1e2caf39807 · dispositions-ok=fix-pr-2616:b7576d1f3973609efe94f502d25ae3fa4d185882 · finisher-pr-2616=labelled
+- #2611 impl-2611=bailed · ports=18611 · tier-ok=impl-2611:fleet-implementer-slow-high
+- #2612 impl-2612=PR#2689 · ports=18612 · tier-ok=impl-2612:fleet-implementer-slow-high · review=member:review-pr-2689 · reviewed=541ff8143dc8abc9e8c2a00ca86bfb64c6b81b56:1/1/3 · fix-pr-2689=applied:ea820f3f963064623ad69b5ea1127e24203bc66b · dispositions-ok=fix-pr-2689:541ff8143dc8abc9e8c2a00ca86bfb64c6b81b56 · finisher-pr-2689=labelled
+- #2613 impl-2613=PR#2629 · ports=18613 · tier-ok=impl-2613:fleet-implementer-slow-high · review=member:review-pr-2629 · reviewed=7669add30be6aae585cd1d76135c63359017f2fd:1/0/4 · fix-pr-2629=applied:c23ca5be8c0a464bc0c7663351210049311fe59f · dispositions-ok=fix-pr-2629:7669add30be6aae585cd1d76135c63359017f2fd · finisher-pr-2629=labelled
+- #2609 impl-2609=PR#2617 · ports=18609 · tier=task-high · tier-ok=impl-2609:fleet-implementer-task-high · review=member:review-pr-2617 · reviewed=8f1186e28f12edf8c5f3eeabb802307bb2c6ad4b:0/1/11 · fix-pr-2617=applied:e5a7542c1b6ec443c2ea6e5e4456253b88068b93 · dispositions-ok=fix-pr-2617:8f1186e28f12edf8c5f3eeabb802307bb2c6ad4b · finisher-pr-2617=killed · finisher-pr-2617-b=labelled
+- #2615 impl-2615=PR#2619 · ports=18615 · tier-ok=impl-2615:fleet-implementer-slow-high · review=member:review-pr-2619 · reviewed=19c11c172c9bdb7e335af96853ba30220b4da4e6:1/0/3 · fix-pr-2619=no-op · dispositions-ok=fix-pr-2619:19c11c172c9bdb7e335af96853ba30220b4da4e6 · finisher-pr-2619=labelled
+- #2626 impl-2626=PR#2705 · ports=18626 · tier=task-high · tier-ok=impl-2626:fleet-implementer-task-high · review=member:review-pr-2705 · reviewed=8e8fa8a2a659eefbd7684e313e9f24f3b0446d6f:1/0/7 · fix-pr-2705=applied:835863fd0c654e30ce5d096ac87fae4b39ab4af5 · dispositions-ok=fix-pr-2705:8e8fa8a2a659eefbd7684e313e9f24f3b0446d6f · finisher-pr-2705=labelled
+- #2633 impl-2633=PR#2653 · ports=18633 · tier-ok=impl-2633:fleet-implementer-slow-high · review=member:review-pr-2653 · reviewed=84b55e0ba9a11b13c1741e0c588ac306dff0fb25:0/0/1 · fix-pr-2653=no-op · dispositions-ok=fix-pr-2653:84b55e0ba9a11b13c1741e0c588ac306dff0fb25 · finisher-pr-2653=labelled
+- #2634
+- #2632 impl-2632=PR#2683 · ports=18632 · tier-ok=impl-2632:fleet-implementer-slow-high · review=member:review-pr-2683 · reviewed=63dd2a77f6dbf97c232ffa8d04571e1cd88ea883:0/0/9 · fix-pr-2683=applied:6af766526c5da4a402253da77bee17729f4934b0 · dispositions-ok=fix-pr-2683:63dd2a77f6dbf97c232ffa8d04571e1cd88ea883 · finisher-pr-2683=labelled
+- #2635 impl-2635=PR#2639 · ports=18635 · tier=task-high · review=member:review-pr-2639 · tier-ok=impl-2635:fleet-implementer-task-high · review=member:review-pr-2639 · reviewed=28dab1c20a7e3c521377b7192c2d0c987b490649:2/0/5 · fix-pr-2639=applied:1440f8653203013c05be895ce305fb0bd8c5cf4e · dispositions-ok=fix-pr-2639:28dab1c20a7e3c521377b7192c2d0c987b490649 · finisher-pr-2639=labelled
+- #2637 impl-2637=PR#2706 · ports=18637 · tier-ok=impl-2637:fleet-implementer-slow-high · review=member:review-pr-2706 · reviewed=028ef27d06821926cdc3489bc9ddd0e50f046c54:0/1/4 · fix-pr-2706=applied:f6f88dc8f8d585bb4256a40630f465ddd31116db · dispositions-ok=fix-pr-2706:028ef27d06821926cdc3489bc9ddd0e50f046c54 · finisher-pr-2706=labelled
+- #2134 impl-2134=PR#2643 · ports=18134 · tier-ok=impl-2134:fleet-implementer-slow-high · review=member:review-pr-2643 · reviewed=c5da37e3d0e235271e3f404969213bbb7bf94992:6/2/20 · fix-pr-2643=applied:12092a72daf793b59e7db3cf85a2c02b21a497d5 · dispositions-ok=fix-pr-2643:c5da37e3d0e235271e3f404969213bbb7bf94992 · finisher-pr-2643=labelled
+- #2640 impl-2640=PR#2656 · ports=18640 · tier-ok=impl-2640:fleet-implementer-slow-high · review=member:review-pr-2656 · reviewed=e1e8cba05d73f9bdaecf216bef0ced305a468f03:3/0/9 · fix-pr-2656=applied:431d38498c02a9c453015ec260e90bce94ffc5ad · dispositions-ok=fix-pr-2656:e1e8cba05d73f9bdaecf216bef0ced305a468f03 · finisher-pr-2656=labelled
+- #2587 impl-2587=PR#2707 · ports=18587 · tier-ok=impl-2587:fleet-implementer-slow-high · review=member:review-pr-2707 · reviewed=e73e285986a682bddcfa8cd75ac058777b262325:0/0/11 · fix-pr-2707=applied:bd62ce3d8302d89a50d25ee2227a9c22667c6e3f · dispositions-ok=fix-pr-2707:e73e285986a682bddcfa8cd75ac058777b262325 · finisher-pr-2707=labelled
+- #2621 impl-2621=PR#2736 · ports=18621 · tier-ok=impl-2621:fleet-implementer-slow-high · review=member:review-pr-2736 · reviewed=db35bcb860c0132fef4f5bb0db607758e256b3a4:1/1/11 · fix-pr-2736=applied:312f6a93337256099b57de9e5b0ffda212235532 · dispositions-ok=fix-pr-2736:db35bcb860c0132fef4f5bb0db607758e256b3a4 · finisher-pr-2736=labelled
+- #2622 impl-2622=PR#2734 · ports=18622 · tier-ok=impl-2622:fleet-implementer-slow-high · review=member:review-pr-2734 · reviewed=516db656fa3aa5e29f815f78b96f0617e67a4cf7:1/1/11 · fix-pr-2734=applied:e844d478d65fbe379848cafbdfe2308472689e9c · dispositions-ok=fix-pr-2734:516db656fa3aa5e29f815f78b96f0617e67a4cf7 · finisher-pr-2734=labelled · fix-pr-2734-b=applied:576ef6f7510878c1a3dadf2e3a930ea1ab970cdf · fix-pr-2734-c=applied:e553c856da779fc60450cafd17183cf3644668bb · finisher-pr-2734-b=labelled
+- #2647 impl-2647=PR#2710 · ports=18647 · tier-ok=impl-2647:fleet-implementer-slow-high · review=member:review-pr-2710 · reviewed=2eef19cb83413ce780e0ec9b253e149495d994c4:3/1/9 · fix-pr-2710=applied:7fa143f0bec28577bb5879619fb9987ca06529e9 · dispositions-ok=fix-pr-2710:2eef19cb83413ce780e0ec9b253e149495d994c4 · finisher-pr-2710=killed · finisher-pr-2710-b=labelled
+- #2649 impl-2649=PR#2658 · ports=18649 · tier-ok=impl-2649:fleet-implementer-slow-high · review=member:review-pr-2658 · reviewed=90d691713ddd2c64dbe8f9c82cb517f8cee22d70:2/1/10 · fix-pr-2658=applied:185c29d3a5e3659e6d07523e860000f1a76c2493 · dispositions-ok=fix-pr-2658:90d691713ddd2c64dbe8f9c82cb517f8cee22d70 · finisher-pr-2658=labelled
+- #2657 impl-2657=PR#2660 · ports=18657 · tier-ok=impl-2657:fleet-implementer-slow-high · review=member:review-pr-2660 · reviewed=21c7c4c716c840cca385cf8bccbb64a24822ddaa:0/0/5 · fix-pr-2660=applied:3259253776edcee0ea0eb8199ff333da25aad68a · dispositions-ok=fix-pr-2660:21c7c4c716c840cca385cf8bccbb64a24822ddaa · finisher-pr-2660=killed · finisher-pr-2660-b=labelled
+- #2663 impl-2663=PR#2682 · ports=18663 · tier-ok=impl-2663:fleet-implementer-slow-high · review=member:review-pr-2682 · reviewed=8b1aaaad55fae2ddb5c4c952604fb5a29e4ac69c:0/0/5 · fix-pr-2682=no-op · dispositions-ok=fix-pr-2682:8b1aaaad55fae2ddb5c4c952604fb5a29e4ac69c · finisher-pr-2682=labelled
+- #2665 impl-2665=PR#2672 · ports=18665 · tier-ok=impl-2665:fleet-implementer-slow-high · review=member:review-pr-2672 · reviewed=02c47971abd221ad71121f7e3f0c6bc58db366b4:0/0/3 · fix-pr-2672=no-op · dispositions-ok=fix-pr-2672:02c47971abd221ad71121f7e3f0c6bc58db366b4 · finisher-pr-2672=labelled
+- #2667 impl-2667=PR#2671 · ports=18667 · tier-ok=impl-2667:fleet-implementer-slow-high · review=member:review-pr-2671 · reviewed=233d262a5d3873f7cf38500964e9e0c512c7c026:0/0/5 · fix-pr-2671=applied:c9bfc225a1d478ef807e24b6ad15d63c6b9d9ee6 · dispositions-ok=fix-pr-2671:233d262a5d3873f7cf38500964e9e0c512c7c026 · finisher-pr-2671=labelled
+- #2669 impl-2669=PR#2674 · ports=18669 · tier-ok=impl-2669:fleet-implementer-slow-high · review=member:review-pr-2674 · reviewed=6846a3bef03b93792872063b41c40f62d12ec88a:0/0/9 · fix-pr-2674=applied:41ce92246fa6edfb04f8a34be42e0bbd538af61d · dispositions-ok=fix-pr-2674:6846a3bef03b93792872063b41c40f62d12ec88a · finisher-pr-2674=labelled
+- #2679 impl-2679=PR#2699 · ports=18679 · tier-ok=impl-2679:fleet-implementer-slow-high · review=member:review-pr-2699 · reviewed=a588ed6bc894caa40d3573880d8eab8da97fef0b:0/0/0 · finisher-pr-2699=killed · finisher-pr-2699-b=labelled
+- #2677 impl-2677-b=PR#2701 · ports=18677 · tier=task-high · tier-ok=impl-2677-b:fleet-implementer-task-high · review=member:review-pr-2701 · reviewed=a1450feba540189ebc3eee6a882c1a490c6e658f:0/0/9 · fix-pr-2701=applied:df453d8fa37499c2ee51d2929a650d53fece75b5 · dispositions-ok=fix-pr-2701:a1450feba540189ebc3eee6a882c1a490c6e658f · finisher-pr-2701=labelled
+- #2684 impl-2684=PR#2690 · ports=18684 · tier-ok=impl-2684:fleet-implementer-slow-high · review=member:review-pr-2690 · reviewed=6fbe346167130d41cf9c029ca72f13bf3825c511:0/0/0 · finisher-pr-2690=labelled
+- #2685 impl-2685=PR#2713 · ports=18685 · tier-ok=impl-2685:fleet-implementer-slow-high · review=member:review-pr-2713 · reviewed=305d709dcadbb0695eca9af44db731e34b853618:0/0/4 · fix-pr-2713=applied:d14ada9ea9544d550c9c08c805a5a6bd9ea2c81e · dispositions-ok=fix-pr-2713:305d709dcadbb0695eca9af44db731e34b853618 · finisher-pr-2713=labelled
+- #2691 impl-2691=PR#2700 · ports=18691 · tier-ok=impl-2691:fleet-implementer-slow-high · review=member:review-pr-2700 · reviewed=2705cf7d27e82cf68b82bf05117fe09515280694:0/0/4 · fix-pr-2700=applied:2ce5141b4a4993b552613000ad209293798b3a14 · dispositions-ok=fix-pr-2700:2705cf7d27e82cf68b82bf05117fe09515280694 · finisher-pr-2700=labelled
+- #2693 impl-2693=PR#2740 · ports=18693 · tier-ok=impl-2693:fleet-implementer-slow-high · review=member:review-pr-2740 · reviewed=256c6f68142212e4d4b55654e74e29571ff46d32:0/0/10 · fix-pr-2740=applied:459e22de54b0011c44b11c89884d9c175cddc356 · dispositions-ok=fix-pr-2740:256c6f68142212e4d4b55654e74e29571ff46d32 · finisher-pr-2740=killed · fix-pr-2740-b=applied:4eeb5ea961dfd1287d417d73f31d91264f8ac820 · finisher-pr-2740-b=killed · finisher-pr-2740-c=killed · finisher-pr-2740-d=labelled
+- #2585 maintainer-pr · review=member:review-pr-2585 · reviewed=54e03d7310903d479462cb4b72a374cf313dc34b:0/0/6 · fix-pr-2585=no-op · dispositions-ok=fix-pr-2585:54e03d7310903d479462cb4b72a374cf313dc34b · finisher-pr-2585=labelled
+- #2702 impl-2702-b=PR#2721 · ports=18702 · tier=task-high · tier-ok=impl-2702-b:fleet-implementer-task-high · review=member:review-pr-2721 · reviewed=deee0a3bad23c50a16c5da6f5fa3bcd45370f43e:2/0/11 · fix-pr-2721=applied:4fce476d7b7d7c3a1aae094b953d3eb414803c5e · dispositions-ok=fix-pr-2721:deee0a3bad23c50a16c5da6f5fa3bcd45370f43e · finisher-pr-2721=labelled
+- #2703 impl-2703=PR#2712 · ports=18703 · tier-ok=impl-2703:fleet-implementer-slow-high · review=member:review-pr-2712 · reviewed=5d33cda3659814a87aa90030f3c0b3814a789fc9:2/0/7 · fix-pr-2712=applied:8e69e227c6b413aad667391c9a59bd6aa30c5590 · dispositions-ok=fix-pr-2712:5d33cda3659814a87aa90030f3c0b3814a789fc9 · finisher-pr-2712=killed · finisher-pr-2712-b=labelled
+- #2676 impl-2676=PR#2718 · ports=18676 · tier-ok=impl-2676:fleet-implementer-slow-high · review=member:review-pr-2718 · reviewed=195e659c51a83dec3723152c5a178a96652f54b4:0/0/5 · fix-pr-2718=no-op · dispositions-ok=fix-pr-2718:195e659c51a83dec3723152c5a178a96652f54b4 · finisher-pr-2718=labelled
+- #2711 impl-2711=PR#2779 · ports=18711 · tier=task-high · tier-ok=impl-2711:fleet-implementer-task-high · review=member:review-pr-2779 · reviewed=105d2d458a9f8a60b4726a21032f09d2cc561a38:0/1/6 · fix-pr-2779=applied:8de06f8173a0ed0a4861a2021b7c3e4c7319de99 · dispositions-ok=fix-pr-2779:105d2d458a9f8a60b4726a21032f09d2cc561a38 · finisher-pr-2779=labelled
+- #2715 impl-2715=PR#2752 · ports=18715 · tier-ok=impl-2715:fleet-implementer-slow-high · review=member:review-pr-2752 · reviewed=b12ee80fcd7f1ce9b0dec1ca6ea57bf00c769df7:0/0/5 · fix-pr-2752=applied:14027ce598c28ed4bd622913771a128c657e0f27 · dispositions-ok=fix-pr-2752:b12ee80fcd7f1ce9b0dec1ca6ea57bf00c769df7 · fix-pr-2752-b=applied:47f437577a5d0f027b776a365498e7c5faa1de34 · finisher-pr-2752=labelled
+- #2720 impl-2720=PR#2753 · ports=18720 · tier-ok=impl-2720:fleet-implementer-slow-high · review=member:review-pr-2753 · reviewed=2c75a9d4a42a2339f9d1ae00659a706f03cfd167:4/0/12 · fix-pr-2753=applied:c8015142914f0e14d87571621e83eb49a78bfcf0 · dispositions-ok=fix-pr-2753:2c75a9d4a42a2339f9d1ae00659a706f03cfd167 · finisher-pr-2753=labelled · fix-pr-2753-b=applied:af73c98847d48e1607a03c618ae6e6381a07a022 · finisher-pr-2753-b=killed · finisher-pr-2753-c=labelled
+- #2728 impl-2728=PR#2792 · ports=18728 · tier-ok=impl-2728:fleet-implementer-slow-high · review=member:review-pr-2792 · reviewed=7fe07071914eb97d3c7fe0d8891ea51e1e70728e:0/0/11 · fix-pr-2792=applied:341bd29e40c9a59f5ca5d2ae961120d6d86c1ccc · dispositions-ok=fix-pr-2792:7fe07071914eb97d3c7fe0d8891ea51e1e70728e · finisher-pr-2792=labelled · finisher-pr-2792-b=labelled
+- #2732 excluded · behind-pr:#2713
+- #2723 impl-2723=PR#2756 · ports=18723 · tier-ok=impl-2723:fleet-implementer-slow-high · review=member:review-pr-2756 · reviewed=d9442d512c00115137d55239bc562cd3c816ffb8:0/0/11 · fix-pr-2756=applied:09350db52278f1e8715675d93eaa2f6ead308b1c · dispositions-ok=fix-pr-2756:d9442d512c00115137d55239bc562cd3c816ffb8 · finisher-pr-2756=labelled
+- #2724 impl-2724=PR#2757 · ports=18724 · tier-ok=impl-2724:fleet-implementer-slow-high · review=member:review-pr-2757 · reviewed=1c7773cd18218e0916376a174a56c7e11f2c9bfa:0/0/13 · fix-pr-2757=applied:b500ffc626b53c9f9c685ae7c472f7032a4da3b6 · dispositions-ok=fix-pr-2757:1c7773cd18218e0916376a174a56c7e11f2c9bfa · fix-pr-2757-b=applied:4eb8345afbd8edb045859f22537dfac113247e14 · finisher-pr-2757=labelled · fix-pr-2757-c=applied:f6ee2ad1f739535ae395ad902006d04fdf95b5b0 · finisher-pr-2757-b=killed · finisher-pr-2757-c=labelled · finisher-pr-2757-d=labelled
+- #2606 impl-2606=PR#2735 · ports=18606 · tier-ok=impl-2606:fleet-implementer-slow-high · review=member:review-pr-2735 · reviewed=4627fe119598e35643f662f3caaa9559ec315f30:1/0/8 · fix-pr-2735=applied:e826660e8e75d9d2e3749ac64197772eb3d62100 · dispositions-ok=fix-pr-2735:4627fe119598e35643f662f3caaa9559ec315f30 · finisher-pr-2735=labelled
+- #2695 impl-2695=PR#2737 · ports=18695 · tier=task-high · tier-ok=impl-2695:fleet-implementer-task-high · review=member:review-pr-2737 · reviewed=8d8fc7435c82d5df1bcba4e922ec753b029d6290:1/0/3 · fix-pr-2737=applied:0a072c71a5b14826857777adbd680e619640c970 · dispositions-ok=fix-pr-2737:8d8fc7435c82d5df1bcba4e922ec753b029d6290 · finisher-pr-2737=labelled
+- #2697 impl-2697=released · ports=18697 · tier-ok=impl-2697:fleet-implementer-slow-high
+- #2714 impl-2714=PR#2754 · ports=18714 · tier-ok=impl-2714:fleet-implementer-slow-high · review=member:review-pr-2754 · reviewed=f6d33ccd530676582405f0139b1401b503eed0cf:0/0/12 · fix-pr-2754=applied:31ecd526e535c7b60edd7fd9f475cf5a6a4741d8 · dispositions-ok=fix-pr-2754:f6d33ccd530676582405f0139b1401b503eed0cf · finisher-pr-2754=labelled
+- #2739
+- #2741 impl-2741=PR#2758 · ports=18741 · tier-ok=impl-2741:fleet-implementer-slow-high · review=member:review-pr-2758-b · fix-pr-2758=applied:f9c81707eb7e03e6a845ba5baf723235c333f555 · dispositions-escalate=fix-pr-2758:e0ec6090779a2efe0ae79695cc02fb01e1160668 · fix-pr-2758-b=applied:2665fae4c3b6327dfd77a1fe8693d34615a90690 · reviewed=2665fae4c3b6327dfd77a1fe8693d34615a90690:4/0/15 · fix-pr-2758-c=killed · fix-pr-2758-d=applied:d05eb311bad18b598e08acbd701c4b03eb2cab8f · dispositions-ok=fix-pr-2758-d:2665fae4c3b6327dfd77a1fe8693d34615a90690 · fix-pr-2758-e=applied:67a36094343c91c040762e6ecda8178f5429e67d · finisher-pr-2758=labelled
+- #2748 impl-2748=PR#2761 · ports=18748 · tier-ok=impl-2748:fleet-implementer-slow-high · review=member:review-pr-2761 · reviewed=445cbd48a6b39c9ff6ba8e9272f0f30477a3cbf8:3/0/10 · fix-pr-2761=applied:a7cdb014b3b9cbafeaf22b8648551303ad71e755 · dispositions-ok=fix-pr-2761:445cbd48a6b39c9ff6ba8e9272f0f30477a3cbf8 · finisher-pr-2761=labelled
+- #2726 maintainer-pr
+- #2733 maintainer-pr · review=member:review-pr-2733 · reviewed=07d5c449b3ec5c18b9d75f259d76efc59a2ae5f4:1/0/6 · fix-pr-2733=applied:637267057a6b58037d8b0bccae858e6ff4352036 · dispositions-ok=fix-pr-2733:07d5c449b3ec5c18b9d75f259d76efc59a2ae5f4 · maintainer-merging:auto-merge
+- #2725 impl-2725=PR#2819 · ports=18725 · tier-ok=impl-2725:fleet-implementer-slow-high · review=member:review-pr-2819 · reviewed=9337429175ededea4b2b7e4952f18cfbc5c0a7fe:1/0/13 · fix-pr-2819=applied:cc2fcd85d6bfeec6e4345223469cde47196042fd · dispositions-ok=fix-pr-2819:9337429175ededea4b2b7e4952f18cfbc5c0a7fe · fix-pr-2819-b=applied:7608e9e409828488509b25ecce18bf6bd88df8dd · finisher-pr-2819=labelled
+- #2600 impl-2600=PR#2762 · ports=18600 · tier-ok=impl-2600:fleet-implementer-slow-high · review=member:review-pr-2762 · review=member:review-pr-2762 · reviewed=b4628277ac406e12b546c35ea6cb80d22eea7018:2/2/13 · fix-pr-2762-b=applied:b687a9505495f8820d6312423036883155b10d08 · dispositions-ok=fix-pr-2762-b:b4628277ac406e12b546c35ea6cb80d22eea7018 · finisher-pr-2762=labelled
+- #2751 impl-2751=PR#2763 · ports=18751 · tier=task-high · tier-ok=impl-2751:fleet-implementer-task-high · review=member:review-pr-2763 · reviewed=485e324816284923646d2c5e29fecc18cf69cfa6:1/0/15 · fix-pr-2763=applied:8ac9fa1d044b42df54a7a9f65c61ee5107903dd7 · dispositions-ok=fix-pr-2763:485e324816284923646d2c5e29fecc18cf69cfa6 · fix-pr-2763-b=applied:cdb6338ee3adc5c9f124367876ddbc13f09708b2 · finisher-pr-2763=labelled
+- #2734 merge-bot-17=done rebase conflict on main (conflict hold)
+- #2275 impl-2275=PR#2771 · ports=18275 · tier-ok=impl-2275:fleet-implementer-slow-high · review=member:review-pr-2771 · reviewed=6d578e8c2e58ae6fec1e333b2fe2a17b58d8ad31:1/1/16 · fix-pr-2771=applied:e204833db9bac4a64b15cec8236cd9c610a22a77 · dispositions-ok=fix-pr-2771:6d578e8c2e58ae6fec1e333b2fe2a17b58d8ad31 · finisher-pr-2771=killed · finisher-pr-2771-b=labelled · finisher-pr-2771-c=labelled
+- #2764 impl-2764=PR#2794 · ports=18764 · tier-ok=impl-2764:fleet-implementer-slow-high · review=member:review-pr-2794 · reviewed=c4834bb622030077ad9d0c76c21f5c29e96d7722:0/0/7 · fix-pr-2794=applied:5599bf329b8cf18fe9ecaca7e2c187b9f7d5aafa · dispositions-ok=fix-pr-2794:c4834bb622030077ad9d0c76c21f5c29e96d7722 · finisher-pr-2794=labelled · finisher-pr-2794-b=labelled
+- #2768 impl-2768-b=PR#2840 · ports=180768 · claimed · review=member:review-pr-2840 · tier-ok=impl-2768-b:fleet-implementer-slow-high · reviewed=fa49840bfb5646b4cd655c277bed8d28049be67a:2/0/9 · fix-pr-2840=killed · fix-pr-2840-b=applied:ac6f7ed906c8aab14bf8f69c37f7332b645de4e0 · dispositions-ok=fix-pr-2840-b:fa49840bfb5646b4cd655c277bed8d28049be67a · finisher-pr-2840=labelled
+- #2234 impl-2234=PR#2780 · ports=18234 · tier-ok=impl-2234:fleet-implementer-slow-high · review=member:review-pr-2780 · reviewed=bf7aed1fb9d55a4f52f16aab935fb7ed51a89bac:1/0/7 · fix-pr-2780=applied:9d8736a6a5b97b1563ac93d0bfe37d534d2915e1 · dispositions-ok=fix-pr-2780:bf7aed1fb9d55a4f52f16aab935fb7ed51a89bac · finisher-pr-2780=labelled · fix-pr-2780-b=applied:8843ea35d1a18d7fd5af105a4104cedb8c65d774 · finisher-pr-2780-b=labelled · finisher-pr-2780-c=labelled
+- #2240 impl-2240=PR#2778 · ports=18240 · tier-ok=impl-2240:fleet-implementer-slow-high · review=member:review-pr-2778 · reviewed=423b7bd55fe5712dd71d8147fbceeadbd8d9e87f:0/0/3 · fix-pr-2778=no-op · dispositions-ok=fix-pr-2778:423b7bd55fe5712dd71d8147fbceeadbd8d9e87f · finisher-pr-2778=killed · finisher-pr-2778-b=labelled
+- #2775
+- #2776 excluded · behind-pr:#2758
+- #2235 impl-2235=PR#2783 · ports=18235 · tier=task-high · tier-ok=impl-2235:fleet-implementer-task-high · review=member:review-pr-2783 · reviewed=c37d86acb5922b59a8dc060e7fd11b824d824cfb:0/1/7 · fix-pr-2783=applied:10adb52c6c49c0846478ddee6f3176e36fdff82c · dispositions-ok=fix-pr-2783:c37d86acb5922b59a8dc060e7fd11b824d824cfb · finisher-pr-2783=labelled
+- #2241 impl-2241=PR#2784 · ports=18241 · tier-ok=impl-2241:fleet-implementer-slow-high · review=member:review-pr-2784 · reviewed=12c28679dd0ffc82c2d81e9ebec323e1f5ee69c4:2/1/10 · fix-pr-2784=applied:c814425f76c641fda12470df916cfde62edc8a07 · dispositions-ok=fix-pr-2784:12c28679dd0ffc82c2d81e9ebec323e1f5ee69c4 · finisher-pr-2784=killed
+- #2781 impl-2781=PR#2837 · ports=180781 · claimed · review=member:review-pr-2837 · reviewed=11fd7719f9fd0498b00e7fbb3e453c4e9f6dc024:2/0/14 · fix-pr-2837=killed · tier-ok=impl-2781:fleet-implementer-slow-high · fix-pr-2837-b=applied:26e7f190711b79a3084a003a797966ef9511878c · dispositions-ok=fix-pr-2837-b:11fd7719f9fd0498b00e7fbb3e453c4e9f6dc024 · finisher-pr-2837=labelled
+- #2242 impl-2242=PR#2791 · ports=18242 · tier-ok=impl-2242:fleet-implementer-slow-high · review=member:review-pr-2791 · reviewed=af36b7a073b8267bb32a03c5ec2596e246aa0c91:0/1/6 · fix-pr-2791=applied:52249440216b638cb4711c818ac9029cc3aecef1 · dispositions-ok=fix-pr-2791:af36b7a073b8267bb32a03c5ec2596e246aa0c91 · finisher-pr-2791=labelled · finisher-pr-2791-b=labelled
+- #2787 impl-2787-b=PR#2843 · ports=180787 · claimed · review=member:review-pr-2843 · reviewed=ac708537e3dda6338736c9553a89283cb7de139b:0/0/4 · fix-pr-2843=no-op · dispositions-ok=fix-pr-2843:ac708537e3dda6338736c9553a89283cb7de139b · finisher-pr-2843=labelled · tier-ok=impl-2787-b:fleet-implementer-slow-high
+- #2788 impl-2788-b=PR#2844 · ports=180788 · claimed · review=member:review-pr-2844 · reviewed=804e96a674bf2ac5a172eee7f3ca9fe16564520b:0/0/2 · fix-pr-2844=no-op · dispositions-ok=fix-pr-2844:804e96a674bf2ac5a172eee7f3ca9fe16564520b · finisher-pr-2844=labelled · tier-ok=impl-2788-b:fleet-implementer-slow-high
+- #2233 impl-2233=PR#2808 · ports=18233 · tier=task-high · tier-ok=impl-2233:fleet-implementer-task-high · review=member:review-pr-2808 · reviewed=ab7ffafcbb53200fe52a7280c2d764deb0f91c79:4/0/8 · fix-pr-2808=applied:7167bfeb5f903cdc88c865b3285a7d548b1b48c5 · dispositions-ok=fix-pr-2808:ab7ffafcbb53200fe52a7280c2d764deb0f91c79 · finisher-pr-2808=labelled · fix-pr-2808-b=applied:8d2485a754d914bec695b6a88ed5b252c8ad55ad · finisher-pr-2808-b=labelled
+- #2795 impl-2795=PR#2830 · ports=180795 · claimed · tier-ok=impl-2795:fleet-implementer-slow-high · review=member:review-pr-2830 · reviewed=e9b658a09a88e0f90c9609ab813188ffd06a9e60:0/0/5 · fix-pr-2830=no-op · dispositions-ok=fix-pr-2830:e9b658a09a88e0f90c9609ab813188ffd06a9e60 · finisher-pr-2830=labelled
+- #2796 impl-2796=PR#2809 · ports=18796 · tier-ok=impl-2796:fleet-implementer-slow-high · review=member:review-pr-2809 · reviewed=04d663ffa065a119ab940a704309df33aed20c43:0/0/3 · fix-pr-2809=applied:4731da28df38f11382f43e74bc0e73d8bfcbc97e · dispositions-ok=fix-pr-2809:04d663ffa065a119ab940a704309df33aed20c43 · finisher-pr-2809=labelled · finisher-pr-2809-b=labelled
+- #2797 impl-2797-b=PR#2829 · ports=180797 · claimed · tier-ok=impl-2797-b:fleet-implementer-slow-high · review=member:review-pr-2829 · reviewed=95fde718e088b3abfd80c7df46c773594e6f31f0:0/0/1 · fix-pr-2829=no-op · dispositions-ok=fix-pr-2829:95fde718e088b3abfd80c7df46c773594e6f31f0 · finisher-pr-2829=labelled
+- #2804 excluded · behind-pr:#2792
+- #2805 excluded · behind-pr:#2792
+- #2800 impl-2800=PR#2810 · ports=18800 · tier-ok=impl-2800:fleet-implementer-slow-high · review=member:review-pr-2810 · reviewed=4e7424dd953504ce08fce0851cc25d4d4b8c04ba:0/0/1 · fix-pr-2810=no-op · dispositions-ok=fix-pr-2810:4e7424dd953504ce08fce0851cc25d4d4b8c04ba · finisher-pr-2810=labelled · finisher-pr-2810-b=labelled
+- #2811
+- #2813 impl-2813=PR#2838 · ports=180813 · claimed · review=member:review-pr-2838 · tier-ok=impl-2813:fleet-implementer-slow-high · reviewed=ace0adb5b6b94bca71db6cf2631df00ebd369ef4:0/0/3 · fix-pr-2838=killed · fix-pr-2838-b=applied:631beedadc94a56322fb5c653d57c92be782d08e · dispositions-ok=fix-pr-2838-b:ace0adb5b6b94bca71db6cf2631df00ebd369ef4 · finisher-pr-2838=labelled
+- #2814 impl-2814=PR#2827 · ports=180814 · tier=task-high · claimed · tier-ok=impl-2814:fleet-implementer-task-high · review=member:review-pr-2827 · reviewed=2015d5f83f2aee9f870f83e1e5bea448916b045a:0/0/1 · fix-pr-2827=no-op · dispositions-ok=fix-pr-2827:2015d5f83f2aee9f870f83e1e5bea448916b045a · finisher-pr-2827=labelled
+- #2815 impl-2815-b=PR#2842 · ports=180815 · claimed · review=member:review-pr-2842 · reviewed=9c91b2a847303cfe82d94a3ffb1ad6471fb9366c:1/0/5 · fix-pr-2842=applied:11ece5d2927afe7144cf7e70652279c5403dbb9a · dispositions-ok=fix-pr-2842:9c91b2a847303cfe82d94a3ffb1ad6471fb9366c · finisher-pr-2842=labelled · tier-ok=impl-2815-b:fleet-implementer-slow-high
+- #2818 impl-2818=PR#2828 · ports=180818 · claimed · tier-ok=impl-2818:fleet-implementer-slow-high · review=member:review-pr-2828 · reviewed=a5aa90620a49692a0cc60234262c9952b8f7f6f1:1/0/13 · fix-pr-2828=applied:8c60e8c1da5e984276eeb9df0b4c5be1aca83eb8 · dispositions-ok=fix-pr-2828:a5aa90620a49692a0cc60234262c9952b8f7f6f1 · finisher-pr-2828=labelled
+- #2755 impl-2755=killed · impl-2755-b=PR#2821 · ports=18755 · tier=task-high · tier-ok=impl-2755-b:fleet-implementer-task-high · review=member:review-pr-2821 · reviewed=93a7c42c5b268da768f897d185d4ce06a5cf2aa8:1/0/12 · fix-pr-2821=applied:d1ca816ded1a1b20d8163872cd4e4acc3a31948c · dispositions-ok=fix-pr-2821:93a7c42c5b268da768f897d185d4ce06a5cf2aa8 · finisher-pr-2821=killed
+- #2820
+- #2823
+- #2236 impl-2236=PR#2825 · ports=180236 · claimed · tier-ok=impl-2236:fleet-implementer-slow-high · review=member:review-pr-2825 · reviewed=132124d7c1aff1903e974ae05de0268b08e4b493:0/0/4 · fix-pr-2825=applied:a8bee736c0542f3f270b75452482150fe2b5408c · dispositions-ok=fix-pr-2825:132124d7c1aff1903e974ae05de0268b08e4b493 · finisher-pr-2825=labelled
+- #2769 impl-2769-b=PR#2826 · ports=180769 · claimed · tier-ok=impl-2769-b:fleet-implementer-slow-high · tier-unverifiable=impl-2769:no-transcript · review=member:review-pr-2826 · reviewed=57d32167f21abafe6619e7d6786ba925c0fde27e:2/1/14 · fix-pr-2826=applied:bf01090d5fd36e223c9a1b2db3c894f13ce16e46 · dispositions-ok=fix-pr-2826:57d32167f21abafe6619e7d6786ba925c0fde27e · finisher-pr-2826=labelled
+- #2834
+- #2773 impl-2773=PR#2839 · ports=180773 · claimed · review=member:review-pr-2839 · tier-ok=impl-2773:fleet-implementer-slow-high · reviewed=9a57cfd6e4ab37472689421ac5e87b10398158ce:2/0/13 · fix-pr-2839=applied:f961f6150701b0dddf301b349a3eb5192a259e61 · dispositions-ok=fix-pr-2839:9a57cfd6e4ab37472689421ac5e87b10398158ce · finisher-pr-2839=labelled
+- #2799 impl-2799=PR#2841 · ports=180799 · tier=task-high · claimed · tier-ok=impl-2799:fleet-implementer-task-high · review=member:review-pr-2841 · reviewed=07e1a3b7febe046b23ec2f98c1b6277faf4b7a7e:4/1/9 · fix-pr-2841=applied:b1b4d23f55a6c29c3d8cb3d0a6bede8a97adfbce · dispositions-ok=fix-pr-2841:07e1a3b7febe046b23ec2f98c1b6277faf4b7a7e · finisher-pr-2841=labelled
+- #2845 impl-2845=PR#2860 · ports=180845 · claimed · tier-ok=impl-2845:fleet-implementer-slow-high · review=member:review-pr-2860 · reviewed=f95b983036969edf2b3dce7e1ec98a03acdfa3f8:2/0/3 · fix-pr-2860=applied:ef60e3727fde652421a15e100303f644c87213c8 · dispositions-ok=fix-pr-2860:f95b983036969edf2b3dce7e1ec98a03acdfa3f8 · finisher-pr-2860=labelled
+- #2849 impl-2849=PR#2861 · ports=180849 · claimed · tier-ok=impl-2849:fleet-implementer-slow-high · review=member:review-pr-2861 · reviewed=ad625896af285c8e08bcf0cdcb0da5262833cc2f:0/0/12 · fix-pr-2861=applied:fa665904e38638ae36be1031562d4ae2694802f3 · dispositions-ok=fix-pr-2861:ad625896af285c8e08bcf0cdcb0da5262833cc2f · finisher-pr-2861=labelled
+- #2851
+- #2852
+- #2853
+- #2855
+- #2856
+- #2854 impl-2854=PR#2859 · ports=180854 · claimed · tier-ok=impl-2854:fleet-implementer-slow-high · review=member:review-pr-2859 · reviewed=4158f02809a35f26bf0e4aa7a0944f2464172703:0/1/8 · fix-pr-2859=no-op · dispositions-ok=fix-pr-2859:4158f02809a35f26bf0e4aa7a0944f2464172703 · finisher-pr-2859=labelled
+- #1377 impl-1377=PR#2865 · ports=181377 · tier=task-high · claimed · tier-ok=impl-1377:fleet-implementer-task-high · review=member:review-pr-2865 · reviewed=3b8a6b0ec9b05393d7c8999d9c29846098562b31:2/1/6 · fix-pr-2865=applied:613f68820e69f69be6f1c83141dddca191e94a76 · dispositions-ok=fix-pr-2865:3b8a6b0ec9b05393d7c8999d9c29846098562b31 · finisher-pr-2865=killed
+- #2862
+- #2863
+- #2864
+- #2866 excluded · drain
+- #2867 excluded · drain
+
+## Dispatched
+
+- merge-bot-1=done
+- impl-2371=PR#2509
+- impl-2444=PR#2510
+- fix-pr-2506=applied:a925c1099fe075624bb567580ec2b394effbf1ee
+- fix-pr-2507=applied:50ae46e3d698f350d5142864b8f68cd9e3e3f0f7
+- impl-2466=PR#2511
+- impl-2467=PR#2519
+- impl-2472=PR#2520
+- fix-pr-2509=applied:963d67779eb2b455ff11a1028ff0a8fabaca41ee
+- fix-pr-2508=applied:5e48f76695c50d3876feb0146a59b8c9315e9432
+- fix-pr-2511=applied:b4520e1ea3fbb1289574b34c8adac18d6ef969e6
+- impl-2512=tier-mismatch
+- impl-2512-b=PR#2528
+- fix-pr-2510=applied:6c319408c5f1a5493927c86b19de762504cdb45a
+- fix-pr-2500=applied:ffce8ac447d84c93268326d481c19986a07c8e93
+- finisher-pr-2506=labelled
+- fix-pr-2519=no-op
+- finisher-pr-2519=labelled
+- finisher-pr-2507=labelled
+- impl-2522=PR#2529
+- merge-bot-2=done
+- fix-pr-2520=applied:7542ee01a8a030d1cd9a043cc18e087fbad30921
+- fix-pr-2528=applied:3eda7b142ad66dcf45089524ce15d6629f6555d5
+- finisher-pr-2500=labelled
+- finisher-pr-2510=failed
+- finisher-pr-2511=labelled
+- impl-2531=PR#2533
+- finisher-pr-2508=labelled
+- finisher-pr-2520=labelled
+- merge-bot-3=done
+- finisher-pr-2509=labelled
+- fix-pr-2529=applied:f93a00e560f1d165078fddc6bbcf1f9820b1eebf
+- merge-bot-4=killed
+- finisher-pr-2510-b=labelled
+- finisher-pr-2528=labelled
+- finisher-pr-2529=labelled
+- fix-pr-2533=applied:5d19a56ef5bfc9a7d51ad230095df243039ba073
+- finisher-pr-2506-b=failed
+- impl-2118=PR#2539
+- impl-2367=PR#2535
+- finisher-pr-2506-c=labelled
+- impl-2374=PR#2536
+- impl-2407=PR#2538
+- fix-pr-2535=applied:ec70c59e436f464de100051b728edf63deafcc2a
+- fix-pr-2536=applied:deb32ba97cd8c88a7c6931198133ba944b1d8081
+- merge-bot-5=done
+- finisher-pr-2533=labelled
+- fix-pr-2538=no-op
+- finisher-pr-2535=labelled
+- finisher-pr-2538=labelled
+- fix-pr-2539=applied:12ce0079cc0ac30d5b368d2a97d24b946b768ced
+- impl-2131=PR#2554
+- finisher-pr-2536=killed
+- impl-2132=PR#2555
+- finisher-pr-2539=labelled
+- merge-bot-6=done
+- impl-2480=PR#2556
+- impl-2490=PR#2557
+- impl-2552=PR#2558
+- fix-pr-2554=applied:7eda2496586725d32c06e4a75c1716259f1d4869
+- fix-pr-2556=applied:968540467cac859443847b437783d66ec340e116
+- finisher-pr-2536-b=labelled
+- fix-pr-2555=applied:c162f1ac33134564054133338951b0c13d6f4042
+- impl-2541=PR#2564
+- impl-2523=PR#2563
+- fix-pr-2557=no-op
+- finisher-pr-2557=labelled
+- merge-bot-7=done
+- fix-pr-2558=applied:0635ce21cf57e94f30fd2cc9fe000d1b7695c111
+- impl-2525=PR#2567
+- fix-pr-2563=no-op
+- fix-pr-2564=no-op
+- finisher-pr-2556=labelled
+- finisher-pr-2563=labelled
+- finisher-pr-2564=labelled
+- finisher-pr-2567=labelled
+- finisher-pr-2555=halted:other
+- finisher-pr-2558=labelled
+- impl-2482=PR#2575
+- impl-2560=PR#2576
+- impl-2514=PR#2579
+- impl-2545=PR#2580
+- impl-2546=PR#2577
+- impl-2570=PR#2581
+- finisher-pr-2555-b=labelled
+- fix-pr-2576=applied:6d05f01999c09c43ac515745b1410520df721586
+- fix-pr-2575=no-op
+- impl-2578=PR#2584
+- finisher-pr-2575=labelled
+- finisher-pr-2554=labelled
+- fix-pr-2577=applied:d0d9f9172713bf534981e12ee0971169633dc7d0
+- merge-bot-8=killed
+- fix-pr-2580=applied:6a6c023ce2f1b60ddcd7fbc52747668e5ac27961
+- fix-pr-2579=applied:ec02a003b9267f86798394aa181c1ad8d2ba2da1
+- fix-pr-2581=no-op
+- finisher-pr-2576=labelled
+- finisher-pr-2581=labelled
+- fix-pr-2584=no-op
+- finisher-pr-2577=labelled
+- finisher-pr-2580=labelled
+- finisher-pr-2579=labelled
+- finisher-pr-2584=labelled
+- impl-2142=PR#2599
+- impl-2573=released
+- impl-2516=PR#2597
+- impl-2582=PR#2601
+- impl-2594=PR#2598
+- impl-2133=PR#2604
+- fix-pr-2597=applied:f5eb734ce59133c3c57759883657aa3693cb5c5d
+- impl-2517=PR#2602
+- fix-pr-2598=no-op
+- fix-pr-2599=applied:e486678d98e5bb9ded94c858532106b50ae9d07e
+- finisher-pr-2598=killed
+- fix-pr-2601=applied:c060bcaf2c7690624a4637f998de3384c3357bcd
+- impl-2498=PR#2614
+- impl-2561=PR#2608
+- impl-2568=PR#2616
+- impl-2542=PR#2607
+- fix-pr-2602=no-op
+- finisher-pr-2597=labelled
+- finisher-pr-2599=labelled
+- finisher-pr-2602=labelled
+- fix-pr-2607=no-op
+- finisher-pr-2607=labelled
+- finisher-pr-2601=labelled
+- fix-pr-2608=no-op
+- finisher-pr-2608=labelled
+- impl-2550=PR#2618
+- impl-2609=PR#2617
+- impl-2615=PR#2619
+- fix-pr-2604=applied:14fd208d4ec8279600f90a0d0d8fb4507ca25413
+- impl-2559=PR#2625
+- fix-pr-2614=applied:82f7429aec0ede41edf35998c4930ab6b06246c0
+- fix-pr-2617=applied:e5a7542c1b6ec443c2ea6e5e4456253b88068b93
+- finisher-pr-2604=labelled
+- fix-pr-2619=no-op
+- finisher-pr-2619=labelled
+- fix-pr-2618=applied:3941308d14aa4a667df7b4b7a2f62849eacff9ef
+- fix-pr-2616=applied:a1ca9188d3de824caa3b9eda8778f1e2caf39807
+- impl-2543=PR#2631
+- impl-2613=PR#2629
+- finisher-pr-2616=labelled
+- finisher-pr-2617=killed
+- merge-bot-9=done
+- fix-pr-2625=applied:0ccd40d96c3f5183498f024e781c485c138235ee
+- finisher-pr-2614=labelled
+- finisher-pr-2618=labelled
+- finisher-pr-2617-b=labelled
+- fix-pr-2631=applied:188081d73749585325aa80ab6e07410dff1b53d3
+- fix-pr-2629=applied:c23ca5be8c0a464bc0c7663351210049311fe59f
+- impl-2635=PR#2639
+- finisher-pr-2625=killed
+- finisher-pr-2629=labelled
+- finisher-pr-2598-b=labelled
+- impl-2503=PR#2642
+- impl-2566=bailed
+- impl-2134=PR#2643
+- fix-pr-2639=applied:1440f8653203013c05be895ce305fb0bd8c5cf4e
+- finisher-pr-2625-b=labelled
+- finisher-pr-2639=labelled
+- impl-2551=PR#2644
+- fix-pr-2642=applied:b7a29b61a44a2e9921609b1c2fbcf85cc6a10802
+- fix-pr-2643=applied:12092a72daf793b59e7db3cf85a2c02b21a497d5
+- finisher-pr-2631=labelled
+- merge-bot-10=done
+- fix-pr-2644=applied:83b6e383dc3c8095d255a2abddb3f05047570a33
+- finisher-pr-2642=labelled
+- finisher-pr-2643=labelled
+- impl-2421=PR#2654
+- impl-2640=PR#2656
+- impl-2591=PR#2652
+- impl-2649=PR#2658
+- finisher-pr-2644=labelled
+- impl-2633=PR#2653
+- merge-bot-11=done
+- finisher-pr-2652=labelled
+- fix-pr-2653=no-op
+- finisher-pr-2653=labelled
+- impl-2592=PR#2659
+- impl-2657=PR#2660
+- fix-pr-2654=applied:58212fc5cf07c73fe5c56ca2e425610a0f05de5d
+- impl-2571=PR#2662
+- fix-pr-2659=applied:4e262393c451f9aaf15d3625d8d0962b433d3275
+- fix-pr-2658=applied:185c29d3a5e3659e6d07523e860000f1a76c2493
+- fix-pr-2660=applied:3259253776edcee0ea0eb8199ff333da25aad68a
+- fix-pr-2656=applied:431d38498c02a9c453015ec260e90bce94ffc5ad
+- impl-2665=PR#2672
+- impl-2667=PR#2671
+- finisher-pr-2659=labelled
+- fix-pr-2662=applied:209d9a65f27a9fa9252445840ffddbfd91afcb1d
+- merge-bot-12=done
+- finisher-pr-2654=labelled
+- finisher-pr-2658=labelled
+- finisher-pr-2660=killed
+- impl-2593=PR#2673
+- impl-2669=PR#2674
+- fix-pr-2671=applied:c9bfc225a1d478ef807e24b6ad15d63c6b9d9ee6
+- finisher-pr-2660-b=labelled
+- finisher-pr-2656=labelled
+- fix-pr-2673=no-op
+- fix-pr-2672=no-op
+- finisher-pr-2662=labelled
+- fix-pr-2674=applied:41ce92246fa6edfb04f8a34be42e0bbd538af61d
+- finisher-pr-2673=labelled
+- finisher-pr-2672=labelled
+- finisher-pr-2671=labelled
+- impl-2632=PR#2683
+- impl-2663=PR#2682
+- impl-2677=released
+- finisher-pr-2674=labelled
+- fix-pr-2682=no-op
+- fix-pr-2683=applied:6af766526c5da4a402253da77bee17729f4934b0
+- merge-bot-13=killed
+- finisher-pr-2682=labelled
+- finisher-pr-2683=labelled
+- merge-bot-14=done
+- merge-bot-15=done
+- impl-2586=PR#2688
+- impl-2611=bailed
+- impl-2612=PR#2689
+- fix-pr-2689=applied:ea820f3f963064623ad69b5ea1127e24203bc66b
+- impl-2684=PR#2690
+- impl-2120=PR#2694
+- finisher-pr-2690=labelled
+- merge-bot-16=killed
+- fix-pr-2688=applied:7bf936f9905c6be2dbbc53d19130dcb208dfcd0f
+- finisher-pr-2689=labelled
+- fix-pr-2694=applied:22e067758d955fff7db07920e98b610be5000e0d
+- impl-2637=PR#2706
+- impl-2679=PR#2699
+- impl-2691=PR#2700
+- impl-2677-b=PR#2701
+- fix-pr-2585=no-op
+- finisher-pr-2585=labelled
+- impl-2685=PR#2713
+- impl-2587=PR#2707
+- impl-2626=PR#2705
+- finisher-pr-2688=killed
+- impl-2647=PR#2710
+- finisher-pr-2699=killed
+- finisher-pr-2699-b=labelled
+- fix-pr-2700=applied:2ce5141b4a4993b552613000ad209293798b3a14
+- fix-pr-2701=applied:df453d8fa37499c2ee51d2929a650d53fece75b5
+- finisher-pr-2688-b=labelled
+- impl-2232=PR#2731
+- impl-2703=PR#2712
+- finisher-pr-2694=killed
+- fix-pr-2705=applied:835863fd0c654e30ce5d096ac87fae4b39ab4af5
+- fix-pr-2706=applied:f6f88dc8f8d585bb4256a40630f465ddd31116db
+- impl-2676=PR#2718
+- fix-pr-2707=applied:bd62ce3d8302d89a50d25ee2227a9c22667c6e3f
+- finisher-pr-2700=labelled
+- finisher-pr-2694-b=labelled
+- finisher-pr-2701=labelled
+- fix-pr-2712=applied:8e69e227c6b413aad667391c9a59bd6aa30c5590
+- impl-2702=killed
+- impl-2702-b=PR#2721
+- fix-pr-2713=applied:d14ada9ea9544d550c9c08c805a5a6bd9ea2c81e
+- fix-pr-2710=applied:7fa143f0bec28577bb5879619fb9987ca06529e9
+- finisher-pr-2705=labelled
+- finisher-pr-2706=labelled
+- finisher-pr-2707=labelled
+- fix-pr-2718=no-op
+- merge-bot-17=done
+- finisher-pr-2718=labelled
+- fix-pr-2721=applied:4fce476d7b7d7c3a1aae094b953d3eb414803c5e
+- impl-2606=PR#2735
+- impl-2621=PR#2736
+- impl-2622=PR#2734
+- finisher-pr-2710=killed
+- finisher-pr-2712=killed
+- impl-2693=PR#2740
+- finisher-pr-2713=labelled
+- impl-2695=PR#2737
+- impl-2697=released
+- finisher-pr-2710-b=labelled
+- finisher-pr-2712-b=labelled
+- fix-pr-2734=applied:e844d478d65fbe379848cafbdfe2308472689e9c
+- fix-pr-2735=applied:e826660e8e75d9d2e3749ac64197772eb3d62100
+- fix-pr-2736=applied:312f6a93337256099b57de9e5b0ffda212235532
+- fix-pr-2731=applied:85e6043042376fceddf517ac0ffffa93b109503b
+- fix-pr-2737=applied:0a072c71a5b14826857777adbd680e619640c970
+- finisher-pr-2721=labelled
+- fix-pr-2740=applied:459e22de54b0011c44b11c89884d9c175cddc356
+- finisher-pr-2735=labelled
+- finisher-pr-2736=labelled
+- finisher-pr-2737=labelled
+- finisher-pr-2734=labelled
+- impl-2720=PR#2753
+- impl-2714=PR#2754
+- impl-2715=PR#2752
+- impl-2711=PR#2779
+- impl-2723=PR#2756
+- impl-2741=PR#2758
+- impl-2724=PR#2757
+- fix-pr-2752=applied:14027ce598c28ed4bd622913771a128c657e0f27
+- impl-2600=PR#2762
+- impl-2751=PR#2763
+- fix-pr-2733=applied:637267057a6b58037d8b0bccae858e6ff4352036
+- impl-2748=PR#2761
+- fix-pr-2754=applied:31ecd526e535c7b60edd7fd9f475cf5a6a4741d8
+- fix-pr-2734-b=applied:576ef6f7510878c1a3dadf2e3a930ea1ab970cdf
+- fix-pr-2757=applied:b500ffc626b53c9f9c685ae7c472f7032a4da3b6
+- fix-pr-2756=applied:09350db52278f1e8715675d93eaa2f6ead308b1c
+- finisher-pr-2731=labelled
+- finisher-pr-2740=killed
+- impl-2275=PR#2771
+- merge-bot-18=done
+- fix-pr-2753=applied:c8015142914f0e14d87571621e83eb49a78bfcf0
+- fix-pr-2734-c=applied:e553c856da779fc60450cafd17183cf3644668bb
+- fix-pr-2758=applied:f9c81707eb7e03e6a845ba5baf723235c333f555
+- fix-pr-2740-b=applied:4eeb5ea961dfd1287d417d73f31d91264f8ac820
+- fix-pr-2752-b=applied:47f437577a5d0f027b776a365498e7c5faa1de34
+- fix-pr-2757-b=applied:4eb8345afbd8edb045859f22537dfac113247e14
+- fix-pr-2761=applied:a7cdb014b3b9cbafeaf22b8648551303ad71e755
+- finisher-pr-2734-b=labelled
+- finisher-pr-2740-b=killed
+- impl-2234=PR#2780
+- impl-2240=PR#2778
+- merge-bot-19=done
+- finisher-pr-2740-c=killed
+- finisher-pr-2740-d=labelled
+- finisher-pr-2752=labelled
+- finisher-pr-2753=labelled
+- finisher-pr-2754=labelled
+- finisher-pr-2756=labelled
+- finisher-pr-2757=labelled
+- finisher-pr-2761=labelled
+- fix-pr-2763=applied:8ac9fa1d044b42df54a7a9f65c61ee5107903dd7
+- merge-bot-20=killed
+- impl-2235=PR#2783
+- impl-2241=PR#2784
+- fix-pr-2778=no-op
+- finisher-pr-2778=killed
+- fix-pr-2771=applied:e204833db9bac4a64b15cec8236cd9c610a22a77
+- fix-pr-2780=applied:9d8736a6a5b97b1563ac93d0bfe37d534d2915e1
+- impl-2242=PR#2791
+- fix-pr-2779=applied:8de06f8173a0ed0a4861a2021b7c3e4c7319de99
+- finisher-pr-2778-b=labelled
+- fix-pr-2783=applied:10adb52c6c49c0846478ddee6f3176e36fdff82c
+- fix-pr-2763-b=applied:cdb6338ee3adc5c9f124367876ddbc13f09708b2
+- fix-pr-2762=applied:b4628277ac406e12b546c35ea6cb80d22eea7018
+- fix-pr-2784=applied:c814425f76c641fda12470df916cfde62edc8a07
+- fix-pr-2753-b=applied:af73c98847d48e1607a03c618ae6e6381a07a022
+- finisher-pr-2779=labelled
+- finisher-pr-2780=labelled
+- impl-2728=PR#2792
+- impl-2764=PR#2794
+- finisher-pr-2763=labelled
+- fix-pr-2791=applied:52249440216b638cb4711c818ac9029cc3aecef1
+- impl-2233=PR#2808
+- finisher-pr-2753-b=killed
+- finisher-pr-2783=labelled
+- fix-pr-2792=applied:341bd29e40c9a59f5ca5d2ae961120d6d86c1ccc
+- fix-pr-2794=applied:5599bf329b8cf18fe9ecaca7e2c187b9f7d5aafa
+- finisher-pr-2753-c=labelled
+- finisher-pr-2771=killed
+- finisher-pr-2784=killed
+- merge-bot-21=killed
+- fix-pr-2780-b=applied:8843ea35d1a18d7fd5af105a4104cedb8c65d774
+- fix-pr-2757-c=applied:f6ee2ad1f739535ae395ad902006d04fdf95b5b0
+- merge-bot-22=killed
+- finisher-pr-2771-b=labelled
+- finisher-pr-2757-b=killed
+- finisher-pr-2780-b=labelled
+- impl-2796=PR#2809
+- impl-2797=bailed
+- impl-2800=PR#2810
+- fix-pr-2762-b=applied:b687a9505495f8820d6312423036883155b10d08
+- fix-pr-2808=applied:7167bfeb5f903cdc88c865b3285a7d548b1b48c5
+- finisher-pr-2791=labelled
+- finisher-pr-2792=labelled
+- finisher-pr-2794=labelled
+- finisher-pr-2757-c=labelled
+- merge-bot-23=killed
+- fix-pr-2809=applied:4731da28df38f11382f43e74bc0e73d8bfcbc97e
+- fix-pr-2810=no-op
+- finisher-pr-2810=labelled
+- merge-bot-24=killed
+- finisher-pr-2762=labelled
+- finisher-pr-2808=labelled
+- finisher-pr-2809=labelled
+- merge-bot-25=done
+- finisher-pr-2757-d=labelled
+- merge-bot-26=done
+- merge-bot-27=done
+- impl-2725=PR#2819
+- merge-bot-28=killed
+- impl-2755=killed
+- impl-2755-b=PR#2821
+- fix-pr-2819=applied:cc2fcd85d6bfeec6e4345223469cde47196042fd
+- fix-pr-2819-b=applied:7608e9e409828488509b25ecce18bf6bd88df8dd
+- finisher-pr-2771-c=labelled
+- merge-bot-29=killed
+- fix-pr-2821=applied:d1ca816ded1a1b20d8163872cd4e4acc3a31948c
+- merge-bot-30=done
+- finisher-pr-2780-c=labelled
+- merge-bot-31=done
+- finisher-pr-2791-b=labelled
+- merge-bot-32=done
+- finisher-pr-2792-b=labelled
+- merge-bot-33=done
+- finisher-pr-2794-b=labelled
+- merge-bot-34=done
+- fix-pr-2808-b=applied:8d2485a754d914bec695b6a88ed5b252c8ad55ad
+- finisher-pr-2809-b=labelled
+- merge-bot-35=done
+- impl-2236=PR#2825
+- impl-2769=killed
+- impl-2769-b=PR#2826
+- finisher-pr-2819=labelled
+- finisher-pr-2808-b=labelled
+- finisher-pr-2821=killed
+- finisher-pr-2810-b=labelled
+- merge-bot-36=done
+- merge-bot-37=done
+- impl-2797-b=PR#2829
+- impl-2795=PR#2830
+- impl-2814=PR#2827
+- impl-2818=PR#2828
+- merge-bot-38=done
+- fix-pr-2825=applied:a8bee736c0542f3f270b75452482150fe2b5408c
+- merge-bot-39=done
+- fix-pr-2827=no-op
+- fix-pr-2826=applied:bf01090d5fd36e223c9a1b2db3c894f13ce16e46
+- fix-pr-2828=applied:8c60e8c1da5e984276eeb9df0b4c5be1aca83eb8
+- fix-pr-2829=no-op
+- fix-pr-2758-b=applied:2665fae4c3b6327dfd77a1fe8693d34615a90690
+- finisher-pr-2825=labelled
+- finisher-pr-2827=labelled
+- fix-pr-2830=no-op
+- merge-bot-40=done
+- finisher-pr-2829=labelled
+- merge-bot-41=done
+- finisher-pr-2826=labelled
+- finisher-pr-2828=labelled
+- impl-2773=PR#2839
+- impl-2781=PR#2837
+- impl-2813=PR#2838
+- merge-bot-42=done
+- merge-bot-43=done
+- impl-2768-b=PR#2840
+- fix-pr-2758-c=killed
+- merge-bot-44=done
+- finisher-pr-2830=labelled
+- merge-bot-45=done
+- fix-pr-2837=killed
+- impl-2799=PR#2841
+- impl-2815=killed
+- impl-2787=killed
+- impl-2788=killed
+- fix-pr-2838=killed
+- fix-pr-2840=killed
+- impl-2815-b=PR#2842
+- impl-2787-b=PR#2843
+- impl-2788-b=PR#2844
+- fix-pr-2758-d=applied:d05eb311bad18b598e08acbd701c4b03eb2cab8f
+- fix-pr-2837-b=applied:26e7f190711b79a3084a003a797966ef9511878c
+- fix-pr-2838-b=applied:631beedadc94a56322fb5c653d57c92be782d08e
+- fix-pr-2840-b=applied:ac6f7ed906c8aab14bf8f69c37f7332b645de4e0
+- finisher-pr-2838=labelled
+- fix-pr-2841=applied:b1b4d23f55a6c29c3d8cb3d0a6bede8a97adfbce
+- fix-pr-2839=applied:f961f6150701b0dddf301b349a3eb5192a259e61
+- merge-bot-46=done
+- finisher-pr-2840=labelled
+- fix-pr-2844=no-op
+- fix-pr-2758-e=applied:67a36094343c91c040762e6ecda8178f5429e67d
+- fix-pr-2842=applied:11ece5d2927afe7144cf7e70652279c5403dbb9a
+- merge-bot-47=done
+- fix-pr-2843=no-op
+- finisher-pr-2837=labelled
+- finisher-pr-2844=labelled
+- finisher-pr-2843=labelled
+- merge-bot-48=done
+- finisher-pr-2758=labelled
+- merge-bot-49=done
+- finisher-pr-2841=labelled
+- finisher-pr-2842=labelled
+- merge-bot-50=done
+- finisher-pr-2839=labelled
+- impl-2845=PR#2860
+- impl-2854=PR#2859
+- impl-2849=PR#2861
+- impl-1377=PR#2865
+- merge-bot-51=done
+- merge-bot-52=done
+- fix-pr-2860=applied:ef60e3727fde652421a15e100303f644c87213c8
+- merge-bot-53=done
+- finisher-pr-2860=labelled
+- fix-pr-2861=applied:fa665904e38638ae36be1031562d4ae2694802f3
+- fix-pr-2859=no-op
+- merge-bot-54=done
+- finisher-pr-2859=labelled
+- merge-bot-55=done
+- merge-bot-56=done
+- finisher-pr-2861=labelled
+- fix-pr-2865=applied:613f68820e69f69be6f1c83141dddca191e94a76
+- merge-bot-57=done
+- finisher-pr-2865=killed
+- merge-bot-58=done
+- merge-bot-59=done
+
+## Filed
+
+- #2512 inflight.test.mjs: ambient GIT_DIR case's /77/ guard matches the random mkdtemp suffix
+- #2513 PR #2507 review: the suggestion band, checked
+- #2514 harness-node.md row 59 cites stale ledger.mjs:138-144 for the ambient GIT_DIR comment
+- #2515 PR #2509 review: the suggestion band, checked
+- #2516 ledger.mjs comment points at a stale line number for the sibling isDigits key check
+- #2517 member-record.mjs comment says folded.agent is undefined for the default task definition; it is null or the string task
+- #2518 PR #2506 review: the suggestion band, checked
+- #2521 PR #2511 review: the suggestion band, checked
+- #2522 board.test.mjs: derived-port-held-by-anything test fails when an outside process holds 8123 and lets go
+- #2523 shell.md row 122 cites net.sh:364,402 for the net_stalled exit-code test
+- #2524 PR #2510 review: the suggestion band, checked
+- #2525 tracker-node.md row 27 cites tier-roles.mjs:266-268 for the remedy ternary, now at 290-292
+- #2526 PR #2508 review: the suggestion band, checked
+- #2527 PR #2519 review: the suggestion band, checked
+- #2530 PR #2520 review: the suggestion band, checked
+- #2531 release-ticket.test.mjs, reap.test.mjs: worktree-listing guards match the operator TMPDIR path
+- #2532 PR #2528 review: the suggestion band, checked
+- #2534 PR #2529 review: the suggestion band, checked
+- #2537 PR #2533 review: the suggestion band, checked
+- #2540 PR #2535 review: the suggestion band, checked
+- #2541 harness-node row 77 cites member-record.mjs:30-34 for a quote that is not in the file
+- #2542 harness-node row 81 cites member-record.mjs:92-94,108 for the synthetic sentinel, now at 68-78
+- #2543 harness-node Coverage bullet gives compute-spend.mjs as 329 lines, file is 367
+- #2544 PR #2538 review: the suggestion band, checked
+- #2545 review-core note test and review-and-fix.md recipe comment leave specialist-copy requests unpinned outside the opening paragraph
+- #2546 review-core-snapshot-path.test.mjs:70 cites a required: comment inside FINDINGS_SCHEMA that does not exist
+- #2547 docs/specs/2026-08-06 review-pr cost spec quotes FINDINGS_SCHEMA's required list with test_run, which #2374 removed
+- #2548 PR #2536 review: the suggestion band, checked
+- #2549 recipe-prove count proof accepts a zero-test suite whose count line carries the claimed number elsewhere
+- #2550 recipe-prove leaves its log directory in TMPDIR after a PROVEN run
+- #2551 recipe-prove runs the Install step, Test entrypoint and mutation with no timeout
+- #2552 recipe-prove reports a git spawn failure as not a git repository
+- #2553 PR #2539 review: the suggestion band, checked
+- #2559 SKILL.md:3069-3070 claim release still says deletes the branch with -D; release-ticket.sh uses update-ref -d
+- #2560 tracker-node.md row 53 claim asserts thinking-level:/effort: frontmatter keys that frontmatter-allowlist.json forbids on agents
+- #2561 tracker-node.md coverage list 'read in full' ranges stale for most files; lift.mjs is listed and cited but no longer exists
+- #2562 PR #2557 review: the suggestion band, checked
+- #2565 PR #2555 review: the suggestion band, checked
+- #2566 docs/metrics/member-outcomes.tsv header names a producer path that does not exist (skills/fleet/scripts/member-outcomes.mjs)
+- #2568 reap.test.mjs: rc-0 listing inconsistent with the registry gitdir test fails intermittently in CI
+- #2569 PR #2564 review: the suggestion band, checked
+- #2570 recipe-prove reads NOT PROVEN, not a git repository, when git stops starting after its last git call -
+- #2571 recipe-prove git() cannot tell a git killed by a signal from one that exited non-zero
+- #2572 PR #2558 review: the suggestion band, checked
+- #2573 ticket-router --check fails when a same-day features row lands after a fit (fitted_through is a bare date)
+- #2574 PR #2554 review: the suggestion band, checked
+- #2578 external-assumptions.md index line 84 still says tier is declared per agent file via effort:/thinking-level: keys
+- #2582 prose.md ADR Coverage line says 0001 through 0013 (all 13 files) but docs/adr holds more
+- #2583 PR #2575 review: the suggestion band, checked
+- #2586 recipe-prove read-back: node or mktemp unstartable after the proof reads as NOT PROVEN, not no verdict
+- #2587 recipe-prove git probe ignores exit status: a git that starts but cannot run still reads as NOT PROVEN
+- #2588 PR #2581 review: the suggestion band, checked
+- #2589 closed issues keep the in-progress label: add a backstop that drops it
+- #2590 PR #2577 review: the suggestion band, checked
+- #2591 harness-node.md rows 52 and 53 cite stale compute-board.mjs line numbers
+- #2592 harness-node.md rows cite stale review-core.mjs and ledger-grammar.mjs line numbers
+- #2593 harness-node.md row 99 says anything past [a few KB] for the 1 MiB PROBE_BODY_CAP
+- #2594 board.mjs comment says every cockpit binds 127.0.0.1 but server.listen(port) binds all interfaces
+- #2595 reap.test.mjs cancelled at file level in full suite run
+- #2596 PR #2584 review: the suggestion band, checked
+- #2600 board cockpit binds every interface: /board.json is reachable from other machines on the network
+- #2603 PR #2599 review: the suggestion band, checked
+- #2605 PR #2601 review: the suggestion band, checked
+- #2606 citation-sweep-prose: ledger.mjs live needle runDispatch keyNum check has no cited-side assertion
+- #2609 compute-spend.mjs classifyRole comment: an untyped task dispatch records none at all, but the omp reader records the literal task
+- #2610 PR #2602 review: the suggestion band, checked
+- #2611 external-assumptions: harness-node row 80 cites member-record.mjs:71-80, the [1m] comment starts at 70 and normalizeModel ends at 79
+- #2612 external-assumptions: harness-node rows 83 and 84 cite stale member-record.mjs line ranges
+- #2613 tracker-node.md row citations point at old line numbers after the coverage-count refresh
+- #2615 external-assumptions.md still says lift.mjs hand-rolls the RegExp.escape replacement and lists lift in the tracker-node scope
+- #2620 PR #2604 review: the suggestion band, checked
+- #2621 cell-readout: a duplicate ticket-features session+agent with a differing chosen_cell silently keeps the last row
+- #2622 cell-readout: duplicate member-outcomes (session, agent) keys collapse silently to the last row
+- #2623 PR #2619 review: the suggestion band, checked
+- #2624 PR #2617 review: the suggestion band, checked
+- #2626 member-outcomes.mjs and member-outcomes.tsv header describe a blank subagent_type as an untyped dispatch; omp records task
+- #2627 PR #2616 review: the suggestion band, checked
+- #2628 PR #2618 review: the suggestion band, checked
+- #2630 PR #2614 review: the suggestion band, checked
+- #2632 SKILL.md:3100 says reap.sh --apply uses git cherry origin/main to authorize -D, but reap.sh deletes with git update-ref -d
+- #2633 tracker-node.md row 5 quoted fragment is a reverse-order paraphrase of tier-roles.mjs:182-188
+- #2634 tracker-node.md rows citing a line range carry no quoted fragment, so a line shift is undetectable from the row
+- #2635 reaping.md:61 says release's update-ref delete is authorized by ahead, cherry and recount and by nothing else, omitting the wt_holding worktree check
+- #2636 PR #2625 review: the suggestion band, checked
+- #2637 external-assumptions: harness-node Coverage has no as-of marker; 'read in full' bullets state counts for files the scan read shorter
+- #2638 PR #2631 review: the suggestion band, checked
+- #2640 reaping.md:25 reap bullet says the update-ref delete is authorized by the cherry check and only by it, omitting the wt_holding worktree check
+- #2641 PR #2639 review: the suggestion band, checked
+- #2645 fleet-tick: gh spawns do not set killSignal, so a gh that ignores SIGTERM outlives the bound
+- #2646 PR #2642 review: the suggestion band, checked
+- #2647 stoppingRule charges a cell with a ruling dated before its Pull
+- #2648 Withdrawal-issue dedupe keys on the exact title so a cell already over the line piles up issues
+- #2649 cell-readout: stoppingRule counts a verdict row with a malformed closed_own_ticket as a pass
+- #2650 PR #2643 review: the suggestion band, checked
+- #2651 PR #2644 review: the suggestion band, checked
+- #2655 PR #2653 review: the suggestion band, checked
+- #2661 PR #2659 review: the suggestion band, checked
+- #2664 PR #2660 review: the suggestion band, checked
+- #2663 external-assumptions prose.md rows 95, 102 and 112 still cite shipped lines the omp-model restatement rewrote
+- #2665 run-merge-bot.md step 1 still names gh run watch as step 2's wait, which is one eval cell polling gh run view
+- #2666 PR #2658 review: the suggestion band, checked
+- #2667 fleet-heartbeat.mjs comments say the CI gate re-issues its wait, but the merge bot holds it in one eval cell
+- #2668 PR #2654 review: the suggestion band, checked
+- #2669 release-ticket.sh:1683 comment says reap.sh authorizes its [gone] deletes with git cherry ALONE, omitting the wt_holding worktree check
+- #2670 PR #2656 review: the suggestion band, checked
+- #2675 PR #2662 review: the suggestion band, checked
+- #2676 recipe-prove git() reads a git that exited 0 after outgrowing the spawn buffer as ok, with truncated stdout
+- #2677 fleet-heartbeat.mjs comments attribute omp's 300s command deadline to run-merge-bot.md's CI wait rule, which names no 300s
+- #2678 PR #2671 review: the suggestion band, checked
+- #2679 external-assumptions: harness-node row 99 cites board.mjs:1612-1616, PROBE_HOST is at 1612 and PROBE_BODY_CAP at 1617
+- #2680 PR #2672 review: the suggestion band, checked
+- #2681 PR #2674 review: the suggestion band, checked
+- #2684 prose.md row 121 cites SKILL.md:2813-2815 for the fan-out authorization passage, now at SKILL.md:2980-2981
+- #2685 prose.md rows 105, 113, 114 cite drifted line numbers (SKILL.md:3036-3039, member-record.mjs:278-283, SKILL.md:1005)
+- #2686 PR #2682 review: the suggestion band, checked
+- #2687 PR #2683 review: the suggestion band, checked
+- #2691 harness-node rows 61, 70, 71, 73, 75, 76 and 77 still cite stale member-record.mjs line ranges
+- #2692 PR #2689 review: the suggestion band, checked
+- #2695 PR #2585 review: out-of-scope doc says tier-check always writes a verdict and the hold never gets stuck
+- #2696 PR #2585 review: triage-sweep-log #2589 row records ready-for-agent, tracker now says ready-for-human
+- #2697 PR #2585 review: out-of-scope doc attributes the could-load-clean quote to ADR 0005 layer 2
+- #2698 PR #2694 review: the suggestion band, checked
+- #2702 derive-testcmd.sh: a cat that cannot be started leaves the node-refusal message with an empty reason
+- #2703 review-core.mjs and claim-ticket.sh say every derive-testcmd.sh refusal names the derivation step; the exit-3 refusals do not
+- #2704 PR #2688 review: the suggestion band, checked
+- #2708 PR #2701 review: the suggestion band, checked
+- #2709 slot-based-fleet-loop spec:844 cites member-record.mjs:125, pinned at 6f2c654 but no longer at that line on main
+- #2715 member-record.test.mjs: no pin that a session_init agent task reads back as subagent_type task, or an agent-less session_init as blank
+- #2716 PR #2705 review: the suggestion band, checked
+- #2717 PR #2706 review: the suggestion band, checked
+- #2714 recipe-prove: a Recipe cache reader killed by a signal reads as NOT PROVEN with an empty reason
+- #2719 PR #2707 review: the suggestion band, checked
+- #2720 ticket-router fit's verdictsByTicket ignores the R5 run_date and both-blank ruling rule
+- #2722 PR #2712 review: the suggestion band, checked
+- #2723 stoppingRule's Pull date is UTC but a tier-outcomes ruling's date is local, so west of UTC a same-instant ruling is dropped
+- #2724 parseFeatures does not validate run_date, so stoppingRule silently excludes a Pull with a blank run_date
+- #2727 PR #2710 review: the suggestion band, checked
+- #2725 stoppingRule charges one PR's ruling to every cell a ticket was Pulled at
+- #2728 recipe-prove writeCache git --version probe message cannot name exit 126 vs 127: git() does not expose status
+- #2729 PR #2718 review: the suggestion band, checked
+- #2730 PR #2713 review: the suggestion band, checked
+- #2732 external-assumptions: no test resolves prose.md's path:N cites, so every SKILL.md edit re-drifts them
+- #2738 PR #2721 review: the suggestion band, checked
+- #2739 derive-testcmd.sh: a refused cache whose node exits non-zero with empty stderr prints a blank reason
+- #2741 derive-testcmd serves a cached Test entrypoint whose glob matches no tracked file
+- #2742 instruments.sh tamper-detection set no longer covers the test suite after the move to tests/
+- #2744 PR #2737 review: the suggestion band, checked
+- #2745 PR #2735 review: the suggestion band, checked
+- #2746 PR #2734 review: the suggestion band, checked
+- #2747 PR #2736 review: the suggestion band, checked
+- #2748 claim-ticket.sh:225 stamp comment says a mismatch means re-materialize to be sure, but nothing re-materializes a runner
+- #2749 PR #2740 review: the suggestion band, checked
+- #2750 PR #2731 review: the suggestion band, checked
+- #2759 PR #2752 review: the suggestion band, checked
+- #2760 PR #2733 review: the suggestion band, checked
+- #2764 CONTEXT.md: Admissible row says the per-cell stopping rule is pending #2134, but it is built
+- #2765 PR #2757 review: the suggestion band, checked
+- #2766 PR #2756 review: the suggestion band, checked
+- #2767 PR #2761 review: the suggestion band, checked
+- #2768 rulingFor accepts a blank Pull date so the R5 on-or-after rule degrades to last-ruling-wins in the fit
+- #2769 rulingFor picks the last qualifying ruling in file order, not the latest by run_date
+- #2770 fitTickets skips a ticket whose last features row is not an exploration or rule row before its rulings are validated
+- #2772 PR #2753 review: the suggestion band, checked
+- #2773 recipe-prove: a git that passes --version but is killed or fails during the reader's rev-parse reads as NOT PROVEN, not a git repository
+- #2774 PR #2754 review: the suggestion band, checked
+- #2775 derive-testcmd: the vacuous-suite probe reads the main checkout's index, not the origin/main tree claim-ticket.sh cuts the worktree from
+- #2776 derive-testcmd: a Test entrypoint glob with an attached shell operator (nope/*.js;echo) is accepted unprobed
+- #2777 PR #2758 review: the suggestion band, checked
+- #2781 arg.mjs header says every importer of arg.mjs refuses via a bound die() and a module binding none has no command line, but recipe-prove.mjs is a CLI binding none
+- #2782 PR #2778 review: the suggestion band, checked
+- #2785 PR #2763 review: the suggestion band, checked
+- #2786 PR #2780 review: the suggestion band, checked
+- #2787 tests/board-liveness-banner.test.mjs spawns fleet-heartbeat.mjs by its real path: a pkill -f fleet-heartbeat.mjs SIGTERMs the --stop child (status null)
+- #2788 fleet-heartbeat.test.mjs: the 700ms sleep in the DURING-the-hold test lets the pre-hold-snapshot regression pass when child startup is slower
+- #2789 PR #2783 review: the suggestion band, checked
+- #2790 PR #2779 review: the suggestion band, checked
+- #2793 PR #2771 review: the suggestion band, checked
+- #2795 shipped-surface sweep remainder: derive-testcmd.sh and worktree.sh still carry citations
+- #2796 json.sh LC_ALL=C comment miscounts the callers that do not pin the locale
+- #2797 harness-node.md quotes frontmatter-allowlist.json strings the shipped-surface sweep rewrote
+- #2798 PR #2784 review: the suggestion band, checked
+- #2800 fleet-state.mjs DEFAULT_CEILING_S comment says heartbeat's default is mirrored here, but heartbeat imports it from fleet-state
+- #2801 spec date section pointers (spec 2026-09-24 § 6) survive in shipped plugin/scripts comments
+- #2802 PR #2791 review: the suggestion band, checked
+- #2803 PR #2794 review: the suggestion band, checked
+- #2804 recipe-prove writeCache git --version probe message reads 'exited 0: git exited 0 after an error' for a git that exits 0 with a spawn error
+- #2805 recipe-prove GIT_THAT_CANNOT_RUN has no case for a git that exits 0 after a spawn error (the !probe.status mutant survives)
+- #2806 recipe-prove git() return carries both ok and status, so {ok:true,status:1} is representable
+- #2807 PR #2792 review: the suggestion band, no-defect reports recorded
+- #2811 board: a pre-bind connect error other than ECONNREFUSED aborts the launch with the raw connect message
+- #2812 PR #2762 review: the suggestion band, checked
+- #2813 prose.md SKILL.md line cites stale after the run-team shipped-surface sweep shifted SKILL.md
+- #2814 cross-repo-citation-prose.test.mjs assertion message claims git grep expect( has zero hits
+- #2815 node-floor-sweep.test.mjs comment cites SKILL.md:282 for fleet-run run via node
+- #2816 PR #2808 review: the suggestion band, checked
+- #2817 PR #2809 review: the suggestion band, checked
+- #2818 json.sh header and shell.md row 68 still count the json.sh callers wrongly after #2796
+- #2820 tier-outcomes: a superseded ruling row with a malformed verdict value is silently ignored by rulingFor
+- #2822 PR #2819 review: the suggestion band, checked
+- #2823 board: a Host refused by the cockpit's loopback guard is not logged on the server
+- #2824 PR #2821 review: the suggestion band, checked
+- #2831 reap.sh jfield header: unverified 'eleven call sites' count
+- #2832 PR #2829 review: the suggestion band, checked
+- #2833 PR #2830 review: the suggestion band, checked
+- #2834 net.sh LC_ALL=C comment names only prove-merge.sh and verify-sha.sh as callers that do not pin the locale, omits delete-merged-branch.sh
+- #2835 PR #2828 review: the suggestion band, checked
+- #2836 PR #2826 review: the suggestion band, checked
+- #2845 prose.md rows 95 and 125 cite test files under plugin/scripts/ that live under tests/
+- #2846 PR #2838 review: the suggestion band, checked
+- #2847 PR #2840 review: the suggestion band, checked
+- #2849 arg.mjs header: fleet-tick.mjs is not the one script still outside arg()/has() — fleet-heartbeat, member-outcomes, shortlist also are
+- #2850 PR #2837 review: the suggestion band, checked
+- #2851 run-team's mid-run Recipe re-read judges the Test entrypoint against a main checkout that fell behind origin/main (derive-testcmd.sh . test, no --at)
+- #2852 derive-testcmd: the vacuous-suite probe refuses a pattern that a program resolves itself under its own directory option (git -C, make -C)
+- #2853 PR #2844 review: the suggestion band, checked
+- #2854 tests/is-cli.test.mjs spawns fleet-heartbeat.mjs by its own name: a pkill -f fleet-heartbeat.mjs SIGTERMs the child (status null)
+- #2855 PR #2843 review: the suggestion band, checked
+- #2856 node-floor-sweep SKILL.md line-number ban misses non-colon spellings
+- #2857 PR #2841 review: the suggestion band, checked
+- #2858 PR #2839 review: the suggestion band, checked
+- #2862 tracker-node.md slice header still names plugin/scripts/slow-transport.mjs
+- #2863 tests/is-cli.test.mjs: spawnSync calls have no timeout, so a mis-guarded script hangs the whole file
+- #2864 PR #2859 review: the suggestion band, checked
+- #2866 arg-header-probes-prose: the derived parseArgs test only matches a named import from node:util, so other import shapes pass unnamed
+- #2867 tests/arg-header-probes-prose: probeArgv ignores r.error and a null r.status, so a spawn failure reads as a silent script row
+- #2868 PR #2861 review: the suggestion band, checked
+- #2869 PR #2865 review: the suggestion band, checked
+
+## Ruled
+
+

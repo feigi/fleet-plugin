@@ -1,0 +1,94 @@
+{
+  "run": 1793307143191,
+  "session": "/Users/chris/.omp/agent/sessions/-dev-fleet-plugin/2026-10-29T20-51-55-997Z_01a1896f-01dd-76c3-86f4-0655cc60f676",
+  "scratch": "/Users/chris/.fleet/scratch/fleet-plugin-28971265",
+  "inFlight": 5,
+  "objective": "cost",
+  "steps": {
+    "alarm": {
+      "status": "ok",
+      "at": "2026-10-29T20:52:10.127Z",
+      "output": "controller alarm armed: pid 3477, /Users/chris/dev/fleet-plugin/.fleet"
+    },
+    "branch": {
+      "status": "ok",
+      "at": "2026-10-29T20:52:10.139Z",
+      "output": "HEAD is refs/heads/main"
+    },
+    "fast-forward": {
+      "status": "ok",
+      "at": "2026-10-29T20:52:11.857Z",
+      "output": "main is level with origin/main"
+    },
+    "pin": {
+      "status": "ok",
+      "at": "2026-10-29T20:52:11.965Z",
+      "output": "instruments pinned: npm-install /Users/chris/.omp/plugins/node_modules/@feigi/fleet-ctl (version 3.123.1)"
+    },
+    "baseline": {
+      "status": "ok",
+      "at": "2026-10-29T20:52:12.128Z",
+      "output": "main-checkout baseline recorded"
+    },
+    "labels": {
+      "status": "ok",
+      "at": "2026-10-29T20:52:12.813Z",
+      "output": "label-map.mjs ensure: {\"needs-triage\":\"needs-triage\",\"needs-info\":\"needs-info\",\"ready-for-agent\":\"ready-for-agent\",\"ready-for-human\":\"ready-for-human\",\"wontfix\":\"wontfix\",\"in-progress\":\"in-progress\",\"onhold\":\"onhold\",\"ready-to-merge\":\"ready-to-merge\"}"
+    },
+    "preflight": {
+      "status": "ok",
+      "at": "2026-10-29T20:52:15.085Z",
+      "output": "preflight.mjs passed (PREFLIGHT OK (/Users/chris/dev/fleet-plugin/.fleet/preflight.json))"
+    },
+    "ruleset": {
+      "status": "ok",
+      "at": "2026-10-29T20:52:16.296Z",
+      "output": "the live gate matches the ruleset spec"
+    },
+    "tier-roles": {
+      "status": "ok",
+      "at": "2026-10-29T20:52:17.926Z",
+      "output": "every tier route resolves (in-flight bound 5)\ntier-roles: every definition routes to a resolvable model at a level it runs, no shadowing override"
+    },
+    "metrics": {
+      "status": "ok",
+      "at": "2026-10-29T20:52:23.049Z",
+      "output": "metrics-refresh.mjs ran\nmetrics-refresh: drain: nothing pending in .fleet/ticket-features.pending.tsv\nmetrics-refresh: member-outcomes: already 23 columns\nmetrics-refresh: cost guard: verdict tripped (tripped: smol-high), pr-cost.mjs exit 3; .fleet/cost-guard.json computed 2026-10-29T20:52:23.039Z"
+    },
+    "cockpit": {
+      "status": "ok",
+      "at": "2026-10-29T20:52:23.050Z",
+      "output": "launched board.mjs serve, pid 4661"
+    },
+    "rotate": {
+      "status": "ok",
+      "at": "2026-10-29T20:52:23.194Z",
+      "output": "ledger rotated, run 1793307143191\narchived /Users/chris/dev/fleet-plugin/.fleet/phase0.json -> /Users/chris/dev/fleet-plugin/.fleet/phase0.2026-10-29T205223Z.json\narchived /Users/chris/dev/fleet-plugin/.fleet/closeout.json -> /Users/chris/dev/fleet-plugin/.fleet/closeout.2026-10-29T205223Z.json\narchived /Users/chris/dev/fleet-plugin/.fleet/briefs -> /Users/chris/dev/fleet-plugin/.fleet/briefs.2026-10-29T205223Z\nrotated /Users/chris/dev/fleet-plugin/.fleet/ledger.md -> /Users/chris/dev/fleet-plugin/.fleet/ledger.2026-10-29T205223Z.md"
+    },
+    "reclaim": {
+      "status": "ok",
+      "at": "2026-10-29T20:52:23.974Z",
+      "output": "scratch reclaimed"
+    },
+    "recipe": {
+      "status": "ok",
+      "at": "2026-10-29T20:52:24.409Z",
+      "output": "withheld: the Recipe's command lines can carry environment assignments"
+    },
+    "fold-in": {
+      "status": "ok",
+      "at": "2026-10-29T20:52:25.406Z",
+      "output": "0 PR(s) queued, 0 already on a carried row"
+    },
+    "stranded": {
+      "status": "ok",
+      "at": "2026-10-29T20:52:32.485Z",
+      "output": "prior dead: 1 claim(s), 0 live token(s) carried\nreport #3872 — no worktree for it in this checkout"
+    },
+    "shortlist": {
+      "status": "ok",
+      "at": "2026-10-29T20:52:40.273Z",
+      "output": "shortlist built"
+    }
+  }
+}
