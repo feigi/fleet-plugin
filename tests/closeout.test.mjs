@@ -836,6 +836,9 @@ const moveOriginMain = (f, file, text) => {
 };
 // A call bound short enough for a test to wait it out, read every 100 ms.
 const FAST = { env: { CLOSEOUT_CALL_MS: "6000", CLOSEOUT_POLL_MS: "100" } };
+// Two merge-step passes, read 100 ms apart, under the default call bound: the
+// count, not a clock, ends the wait.
+const COUNTED = { env: { CLOSEOUT_POLLS: "2", CLOSEOUT_POLL_MS: "100" } };
 const leftOpenLine = (r) => r.out.map((l) => l.trim()).find((l) => l.startsWith("left open: "));
 const armedOrDeleting = (f) => f.ghCalls().filter((l) => /--auto|--delete-branch/.test(l));
 
@@ -975,11 +978,8 @@ test("finish: pending CI returns within the call's bound at exit 4 with NEED mer
   const f = fixture();
   f.control("ci-state", ciPending);
   f.control("gh-view", view("OPEN", "BLOCKED"));
-  const t0 = Date.now();
-  const r = f.run("finish", ["--reason", "wrap up"], FAST);
-  const took = Date.now() - t0;
+  const r = f.run("finish", ["--reason", "wrap up"], COUNTED);
   assert.equal(r.status, 4, r.err + r.stdout);
-  assert.ok(took < Number(FAST.env.CLOSEOUT_CALL_MS), `the call took ${took} ms`);
   assert.deepEqual(r.out.filter((l) => l.startsWith("NEED ")), ["NEED merge-wait PR #7"]);
   assert.match(r.stdout, /^closeout: merge: pending$/m);
   assert.ok(f.calls("ci-state").length >= 2, "it read CI again inside the call");
@@ -988,6 +988,13 @@ test("finish: pending CI returns within the call's bound at exit 4 with NEED mer
   assert.equal(first.steps.merge.status, "pending");
   assert.equal(first.mergeOutcome, null);
   assert.deepEqual(f.calls("gh-merge"), []);
+
+  const t0 = Date.now();
+  const bounded = f.run("finish", ["--reason", "wrap up"], FAST);
+  const took = Date.now() - t0;
+  assert.equal(bounded.status, 4, bounded.err + bounded.stdout);
+  assert.ok(took < Number(FAST.env.CLOSEOUT_CALL_MS), `the call took ${took} ms`);
+  assert.deepEqual(bounded.out.filter((l) => l.startsWith("NEED ")), ["NEED merge-wait PR #7"]);
   const pin = originRev(f, BRANCH);
 
   rmSync(join(f.stubs, "gh-view.calls"));
@@ -1008,10 +1015,7 @@ test("finish: a failed gh pr merge is asked once in the call, and its own words 
   const f = fixture();
   f.control("gh-view", view("OPEN", "CLEAN"));
   f.control("gh-merge", { exit: 1, err: "GraphQL: Base branch was modified\n" });
-  // A call bound past FAST's: every step before the merge, the gather and the
-  // records commit included, counts against it, so under a loaded suite FAST
-  // can leave the step one poll.
-  const r = f.run("finish", ["--reason", "wrap up"], { env: { ...FAST.env, CLOSEOUT_CALL_MS: "15000" } });
+  const r = f.run("finish", ["--reason", "wrap up"], COUNTED);
   assert.equal(r.status, 4, r.err + r.stdout);
   assert.equal(f.calls("gh-merge").length, 1);
   assert.ok(f.calls("ci-state").length >= 2, "it polled again after the merge failed");
@@ -1024,7 +1028,7 @@ test("finish: green CI at the pin with mergeStateStatus neither CLEAN nor HAS_HO
   for (const state of ["BLOCKED", "UNKNOWN", "DRAFT"]) {
     const f = fixture();
     f.control("gh-view", view("OPEN", state));
-    const r = f.run("finish", ["--reason", "wrap up"], FAST);
+    const r = f.run("finish", ["--reason", "wrap up"], COUNTED);
     assert.equal(r.status, 4, `${state}: ${r.err}${r.stdout}`);
     const need = r.out.indexOf("NEED merge-wait PR #7");
     assert.notEqual(need, -1, r.stdout);
@@ -1087,12 +1091,12 @@ test("finish: the 30-min bound leaves the PR open at exit 0, naming the last sta
   for (const [controls, reason, merges] of cases) {
     const f = fixture();
     for (const [name, value] of Object.entries(controls)) f.control(name, value);
-    const r = f.run("finish", ["--reason", "wrap up"], FAST);
+    const r = f.run("finish", ["--reason", "wrap up"], COUNTED);
     assert.equal(r.status, 4, r.err + r.stdout);
     const receipt = f.receipt();
     receipt.mergeStarted = new Date(Date.now() - 31 * 60_000).toISOString();
     writeFileSync(f.receiptPath, JSON.stringify(receipt));
-    const again = f.run("finish", ["--reason", "wrap up"], FAST);
+    const again = f.run("finish", ["--reason", "wrap up"], COUNTED);
     assert.equal(again.status, 0, again.err + again.stdout);
     assert.equal(leftOpenLine(again), `left open: PR #7 — ${reason}`);
     assert.equal(f.receipt().steps.merge.status, "ok");
