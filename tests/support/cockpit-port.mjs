@@ -56,11 +56,13 @@ function answers(port, ms = 200) {
 // launch exhausting its window is the holders' doing and not the scan's.
 // A row calls stop() in its `finally` as well, so a row that throws before it
 // reads the landing does not leave the watch polling under the rows after it.
-export async function watchWindow(ports, everyMs = 5) {
+// `probe` answers whether a port is held, answers() above unless a row that
+// pins this logic scripts which candidates answer.
+export async function watchWindow(ports, everyMs = 5, probe = answers) {
   const seen = new Set();
   const round = async () => {
     const open = ports.filter((p) => !seen.has(p));
-    const held = await Promise.all(open.map((p) => answers(p)));
+    const held = await Promise.all(open.map((p) => probe(p)));
     open.forEach((p, i) => { if (held[i]) seen.add(p); });
   };
   await round();
