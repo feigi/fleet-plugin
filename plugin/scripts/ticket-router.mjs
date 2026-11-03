@@ -734,10 +734,11 @@ function estimate(units, order, nodes) {
 }
 
 // What each objective's judge reads and says: the figure per merged PR it
-// minimises (`estimate()`'s name and its bootstrap metric), its verdict for a
-// candidate past the margin and for one with no reliable difference, the key
-// a pair names its better side by, and its reasons for a winner every other
-// qualifier was reliably worse than and for one ahead on the figure.
+// minimises (a `compareCells` side's name for it) and the measure its range is
+// read in (`range()`'s), its verdict for a candidate past the margin and for
+// one with no reliable difference, the key a pair names its better side by,
+// and its reasons for a winner every other qualifier was reliably worse than
+// and for one ahead on the figure.
 const JUDGE = Object.freeze({
   cost: {
     figure: "usd_per_merged", metric: "usd", over: "too-dear", unreliable: "not-reliably-cheaper",
@@ -762,11 +763,14 @@ const unjudged = () => ({ cell: null, reason: "unjudged", cells: {}, pairs: [] }
  * figure read is the cell's newest generation's, the default cell's included,
  * and every comparison is `compareCells`': two cells over the stretches in
  * which both were drawn, the stretches pooled, so a base's other weeks move
- * no verdict and a shift that hits every cell at once cancels. `pulls` holds
- * the row's counted Pulls per cell (`estimate()`'s); `baseCell` is the cell
- * the row holds unless a candidate qualifies: the default cell under `cost`,
- * the `cost` row's cell under `speed`. The figure is $ per merged PR under
- * `cost` and minutes of work time per merged PR under `speed`.
+ * no verdict and a shift that hits every cell at once cancels in every gap.
+ * The one test it does not cancel in is ADOPT_RATIO's, a ratio of the two
+ * figures: a shift that raises both by the same amount brings the ratio nearer
+ * 1, so it can move a candidate from qualifying to `too-dear` or `too-slow`.
+ * `pulls` holds the row's counted Pulls per cell (`estimate()`'s); `baseCell`
+ * is the cell the row holds unless a candidate qualifies: the default cell
+ * under `cost`, the `cost` row's cell under `speed`. The figure is $ per
+ * merged PR under `cost` and minutes of work time per merged PR under `speed`.
  *
  * A candidate is a cell of `cells` other than the base. Its `verdict`, the
  * first that applies: `tripped` by the guard; `too-few`, under MIN_N merged

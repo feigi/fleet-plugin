@@ -937,7 +937,7 @@ test("the fit's range against slow-high is the guard's usd_diff_ci95: the same n
 
 test("an unmerged counted Pull is a bootstrap unit with its spend and no merged PR: 20 merged and 10 closed at $3 against $10 span -5.5, not a flat -7", () => {
   // Both ranges build their units with bootUnit; the guard reads PR state, so a closed PR is an unmerged counted Pull there.
-  assert.deepEqual([bootUnit({ spend: 3, merged: false, stretch: "s" }), bootUnit({ spend: 3, merged: true, stretch: "s" })], [{ value: 3, per: 0, stretch: "s" }, { value: 3, per: 1, stretch: "s" }]);
+  assert.deepEqual([bootUnit({ spend: 3, merged: false, stretch: "s" }), bootUnit({ spend: 3, merged: true, stretch: "s" })], [{ value: 3, per: 0, weigh: 1, stretch: "s" }, { value: 3, per: 1, weigh: 1, stretch: "s" }]);
   const w = world();
   baseline(w);
   addPulls(w, { cell: "task-high", model: "model-t", count: 20, usd: 3 });
@@ -947,14 +947,14 @@ test("an unmerged counted Pull is a bootstrap unit with its spend and no merged 
   // Booked as merged, every resample of task-high would read $3 a PR, and the range would be [-7, -7].
   const ci = th.usd_diff_ci95;
   assert.ok(ci[0] < -5.5 && -5.5 < ci[1], `a range around $4.50 − $10: ${ci}`);
-  assert.deepEqual(bootstrapDiffCI(Array(30).fill({ value: 3, per: 1 }), Array(20).fill({ value: 10, per: 1 })), [-7, -7]);
+  assert.deepEqual(bootstrapDiffCI(Array(30).fill({ value: 3, per: 1, weigh: 1 }), Array(20).fill({ value: 10, per: 1, weigh: 1 })), [-7, -7]);
 });
 
-test("bootUnit takes a measure: `minutes` is a Pull's work time over 60, `usd` its spend and the default, `fail` its false claims in points over its claims; bootstrapDiffCI reads the unit's value", () => {
+test("bootUnit takes a measure: `minutes` is a Pull's work time over 60, `usd` its spend and the default, each weighing one Pull, `fail` its false claims in points over its claims, weighing its claims; bootstrapDiffCI reads the unit's value", () => {
   const u = { spend: 3, workS: 90, merged: true, claims: 4, falseClaims: 1, stretch: "s" };
   assert.deepEqual(
     [bootUnit(u), bootUnit(u, "usd"), bootUnit(u, "minutes"), bootUnit(u, "fail")],
-    [{ value: 3, per: 1, stretch: "s" }, { value: 3, per: 1, stretch: "s" }, { value: 1.5, per: 1, stretch: "s" }, { value: 100, per: 4, stretch: "s" }],
+    [{ value: 3, per: 1, weigh: 1, stretch: "s" }, { value: 3, per: 1, weigh: 1, stretch: "s" }, { value: 1.5, per: 1, weigh: 1, stretch: "s" }, { value: 100, per: 4, weigh: 4, stretch: "s" }],
   );
   assert.deepEqual(bootstrapDiffCI(Array(20).fill(bootUnit({ ...u, workS: 60 }, "minutes")), Array(20).fill(bootUnit({ ...u, workS: 150 }, "minutes"))), [-1.5, -1.5]);
 });
@@ -1278,6 +1278,14 @@ test("compareCells counts an unmerged Pull's spend and no merged PR, and a Pull'
   assert.deepEqual([two.cell.fail_rate, two.base.fail_rate], [0.5, 0.25]);
 });
 
+test("compareCells reads no floor against a side with no claim, even in one stretch: a fail rate of 5 of 20 against none is not under it, nor none against 3 of 20", () => {
+  const noClaims = (n) => units3(W1, n, { claims: 0 });
+  for (const [cell, base] of [[units3(W1, 20, { fails: 5 }), noClaims(20)], [noClaims(20), units3(W1, 20, { fails: 3 })]]) {
+    const m = compareCells(cell, base);
+    assert.deepEqual([m.stretches, m.cell.fail_rate, m.base.fail_rate, m.underFloor, m.range("fail")], [1, null, null, false, null]);
+  }
+});
+
 test("compareCells takes only the stretches in which both cells have Pulls, and the base's others change nothing", () => {
   const cell = [...units3(W1, 12, { fails: 6, spend: 8 }), ...units3(W2, 10, { fails: 2, spend: 6 })];
   const base = [...units3(W2, 10, { fails: 1, spend: 10 }), ...units3(W3, 30, { fails: 0, spend: 1 })];
@@ -1337,15 +1345,18 @@ test("a cell that ran in one stretch is compared with the base's Pulls of that s
   assert.deepEqual([m.stretches, m.base.n, m.base.fail_rate, m.base.usd_per_merged, m.underFloor], [1, 25, 0.28, 10, false], "8 of 20 against 7 of 25 is 12 points");
 });
 
-test("a stretch in which a side has no merged PR has no $ per merged PR to compare and takes no part in it, its Pulls counted all the same", () => {
+test("a stretch in which a side merged nothing still counts that side's spend in its $ per merged PR: every Pull of a shared stretch is kept", () => {
+  // The cell spent $100 on each of 5 abandoned Pulls in W1 and $1 on each of 5 merged in W2; the base merged its 5 of each at $10.
   const cell = [...units3(W1, 5, { merged: false, claims: 0, spend: 100 }), ...units3(W2, 5, { spend: 1 })];
   const base = [...units3(W1, 5, { spend: 10 }), ...units3(W2, 5, { spend: 10 })];
   const m = compareCells(cell, base);
-  assert.deepEqual([m.stretches, m.cell.n, m.cell.merged, m.cell.usd_per_merged, m.base.usd_per_merged], [2, 10, 5, 1, 10]);
-  // Merged only in different stretches, the two cells share none that carries a figure.
+  // Equal weeks weigh alike: $50.50 a Pull over half a merged PR a Pull, so $101, not the $1 of the merged week alone.
+  assert.deepEqual([m.stretches, m.cell.n, m.cell.merged, m.cell.usd_per_merged, m.base.usd_per_merged, m.cell.minutes_per_merged], [2, 10, 5, 101, 10, 2]);
+  assert.deepEqual(m.range("usd"), [91, 91], "the bootstrap pools every resample the same way");
+  // Merged only in different stretches, each side's figure still carries the spend of the week it merged nothing in.
   const apart = compareCells([...units3(W1, 20), ...units3(W2, 5, { merged: false, claims: 0 })], [...units3(W1, 5, { merged: false, claims: 0 }), ...units3(W2, 20)]);
-  assert.deepEqual([apart.cell.merged, apart.base.merged, apart.cell.usd_per_merged, apart.cell.minutes_per_merged, apart.cell.fail_rate, apart.underFloor], [20, 20, null, null, null, false]);
-  assert.equal(apart.range("usd"), null);
+  assert.deepEqual([apart.cell.merged, apart.base.merged, apart.cell.usd_per_merged, apart.base.usd_per_merged, apart.cell.minutes_per_merged], [20, 20, 2, 2, 2]);
+  assert.deepEqual([apart.cell.fail_rate, apart.underFloor, apart.range("usd")], [null, false, [0, 0]], "no week holds a claim on both sides: no fail rate, so no floor");
 });
 
 test("compareCells reads the floor in exact counts across stretches: three stretches each exactly 15 points over are 15 points over, and one short is not", () => {

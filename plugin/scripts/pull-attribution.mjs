@@ -92,15 +92,18 @@
 // THE COMPARISON. `compareCells` holds two cells' newest-generation counted
 // Pulls against each other over their shared stretches: each stretch on its
 // own, then the stretches pooled with Mantel-Haenszel weights. A stretch
-// weighs d_cell·d_base/(d_cell + d_base) over the counts d of the figure being
-// compared — merged PRs for $ and minutes per merged PR, claims for the fail
-// rate — so it weighs nothing where either side has none. Every Pull of a
-// shared stretch is kept, none filtered or decayed, and one in a stretch the
-// other has none in takes no part. A shift that hits both cells in a stretch
-// cancels, since the gap is read inside it, and a cell that ran in one stretch
-// is held to the other's Pulls of that stretch alone. With one shared stretch
-// the comparison is the cells' own figures. The bootstrap resamples within
-// each stretch.
+// weighs w_cell·w_base/(w_cell + w_base) over the counts w the figure is
+// weighed by — Pulls for $ and minutes per merged PR, claims for the fail
+// rate. A side's $ (or minutes) per merged PR is its spend per Pull over its
+// merged PRs per Pull, each averaged over the stretches with those weights, so
+// the spend of a stretch in which it merged nothing still counts; its fail
+// rate is its stretches' fail rates averaged, a stretch in which either side
+// has no claim weighing nothing. Every Pull of a shared stretch is kept, none
+// filtered or decayed, and one in a stretch the other has none in takes no
+// part. A shift that hits both cells in a stretch cancels, since the gap is
+// read inside it, and a cell that ran in one stretch is held to the other's
+// Pulls of that stretch alone. With one shared stretch the comparison is the
+// cells' own figures. The bootstrap resamples within each stretch.
 //
 // THE FLOOR. A cell is under the floor against a baseline when its fail rate
 // is TRIP_POINTS or more points above the baseline's over the stretches they
@@ -155,15 +158,19 @@ function mulberry32(seed) {
 }
 
 // What a unit measures: its `value` over its `per` is the figure, $ or minutes of work time per merged PR, or the
-// fail rate in points per claim.
+// fail rate in points per claim; `weigh` is what it adds to the count its stretch is weighed by, one Pull or its
+// claims.
 const MEASURES = Object.freeze({
-  usd: { value: (u) => u.spend, per: (u) => (u.merged ? 1 : 0) },
-  minutes: { value: (u) => u.workS / 60, per: (u) => (u.merged ? 1 : 0) },
-  fail: { value: (u) => 100 * u.falseClaims, per: (u) => u.claims },
+  usd: { value: (u) => u.spend, per: (u) => (u.merged ? 1 : 0), weigh: () => 1 },
+  minutes: { value: (u) => u.workS / 60, per: (u) => (u.merged ? 1 : 0), weigh: () => 1 },
+  fail: { value: (u) => 100 * u.falseClaims, per: (u) => u.claims, weigh: (u) => u.claims },
 });
 
-// A counted Pull as a unit of `measure`, one of MEASURES: `{ value, per, stretch }`.
-export const bootUnit = (u, measure = "usd") => ({ value: MEASURES[measure].value(u), per: MEASURES[measure].per(u), stretch: u.stretch });
+// A counted Pull as a unit of `measure`, one of MEASURES: `{ value, per, weigh, stretch }`.
+export const bootUnit = (u, measure = "usd") => {
+  const m = MEASURES[measure];
+  return { value: m.value(u), per: m.per(u), weigh: m.weigh(u), stretch: u.stretch };
+};
 
 // The stretches in which both sides have a unit, as `{ cell, base }` lists of those units, in the order the cell first meets them.
 function sharedStretches(cellUnits, baseUnits) {
@@ -177,41 +184,48 @@ function sharedStretches(cellUnits, baseUnits) {
   return [...byStretch.values()].filter((s) => s.cell.length > 0 && s.base.length > 0);
 }
 
-// One side's units in a stretch as `{ v, d }`: their values summed, and their `per`s.
-const sumOf = (units) => units.reduce((s, u) => ({ v: s.v + u.value, d: s.d + u.per }), { v: 0, d: 0 });
+// One side's units in a stretch as `{ v, d, w }`: their values, their `per`s and their `weigh`s summed.
+const sumOf = (units) => units.reduce((s, u) => ({ v: s.v + u.value, d: s.d + u.per, w: s.w + u.weigh }), { v: 0, d: 0, w: 0 });
 
-// The two sides' figures pooled over the stretches: `sums` holds one `{ cell, base }` of `{ v, d }` per stretch, a
-// side's figure in it v/d. The stretches are weighted by d_cell·d_base/(d_cell + d_base), what the thinner side
-// lets a stretch weigh, and one in which either side has no d takes no part. null when no stretch does.
+// The two sides' figures pooled over the stretches: `sums` holds one `{ cell, base }` of `{ v, d, w }` per stretch.
+// A stretch is weighted by w_cell·w_base/(w_cell + w_base), what the thinner side lets it weigh, one in which
+// either side has no w taking no part, and a side's figure is its v per w over its d per w, each averaged with
+// those weights: with w the d, the average of the stretches' v/d. A side's v and d of a stretch are scaled by
+// its weight over its w, taken relative to the first stretch's, so that with one stretch the figure is v/d
+// exactly. null when no stretch takes part, or when a side has no d in those that do.
 function pool(sums) {
-  const weights = sums.map(({ cell, base }) => (cell.d > 0 && base.d > 0 ? (cell.d * base.d) / (cell.d + base.d) : 0));
-  const total = weights.reduce((a, w) => a + w, 0);
-  if (total === 0) return null;
-  let cell = 0, base = 0;
-  sums.forEach((s, k) => {
-    if (weights[k] === 0) return;
-    cell += (weights[k] / total) * (s.cell.v / s.cell.d);
-    base += (weights[k] / total) * (s.base.v / s.base.d);
-  });
-  return { cell, base };
+  const weights = sums.map(({ cell, base }) => (cell.w > 0 && base.w > 0 ? (cell.w * base.w) / (cell.w + base.w) : 0));
+  const figure = (side) => {
+    let v = 0, d = 0, first = null;
+    sums.forEach((s, k) => {
+      if (weights[k] === 0) return;
+      const scale = weights[k] / s[side].w;
+      first ??= scale;
+      v += (scale / first) * s[side].v;
+      d += (scale / first) * s[side].d;
+    });
+    return d > 0 ? v / d : null;
+  };
+  const [cell, base] = [figure("cell"), figure("base")];
+  return cell === null || base === null ? null : { cell, base };
 }
 
 // The bootstrap 95% range of (cell − base), its ends rounded to two places, over the stretches in which both
 // sides have units. Each stretch's units are resampled among themselves and the stretches pooled as `pool` pools
 // them, so a shift in a stretch that hits both sides cancels in every resample. A unit is one counted Pull,
-// `bootUnit`'s shape `{ value, per, stretch }`; units with no stretch are in one together. null when no stretch
-// is shared, or when under half the resamples have a figure on both sides.
+// `bootUnit`'s shape `{ value, per, weigh, stretch }`; units with no stretch are in one together. null when no
+// stretch is shared, or when under half the resamples have a figure on both sides.
 export function bootstrapDiffCI(cellUnits, baseUnits, { iterations = 2000, seed = 1 } = {}) {
   const shared = sharedStretches(cellUnits, baseUnits);
   if (shared.length === 0) return null;
   const rand = mulberry32(seed);
   const resample = (units) => {
-    let v = 0, d = 0;
+    let v = 0, d = 0, w = 0;
     for (let i = 0; i < units.length; i++) {
       const x = units[Math.floor(rand() * units.length)];
-      v += x.value; d += x.per;
+      v += x.value; d += x.per; w += x.weigh;
     }
-    return { v, d };
+    return { v, d, w };
   };
   const diffs = [];
   for (let i = 0; i < iterations; i++) {
@@ -254,10 +268,12 @@ function reachesMargin(shared) {
  * Two cells' newest-generation counted Pulls compared over the stretches in which both were drawn, the one
  * comparison the fit's rows, its floor and the cost guard make. Within each shared stretch the two cells are
  * compared, and the stretches are pooled by `pool`, so a shift that hits both cells in a stretch cancels and
- * every Pull of a shared stretch is kept. A cell's Pulls in a stretch the other has none in take no part.
+ * every Pull of a shared stretch is kept, its spend and work time in the $ and minutes per merged PR even where
+ * its side merged nothing in that stretch. A cell's Pulls in a stretch the other has none in take no part.
  * Returns `{ stretches, cell, base, underFloor, range }`: `stretches`, how many were shared; `cell` and `base`,
  * each side's counts over the shared stretches (`n`, `merged`, `claims`, `failed`) beside its figures pooled
- * over them (`usd_per_merged`, `minutes_per_merged`, `fail_rate`, null where no stretch can carry one);
+ * over them (`usd_per_merged`, `minutes_per_merged`, `fail_rate`, null where a side has no merged PR or no
+ * claim to carry one);
  * `underFloor`, whether the cell's fail rate is TRIP_POINTS or more points above the base's, pooled; and
  * `range(measure)`, the bootstrap range of (cell − base) for `measure`, one of `usd`, `minutes` (per merged
  * PR) and `fail` (points), null where there is none. With one shared stretch these are the Pulls' own figures,

@@ -2,6 +2,10 @@
 // Derivation script for issue #4169: how often does a split pass by chance when the Fit
 // re-judges it at every run, and how long does a real one take to be found?
 //
+// Run it in a checkout of e810699f, the commit split-looks.md was measured at:
+// it imports `underFloor` from pull-attribution.mjs and `ruleStratum` from
+// ticket-router.mjs, which later commits removed.
+//
 // It re-uses split-gate-derive.mjs (#4160, branch research/split-gate): the corpus loading through the
 // Router's own modules (plugin/scripts/: `attribute`, `generations`, `tally`, `underFloor`, `MIN_N`), the
 // resampling, the decoy design, the candidate cuts, the gain engine, G1 (shuffled null) and G2 (cross-fitted

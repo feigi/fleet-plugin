@@ -2947,6 +2947,28 @@ test("fit: adding the same shift to every cell's Pulls within each week, a diffe
   assert.deepEqual([after.rows.cost["*"], after.rows.speed["*"]], ["task-high", "task-high"]);
 });
 
+test("fit: MIN_N counts the base's merged PRs of the weeks it shares with a candidate too: a base with enough of its own but too few there leaves the candidate too-few", () => {
+  const next = fitWeeks([
+    { cell: "slow-high", date: MON1, n: 25, usd: 10 },
+    { cell: "slow-high", date: MON2, n: 10, usd: 10 },
+    { cell: "smol-high", date: MON2, n: 25, usd: 2 },
+  ]);
+  assert.equal(next.estimates["*"]["slow-high"].merged, 35, "35 merged PRs of its own");
+  assert.deepEqual(next.reasons.cost["*"].cells["smol-high"], TOO_FEW, "10 of them in the week smol-high was drawn");
+  assert.deepEqual(next.rows.cost, { "*": "slow-high" });
+});
+
+test("fit: the ADOPT_RATIO test is a ratio, so the one verdict a shift can move: $5 more a PR on both cells takes a candidate from qualifying to too-dear, its range unmoved", () => {
+  const specs = (shift) => [
+    { cell: "slow-high", date: MON1, n: 25, usd: 10 + shift, fails: 5 },
+    { cell: "task-high", date: MON1, n: 25, usd: 7 + shift, fails: 5 },
+  ];
+  const [before, after] = [fitWeeks(specs(0)), fitWeeks(specs(5))];
+  assert.deepEqual(before.reasons.cost["*"].cells["task-high"], { verdict: "qualifies", under_floor: false, bar: 0.35, range: [-3, -3] }, "$7 is 0.7 of $10");
+  assert.deepEqual(after.reasons.cost["*"].cells["task-high"], { verdict: "too-dear", under_floor: false, bar: 0.35, range: [-3, -3] }, "$12 is 0.8 of $15, past 0.75, on the same $3 gap");
+  assert.deepEqual([before.rows.cost["*"], after.rows.cost["*"]], ["task-high", "slow-high"]);
+});
+
 test("fit: the cost the row weighs is the matched one: a cell cheaper than the base where both ran is adopted, though the base's whole run is cheaper than it", () => {
   // The base ran at $10 where smol-high did and at $1 in the week after, so its whole run reads $3.65 against smol-high's $6.
   const next = fitWeeks([

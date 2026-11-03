@@ -70,9 +70,11 @@
 // STRETCHES) in which both were drawn, each stretch compared on its own and
 // the stretches pooled, so a shift that hits every cell at once cancels, and
 // the baseline's other weeks, in which the cell never ran, move no verdict.
-// MIN_N counts each side's merged PRs in those stretches. A cell with MIN_N
-// merged PRs of its own that is short of them there, or shares no stretch
-// with the baseline, is not judged and never trips: its line says
+// The matched $ per merged PR counts a stretch's spend even where a side
+// merged nothing in it, so a cell that abandons work carries that spend there
+// too. MIN_N counts each side's merged PRs in those stretches. A cell with
+// MIN_N merged PRs of its own that is short of them there, or shares no
+// stretch with the baseline, is not judged and never trips: its line says
 // `unmatched`, and the report's `unmatched` lists it.
 //
 // THE GUARD FILE keeps each cell's whole entry as the report computed it —
@@ -86,8 +88,9 @@
 // list. `no_ruling_prs` and `pending_prs` name the PRs behind the last two,
 // ascending, as the report's top-level `pending` list does: a `no_ruling`
 // Pull contributes the implementer PRs that make it one. Beside `min_n` it
-// records `trip_points`, the floor's margin, and
-// `tsv_blobs`: the git blob id of each TSV it read, by the path it read it at.
+// records `trip_points`, the floor's margin, `unmatched`, the report's list of
+// the cells not judged, and `tsv_blobs`: the git blob id of each TSV it read,
+// by the path it read it at.
 
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -174,10 +177,11 @@ const judged = (m) => m.cell.merged >= MIN_N && m.base.merged >= MIN_N;
 // the baseline's, in integer counts, or its $ per merged PR at least the baseline's. The $ leg takes the unrounded
 // figures: the cent-rounded ones are for display, and a trip is sticky, so a cell cheaper by under half a cent
 // must not trip on rounding alone. A cell that shares no stretch with the baseline, or has under MIN_N merged PRs
-// on either side in those it shares, is not judged and does not trip.
+// on either side in those it shares, is not judged and does not trip. `tripsOn` holds the rule on a comparison,
+// `trips` on two cells' Pulls.
+const tripsOn = (m) => judged(m) && (m.underFloor || (m.cell.usd_per_merged !== null && m.cell.usd_per_merged >= m.base.usd_per_merged));
 export function trips(cell, base) {
-  const m = compareCells(cell, base);
-  return judged(m) && (m.underFloor || (m.cell.usd_per_merged !== null && m.cell.usd_per_merged >= m.base.usd_per_merged));
+  return tripsOn(compareCells(cell, base));
 }
 
 export function computeReport({ members, tiers, features, prs, routerTable = null, pricing = null, windowStart = WINDOW_START }) {
@@ -231,15 +235,17 @@ export function computeReport({ members, tiers, features, prs, routerTable = nul
   // The guard, over each cell's newest generation alone.
   const b = figures.find((f) => f.cell === BASELINE_CELL) ?? { generation: null, n_merged: 0, mean_usd: null, fail_rate: null };
   const baseline = { cell: BASELINE_CELL, generation: b.generation, n: b.n_merged, mean_usd: b.mean_usd, fail_rate: b.fail_rate };
-  // Each cell is held to the baseline over the stretches in which both were drawn (`compareCells`): `trips` is the
-  // rule, and `judged` whether MIN_N merged PRs a side there let it apply. A cell short of them is `unmatched`.
+  // Each cell is held to the baseline over the stretches in which both were drawn (`compareCells`): `judged` is
+  // whether MIN_N merged PRs a side there let the trip rule apply, and `tripsOn` the rule. A cell short of them is
+  // `unmatched`.
   const tripped = [];
   const unmatched = [];
   if (baseline.n >= MIN_N) {
     for (const t of tallies.values()) {
       if (t.cell === BASELINE_CELL || t.merged < MIN_N) continue;
-      if (trips(t.pulls, base.pulls)) tripped.push(t.cell);
-      else if (!judged(compareCells(t.pulls, base.pulls))) unmatched.push(t.cell);
+      const m = compareCells(t.pulls, base.pulls);
+      if (!judged(m)) unmatched.push(t.cell);
+      else if (tripsOn(m)) tripped.push(t.cell);
     }
   }
   const verdict = baseline.n < MIN_N ? "none" : tripped.length ? "tripped" : "ok";
@@ -363,6 +369,7 @@ export function guardFile(report, computedAt, tsvBlobs = {}) {
       return { cell, generation, n: f.n_merged, ...rest };
     }),
     tripped: report.tripped,
+    unmatched: report.unmatched,
     verdict: report.verdict,
     retire: report.retire,
     // The n the baseline and every judged cell need, and the margin the fail

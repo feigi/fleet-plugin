@@ -1057,7 +1057,7 @@ test("--guard: a cell that shares no week with the baseline is not judged and ne
   assert.deepEqual(r.guard.cells.find((c) => c.cell === "smol-high").usd_diff_ci95, null);
   assert.match(r.stdout, /^smol-high\t.*\tunmatched$/m);
   assert.deepEqual(JSON.parse(runCli(w, ["--json"]).stdout).unmatched, ["smol-high"]);
-  assert.equal("unmatched" in r.guard, false, "the guard file is the file it was");
+  assert.deepEqual(r.guard.unmatched, ["smol-high"], "the guard file carries the list, so its readers can tell a cell not judged from one judged ok");
 });
 
 test("--guard: MIN_N counts the merged PRs of the weeks both were drawn in, not a cell's whole run", () => {
@@ -1100,7 +1100,12 @@ test("trips() holds a cell to MIN_N merged PRs on each side in the stretches it 
   assert.equal(trips(pulls(20, 20, 1), pulls(19, 0, 10)), false, "a baseline of 19");
   assert.equal(trips(pulls(20, 20, 1, "2026-10-12/0"), base), false, "no stretch in common");
   assert.equal(trips(pulls(20, 20, 1), base), true);
-  // Merged only in different stretches, the two share none that carries a figure to compare: nothing trips.
+});
+
+test("trips() judges a cell whose merged PRs fall in other stretches than the baseline's on the $ each side spent: 100 times the baseline's cost trips", () => {
   const unmerged = (units) => units.map((u) => ({ ...u, merged: false, claims: 0, falseClaims: 0 }));
-  assert.equal(trips([...pulls(20, 20, 1, "a"), ...unmerged(pulls(5, 0, 1, "b"))], [...unmerged(pulls(5, 0, 10, "a")), ...pulls(20, 0, 10, "b")]), false);
+  // Each side merged in one week and abandoned one Pull in the other; the cell spent $100 a Pull, the baseline $1.
+  const base = [...unmerged(pulls(1, 0, 1, "a")), ...pulls(25, 0, 1, "b")];
+  assert.equal(trips([...pulls(25, 0, 100, "a"), ...unmerged(pulls(1, 0, 100, "b"))], base), true);
+  assert.equal(trips([...pulls(25, 0, 0.5, "a"), ...unmerged(pulls(1, 0, 0.5, "b"))], base), false, "half the baseline's cost does not");
 });

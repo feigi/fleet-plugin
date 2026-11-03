@@ -190,14 +190,19 @@ const FIELD_WORDS = [
 
 // Merged PRs against `min_n`. A Cell is judged only while the baseline has
 // `min_n` merged PRs itself: below that the guard holds nothing back, whatever a
-// Cell's own n.
+// Cell's own n. A Cell the guard lists `unmatched` has `min_n` of its own but is
+// short of them, on its side or the baseline's, in the stretches both were drawn
+// in, so it was not judged either.
 function mergedFigure(e, g, isBase) {
   const n = e.n;
   const min = g.min_n;
   const base = g.baseline.cell;
-  const judged = isBase || g.verdict !== "none";
+  const unmatched = !isBase && Array.isArray(g.unmatched) && g.unmatched.includes(e.cell);
+  const judged = isBase || (g.verdict !== "none" && !unmatched);
   const text = n >= min
-    ? judged ? `${n} ≥ ${min} ✓` : `${n} ≥ ${min}: not judged until ${base} has ${min}`
+    ? judged ? `${n} ≥ ${min} ✓`
+      : unmatched ? `${n} ≥ ${min}: not judged, under ${min} on a side in the stretches shared with ${base}`
+        : `${n} ≥ ${min}: not judged until ${base} has ${min}`
     : `${n} of ${min}: not judged`;
   const beside = [];
   const unchecked = [];

@@ -2,6 +2,10 @@
 // Derivation script for issue #4160: when would a self-splitting grouping first
 // split, and how often does it split by chance?
 //
+// Run it in a checkout of e810699f, the commit split-gate.md was measured at:
+// it imports `underFloor` from pull-attribution.mjs and `ruleStratum` from
+// ticket-router.mjs, which later commits removed.
+//
 // The corpus is loaded exactly as router-inputs-derive.mjs (#4150) loads it,
 // through the Router's own modules in plugin/scripts/: `attribute`,
 // `generations`, `tally` (pull-attribution.mjs) over docs/metrics/*.tsv, window
