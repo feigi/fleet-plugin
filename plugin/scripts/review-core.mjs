@@ -993,10 +993,11 @@ function standaloneScratchRoot() {
  * run root of this PR, it evicts every tree in that run root: the snapshot and
  * each specialist's and refuter's copy lose every path git ignores in them,
  * and nothing restores them. The run root's other files stay, review.json
- * among them. A failed eviction, and a reported run root it refuses to touch,
- * are logged; neither, nor a log that throws, changes what the review returns
- * or throws. A snapshot step that reported no run root evicts nothing and
- * logs nothing.
+ * among them. A failed eviction, a directory the eviction skips, and a
+ * reported run root it refuses to touch, are logged — a skip worded as a skip,
+ * not a failure; none of them, nor a log that throws, changes what the review
+ * returns or throws. A snapshot step that reported no run root evicts nothing
+ * and logs nothing.
  */
 export async function runReview(host, args) {
   const run = { partition: null, runRoot: null };
@@ -1041,6 +1042,7 @@ function evictRunRoot(log, { partition, runRoot }) {
     }
     const done = evictTrees(runRoot, { apply: true });
     for (const f of done.failed) say(`eviction at the end of the review failed in ${f.path}: ${f.error}`);
+    for (const s of done.skipped) say(`eviction at the end of the review skipped ${s.path}: ${s.reason}`);
   } catch (e) {
     say(`eviction at the end of the review failed in ${runRoot}: ${e?.message ?? e}`);
   }

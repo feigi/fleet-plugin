@@ -55,13 +55,20 @@ work in flight rather than every run's history.
    everything in the run root outside a tree stay, and nothing marks or
    restores an evicted tree. A directory that resolves to an enclosing
    repository is never stripped, no symlink is followed, and a repository
-   inside an ignored directory goes with that directory. The step prints
-   `SNAPSHOT_PRUNE_FAILED` when the receipt's `failed[]` is non-empty, and a
-   tree that failed is tried again by the next review's pass. `runReview`
+   inside an ignored directory goes with that directory. A directory that holds
+   a `.git` of its own which git will not answer for — rev-parse errors, times
+   out or exits non-zero, the realpath comparison throws, or git resolves it to
+   a different top level — and a directory the walk cannot list for EACCES or
+   EPERM, the run root included, is skipped: it is not evicted, the walk goes
+   on, and the receipt names it under `skipped[]` with its reason, never under
+   `failed[]`. The step prints `SNAPSHOT_PRUNE_FAILED` when the receipt's
+   `failed[]` is non-empty, so a skipped directory never prints it, and a tree
+   that failed is tried again by the next review's pass. `runReview`
    runs the same eviction on its own run root when it returns or throws after
    its snapshot step reported one — only a path of the shape
    `<scratch>/pr<N>/run-` and eight characters, a real directory — and logs a
-   failure there without changing what the review returns. Reading nothing
+   failure there, and one line per skipped directory worded as a skip, without
+   changing what the review returns. Reading nothing
    the cwd decides, `--pr` does not check that `--root` is this workspace's
    own.
 5. **One removal sequence.** Every removal restores owner rwx, clears darwin's
