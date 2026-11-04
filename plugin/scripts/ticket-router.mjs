@@ -65,6 +65,7 @@ import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
 import {
   AttributionError, FEATURE_COLUMNS, OPTIONAL_COLUMNS, TRIP_POINTS, attribute, compareCells, generations, parseFeatures, tally,
 } from "./pull-attribution.mjs";
+import { searchSplits, standing } from "./split-gate.mjs";
 import { RulingError, parseTierOutcomes } from "./tier-outcomes.mjs";
 import { LINE_REF, briefPaths, briefText } from "./ticket-text.mjs";
 import { catalogEntry, implementerCell, readOmpConfigValue, readOmpModelCatalog, resolveRole } from "./tier-roles.mjs";
@@ -666,20 +667,23 @@ const round4 = (x) => Math.round(x * 1e4) / 1e4;
 
 /**
  * The fit's Pulls: pull-attribution.mjs's units over the window — booked as
- * routed, each to its own row's cell and group, `stratum` the walk from a
- * features row to its group — restricted to rows the free classifier routed
- * plus exploration rows: a row a live B classifier routed is the A/B's test
- * set, not the fit's. The fit sees no PR state, so a Pull with
+ * routed, each to its own row's cell — restricted to rows the free classifier
+ * routed plus exploration rows: a row a live B classifier routed is the A/B's
+ * test set, not the fit's. The fit sees no PR state, so a Pull with
  * a Ruling is merged. A fit reads everything in the commit it is given: no row
  * is cut by date, because `--check` re-reads that same commit rather than
  * re-cutting the working tree's files. `order` ranks each cell's generations
  * over every Pull in the window, the restriction aside, so the fit names the
- * same newest generation the guard does.
+ * same newest generation the guard does. No unit is in a group yet: `book`
+ * puts each where a tree walks its features row.
  */
-function fitPulls({ features, members, verdicts, window, stratum }) {
-  const all = attribute({ features, members, tiers: verdicts, windowStart: window || null, stratum });
+function fitPulls({ features, members, verdicts, window }) {
+  const all = attribute({ features, members, tiers: verdicts, windowStart: window || null });
   return { units: all.filter((u) => u.pull.exploration_draw !== "" || u.pull.sizing_src === "rule"), order: generations(all) };
 }
+
+/** `units`, each booked to the group `table`'s tree walks its features row to (stratumOf). */
+const book = (units, table) => units.map((u) => ({ ...u, stratum: stratumOf(table, u.pull) }));
 
 // Per node of the tree, per cell, its newest generation's figures: `n` counted
 // Pulls, `merged`, $ per merged PR, minutes of work time per merged PR, false
@@ -881,8 +885,8 @@ function judgeSpeedRow(pulls, cells, tripped, costCell) {
 }
 
 /**
- * The re-fit table, over the tree `prior.splits` holds: the fit makes no split
- * and takes none away. `guard` is `{ tripped, n, window_start }` (readGuard's
+ * The re-fit table, over the tree `prior.splits` holds: this makes no split
+ * and takes none away (fitTree grows the tree). `guard` is `{ tripped, n, window_start }` (readGuard's
  * shape); `commit` is the sha of the commit the inputs were read from, or null
  * for the empty corpus before any fit. `rows` and `reasons` hold one set per
  * objective, and each a row or record for every node. `reasons.cost` holds
@@ -899,8 +903,13 @@ function judgeSpeedRow(pulls, cells, tripped, costCell) {
  */
 export function fitTable({ prior, features, members, verdicts, guard, commit = null }) {
   const window = guard.window_start ?? prior.window_start ?? null;
+  return tableOver({ prior, ...fitPulls({ features, members, verdicts, window }), guard, commit, window });
+}
+
+// The table over the tree `prior.splits` holds, from the fit's Pulls (fitPulls') booked to its groups.
+function tableOver({ prior, units: unbooked, order, guard, commit, window }) {
   const nodes = treeNodes(prior.splits);
-  const { units, order } = fitPulls({ features, members, verdicts, window, stratum: (row) => stratumOf(prior, row) });
+  const units = book(unbooked, prior);
   const { estimates, pulls } = estimate(units, order, nodes);
   const tripped = new Set(guard.tripped);
 
@@ -932,6 +941,105 @@ export function fitTable({ prior, features, members, verdicts, guard, commit = n
     reasons,
     guard: { tripped: [...tripped].sort(), n: Object.fromEntries(Object.keys(guard.n).sort().map((c) => [c, guard.n[c]])) },
   };
+}
+
+// ---------------------------------------------------------------------------
+// the split gate — which tree the fit grows
+// ---------------------------------------------------------------------------
+
+// The inputs the split search reads, in the order it searches them, and how each is cut: a count at its percentiles,
+// `kind` on each of its values, `parent` on whether the ticket names one. They are the inputs a split may read.
+const SEARCHED = Object.freeze([
+  ...Object.keys(INPUTS).filter((name) => INPUTS[name] === "number" && name !== "parent").map((name) => ({ name, cuts: "percentiles" })),
+  { name: "kind", cuts: "values", values: [...KINDS] },
+  { name: "parent", cuts: "presence" },
+]);
+
+const PROBABILITY = /^(?:1|([1-9][0-9]*)\/([1-9][0-9]*))$/;
+
+/**
+ * The probability a features row's Cell was assigned with, or null where the row records none, as one written before
+ * the column existed does: it is left out of the gate, never read as certain. Throws `AttributionError` on a value that
+ * is no probability.
+ */
+function probabilityOf(row) {
+  const text = row.assignment_prob ?? "";
+  if (text === "") return null;
+  const m = PROBABILITY.exec(text);
+  const p = m === null ? NaN : m[1] === undefined ? 1 : Number(m[1]) / Number(m[2]);
+  if (!(p > 0 && p <= 1)) throw new AttributionError(`ticket #${row.ticket}: a ticket-features row's assignment_prob is '${text}', expected blank or a probability`);
+  return p;
+}
+
+// A seed that is a function of which Pulls were scored: a Fit reproduces from its records, and draws other shuffles once they grow.
+function seedOf(ids) {
+  let h = 2166136261;
+  for (const id of ids) {
+    for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619);
+    h = Math.imul(h ^ 0xff, 16777619);
+  }
+  return h >>> 0;
+}
+
+/** The tree a standing split makes: its first cut at the root, its second, if it has one, at each child of the root. */
+function treeOf(cuts) {
+  const splits = { "*": { ...cuts[0] } };
+  if (cuts.length > 1) for (const node of childrenOf("*", cuts[0])) splits[node] = { ...cuts[1] };
+  return splits;
+}
+
+/**
+ * The tree the fit grows, and what the gate found. The group searched is every counted Pull of the table's Cells the
+ * guard has not tripped, that records the probability its Cell was assigned with (the rest are `left_out`): the gate
+ * weighs each Pull by it. `previous` is the `gate` record of the last Fit that computed, or null. The tree is the root
+ * and, when the best split passes both tests and passed on the same input or inputs at the last Fit too, that split;
+ * the starting table's own tree is not read. `gate.passed` is what the next Fit reads.
+ */
+function growTree({ prior, units, order, tripped, previous }) {
+  const cells = prior.cells.includes(POLICY_CELL) ? [POLICY_CELL, ...prior.cells.filter((c) => c !== POLICY_CELL && !tripped.has(c))] : [];
+  const pulls = [];
+  let leftOut = 0;
+  for (const { pulls: counted } of tally(units, order).filter((t) => cells.includes(t.cell))) {
+    for (const u of counted) {
+      const prob = probabilityOf(u.pull);
+      if (prob === null) {
+        leftOut++;
+        continue;
+      }
+      pulls.push({
+        cell: u.cell, usd: u.spend, merged: u.merged ? 1 : 0, claims: u.claims, failed: u.falseClaims, prob,
+        inputs: Object.fromEntries(SEARCHED.map(({ name }) => [name, inputOf(name, u.pull)])), id: `${u.pull.session}\0${u.pull.agent}`,
+      });
+    }
+  }
+  const found = searchSplits({ pulls, cells, inputs: SEARCHED, minN: MIN_N, seed: seedOf(pulls.map((p) => p.id)) });
+  const kept = Array.isArray(previous?.passed) ? previous.passed : [];
+  const { passed, stands } = standing({ best: found.best, previous: kept });
+  const best = found.best;
+  const gate = {
+    scored: found.scored,
+    left_out: leftOut,
+    best: best === null ? null : {
+      inputs: best.inputs, cuts: best.cuts, gain: round4(best.gain), exceeded: best.exceeded, passes_null: best.passesNull,
+      lower_bound: round4(best.lowerBound), passes_bound: best.passesBound,
+    },
+    passed,
+  };
+  return { gate, splits: stands.length > 0 ? treeOf(best.cuts) : {} };
+}
+
+/**
+ * The Fit: the table fitted over the tree the split gate grows, and the gate's record. `previous` is the `gate` record
+ * of the last Fit that computed, or null where there is none; the rest is fitTable's. A split stands in the table
+ * once it has passed the gate at two consecutive Fits on the same input or inputs, and is gone from it at the first Fit
+ * it fails; that Fit's `gate.passed` is the whole of what the next one reads of this.
+ * @returns {{ table: object, gate: { scored: number, left_out: number, best: object|null, passed: string[] } }}
+ */
+export function fitTree({ prior, features, members, verdicts, guard, commit = null, previous = null }) {
+  const window = guard.window_start ?? prior.window_start ?? null;
+  const fitted = fitPulls({ features, members, verdicts, window });
+  const { gate, splits } = growTree({ prior, ...fitted, tripped: new Set(guard.tripped), previous });
+  return { table: tableOver({ prior: { ...prior, splits }, ...fitted, guard, commit, window }), gate };
 }
 
 // ---------------------------------------------------------------------------

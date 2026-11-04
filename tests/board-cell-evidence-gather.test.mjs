@@ -262,8 +262,8 @@ test("readFitFile: reads what metrics-refresh writes; a missing file is missing;
   const stateDir = join(dir, ".fleet");
   assert.deepEqual(readFitFile(stateDir), { status: "missing" });
   const written = writtenFit(dir);
-  // The tab reads every field but the guard the Fit used, which route does not read either, and the prior.
-  const { guard: _used, prior, ...read } = written;
+  // The tab reads every field but the guard the Fit used, which route does not read either, the prior and the split gate's record.
+  const { guard: _used, prior, gate: _gate, ...read } = written;
   assert.deepEqual(readFitFile(stateDir), { status: "ok", fit: read });
   writeFileSync(join(stateDir, "router-fit.json"), JSON.stringify({ ...written, prior: null }));
   assert.equal(readFitFile(stateDir).status, "ok", "a Fit with no prior is read: the tab never reads it");
@@ -287,7 +287,7 @@ test("readFitFile: a Fit route routes by is read, whatever the fields only the t
   const dir = tempDir("cell-evidence-fit-fields-");
   const stateDir = join(dir, ".fleet");
   const written = writtenFit(dir);
-  const { guard: _used, prior: _prior, ...read } = written;
+  const { guard: _used, prior: _prior, gate: _gate, ...read } = written;
   const path = join(stateDir, "router-fit.json");
   for (const [text, fit] of [
     [JSON.stringify({ ...written, computed_at: 3 }), { ...read, computed_at: null }],

@@ -17,8 +17,9 @@ import { DAY_ONE_TABLE, dayOneScripts } from "./support/day-one-router-table.mjs
 import { SEARCH_STUB_SRC, fillerPrs, searchesOf } from "./support/gh-pr-search.mjs";
 import { WINDOW_START, MIN_N } from "../plugin/scripts/pr-cost.mjs";
 import { FEATURE_COLUMNS, parseFeatures } from "../plugin/scripts/pull-attribution.mjs";
-import { fitTable, validateTable } from "../plugin/scripts/ticket-router.mjs";
+import { fitTree, validateTable } from "../plugin/scripts/ticket-router.mjs";
 import { writeFit } from "../plugin/scripts/metrics-refresh.mjs";
+import { corpus as pullsOf, flip } from "./support/gate-corpus.mjs";
 import { refitFailure } from "../plugin/scripts/compute-cell-evidence.mjs";
 
 // A copy of the scripts holding the day-one table, so the installed table the run reads as its prior does not move with a re-fit.
@@ -319,9 +320,9 @@ const INSTALLED_VERSION = JSON.parse(readFileSync(new URL("../plugin/package.jso
 // The run's route call against the fixture workspace, from the same scripts directory: no `--table`, so it routes by
 // the Fit beside the guard, else by the starting table. `table`, when given, is passed as `--table` instead.
 const ROUTER = join(dirname(SCRIPT), "ticket-router.mjs");
-function routeIn(f, table = null) {
+function routeIn(f, table = null, labels = ["bug"]) {
   const issue = join(f.root, "issue.json");
-  writeFileSync(issue, JSON.stringify({ title: "t", body: "short brief\n- [ ] one", comments: [], labels: [{ name: "bug" }], createdAt: "2026-10-01T00:00:00Z" }));
+  writeFileSync(issue, JSON.stringify({ title: "t", body: "short brief\n- [ ] one", comments: [], labels: labels.map((name) => ({ name })), createdAt: "2026-10-01T00:00:00Z" }));
   const tableArgs = [];
   if (table !== null) {
     const path = join(f.root, "routed-table.json");
@@ -350,7 +351,7 @@ test("a phase 0 over fixture records writes router-fit.json beside the fresh gua
   assert.equal(r.status, 0, r.stderr);
   const guard = JSON.parse(readFileSync(join(f.repo, GUARD), "utf8"));
   const fit = JSON.parse(readFileSync(join(f.repo, FIT), "utf8"));
-  assert.deepEqual(Object.keys(fit), ["computed_at", "guard_computed_at", "guard", "tsv_blobs", "prior", "table"]);
+  assert.deepEqual(Object.keys(fit), ["computed_at", "guard_computed_at", "guard", "tsv_blobs", "prior", "table", "gate"]);
   assert.ok(Date.parse(fit.computed_at) >= started - 1000, fit.computed_at);
   assert.equal(fit.guard_computed_at, guard.computed_at, "fitted beside the guard this run wrote");
   assert.deepEqual(fit.guard, {
@@ -492,14 +493,83 @@ test("the recorded blob ids, guard and prior recompute the same Fit once the row
     assert.equal(fit.tsv_blobs[path], git(f.repo, ["rev-parse", `HEAD:${path}`]), `${path}: the blob the Fit read is the one on the commit`);
     return parse(execFileSync("git", ["-C", f.repo, "cat-file", "blob", fit.tsv_blobs[path]], { env: ENV, encoding: "utf8" }));
   };
-  const again = fitTable({
-    prior: fit.prior, guard: fit.guard, commit: null,
+  const again = fitTree({
+    prior: fit.prior, guard: fit.guard, commit: null, previous: null,
     members: at("docs/metrics/member-outcomes.tsv", parseMemberTsv),
     verdicts: at("docs/metrics/tier-outcomes.tsv", parseTierOutcomes),
     features: at(FEATURES, parseFeatures),
   });
   assert.equal(fit.table.n_rows, 3);
-  assert.deepEqual(again, fit.table);
+  assert.deepEqual(again, { table: fit.table, gate: fit.gate });
+});
+
+// A corpus whose `kind` splits the Cells' prices: task-high $1 on an enhancement and $14 on a bug, slow-high $10 on both. Pooled
+// task-high is $7.50, so the root routes task-high, the bugs go back to slow-high, and the other kinds stay on task-high.
+const KIND_FLIP = () => pullsOf(flip({ input: "kind", sides: ["enhancement", "bug"], low: [10, 1], high: [10, 14] }));
+const phase0 = (f) => {
+  const r = f.run();
+  assert.equal(r.status, 0, r.stderr);
+  return r;
+};
+const fitFile = (f) => JSON.parse(readFileSync(join(f.repo, FIT), "utf8"));
+// The tmp file the Fit is renamed from, made a directory so that writing it fails.
+const blockFit = (f) => mkdirSync(join(f.repo, `${FIT}.tmp`), { recursive: true });
+const unblockFit = (f) => rmSync(join(f.repo, `${FIT}.tmp`), { recursive: true });
+
+test("a split that passes the gate at one phase 0 stands at the next, read from the Fit file the next one replaces, and the group's row routes its tickets", () => {
+  const f = fixture({ rows: KIND_FLIP() });
+  phase0(f);
+  const first = fitFile(f);
+  assert.deepEqual([first.table.splits, first.gate.passed], [{}, ["kind"]], "a first pass is kept in the file and stands nowhere");
+  assert.deepEqual(first.gate.best.cuts, [{ input: "kind", cut: "bug" }]);
+  assert.deepEqual([first.gate.scored, first.gate.left_out], [160, 0]);
+  phase0(f);
+  const second = fitFile(f);
+  assert.deepEqual(second.table.splits, { "*": { input: "kind", cut: "bug" } });
+  assert.deepEqual(second.table.rows.cost, { "*": "task-high", "kind=bug": "slow-high", "kind!=bug": "task-high" });
+  assert.deepEqual(second.gate.passed, ["kind"], "and its next pass is read in turn");
+  assert.equal(validateTable(second.table) instanceof Error, false);
+  const where = (line) => /POLICY=(\S+) .* STRATUM=(\S+) /.exec(line).slice(1);
+  assert.deepEqual(where(routeIn(f, null, ["bug"])), ["slow-high", "kind=bug"]);
+  assert.deepEqual(where(routeIn(f, null, ["enhancement"])), ["task-high", "kind!=bug"]);
+  // A ticket with no kind label lacks the input the split reads, so it follows the node's own row: the root's.
+  assert.deepEqual(where(routeIn(f, null, [])), ["task-high", "*"]);
+  assert.deepEqual(where(routeIn(f, null, ["needs-triage"])), ["task-high", "*"]);
+});
+
+test("a Fit that failed is no look at the gate: it neither advances the count nor resets it", () => {
+  const f = fixture({ rows: KIND_FLIP() });
+  // A failure before any pass is no pass: the first Fit that computes passes once and does not stand.
+  blockFit(f);
+  assert.match(phase0(f).stdout, /metrics-refresh: fit: failed — /);
+  assert.equal(existsSync(join(f.repo, FIT)), false);
+  unblockFit(f);
+  phase0(f);
+  const once = readFileSync(join(f.repo, FIT), "utf8");
+  assert.deepEqual([fitFile(f).table.splits, fitFile(f).gate.passed], [{}, ["kind"]]);
+  // A failure after a pass leaves its file as it was, and that pass is still the one the next Fit reads.
+  blockFit(f);
+  assert.match(phase0(f).stdout, /metrics-refresh: fit: failed — /);
+  assert.equal(readFileSync(join(f.repo, FIT), "utf8"), once);
+  unblockFit(f);
+  phase0(f);
+  assert.deepEqual(fitFile(f).table.splits, { "*": { input: "kind", cut: "bug" } }, "the pass before the failure and the pass after it are consecutive Fits that computed");
+});
+
+test("a previous Fit that will not parse, or holds no gate, is no previous pass; one that cannot be read fails the Fit", () => {
+  const f = fixture({ rows: KIND_FLIP() });
+  phase0(f);
+  const { table } = fitFile(f);
+  for (const old of ["not json", "[]", "null", JSON.stringify({ table }), JSON.stringify({ table, gate: { passed: "kind" } })]) {
+    writeFileSync(join(f.repo, FIT), old);
+    phase0(f);
+    const fit = fitFile(f);
+    assert.deepEqual([fit.table.splits, fit.gate.passed], [{}, ["kind"]], old);
+  }
+  // A directory where the file belongs is a read the Fit cannot make: it fails, naming why, and leaves it.
+  rmSync(join(f.repo, FIT));
+  mkdirSync(join(f.repo, FIT));
+  assert.match(phase0(f).stdout, /metrics-refresh: fit: failed — EISDIR: illegal operation on a directory, read/, "the read of the file it replaces, not the write over it");
 });
 
 test("usage: only the declared flag and no positional, else exit 2", () => {
