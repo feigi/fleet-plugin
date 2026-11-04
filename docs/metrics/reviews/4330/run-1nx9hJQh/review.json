@@ -1,0 +1,224 @@
+{
+  "pr": 4330,
+  "head": "8989a3bccc1cce9cdc8674b091eb2bc0256f97f8",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I wrote nothing there; these pre-date my review and belong to another agent or the controller."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I did not edit these files. They were already modified in the controller checkout, I assume by another agent or the controller. I did not check which."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (neither was touched by this review; they are modified in the controller's checkout, probably by another process)"
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (not written by this review; my commands there were only `git remote get-url origin` and read-only `gh` calls)"
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (this pass wrote nothing there; every write went to simplify/copy, simplify/copy2 and their logs)"
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (I never wrote there; presumably other members' work)."
+    }
+  ],
+  "counts": {
+    "survived": 1,
+    "refuted": 0,
+    "unverified": 11,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4330/run-1nx9hJQh/snapshot-8989a3bc",
+  "survived": [
+    {
+      "severity": "critical",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 2217,
+      "claim": "The finisher gate's new Check 3 treats only ledger impl-N=PR#M tokens as the PR's own tickets. The phase-0 fold-in writes `PR#M · inherited (closes #N)` rows for a prior run's open ticket PR, and those rows carry no such token. Check 3 therefore refuses the finisher for that PR because its own ticket #N still carries in-progress. It then tells the controller to rewrite `Closes #N` as `Refs #N`, and following that advice makes the merge leave #N open and its claim stranded, which is the leak the ticket exists to stop.",
+      "evidence": "Appended to my copy's tests/ledger-dispatch.test.mjs: f.put(\"3606\", `PR#3606 · inherited (closes #3545) · review=member:review-pr-3606 · reviewed=${GATE_HEAD}:0/0/0:${GATE_RUN}`); labelled(f.bin,3606,[\"patch\"]); closes(f.bin,3606,[3545]); issueLabelled(f.bin,3545,[\"in-progress\"]); f.ok(\"dispatch\",\"3606\",\"finisher-pr-3606\"). Ran `node --test --test-name-pattern=PROBE tests/ledger-dispatch.test.mjs`, output: `✖ PROBE inherited ticket PR closing its own in-progress ticket … dispatch 3606 finisher-pr-3606: got exit 2  ledger: finisher-pr-3606: PR #3606 closes #3545, which another claim holds — rephrase it as \"Refs #3545\" — not dispatching finisher-pr-3606`. The row shape is the one phase0.mjs:548 writes (`PR#${pr.number} · inherited (${closes})`). Rotation after a dead run carries no impl token (phase-0.md:308-310). stranded.mjs leaves in-progress issues with an open PR to the fold-in (phase-0.md:587-588). next-ticket SKILL.md:193 says in-progress stays on the ticket until its PR merges. rulingOf (ledger.mjs:2015) builds `tickets` only from implementerClaims, and closingRefusals then calls claimedElsewhere(closed, tickets, …).",
+      "suggested_fix": "Also count as the PR's own the ticket N taken from its head branch when the head is a claim branch `implementer/<N>-impl-<N>[-x]`: read headRefName in the gate's prViewClosing call and add N to `own` before claimedElsewhere. Add a ledger-dispatch test for an inherited row whose PR closes its own in-progress ticket and is dispatched.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Reproduced in my own copy of the snapshot. The probe uses the phase0 inherited row shape `PR#3606 · inherited (closes #3545)`, with the PR closing #3545 and #3545 labelled in-progress. `env -u FORCE_COLOR node --test --test-name-pattern=PROBE tests/ledger-dispatch.test.mjs` ran 1 test and failed it: dispatch exit 2, `PR #3606 closes #3545, which another claim holds — rephrase it as \"Refs #3545\"`. As a control I changed the row to carry an `impl-3545=PR#3606` token. Check 3 then no longer fired, and the dispatch was refused later for a missing tier-outcomes ruling. So the token is what decides Check 3. I did not apply the Refs advice and observe the merge, so the claim's last step (the merge leaves #3545 open and stranded) rests on the message text and the cited docs. red: env -u FORCE_COLOR node --test --test-name-pattern=PROBE tests/ledger-dispatch.test.mjs → exit 1, fail 1 incl PROBE inherited; baseline: impl-token control → different refusal (no ruling), Check 3 not triggered. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I did not write in that directory; it was already modified."
+        },
+        {
+          "refuted": false,
+          "reason": "Reproduced in my own snapshot copy. I appended the claimed probe to tests/ledger-dispatch.test.mjs: an inherited row, PR closes #3545, #3545 labelled in-progress. `env -u FORCE_COLOR node --test --test-name-pattern=PROBE tests/ledger-dispatch.test.mjs` completed with tests 1, fail 1, cancelled 0. The failure was `dispatch 3606 finisher-pr-3606: got exit 2 ... PR #3606 closes #3545, which another claim holds — rephrase it as \"Refs #3545\"`. Code check: rulingOf builds tickets only from implementerClaims, and closingRefusals passes those tickets to claimedElsewhere, which treats #3545 as foreign. phase0.mjs:548 writes `PR#N · inherited (closes)` with no impl- token, and my grep of phase0.mjs found no other `inherited (` writer. I did not check whether anything else adds an impl token to those rows. Not handled elsewhere in the gate. I did not run a negative control: an impl-token row for the same PR, which would show the refusal is specific to the inherited shape. red: env -u FORCE_COLOR node --test --test-name-pattern=PROBE tests/ledger-dispatch.test.mjs → exit 1 (not read from the output; the failure shown is the exit-2 dispatch assertion), fail 1 incl PROBE inherited ticket PR closing its own in-progress ticket; baseline: not run (the probe is new, so no baseline exists). CWD-AUDIT: not run. `pwd` printed /Users/chris/dev/fleet-plugin and I never wrote there, but I did not run `git status` on it.",
+          "counter_evidence": ""
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 2943,
+      "claim": "The settle check calls issueLabels(n) once per occurrence. If closingIssuesReferences ever repeats a reference, the issue is read again and appears twice in the `in-progress: #7, #7` text. The finisher gate avoids the repeat read because it caches labels in a Map; settle does not.",
+      "evidence": "Not executed. Reasoned from the diff: claimedElsewhere's `others.filter((n) => labelsOf(n).includes(inProgress))` has no dedupe, and settle passes `issueLabels` directly. I did not check whether ownClosingIssues already dedupes.",
+      "suggested_fix": "Dedupe `others` in claimedElsewhere, e.g. `[...new Set(numbers)].filter(...)`.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 2210,
+      "claim": "The in-progress comparison is case-sensitive (`labelsOf(n).includes(inProgress)`), although the Label map treats role strings as the same when they differ only in case. A map spelling in-progress as 'In-Progress' lets an issue labelled 'in-progress' through, with no error and the check showing 'in-progress: none'.",
+      "evidence": "Probe B in my copy: the map set `in-progress` to 'In-Progress', PR #6 closed [#5, #7], and issue #7 had label 'in-progress'. The settle returned outcome PR#6 and refused nothing. The existing `labels.includes(ready)` in labelRefusal compares the same way, so this matches the existing convention. Whether gh returns repo-canonical label case, which would remove the gap, I did not test.",
+      "suggested_fix": "Compare `l.toLowerCase()` against `inProgress.toLowerCase()`, matching labelStringFaults's case-insensitive uniqueness rule, or state that exact case is required.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 2943,
+      "claim": "In `settle --from-report`, the new `issueLabels` reads run even after an earlier check has already failed. A failed check does not stop the later reads, because check() collects failures. A PR that is not OPEN, or that does not close #N, therefore dies as exit 2 ('could not read issue #M's labels') where it would have been exit 3 with the failing check named. The real fault (wrong PR) is reported as a gh read failure. This is loud rather than swallowed, and the 'nothing written' message is accurate.",
+      "evidence": "Probe A: state CLOSED, refs [#5, #7], no answer for issue 7. The settle exited 2 with 'could not read issue #7's labels … nothing written', and the CLOSED state was never reported. Probe A2: refs [#55, #7], PR does not close #5. Exit 2 naming #55's labels. The PR's own diff had to add `f.issue(55, {labels: []})` to the existing 'does not close ticket N' test to keep it at exit 3.",
+      "suggested_fix": "Skip the claimedElsewhere read when the OPEN or closes-#N checks have already failed, e.g. guard on `pr.state === \"OPEN\" && numbers.includes(live.number)`. Or accept the exit-2 precedence and say so.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 2156,
+      "claim": "I found no swallowed error, empty catch, or dereference moved inside an existing try in this diff. The only try/catch touched is `roleLabel`. Its body is the same `readLabelMap(...)[role]` call as before, generalised over the role, and it still re-throws anything that is not LabelMapUnreadable or FleetDirUnresolvable. Malformed gh answers (missing title, `labels` null, a non-array, or unnamed labels) all go through `die`, and the PR's own tests cover them. The Label map cannot hold `in-progress` as undefined: readLabelMap rejects a missing role via labelStringFaults. The `includes(inProgress)` check therefore cannot silently pass on an undefined string.",
+      "evidence": "Read ledger.mjs roleLabel and namedLabels. Read label-map.mjs readLabelMap and labelStringFaults (stringFault returns 'missing' for undefined, which becomes LabelMapUnreadable). The test-run log shows 8869 of 8869 pass, including the new 'could not look' cases for a failed read, a bad shape, and an absent map.",
+      "suggested_fix": "None.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "No discrimination gap found: every behaviour-changing mutant of the new claimedElsewhere logic was killed by named new tests. The one survivor (m2) is equivalent. The remoteHead helper and the issueRead title-type guard were not mutated, so they are unprobed rather than known-covered.",
+      "evidence": "red: ./agent-test tests/ledger-dispatch.test.mjs tests/ledger-settle-report.test.mjs → exit 1, fail 3 incl 'the in-progress string is the Label map's: a map spelling the role wip refuses wip on a closed ticket and lets in-progress through' (mutant m6); baseline: ./agent-test tests/ledger-dispatch.test.mjs tests/ledger-settle-report.test.mjs → exit 0, tests 221 pass 221 fail 0, that test pass",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/dispositions-check.test.mjs",
+      "line": 30,
+      "claim": "The stub comment (and the stub itself) still advertises `issue view <n> --json title`, but this diff moved the only caller (ledger.mjs issueRead) to `title,labels`, so no code path in the tree asks for `--json title` any more and the `title`-only branch is dead.",
+      "evidence": "grep -rnE 'json title\\b|\"--json\", \"title\"' plugin/scripts tests (excluding `title,`) found only the comment at dispositions-check.test.mjs:30 and the stub's `fields === \"title\"` branch at lines 56/66; plugin/scripts/ledger.mjs:2121 now calls `gh issue view ${n} --json title,labels`. The comment reads as if the three field sets are all still exercised.",
+      "suggested_fix": "Drop `--json title` from the comment and the `fields !== \"title\"` / `fields === \"title\"` branches, leaving `labels,state,title` and `title,labels`.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/skills/next-ticket/SKILL.md",
+      "line": 185,
+      "claim": "The added sentence 'A ticket closed by another claim's PR strands that claim: neither release nor reap removes it' is ambiguous about 'it' and was not checked against release-ticket.sh or reap.sh behaviour.",
+      "evidence": "Read release-ticket.sh header (lines 1-30): release only handles never-dispatched branches and branches whose PRs all read CLOSED, and reap.sh is named as handling merged tickets. I did not trace the stranded-claim path (closed issue plus in-progress label plus an unmerged claim branch) through either script, so the claim is unconfirmed.",
+      "suggested_fix": "Name what is stranded (the claim's label, worktree and branch), or cite the script behaviour.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body: 'the five cases the ticket names' in ledger-settle-report.test.mjs cannot be checked from the snapshot or diff. The diff adds 8 settle tests: another-claim refusal, multi-ticket naming, second-ticket-nobody-holds, wip map, failed/labels-less read, no map, own-ticket and replacement, and a url-less reference. The body's list (five, plus multi-ticket and no-map) accounts for fewer than that.",
+      "evidence": "Counted `test(\"impl-N=PR#M...` and related additions in the ledger-settle-report.test.mjs section of pr.diff; the ticket text is not in the snapshot. The tests the body names are all present.",
+      "suggested_fix": "No change required. List the tests by name if the count matters.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 2151,
+      "claim": "claimedElsewhere(numbers, own, labelsOf) states in a comment, not in the code, that labelsOf(n) must return a string array. The closingRefusals caller passes `(m) => labels.get(m)`, which returns undefined for a number missing from the Map, and .includes would then throw a TypeError.",
+      "evidence": "Read from the diff. closingRefusals sets labels for every n it pushes to `closed` and passes only `closed` to claimedElsewhere, so undefined is unreachable today. The other caller, issueLabels, goes through labelNames, which dies on anything but a named-label list. Nothing runs undefined through the invariant at runtime. The test run passed 8869/8869.",
+      "suggested_fix": "Optional. Have closingRefusals collect the labels in a Map and pass `labels.get(m) ?? []`, or pass the Map's own getter and assert, so that a missing number fails loudly instead of throwing a TypeError. No change is required.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 2202,
+      "claim": "In closingRefusals, the `closed` array is redundant state: prViewClosing's numbers come from ownClosingIssues, which deduplicates them through a Set in GitHub's order, so `closed` always holds exactly the keys of the new `labels` Map, in the same order.",
+      "evidence": "closing-refs.mjs:25-36 builds `numbers = new Set()` and returns `[...numbers]`. In simplify/copy2 I removed `const closed = []` and `closed.push(n)` and added `const closed = [...labels.keys()];` after the loop. Then ran `node --test --test-reporter=tap tests/ledger-dispatch.test.mjs`: exit=0, # tests 144, # pass 144, # fail 0, which includes the PR's new claimed-elsewhere, Ticketless and duplicate-reference tests.",
+      "suggested_fix": "Keep only the Map: `const labels = new Map(); for (const n of refs) { const issue = issueRead(n); if (issue.title.trim() === own) failures.push(...); else labels.set(n, issue.labels); } const closed = [...labels.keys()];` Then the claimedElsewhere loop and `return { refs: closed, failures }` stay as they are.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/dispositions-check.test.mjs",
+      "line": 53,
+      "claim": "Since this PR replaced ledger's issueTitle (`--json title`) with issueRead (`--json title,labels`), nothing sends `gh issue view <n> --json title` any more, so the GH_STUB's `fields !== \"title\"` acceptance and its `fields === \"title\" ? { title: issue.title } : …` branch are dead. The doc comment's `(or --json title, …)` is out of date too.",
+      "evidence": "A grep for `--json title` / `\"--json\", \"title\"` over plugin/ and tests/ found only title,body,comments…, labels,state,title (dispositions-check.mjs:775) and title,labels (ledger.mjs:2121). In simplify/copy I took `&& fields !== \"title\"` out of the guard and replaced the ternary with the full `{ labels, state, title }` answer. Then ran `node --test --test-reporter=tap tests/dispositions-check.test.mjs`: exit=0, # tests 142, # pass 142, # fail 0, and `grep -c 'unexpected call'` on the log printed 0.",
+      "suggested_fix": "Guard: `(fields !== \"labels,state,title\" && fields !== \"title,labels\")`. Answer: `process.stdout.write(JSON.stringify({ labels: issue.labels.map((name) => ({ name })), state: issue.state, title: issue.title }));`. Comment: `issue view <n> --json labels,state,title (or --json title,labels)`.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

@@ -1,0 +1,209 @@
+{
+  "pr": 4320,
+  "head": "fc884db404599b80f547a9dca0060f3675faa963",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I made no writes there, so these were already modified when I started."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I did not write to that checkout; my only commands there were `pwd` and this `git status`. The modified files were already present when I checked and are most likely from another member's run."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I wrote nothing there, so I cannot account for these two modified files."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. The mtimes are 2026-11-01 22:48 and 2026-11-03 14:21, both before this pass created its copy (14:49). In that directory this pass ran only `pwd` and `git status`."
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. The only commands I ran in that directory were `pwd` and this read-only `git status`; every write went to the scratch copy, so I did not make these changes, but I am still reporting them."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. I ran every command from my own copy and never wrote to that path, so these are not mine. Another agent or the controller most likely changed them."
+    }
+  ],
+  "counts": {
+    "survived": 1,
+    "refuted": 0,
+    "unverified": 10,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4320/run-v3fP81Ns/snapshot-fc884db4",
+  "survived": [
+    {
+      "severity": "important",
+      "file": ".github/workflows/ci.yml",
+      "line": 182,
+      "claim": "The PR does not meet three of #4245's acceptance criteria. CI still has its 'Router table check' step. `ticket-router.mjs --check` still exists. `--check` (fittedCommit, ticket-router.mjs:1090-1091) and CI (ci.yml:185) still read `fitted_commit`. The test-support header also still says \"CI's `Router table check` still re-fits it\", where the ticket asks it to say there is no CI table check. The PR justifies the narrowing with a 'maintainer's split ruling', but issue #4245 does not record that ruling anywhere.",
+      "evidence": "Grepped .github for `Router table|fitted_commit`. Hits: ci.yml:182 `- name: Router table check`, ci.yml:185 `fitted=$(node -p '...fitted_commit ?? \"\"')` and ci.yml:189 `node plugin/scripts/ticket-router.mjs --check …`. In the copy, `node plugin/scripts/ticket-router.mjs --check --table plugin/scripts/router-table.json --features docs/metrics/ticket-features.tsv --members docs/metrics/member-outcomes.tsv --verdicts docs/metrics/tier-outcomes.tsv` printed `matches a re-fit of 0 Pulls at no commit` and exited 0, so the mode is live. `sed -n 1,10p tests/support/day-one-router-table.mjs` shows \"CI's `Router table check` still re-fits it\". issue://4245 has one comment, the triage Agent Brief, and its ACs say 'CI has no router step' and 'Nothing in the repository reads `fitted_commit`'. pr://4320 says 'Refs #4245', and its 'What remains' section lists these items as a follow-up.",
+      "suggested_fix": "Either finish the slice: remove `--check` and its helpers (resolveCommit, showAt, gitBeside, SHA, fitTable's commit param), CI's Router table check step and the ciRouterCheck tests, then re-derive the Recipe. Or record the split ruling on #4245 and open the follow-up ticket before this merges, so #4245 does not look partly done while it stays open.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "In the snapshot, ci.yml:182 still has `- name: Router table check`. ci.yml:185 still reads `fitted_commit` and ci.yml:189 still runs `ticket-router.mjs --check`. Lines 1-10 of tests/support/day-one-router-table.mjs still say \"CI's `Router table check` still re-fits it, from no commit while `fitted_commit` is null\". That contradicts the #4245 acceptance criteria as the claim quotes them. I did not run anything and did not open ticket-router.mjs, so the 1090-1091 `fittedCommit` lines, the live `--check` run and the issue and PR text (including the \"split ruling\") are unchecked here. No test run was needed, so there is no red or baseline line. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. These files were already modified, and I only ran read-only commands there."
+        },
+        {
+          "refuted": false,
+          "reason": "Claim holds in the snapshot. Searched ci.yml in the snapshot and pr.diff for `Router table`/`fitted_commit`. ci.yml still has `Router table check` at line 182 and reads `fitted_commit` at line 185. The test-support header (tests/support/day-one-router-table.mjs lines 1-10) still says \"CI's `Router table check` still re-fits it\". pr-messages.md says the PR was \"Narrowed by the maintainer's split ruling\" because the Check step runs `--check`. That is a deliberate deferral, not handling elsewhere, so the ACs ('CI has no router step', 'Nothing reads fitted_commit') are unmet. I did not re-run `--check` or any tests, and I did not independently re-read issue #4245 for the ruling; I only saw the PR text citing it. CWD-AUDIT: not run (I only ran read-only grep/sed from /Users/chris/dev/fleet-plugin and wrote nothing)."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": ".omp/skills/run-team-local/hook.mjs",
+      "line": 101,
+      "claim": "The PR removes the hook's `--dry-run` flag outright, so passing it is now a usage error (exit 2). The ticket only asked to drop the re-fit's `would …` dry-run text. The removal goes slightly beyond the ticket, but the flag gated only the retired duty, and I found no caller that passes it.",
+      "evidence": "In the copy, `node .omp/skills/run-team-local/hook.mjs --dry-run --repo .` printed `run-team-local: unknown flag --dry-run — accepted: --repo, --agents, --model-roles, --catalog` and exited 2. A repo-wide grep (excluding docs/metrics/runs) for `hook\\.mjs.*--dry-run` found no invocations. AGENTS.md:43-45 runs the skill without flags.",
+      "suggested_fix": "Acceptable as is. If any operator scripts pass `--dry-run`, accept it as a no-op for one release, or mention the removal in the changelog.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": ".omp/skills/run-team-local/hook.mjs",
+      "line": 98,
+      "claim": "The PR adds no new swallowed errors, hidden fallbacks or catch mislabeling. It only deletes code. The hook's single remaining catch (duty failure, warn plus exitCode 1) is unchanged, and no new dereference moved into an existing try.",
+      "evidence": "The diff has no added catch blocks. The only added line containing `?.` or `??` is a test assertion. The removed routerFit try/catch/finally and ghJson catch are gone entirely. `node hook.mjs --dry-run` exits 2 with 'unknown flag --dry-run — accepted: --repo, --agents, --model-roles, --catalog'.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 942,
+      "claim": "Removed CLI modes and flags are rejected loudly rather than silently ignored.",
+      "evidence": "`ticket-router.mjs fit --table …` and `route fit` both print \"unexpected argument 'fit'\" and exit 2. `--check --table … --due` prints 'unknown flag --due' and exits 2. A valid `--check` on the committed table prints 'matches a re-fit of 0 Pulls at no commit' and exits 0. CI's 'Router table check' step (.github/workflows/ci.yml:189) still invokes `--check`, which is retained.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "claim": "Changing the --check mismatch detection to compare only the re-fit's keys (ignoring table-only extra keys) leaves every test in tests/ticket-router.test.mjs green, so the table-only-extra-key branch is not discriminated. This is unchanged code that the PR only moved, and may be unreachable if validateTable rejects unknown keys.",
+      "evidence": "mutant `Object.keys({ ...refit, ...table })` → `Object.keys(refit)`: ./agent-test tests/ticket-router.test.mjs → exit 0, tests 169, fail 0. Baseline: same command, tests 169, pass 169, fail 0. No killing red exists, so this is a surviving mutant and nothing more.",
+      "suggested_fix": "Optionally add a --check case where the table carries an extra top-level key that a re-fit would not produce, unless validateTable already makes it unreachable.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 3,
+      "claim": "The header still says the script serves 'dispatch and … the offline fit', but the `fit` mode is gone, so the wording could read as if a fit mode still exists.",
+      "evidence": "Snapshot lines 2-5: 'One script for dispatch and for the offline fit, because the walk from a ticket's inputs to its group is the one function that must never read differently between the two.' The modes now are `route` and `--check`; `fit` returns \"unexpected argument 'fit'\". fitTable is still exported and used by `--check` and by metrics-refresh in-process, so the claim is arguably still true. The wording is ambiguous.",
+      "suggested_fix": "Reword to 'for dispatch and for the fit that --check and metrics-refresh run in-process'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/board-cell-evidence-gather.test.mjs",
+      "line": 356,
+      "claim": "Comments in untouched cockpit tests say 'a re-fit moves the shipped one', which this PR makes false because no re-fit PR exists any more. The PR body discloses this and defers it.",
+      "evidence": "grep over tests/ found the phrase in board-cell-evidence-gather.test.mjs:356, cell-evidence-alerts.test.mjs, cockpit-tabs.test.mjs:832, compute-cell-evidence.test.mjs:511 and metrics-refresh.test.mjs:24. The PR body's 'Deliberately left' covers 'the cockpit and metrics-refresh tests'.",
+      "suggested_fix": "Reword those comments in the follow-up or in #4246.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The PR adds no type definitions or casts. All changed code is plain .mjs with no TypeScript or JSDoc types, so there is no cast or type-conformance issue to report. The PR is mostly deletion: the `fit` and `--due` modes, `mergedSince`, `FIT_EVERY_MERGED`, `cellCounts` and `rowLines` are removed. `--check` stays. The only new piece is a reset starting table in router-table.json.",
+      "evidence": "The grep of added diff lines for ` as `, @ts-, `: any`, @type and @typedef matched only a comment on line 318 and one on line 1264 of pr.diff, both prose. A snapshot grep for the removed identifiers found no live code references. The only matches were an unrelated local `rowLines` in fleet-tick.mjs, plus docs and research files, which still describe `fit --due` historically.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": ".omp/skills/run-team-local/hook.mjs",
+      "line": 112,
+      "claim": "After the re-fit duty is removed, main() still builds a one-entry `duties` array and loops over it with `[name, duty]` destructuring and a `return`. That is indirection left over from having two duties, and calling driftNotice directly in a try/catch does the same thing.",
+      "evidence": "Snapshot hook.mjs:112-123 holds `const duties = [[\"drift notice\", () => driftNotice(repo, agentsDir, F)]]; for (const [name, duty] of duties) { try { duty(); } catch (e) { warn(`${name} failed: ${e.message}`); process.exitCode = 1; return; } }`. In my copy I replaced it with the direct form below and ran `node --test tests/run-team-local-hook.test.mjs` (with ticket-router.test.mjs): 175/175 pass, exit 0. That includes \"duties: a duty that fails exits 1 naming it\", which checks stderr `/^run-team-local: drift notice failed: malformed row/m`.",
+      "suggested_fix": "try { driftNotice(repo, agentsDir, F); } catch (e) { warn(`drift notice failed: ${e.message}`); process.exitCode = 1; }  (the trailing `return` was there only to skip later duties, so it can go)",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 1080,
+      "claim": "With the `fit` and `--due` modes removed, the four closures `corpusAt` (1080), `commitOf` (1086), `fittedCommit` (1090) and `joined` (1103) each have exactly one call site, all in the straight-line --check tail. They were shared helpers when three modes used them; now they are one-use wrappers, and `commitOf` is only ever called from inside `fittedCommit`.",
+      "evidence": "In the copy, `grep -cF` gives call-site counts commitOf( 1, fittedCommit( 1, joined( 1, corpusAt( 1. The definitions use `const x = (` so they are not counted. I inlined all four in the copy, keeping every die() message and its order. `node --test tests/ticket-router.test.mjs tests/run-team-local-hook.test.mjs` gave 175/175 pass. That covers the --check tests for a non-sha fitted_commit, a missing commit with the `git fetch --depth=1 origin <sha>` message, a git failure, unreadable inputs and join errors at exit 2. The prose/import-shape tests ambient-git-vars-mjs-prose, pull-attribution and metrics-refresh gave 125/125 pass.",
+      "suggested_fix": "After `for (const flag of [...]) need(flag);`: `const fitted = table.fitted_commit; if (fitted !== null) { if (typeof fitted !== \"string\" || !SHA.test(fitted)) die(...); let held; try { held = resolveCommit(need(\"features\"), fitted); } catch (e) { die(`cannot resolve ...`); } if (held === null) die(`... was fitted from commit ...`); } const { features, members, verdicts } = fitted === null ? { features: [], members: [], verdicts: [] } : { features: fileAt(fitted, \"features\", parseFeatures), members: fileAt(fitted, \"members\", parseMemberTsv), verdicts: fileAt(fitted, \"verdicts\", parseTierOutcomes) }; let refit; try { refit = fitTable({...}); } catch (e) { if (!(e instanceof RulingError || e instanceof AttributionError)) throw e; die(`cannot join ...`); }`. At minimum, fold `commitOf` into `fittedCommit`, its only caller.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/ticket-router.test.mjs",
+      "line": 1891,
+      "claim": "The PR cut the `fit` and `fit --due` entries out of two `for (const args of [...])` loops and left each loop running over a single `[\"--check\", ...p.fitArgs]` entry (lines 1891 and 1909). Each is now a one-iteration loop whose only extra use of `args` is in the assertion message.",
+      "evidence": "Snapshot tests/ticket-router.test.mjs:1891 and :1909 both read `for (const args of [[\"--check\", ...p.fitArgs]]) { const r = cli(args); assert.equal(r.status, 2, `${args.join(\" \")}: ${r.stderr}`); ... }`. The diff shows the old headers were \"fit, fit --due and --check refuse ...\". In my copy I replaced both loops with straight-line code and the ticket-router test file passed (part of 175/175, exit 0).",
+      "suggested_fix": "const r = cli([\"--check\", ...p.fitArgs]); assert.equal(r.status, 2, r.stderr); assert.match(r.stderr, /.../); assert.equal(r.stdout, \"\");  (with the loop and its closing brace removed, in both tests)",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

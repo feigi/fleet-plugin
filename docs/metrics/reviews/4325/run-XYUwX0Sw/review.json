@@ -1,0 +1,101 @@
+{
+  "pr": 4325,
+  "head": "25c80c6db35c859ee59a037982b22ec05c6099dd",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv' (not written by me; I only ran read-only commands and wrote no files, so these are pre-existing modifications from another agent/controller activity)."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv` (not written by this pass; every write here went under correctness/)"
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 5,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4325/run-XYUwX0Sw/snapshot-25c80c6d",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "docs/specs/2026-10-27-cockpit-tabs-design.md",
+      "line": 209,
+      "claim": "The § 5.1 note (lines 207-211) and the § 5.2 note (lines 245-249) say that with no Fit read the view's source line reads 'starting table · no Fit yet: the next phase 0 writes one'. That holds only for a missing Fit. An unreadable or invalid Fit, which is also a case where no Fit is read, reads 'starting table · the Fit is not read: <why>'.",
+      "evidence": "Ran `node probe-source.mjs` in correctness/, calling computeCellEvidence from the copy with the starting table and guard null. It printed: {\"status\":\"missing\"} => \"starting table · no Fit yet: the next phase 0 writes one\"; {\"status\":\"unreadable\",\"why\":\"not JSON\"} => \"starting table · the Fit is not read: not JSON\". The code is compute-cell-evidence.mjs:459, `fit?.status === \"unreadable\" ? `the Fit is not read: ${fit.why}` : \"no Fit yet: …\"`.",
+      "suggested_fix": "In both notes, name the second wording: \"no Fit yet: the next phase 0 writes one\" when there is no Fit file, and \"the Fit is not read: <why>\" when the file cannot be read or is invalid.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/components/tier-routing.md",
+      "line": 74,
+      "claim": "The tier-routing note says the Fit is 'recomputed at every phase 0', and the router spec R5 cadence note (line 774) says metrics-refresh 'computes the Fit at every phase 0'. In the code the Fit runs only after the guard duty wrote a guard; otherwise phase 0 prints 'fit: skipped, no guard written' and leaves the old file.",
+      "evidence": "Read metrics-refresh.mjs:335-336 (`if (written === null) return say(`fit: skipped, no guard written — ${FIT} left as it is`)`), :360-371 (`written` is set only when the costGuard duty returns, and `fit(repo, written)` is called only without --no-fit), and the header at :64 ('After the cost guard wrote a guard, and only then'). This was read, not executed.",
+      "suggested_fix": "Change 'recomputed at every phase 0' to 'recomputed at each phase 0 that writes a cost guard', or similar wording, in both notes.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/specs/2026-09-28-model-effort-router-design.md",
+      "line": 861,
+      "claim": "The R6 #3895 paragraph still says `route` calls rowDispatch for 'its policy row, its base row (the policy row's own unless arm B sizes it) and its draw', and the #4247 note under it does not cover that sentence. In the landed route, rowDispatch is called for the run's Objective and for `cost` (the draw centre), and no arm B sizing ever changes a base row.",
+      "evidence": "Read ticket-router.mjs:612-614 (`const dispatch = (o) => rowDispatch({ table, guard, objective: o, stratum, install }); const policyRow = dispatch(objective); const drawRow = dispatch(\"cost\");`) and :576-578 ('A live B Pull records its sizing verdict and routes as an A Pull does'). The #4247 note at the end of that paragraph covers only `install` and `draw.cells`. This was read, not executed.",
+      "suggested_fix": "Add a clause to that #4247 note: route calls rowDispatch for the Objective's row and for the `cost` row its draw is centred on, and arm B no longer sizes a base row (R2's note).",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/specs/2026-09-28-model-effort-router-design.md",
+      "claim": "The notes say the Fit is computed/recomputed 'at every phase 0', but metrics-refresh only runs the Fit after the cost guard wrote a guard, so a phase 0 with no guard writes no Fit; the note on line ~230 and tier-routing.md line 11 overstate it.",
+      "evidence": "plugin/scripts/metrics-refresh.mjs:64-65: 'After the cost guard wrote a guard, and only then, the Router's fit … runs in-process'. Notes at pr.diff lines 11-12 ('recomputed at every phase 0') and 230-231 ('computes the Fit at every phase 0'); cockpit-tabs note elsewhere correctly says 'at phase 0 only'.",
+      "suggested_fix": "Say 'at each phase 0 that has a cost guard' (or 'at phase 0 after the guard writes') in the two notes.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/specs/2026-09-28-model-effort-router-design.md",
+      "claim": "Note cites § 2.12 of the new spec for `assignment_prob`, but § 2.12 item 4 only says 'assignment probability' (the column name `assignment_prob` appears only in code), so the cited section does not name that identifier.",
+      "evidence": "grep assignment_prob in docs/specs/2026-11-01-self-refining-router-design.md: no hits; § 2.12 item 4 (line 191) reads 'assignment probability'; identifier exists at plugin/scripts/ticket-router.mjs:581,644.",
+      "suggested_fix": "Acceptable as is; optionally drop the identifier or cite ticket-router.mjs.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

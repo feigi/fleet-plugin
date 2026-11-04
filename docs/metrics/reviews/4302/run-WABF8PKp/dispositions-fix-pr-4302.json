@@ -1,0 +1,52 @@
+{
+  "head": "122efb1e369d3b8910131e4bf9002c5eeea58a2d",
+  "run": "run-WABF8PKp",
+  "entries": [
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4302/fix-zdcBzJ4p/u0/verdict.json",
+      "remedyFiles": [
+        "tests/implementer-model-tier.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4302/fix-zdcBzJ4p/u1/verdict.json",
+      "remedyFiles": [
+        "tests/implementer-model-tier.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "refuted: the uniqueness assertion is the sole failure under a template-lost-cell mutant (ticket acceptance case), so dropping it loses that pin; recorded on the suggestion-band record",
+      "issue": 4309,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4302/fix-zdcBzJ4p/u2/verdict.json",
+      "remedyFiles": [
+        "tests/implementer-model-tier.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4302/fix-zdcBzJ4p/u3/verdict.json",
+      "remedyFiles": [
+        "tests/implementer-model-tier.test.mjs"
+      ]
+    }
+  ]
+}

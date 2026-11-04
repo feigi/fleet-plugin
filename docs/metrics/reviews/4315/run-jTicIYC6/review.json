@@ -1,0 +1,98 @@
+{
+  "pr": 4315,
+  "head": "37bbba9f334177f659bde436fa7ac61c2e2560b0",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/ticket-features.tsv, M docs/metrics/tier-outcomes.tsv. I wrote nothing there; my only commands in that directory were `pwd` and the read-only `git status`. These look like another agent's metrics output."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I did not write to this directory; the files were probably changed by other agents' runs."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I wrote nothing there, so I cannot account for these two files."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (this review wrote nothing there; every command ran in the scratch dir or the copy)"
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 4,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4315/run-jTicIYC6/snapshot-37bbba9f",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "tests/stranded.test.mjs",
+      "line": 669,
+      "claim": "Both renamed tests still discriminate: removing the `-x` letter from CLAIM_WORKTREE reds the 'hand-made worktree' test, and removing it from CLAIM_BRANCH reds the 'two claims on one ticket' test. The whitespace-only mutation stays green. No gap found.",
+      "evidence": "red: node --test --test-name-pattern=hand-made tests/stranded.test.mjs → exit 1, fail 1 incl 'a hand-made worktree `.worktrees/<N>-impl-<N>-<x>` is still a claim's worktree'; baseline: same cmd → exit 0, tests 1 pass 1 fail 0 cancelled 0. red: node --test --test-name-pattern=two.claims.on.one.ticket tests/stranded.test.mjs → exit 1, fail 1 incl 'a branch with no worktree is a claim too; two claims on one ticket are both listed, and its issue is read once'; baseline: same cmd → exit 0, tests 1 pass 1 fail 0 cancelled 0. The whitespace-only CLAIM_BRANCH mutation was added after the other two and I did not read its result; I did not use it in any claim.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/stranded.mjs",
+      "line": 37,
+      "claim": "The stranded.mjs header (lines 37-42) still describes implementer claims as `.worktrees/<N>-impl-<N>[-x]`, `implementer/<N>-impl-<N>[-x]` and a `release-ticket.sh <N> impl-<N>[-x] implementer` dry run. The PR edits the comment at the CLAIM_WORKTREE constants in the same file to say no fleet path writes `-x`, so the two comments now disagree.",
+      "evidence": "sed -n 34,44p plugin/scripts/stranded.mjs shows the `[-x]` forms at lines 37, 38 and 42. The diff's new comment at ~line 202 says '-x retry letter that no fleet path writes'.",
+      "suggested_fix": "Reword the header to name the `-x` form as hand-made only, or drop `[-x]` from the header.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/evict.mjs",
+      "line": 17,
+      "claim": "Untouched evict.mjs still describes claim trees as `<N>-impl-<N>[-x]` on `implementer/<N>-impl-<N>[-x]` (lines 17 and 303, the latter in a user-facing kept-reason string) with no note that `-x` is never written. This conflicts with the new claim-ticket.sh and stranded.mjs comments and with CONTEXT.md's one-claim-per-ticket sentence. ADR 0036 line 19 has the same text.",
+      "evidence": "grep -rn 'impl-<N>\\[-x\\]' on the snapshot: evict.mjs:17, evict.mjs:303, docs/adr/0036-an-idle-claim-tree-is-evicted-its-dependencies-go-the-claim-stays.md:19.",
+      "suggested_fix": "Add the same 'a hand-made name only' qualifier at evict.mjs:17 or leave as an accepted regex-shape description. The code at 303 is user-visible text, so changing it is not a comment-only edit.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body: 'Full suite: `./agent-test` passed 8848/8848 on tree `2b7baeb`' does not match this review's run of the same command: tests 8848, pass 8847, skipped 1, fail 0, exit 0. The body's count treats the one skipped test as a pass. The tree hash it names also cannot be checked against the snapshot.",
+      "evidence": "The dispatch's recorded counts line: 'tests 8848, pass 8847, fail 0, cancelled 0, skipped 1'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

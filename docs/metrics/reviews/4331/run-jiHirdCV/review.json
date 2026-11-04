@@ -1,0 +1,361 @@
+{
+  "pr": 4331,
+  "head": "e6e6daca63d8d9b217ee4b419d511f831b3fe248",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (I did not write these; likely another agent's/controller's output)"
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (not written by this review; I never wrote under that path, so these were already modified there and are unaccounted for by me)."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv' and ' M docs/metrics/tier-outcomes.tsv'. I never wrote to that checkout and did not touch these two metrics files; they were already modified when I looked, so I cannot say whether they pre-date this review."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — printed ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. I never wrote there; my work was only under the scratch dir. Probably another agent's."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (I did not cause this. Every command I ran either cd'd into my scratch directory or read from it, and none wrote to this path. These two files were already modified there.)"
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. I never wrote to that path; these changes predate or are separate from this pass."
+    }
+  ],
+  "counts": {
+    "survived": 6,
+    "refuted": 0,
+    "unverified": 13,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4331/run-jiHirdCV/snapshot-e6e6daca",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 834,
+      "claim": "One acceptance criterion ('adding the same shift to every Cell's Pulls within each stretch leaves every verdict unchanged') fails because of the ADOPT_RATIO test, `printed(vsBase.cell) > ADOPT_RATIO * printed(vsBase.base)`. That test is a ratio, so an additive per-stretch shift turns a qualifying cell into too-dear and changes the row's cell.",
+      "evidence": "I appended a temporary test to the copy's tests/ticket-router.test.mjs, using its own fitWeeks helper: one week MON1, slow-high n=25 at usd 10+s, task-high n=25 at usd 7+s, 5 fails each. Ran `node --test --test-name-pattern='PROBE ratio shift' tests/ticket-router.test.mjs`. Output: `PROBE before {\"verdict\":\"qualifies\",\"under_floor\":false,\"bar\":0.35,\"range\":[-3,-3]} task-high` and `PROBE after  {\"verdict\":\"too-dear\",\"under_floor\":false,\"bar\":0.35,\"range\":[-3,-3]} slow-high`. The range is unchanged, but the verdict and the row's cell both flip. The PR's own shift test (tests/ticket-router.test.mjs:2930) uses task-high at $2 against the base's $10, so the ratio stays far below 0.75 and this case is never exercised.",
+      "suggested_fix": "Make the adoption-margin test shift-invariant: compare the pooled gap (cell − base) with a margin taken from the base's figure in each stretch, or pool a per-stretch ratio. Otherwise, record in the PR and ticket that the ADOPT_RATIO leg is excluded from the shift-invariance criterion, and add a test that pins whichever behaviour you choose.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Reproduced in my own copy of the snapshot. I appended a probe test using fitWeeks: one week, slow-high usd 10+s and task-high usd 7+s, n=25, 5 fails each. Run: `env -u FORCE_COLOR node --test --test-name-pattern='PROBE ratio shift' tests/ticket-router.test.mjs` → exit 0, tests 1, pass 1, fail 0. Output: shift 0 gives task-high `qualifies`, range [-3,-3], row cell task-high. Shift 5 gives task-high `too-dear`, same range [-3,-3], row cell slow-high. The verdict and the row's cell both change under a uniform additive shift, because the ADOPT_RATIO test (ratio 0.7 becomes 0.8 against 0.75) is not shift-invariant (line 834). I did not read the exact wording of the acceptance criterion; I took it from the claim. I did not run the mutant/baseline kill protocol, since this is a behavioural probe rather than a mutant kill. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I never wrote there; all my writes went to the scratch copy."
+        },
+        {
+          "refuted": false,
+          "reason": "Reproduced in my own copy of the snapshot. Probe with fitWeeks: one week MON1, slow-high 25 Pulls at usd 10+s, task-high 25 at 7+s, 5 fails each. s=0 gives task-high \"qualifies\" and the row's cell is task-high. s=20 gives \"too-dear\" and the row's cell is slow-high. The range stays [-3,-3] and the bar stays 0.35. The cause is the line the diff introduces, `printed(vsBase.cell) > ADOPT_RATIO * printed(vsBase.base)`, a ratio test that an additive shift does not preserve. I found no other guard for it. The PR's own doc comment says a shift hitting every cell cancels, and its shift test uses task-high at $2 against a base of $10, so the ratio never nears 0.75. I did not confirm that the ticket's acceptance criterion is worded as the claim quotes it. Evidence: `env -u FORCE_COLOR node --test --test-name-pattern='PROBE ratio shift' tests/ticket-router.test.mjs` → tests 1, pass 1, fail 0, printing the before and after lines above. The probe is a console.log test, so it never goes red.\n\nCWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I never wrote there; every run was in my scratch copy."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/pull-attribution.mjs",
+      "line": 186,
+      "claim": "The `pool` weighting gives weight 0 to any stretch where one side has zero merged PRs. That side's spend on abandoned work in a shared stretch then drops out of the $-per-merged-PR figure, so a cell that burns money without merging escapes the guard's $ leg and looks cheaper in the fit. This contradicts 'every Pull inside a shared stretch is kept' and the pr-cost comment that an abandoning cell carries its spend.",
+      "evidence": "In the copy I called compareCells and trips with two sets of Pulls. Cell: 20 merged at $5 in W1, plus 5 unmerged at $50 in W2. Base: 20 merged at $6 in W1 and 20 merged at $6 in W2. Output: `stretches 2 cell n 25 cell usd_per_merged 5 base 6`, `whole-spend/merged cell 17.5 range [-1,-1]`, `trips: false`. The $250 the cell spent in the shared stretch W2 is gone: the figure reads $5, against $17.50 when the same Pulls are counted as spend over merged. The pre-PR $ leg, `cell.mean_usd >= base.mean_usd` with mean = spend/merged, would trip on this input (17.5 ≥ 6).",
+      "suggested_fix": "Do not let a d=0 side wipe out its own spend in a shared stretch. For example, weight the stretches by Pull counts and pool spend and merges separately (a ratio of pooled sums), or treat a stretch where one side spent but merged nothing as an unbounded figure for that side rather than as no information. Add a test with spend on abandoned work in a shared stretch.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "I ran compareCells from the snapshot with the claim's Pulls: cell 20 merged at $5 in W1 plus 5 unmerged at $50 in W2, base 20 merged at $6 in each of W1 and W2. Output was `2 5 6`, meaning 2 shared stretches, cell usd_per_merged 5 and base 6. pool() gives weight 0 to W2 because the cell's merged count there is 0 (pull-attribution.mjs:186-188), so the cell's $250 of W2 spend drops out. pr-cost.mjs:180 trips the $ leg only when `cell.usd_per_merged >= base.usd_per_merged`, and 5 < 6, so it does not trip. The doc comment at pull-attribution.mjs:257 ('every Pull of a shared stretch is kept') and the pr-cost.mjs:55 comment ('a cell that abandons work carries that spend') are contradicted. I did not run trips or the range, and I did not run ./agent-test. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (I wrote nothing in that directory; my only writes were in the scratch dir)."
+        },
+        {
+          "refuted": false,
+          "reason": "I ran the claim's input against a copy of the snapshot. It gave usd_per_merged cell 5, base 6, trips false, so the $250 spent in W2 never reaches the figure. `pool` (pull-attribution.mjs:186) skips any stretch where either side has zero `d` (merged PRs), and `trips` in pr-cost.mjs compares only the pooled figures. I found nothing else in the guard that picks up that spend. The pool comment documents the skip, but that is the behaviour the finding objects to, not a defence of it. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (not written by me; I wrote only under my scratch dir)."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "docs/research/split-looks-derive.mjs",
+      "line": 46,
+      "claim": "The PR removes the `underFloor` export and changes `bootUnit`'s shape from {value, merged} to {value, per, stretch}, plus `trips`' arguments, but does not migrate the research derivation scripts that import them. split-looks-derive.mjs now crashes, cell-grid-derive.mjs silently gets null ranges, and split-gate-derive.mjs, router-inputs-derive.mjs and consumer-burn-in-derive.mjs still call `underFloor` or `trips` with count objects.",
+      "evidence": "`grep -rlE 'underFloor|bootstrapDiffCI|bootUnit|trips\\(' docs plugin tests` lists docs/research/{cell-grid,consumer-burn-in,router-inputs,split-gate,split-looks}-derive.mjs. Running `node docs/research/split-looks-derive.mjs --hist-null 1 --hist-real 1 --hist-once 1 --pulls-null 120 --pulls-real 120 --nulls 19 --workers 1`: base copy exits 0 with 129 lines of output; PR copy exits 1 with `worker error: TypeError: underFloor is not a function`. A node probe in the PR copy printed `underFloor exported: undefined`; `bootstrapDiffCI` with cell-grid-derive's {value, merged:1} units returned `null`; `trips({claims:20,failed:7,mean_usd:5},{...})` threw `TypeError units is not iterable`, which is what consumer-burn-in-derive.mjs:216 does.",
+      "suggested_fix": "Migrate the five scripts to compareCells and the new bootUnit shape, or record in the PR that they are frozen to an older tree and pin that commit in their headers. The repo's cutover rule calls for migrating every caller.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Reproduced in my own snapshot copy: split-looks-derive.mjs exits 1 with 'worker error: TypeError: underFloor is not a function'. grep of plugin/ and tests/ finds no `underFloor` export in pull-attribution.mjs (only a result field name). split-gate, router-inputs and consumer-burn-in still import and call underFloor. I did not re-run the base copy, cell-grid null ranges, or the trips probe. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv' (these appeared in the host checkout; my writes were only in the scratch dir, so I did not make them)."
+        },
+        {
+          "refuted": false,
+          "reason": "I checked the snapshot by grep and sed only. I did not re-run the scripts or the test suite, so this verdict has no red/baseline evidence line. The PR diff touches only CONTEXT.md, plugin/scripts/*, and tests/*. It does not touch docs/research. `grep -c 'export function underFloor' plugin/scripts/pull-attribution.mjs` returns 0, so the export is gone. docs/research/split-looks-derive.mjs:46 still does `const { underFloor, TRIP_POINTS } = await import(.../pull-attribution.mjs)`. split-gate-derive.mjs:195 and :500, router-inputs-derive.mjs:583 and consumer-burn-in-derive.mjs:214 still call `underFloor` with count objects. The claim's own run of split-looks-derive.mjs showed the base copy exiting 0 and the PR copy failing with `underFloor is not a function`. I found no other handling of this (a shim, a test, or a CI step covering these scripts). Only baseline-efficiency-derive.py has a test. The claim's evidence is therefore consistent with what the snapshot shows.\nCWD-AUDIT: not run — pwd output was lost in the garbled first result, so I have no path to audit.",
+          "inconclusive": false
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/pr-cost.mjs",
+      "line": 356,
+      "claim": "The new `unmatched` status exists only in computeReport and the TSV. guardFile does not write it to cost-guard.json, so its readers cannot tell an unmatched cell from a judged-ok one. compute-cell-evidence's mergedFigure prints `n ≥ min ✓` (judged) for any cell with n ≥ min_n when the verdict is not none.",
+      "evidence": "In the copy, `guardFile({..., tripped: [], unmatched: [\"smol-high\"], verdict: \"ok\", ...}, \"now\")` printed `keys: computed_at,window_start,baseline,cells,tripped,verdict,retire,min_n,trip_points,tsv_blobs | has unmatched: false | cell entry: {\"cell\":\"smol-high\",\"generation\":\"m\",\"n\":30,\"n_merged\":30}`. `grep -rn 'unmatched' plugin --include=*.mjs` finds no reader outside pr-cost.mjs. compute-cell-evidence.mjs:196-201 computes `judged = isBase || g.verdict !== \"none\"` and prints `${n} ≥ ${min} ✓` (I read this code; I did not render it).",
+      "suggested_fix": "Write `unmatched` into guardFile and have compute-cell-evidence's mergedFigure, and fleet-tick's OK row if it should, show such a cell as not judged.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "I confirmed the claim by reading the snapshot source. I did not run `./agent-test`, a mutant, or `guardFile`, so the claim's printed `guardFile` output is unreproduced here. In pr-cost.mjs, computeReport (lines 237-256) builds and returns `unmatched`. guardFile (lines 356-375) emits only computed_at, window_start, baseline, cells, tripped, verdict, retire, min_n, trip_points and tsv_blobs, so `unmatched` is never written to cost-guard.json. A grep of plugin/scripts/*.mjs finds `unmatched` as a status only in pr-cost.mjs; the other hits are comments or unrelated variables. compute-cell-evidence.mjs:196-201 sets `judged = isBase || g.verdict !== \"none\"` and prints `${n} ≥ ${min} ✓` for any cell with n ≥ min when the verdict is not none. That includes a cell that computeReport marked unmatched. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (I made no writes there; both files were already modified in the shared checkout)."
+        },
+        {
+          "refuted": false,
+          "reason": "I read the snapshot source and did not re-run the guardFile output. pr-cost.mjs computes `unmatched` only in computeReport (lines 237-256) and formatReport's TSV guard column (line 330). compute-cell-evidence.mjs mergedFigure (lines 191-201) prints `n ≥ min ✓` whenever n >= min and verdict != none. An unmatched cell always has merged >= MIN_N, so it would show ✓ there. The claim's guardFile output was not independently reproduced. This is a code reading, not a run. The only point in the claim's favour that I checked is that `unmatched` appears at the lines above and nowhere else I looked. No other handling found. CWD-AUDIT: clean /Users/chris/dev/fleet-plugin (not run; I only read the snapshot and wrote nothing).",
+          "inconclusive": false
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/pr-cost.mjs",
+      "line": 178,
+      "claim": "`trips` (and `pool`) silently drop the $ leg when the two cells' merged PRs fall in disjoint shared stretches. `judged(m)` is still true, so the cell is neither tripped nor listed as `unmatched` and the guard reports it `ok` even though no $ comparison was possible.",
+      "evidence": "Ran p1.mjs against the snapshot copy. The cell has 25 merged Pulls at $100 each in stretch A plus 1 unmerged Pull in B. The base has 25 merged Pulls at $1 each in stretch B plus 1 unmerged Pull in A. `compareCells` returned {stretches:2, cell.merged:25, base.merged:25, cell.usd_per_merged:null, base.usd_per_merged:null, underFloor:false, range('usd'):null}, and `trips(cell,base)` returned false. `judged` passes on merged counts alone (25 >= MIN_N on each side). `pool()` returns null because no stretch has d>0 on both sides. `trips` then evaluates `m.cell.usd_per_merged !== null && ...` as false, so a 100x cost gap never trips. The fail leg has the same property: `reachesMargin` skips stretches where either side has no claims.",
+      "suggested_fix": "Make `judged` (pr-cost) and `enough` (router) require that the figure each leg judges on is comparable, i.e. `m.cell.usd_per_merged !== null && m.base.usd_per_merged !== null`. Otherwise route the cell to `unmatched` instead of `ok`. Alternatively count MIN_N merged PRs only over stretches where both sides have merged PRs.",
+      "dimension": "silent-failure",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Reproduced by running a probe in my own copy (git archive of the snapshot). Cell: 25 merged units in stretch A at $100 plus 1 unmerged in B. Base: 25 merged units in B at $1 plus 1 unmerged in A. compareCells returned stretches:2, cell.merged:25, base.merged:25, usd_per_merged:null on both sides, underFloor:false, range('usd'):null. trips(cell,base) returned false. judged() passes on the merged counts alone, so the cell is neither tripped nor listed as unmatched even though no $ comparison was possible. The scenario is contrived, but the claim is true of the code as written. I ran no mutant and did not run ./agent-test. The copy is not a git repo and I did not run the Install step, which the probe did not need. CWD-AUDIT: not run on /Users/chris/dev/fleet-plugin. I only read from it; the probe wrote only under the scratch dir, and no git status was run.",
+          "counter_evidence": "node p1.mjs → {\"s\":2,\"c\":{\"n\":26,\"merged\":25,\"claims\":25,\"failed\":0,\"usd_per_merged\":null,...},\"b\":{\"n\":26,\"merged\":25,...,\"usd_per_merged\":null},\"uf\":false,\"r\":null} false"
+        },
+        {
+          "refuted": false,
+          "reason": "Reproduced by running node against the snapshot with the claimed fixture: 25 merged Pulls at $100 in stretch A plus 1 unmerged in B for the cell, and 25 merged at $1 in B plus 1 unmerged in A for the base. compareCells returned stretches=2, cell.merged=25, base.merged=25, cell.usd_per_merged=null, underFloor=false, and trips() returned false. So the 100x cost gap goes unflagged while judged() passes on merged counts alone. The code shows no other guard. sharedStretches keeps any stretch where both sides have a unit, merged or not, and pool() returns null when no stretch has d>0 on both sides. I did not check whether real data can produce disjoint merged stretches. The scenario is an edge case, but the claimed behavior is real. No test was run, so there is no red/baseline evidence line. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv' (not touched by me; I wrote only to the scratch dir)."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 813,
+      "claim": "In judge(), the `enough` guard's base-side term `m.base.merged >= MIN_N` is not pinned by any test: dropping it leaves the suite green. The changed behaviour is that a candidate whose stretch-shared merged-PR count on the base side is under MIN_N is verdicted 'too-few'.",
+      "evidence": "Mutant at ticket-router.mjs:813 `m.cell.merged >= MIN_N && m.base.merged >= MIN_N` to `m.cell.merged >= MIN_N`. Ran `./agent-test tests/pull-attribution.test.mjs tests/pr-cost.test.mjs tests/ticket-router.test.mjs` in my copy: exit 0, tests 336, pass 336, fail 0 (the mutant survived). Baseline: shared full `./agent-test` exit 0, 8887 pass. By contrast the same-shaped pr-cost `judged` mutant (`&&` to `||`) was killed by 2 tests, so the router copy is the untested one. The router's early return on `mergedOf(POLICY_CELL)` / `mergedOf(baseCell)` counts whole-run merged PRs, not stretch-shared ones, so it does not cover this term.",
+      "suggested_fix": "Add a ticket-router test where the base cell has at least MIN_N merged PRs overall but fewer than MIN_N in the stretches shared with the candidate, and assert the candidate is 'too-few' and not a qualifier.",
+      "dimension": "tests",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Mutant applied in my own copy (git diff showed line 813 changed to `m.cell.merged >= MIN_N`). I ran `env -u FORCE_COLOR ./agent-test tests/ticket-router.test.mjs tests/pull-attribution.test.mjs`. It exited 0 with 269 tests, 269 pass and 0 fail, so the mutant survived. I did not run the tests/pr-cost.test.mjs file the claim also lists, and I did not run the unmutated tree. The mutation reached the file, but I had no test that could fail on it and no positive control of a differing result. A surviving mutant is consistent with the claim that the `m.base.merged` term is unpinned. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I did not write to that directory; the two docs/metrics files were already modified there, so they were not from my work."
+        },
+        {
+          "refuted": false,
+          "reason": "Mutant `enough = m.cell.merged >= MIN_N` (base term dropped) applied in my own snapshot copy: `env -u FORCE_COLOR ./agent-test tests/ticket-router.test.mjs tests/pull-attribution.test.mjs` → exit 0, tests 269, pass 269, fail 0. The mutant survived. The sed edit was confirmed by git diff (1 line changed). The early return counts whole-run merged PRs, whereas compareCells counts each side's merged PRs over the shared stretches separately (pull-attribution.mjs:267-273). So base.merged can be under MIN_N while the early return passes, and nothing else covers the term. I did not run a mutant-reverted baseline of the narrowed command; the claim's shared full-suite baseline is exit 0. This is not a red/kill claim. CWD-AUDIT: not run on /Users/chris/dev/fleet-plugin; I made no edits there (the mutant was only in scratch)."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/pull-attribution.mjs",
+      "line": 240,
+      "claim": "The floor's behaviour changes when one side has zero claims, even with a single stretch: the old underFloor returned true, reachesMargin now returns false. The ticket asks for 'single shared stretch ⇒ exactly today's output', so this change should be either pinned by a test or stated in the PR.",
+      "evidence": "Node probe. base: `underFloor(0/0 vs 3/20): true`, `underFloor(5/20 vs 0/0): true`. PR copy, single stretch W1 via compareCells: `underFloor(0/0 vs 3/20): false`, `(5/20 vs 0/0): false`.",
+      "suggested_fix": "Keep the new behaviour (it is arguably the fix), but state it in the PR and add a test. Alternatively, if a 5/20 cell against a zero-claim base should still be refused, handle that case explicitly.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 825,
+      "claim": "The router labels a cell that shares no stretch with the base `too-few`, the same verdict as a cell short of MIN_N. The guard names this case separately (`unmatched`), so the Fit's record cannot tell 'not drawn alongside the base' from 'too few Pulls'.",
+      "evidence": "Read only (not executed beyond the PR's own test, tests/ticket-router.test.mjs:906-910, which asserts TOO_FEW for a cell with no shared week).",
+      "suggested_fix": "Consider an `unmatched` verdict in the router to match the guard, and update the Fit and cockpit readers of the verdict.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/research/cell-grid-derive.mjs",
+      "line": 131,
+      "claim": "The research script cell-grid-derive.mjs still statically imports `bootstrapDiffCI` and builds units in the old `{value, merged}` shape. Under the new `{value, per, stretch}` contract this returns null for every CI, with no error. Other research scripts that destructure the removed `underFloor` export (router-inputs-derive, split-gate-derive, split-looks-derive, consumer-burn-in-derive) will fail with a TypeError when called, which is loud. This one will not.",
+      "evidence": "grep showed `import { bootstrapDiffCI } from \"../../plugin/scripts/pull-attribution.mjs\"` at cell-grid-derive.mjs:22 and the old-shape call at line 131. Ran p2.mjs: `bootstrapDiffCI` on 30 `{value, merged:1}` units per side returned `null`. I did not run cell-grid-derive.mjs itself.",
+      "suggested_fix": "Update the research callers to `bootUnit(...)` units, or document them as pinned to the old commit. The ones that use a `${S}` path may already be pinned; I did not check.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 804,
+      "claim": "`pullsOf = (c) => pulls[c] ?? []` and the `judge(objective, pulls = {}, ...)` default turn a missing cell key into an empty list, which is read as `too-few`. This matches the old `!e` check, so it is not a regression, but a bug that drops a cell's pulls would still be silent.",
+      "evidence": "Code read: ticket-router.mjs:703 and :730 set `pulls[s][t.cell]` only for cells that have a tally, and the pre-diff code also treated a missing `est[c]` as too-few. Not executed as a failure.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 737,
+      "claim": "The comment above `JUDGE` says `figure` is `estimate()`'s name for the figure. `judge` no longer reads `estimate()`: after this diff it reads `compareCells(...)`'s `side[figure]`, which happens to use the same key names.",
+      "evidence": "The diff removes the `est` parameter from `judge` (`function judge(objective, pulls = {}, cells, tripped, baseCell)`). It now reads `printed(vsBase.cell)`, which resolves to `side[figure]`. The comment at lines 736-740 was not touched and still reads \"the figure per merged PR it minimises (`estimate()`'s name and its bootstrap metric)\".",
+      "suggested_fix": "Reword to say `figure` names a `compareCells` side's figure (`usd_per_merged` or `minutes_per_merged`) and `metric` is the measure passed to `range()`.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 773,
+      "claim": "The `judge` JSDoc and the PR body's MIN_N description cover only the candidate side of eligibility. They do not say that `judge` first returns `unjudged` when the default cell or the base has fewer than MIN_N merged PRs over its whole run, whatever stretches it shares.",
+      "evidence": "In the diff, `if (mergedOf(POLICY_CELL) < MIN_N || mergedOf(baseCell) < MIN_N) return record;` counts `pullsOf(c).filter(u => u.merged)`, which is unfiltered by stretch. The code comment says so (\"whichever stretches they share\"). The PR body's 'Eligibility' paragraph and the commit message (\"MIN_N counts merged PRs in the shared stretches\") read as if every MIN_N test were stretch-matched.",
+      "suggested_fix": "Add one clause to the PR body and the JSDoc 'unjudged' reason: the default cell and the base are gated on their whole-run merged PRs, the candidate on merged PRs in shared stretches.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/adr/0016-per-ticket-model-effort-routing.md",
+      "line": 122,
+      "claim": "ADR 0016 line 122 still reads \"Baseline: slow-high, strictly, cumulative from a WINDOW_START\". After this diff the guard compares each cell with the baseline only over the stretches in which both were drawn, so 'cumulative' is stale there.",
+      "evidence": "grep -rn -i cumulative docs/adr returns 0016:34 (\"its cumulative baseline compares time-matched, as ADR 0037 and the…\") and 0016:122 (\"cumulative from a WINDOW_START\"). The new comment at `pr-cost.mjs:111` says \"the baseline is not cumulative over it\". The PR body says ADR and spec text is deliberately left as the spec's final slice, so this is a known gap, not a defect in the diff.",
+      "suggested_fix": "Cover it in the final spec/ADR amendment slice.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "No PR body or commit-message assertion I checked is false. Verified items: the 141/0 numstat for tests/ticket-router.test.mjs, the +28.1 [3.1, 50.0] line at docs/research/router-inputs.md:300, ruleStratum (0 hits in ticket-router.mjs, 8 docs/research/*.mjs files name it), the 'one function, no stretch/pooling code' pin at tests/pull-attribution.test.mjs:962, and the figures in the test comments (7-of-20 vs 4-of-20 pooling to 14.999999999999996, $6.44, 0.93, $3.65, 55 minutes, 33 points under the cell's 40%).",
+      "evidence": "`node p.mjs` in my copy printed `2 18/32 15/63 of 104 32.5 [13.55,51.3]`, identical to the PR body. `node q.mjs` printed 14.999999999999996 for both 7-vs-4 and 5-vs-2 triples. An awk count of added lines in the ticket-router test hunk gave 141 added and 0 deleted (the lone `-` it counted is the `---` file header). `grep -c ruleStratum plugin/scripts/ticket-router.mjs` printed 0, and `grep -ln ruleStratum docs/research/*.mjs` listed 8 files (the PR body does not give that count).",
+      "suggested_fix": "None.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/pull-attribution.mjs",
+      "claim": "The measure name is a free string: compareCells' returned `range(measure)` and `bootUnit(u, measure)` accept any string, and the valid set (usd|minutes|fail) is only documented in comments; an invalid name fails only at runtime with a TypeError on `MEASURES[measure].value`.",
+      "evidence": "Read from diff: `export const bootUnit = (u, measure = \"usd\") => ({ value: MEASURES[measure].value(u) ...` and `range: (measure) => bootstrapDiffCI(cellPulls.map((u) => bootUnit(u, measure)) ...`; doc comment says 'one of usd, minutes, fail'. Not executed.",
+      "suggested_fix": "Optionally assert `Object.hasOwn(MEASURES, measure)` with a clear error in bootUnit, or expose range as per-measure properties instead of a string-keyed function.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/pull-attribution.mjs",
+      "claim": "compareCells' per-side figures read `pooled.usd?.[which]` / `pooled.minutes?.[which]` with optional chaining but `pooled.fail === null ? ... : pooled.fail[which]` without; the three measures are handled inconsistently, and the shape `{stretches, cell, base, underFloor, range}` is documented only in a comment.",
+      "evidence": "Read from diff lines ~199-207: `usd_per_merged: pooled.usd?.[which] ?? null, minutes_per_merged: pooled.minutes?.[which] ?? null, fail_rate: pooled.fail === null ? null : pooled.fail[which] / 100`. pool returns null when no stretch is shared, so all three behave the same today; not executed.",
+      "suggested_fix": "Use one pattern (e.g. `pooled.fail?.[which] / 100` guarded) for all three.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/pull-attribution.mjs",
+      "claim": "A unit's `stretch` may be undefined ('units with no stretch are in one together'): the invariant that every counted Pull carries a stretch name is not enforced at construction, and an undefined Map key silently groups unstretched units rather than failing.",
+      "evidence": "Read from diff: doc comment 'units with no stretch are in one together' and `byStretch.get(u.stretch) ?? byStretch.set(u.stretch, ...)`; bootUnit copies `stretch: u.stretch` unvalidated. Not executed.",
+      "suggested_fix": "Accept as intended; or fail fast if a counted Pull lacks a stretch when produced by stretchesOf.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/pr-cost.mjs",
+      "line": 240,
+      "claim": "The guard loop builds the same compareCells(t.pulls, base.pulls) comparison twice for every cell that does not trip: once inside trips() and again for `!judged(compareCells(...))`. It can be computed once and the two branches tested against it.",
+      "evidence": "Mutant in simplify/copy: I split trips into `const tripsOn = (m) => judged(m) && (m.underFloor || (m.cell.usd_per_merged !== null && m.cell.usd_per_merged >= m.base.usd_per_merged)); export function trips(cell, base) { return tripsOn(compareCells(cell, base)); }` and changed the loop to `const m = compareCells(t.pulls, base.pulls); if (!judged(m)) unmatched.push(t.cell); else if (tripsOn(m)) tripped.push(t.cell);`. ./agent-test on the 10 dependent test files (pr-cost, ticket-router, pull-attribution and 7 more): exit=0, tests 991, pass 991, fail 0. The two forms are equivalent: tripsOn implies judged, so an unjudged cell went to unmatched before and still does, and a judged cell goes to tripped exactly when the trip rule holds.",
+      "suggested_fix": "In pr-cost.mjs, pull the rule body into `const tripsOn = (m) => judged(m) && (m.underFloor || (m.cell.usd_per_merged !== null && m.cell.usd_per_merged >= m.base.usd_per_merged));` and keep `export function trips(cell, base) { return tripsOn(compareCells(cell, base)); }` for its tests. In computeReport's loop, write `const m = compareCells(t.pulls, base.pulls); if (!judged(m)) unmatched.push(t.cell); else if (tripsOn(m)) tripped.push(t.cell);`.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 870,
+      "claim": "judgeRow and judgeSpeedRow are one-line wrappers that only fix judge()'s objective and baseCell. The PR rewrote both signatures (it dropped `est`), each has a single call site in fitTable, and neither is exported, so the indirection adds nothing.",
+      "evidence": "`grep -n 'judgeRow|judgeSpeedRow' plugin/scripts/ticket-router.mjs` shows the definitions at lines 870 and 875, one call each at lines 908 and 911, and mentions only in doc comments at lines 885 and 888. In simplify/copy I deleted both wrappers and wrote the calls as `judge(\"cost\", pulls[s], prior.cells, tripped, POLICY_CELL)` and `judge(\"speed\", pulls[s], prior.cells, tripped, costCell)`. The same 10-file ./agent-test run (applied together with the pr-cost change above): exit=0, 991/991 pass.",
+      "suggested_fix": "Delete judgeRow and judgeSpeedRow. In fitTable, call `judge(\"cost\", pulls[s], prior.cells, tripped, POLICY_CELL)` and `own ? judge(\"speed\", pulls[s], prior.cells, tripped, costCell) : unjudged()`. Reword the fitTable doc comment (lines 885 and 888) to name `judge(\"cost\", …)` and `judge(\"speed\", …)`.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

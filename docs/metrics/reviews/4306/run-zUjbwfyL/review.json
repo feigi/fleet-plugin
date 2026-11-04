@@ -1,0 +1,364 @@
+{
+  "pr": 4306,
+  "head": "96e2f219b71294c05c2d27c0c1e3f134336401cf",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I only ran read-only commands and wrote nothing, so these edits come from another agent or the user."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I only ran read-only commands and wrote nothing there, so the two modified files predate this review or come from another agent."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (not written by this review; my writes went only to the scratch dir)"
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin —  M docs/metrics/ticket-features.tsv,  M docs/metrics/tier-outcomes.tsv (none of my commands wrote there: every probe ran with cwd in correctness/copy, and the only command started at the first pwd was a read-only wc/grep of pr.diff)"
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv` (this pass did not cause them: every command that wrote anything first cd'd into simplify/copy or simplify/, and the only command run in that directory was `pwd` plus this status check)"
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I never wrote to that tree, so these are not mine."
+    }
+  ],
+  "counts": {
+    "survived": 6,
+    "refuted": 1,
+    "unverified": 11,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4306/run-zUjbwfyL/snapshot-96e2f219",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 546,
+      "claim": "Under the `speed` Objective, when the group's speed-row Cell is one of the cost row's exploration Cells (e.g. cost task-high, speed task-xhigh), `assignment_prob` is wrong for that Cell: an exploring Pull that draws the policy Cell records 1/20 and a non-exploring Pull records 4/5, though the Cell's real assignment probability is 4/5 + 1/(5K) = 17/20. The ticket requires 'the probability that the Cell it actually runs was assigned to it'.",
+      "evidence": "In the copy I ran `node probe-speed.mjs`. Its table has rows cost:{*:task-high}, speed:{*:task-xhigh} and the fixed test install; it calls route() for tickets 1..400 with implRow 5 and 3, objective speed. Output: `pool { by: 'every-5th', cells: [ 'task-xhigh', 'task-medium', 'slow-medium', 'smol-xhigh' ] }` and `{ 'explore policy=task-xhigh chosen=task-xhigh prob=1/20': 113, 'stay policy=task-xhigh chosen=task-xhigh prob=4/5': 400, 'explore ... chosen=slow-medium prob=1/20': 100, ... }`. The same Cell gets two different recorded probabilities, and neither is its marginal probability. A tripped speed row has the same defect, because it falls back to slow-high, which is in the pool when the cost Cell is task-xhigh or slow-xhigh. The test fixture rowTable never puts the speed Cell in the cost Cell's exploration set, so the suite cannot catch this.",
+      "suggested_fix": "Two options. (1) Exclude the Pull's own policy Cell from the draw cells when the objective is not cost, and use that K. (2) Have assignmentProb take `cell`, `policy` and `cells`: return 4/5 + 1/(5K) when cell === policy and policy ∈ cells, 1/(5K) for any other drawn cell, and 4/5 otherwise. Add a route test with speed≠cost rows whose speed Cell is a cost exploration Cell.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "I did not run a probe or the suite, so this verdict rests on reading the snapshot code only. In `route` (ticket-router.mjs ~L600-630), the policy Cell comes from `dispatch(objective)` and the exploration pool from `dispatch(\"cost\").draw.cells`. The draw is `drawCell` with `policyCell: null`, and the comment says the pool never holds the group's own Cell, which only covers the cost row's Cell. `assignmentProb` receives only `{burnIn, chainHead, exploring, K}`. It returns 1/(5K) for an exploring Pull and 4/5 otherwise, and has no input saying whether the speed policy Cell is in the draw pool. So when the speed Cell is one of the cost row's exploration Cells, an exploring Pull that draws it records 1/20 and a non-exploring Pull records 4/5. The true marginal is 4/5 + 1/(5K), which is 17/20 for K=4. The claim as described holds in the code. I did not check the tripped-speed-row case. The doc comment says a Pull \"runs its group's Cell at the share left\", which matches the code but not the ticket's wording. CWD-AUDIT: not run; I changed no files and created none under /Users/chris/dev/fleet-plugin.",
+          "inconclusive": false
+        },
+        {
+          "refuted": false,
+          "inconclusive": false,
+          "reason": "Not refuted, by code reading only: I did not run the probe. At ticket-router.mjs:458 and :614 the pool is explorationCells(centre = the cost-row Cell, ...) filtered to Cells the install defines and the guard hasn't tripped. It excludes only the cost Cell. The policy Cell comes from the objective's row, so a speed Cell that is one of the cost Cell's exploration Cells stays in the pool. Line 546 then computes assignmentProb from K = pool size alone. That gives 1/(5K) on an exploring Pull and 4/5 on a non-exploring Pull, whichever Cell was drawn. The Cell's true marginal in the overlap case is 4/5 + 1/(5K). Lens 2, handled elsewhere: nothing handles it. No other code adjusts for the overlap, and pull.md:291 and CONTEXT.md:574 describe '4/5 at the group's Cell, 1/5 of 1 over the Cells drawn', which is exactly this behavior. The docs therefore document the defect and do not resolve it. Narrowing: it only matters when the objective row's Cell differs from the cost Cell and lies in its exploration set; in burn-in, or when the cost and objective rows agree, the recorded value is correct. The claim's 'neither is its marginal' is accurate. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/ticket-features.tsv, M docs/metrics/tier-outcomes.tsv (pre-existing modifications; I wrote nothing there)."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 399,
+      "claim": "Exploration is switched off with no warning when modelRoles is empty or missing roles. installOf then gives every role an empty ladder, so every Pull past burn-in routes with no draw, REASON=ok and assignment_prob 1. The same file warns on stderr when the install cannot be read at all.",
+      "evidence": "In the copy I ran `sh probe-cli.sh`: the CLI route past burn-in, cost row task-high, impl-row 5 then 3, --catalog listing sonnet low..max, --agents plugin/agents. With `--model-roles` = `{}`: `CELL=task-high DRAW=- BY=- ... REASON=ok`, stderr empty, pending probs `1`, `1`. With the omp wrapper shape `{\"value\":{\"task\":...}}`: the same output, stderr empty. With `{\"task\":\"anthropic/claude-sonnet-5-5:high\"}`: `CELL=task-medium DRAW=1/2 BY=every-5th`, probs `1/10`, `4/5`. resolveRole (tier-roles.mjs:116-121) returns null for an unset role, and installOf maps that to []. compute-cell-evidence.mjs:557 treats an unset modelRoles role as a normal state ('omp picks the model'). Before this PR, exploration on such an install drew over table.cells.",
+      "suggested_fix": "When installOf leaves a role unresolved or every ladder empty, write the same `WARNING cannot read what this install runs ... no exploration Cell is drawn` line. Also reject a --model-roles file that is the `{value: …}` wrapper rather than the record.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Ran installOf({modelRoles:{},catalog:[],definitions:[]}) in the snapshot: ladders are {smol:[],task:[],slow:[]}. Read the CLI path at ticket-router.mjs:1043-1053: the try block does not throw for empty modelRoles, and the stderr WARNING is only in the catch. So empty or missing roles give empty ladders and no warning, as claimed. I did not rerun the full CLI probe. CWD-AUDIT: not run (I only read files and ran a node -e one-liner, with no writes anywhere)."
+        },
+        {
+          "refuted": false,
+          "reason": "Not refuted, but I did not run the probe. I read the snapshot source. installOf (ticket-router.mjs:399) gives a role with no resolved model an empty ladder, with no warning. The only stderr warning on this path is the catch at line 1053, which fires when reading modelRoles, the catalog or the agents directory throws. An empty or role-less modelRoles parses fine, so it never reaches the catch. The header doc (line 39) says only that a failed read warns. compute-cell-evidence.mjs:557 treats an unset role as the normal state 'omp picks the model'. Nothing else in the file warns about it, so the silence is real. Weaker point: no exploration draw for an unset role may be intentional, since the ladder is unknowable. The finding is still a valid observability gap. CWD-AUDIT: not run (no git status taken in /Users/chris/dev/fleet-plugin; I made no writes there)."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 314,
+      "claim": "An install read that PARSES but holds nothing usable (null/{}/[] modelRoles, a catalog object with no `models` array or with `models: []`, `thinking: null`, role models absent from the catalog, an agents dir with no matching implementer definitions) raises no error and no warning: every ladder or `defined` set comes out empty, the Pull is silently denied exploration, and the row records assignment_prob=1 with REASON=ok.",
+      "evidence": "probe.mjs through the CLI at --impl-row 5, table past burn-in, guard ok. Healthy install: `CELL=slow-xhigh DRAW=2/3 BY=every-5th ... REASON=ok`, prob=1/15. With catalog `{}`, `{models:\"x\"}`, `{models:[]}`, `thinking:null`, unlisted models, modelRoles `null`/`{}`/`[]`, or an empty agents dir: exit=0, stderr=\"\" in every case, `DRAW=- BY=- ... REASON=ok`, assignment_prob=1, exploration_draw=\"\". Only a throw (bad JSON, missing file, omp absent) reaches the WARNING branch. readOmpJson validates only that the top level is an object. `readOmpConfigValue` returns `.value`, so an omp reply of `{}` gives `undefined`, which resolveRole turns into [] with no signal. `installOf` itself does the silent flattening (`catalogEntry(...)?.thinking`, `Array.isArray(thinking) ? ... : []`).",
+      "suggested_fix": "Have installOf (or main) refuse a modelRoles that is not an object and a catalog without a `models` array, which tier-roles' checkRoutes already does via kindOf, so the existing catch warns. Also warn when the Pull is past burn-in, may explore, and every ladder is empty or `defined` ends up with no Cell the group could use. Do not let that case pass as a plain `REASON=ok`.",
+      "dimension": "silent-failure",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Ran installOf from the snapshot with modelRoles null/{}/[] and catalogs {}, {models:[]}, {models:\"x\"}. Each call returned without throwing and gave empty ladders {smol:[],task:[],slow:[]}. Source at ticket-router.mjs:399-407 shows the flattening. The WARNING branch at line 1053 sits in a catch, so it fires only on a throw. The row's assignment_prob=1 and REASON=ok were not re-run through the CLI; that part rests on the claim's probe and on reading the code. Claim holds. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv' and ' M docs/metrics/tier-outcomes.tsv'. I did not edit these; I only ran read-only node and git commands, with no writes there."
+        },
+        {
+          "refuted": false,
+          "reason": "Read the snapshot code and found no handling elsewhere. installOf (ticket-router.mjs:399-407) turns a missing model, a missing catalog entry and a non-array `thinking` into an empty ladder with no signal. The only warning is the catch at line 1052, so only a throw from the reads reaches it. The doc comment says an unlisted model gives `[]` by design. That makes the silence intentional, but it does not make it handled. I did not run the probe, so the exit, stderr and row values (DRAW=-, REASON=ok, assignment_prob=1) are unconfirmed. CWD-AUDIT: not run; I only read files and wrote nothing in /Users/chris/dev/fleet-plugin."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/compute-cell-evidence.mjs",
+      "line": 544,
+      "claim": "The new burn-in branch of dispatchWords, `table.burn_in ? \"no draw: no other Cell is left\" : ...`, is not asserted by any test. Replacing the string with \"zzz\", or forcing the condition false, leaves the whole suite green.",
+      "evidence": "red: none, survived. Mutants `\"no draw: no other Cell is left\"`→`\"zzz\"` and `table.burn_in ?`→`false ?` both gave: ./agent-test tests/ticket-router.test.mjs tests/compute-cell-evidence.test.mjs tests/pull-attribution.test.mjs tests/metrics-refresh.test.mjs → tests 363, fail 0; baseline same command → exit 0, 363 pass. `grep -rn \"no other Cell is left\" tests plugin` matches only the source line.",
+      "suggested_fix": "Add a compute-cell-evidence test with a burn_in table whose starting Cells are all tripped (rowDispatch draw null), and assert the dispatch text is the \"no draw: no other Cell is left\" wording.",
+      "dimension": "tests",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Claim holds. Mutant \"no draw: no other Cell is left\"→\"zzz\" applied in my copy (grep -c zzz =1 confirms it reached the source); ./agent-test tests/compute-cell-evidence.test.mjs → exit 0, tests 95, pass 95, fail 0. Text appears nowhere in tests/ (grep over tests+plugin matched only source). No red, so the branch is unasserted. CWD-AUDIT: clean /Users/chris/dev/fleet-plugin (not run; I wrote nothing there, only in scratch)"
+        },
+        {
+          "refuted": false,
+          "reason": "Mutant survives. In my own copy, replacing \"no draw: no other Cell is left\" with \"zzz\" (grep confirmed the mutation was applied) left tests/compute-cell-evidence.test.mjs at tests 95, pass 95, fail 0. Every dispatch assertion in the tests dir expects either the burn_in:false \"every 5th Pull…\" text or the by==='burn-in' draw text. The \"none left\" test at line 657 asserts only the heading, not the dispatch. Search scope: the snapshot's tests dir, grepped for \"no draw\", \"every 5th\" and the string itself. Narrowed run only, no baseline run in the same tree: the claim's own baseline (363 pass) is not independently re-run. Not handled elsewhere. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I made no edits there, so this is pre-existing or from other agents.",
+          "inconclusive": false
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/skills/run-team/references/pull.md",
+      "line": 459,
+      "claim": "Untouched paragraph (the diff edits pull.md only near line 285) still says the router draws 'over the routing table's `cells` minus the policy cell, in token order'. This diff replaced that post-burn-in draw pool with the group's exploration Cells (explorationCells), so the sentence is now false, and it contradicts the new paragraph the diff adds at line ~285.",
+      "evidence": "grep -rnE 'minus the policy' in the snapshot: pull.md:459 'over the routing table's `cells` minus the policy cell'. drawPool in the diff returns explorationCells(centre, install.ladders) past burn-in and no longer reads table.cells. tests/run-team-war-stories-prose.test.mjs:122 pins the old wording, so the fix must update that test pin and tests/fixtures/run-team-moved-text/measured-war-stories.txt too.",
+      "suggested_fix": "Reword the post-burn-in sentence to say the draw is over the group's exploration Cells, centred on the `cost` row Cell. Update the pin in run-team-war-stories-prose.test.mjs and the fixture text to match.",
+      "dimension": "comments",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Snapshot pull.md:459 still reads 'over the routing table's `cells` minus the policy cell, in token order'. The diff's pull.md hunk (@@ -282) does not touch it. The diff changes drawPool to return explorationCells(centre, install.ladders) filtered by install.defined past burn-in, so it no longer reads table.cells. The new paragraph at ~285 says an exploring Pull draws over exploration Cells, so the two passages contradict each other. tests/run-team-war-stories-prose.test.mjs:122 pins the old wording. I did not run tests; this check was by grep and diff reading. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I did not touch these files, so the modifications are pre-existing."
+        },
+        {
+          "refuted": false,
+          "reason": "Confirmed by reading, not by running a test. Snapshot pull.md:459 still says the draw is 'over the routing table's `cells` minus the policy cell, in token order'. The diff's pull.md hunk (@@ -282, around line 285) adds a paragraph saying that past burn-in an exploring Pull draws over the group's exploration Cells. The diff's drawPool returns explorationCells(centre, install.ladders) filtered by install.defined past burn-in, and no longer reads table.cells. The line-459 sentence is outside the diff's only pull.md hunk, so it is untouched. It is not handled elsewhere: line 459 still states the old rule, and the only later text (lines 460-461) covers burn-in. Pins on the old wording remain at tests/run-team-war-stories-prose.test.mjs:122 and tests/fixtures/run-team-moved-text/measured-war-stories.txt:99. I did not run ./agent-test, so there is no red/green evidence line. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I did not touch these files; they were already modified when I started."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "docs/components/tier-routing.md",
+      "line": 24,
+      "claim": "Untouched doc still says an every-5th Pull runs at 'the router's draw over router-table.json's cells minus the policy cell'. The diff changed the post-burn-in draw to the group's exploration Cells, so this is now false.",
+      "evidence": "docs/components/tier-routing.md:22-25: 'the router's draw over [`router-table.json`]...'s cells minus the policy cell'. The new drawPool/explorationCells code in the diff does not read table.cells past burn-in.",
+      "suggested_fix": "Say the draw is over the group's exploration Cells around its `cost` row Cell.",
+      "dimension": "comments",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "I read the diff at lines 144-170. The new drawPool returns STARTING_CELLS during burn-in. After burn-in it returns explorationCells(centre, install.ladders) filtered by install.defined, and it does not read table.cells. The snapshot's docs/components/tier-routing.md:22-25 still says the draw is 'over router-table.json's cells minus the policy cell', and the diff does not touch that file, so the doc is stale. This was a code and diff read only; I ran no tests. CWD-AUDIT: not run, since I wrote nothing and the checkout at /Users/chris/dev/fleet-plugin was only used for pwd."
+        },
+        {
+          "refuted": false,
+          "reason": "Diff's drawPool returns STARTING_CELLS in burn-in, else explorationCells(centre, install.ladders) filtered by defined cells; it no longer uses table.cells. Doc lines 22-25 (untouched) still say 'draw over router-table.json's cells minus the policy cell', so it is stale. Nothing else in the diff updates that doc. I checked by reading code only, with no test run. CWD-AUDIT: clean /Users/chris/dev/fleet-plugin (no git status run; I made no writes)"
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [
+    {
+      "severity": "important",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 321,
+      "claim": "When the install read fails (the loud-looking WARNING path), the failure reaches stderr only: the Routing line / ledger `## Routed` entry still says REASON=ok, and the ticket-features row records assignment_prob=1. On a non-exploring Pull that probability is false. Past burn-in a normal Pull runs its group's Cell at 4/5, but the failed read leaves `install` null, `drawRow.draw` becomes null, and assignmentProb takes the K===0 branch.",
+      "evidence": "probe.mjs `bad json roles, NON-exploring row3`: stderr has the WARNING, but stdout is `... DRAW=- BY=- ... REASON=ok` and prob=1. The healthy row 3 run gives prob=4/5. probe2.mjs with PATH=/nonexistent: exit 0, WARNING `omp config get modelRoles --json failed: spawnSync omp ENOENT`, stdout `... REASON=ok`. The new test 'an install it cannot read warns...' asserts the same prob \"1\" and so pins it. Nothing in the committed ledger/features data marks the row as degraded. ROUTING_REASONS has no value for it, and `degrade()` is never called for it.",
+      "suggested_fix": "Make a failed install read degrade the Routing REASON (a new ROUTING_REASONS value, or route()'s `degrade`) so the ledger shows it. Record assignment_prob blank (unknown, which the column already defines) instead of \"1\" for a Pull whose exploration pool could not be determined. Do not let it feed the Fit as certain.",
+      "dimension": "silent-failure",
+      "verdict": "refuted",
+      "votes": [
+        {
+          "refuted": true,
+          "reason": "I read the code and did not run it. The mechanics match the claim. A failed install read leaves install null, so K=0 and assignmentProb returns \"1\" (ticket-router.mjs:547). The WARNING goes to stderr only (line 1053). But the claim's premise, that prob=1 is false, is contestable. On a failed read no exploration draw happens, so the Cell is assigned deterministically and 1 is the true propensity of that run. The doc comment says K=0 means \"the Pull's Cell was certain\", and the WARNING says \"no exploration Cell is drawn\". What remains is the missing degraded marker in REASON, a design gap rather than a false value. Given the instruction to refute when uncertain, I refute. No red/green run was made; the check was reading the code only. CWD-AUDIT: not run (I made no writes; cwd /Users/chris/dev/fleet-plugin)."
+        },
+        {
+          "refuted": false,
+          "reason": "Not refuted. The code path is as claimed. When the install read throws, `install` stays null. `drawPool` then returns [] and `drawRow.draw` is null, so `K` is 0. `assignmentProb` is a pure function, and I ran it directly: with burnIn false, chainHead false and exploring false, K=0 gives \"1\" and K=3 gives \"4/5\". The only signal of the failure is the stderr WARNING at ticket-router.mjs:1053. That branch calls neither `degrade()` nor any reason code, so `reason` falls through to \"ok\". The doc comment at line 541 describes K=0 as 'no draw, certain', so the \"1\" is partly by design. But on a non-exploring Pull the install read does not affect which Cell runs, so recording \"1\" rather than 4/5 is still wrong. I did not re-run the probe scripts or the test suite, so the REASON=ok stdout and the test that pins prob \"1\" rest on code reading only. No handler elsewhere marks the row as degraded. No red/kill claimed. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I did not write to this directory, so those modifications were already there."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 1045,
+      "claim": "Every non-chain-head `route` past burn-in now spawns `omp` twice, including the 4-in-5 Pulls that do not explore. That adds about 5.7 s per Pull on this host, through execFileSync with no timeout, and pull.mjs stage_route also spawns the router with no timeoutMs. A hung omp therefore hangs the Pull. The shipped router-table.json has `\"burn_in\": false`, so this applies on every install now.",
+      "evidence": "In the copy I ran `node -e 'import(\"./plugin/scripts/tier-roles.mjs\").then(t=>{...readOmpConfigValue(\"modelRoles\")...readOmpModelCatalog()...})'`, which printed `config ms 2117 catalog ms 3612`. `grep -n '\"burn_in\"' plugin/scripts/router-table.json` printed `12:  \"burn_in\": false,`. tier-roles.mjs:195 calls execFileSync with no timeout option, and pull.mjs:948 calls this.script(\"route\", ...) with no opts. I did not reproduce a hang.",
+      "suggested_fix": "Pass a timeout to the omp reads, or give the route step a timeoutMs. A failed read already degrades to 'no draw' with a warning.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/compute-cell-evidence.mjs",
+      "line": 544,
+      "claim": "Past burn-in the cockpit now always says 'every 5th Pull drawn over the group's exploration Cells', even when the guard has tripped every exploration Cell and `route` draws nothing. Before, rd.draw === null printed 'no draw: no other Cell is left'. The comment states this choice; it remains a loss of accuracy.",
+      "evidence": "Read only, not executed: dispatchWords branches on `table.burn_in`, not `rd.draw`, and rowEntry (line 575) calls rowDispatch without `install`, so rd.draw is always null past burn-in. The diff's compute-cell-evidence.test.mjs hunk asserts this new wording for a past-burn-in table.",
+      "suggested_fix": "None required within this ticket. If wanted, have the cockpit read the tripped list against the explorationCells grammar to name the case where every candidate is tripped.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/compute-cell-evidence.mjs",
+      "line": 544,
+      "claim": "dispatchWords now describes any post-burn-in row as 'every 5th Pull drawn over the group's exploration Cells' without checking whether a draw exists. The old text switched to 'no draw: no other Cell is left' when rd.draw was null. The cockpit calls rowDispatch without `install`, so rd.draw is always null past burn-in and the text can no longer reflect an all-tripped or unrunnable pool.",
+      "evidence": "Read of the diff hunk: `const fifth = table.burn_in ? \"no draw: no other Cell is left\" : \"every 5th Pull drawn over the group's exploration Cells\"`. I did not execute the cockpit with an all-tripped exploration pool, so this is unverified at runtime.",
+      "suggested_fix": "Keep the claim out of the cockpit's tripped/no-pool case, or word it as 'when an exploration Cell is available'.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/metrics-refresh.mjs",
+      "line": 22,
+      "claim": "The DRAIN header comment lists the columns a corpus gains blank ('`objective`, `parent`, `named_paths`, `named_lines`, `dirs`, `title` or `plugin_version`'). The diff adds `assignment_prob`, which the drain widens the same way (and the diff updates the metrics-refresh tests for it), but the list omits it.",
+      "evidence": "metrics-refresh.mjs:20-23 read from the snapshot. The diff's metrics-refresh.test.mjs hunk adds PROB='assignment_prob' to OLDER, and the comment above it says 'then the assignment probability'.",
+      "suggested_fix": "Add `assignment_prob` to the column list in the comment.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "CONTEXT.md",
+      "line": 574,
+      "claim": "The edited Exploration draw entry still says 'the Fit weighs the Pull by it'. PR body: 'Nothing reads it as a probability in this change'. The sentence now sits beside new text saying the column is blank on old rows, so a reader may think the Fit already reads `assignment_prob`.",
+      "evidence": "grep -rn assignment_prob plugin/scripts finds only pull-attribution.mjs:101,109 and ticket-router.mjs:567,631, so no Fit code reads it. The 'weighs' text is pre-existing, but the diff puts the column pointer directly before it.",
+      "suggested_fix": "Say the Fit will weigh the Pull by it, or point to the ticket that adds the read.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/pull-attribution.mjs",
+      "line": 101,
+      "claim": "The `assignment_prob` format (`1` or `<n>/<d>` in lowest terms, blank = unknown) is documented only. parseFeatures accepts any string in the column, and the type is a plain string.",
+      "evidence": "Read pr.diff and pull-attribution.mjs. `assignment_prob` joins FEATURE_COLUMNS and OPTIONAL_COLUMNS (slice from 'objective'), and parseFeatures only does `row[c] ??= ''`. grep for `assignment_prob` in plugin/scripts shows only the column list, the comment and ticket-router.mjs:631 (the writer). Nothing validates the value, and the new test only round-trips '1', '4/5' and '1/15'.",
+      "suggested_fix": "When the Fit starts reading the column, validate it in parseFeatures (blank, or /^(1|[1-9]\\d*\\/[1-9]\\d*)$/ with n<d) and refuse a malformed value, as other columns are refused. Until then the format stays a convention.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 211,
+      "claim": "assignmentProb takes `{burnIn, chainHead, exploring, K}` as a loose boolean bag. Combinations that cannot occur are representable, and the branch order resolves them silently (past burn-in, chainHead && exploring returns '1' ahead of the exploring branch). The 'blank means unknown, never 1 or 0' invariant is also unenforced on the writer, because `1` is returned for both a certain Cell and the read-failure fallback.",
+      "evidence": "Read the diff of assignmentProb and route(): `exploring = table.burn_in || (implRow % EXPLORE_EVERY === 0 && !chainHead)`. That makes (burnIn=false, chainHead=true, exploring=true) unreachable from route, yet the function accepts it. The unit test calls it directly with burn-in chain-head and exploring=true. An install-read failure (install=null, so K=0) writes '1' with only the stderr warning as a trace.",
+      "suggested_fix": "Pass a single `mode` ('burn-in' | 'chain-head' | 'explore' | 'policy') instead of three booleans. Consider whether a failed install read should write blank (unknown) rather than a certain '1'.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 442,
+      "claim": "`install = null` is a default parameter on rowDispatch/route, so a caller that forgets to pass the install silently gets 'no exploration Cell' after burn-in. The sentinel means both 'not read' and 'read failed', and only the test files pass it explicitly.",
+      "evidence": "Read the diff: `rowDispatch({ table, guard, objective, stratum, install = null })` and `route({..., install = null})`. drawPool returns [] when install===null. The updated tests add `install: INSTALL` at each call site because the default draws nothing (the test asserts `rowDispatch(... no install).draw === null`). The router's main() passes install, but any other caller would silently change behaviour.",
+      "suggested_fix": "Make `install` required past burn-in (no default), or use a distinct named sentinel such as `NO_INSTALL` so the omission is not indistinguishable from a failed read.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 390,
+      "claim": "LEVELS is derived by regex-matching the source text of the CELL RegExp (`CELL.source.match(/\\)-\\(([^)]*)\\)/)[1]`), and the ordering relied on for `rank` is only the order of that alternation, which is never asserted. A change to the CELL pattern shape would throw a TypeError at import, or silently reorder the levels.",
+      "evidence": "Read the diff line `const LEVELS = Object.freeze(CELL.source.match(/\\)-\\(([^)]*)\\)/)[1].split(\"|\"))`. The ledger-grammar.mjs line 848 CELL source lists minimal|low|medium|high|xhigh|max, which happens to be effort order. The tests exercise ladders only through installOf output and do not assert LEVELS itself.",
+      "suggested_fix": "Export a frozen LEVELS array from ledger-grammar.mjs and build CELL from it (as CELL_DEF is built from CELL), so the effort order is one declared value and not parsed back out of a regex.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 390,
+      "claim": "LEVELS is built by running a regex over the source text of the CELL regex (`CELL.source.match(/\\)-\\(([^)]*)\\)/)[1].split(\"|\")`). That is a regex parsing a regex, which hides a plain constant, and it sits next to ROLES_BY_PRICE, which is written out as a literal.",
+      "evidence": "In the copy: `node -e 'import(\"./plugin/scripts/ledger-grammar.mjs\").then(({CELL})=>console.log(JSON.stringify(CELL.source.match(/\\)-\\(([^)]*)\\)/)[1].split(\"|\"))))'` printed [\"minimal\",\"low\",\"medium\",\"high\",\"xhigh\",\"max\"]. I replaced line 390 with that literal array and ran ticket-router, pull-attribution, compute-cell-evidence and metrics-refresh tests: tests 363, pass 363, fail 0. grep across plugin/scripts found no exported level list to reuse. The only list is the CELL regex at ledger-grammar.mjs:848; tier-roles.mjs:74 MODEL_ROUTE_RE repeats the same levels.",
+      "suggested_fix": "Write `const LEVELS = Object.freeze([\"minimal\", \"low\", \"medium\", \"high\", \"xhigh\", \"max\"]);` directly. Better: export LEVELS (and the role list) from ledger-grammar.mjs and build CELL from them (`new RegExp(`^(${ROLES.join(\"|\")})-(${LEVELS.join(\"|\")})$`)`), so the list is defined once and the router imports it.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 610,
+      "claim": "route() now declares `let exploring = false` and reassigns it inside `if (guard !== null)`. That mutable state is unnecessary: assignmentProb only reads `exploring` when K > 0, and K > 0 is impossible without a guard because rowDispatch returns draw: null when guard is null. So `exploring` can be a const computed once, before the guard check.",
+      "evidence": "In the copy I replaced lines 610-613 (`let exploring = false; if (guard !== null) { exploring = …; if (exploring) {`) with `const exploring = table.burn_in || (implRow % EXPLORE_EVERY === 0 && !chainHead); if (guard !== null) { if (exploring) {`. With the LEVELS mutant also applied, I ran `node --test tests/ticket-router.test.mjs tests/pull-attribution.test.mjs tests/compute-cell-evidence.test.mjs tests/metrics-refresh.test.mjs`: ℹ tests 363, ℹ pass 363, ℹ fail 0. These include the assignment_prob cases for no guard (\"1\"), a chain head, 4/5, 1/15, 1/10 and burn-in 1/3, plus the rowDispatch/route agreement sweep.",
+      "suggested_fix": "`const exploring = table.burn_in || (implRow % EXPLORE_EVERY === 0 && !chainHead);` placed before the guard check, then `if (guard !== null && exploring) { … }` with one fewer nesting level. Delete the `let exploring = false;` line.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

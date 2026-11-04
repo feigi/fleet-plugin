@@ -1,0 +1,175 @@
+{
+  "pr": 4340,
+  "head": "4880fcf2fa9f2a11d0ce1b29d01b28b66123a4ae",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (not written by this review; I only ran read-only commands, so these are probably from other agents or the controller)"
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv' and ' M docs/metrics/tier-outcomes.tsv'. I did not touch these; they were already modified when I ran the audit, at the end."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — printed ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. I ran only `pwd`, `wc -l` and read-only `git status` there, so these modifications are not mine and are likely another agent's or the controller's."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I did not touch these. I only ran `git status` there."
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv` (this pass wrote nothing in that tree; its only commands there were `pwd` and this status audit, so these modifications come from someone else)"
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. This pass never wrote to that tree; every write went to correctness/ under the run dir."
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 9,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4340/run-F8rkM8MI/snapshot-4880fcf2",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/derive-testcmd.sh",
+      "line": 415,
+      "claim": "The PR rewrote this comment to say review-core.mjs's *shared test run* embeds the Test entrypoint raw in `{ cd <dir> && <cmd>; }`, where a trailing `;`/`&` or a `#` word 'break the wrapper as a syntax error'. That is false: the shared run single-quotes the command into suite-slot.mjs, which runs `sh -c '<cmd> \"$@\"'`, so those endings exit 0.",
+      "evidence": "review-core.mjs:416 `slotted(cmd)` returns `fleet-run suite-slot.mjs '${cmd quoted}'`, and :1370 runs `{ cd \"${snap.path}\" && ${slotted(testCmd)}; }`. suite-slot.mjs:111 spawns `sh -c `${entrypoint} \"$@\"``. I ran the real wrapper in correctness/probe: `sh -c \"{ cd $PWD && node ../copy/plugin/scripts/suite-slot.mjs '<cmd>'; }\"` gave `[true;] exit=0`, `[true &] exit=0`, `[true #x] exit=0`. Embedding raw instead (`{ cd /tmp && true;; }`) gave `syntax error near unexpected token ';;'`. The old wording named the snapshot agent, which by then only read the string and never embedded it. The PR changed the subject but kept a claim that is still untrue.",
+      "suggested_fix": "Drop the review-core clause, or restate it accurately. The shared run hands the string to suite-slot.mjs, which appends `\"$@\"` inside `sh -c` the same way claim-ticket.sh's runner does, so the hazard is the claim-ticket one, not a syntax error in the `{ … }` group.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/review-eval.mjs",
+      "line": 164,
+      "claim": "A missing args.testCmd is a deterministic dispatch mistake, but runReviewToFile retries it and returns {status:\"failed\"} with two identical errors, where it throws before any run for a bad pr or scratch.",
+      "evidence": "Probe: runReviewToFile({pr:7,branch:\"b\",worktree:\"/w\",scratch:<abs>}, a=>runReview(host,a)) with no testCmd returned {\"status\":\"failed\",\"errors\":[\"attempt 1: review-pr: args.testCmd is required — the Test entrypoint the shared run executes, got undefined\",\"attempt 2: …same…\"]}. The file's own comment at lines 151-157 says a dispatch mistake throws before any run because retrying would only repeat it. The failure is visible, not swallowed, but a controller that treats `failed` as a review failure event may re-dispatch another runner and hit the same refusal instead of fixing its dispatch.",
+      "suggested_fix": "Add a testCmd refusal (non-empty string) beside runnerPrRefusal in runReviewToFile so it throws like the pr and scratch refusals. Keep the check in runReview as well.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/review-core.mjs",
+      "line": 1147,
+      "claim": "The hard-coded `--at origin/main` makes a worktree whose repo has no origin/main ref read its Install step as UNREAD, so every review in that repo skips its suite. This is surfaced, not silent, but the prose that classifies an unread step is now wrong for this cause.",
+      "evidence": "Probe: `sh derive-testcmd.sh <fixture with valid .fleet/recipe.json, no origin/main> install --at origin/main` printed `derive-testcmd: --at 'origin/main' does not resolve to a commit in <fixture>`, rc=1, whereas without --at it printed `./install.sh`, rc=0. The block then prints SNAPSHOT_INSTALL_UNREAD and the prompt tells the agent to report installError from stderr, so installReason gives \"the Install step did not run in the snapshot — <that message> — so the shared test run was skipped\" and the test run carries `unprovisioned`. The installFinding comment (review-core.mjs ~653) still says an unreadable Install step \"is the Recipe's state, not the PR's\", which is false for a missing ref. claim-ticket.sh:170 and phase-0 already assume origin/main, so the convention is consistent.",
+      "suggested_fix": "Optional: reword the installFinding comment, and say in the docs that an absent origin/main skips the suite. No code change is needed for correctness.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "ADR 0015's Consequences bullet still says 'resolveTestCmd keeps its refusal but the message names the derivation step' and that the snapshot 'reads the same cache'. This PR deletes resolveTestCmd, and the snapshot no longer reads the Test entrypoint. Only the Status-line amendment flags it.",
+      "evidence": "grep -n resolveTestCmd docs/adr/0015-*.md shows line 90. grep -c 'resolveTestCmd' plugin/scripts/review-core.mjs was not run for this term, but 'grep -F resolveTestCmd' over plugin/ and tests/ in the snapshot matched only tests/*/comments in the diff and none of the shipped code. The PR body says the ADR body is deliberately left unchanged, which is accurate, so this is a stale-history risk rather than a false claim.",
+      "file": "docs/adr/0015-consumer-recipe-by-agent-reasoning-no-technology-table.md",
+      "line": 90,
+      "suggested_fix": "Add a short parenthetical to that bullet pointing at the Status amendment ('superseded by #4046'), or accept that the Status line carries it.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "Every checkable assertion in the PR body and commit 4880fcf2 matched the snapshot.",
+      "evidence": "The grep -c -F counts that I re-ran in the snapshot all matched the body: 'install --at origin/main' gives 1 in review-core.mjs and 1 in review-and-fix.md; testCmdError and DERIVATION_STEP each give 0; installError gives 6; 'export function install' gives 2 (installFinding, installReason); 'A claim that refuses because the Recipe cache' gives 1 in phase-0.md; files under plugin/ citing 4046 give 0; 'HEAD^{tree}' is 2d259b8fe58530... as quoted. The new refusal at review-core.mjs:1092 exists. The tests/derive-testcmd.test.mjs file referenced from the new comments exists. No other stale 'N of M' count or test-name pointer was found.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/review-core.mjs",
+      "line": 1092,
+      "claim": "The new `args.testCmd` invariant (non-empty string) is enforced once at the reviewRun entry by a runtime check, and the narrowed `const testCmd = A.testCmd` is the only value that reaches the shared-run code. There is no type-level encoding, but nothing in the changed code bypasses the check.",
+      "evidence": "Snapshot grep shows `testCmd` is read from `A.testCmd` only at lines 1092-1095. Lines 1317, 1370, 1413, 1414 and 1548 all use the validated local `testCmd`. `resolveTestCmd`, `snap.testCmd` and `testCmdError` have no remaining references in plugin/. SNAPSHOT_SCHEMA also dropped `testCmd` and `testCmdError`, so the snapshot agent can no longer supply a competing value.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/review-core-testcmd.test.mjs",
+      "line": 66,
+      "claim": "The textual pin \"no hardcoded testCmd default remains\" (`doesNotMatch(CODE, /A\\.testCmd\\s*\\|\\|\\s*\"/)`) is now fully covered by the new behavioural test \"runReview with testCmd absent, empty or blank refuses before any agent is dispatched\" (line 42): any default that actually takes effect makes the refusal test fail, and the regex catches only one spelling of a default.",
+      "evidence": "Ran in the private copy, with each mutant reverted afterwards. Mutant B1 added `if (!A.testCmd) A.testCmd = \"node --test\";` after `const A = decodeArgs(args);`. `node --test tests/review-core-testcmd.test.mjs` gave `✖ runReview with testCmd absent, empty or blank refuses…` and `✔ no hardcoded testCmd default remains`, pass 10 fail 1, so the textual pin missed a real default. Mutant B2 used `A.testCmd = A.testCmd || \"node --test\";` and both tests went red (pass 9 fail 2). In every effective-default mutant I tried, the behavioural test went red. The regex adds value only where a default would be dead code, for example one placed after the guard.",
+      "suggested_fix": "Delete the `no hardcoded testCmd default remains` test (lines 64-68). The refusal test at line 42 already guards the #142 regression and catches every spelling of a default. If the #142 history should stay visible, move its comment onto that test.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/review-core.mjs",
+      "line": 1092,
+      "claim": "The new guard reads `A.testCmd` three times and only then aliases it with `const testCmd = A.testCmd;`. The neighbouring arguments in reviewRun alias first and validate the local (`const pr = A.pr; … if (!isDigits(pr))`); doing the same here removes the repeated property reads with no change in behaviour.",
+      "evidence": "Applied this exact rewrite in the private copy: `const testCmd = A.testCmd; if (typeof testCmd !== \"string\" || testCmd.trim() === \"\") { throw new Error(`review-pr: args.testCmd is required — the Test entrypoint the shared run executes, got ${JSON.stringify(testCmd)}`); }`. Then ran `node --test tests/review*.test.mjs tests/select-dimensions.test.mjs`: exit 0, tests 342, pass 342, fail 0. Also ran the narrower set testcmd/snapshot-path/shared-test-run/cwd-isolation: tests 72, pass 72. decodeArgs (line 422) returns a plain parsed object, so reading the field once instead of three times cannot change the result.",
+      "suggested_fix": "const testCmd = A.testCmd;\nif (typeof testCmd !== \"string\" || testCmd.trim() === \"\") {\n  throw new Error(`review-pr: args.testCmd is required — the Test entrypoint the shared run executes, got ${JSON.stringify(testCmd)}`);\n}",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/snapshot-repo.test.mjs",
+      "line": 148,
+      "claim": "The new `scriptInstallRepo` fixture copies `installedRepo` almost line for line: the .gitignore rewrite, the add + \"recipe\" commit + `update-ref refs/remotes/origin/main`, and the `.fleet/recipe.json` write with the same `check/installClean/testCount/uncovered` constants. Two shared helpers would remove the copy, so the two fixtures cannot drift apart on recipe shape.",
+      "evidence": "Applied the refactor in the private copy. I added `commitAsOriginMain(dir)` (add, commit \"recipe\", update-ref origin/main) and `writeRecipe(dir, fields)` (mkdir .fleet, then write `{check:true, installClean:true, testCount:1, uncovered:[], ...fields, derivedAt: rev-parse origin/main}`). installedRepo then calls `writeRecipe(dir, {install:\"sh ./install.sh\", test:\"sh ./check.sh\"})` and scriptInstallRepo calls `writeRecipe(dir, {install, test:\"true\"})`. In installedRepo, derivedAt was HEAD, which equals origin/main at that point. `node --test tests/snapshot-repo.test.mjs` gave exit 0, tests 45, pass 45, fail 0. `git diff --stat` showed 14 insertions and 18 deletions before I reverted.",
+      "suggested_fix": "function commitAsOriginMain(dir) { git(dir, \"add\", \"-A\"); git(dir, \"-c\", \"user.name=fixture\", \"-c\", \"user.email=fixture@invalid\", \"commit\", \"-q\", \"-m\", \"recipe\"); git(dir, \"update-ref\", \"refs/remotes/origin/main\", \"HEAD\"); }\nfunction writeRecipe(dir, fields) { mkdirSync(join(dir, \".fleet\"), { recursive: true }); const recipe = { check: true, installClean: true, testCount: 1, uncovered: [], ...fields, derivedAt: git(dir, \"rev-parse\", \"origin/main\") }; writeFileSync(join(dir, \".fleet\", \"recipe.json\"), `${JSON.stringify(recipe)}\\n`); }\nThen both installedRepo and scriptInstallRepo call commitAsOriginMain(dir) and writeRecipe(dir, {install, test}).",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

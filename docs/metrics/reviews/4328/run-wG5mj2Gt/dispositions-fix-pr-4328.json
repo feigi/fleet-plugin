@@ -1,0 +1,191 @@
+{
+  "head": "6e70c3c93541a9574590d0509b5c2a31df1d0e58",
+  "run": "run-wG5mj2Gt",
+  "entries": [
+    {
+      "bucket": "survived",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "charge": "unmet",
+      "reason": "relative-path and two-line fixtures renamed for the sha256 of their content, each kept reason asserted exactly. red: ./agent-test tests/reclaim-scratch.test.mjs (via suite-slot) with !isAbsolute dropped \u2192 exit 1, fail 1 incl the no-checkout-path test; with the multi-line guard dropped \u2192 exit 1, fail 1 incl it; baseline: same \u2192 exit 0, that test pass; control (guards swapped) \u2192 exit 0, 82/82."
+    },
+    {
+      "bucket": "survived",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "false-rationale",
+      "issue": 4333
+    },
+    {
+      "bucket": "survived",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "charge": "none",
+      "chargeReason": "not-the-implementers-text",
+      "reason": "board-server.mjs and board.mjs drop the sole-caller claim; fleet-dir.mjs names the checkout-path write beside the cockpit port. fleet-state.mjs:73 makes no sole-caller claim and is unchanged."
+    },
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "out",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4328/fix-w6fyi44t/u0/verdict.json",
+      "reason": "out of scope: widens #4112's ruled parent-directory rule; refuter could not refute it, filed open needs-triage",
+      "issue": 4332
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4328/fix-w6fyi44t/u1/verdict.json",
+      "reason": "refuter reproduced the FIFO hang; checkoutOf reads only a regular file (lstat). red: FIFO test with the isFile guard dropped \u2192 exit 1, fail 1 incl it; baseline \u2192 exit 0, pass."
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4328/fix-w6fyi44t/u2/verdict.json",
+      "reason": "dangling-symlink checkout test added. red: existsAt lstat\u2192stat \u2192 exit 1, fail 1 incl it; baseline \u2192 exit 0, pass."
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4328/fix-w6fyi44t/u3/verdict.json",
+      "reason": "unreadable checkout-path test added. red: EACCES/EPERM dropped from NO_CHECKOUT_FILE \u2192 exit 1, fail 1 incl it; baseline \u2192 exit 0, pass."
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4328/fix-w6fyi44t/u4/verdict.json",
+      "reason": "refuted: the failure is named with its path and error; filed on the suggestion-band record",
+      "issue": 4333
+    },
+    {
+      "bucket": "unverified",
+      "index": 5,
+      "scope": "out",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4328/fix-w6fyi44t/u5/verdict.json",
+      "reason": "refuted: harm not reproduced; filed on the suggestion-band record",
+      "issue": 4333
+    },
+    {
+      "bucket": "unverified",
+      "index": 6,
+      "scope": "out",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4328/fix-w6fyi44t/u6/verdict.json",
+      "reason": "refuted: #4112 item 7 rules the keep; filed on the suggestion-band record",
+      "issue": 4333
+    },
+    {
+      "bucket": "unverified",
+      "index": 7,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4328/fix-w6fyi44t/u7/verdict.json",
+      "reason": "applied at the reachable sites: ENOTDIR in existsAt (checkout under a file) and the `at instanceof Error` keep (checkout under an unsearchable dir); each mutant \u2192 exit 1, fail 1 incl its test; baseline \u2192 exit 0. Not pinned: EPERM (no fixture here makes an unprivileged read return it), the `up instanceof Error` keep (no fixture makes the parent's lstat fail while the checkout's answers ENOENT or ENOTDIR), and the other-read-error branch, which a symlink loop no longer reaches now that a non-regular checkout-path reads as no checkout file."
+    },
+    {
+      "bucket": "unverified",
+      "index": 8,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4328/fix-w6fyi44t/u8/verdict.json",
+      "reason": "failed-rename test added (a non-empty directory at checkout-path). red: rmSync(tmp) dropped \u2192 exit 1, fail 1 incl it; baseline \u2192 exit 0, pass."
+    },
+    {
+      "bucket": "unverified",
+      "index": 9,
+      "scope": "out",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4328/fix-w6fyi44t/u9/verdict.json",
+      "reason": "refuted: a dated, commit-pinned research note; filed on the suggestion-band record",
+      "issue": 4333
+    },
+    {
+      "bucket": "unverified",
+      "index": 10,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4328/fix-w6fyi44t/u10/verdict.json",
+      "reason": "refuted in a single refuter with u14 as a conflicting pair; u14 won and was applied; filed on the suggestion-band record",
+      "issue": 4333
+    },
+    {
+      "bucket": "unverified",
+      "index": 11,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4328/fix-w6fyi44t/u11/verdict.json",
+      "reason": "refuted: the swap changes only the kept reason; filed on the suggestion-band record",
+      "issue": 4333
+    },
+    {
+      "bucket": "unverified",
+      "index": 12,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4328/fix-w6fyi44t/u12/verdict.json",
+      "reason": "refuted: documented, consumer reads idle strictly; filed on the suggestion-band record",
+      "issue": 4333
+    },
+    {
+      "bucket": "unverified",
+      "index": 13,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4328/fix-w6fyi44t/u13/verdict.json",
+      "reason": "refuter could not refute it, but the remedy edits scratchRoot()'s key computation, which #4112 rules out of scope; below the claim bar on the suggestion-band record",
+      "issue": 4333,
+      "remedyFiles": [
+        "plugin/scripts/fleet-dir.mjs",
+        "plugin/scripts/reclaim-scratch.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 14,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4328/fix-w6fyi44t/u14/verdict.json",
+      "reason": "checkoutOf returns { checkout } or { reason }; refuter measured reasons byte-identical (76/76), full suite green after."
+    },
+    {
+      "bucket": "unverified",
+      "index": 15,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4328/fix-w6fyi44t/u15/verdict.json",
+      "reason": "idle: true on the removal verdict."
+    }
+  ]
+}

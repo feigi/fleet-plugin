@@ -1,0 +1,228 @@
+{
+  "pr": 4305,
+  "head": "50fcfb824abec4038a4abf320799b83f026401dc",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. I ran no writing commands, so I did not make these changes. They are most likely another agent's work or the controller's metrics output."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (I only ran read-only commands; these are not mine)"
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I wrote nothing in that checkout, so these changes predate or come from another run."
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv` (not written by this agent; every command of mine ran in the snapshot or in my scratch copy)"
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I ran only read-only commands there and never wrote to it, so I did not make these two modifications."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv' (I wrote nothing there: every command chained a cd into the scratch copies, and every edit targeted correctness/copy or correctness/mut. The #4098 refuters' notes record tier-outcomes.tsv as already modified, which points to the controller's own metrics writes.)"
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 1,
+    "unverified": 11,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4305/run-td8xha9R/snapshot-50fcfb82",
+  "survived": [],
+  "refuted": [
+    {
+      "severity": "important",
+      "file": "docs/adr/0036-an-idle-claim-tree-is-evicted-its-dependencies-go-the-claim-stays.md",
+      "line": 42,
+      "claim": "ADR 0036 decisions 4, 5 and 6 still state the pre-#4098 rules, so the body contradicts the new Status amendment: 4 lists 'already marked' as an unconditional keep, 5 says the mark is written unconditionally and that a failed deletion 'keeps its mark' with no retry, and 6 says the restore time is recorded 'only once the tree is clean'.",
+      "evidence": "Snapshot ADR lines 42-43 ('Kept, each with its reason: already marked; ...'), 52-56 ('writes the mark ... A tree whose deletion fails keeps its mark and is named in failed') and 62-64 ('Only once the tree is clean does it record the restore time (fleet-restored) and remove the mark') are unchanged by the diff; the diff only adds an 'Amended by #4098' note at lines 9-15 of the file, which itself says these decisions are altered.",
+      "suggested_fix": "Reword decisions 4, 5 and 6 in place, or state in the amendment that those paragraphs are superseded. The #4228 amendment already uses the Status-note style, so this may be intended; if so, keep it a suggestion.",
+      "dimension": "comments",
+      "verdict": "refuted",
+      "votes": [
+        {
+          "refuted": true,
+          "reason": "The body text of decisions 4, 5 and 6 is unchanged, as the claim says. But the Status amendment names those same decisions and says how each is altered. The earlier #4228 amendment follows the same pattern: it left decision 6's body as written and amended only the Status ('as decision 6 below words it'). So the Status-amendment convention is deliberate and the contradiction is flagged, not hidden. I only read files and ran no suite, so there is no red or green run. I did not check how the other ADRs handle amendments. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/ticket-features.tsv, M docs/metrics/tier-outcomes.tsv (not from my commands; I made no writes)."
+        },
+        {
+          "refuted": true,
+          "reason": "I read the snapshot ADR and the diff, and ran nothing else. The body of decisions 4, 5 and 6 is unchanged, as the claim says. The new Status amendment (lines 9-15) names each altered decision. It says decision 4's 'already marked' keep is dropped, decision 5's failed trees are named in `failed` on every sweep, and decision 6's restore time is recorded before the Install step. The ADR already follows this convention: the #4228 amendment alters decision 6 the same way and leaves the body text as written. So the contradiction is flagged in the document, not unhandled. The evidence only shows the body wording was not rewritten, which is weaker than a contradiction that readers cannot see. Residual risk: a reader who skips Status may still be misled, and that is a style preference rather than a defect. No test or mutation applies to a docs-only claim. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I did not touch these files; they were already modified when I started."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "tests/evict.test.mjs",
+      "line": 499,
+      "claim": "No test pins that `--restore` without `--apply` writes no restore time: a mutant that calls `beforeRun` (the RESTORED write) before installIn's `if (!apply) return { install }` passes the whole evict and finisher-tree suites, even though in it a dry-run restore writes `fleet-restored` and holds the tree for 7 days.",
+      "evidence": "In correctness/mut I moved evict.mjs lines 460-461 (`const stopped = beforeRun === null ? null : beforeRun(install); if (stopped !== null) return refuse(...)`) above line 459 (`if (!apply) return { install };`). Then I ran `node --test --test-reporter=tap tests/evict.test.mjs tests/finisher-tree.test.mjs`: exit=0, # tests 52, # pass 52, # fail 0. Next I copied the test file with one extra line after line 507, `assert.equal(existsSync(join(f.admin(wt), RESTORED)), false, \"dry run wrote the restore time\")`, and ran it with `--test-name-pattern='runs nothing and names the command'`. The mutant failed ('mut dry run wrote the restore time', # fail 1); the unmutated copy passed (# pass 1, # fail 0). The shipped code is correct. Only the guard is unpinned.",
+      "suggested_fix": "In the test '--restore without --apply runs nothing and names the command' (tests/evict.test.mjs:499-508), add `assert.equal(existsSync(join(f.admin(wt), RESTORED)), false);`.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/evict.mjs",
+      "line": 331,
+      "claim": "No swallowed error, hidden fallback, mislabelled catch, or newly dereferenced call inside an existing try was found in this diff. The only new try/catch blocks surface the error text, and the unchanged restoredAt/headMoved reads still throw into judge()'s existing catches.",
+      "evidence": "Probes in a copy of the snapshot. A marked tree with a corrupt index was kept with the reason `git ls-files --ignored failed (exit 128: fatal: …/index: index file smaller than expected)`, and `failed` and `evicted` were empty. Garbage in fleet-restored was kept with `…/fleet-restored holds no time: \"garbage\"`. A marked tree with a hand-made ignored dist/ was evicted with reason `already evicted, ignored paths left — HEAD last moved …` and dist/ was removed, which the ADR amendment describes as intended. A restore whose Install step exited 127 exited 2 with the refusal on stderr, left the mark in place, and left the restore time written (the probe printed its `existsSync` booleans, but the output line was cut off; the new test 'a restore whose install fails…' asserts both). The pre-existing test 'a restore time that cannot be written refuses before the Install step runs' covers the write-failure path.",
+      "suggested_fix": "None required. Optionally, `installIn` could check `typeof stopped === 'string'` instead of `stopped !== null`, so a `beforeRun` that returned `undefined` could not produce a refusal with an undefined message. The only caller returns null or a string, so this is a hardening note I did not run.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/evict.mjs",
+      "line": 326,
+      "claim": "No test covers a marked tree whose ignored paths cannot be listed: changing the new catch in the marked branch of judge() to `ignored = []` leaves every test green.",
+      "evidence": "red: n/a (mutant survived). Mutant: in the `if (mark.marked) { try { ignored = ignoredPaths(w.path) } catch (e) { return { kept: e.message } } … }` block, `return { kept: e.message };` → `ignored = [];`. Run: `./agent-test tests/evict.test.mjs` in the mutated copy → exit 0, tests 36, fail 0. Baseline: same command on the unmutated copy → exit 0, tests 36, pass 36. The mutant still keeps the tree, but with the reason 'already evicted…' instead of the listing error. The header comment's rule 'its ignored paths cannot be listed' is therefore untested for marked trees. The test-file diff has no case that makes ignoredPaths fail for a marked tree.",
+      "suggested_fix": "Add a test where a marked tree's ignored-path listing fails (the way the existing unmarked 'cannot be listed' case does it) and assert the kept reason is the listing error, not 'already evicted'.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/adr/0036-an-idle-claim-tree-is-evicted-its-dependencies-go-the-claim-stays.md",
+      "line": 13,
+      "claim": "The ADR amendment says a restore 'still installing, or one refused, holds the tree for 7 days', but a refusal ahead of the Install step (derive, status-before, dirty-before) writes no restore time and holds nothing.",
+      "evidence": "In the diff, record() runs only via installIn's beforeRun after the derive/status/dirty checks pass. The new test 'a restore with no Install step derived writes no restore time' asserts existsSync(RESTORED) === false for exactly that refusal. The evict.mjs header words it correctly ('Once the checks ahead of the Install step pass'). The PR body repeats the same unqualified phrase but qualifies it earlier with 'after the checks ahead of the Install step'.",
+      "suggested_fix": "Say 'one refused after the checks ahead of the Install step'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/finisher-tree.mjs",
+      "line": 42,
+      "claim": "The finisher-tree.mjs receipt comment enumerates evict.mjs's installIn() refusal kinds without the new `before-run` kind that the diff adds.",
+      "evidence": "finisher-tree.mjs lines 41-43 list 'derive, status-before, dirty-before, not-run, failed, status-after, dirtied'; the diff adds `before-run` to the installIn() doc. finisher-tree.mjs line 152 calls installIn(tree, true, { verb: \"install\", retry: false }) with no beforeRun, so before-run cannot reach the receipt. The list is accurate for the finisher, but 'one of evict.mjs's installIn() kinds' now reads as exhaustive.",
+      "suggested_fix": "Either leave it, or add 'before-run, never raised here: the finisher passes no beforeRun'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/evict.mjs",
+      "line": 442,
+      "claim": "The installIn() doc ends 'Nothing here writes a mark or a restore time', but a restore passes a beforeRun hook that does write the restore time inside the call.",
+      "evidence": "Diff lines 157-162: the doc says beforeRun is called just before the Install step. restore() (evict.mjs ~line 494-499) passes `record`, which does writeFileSync(restored,...). installIn's own code writes nothing, so the sentence is true of the function body, though a reader could take it to cover the hook's effects.",
+      "suggested_fix": "Say 'installIn itself writes no mark or restore time; a beforeRun hook may'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/finisher-tree.mjs",
+      "line": 42,
+      "claim": "The PR adds the refusal kind `before-run` to installIn()'s JSDoc kind list, but finisher-tree.mjs's header (line 42-43) lists the kinds from installIn() by hand and still omits it. The kind set exists only in prose, so the two copies can drift.",
+      "evidence": "grep showed finisher-tree.mjs:42-43 lists `derive, status-before, dirty-before, not-run, failed, status-after, dirtied`. The diff adds ` *   before-run` only to evict.mjs. finisher-tree.mjs never passes beforeRun (call at line 152 passes only verb and retry), so the kind is unreachable from that caller and the effect is only a stale doc. The EXIT map at line 89 falls back via `?? 1`, so a new kind would not break it.",
+      "suggested_fix": "Export a frozen `REFUSAL_KINDS` object from evict.mjs and have finisher-tree's EXIT map and header refer to it. Alternatively, leave it as is, since the kind is unreachable there.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/evict.mjs",
+      "line": 173,
+      "claim": "The `beforeRun` hook is typed only by prose, as 'returns null, or the message of a refusal', and the check is `stopped !== null`. A hook that returns `undefined`, for example by forgetting `return null`, is treated as a refusal and gives a refusal whose message is `undefined`.",
+      "evidence": "Diff lines 173-174: `const stopped = beforeRun === null ? null : beforeRun(install); if (stopped !== null) return refuse(\"before-run\", stopped, install);`. The sole caller, `record` in restore(), returns null or a string on every path, so nothing is wrong today.",
+      "suggested_fix": "Test `typeof stopped === \"string\"`, or have the hook return `{refuse: message} | undefined`. Alternatively document that the return must be exactly null or a string.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/evict.mjs",
+      "line": 123,
+      "claim": "The `retry` field on the judge verdict (`retry: mark.marked`) has the same name as installIn's `retry` option, which means something unrelated (whether the dirty-before message tells the reader to retry). The two concepts are close together in one file, and the verdict's shape (`{kept}` or `{evict:{...,retry}}`) is not enforced by any type.",
+      "evidence": "Diff line 123 sets `retry: mark.marked` in the verdict. Diff line 164 has `installIn(tree, apply, { verb = \"restore\", retry = true, ... })`. evictTree reads `verdict.retry` at diff line 134.",
+      "suggested_fix": "Rename the verdict field to something like `marked` or `alreadyMarked`.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/evict.mjs",
+      "line": 444,
+      "claim": "installIn's `beforeRun = null` default plus the `beforeRun === null ? null : beforeRun(install)` guard is needless indirection, and the `install` argument it passes is never read: its only provider, restore()'s `record`, is declared `() => {…}` and the doc comment does not name the argument.",
+      "evidence": "In the probe copy I changed line 444 to `beforeRun = () => null` and line 460 to `const stopped = beforeRun();` (along with the judge() change in the next finding). `node --check plugin/scripts/evict.mjs` → SYNTAX-OK. `node --test --test-reporter=tap tests/evict.test.mjs tests/finisher-tree.test.mjs tests/install-not-run-cause-prose.test.mjs tests/ambient-git-vars-mjs-prose.test.mjs` → exit=0, tests 88, pass 88, fail 0. As a check that these tests notice the hook, I replaced line 460 with `const stopped = null;`. tests/evict.test.mjs then gave exit=1 with 7 failures, including 'not ok 19 - --restore --apply writes the restore time before the Install step starts' and 'not ok 25 - a restore time that cannot be written refuses before the Install step runs and leaves the mark'. So those tests exercise this hook, and the simplified form passes them. grep shows only two callers of installIn: finisher-tree.mjs:152 passes no beforeRun, and restore() passes `record`. Neither passes `beforeRun: null` explicitly, so the null default exists only to be tested for.",
+      "suggested_fix": "`export function installIn(tree, apply, { verb = \"restore\", retry = true, beforeRun = () => null } = {})` and `const stopped = beforeRun();`, which removes the null check and the unused `install` argument.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/evict.mjs",
+      "line": 351,
+      "claim": "In judge(), the `ignored === null` sentinel only repeats `!mark.marked`: a marked tree reaches line 351 only with `ignored` already set (any other path returns at lines 330-335), and an unmarked tree always reaches it with `ignored` still null. Testing the mark directly says why the late listing exists, without a second variable a reader has to keep in step.",
+      "evidence": "From the snapshot's evict.mjs lines 328-358: `let ignored = null; if (mark.marked) { try { ignored = ignoredPaths(w.path); } catch (e) { return { kept: e.message }; } if (ignored.length === 0) return {kept: …} }`. No other assignment to `ignored` happens before line 351. In the probe copy I changed line 351 to `if (!mark.marked) {`, then ran `node --check` → SYNTAX-OK, and the targeted run above (evict, finisher-tree, install-not-run-cause-prose, ambient-git-vars-mjs-prose) → 88/88 pass. That suite includes the PR's new marked-tree tests: 'a marked tree whose removal partly failed is removed again…', 'every other keep-rule holds a marked tree with ignored paths left…' and 'a dry run names a marked tree with ignored paths left…'.",
+      "suggested_fix": "Replace `if (ignored === null) {` with `if (!mark.marked) {`, and declare `let ignored;` without the `= null` sentinel. Optionally, move the two copies of the try/catch around `ignoredPaths(w.path)` into one local `const listIgnored = () => …` returning `{paths}` or `{kept}`. Keep the two call sites where they are, because the early one for marked trees and the late one for unmarked trees set which keep-reason wins.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

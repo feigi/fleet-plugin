@@ -1,0 +1,51 @@
+{
+  "head": "9409f4ddb5755a1b69fa5aad1afca136cf18b3f3",
+  "run": "run-HXCDbgv3",
+  "entries": [
+    {
+      "bucket": "survived",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "charge": "none",
+      "chargeReason": "defect-outside-acceptance",
+      "reason": "Applied in dad6ff6f: row \"watchWindow: the real probe reads a candidate nothing holds as free\". red: ./agent-test tests/board-server.test.mjs with answers() mutated to done(true) → exit 1, fail 1 incl that row; baseline: same command, unmutated copy → exit 0, that row pass."
+    },
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "out",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "issue": 4310,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4304/fix-jn6bBlWQ/u0/verdict.json",
+      "remedyFiles": [
+        "tests/board-server.test.mjs"
+      ],
+      "reason": "Out of #4267 scope and predates the PR; refuter let it survive (mutant ahead[0]→last passes the file), filed open needs-triage."
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "issue": 4312,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4304/fix-jn6bBlWQ/u1/verdict.json",
+      "remedyFiles": [
+        "tests/board-server.test.mjs"
+      ],
+      "reason": "Refuter refuted it: the comment is unchanged by the PR and still describes the row it heads; recorded on the suggestion-band record."
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4304/fix-jn6bBlWQ/u2/verdict.json",
+      "reason": "Refuter let it survive: every checkable claim in the body and commit message holds at 9409f4dd. Its remedy is no change; the body was reconciled for dad6ff6f so it stays true."
+    }
+  ]
+}

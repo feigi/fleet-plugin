@@ -1,0 +1,273 @@
+{
+  "pr": 4316,
+  "head": "1c627198905f07e15f6fbbe3f35096e4f635d934",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I wrote nothing there and ran only read-only commands, so these changes are not mine."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv' (not written by this review agent; I ran only read commands from that dir)."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. I wrote to neither: all my writes went under the scratch dir. They are probably another agent's or the controller's metrics output, and I cannot account for them."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin —  M docs/metrics/ticket-features.tsv,  M docs/metrics/tier-outcomes.tsv (I never wrote there: every command chained a cd into the scratch dir or the snapshot copy)."
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv` (this pass never wrote under that path; every command chained its own cd into the snapshot or simplify/, so these changes were already there or came from another agent)"
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I did not write to this checkout; the two metrics files are not mine."
+    }
+  ],
+  "counts": {
+    "survived": 2,
+    "refuted": 0,
+    "unverified": 13,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4316/run-wvKgfXG7/snapshot-1c627198",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "plugin/scripts/fleet-event.mjs",
+      "line": 752,
+      "claim": "If the label comes off but posting the PR comment fails, the comment is lost for good. The NEED carries neither the body nor a command to re-post it, and a re-run of merge-bot-report skips the PR at the 'no ready-to-merge on it' check (line 740) before it reaches the comment.",
+      "evidence": "PROBE-B in my copy: movedFixture() with gh-fail.json=[\"pr comment\"], then `f.run([\"merge-bot-report\",\"merge-bot-1\"])` → status 4, stdout `NEED head-moved-after-label comment #89 — gh pr comment failed: gh boom` / `#89 label-off=finisher-pr-89; #89 ready-to-merge taken off; settled merge-bot-1=done`. Removed gh-fail.json and re-ran → status 0, order [\"gh pr view 89\",\"fleet-tick …\"], stdout `#89 head-moved-after-label: no ready-to-merge on it, nothing to take off`, and the PR's comments hold only the original head record; the take-off comment was never posted.",
+      "suggested_fix": "Either put the comment body (or a re-runnable command) in the NEED, or let a re-run reach the comment step for a PR whose label is already off when its rows carry the label-off= this refusal wrote, so the 'skipped when already carried' check does the dedupe.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Read the snapshot source. takeLabelOff removes the label before the comment is attempted (line 751). ev.comment (line 418) on gh failure only emits the NEED `... gh pr comment failed: <said>`, with no body and no re-post command. A re-run of movedAfterLabel then returns at line 740 (`no ready-to-merge on it, nothing to take off`), so the comment is never retried. I did not execute the probe; this rests on code reading plus the finding's own reported run. CWD-AUDIT: not run; I made no writes in /Users/chris/dev/fleet-plugin."
+        },
+        {
+          "refuted": false,
+          "reason": "Source read confirms the claim; I did not run the probe, so this is a code-read verdict rather than a run. movedAfterLabel (lines 731-753) calls takeLabelOff and, once the label is off, ev.comment(...). On a gh failure, comment() (line 418-428) emits only `${what} #${n} — gh ${noun} comment failed: ${said(r)}` and returns false. That NEED has no body and no re-post command. A re-run hits the `!view.labels.includes(ready)` early return at line 740 and posts nothing. Nothing else handles it: the other callers (lines 485, 671, 688) use the same comment() and the file has no retry path. The evidence matches this code path. The comment is informational, but the claim is about the comment being lost, which holds. CWD-AUDIT: not run; I did not write to /Users/chris/dev/fleet-plugin and only read the snapshot."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "claim": "When a merge bot's head-moved-after-label refusal lands while a finisher attempt is dispatched but not yet settled (outcome null), takeLabelOff removes ready-to-merge with no label-off= token. It reports this only as a summary note, not a NEED. Once that finisher settles `labelled`, the tick's unlabelledFinishers() reads the missing label as a finisher's miss, the exact misread the token exists to prevent.",
+      "evidence": "Probe: movedFixture({rows:[\"#413 impl-413=PR#89 · finisher-pr-89\"]}) then `merge-bot-report merge-bot-1`. Exit 0. Order was `gh pr view 89|gh pr edit 89|gh pr view 89|gh pr comment 89|settle…`, with no `ledger token` call. Summary: `#89: no finisher attempt settled labelled since the last label-off=, none written; #89 ready-to-merge taken off`. Rows unchanged, labels `['patch']`. Feeding the row with finisher-pr-89=labelled to unlabelledFinishers() returned `[{\"pr\":89,\"labelled\":[\"finisher-pr-89\"]}]`, a flagged miss.",
+      "file": "plugin/scripts/fleet-event.mjs",
+      "line": 196,
+      "suggested_fix": "In takeLabelOff, tell apart `no attempt at all / hand label` from `an attempt exists whose outcome is still null`. In the live case, do not remove the label, or print a NEED naming the live finisher. At minimum, make the note state that a live attempt exists.",
+      "dimension": "silent-failure",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Code read: takeLabelOff (fleet-event.mjs:762-770) finds no labelled attempt when the finisher is outcome null, so it writes no label-off= token and emits only ev.note, not a NEED. It then removes the label. I ran unlabelledFinishers on row `#413 impl-413=PR#89 · finisher-pr-89` with the PR in the unqueued set. With finisher-pr-89=labelled it returns [{pr:89,labelled:[finisher-pr-89]}], a flagged miss. With the outcome null it returns []. I did not re-run the full probe through merge-bot-report or `./agent-test`. The claim holds as stated. Only the race matters: the finisher must have labelled before the bot's removal and settle afterwards. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. Those were already modified; I wrote nothing there."
+        },
+        {
+          "refuted": false,
+          "reason": "I did not run the probe. I read the code. takeLabelOff (fleet-event.mjs:762-768) writes label-off= only for attempts whose outcome is `labelled`. For an unsettled attempt (outcome null) it only calls ev.note, which is not a NEED. latestFinisherAttempts and unlabelledFinishers (fleet-tick.mjs:698-745) then flag the PR once that attempt settles `labelled` with no label-off= token. I found no other handling. The impact is weaker than claimed: the head moved and a fresh finisher is wanted anyway, so the flag mostly triggers the repair that is already needed. The remaining harm is that the miss counts toward the escalation count. CWD-AUDIT: not run; I only read files under the snapshot and wrote nothing, and I did not run the git status audit on /Users/chris/dev/fleet-plugin."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/fleet-event.mjs",
+      "line": 773,
+      "claim": "When the label-off= token write is refused inside merge-bot-report, the label stays on, the summary says only 'token #89 label-off=finisher-pr-89 refused (exit 2)', and no line names `fleet-event.mjs label-off <pr>`. The ruling says 'a failed write … is a NEED naming the command'.",
+      "evidence": "PROBE-A: movedFixture(), then chmod 0555 on the fixture's .fleet dir and ran merge-bot-report → status 2, order [gh pr view 89, ledger token 89 label-off=finisher-pr-89, settle …, fleet-tick …], stdout `event: merge-bot-report: token #89 label-off=finisher-pr-89 refused (exit 2); settle merge-bot-1 refused (exit 2)`, labels still [\"ready-to-merge\",\"patch\"]. No NEED line. (The settle failed on the same lock here, so a re-run would retry; if only the token refuses, the bot settles and nothing names the remedy.)",
+      "suggested_fix": "After ev.refuse(...) in takeLabelOff, also call ev.need(`label-off PR #${pr} — the label-off= token was refused; ${again}`), or fold the remedy into the refusal note.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 2222,
+      "claim": "`ledger.mjs dispatch finisher-pr-M` now reads the Label map (releaseLabelRefusal → readyLabel, line 2202) and dies without one. readyLabel's doc comment (2222-2228: 'Only the two paths … read it … so every other verb runs with no map at all') and the header note at 2737-2740 still describe the old set of readers.",
+      "evidence": "Mutation in my copy: replaced dispositions-check.test.mjs line 104 (`if (labelMap !== null) seedLabelMap(dir);`) and ran `node --test --test-name-pattern='each allowed reason passes' tests/dispositions-check.test.mjs` → fail 1 with `ledger: dispatch finisher-pr-40: no Label map at …/run/.fleet/labels.json: run \\`label-map.mjs ensure\\`…; nothing written`. The PR's own seedLabelMap additions to ledger.test.mjs, ledger-row-review.test.mjs and dispositions-check.test.mjs come from this same new dependency.",
+      "suggested_fix": "Add `dispatch finisher-pr`'s label check to the readers listed in readyLabel's comment (and the 2737-2740 note).",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/fleet-event.mjs",
+      "line": 731,
+      "claim": "Re-processing the same merge-bot report after a maintainer re-applies ready-to-merge by hand (no new ready-to-merge-head: record) removes the human's label again. The skip conditions (not open, unlabelled, newest record names the head) do not cover a re-label after the take-off.",
+      "evidence": "PROBE-C: movedFixture(), first merge-bot-report run, then pushed READY back onto PR 89's labels via setGh, then a second run → status 0, order [gh pr view 89, gh pr edit 89, gh pr view 89, fleet-tick …], stdout `#89: no finisher attempt settled labelled since the last label-off=, none written; #89 ready-to-merge taken off; head-moved-after-label comment already on #89; merge-bot-1=done already settled`, labels now [\"patch\"].",
+      "suggested_fix": "Skip the take-off for a merge bot the ledger already holds settled, or when the PR's rows already carry a label-off= with no labelled attempt after it, so a replayed report cannot remove a later hand label. Otherwise state this edge in the header as accepted.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "If the removal succeeds but the `head-moved-after-label` PR comment fails, the NEED names no recovery command. The event can never repost it, because a rerun finds no label and the member is already settled. The only on-PR record of why the label vanished is lost, with nothing in the output saying so.",
+      "evidence": "Probe with gh-fail.json = [\"pr comment\"]. First run: exit 4, `NEED head-moved-after-label comment #89 — gh pr comment failed: gh boom`, label already gone, merge-bot-1 settled. Rerun after clearing the failure: exit 0, `#89 head-moved-after-label: no ready-to-merge on it, nothing to take off; merge-bot-1=done already settled`, comments still 1 (+0 new).",
+      "file": "plugin/scripts/fleet-event.mjs",
+      "line": 186,
+      "suggested_fix": "Post the comment before removing the label, or make the NEED say to post it by hand, or let a rerun repost it when the label is gone and the newest comment is not the take-off comment.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "When the label-off= ledger write is refused inside a merge-bot-report settle, the label stays on the moved head and merge-bot-1 still settles. The only signals are exit 2 and the ledger's stderr: no NEED line, and no `run label-off <pr> again` hint (the gh-failure paths do have one).",
+      "evidence": "Probe with .fleet chmod 555 and ledger.md 444. Exit 2, stdout summary `token #89 label-off=finisher-pr-89 refused (exit 2); settle merge-bot-1 refused (exit 2)`, stderr `ledger: cannot create …ledger.md.lock: EACCES`, labels still `['ready-to-merge','patch']`. Here the settle was refused too. In the token-only failure case (settle succeeding) the same code path leaves the label with only the exit code to say so.",
+      "file": "plugin/scripts/fleet-event.mjs",
+      "line": 205,
+      "suggested_fix": "After ev.refuse for the token, also ev.need(`label-off PR #${pr} — ledger write refused; ${again}`), as the gh failure branches do.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/fleet-event.mjs",
+      "claim": "Choosing the latest labelled attempt (`.at(-1)`) rather than the first (`.at(0)`) is not discriminated: mutating it to `.at(0)` leaves every test green.",
+      "evidence": "red: n/a (survivor). Mutant `filter((a) => a.outcome === \"labelled\").at(-1)?.name` → `.at(0)?.name` in a clone, `./agent-test tests/fleet-event.test.mjs --test-name-pattern='merge-bot-report|label-off|head-moved|labelled finisher'` → exit 0, tests 169, pass 169, fail 0. Baseline on the unmutated tree is the same full file: exit 0, 169 pass. The latest-attempt choice has no test. The fixtures never leave two unnamed `labelled` attempts after the highest `label-off=`, so the filter leaves at most one.",
+      "suggested_fix": "Add a fixture with two `labelled` attempts and no `label-off=` between them (for example `finisher-pr-89=labelled · finisher-pr-89-b=labelled`). Assert that the token names `-b`.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body, and the label-off header comment in fleet-event.mjs: a failed token write is described as a NEED naming the command, but takeLabelOff reports it through ev.refuse (a note plus the exit status, no NEED line); only a failed `gh pr edit`, an unreadable read-back or a still-present label produce a NEED.",
+      "evidence": "Read fleet-event.mjs:771-775: `if (w.status !== 0) { ev.refuse(`token #${pr} ${tok}`, w); return false; }`. Lines 350-360: `need()` pushes a `NEED ...` line, `refuse()` only writes stderr, sets this.refused and calls note(). Header lines 132-135 say 'A failed write, or a read-back that still carries the label, is a `NEED label-off PR #<pr> …`'. The PR body repeats it: 'A failed write or a read-back that still carries the label is a NEED naming the command'. The only test of the NEED path is 'a failed removal is a NEED …', which fails `gh pr edit`, not the token write.",
+      "file": "plugin/scripts/fleet-event.mjs",
+      "line": 132,
+      "suggested_fix": "Reword to 'A refused token write passes the ledger's refusal through; a failed removal, an unreadable read-back, or a read-back still carrying the label is a NEED …'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The ledger.mjs runDispatch comment says the PR's `ready-to-merge` and release labels are 'all read off gh', but the `ready-to-merge` string is read from the repository's Label map file (readyLabel(repoDir(), where)); only the PR's label list comes from gh.",
+      "evidence": "Diff hunk in ledger.mjs: `const ready = readyLabel(repoDir(), where);` next to `const labels = prLabels(pr);`; the edited comment reads 'must carry no `ready-to-merge` and exactly one release label, all read off gh from the ledger's repository'. The PR body's own line, 'a finisher dispatch reads the Label map for the label string', contradicts 'all read off gh'.",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 2414,
+      "suggested_fix": "Say 'the PR's labels read off gh, the `ready-to-merge` string off the Label map'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The prose says the label comes off 'with its report's settle', but the take-off is run by `merge-bot-report` before `settle --from-report`, and the settle itself writes no label-off.",
+      "evidence": "fleet-event.mjs:731-753 `movedAfterLabel` calls takeLabelOff and ev.comment, and the `ev.settle(member)` call follows later in mergeBotReport (header 82-90: 'Then `settle --from-report`'). The pins in head-moved-after-label-prose.test.mjs:455-465 and finisher.md/run-merge-bot.md/SKILL.md all say 'its report's settle takes it off'. The phrase reads right as shorthand for the report step, but a reader could take it to mean `ledger.mjs settle`.",
+      "suggested_fix": "Say 'its merge-bot-report takes it off' in the prose and pins.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/fleet-event.mjs",
+      "line": 137,
+      "claim": "The new prView() hand-validates the `gh pr view` JSON shape at runtime. It checks state, labels, a 40-hex headRefOid and comments with `body` and `createdAt`. The existing view method near line 405 validates a looser shape (`v.comments` is an array, `labels` only for issues). It then maps with `String(c?.body ?? \"\")`. The two now return different shapes (prView's `{state, labels, head, comments, bodies}` versus `{labels, bodies, state}`), and comment() accepts only the shared `bodies` field.",
+      "evidence": "Read diff lines 137-157 and fleet-event.mjs:405-428. The project is untyped .mjs with no type system, so a runtime guard is the only enforcement available and is adequate. The two validators can drift, but the diff does not break either.",
+      "suggested_fix": "Optional: have the existing view method, or a shared helper, return the stricter shape so there is one validator.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/fleet-event.mjs",
+      "line": 765,
+      "claim": "In takeLabelOff, `.find((u) => u.pr === pr)` repeats a filter that latestFinisherAttempts already applies. The call passes `new Set([pr])` as `unqueued`, so the result has at most one entry and that entry is always PR `pr`; `[0]` is equivalent.",
+      "evidence": "Read fleet-tick.mjs:724-731: `for (const [n, byName] of attempts) { if (!unqueued.has(n)) continue; ... out.push({ pr: n, ... }) }`. With unqueued = {pr}, every entry pushed has `pr === pr`. If `pr` had a different type than the ledger's numeric keys, `has` would miss and both forms would give undefined. Mutant in my copy: line 765 → `latestFinisherAttempts(ev.ledger, new Set([pr]))[0]` (together with finding 2). Ran `node --test tests/fleet-event.test.mjs tests/fleet-event-wake-table.test.mjs`: # tests 189, # pass 189, # fail 0. That covers the new tests for no labelled attempt, an already-named token, and a later -b attempt.",
+      "suggested_fix": "const stretch = latestFinisherAttempts(ev.ledger, new Set([pr]))[0];",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/fleet-event.mjs",
+      "line": 771,
+      "claim": "takeLabelOff adds a fourth copy of the token write `node(\"ledger.mjs\", [\"token\", String(pr), tok])` with its refuse-or-note handling. park (834-836), ci (946-948) and conflict (966-968) already repeat it word for word. An Event method `token(pr, tok)` returning a boolean would replace all four, and takeLabelOff's 7-line else block would become 2 lines.",
+      "evidence": "grep `\"token\"|refuse\\(` on fleet-event.mjs shows the same three lines at 834-836, 946-948 and 966-968. 771-776 is the same code in an early-return form. Mutant in my copy: added `token(pr, tok) { const w = node(\"ledger.mjs\", [\"token\", String(pr), tok]); if (w.status !== 0) { this.refuse(`token #${pr} ${tok}`, w); return false; } this.note(`#${pr} ${tok}`); return true; }` to class Event after settle(). Replaced all four sites with `ev.token(pr, tok)`, and takeLabelOff with `if (!ev.token(pr, tok)) return false;`. `node` is a module-level const (line 298), so it is in scope inside the class. Ran `node --test tests/fleet-event.test.mjs tests/fleet-event-wake-table.test.mjs`: 189/189 pass. The passing tests include the exact `first.order` and event-line assertions for label-off, so the order of writes and the notes are unchanged.",
+      "suggested_fix": "In class Event: `token(pr, tok) { const w = node(\"ledger.mjs\", [\"token\", String(pr), tok]); if (w.status !== 0) { this.refuse(`token #${pr} ${tok}`, w); return false; } this.note(`#${pr} ${tok}`); return true; }`. In takeLabelOff's else branch: `const tok = `label-off=${attempt}`; if (!ev.token(pr, tok)) return false;`. In park/ci/conflict: `ev.token(pr, tok);`.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 2197,
+      "claim": "releaseLabelRefusal now refuses on `ready-to-merge` as well as on release labels, and its doc comment was rewritten to \"the finisher gate's label checks\". The function name and the caller's `labelled` variable (line 2430) still describe only the release-label check. Renaming both, for example to labelRefusal / labelFailure, would make the name match what it does, and nothing else would change.",
+      "evidence": "grep `releaseLabelRefusal` across the whole snapshot: 3 hits, all in ledger.mjs (definition 2197, comment 2416, call 2430). No test or doc names it, so the rename is limited to that file. Read 2197-2205: the first refusal it now returns is `PR #${pr} carries ${ready} — a finisher runs on a PR without it ...`, which is not a release label. This is a rename only; I did not run tests for it.",
+      "suggested_fix": "Rename `releaseLabelRefusal` to `labelRefusal` at 2197, 2416 and 2430, and `const labelled` to `const labelFailure` at 2430-2431.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

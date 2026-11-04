@@ -1,0 +1,259 @@
+{
+  "head": "5c8a8de145eaf9ad782746feaa1285d5ec100540",
+  "run": "run-QfEWdZET",
+  "entries": [
+    {
+      "bucket": "survived",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "remedy-worse",
+      "issue": 4335,
+      "remedyFiles": [
+        "plugin/scripts/reclaim-scratch.mjs"
+      ],
+      "charge": "none",
+      "chargeReason": "defect-outside-acceptance"
+    },
+    {
+      "bucket": "survived",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "remedyFiles": [
+        "plugin/scripts/review-core.mjs"
+      ],
+      "charge": "false-claim"
+    },
+    {
+      "bucket": "survived",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "remedy-worse",
+      "issue": 4336,
+      "remedyFiles": [
+        "plugin/scripts/evict-tree.mjs"
+      ],
+      "charge": "none",
+      "chargeReason": "defect-outside-acceptance"
+    },
+    {
+      "bucket": "survived",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "remedy-worse",
+      "issue": 4336,
+      "remedyFiles": [
+        "plugin/scripts/evict-tree.mjs"
+      ],
+      "charge": "false-claim"
+    },
+    {
+      "bucket": "survived",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "remedy-worse",
+      "issue": 4335,
+      "remedyFiles": [
+        "plugin/scripts/reclaim-scratch.mjs"
+      ],
+      "charge": "none",
+      "chargeReason": "defect-outside-acceptance"
+    },
+    {
+      "bucket": "survived",
+      "index": 5,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "remedyFiles": [
+        "docs/research/external-assumptions/harness-node.md"
+      ],
+      "charge": "none",
+      "chargeReason": "not-the-implementers-text"
+    },
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4329/fix-djAZt9tl/u0/verdict.json",
+      "disposition": "defer",
+      "issue": 4337,
+      "reason": "refuted: bounded one-time delay, tracked files only"
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4329/fix-djAZt9tl/u1/verdict.json",
+      "disposition": "defer",
+      "issue": 4337,
+      "reason": "refuted: the ticket's decided shape rule, pinned by an existing test"
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4329/fix-djAZt9tl/u2/verdict.json",
+      "disposition": "apply"
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4329/fix-djAZt9tl/u3/verdict.json",
+      "disposition": "apply"
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4329/fix-djAZt9tl/u4/verdict.json",
+      "disposition": "defer",
+      "issue": 4337,
+      "reason": "refuted: the full suite kills the mutant (snapshot-repo.test.mjs)"
+    },
+    {
+      "bucket": "unverified",
+      "index": 5,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4329/fix-djAZt9tl/u5/verdict.json",
+      "disposition": "apply"
+    },
+    {
+      "bucket": "unverified",
+      "index": 6,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4329/fix-djAZt9tl/u6/verdict.json",
+      "disposition": "defer",
+      "issue": 4337,
+      "reason": "refuted: the test file's header states the coverage split"
+    },
+    {
+      "bucket": "unverified",
+      "index": 7,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4329/fix-djAZt9tl/u7/verdict.json",
+      "disposition": "apply",
+      "reason": "verified true; the finding asks for no change, and the test it names already discriminates"
+    },
+    {
+      "bucket": "unverified",
+      "index": 8,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4329/fix-djAZt9tl/u8/verdict.json",
+      "disposition": "apply"
+    },
+    {
+      "bucket": "unverified",
+      "index": 9,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4329/fix-djAZt9tl/u9/verdict.json",
+      "disposition": "defer",
+      "issue": 4337,
+      "reason": "refuted: the parenthetical is scoped to the caller's own run root and true there"
+    },
+    {
+      "bucket": "unverified",
+      "index": 10,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4329/fix-djAZt9tl/u10/verdict.json",
+      "disposition": "apply",
+      "reason": "applied on ADR 0029's Status line, not in decision 7's body, per AGENTS.md's ADR amendments rule",
+      "remedyFiles": [
+        "docs/adr/0029-scratch-is-reclaimed-on-github-terminal-state-and-age.md"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 11,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4329/fix-djAZt9tl/u11/verdict.json",
+      "disposition": "defer",
+      "issue": 4337,
+      "reason": "refuted: a dated research note whose cites are pinned to its commit"
+    },
+    {
+      "bucket": "unverified",
+      "index": 12,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4329/fix-djAZt9tl/u12/verdict.json",
+      "disposition": "defer",
+      "issue": 4337,
+      "reason": "refuted: ambiguous, not false; body since rewritten"
+    },
+    {
+      "bucket": "unverified",
+      "index": 13,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4329/fix-djAZt9tl/u13/verdict.json",
+      "disposition": "defer",
+      "issue": 4337,
+      "reason": "refuted: no reachable inconsistent state; restructure is style"
+    },
+    {
+      "bucket": "unverified",
+      "index": 14,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4329/fix-djAZt9tl/u14/verdict.json",
+      "disposition": "defer",
+      "issue": 4337,
+      "reason": "refuted: no consumer reads evicted and the header documents the key"
+    },
+    {
+      "bucket": "unverified",
+      "index": 15,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4329/fix-djAZt9tl/u15/verdict.json",
+      "disposition": "apply"
+    },
+    {
+      "bucket": "unverified",
+      "index": 16,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4329/fix-djAZt9tl/u16/verdict.json",
+      "disposition": "apply"
+    },
+    {
+      "bucket": "unverified",
+      "index": 17,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4329/fix-djAZt9tl/u17/verdict.json",
+      "disposition": "apply"
+    },
+    {
+      "bucket": "unverified",
+      "index": 18,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4329/fix-djAZt9tl/u18/verdict.json",
+      "disposition": "apply"
+    }
+  ]
+}

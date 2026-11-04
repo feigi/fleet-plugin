@@ -1,0 +1,42 @@
+{
+  "head": "3731fbeda4744bc982ad90bc10e3087f8fe4e366",
+  "run": "run-EFMRlraL",
+  "entries": [
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted: inherent timing limit; the suggested elapsed bound passes at the measured 3.6 s stall, and a tighter one flakes a correct wrapper",
+      "issue": 4307,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4303/fix-gVShdbY3/u0/verdict.json",
+      "remedyFiles": [
+        "tests/suite-slot.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "confirmation finding, alleges no wrong behavior and has no remedy; refuter confirmed both mutants killed",
+      "issue": 4307,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4303/fix-gVShdbY3/u1/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "remedy-worse",
+      "issue": 4308,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4303/fix-gVShdbY3/u2/verdict.json",
+      "remedyFiles": [
+        "tests/suite-slot.test.mjs"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,102 @@
+{
+  "pr": 4304,
+  "head": "9409f4ddb5755a1b69fa5aad1afca136cf18b3f3",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "tests",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I ran only read-only commands in that directory (pwd, git status), so I did not make these modifications. They are probably another member's metrics output."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv' (this review wrote nothing there; every command chained a cd into the scratch copy)"
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (I only read there and wrote nothing; these changes are from other agents or the controller)."
+    }
+  ],
+  "counts": {
+    "survived": 1,
+    "refuted": 0,
+    "unverified": 3,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4304/run-HXCDbgv3/snapshot-9409f4dd",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "tests/board-server.test.mjs",
+      "line": 861,
+      "claim": "After this PR, no row in board-server.test.mjs or cockpit-tick-nonblocking.test.mjs checks that the real answers() probe reads a refused connect as free. A regression that makes answers() read every port as held passes the whole of both files, but before the PR it failed 4 rows.",
+      "evidence": "In the copy, mutated tests/support/cockpit-port.mjs from `socket.once(\"error\", (e) => done(e.code !== \"ECONNREFUSED\"))` to `done(true)`, then ran `node --test --test-reporter=spec tests/board-server.test.mjs tests/cockpit-tick-nonblocking.test.mjs` → 'ℹ tests 69 / pass 69 / fail 0 / skipped 0'. Then applied `git apply -R pr.diff` (the pre-PR tree) with the same mutant and ran the watchWindow|heldWindowExit rows → 'fail 4': 'with nothing held', 'landing past a candidate nothing held', 'allHeld()' and 'heldWindowExit' each ✖. All 4 rows now use scriptedWatch, so the default probe's free-reading has no test. If answers() regressed this way, blockerBefore() in the derived-port CLI rows would excuse every landing past ports[0], and a real scan bug would surface as a heldOutside skip, not a failure.",
+      "suggested_fix": "Add one real-socket row that pins answers()'s refusal-means-free reading, using the brief's second approach: draw a port with unheldPorts(1) and run watchWindow([port]) with no probe. If allHeld() is true, try to listen on the port: EADDRINUSE means an outside holder, so t.skip(heldOutside(port)); otherwise assert allHeld() is false. This keeps the default path covered without bringing back the cross-process flake.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "In my own copy of the snapshot, the baseline run of both files gave tests 69, pass 69, fail 0. With the mutant `done(true)` in tests/support/cockpit-port.mjs, the same command gave tests 69, pass 68, fail 0. No row failed, and one row no longer passed. That row is probably the heldOutside skip the claim predicts, but I did not check which row it was. The claim said the mutant gave 69 pass and 0 skipped, so that detail differs slightly, but the core point holds: a probe that reads every port as held fails no row in either file. I did not re-run the pre-PR tree, so the claim's 4 pre-PR failures are untested here. The mutation took effect, since pass dropped from 69 to 68. Commands: baseline `env -u FORCE_COLOR node --test --test-reporter=spec tests/board-server.test.mjs tests/cockpit-tick-nonblocking.test.mjs`, then the same command after the mutation. CWD-AUDIT: not run; the shell started in /Users/chris/dev/fleet-plugin and I made no edits there, since every command ran in the scratch copy."
+        },
+        {
+          "refuted": false,
+          "reason": "Reproduced in my own copy of the snapshot. I changed the answers() probe in tests/support/cockpit-port.mjs to `done(true)`, so every port reads as held. Running both files then gave exit 0, tests 69, pass 69, fail 0, cancelled 0, skipped 0. The only real-probe row, board-server.test.mjs:843 (a held-then-released candidate), still passes under the mutant. Both of its candidates read as held, so blockerBefore(landed) returns the first one, which is the asserted value. The four rows that used to catch this mutant (nothing held, landing past a candidate nothing held, allHeld, heldWindowExit) now use scriptedWatch. I did not rerun the pre-PR tree, so the 'failed 4 rows before' half rests on the finder's evidence. The claim that the real probe's free-reading is unchecked holds. The same-name `done(true)` grep matched 3 lines, so the sed may have hit other lines too, but the mutant ran and the suite stayed green. red: n/a (no failing test under the mutant); mutant run: node --test tests/board-server.test.mjs tests/cockpit-tick-nonblocking.test.mjs → exit 0, 69 pass. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/ticket-features.tsv, M docs/metrics/tier-outcomes.tsv (not from me; I only wrote under the scratch dir)."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "tests/support/cockpit-port.mjs",
+      "line": 78,
+      "claim": "No watchWindow row pins which blocker blockerBefore returns when two or more candidates precede the landing; changing `ahead[0]` to the last ahead candidate passes the whole file.",
+      "evidence": "red: ./agent-test tests/board-server.test.mjs → exit 0, fail 0 (mutant survived: `ahead[0] : null` → `ahead[ahead.length-1] : null`); baseline: ./agent-test tests/board-server.test.mjs → exit 0, tests 67 pass 67 fail 0 cancelled 0. Contrast: every→some mutant → exit 1, fail 1 incl 'watchWindow: a landing past a candidate nothing held is not excused by an earlier one that was held'; baseline exit 0, that test passes.",
+      "suggested_fix": "Add a row with three scripted candidates, all of the first two held, landing on the third, asserting blockerBefore returns the first.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/board-server.test.mjs",
+      "line": 836,
+      "claim": "The comment above the held-and-released row still opens \"watchWindow's two answers, on ephemeral ports…\", but after this diff that row is the only one still covering real sockets. Its sibling rows now run on scripted literal labels (40001–40003), so \"two answers\" no longer describes a single group of rows.",
+      "evidence": "Lines 836–841 are untouched by the diff. Lines 858–861 are new and say the following rows use a scripted probe over labels nothing connects to. The diff changes the ephemeral-port premise only for the rows below the held-and-released row. No factual falsehood was found; this is a mild readability point.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "No falsified claim found in the PR body or the commit message. Every claim I could check against the snapshot holds.",
+      "evidence": "The 'probe = answers' default is at tests/support/cockpit-port.mjs:61. grep -nF 'unheldPorts(' tests/board-server.test.mjs returns 6 matches: the definition at 1250, the 2-port held-and-released call at 844, and four 1-port stubbed-connect CLI rows (1263, 1280, 1295, 1315). That matches the body. The four rows named in the body (the 'nothing held', 'landing past a candidate nothing held', allHeld and heldWindowExit rows) all use scriptedWatch with literal labels 40001–40003. No stale unheldPort( reference remains in tests/. watchWindow's other callers (board-server.test.mjs:950, cockpit-tick-nonblocking.test.mjs:147) pass no probe and so use the real check. The unheldPorts comment (bind all before release, so distinct) matches the code.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}
