@@ -9,16 +9,18 @@ whose review might still be running.
 
 **The ledger already keeps a PR to one live review.** A PR has at most one
 open review launch. A launch is settled `=failed` only after its runner is
-confirmed dead, in the same call that launches the next review. Scratch
-roots are keyed per checkout, like the ledger, so when a review's snapshot
-step runs, every other run root of that PR belongs to a finished or dead
-review.
+confirmed dead, either on its own or in the same `ledger.mjs review` call
+that launches the next review. Scratch roots are keyed per workspace, like
+the ledger, so when a review's snapshot step runs, every other run root of
+that PR belongs to a finished or dead review.
 
 **Covering a dead runner's root is the point of the pass.** A review evicts
 its own run root when it ends. The `--pr` pass is what frees the root of a
 runner that died before that. Any rule that skips young or recently written
 roots skips exactly that root, and leaves its installed dependencies (about
-1.2 GB per agent-brain tree) in place until the 7-day retention.
+1.2 GB per agent-brain tree) in place until the root sweep removes the PR's
+scratch directory after the PR is merged or closed, or until the 7-day
+retention, whichever comes first.
 
 **Each guard is a new rule with no evidence behind it.** A grace window
 needs an upper bound on how long a review runs. A pid marker fails because
