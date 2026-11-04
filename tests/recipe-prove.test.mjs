@@ -1683,7 +1683,7 @@ test("a tree that cannot be read after the Check step names the check output, no
     "--check-mutation", "the lint step fails on a dirty status",
   ]);
   assert.equal(r.status, 1, r.err);
-  assert.match(r.err, /could not read the tree state in the throwaway worktree: .*; check output: \S*check\.log/);
+  assert.match(r.err, /could not read the tree state in the throwaway worktree: .*; check output: \S*check\.log/s);
   assert.doesNotMatch(r.err, /install output/);
   assert.equal(existsSync(cachePath(dir)), false);
 });
