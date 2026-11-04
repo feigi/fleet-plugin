@@ -72,26 +72,30 @@
 // each TSV it read, keyed by path as the guard keys its own), `prior` (the
 // starting table's `fitted_commit`, `cells`, `classifier`, `splits` and
 // `window_start`, and the install's `package.json` `version`), the
-// fitted `table` and `gate`, the split gate's record: the Pulls it scored and
-// those it left out for want of a recorded assignment probability, the best
-// split it found with its figures, and `passed`, the inputs of the split that
-// passed both its tests. `ticket-router.mjs route` routes by that `table`, read
-// beside the guard; nothing commits the file. A split stands in the `table`
-// once it has passed at two consecutive Fits on the same input or inputs, and
-// is gone at the first Fit it fails; the next Fit reads the previous one's
-// `gate.passed` from the file this one replaces, which is all it carries
-// forward. The Fit is a pure function of the records, the guard, the prior and
-// that `passed`: the TSVs at the recorded blob ids, the guard and the prior
-// fit to the same table again. With no records it is the starting table's
-// fit, as any other. It is called in-process because a fit has no verdict
-// for an exit status to carry. It never fails the run: an error prints
-// `metrics-refresh: fit: failed — <why>`, leaves the old file in place, so the
-// run routes by the last Fit that computed, and leaves the exit status as the
-// other duties set it. A Fit that failed is no look at the gate: the old
-// file's `passed` is still what the next Fit reads, so its count neither
-// advances nor resets. That line stays on stdout: the cockpit reads it off the
-// receipts' `metrics` step, and close-out's receipt keeps only stdout from a
-// run that exits 0.
+// fitted `table` and `gate`, the split gate's record: a digest of the Cells
+// and Pulls it searched (`records`), the Pulls it scored and those it left
+// out for want of a recorded assignment probability, the best split it found
+// with its figures, `passed`, the inputs of the split that passed both its
+// tests, and `stands`, those of the split that stands. `ticket-router.mjs
+// route` routes by that `table`, read beside the guard; nothing commits the
+// file. A split stands in the `table` once it has passed at two consecutive
+// Fits on the same input or inputs, and is gone at the first Fit it fails;
+// the next Fit reads the previous one's `gate` from the file this one
+// replaces, which is all it carries forward. The Fit is a pure function of
+// the records, the guard, the prior and that `gate`: the TSVs at the recorded
+// blob ids, the guard and the prior fit to the same table again. So a Fit
+// whose `records` are the previous one's is no look at the gate: it keeps
+// that one's `passed` and `stands`, and a phase 0 run again over records that
+// have not changed neither advances a split's count nor resets it. With no
+// records it is the starting table's fit, as any other. It is called
+// in-process because a fit has no verdict for an exit status to carry. It
+// never fails the run: an error prints `metrics-refresh: fit: failed — <why>`,
+// leaves the old file in place, so the run routes by the last Fit that
+// computed, and leaves the exit status as the other duties set it. A Fit that
+// failed is no look at the gate either: the old file's `gate` is still what
+// the next Fit reads, so its count neither advances nor resets. That line
+// stays on stdout: the cockpit reads it off the receipts' `metrics` step, and
+// close-out's receipt keeps only stdout from a run that exits 0.
 //
 // One `metrics-refresh: <duty>: …` line per duty on stdout. Exit 0 when no
 // duty failed; 1 when one failed — named on stderr, and the duties after

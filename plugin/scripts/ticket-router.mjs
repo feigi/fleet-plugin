@@ -51,6 +51,7 @@
 // the guard are files the caller wrote, a fitted commit is fetched by the
 // caller, and the install reads ask the local `omp`.
 
+import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, appendFileSync, mkdirSync, statSync, realpathSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
@@ -993,7 +994,10 @@ function treeOf(cuts) {
  * guard has not tripped, that records the probability its Cell was assigned with (the rest are `left_out`): the gate
  * weighs each Pull by it. `previous` is the `gate` record of the last Fit that computed, or null. The tree is the root
  * and, when the best split passes both tests and passed on the same input or inputs at the last Fit too, that split;
- * the starting table's own tree is not read. `gate.passed` is what the next Fit reads.
+ * the starting table's own tree is not read. `gate.records` is a digest of the Cells and Pulls searched: a Fit whose
+ * digest is the last Fit's searched what that Fit searched and finds what it found, so it is no look at the gate — it
+ * keeps that Fit's `passed` and `stands`, and a first pass cannot stand on the same records twice. `gate.passed`,
+ * `gate.stands` and `gate.records` are what the next Fit reads.
  */
 function growTree({ prior, units, order, tripped, previous }) {
   const cells = prior.cells.includes(POLICY_CELL) ? [POLICY_CELL, ...prior.cells.filter((c) => c !== POLICY_CELL && !tripped.has(c))] : [];
@@ -1013,10 +1017,14 @@ function growTree({ prior, units, order, tripped, previous }) {
     }
   }
   const found = searchSplits({ pulls, cells, inputs: SEARCHED, minN: MIN_N, seed: seedOf(pulls.map((p) => p.id)) });
+  const records = createHash("sha256").update(JSON.stringify({ cells, pulls })).digest("hex");
   const kept = Array.isArray(previous?.passed) ? previous.passed : [];
-  const { passed, stands } = standing({ best: found.best, previous: kept });
+  const { passed, stands } = previous?.records === records
+    ? { passed: kept, stands: (Array.isArray(previous.stands) ? previous.stands : []).filter((key) => key === found.best?.key) }
+    : standing({ best: found.best, previous: kept });
   const best = found.best;
   const gate = {
+    records,
     scored: found.scored,
     left_out: leftOut,
     best: best === null ? null : {
@@ -1024,6 +1032,7 @@ function growTree({ prior, units, order, tripped, previous }) {
       lower_bound: round4(best.lowerBound), passes_bound: best.passesBound,
     },
     passed,
+    stands,
   };
   return { gate, splits: stands.length > 0 ? treeOf(best.cuts) : {} };
 }
@@ -1031,9 +1040,10 @@ function growTree({ prior, units, order, tripped, previous }) {
 /**
  * The Fit: the table fitted over the tree the split gate grows, and the gate's record. `previous` is the `gate` record
  * of the last Fit that computed, or null where there is none; the rest is fitTable's. A split stands in the table
- * once it has passed the gate at two consecutive Fits on the same input or inputs, and is gone from it at the first Fit
- * it fails; that Fit's `gate.passed` is the whole of what the next one reads of this.
- * @returns {{ table: object, gate: { scored: number, left_out: number, best: object|null, passed: string[] } }}
+ * once it has passed the gate at two consecutive Fits on the same input or inputs, over other records each time — a
+ * Fit over the records the last one searched is no look, and keeps what that one found — and is gone from it at the
+ * first Fit it fails; that Fit's `gate` is the whole of what the next one reads of this.
+ * @returns {{ table: object, gate: { records: string, scored: number, left_out: number, best: object|null, passed: string[], stands: string[] } }}
  */
 export function fitTree({ prior, features, members, verdicts, guard, commit = null, previous = null }) {
   const window = guard.window_start ?? prior.window_start ?? null;

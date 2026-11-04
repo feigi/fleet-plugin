@@ -345,3 +345,17 @@ test("a group with no Pulls, or no Cells to choose among, searches nothing; a Pu
   assert.deepEqual(searchSplits({ pulls: [], cells: [], inputs: INPUTS, minN: MIN_N }), { scored: 0, base: null, cuts: [], best: null });
   assert.throws(() => search([pull("smol-high", 1)]), /Pull 0 ran smol-high, which is not one of the Cells searched/);
 });
+
+test("a Pull is read as its own Cell however many Cells are searched: the 257th is not the first", () => {
+  // The default Cell at $5 a merged PR and the last of 257 Cells at $1: the one-Cell choice is the last, read as itself.
+  const cells = Array.from({ length: 257 }, (_, i) => `c${i}`);
+  const pulls = [...Array.from({ length: 30 }, () => pull("c0", 5)), ...Array.from({ length: 30 }, () => pull("c256", 1))];
+  assert.equal(searchSplits({ pulls, cells, inputs: INPUTS, minN: 1, shuffles: 0 }).base, "c256");
+});
+
+test("the bound's outcome model is fitted on the other folds of five: its figure on a noisy flip is the five-fold one", () => {
+  // Each Pull's $ is its side's price plus up to $6, so the fold a Pull falls in moves the model that predicts it. The
+  // figure was measured at seed 7; four folds or ten give another.
+  const noisy = flip({ over: (cell, side, i) => ({ usd: (cell === "slow-high" ? 10 : side === 0 ? 4 : 14) + (cell === "slow-high" ? i % 7 : i % 5) }) });
+  assert.equal(search(noisy).best.lowerBound.toFixed(9), "1.190525927");
+});

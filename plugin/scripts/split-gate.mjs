@@ -10,7 +10,9 @@
 // its own, so no cut asks whether the input was recorded. A cut whose smaller side holds fewer than twice the
 // minimum Pulls is dropped, and so is one that cuts its input as an earlier cut does. A partition is one cut, or two
 // cuts on two different inputs: depth two, the most the search reaches. A Pull lacking an input of the partition is
-// outside it and routes by the group's own row, whatever the partition says.
+// outside it, and the gate scores it as keeping the group's one-Cell choice. In the tree, one lacking the first cut's
+// input routes by the group's own row, and one holding it but lacking the second's by the row of its side of the
+// first cut, which no leaf of the partition scores.
 //
 // THE GAIN. Each side of a partition (a leaf, for two cuts) takes the cheapest Cell it can: one with the minimum
 // merged PRs there that is not under the quality floor against the default Cell, the default Cell itself needing
@@ -78,8 +80,12 @@ function cutsOf(pulls, inputs, minN) {
     const held = pulls.map((p) => p.inputs[name] ?? null);
     const present = held.filter((v) => v !== null);
     if (present.length === 0) continue;
-    const sorted = how === "percentiles" ? Float64Array.from(present).sort() : null;
-    const thresholds = how === "percentiles" ? PERCENTILES.map((q) => Math.floor(quantile(sorted, q))) : how === "presence" ? [0] : values;
+    let thresholds = values;
+    if (how === "presence") thresholds = [0];
+    else if (how === "percentiles") {
+      const sorted = Float64Array.from(present).sort();
+      thresholds = PERCENTILES.map((q) => Math.floor(quantile(sorted, q)));
+    }
     const kept = new Set();
     for (const cut of thresholds) {
       const side = Int8Array.from(held, (v) => (v === null ? -1 : (how === "values" ? v === cut : v > cut) ? 1 : 0));
@@ -191,7 +197,7 @@ function shuffledReach({ parts, sets, o, C, minN, base, gain, shuffles, allowed,
   const s = new Float64Array(MOST_LEAVES * C * STRIDE);
   const list = new Int32Array(n);
   const perm = new Int32Array(n);
-  const shuf = { cell: new Uint8Array(n), merged: new Float64Array(n), usd: new Float64Array(n), claims: new Float64Array(n), failed: new Float64Array(n) };
+  const shuf = { cell: new Int32Array(n), merged: new Float64Array(n), usd: new Float64Array(n), claims: new Float64Array(n), failed: new Float64Array(n) };
   let reached = 0;
   for (let b = 0; b < shuffles && reached <= allowed; b++) {
     for (const set of sets) {
@@ -299,7 +305,7 @@ export function searchSplits({ pulls, cells, inputs, minN, shuffles = NULL_SHUFF
   if (C === 0) return out;
   const index = new Map(cells.map((c, i) => [c, i]));
   const o = {
-    cell: new Uint8Array(n), merged: new Float64Array(n), usd: new Float64Array(n),
+    cell: new Int32Array(n), merged: new Float64Array(n), usd: new Float64Array(n),
     claims: new Float64Array(n), failed: new Float64Array(n), prob: new Float64Array(n),
   };
   pulls.forEach((p, i) => {
@@ -314,6 +320,7 @@ export function searchSplits({ pulls, cells, inputs, minN, shuffles = NULL_SHUFF
   const whole = new Int8Array(n);
   tallyInto(s, whole, 1, C, o);
   const base = pick(s, 0, C, minN, 0);
+  const ratio = s[base * STRIDE + 1] > 0 ? s[base * STRIDE + 2] / s[base * STRIDE + 1] : 0;
   out.base = cells[base];
   out.cuts = cuts.map(({ input, cut, below, above }) => ({ input, cut, below, above }));
 
@@ -322,9 +329,9 @@ export function searchSplits({ pulls, cells, inputs, minN, shuffles = NULL_SHUFF
   for (let q = 0; q < parts.length; q++) {
     tallyInto(s, parts[q].gid, parts[q].leaves, C, o);
     const g = gainOf(s, parts[q].leaves, C, n, minN, base);
-    if (top < 0 || g > gain) [top, gain] = [q, g];
+    if (g > gain) [top, gain] = [q, g];
   }
-  if (top < 0 || gain <= EPS) return out;
+  if (gain <= EPS) return out;
   const best = parts[top];
 
   const strata = new Map();
@@ -337,8 +344,6 @@ export function searchSplits({ pulls, cells, inputs, minN, shuffles = NULL_SHUFF
 
   // The bound's outcome is a Pull's $ less the one-Cell choice's $ per merged PR for each PR that merged, so a Pull that
   // never merged counts for what it cost. With every Pull merged that is the $ shifted, which the estimate ignores.
-  tallyInto(s, whole, 1, C, o);
-  const ratio = s[base * STRIDE + 1] > 0 ? s[base * STRIDE + 2] / s[base * STRIDE + 1] : 0;
   const z = Float64Array.from(o.usd, (u, i) => u - ratio * o.merged[i]);
   const fold = new Int8Array(n);
   const order = Int32Array.from({ length: n }, (_, i) => i);

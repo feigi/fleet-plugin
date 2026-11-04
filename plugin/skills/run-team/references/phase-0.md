@@ -256,8 +256,11 @@ the tree of groups: it searches the dispatch-time inputs of the Pulls that
 recorded an assignment probability for a split, and a split joins the tree only
 after it has passed the shuffled null and the off-policy bound at two
 consecutive Fits on the same input or inputs, and leaves it at the first Fit
-it fails. What passed is kept in the Fit file for the next Fit to read, which
-is the only state a Fit carries. A
+it fails. What passed, what stands and a digest of the Pulls the gate searched
+are kept in the Fit file for the next Fit to read, which is the only state a
+Fit carries: a Fit over the same Pulls as the last one — phase 0 run again
+before a close-out added any — finds what that one found, so it is no look at
+the gate and keeps what that one kept. A
 `metrics-refresh: fit: failed — <why>` line leaves the previous file as it
 was and the exit at 0, so it never stops the run: the run routes by the last
 Fit that computed, else by the starting table, and a Fit that failed is no look

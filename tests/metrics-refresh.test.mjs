@@ -505,7 +505,14 @@ test("the recorded blob ids, guard and prior recompute the same Fit once the row
 
 // A corpus whose `kind` splits the Cells' prices: task-high $1 on an enhancement and $14 on a bug, slow-high $10 on both. Pooled
 // task-high is $7.50, so the root routes task-high, the bugs go back to slow-high, and the other kinds stay on task-high.
-const KIND_FLIP = () => pullsOf(flip({ input: "kind", sides: ["enhancement", "bug"], low: [10, 1], high: [10, 14] }));
+// `n` Pulls of each Cell on each side.
+const KIND_FLIP = (n = 40) => pullsOf(flip({ input: "kind", sides: ["enhancement", "bug"], low: [10, 1], high: [10, 14], n }));
+// The fixture's three metrics files rewritten to hold `rows`, as close-outs that added rows would leave them.
+const recorded = (f, rows) => {
+  write(f.repo, FEATURES, featuresTsv(rows.features));
+  write(f.repo, "docs/metrics/member-outcomes.tsv", membersTsv(rows.members));
+  write(f.repo, "docs/metrics/tier-outcomes.tsv", tiersTsv(rows.tiers));
+};
 const phase0 = (f) => {
   const r = f.run();
   assert.equal(r.status, 0, r.stderr);
@@ -516,19 +523,26 @@ const fitFile = (f) => JSON.parse(readFileSync(join(f.repo, FIT), "utf8"));
 const blockFit = (f) => mkdirSync(join(f.repo, `${FIT}.tmp`), { recursive: true });
 const unblockFit = (f) => rmSync(join(f.repo, `${FIT}.tmp`), { recursive: true });
 
-test("a split that passes the gate at one phase 0 stands at the next, read from the Fit file the next one replaces, and the group's row routes its tickets", () => {
+test("a split that passes the gate at one phase 0 stands at the next over more records, read from the Fit file the next one replaces, and the group's row routes its tickets", () => {
   const f = fixture({ rows: KIND_FLIP() });
   phase0(f);
   const first = fitFile(f);
   assert.deepEqual([first.table.splits, first.gate.passed], [{}, ["kind"]], "a first pass is kept in the file and stands nowhere");
   assert.deepEqual(first.gate.best.cuts, [{ input: "kind", cut: "bug" }]);
   assert.deepEqual([first.gate.scored, first.gate.left_out], [160, 0]);
+  // Phase 0 run again before any close-out: the same records, so no look, and the first pass does not stand on them.
+  phase0(f);
+  const again = fitFile(f);
+  assert.deepEqual([again.gate.records, again.table.splits, again.gate.passed], [first.gate.records, {}, ["kind"]]);
+  recorded(f, KIND_FLIP(41));
   phase0(f);
   const second = fitFile(f);
   assert.deepEqual(second.table.splits, { "*": { input: "kind", cut: "bug" } });
   assert.deepEqual(second.table.rows.cost, { "*": "task-high", "kind=bug": "slow-high", "kind!=bug": "task-high" });
   assert.deepEqual(second.gate.passed, ["kind"], "and its next pass is read in turn");
   assert.equal(validateTable(second.table) instanceof Error, false);
+  phase0(f);
+  assert.deepEqual([fitFile(f).table.splits, fitFile(f).gate.stands], [second.table.splits, ["kind"]], "phase 0 run again over the records it stood on keeps it");
   const where = (line) => /POLICY=(\S+) .* STRATUM=(\S+) /.exec(line).slice(1);
   assert.deepEqual(where(routeIn(f, null, ["bug"])), ["slow-high", "kind=bug"]);
   assert.deepEqual(where(routeIn(f, null, ["enhancement"])), ["task-high", "kind!=bug"]);
@@ -552,6 +566,8 @@ test("a Fit that failed is no look at the gate: it neither advances the count no
   assert.match(phase0(f).stdout, /metrics-refresh: fit: failed — /);
   assert.equal(readFileSync(join(f.repo, FIT), "utf8"), once);
   unblockFit(f);
+  // A close-out has added rows since, so the Fit after the failure searches other records than the pass before it.
+  recorded(f, KIND_FLIP(41));
   phase0(f);
   assert.deepEqual(fitFile(f).table.splits, { "*": { input: "kind", cut: "bug" } }, "the pass before the failure and the pass after it are consecutive Fits that computed");
 });
@@ -570,6 +586,19 @@ test("a previous Fit that will not parse, or holds no gate, is no previous pass;
   rmSync(join(f.repo, FIT));
   mkdirSync(join(f.repo, FIT));
   assert.match(phase0(f).stdout, /metrics-refresh: fit: failed — EISDIR: illegal operation on a directory, read/, "the read of the file it replaces, not the write over it");
+});
+
+test("a grown tree that route would refuse is never written: the Fit fails, naming why, and the old file stays", () => {
+  // Counts past what a double holds exactly: the cut the gate finds is 9e+25, which is no count a table can name.
+  const huge = (digits) => `9${"0".repeat(digits)}`;
+  const rows = (n) => pullsOf(flip({ sides: [huge(25), huge(30)], n }));
+  const f = fixture({ rows: rows(40) });
+  phase0(f);
+  const once = readFileSync(join(f.repo, FIT), "utf8");
+  assert.deepEqual(JSON.parse(once).gate.passed, ["criteria"]);
+  recorded(f, rows(41));
+  assert.match(phase0(f).stdout, /metrics-refresh: fit: failed — .*cuts criteria at 9e\+25/);
+  assert.equal(readFileSync(join(f.repo, FIT), "utf8"), once);
 });
 
 test("usage: only the declared flag and no positional, else exit 2", () => {

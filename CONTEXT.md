@@ -683,9 +683,10 @@ of each metrics file it read and the guard it used recorded so it can be
 recomputed. It routes that run; each close-out's evidence routes the next. A run
 whose Fit fails routes by the last Fit that computed, else by the **Starting
 table**. It holds the tree of Strata, each Stratum's rows and every candidate
-Cell's verdict, and what passed the split gate at this Fit, the one thing the
-next Fit reads of it: a Fit that failed leaves that as it was, so it is no look
-at the gate.
+Cell's verdict, and what the split gate found at this Fit — what passed, what
+stands and a digest of the Pulls it searched — the one thing the next Fit reads
+of it: a Fit that failed leaves that as it was, and a Fit over the same Pulls
+keeps it, so neither is a look at the gate.
 _Avoid_: Preview fit (it was only displayed, beside a table fitted elsewhere),
 re-fit (a Fit changes no checked-in table), shadow table, readout
 

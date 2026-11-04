@@ -26,9 +26,9 @@ test("the first pass of a split is only kept: the tree stays the one node, and t
 });
 
 test("a split that passed at the last Fit and passes now stands: two groups, each with its own cost and speed row", () => {
-  const rows = corpus(flip());
-  const first = fit(null, { rows });
-  const { table, gate } = fit(null, { rows, previous: first.gate });
+  const first = fit(flip());
+  // The next Fit's records hold more Pulls: one over the same records would be no look (below).
+  const { table, gate } = fit(flip({ n: 41 }), { previous: first.gate });
   assert.deepEqual(table.splits, { "*": { input: "criteria", cut: 0 } });
   assert.equal(validateTable(table) instanceof Error, false, "route reads it through validateTable");
   // The low side takes task-high at $4 against $10; the high side leaves it at $14, and the root at $9 does not beat 0.75 x $10.
@@ -36,6 +36,20 @@ test("a split that passed at the last Fit and passes now stands: two groups, eac
   assert.deepEqual(Object.keys(table.rows.speed).sort(), ["*", "criteria<=0", "criteria>0"]);
   assert.deepEqual(Object.keys(table.estimates).sort(), ["*", "criteria<=0", "criteria>0"]);
   assert.deepEqual(gate.passed, ["criteria"], "kept for the next Fit, which a standing split must pass again");
+});
+
+test("a Fit over the records the last one searched is no look: a first pass does not stand on it, and a split that stands stays", () => {
+  const rows = corpus(flip());
+  const first = fit(null, { rows });
+  const again = fit(null, { rows, previous: first.gate });
+  assert.equal(again.gate.records, first.gate.records, "the same Cells and Pulls searched");
+  assert.deepEqual([again.table.splits, again.gate.passed, again.gate.stands], [{}, ["criteria"], []], "one pass looked at twice is still one pass");
+  const grown = corpus(flip({ n: 41 }));
+  const second = fit(null, { rows: grown, previous: again.gate });
+  assert.notEqual(second.gate.records, first.gate.records);
+  assert.deepEqual([second.table.splits, second.gate.stands], [{ "*": { input: "criteria", cut: 0 } }, ["criteria"]], "a pass over other records is the second look");
+  const repeat = fit(null, { rows: grown, previous: second.gate });
+  assert.deepEqual([repeat.table.splits, repeat.gate.passed, repeat.gate.stands], [second.table.splits, ["criteria"], ["criteria"]], "looking again at what a split stood on does not merge it back");
 });
 
 test("a cut that moved with the percentiles between two Fits is the same split: the count stands on the input, and the tree takes the new cut", () => {
@@ -119,18 +133,20 @@ test("a Cell the guard has tripped is no choice, and its Pulls are not scored", 
 
 test("the tree reaches two inputs, each node its own row, and a ticket lacking the second input stops at the node of the first", () => {
   // Task-high is $4 on three corners of `criteria` x `paths` and $20 on the fourth; slow-high is $10 throughout.
-  const corners = [];
-  for (const criteria of ["0", "5"]) {
-    for (const paths of ["0", "5"]) {
-      for (let i = 0; i < 30; i++) {
-        for (const [cell, usd] of [["slow-high", 10], ["task-high", criteria === "5" && paths === "5" ? 20 : 4]]) corners.push({ cell, usd, held: { criteria, paths } });
+  const corners = (each) => {
+    const specs = [];
+    for (const criteria of ["0", "5"]) {
+      for (const paths of ["0", "5"]) {
+        for (let i = 0; i < each; i++) {
+          for (const [cell, usd] of [["slow-high", 10], ["task-high", criteria === "5" && paths === "5" ? 20 : 4]]) specs.push({ cell, usd, held: { criteria, paths } });
+        }
       }
     }
-  }
-  const rows = corpus(corners);
-  const first = fit(null, { rows });
+    return specs;
+  };
+  const first = fit(corners(30));
   assert.deepEqual(first.gate.passed, ["criteria+paths"]);
-  const { table } = fit(null, { rows, previous: first.gate });
+  const { table } = fit(corners(31), { previous: first.gate });
   assert.deepEqual(table.splits, {
     "*": { input: "criteria", cut: 0 },
     "criteria>0": { input: "paths", cut: 0 },

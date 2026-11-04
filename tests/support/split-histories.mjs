@@ -84,14 +84,17 @@ export function history({ delta, h, runs, seed = 20261101, runPulls = 17, burnIn
     looks.push({ pulls: pulls.length, passed: passed[0] ?? null, stands: stands[0] ?? null });
     policy = CELLS.indexOf(found.base);
     if (stop === "stand" && stands.length > 0) break;
-    if (stop === "real" && stands.some((key) => key.split("+").includes("coin"))) break;
+    if (stop === "real" && stands.some(onCoin)) break;
   }
   return looks;
 }
 
+/** Whether `key`, a split's key or null, is the real split: one that reads the coin. */
+const onCoin = (key) => key !== null && key.split("+").includes("coin");
+
 /** The first run, 1-based, at which a history's split on the coin stands, the real one; Infinity if it never does. */
 const firstReal = (looks) => {
-  const i = looks.findIndex((l) => l.stands !== null && l.stands.split("+").includes("coin"));
+  const i = looks.findIndex((l) => onCoin(l.stands));
   return i < 0 ? Infinity : i + 1;
 };
 
