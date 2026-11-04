@@ -145,8 +145,8 @@ export const TRIP_POINTS = 15;
 
 const round2 = (x) => (Number.isFinite(x) ? Number(x.toFixed(2)) : null);
 
-// Deterministic, so a re-run reads the same range.
-function mulberry32(seed) {
+// Deterministic, so a re-run reads the same range; the split gate's shuffles and folds draw from it too.
+export function mulberry32(seed) {
   let a = seed >>> 0;
   return () => {
     a = (a + 0x6d2b79f5) >>> 0;
