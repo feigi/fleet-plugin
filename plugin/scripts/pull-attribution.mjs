@@ -145,8 +145,8 @@ export const TRIP_POINTS = 15;
 
 const round2 = (x) => (Number.isFinite(x) ? Number(x.toFixed(2)) : null);
 
-// Deterministic, so a re-run reads the same range.
-function mulberry32(seed) {
+// Deterministic, so a re-run reads the same range; the split gate's shuffles and folds draw from it too.
+export function mulberry32(seed) {
   let a = seed >>> 0;
   return () => {
     a = (a + 0x6d2b79f5) >>> 0;
@@ -451,7 +451,7 @@ function stretchesOf(pulls) {
 
 /**
  * One unit per ticket-features row dated on or after `windowStart` (every dated
- * row when null), in file order: `{ pull, cell, stratum, stretch, generation, status,
+ * row when null), in file order: `{ pull, cell, stretch, generation, status,
  * merged, pr, ruling, pendingPr, noRuling, noRulingPrs, claims, falseClaims, rows, spend, workS }`,
  * `generation` null exactly when the Pull is excluded. `noRulingPrs` are the
  * Pull's own implementer PRs that are merged and that no Pull holds a Ruling
@@ -459,13 +459,13 @@ function stretchesOf(pulls) {
  * Ruling, or when PR state is unknown. `spend` is null when a
  * booked `cost` is blank, and `workS`, its work time in seconds, when a booked
  * `work_s` of a row naming no parent is. `prs` is `gh pr list`'s
- * `{ number, state }` rows, or null when PR state is unknown (the fit). `stratum`
- * maps a features row to its stratum. `stretch` names the Pull's stretch among
- * the windowed Pulls (`stretchesOf`), excluded Pulls included. Throws `AttributionError` on a features
+ * `{ number, state }` rows, or null when PR state is unknown (the fit).
+ * `stretch` names the Pull's stretch among the windowed Pulls
+ * (`stretchesOf`), excluded Pulls included. Throws `AttributionError` on a features
  * row it cannot date or a booked `cost` or `work_s` it cannot read, and
  * `RulingError` as `rulingFor` does.
  */
-export function attribute({ features, members, tiers, prs = null, windowStart = null, stratum = () => null }) {
+export function attribute({ features, members, tiers, prs = null, windowStart = null }) {
   const pulls = datedRows(features);
   const omp = ompRows(members);
   // Implementer rows to their Pull, and a PR-named member's key to its PR.
@@ -570,7 +570,7 @@ export function attribute({ features, members, tiers, prs = null, windowStart = 
     else if (blank || (r && !r.carried)) status = "unpriced";
     else if (untimed) status = "untimed";
     return {
-      pull, cell: pull.chosen_cell, stratum: stratum(pull), stretch: stretch.get(pull), generation, status, merged, pr: r?.pr ?? null, ruling: r?.ruling ?? null,
+      pull, cell: pull.chosen_cell, stretch: stretch.get(pull), generation, status, merged, pr: r?.pr ?? null, ruling: r?.ruling ?? null,
       noRuling: noRulingPrs.length > 0, noRulingPrs, pendingPr, claims, falseClaims, rows: booked, spend: blank ? null : spend, workS: untimed ? null : workS,
     };
   });

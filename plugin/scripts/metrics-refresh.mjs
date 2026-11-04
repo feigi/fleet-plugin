@@ -62,7 +62,7 @@
 // router and `fleet-tick.mjs` consume, not failures; any other non-zero exit is.
 //
 // FIT. After the cost guard wrote a guard, and only then, the Router's fit
-// (`ticket-router.mjs`'s fitTable) runs in-process over the working-tree TSVs
+// (`ticket-router.mjs`'s fitTree) runs in-process over the working-tree TSVs
 // the guard just read and the guard just written, with the starting table
 // (`router-table.json` beside the scripts) as its prior and no commit. It
 // writes the Fit, `.fleet/router-fit.json`, through a temp file and a rename:
@@ -71,18 +71,31 @@
 // `tripped`, per-Cell `n` and `window_start`), `tsv_blobs` (the git blob id of
 // each TSV it read, keyed by path as the guard keys its own), `prior` (the
 // starting table's `fitted_commit`, `cells`, `classifier`, `splits` and
-// `window_start`, and the install's `package.json` `version`) and the
-// fitted `table`. `ticket-router.mjs route` routes by that `table`, read
-// beside the guard; nothing commits the file. The Fit is a pure function of
-// those records: the TSVs at the recorded blob ids, the guard and the prior
-// fit to the same table again. With no records it is the starting table's
-// fit, as any other. It is called in-process because a fit has no verdict
-// for an exit status to carry. It never fails the run: an error prints
-// `metrics-refresh: fit: failed — <why>`, leaves the old file in place, so the
-// run routes by the last Fit that computed, and leaves the exit status as the
-// other duties set it. That line stays on stdout: the cockpit reads it off the receipts'
-// `metrics` step, and close-out's receipt keeps only stdout from a run that
-// exits 0.
+// `window_start`, and the install's `package.json` `version`), the
+// fitted `table` and `gate`, the split gate's record: a digest of the Cells
+// and Pulls it searched (`records`), the Pulls it scored and those it left
+// out for want of a recorded assignment probability, the best split it found
+// with its figures, `passed`, the inputs of the split that passed both its
+// tests, and `stands`, those of the split that stands. `ticket-router.mjs
+// route` routes by that `table`, read beside the guard; nothing commits the
+// file. A split stands in the `table` once it has passed at two consecutive
+// Fits on the same input or inputs, and is gone at the first Fit it fails;
+// the next Fit reads the previous one's `gate` from the file this one
+// replaces, which is all it carries forward. The Fit is a pure function of
+// the records, the guard, the prior and that `gate`: the TSVs at the recorded
+// blob ids, the guard and the prior fit to the same table again. So a Fit
+// whose `records` are the previous one's is no look at the gate: it keeps
+// that one's `passed` and `stands`, and a phase 0 run again over records that
+// have not changed neither advances a split's count nor resets it. With no
+// records it is the starting table's fit, as any other. It is called
+// in-process because a fit has no verdict for an exit status to carry. It
+// never fails the run: an error prints `metrics-refresh: fit: failed — <why>`,
+// leaves the old file in place, so the run routes by the last Fit that
+// computed, and leaves the exit status as the other duties set it. A Fit that
+// failed is no look at the gate either: the old file's `gate` is still what
+// the next Fit reads, so its count neither advances nor resets. That line
+// stays on stdout: the cockpit reads it off the receipts' `metrics` step, and
+// close-out's receipt keeps only stdout from a run that exits 0.
 //
 // One `metrics-refresh: <duty>: …` line per duty on stdout. Exit 0 when no
 // duty failed; 1 when one failed — named on stderr, and the duties after
@@ -101,7 +114,7 @@ import { COLUMNS as MEMBER_COLUMNS, ENDINGS, isImplementer, parseTsv as parseMem
 import { blobId } from "./pr-cost.mjs";
 import { FEATURE_COLUMNS, parseFeatures } from "./pull-attribution.mjs";
 import { REPORT_STATUSES } from "./report-files.mjs";
-import { DEFAULT_TABLE, FIT_FILE, INSTALL_PACKAGE, fitTable, installVersion, readGuard, validateTable } from "./ticket-router.mjs";
+import { DEFAULT_TABLE, FIT_FILE, INSTALL_PACKAGE, fitTree, installVersion, readGuard, validateTable } from "./ticket-router.mjs";
 import { parseTierOutcomes } from "./tier-outcomes.mjs";
 
 const NAME = "metrics-refresh";
@@ -283,11 +296,30 @@ function costGuard(repo) {
   return g;
 }
 
+// What the last Fit that computed recorded of the split gate (its `gate`), or null where there is no such Fit to read:
+// no file, one that will not parse, or one written before the gate. Any other failure to read the file throws, as a
+// Fit that cannot read what it replaces cannot write it either.
+function previousGate(repo) {
+  let text;
+  try {
+    text = readFileSync(join(repo, FIT), "utf8");
+  } catch (e) {
+    if (e.code === "ENOENT") return null;
+    throw e;
+  }
+  try {
+    return JSON.parse(text)?.gate ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // The Fit over `repo`'s working-tree TSVs and `written`, the guard file the
 // guard duty just wrote (parsed), with the router table at `tablePath` as its
 // prior, written to `.fleet/router-fit.json` through a temp file and a rename.
 // Throws on anything it cannot read, fit or write, before the rename, so the
-// old file stays as it was.
+// old file stays as it was: a Fit that throws is no look at the split gate,
+// and the next one reads the gate the old file holds.
 export function writeFit(repo, written, { tablePath = DEFAULT_TABLE, packagePath = INSTALL_PACKAGE, now = new Date() } = {}) {
   const guard = readGuard(written);
   if (guard === null) throw new Error(`${GUARD} is not a guard the router reads`);
@@ -298,6 +330,7 @@ export function writeFit(repo, written, { tablePath = DEFAULT_TABLE, packagePath
     throw new Error(`cannot read the starting router table ${tablePath}: ${e.code ?? e.message}`);
   }
   if (prior instanceof Error) throw new Error(`${tablePath}: ${prior.message}`);
+  const previous = previousGate(repo);
   // Keyed by the path as the guard keys its own (pr-cost.mjs reads these, relative to the workspace).
   const tsvBlobs = {};
   const read = (rel, parse) => {
@@ -308,7 +341,10 @@ export function writeFit(repo, written, { tablePath = DEFAULT_TABLE, packagePath
   const members = read(MEMBERS, parseMemberTsv);
   const verdicts = read(TIERS, parseTierOutcomes);
   const features = read(FEATURES, parseFeatures);
-  const table = fitTable({ prior, features, members, verdicts, guard, commit: null });
+  const { table, gate } = fitTree({ prior, features, members, verdicts, guard, commit: null, previous });
+  // The tree the gate grew is the one `route` will read it through.
+  const valid = validateTable(table);
+  if (valid instanceof Error) throw valid;
   const record = {
     computed_at: now.toISOString(),
     guard_computed_at: written.computed_at,
@@ -323,6 +359,7 @@ export function writeFit(repo, written, { tablePath = DEFAULT_TABLE, packagePath
       window_start: prior.window_start,
     },
     table,
+    gate,
   };
   const file = join(repo, FIT);
   writeFileSync(`${file}.tmp`, `${JSON.stringify(record, null, 2)}\n`);
