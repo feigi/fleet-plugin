@@ -36,7 +36,6 @@ export const SNAP = {
   head: "abc123",
   pathVerified: true,
   repoVerified: true,
-  testCmd: "node --test",
   // The Install step ran in the snapshot and exited 0, so the shared test run
   // goes ahead; a case about a failed or unread install names its own.
   installCmd: "sh ./install.sh",

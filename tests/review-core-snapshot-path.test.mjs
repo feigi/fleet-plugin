@@ -579,8 +579,8 @@ test("the snapshot block mints a per-run destination, then extracts, probes, com
       "the tree compare no longer names its two outcomes — a failed init or a snapshot that is not the reviewed tree goes back to being reported as a verified environment",
     ],
     [
-      /INSTALL=\$\(~\/\.omp\/plugins\/node_modules\/@feigi\/fleet-ctl\/scripts\/fleet-run derive-testcmd\.sh \$\{worktree\} install\)/,
-      "the Install step is no longer read off the Recipe cache through derive-testcmd.sh — pointed at the snapshot it refuses, since the snapshot holds no cache, and nothing else may guess the command",
+      /INSTALL=\$\(~\/\.omp\/plugins\/node_modules\/@feigi\/fleet-ctl\/scripts\/fleet-run derive-testcmd\.sh \$\{worktree\} install --at origin\/main\)/,
+      "the Install step is no longer read off the Recipe cache through derive-testcmd.sh at origin/main — pointed at the snapshot it refuses, since the snapshot holds no cache; read against the PR's own tree, a PR that breaks the step's path reads as an invalid cache; and nothing else may guess the command",
     ],
     [
       /\( cd "\$SNAP" && env -u CI sh -c "\$INSTALL" \) >"\$RUN\/install\.log" 2>&1; echo SNAPSHOT_INSTALL_EXIT=\$\?/,
@@ -793,10 +793,8 @@ test("no artefact path is spelled off the bare scratch argument — every one ha
 
 // The function is worthless if nothing calls it, and every test above tests a
 // COPY lifted from the source text: it stays green while the feature
-// disconnects. `review-core-testcmd.test.mjs`'s "runReview actually calls
-// resolveTestCmd once the snapshot is validated" records this exact defect for
-// resolveTestCmd, and `select-dimensions.test.mjs`'s "actually calls
-// resolveDimensions" pin does for the fan-out.
+// disconnects. `select-dimensions.test.mjs`'s "actually calls
+// resolveDimensions" pin records this exact defect for the fan-out.
 // Delete the `snapshotMissing(snap)` call and its `throw` in review-core.mjs and
 // #140's refusal is dead code with this whole file green.
 test("runReview actually calls snapshotMissing and throws on its result", () => {
@@ -810,17 +808,15 @@ test("runReview actually calls snapshotMissing and throws on its result", () => 
     /^\s*if \(missingReason\) throw new Error\(/m,
     "snapshotMissing's result is computed but never thrown on — the guard decides nothing",
   );
-  // Ordering, same guardAt/callAt shape as review-core-testcmd.test.mjs's
-  // "runReview actually calls resolveTestCmd once the snapshot is validated":
-  // after the schema that produces `pathVerified`, and before the first thing
-  // that reads `snap` — `resolveTestCmd`, which would otherwise derive a command
-  // for a tree that was never confirmed to exist.
+  // Ordering: after the schema that produces `pathVerified`, and before the
+  // first decision drawn from `snap` — `installReason`, which would otherwise
+  // judge an Install step run in a tree that was never confirmed to exist.
   const schemaAt = CODE.indexOf('required: ["runRoot", "path", "head", "pathVerified", "repoVerified"]');
   const callAt = CODE.indexOf("const missingReason = snapshotMissing(snap, runRootPrefix);");
-  const testCmdAt = CODE.indexOf("const testCmd = resolveTestCmd(");
-  assert.ok(schemaAt !== -1 && testCmdAt !== -1, "the schema or the resolveTestCmd call moved — update this test");
+  const decisionAt = CODE.indexOf("const notInstalled = installReason(snap);");
+  assert.ok(schemaAt !== -1 && decisionAt !== -1, "the schema or the installReason call moved — update this test");
   assert.ok(schemaAt < callAt, "the guard runs above the schema that produces pathVerified");
-  assert.ok(callAt < testCmdAt, "resolveTestCmd reads snap before the guard has cleared it");
+  assert.ok(callAt < decisionAt, "installReason reads snap before the guard has cleared it");
 });
 
 // `usableDiff` carries no head check of its own (#1132), so a diff for a

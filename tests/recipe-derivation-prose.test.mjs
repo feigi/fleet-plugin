@@ -68,7 +68,6 @@ test("every refusal naming the Recipe derivation step names one that phase 0 car
   const sources = {
     "derive-testcmd.sh": read("scripts/derive-testcmd.sh").text.match(/^derive="([^"]*)"/m),
     "claim-ticket.sh": read("scripts/claim-ticket.sh").text.match(/^rederive="([^"]*)"/m),
-    "review-core.mjs": read("scripts/review-core.mjs").text.match(/DERIVATION_STEP =\s*"([^"]*)"/),
   };
   for (const [file, m] of Object.entries(sources)) {
     assert.ok(m, `${file}: could not find its derivation-step message — update this test`);

@@ -102,19 +102,6 @@ test("every dispatched specialist receives the shared run's command, counts and 
   }
 });
 
-// The override precedence #142 settled, carried onto the one prompt that runs
-// the command: a caller's override wins, the derivation is used without one.
-test("the shared run runs the caller's override, and the snapshot's derived command only without one", async () => {
-  for (const [args, expected] of [
-    [{ ...ARGS, testCmd: "npm test -- --ci" }, "npm test -- --ci"],
-    [{ ...ARGS, testCmd: undefined }, SNAP.testCmd],
-  ]) {
-    const { host, prompts } = scriptedHost(script({}));
-    await run(host, args);
-    assert.ok(prompts["test-run"][0].includes(`suite-slot.mjs '${expected}'; }`), `the test-run prompt does not run ${expected} through the suite-slot wrapper`);
-  }
-});
-
 // A review's one run goes through the wrapper, so the block must hand it a
 // command that survives a shell: the command is single-quoted into the block,
 // and a quote inside it has to be closed, escaped and reopened.

@@ -707,6 +707,11 @@ const CHANGED = [
     "On a PR carrying `ready-to-merge`, the push moves the head after the label, so the next merge bot refuses it `head-moved-after-label-#<M>`: a fresh finisher, per **Failure handling**.",
     "On a PR carrying `ready-to-merge`, the push moves the head after the label, so the next merge bot refuses it `head-moved-after-label-#<M>` and its report's settle takes the label off; then a fresh finisher, per **Failure handling**.",
   ],
+  // The review refuses a missing test command too: nothing in it derives one.
+  [
+    "The review throws on missing `args.pr`/`args.worktree` and on a snapshot agent that returned no tree, and a failure surfaces mid-loop, where \"react, never block\" makes it easy to log and carry on — leaving a PR that *reads* as reviewed and is not.",
+    "The review throws on missing `args.pr`/`args.worktree`/`args.testCmd` and on a snapshot agent that returned no tree, and a failure surfaces mid-loop, where \"react, never block\" makes it easy to log and carry on — leaving a PR that *reads* as reviewed and is not.",
+  ],
 ];
 
 // Sentences deleted outright, each named with what stands in its place.

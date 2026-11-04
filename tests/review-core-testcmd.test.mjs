@@ -4,23 +4,23 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { stripComments } from "./support/strip-comments.mjs";
 import { Pin } from "./support/prose-pin.mjs";
-import { resolveTestCmd, SNAPSHOT_SCHEMA, TEST_RUN_SCHEMA } from "../plugin/scripts/review-core.mjs";
+import { runReview, SNAPSHOT_SCHEMA, TEST_RUN_SCHEMA } from "../plugin/scripts/review-core.mjs";
+import { ARGS, SNAP, parallel, pipeline, review, scriptedHost } from "./support/review-host-fixture.mjs";
 
 // The review host used to default `testCmd` to a literal string naming THIS
 // repo's own test path — silent green everywhere else, since `worktree` is a
 // caller-supplied argument and a glob matching nothing exits 0 reporting
-// `tests 0` (#142). It is now READ from the repo under review's Recipe cache by
-// the snapshot agent (see the "derives this repository's own test command"
-// paragraph below), through derive-testcmd.sh — see derive-testcmd.test.mjs
-// for that script's own coverage, exercised against fixture repos that are
-// NOT this one, which is the guard #142's acceptance criteria required and an
-// archive of this repo could not have been.
+// `tests 0` (#142). Every caller now passes the Test entrypoint it read off
+// the repo under review's Recipe cache, and the review refuses without one
+// (#4046): the snapshot no longer reads the Test entrypoint at all. See
+// derive-testcmd.test.mjs for the reader's own coverage.
 //
-// This file covers what remains review-core.mjs's own responsibility:
-// resolveTestCmd's resolution order and refusal, the snapshot agent's prompt
-// and schema actually carrying the derivation, and the shared test-run
-// prompt (#2315) handing testCmd over verbatim with the 'tests 0' rule — the
-// one prompt that runs it, since no specialist runs the full suite any more.
+// This file covers what remains review-core.mjs's own responsibility: the
+// refusal of a review with no test command, the snapshot agent's prompt and
+// schema carrying the Install step but no Test entrypoint, and the shared
+// test-run prompt (#2315) handing testCmd over verbatim with the 'tests 0'
+// rule — the one prompt that runs it, since no specialist runs the full suite
+// any more.
 const REPO = join(import.meta.dirname, "..", "plugin");
 const SOURCE = readFileSync(join(REPO, "scripts", "review-core.mjs"), "utf8");
 
@@ -33,109 +33,65 @@ const SOURCE = readFileSync(join(REPO, "scripts", "review-core.mjs"), "utf8");
 // pins use rejects a leading `//` and nothing else. Measured, #142 review.
 const CODE = stripComments(SOURCE);
 
-test("an explicit override always wins, whatever the snapshot derived", () => {
-  assert.equal(resolveTestCmd("npm test --", { testCmd: "node --test" }), "npm test --");
-  assert.equal(resolveTestCmd("npm test --", null), "npm test --");
-  assert.equal(resolveTestCmd("npm test --", { testCmdError: "refused" }), "npm test --");
-});
+const SNAPSHOT_ONLY = { snapshot: [SNAP], "review:correctness": [review([])] };
 
-test("no override falls back to the snapshot agent's derivation", () => {
-  assert.equal(resolveTestCmd(undefined, { testCmd: "node --test" }), "node --test");
-  assert.equal(resolveTestCmd(null, { testCmd: "npm test --" }), "npm test --");
-});
-
-// The whole point of #142: neither an override nor a derivation must REFUSE
-// the review, never fall back to a guessed default. The reason passed through
-// is derive-testcmd.sh's own, which names the derivation step (ADR 0015).
-test("no override and no derivation refuses, naming the snapshot agent's reason", () => {
-  assert.throws(
-    () => resolveTestCmd(undefined, { testCmdError: "derive-testcmd: no Recipe cache at /r/.fleet/recipe.json" }),
-    /no test command for this repository — derive-testcmd: no Recipe cache at \/r\/\.fleet\/recipe\.json/,
-  );
-});
-
-// With no reason from the snapshot agent, the refusal still has to tell its
-// reader what to RUN — the derivation step — rather than only that nothing
-// was derived: a controller or reviewer reading it has no other pointer.
-test("no override, no snapshot at all, and no testCmdError still refuses, naming the derivation step", () => {
-  for (const snap of [null, {}]) {
-    assert.throws(
-      () => resolveTestCmd(undefined, snap),
-      /no test command for this repository — the snapshot agent read no Recipe cache; run the Recipe derivation step \(run-team phase 0/,
+// #4046: nothing derives a test command any more, so a review handed none has
+// nothing to run. It refuses on its own terms, naming `testCmd`, before the
+// snapshot agent or anything else is dispatched — a refusal after the
+// snapshot would spend a cut on a review that could never run its suite.
+test("runReview with testCmd absent, empty or blank refuses before any agent is dispatched, naming testCmd", async () => {
+  for (const testCmd of [undefined, null, "", "   ", 42]) {
+    const run = scriptedHost(SNAPSHOT_ONLY);
+    await assert.rejects(
+      runReview({ ...run.host, pipeline, parallel }, { ...ARGS, testCmd }),
+      /^Error: review-pr: args\.testCmd is required/,
+      `testCmd ${JSON.stringify(testCmd)} was not refused naming testCmd`,
     );
+    assert.deepEqual(run.labels, [], `testCmd ${JSON.stringify(testCmd)} dispatched ${run.labels.join(", ")} before refusing`);
   }
 });
 
-// A falsy-but-present override (`""`) is caller error, not "no override" —
-// the `||`/truthiness check above only distinguishes explicit from absent,
-// and this pins that an empty string does NOT silently pass through as a
-// command. It falls to the snapshot the same as `undefined` would.
-test("an empty-string override is not treated as an explicit command", () => {
-  assert.equal(resolveTestCmd("", { testCmd: "node --test" }), "node --test");
-});
-
-// The function is worthless if nothing calls it — pin the CALL SITE, not
-// just the lifted copy. select-dimensions.test.mjs's #118 regression is this
-// exact defect: replacing the call with a bare default left every test above
-// green while the feature disconnected.
-test("runReview actually calls resolveTestCmd once the snapshot is validated", () => {
-  assert.match(
-    CODE,
-    /^\s*const testCmd = resolveTestCmd\(A\.testCmd, snap\);$/m,
-    "the testCmd call site changed — the derivation may be disconnected",
-  );
-  // Textually after the snapshot's own validity guard, not before — snap must
-  // be known good (or the throw above already fired) before this reads it.
-  // Anchored on the guard's INVOCATION — not its declaration, and not one of
-  // its return messages. The declaration sits above every top-level statement
-  // in this file, so ordering against it is near-tautological: measured, it
-  // stays green with the resolveTestCmd call moved ahead of the guard, which
-  // is the one regression this assertion's message names. A message anchor is
-  // reword-fragile instead — #539 split the single "no tree" message into
-  // three, and the retired literal leaves guardAt at -1, which reds this
-  // assertion loudly rather than silently, but reds it all the same. The call
-  // site is the only anchor that is both reword-proof and order-sensitive.
-  const guardAt = CODE.indexOf("const missingReason = snapshotMissing(snap, runRootPrefix);");
-  const callAt = CODE.indexOf("const testCmd = resolveTestCmd(");
-  assert.ok(guardAt !== -1 && callAt !== -1 && callAt > guardAt, "resolveTestCmd is called before snap is validated");
+// The accept direction: a review handed a command runs exactly that command,
+// whatever a snapshot report might carry beside it.
+test("runReview with a testCmd runs exactly that command in the shared run", async () => {
+  const run = scriptedHost({ ...SNAPSHOT_ONLY, snapshot: [{ ...SNAP, testCmd: "node --test elsewhere" }] });
+  await runReview({ ...run.host, pipeline, parallel }, { ...ARGS, testCmd: "npm test -- --ci" });
+  assert.equal(run.calls["test-run"], 1, "the shared run was not dispatched once");
+  assert.ok(run.prompts["test-run"][0].includes("suite-slot.mjs 'npm test -- --ci'; }"), "the shared run does not run the command the caller passed");
+  assert.ok(!run.prompts["test-run"][0].includes("elsewhere"), "the shared run ran a command the snapshot report carried");
 });
 
 // A hardcoded default anywhere in this file is the exact regression #142
 // fixes — `A.testCmd || "<literal>"` is the shape it used to take.
 test("no hardcoded testCmd default remains", () => {
-  assert.doesNotMatch(
-    CODE,
-    /A\.testCmd\s*\|\|\s*"/,
-    "a literal testCmd default reappeared — it must come from resolveTestCmd/derive-testcmd.sh instead",
-  );
+  assert.doesNotMatch(CODE, /A\.testCmd\s*\|\|\s*"/, "a literal testCmd default reappeared — the review runs the command its caller passes");
 });
 
-// The snapshot agent's return schema gains testCmd/testCmdError the same way
-// diffPath/diffLines/prHead were added: `additionalProperties: false` drops
+// The snapshot agent's return schema carries the Install step's facts the same
+// way diffPath/diffLines/prHead were added: `additionalProperties: false` drops
 // an undeclared field silently, so BOTH the prompt asking for it and the
 // schema declaring it have to be pinned, or the feature disconnects in one
 // token exactly like `review-core-reads.test.mjs`'s "the snapshot agent asks for
 // the diff facts AND declares them in its schema" records happening to the
-// diff facts.
-test("the snapshot agent is told to derive testCmd AND the schema declares it", () => {
+// diff facts. The Test entrypoint is no longer one of them (#4046): the caller
+// passes it, so the snapshot neither reads it nor declares it.
+test("the snapshot agent reads the Install step at origin/main AND the schema declares its facts, and no Test entrypoint is read", () => {
   const snapshot = Pin.of(CODE, "CODE").between("const snap = await agent(", "if (snap) {", "the snapshot agent dispatch").text;
 
+  assert.doesNotMatch(snapshot, /derive-testcmd\.sh \$\{worktree\} test/, "the snapshot agent reads the Test entrypoint again — every caller passes testCmd, so nothing would use it");
+  assert.doesNotMatch(snapshot, /testCmd/, "the snapshot prompt asks for a test command again");
+  // The command also has to RUN where the specialists are told to run it.
+  // `git archive` carries tracked files only, so a tree whose suite needs an
+  // installed dependency exits non-zero in a bare snapshot while passing in
+  // the worktree its Recipe was proven in. The Install step is read through
+  // the same reader, off the review worktree (the snapshot holds no Recipe
+  // cache), against `origin/main` — the tree the Recipe was proven on, so a
+  // PR that breaks the step's path runs it and fails it rather than reading
+  // as an invalid cache (#4046) — and run in `$SNAP`, from its root.
   assert.match(
     snapshot,
-    /~\/\.omp\/plugins\/node_modules\/@feigi\/fleet-ctl\/scripts\/fleet-run derive-testcmd\.sh \$\{worktree\} test/,
-    "the snapshot agent no longer reads the Test entrypoint through derive-testcmd.sh via the Resolver",
-  );
-  // Deriving the command is half the job — it also has to RUN where the
-  // specialists are told to run it. `git archive` carries tracked files only,
-  // so a tree whose suite needs an installed dependency exits non-zero in a
-  // bare snapshot while passing in the worktree its Recipe was proven in. The
-  // Install step is read through the same reader, off the review worktree
-  // (the snapshot holds no Recipe cache), and run in `$SNAP` — THIS run's
-  // destination — from its root.
-  assert.match(
-    snapshot,
-    /INSTALL=\$\(~\/\.omp\/plugins\/node_modules\/@feigi\/fleet-ctl\/scripts\/fleet-run derive-testcmd\.sh \$\{worktree\} install\)/,
-    "the snapshot agent no longer reads the Install step through derive-testcmd.sh via the Resolver, off the worktree that holds the cache",
+    /INSTALL=\$\(~\/\.omp\/plugins\/node_modules\/@feigi\/fleet-ctl\/scripts\/fleet-run derive-testcmd\.sh \$\{worktree\} install --at origin\/main\)/,
+    "the snapshot agent no longer reads the Install step through derive-testcmd.sh via the Resolver, off the worktree that holds the cache, at origin/main",
   );
   assert.match(
     snapshot,
@@ -146,16 +102,6 @@ test("the snapshot agent is told to derive testCmd AND the schema declares it", 
   // BACKSLASH-backtick in the source text — `\\?` matches it either way, the
   // same idiom `review-core-reads.test.mjs` uses for diffPath/prHead/diffLines.
   const B = "\\\\?`";
-  assert.match(
-    snapshot,
-    new RegExp(`Report\\s+${B}testCmd${B}\\s*=\\s*its\\s+stdout\\s+ONLY\\s+if\\s+it\\s+exited\\s+0`),
-    "testCmd is not bound to the script's stdout and gated on its exit code",
-  );
-  assert.match(
-    snapshot,
-    new RegExp(`report\\s+${B}testCmdError${B}\\s*=\\s*its\\s+stderr`),
-    "testCmdError is not bound to the script's stderr on refusal",
-  );
   assert.match(
     snapshot,
     new RegExp(`Report\\s+${B}installCmd${B}\\s+=\\s+the\\s+SNAPSHOT_INSTALL_STEP\\s+value\\s+and\\s+${B}installExit${B}\\s+=\\s+the\\s+SNAPSHOT_INSTALL_EXIT\\s+value`),
@@ -186,17 +132,20 @@ test("the snapshot agent is told to derive testCmd AND the schema declares it", 
   // never a second copy of its JSON re-parsed from source text. A field
   // declared ANYWHERE else is undeclared as far as
   // `additionalProperties: false` is concerned.
-  for (const field of ["testCmd", "testCmdError", "installCmd", "installExit", "installError", "untracked", "untrackedCount", "statusError"]) {
+  for (const field of ["installCmd", "installExit", "installError", "untracked", "untrackedCount", "statusError"]) {
     assert.ok(
       Object.prototype.hasOwnProperty.call(SNAPSHOT_SCHEMA.properties, field),
       `${field} is not declared in SNAPSHOT_SCHEMA.properties — additionalProperties:false drops it`,
     );
   }
-  // Both stay OUT of `required`: a network or git failure inside
-  // derive-testcmd.sh must not abort a snapshot that is otherwise good —
-  // resolveTestCmd is what turns a missing derivation into a refusal, not a
+  for (const field of ["testCmd", "testCmdError"]) {
+    assert.ok(!Object.prototype.hasOwnProperty.call(SNAPSHOT_SCHEMA.properties, field), `${field} is declared in SNAPSHOT_SCHEMA.properties again — nothing reads it`);
+  }
+  // The Install step's facts stay OUT of `required`: a network or git failure
+  // inside derive-testcmd.sh must not abort a snapshot that is otherwise good
+  // — installReason is what turns an unread step into a skipped suite, not a
   // required-field validation error one layer down. `pathVerified` joins
-  // path+head instead (#140): unlike testCmd, its absence must abort. So does
+  // path+head instead (#140): its absence must abort. So does
   // `repoVerified` (#1056) — whether the snapshot is a repository holding the
   // reviewed tree decides what a suite run in there is evidence about.
   // `environmentNote`'s strict `=== true` check already guarantees an omitted
@@ -210,22 +159,6 @@ test("the snapshot agent is told to derive testCmd AND the schema declares it", 
     ["runRoot", "path", "head", "pathVerified", "repoVerified"],
     "required must stay path+head+pathVerified+repoVerified only",
   );
-});
-
-// derive-testcmd.sh's exit-3 refusals are about the environment and name no
-// derivation step, so the prompt must not tell the snapshot agent that every
-// refusal does.
-test("the snapshot agent is told a cache refusal names the derivation step and an exit-3 refusal names an environment fault", () => {
-  const snapshot = Pin.of(CODE, "CODE").between("const snap = await agent(", "if (snap) {", "the snapshot agent dispatch").text;
-  assert.match(snapshot, /a\s+refusal\s+about\s+the\s+cache\s+names\s+the\s+step\s+that\s+derives\s+it/);
-  assert.match(snapshot, /an\s+exit-3\s+refusal\s+names\s+an\s+environment\s+fault,\s+and\s+the\s+caller\s+fixes\s+that\s+instead\s+of\s+deriving/);
-  // The two clauses above are the only places the prompt may speak of a
-  // refusal: any other sentence about one, however worded or capitalised, is a
-  // fresh chance to say that every refusal names the derivation step.
-  const outside = snapshot
-    .replace(/a\s+refusal\s+about\s+the\s+cache\s+names\s+the\s+step\s+that\s+derives\s+it/, "")
-    .replace(/an\s+exit-3\s+refusal\s+names\s+an\s+environment\s+fault/, "");
-  assert.doesNotMatch(outside, /\brefusals?\b/i, "the prompt speaks of a refusal outside the two clauses that say which kind names the derivation step");
 });
 
 // #2315. The prompt that RUNS the command is the shared test run's — every
@@ -242,8 +175,8 @@ function testRunPrompt() {
 test("the test-run prompt hands the command over verbatim and rules 'tests 0' a failure", () => {
   const prompt = testRunPrompt();
   // The command block must INTERPOLATE testCmd, not restate it. A hardcoded
-  // copy drifts from the resolved value the moment either one changes, and a
-  // caller passing args.testCmd (or the derivation) would be handed the wrong
+  // copy drifts from the passed value the moment either one changes, and a
+  // caller passing args.testCmd would be handed the wrong
   // command. Run from the snapshot's root, its output captured to the log
   // every specialist is pointed at, and through the suite-slot wrapper — the
   // only thing between the command and the host-wide bound.

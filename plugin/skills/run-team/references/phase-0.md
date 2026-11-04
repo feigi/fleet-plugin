@@ -484,7 +484,7 @@ code in the claim tree.
 **Derive the Recipe — the Recipe derivation step — before the fold-in below
 and before the first claim.** Every claim runs this repository's Install
 step and bakes its Test entrypoint into the member's runner, and every
-review reads the Test entrypoint, all out of the **Recipe cache**
+review runs the Install step, all out of the **Recipe cache**
 (`.fleet/recipe.json` beside the common git dir); no script infers either
 command. Check it first: `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run derive-testcmd.sh .
 install --at origin/main`, `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run derive-testcmd.sh . check
@@ -522,7 +522,7 @@ stall, below.
 **Where `checkCmd` comes from:** the repository's Check step, out of the same Recipe cache — `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run derive-testcmd.sh . check` prints it. Pass it to the fix-applier beside `testCmd`; the review does not run it. Neither member runs the two by hand: `recipe-check.mjs` runs the Check step it reads off that cache, then the `testCmd` it is handed, on the member's staged tree, and writes the record `ledger.mjs settle --from-report` requires of an implementer's and a fix-applier's report.
 
 **Mid-run, a cache that stops running is re-derived once, then the run
-stalls.** A claim or a review that refuses because the Recipe cache is
+stalls.** A claim that refuses because the Recipe cache is
 invalid — a command that no longer runs, or an Install step that changed
 the tree — is a mid-run trigger: dispatch `derive-recipe` again
 exactly as above, then retry what refused. So is the `NEED derive-recipe`
