@@ -2969,8 +2969,8 @@ async function runSettleFromReport() {
       // branch origin lacks, or a PR that is closed with its branch gone, is
       // a refusal of the claim, never a verify-sha.sh that could not look.
       if (checks.every((c) => c.ok)) {
-        const sha = verifyShaOf(report.branch, report.head);
-        check(`verify-sha.sh ${report.branch} ${report.head} exits 0`, sha.status === 0);
+        const sha = verifyShaOf(claimBranch, report.head);
+        check(`verify-sha.sh ${claimBranch} ${report.head} exits 0`, sha.status === 0);
         recipeGate(report.head);
       }
     } else if (report.outcome === "blocked") {

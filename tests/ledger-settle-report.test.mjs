@@ -242,6 +242,14 @@ test("impl-N=PR#M: a report naming a branch origin does not have is exit 3 for t
   f.refused("impl-5", 3, /failed: the report's branch is implementer\/5-impl-5 \(report: no-such-branch\)/);
 });
 
+test("impl-N=PR#M: a report naming another ticket's claim branch is exit 3 for the same check", () => {
+  const f = fixture();
+  f.ok("dispatch", "5", "impl-5");
+  f.report("impl-5", implReport(f, { branch: "implementer/6-impl-6" }));
+  f.pr(6, { state: "OPEN", closingIssuesReferences: [ref(5)] });
+  f.refused("impl-5", 3, /failed: the report's branch is implementer\/5-impl-5 \(report: implementer\/6-impl-6\)/);
+});
+
 test("impl-N=PR#M: the claim branch absent on origin, with the PR headed on another branch, is exit 3 naming the PR's head, not exit 2", () => {
   const f = fixture();
   f.ok("dispatch", "5", "impl-5");
