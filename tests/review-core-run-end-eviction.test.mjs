@@ -122,7 +122,7 @@ test("runReview evicts nothing when the snapshot agent reported nothing, and say
   assert.deepEqual(logs.filter((m) => /eviction/.test(m)), []);
 });
 
-test("runReviewToFile still writes review.json in the evicted run root and returns its status, ledger token and digest", async (t) => {
+test("runReviewToFile still writes review.json in the evicted run root and returns its status and digest", async (t) => {
   const { scratch } = scratchDir(t);
   const run = join(scratch, "pr7", RUN);
   let built;
@@ -132,7 +132,7 @@ test("runReviewToFile still writes review.json in the evicted run root and retur
 
   assert.equal(out.status, "completed");
   assert.equal(out.path, join(run, "review.json"));
-  assert.match(out.ledger, new RegExp(`^reviewed=abc123:\\d+/\\d+/\\d+:${RUN}$`));
+  assert.equal("ledger" in out, false);
   assert.equal(out.attempts, 1);
   assert.deepEqual(out.errors, []);
   const written = JSON.parse(readFileSync(out.path, "utf8"));

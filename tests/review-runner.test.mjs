@@ -6,8 +6,8 @@
 //
 //   - the full result object lands at `<run root>/review.json`, the run root
 //     being the review's own `<scratch>/pr<pr>/run-XXXXXXXX` (#2886), and the
-//     return carries only the digest, the path and the ledger token, which
-//     names that run;
+//     return carries only the digest and the path, whose run root names that
+//     run;
 //   - a throw or an empty return is retried ONCE; a second failure reports
 //     `failed` with both errors, naming no fallback (the controller takes the
 //     next free reviewer name off the PR's rows), writing no file;
