@@ -31,6 +31,11 @@ const git = (cwd, args) => execFileSync("git", ["-c", "maintenance.auto=false", 
 
 // The Install step: it leaves an ignored directory and, unless told not to, one
 // untracked file nothing ignores, and fails or cannot run when the case says so.
+// The Recipe runs it as `exec ./install.sh` so that, under any `sh`, the process
+// the script spawns is the step itself: its exit and its signal are the step's
+// own, and an absent file is exit 127. Run as `sh install.sh` instead, a `sh -c`
+// that does not exec its last command reported the kill as exit 137, and the
+// absent file as exit 2 (CI run 42105803906).
 const INSTALL = `#!/bin/sh
 [ -n "\${INSTALL_LOG:-}" ] && printf '%s\\n' "\${CI-unset}" > "$INSTALL_LOG"
 [ -n "\${INSTALL_MISSING:-}" ] && exit 127
@@ -50,7 +55,7 @@ function fixture(t) {
   git(dir, ["-c", "init.defaultBranch=main", "init", "-q", repo]);
   writeFileSync(join(repo, ".gitignore"), "node_modules/\n.fleet/\n");
   writeFileSync(join(repo, "tracked.txt"), "t\n");
-  writeFileSync(join(repo, "install.sh"), INSTALL);
+  writeFileSync(join(repo, "install.sh"), INSTALL, { mode: 0o755 });
   git(repo, ["add", "-A"]);
   git(repo, ["commit", "-q", "-m", "pin"]);
   const pin = git(repo, ["rev-parse", "HEAD"]);
@@ -61,7 +66,7 @@ function fixture(t) {
   git(repo, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
   mkdirSync(join(repo, ".fleet"));
   writeFileSync(join(repo, ".fleet", "recipe.json"), JSON.stringify({
-    install: "sh install.sh", test: "true", check: true, derivedAt: pin,
+    install: "exec ./install.sh", test: "true", check: true, derivedAt: pin,
     installClean: true, testCount: 1, uncovered: [],
   }));
   const scratch = join(dir, "scratch");
@@ -94,7 +99,7 @@ test("the copy is the pin's tree in a repository of its own, holds the ignored i
   assert.equal(readFileSync(log, "utf8"), "unset\n", "the Install step ran with CI set");
   assert.deepEqual(r.receipt, {
     dest: f.dest, pr: 7, pin: f.pin, head: git(f.dest, ["rev-parse", "HEAD"]), tree: git(f.dest, ["rev-parse", "HEAD^{tree}"]),
-    install: "sh install.sh", kind: "built", exit: 0, untracked: ["?? leftover.txt"], untrackedCount: 1, message: null,
+    install: "exec ./install.sh", kind: "built", exit: 0, untracked: ["?? leftover.txt"], untrackedCount: 1, message: null,
   });
 });
 
@@ -277,7 +282,7 @@ test("an Install step that cannot run is exit 3, one that fails or changes a tra
     assert.equal(r.status, code, JSON.stringify(env));
     assert.equal(r.receipt.kind, kind, JSON.stringify(env));
     assert.equal(r.receipt.exit, exit, JSON.stringify(env));
-    assert.equal(r.receipt.install, "sh install.sh");
+    assert.equal(r.receipt.install, "exec ./install.sh");
     assert.equal(r.receipt.untracked, null, "a refused copy reports untracked paths it never read");
     assert.equal(existsSync(f.dest), true, "the script removed the copy");
   }
