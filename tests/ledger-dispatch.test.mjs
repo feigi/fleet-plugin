@@ -1486,14 +1486,17 @@ test("a finisher for an implementer's PR is refused until the PR has a tier-outc
   assert.deepEqual(f.read().dispatched, ["finisher-pr-3606=failed", "finisher-pr-3606-b"]);
 });
 
-test("any row for the PR passes the ruling, whatever its date or width; a row whose verdicts were never ruled refuses the finisher on the closing gate", (t) => {
+test("any row for the PR passes the ruling, whatever its date, width or verdicts; a row whose verdicts were never ruled dispatches the finisher once the body closes the ticket, and refuses it until then", (t) => {
   const f = fixture(t);
   f.put("3545", RULED_ROW);
   mkdirSync(dirname(f.tierOutcomes), { recursive: true });
   // A header, then a row of the full width whose verdicts were never ruled.
   writeFileSync(f.tierOutcomes, "# run_date\tpr\n2026-01-01\t3606\t3545\troutine\t\t\t\t\t\t\t\t\n");
-  f.refused(["dispatch", "3606", "finisher-pr-3606"], /finisher-pr-3606: PR #3606's row in \S+tier-outcomes\.tsv has no closed_own_ticket verdict/);
+  f.refused(["dispatch", "3606", "finisher-pr-3606"], /^(?![\s\S]*closed_own_ticket)[\s\S]*finisher-pr-3606: PR #3606 does not close #3545, its own ticket — add "Closes #3545" to its body/);
   assert.deepEqual(f.read().dispatched, []);
+  closes(f.bin, 3606, [3545]);
+  assert.equal(f.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher");
+  assert.deepEqual(f.read().dispatched, ["finisher-pr-3606"]);
 });
 
 test("a tier-outcomes file that cannot be parsed or read refuses the finisher, naming the file, and is never a pass", (t) => {
@@ -1563,17 +1566,17 @@ test("implementer, fix-applier and merge-bot dispatches are not gated on a rulin
   assert.deepEqual(ghCalls(f.bin).filter((c) => c.startsWith("pr view") || c.startsWith("issue view")), []);
 });
 
-// The closing-reference gate, after the ruling. A finisher's PR is checked
-// against its ruling: when closed_own_ticket=yes, each ticket claiming the PR
-// must be a closing reference of its body; when closed_own_ticket=no, none may
-// be. No closing reference may be the suggestion-band record of the PR's own
-// review, whatever the ruling. A read that cannot answer dies, naming the read.
+// The closing-reference gate, after the ruling. A finisher's PR must close
+// each of its own tickets, whatever its ruling: the ruling judges the work as
+// first submitted, and no verdict in it is read here. No closing reference may
+// be the suggestion-band record of the PR's own review. A read that cannot
+// answer dies, naming the read.
 
-test("a PR ruled closed_own_ticket=yes is refused while its body does not close the ticket, and recorded once it does", (t) => {
+test("a PR is refused while its body does not close its ticket, and recorded once it does", (t) => {
   const f = fixture(t);
   f.put("3545", RULED_ROW);
   f.rule(3606, "3545");
-  f.refused(["dispatch", "3606", "finisher-pr-3606"], /finisher-pr-3606: PR #3606 does not close #3545, ruled closed_own_ticket=yes — add "Closes #3545" to its body/);
+  f.refused(["dispatch", "3606", "finisher-pr-3606"], /finisher-pr-3606: PR #3606 does not close #3545, its own ticket — add "Closes #3545" to its body/);
   assert.deepEqual(f.read().dispatched, []);
   closes(f.bin, 3606, [3545]);
   assert.equal(f.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher");
@@ -1587,20 +1590,22 @@ test("an ordinary issue among a PR's closing references does not refuse it", (t)
   assert.equal(f.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher");
 });
 
-test("a PR ruled closed_own_ticket=no is recorded while its body does not close the ticket", (t) => {
-  const f = fixture(t);
-  f.put("3545", RULED_ROW);
-  f.rule(3606, "3545", "no");
-  assert.equal(f.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher");
-});
+// The observed case: PR #4072 the settled implementer PR of ticket #4037, its
+// body saying `Refs #4037`. Whatever its ruling, it must close the ticket.
+const OBSERVED_ROW = `impl-4037=PR#4072 · tier-ok=impl-4037:fleet-implementer-slow-high · reviewed=${GATE_HEAD}:0/0/0:${GATE_RUN}`;
+const NOT_CLOSED = /^(?![\s\S]*closed_own_ticket)[\s\S]*finisher-pr-4072: PR #4072 does not close #4037, its own ticket — add "Closes #4037" to its body \(gh pr edit 4072 --body-file …\) — not dispatching finisher-pr-4072/;
 
-test("a PR ruled closed_own_ticket=no is refused while its body closes the ticket, naming the rephrasing", (t) => {
-  const f = fixture(t);
-  f.put("3545", RULED_ROW);
-  f.rule(3606, "3545", "no");
-  closes(f.bin, 3606, [3545]);
-  f.refused(["dispatch", "3606", "finisher-pr-3606"], /finisher-pr-3606: PR #3606 closes #3545, ruled closed_own_ticket=no — rephrase it as "Refs #3545"/);
-  assert.deepEqual(f.read().dispatched, []);
+test("an implementer PR must close its own ticket whatever its ruling: refused naming the ticket and Closes while its body does not, dispatched once it does", (t) => {
+  for (const closed of ["no", "yes"]) {
+    const f = fixture(t);
+    f.put("4037", OBSERVED_ROW);
+    f.rule(4072, "4037", closed, []);
+    f.refused(["dispatch", "4072", "finisher-pr-4072"], NOT_CLOSED);
+    assert.deepEqual(f.read().dispatched, [], closed);
+    closes(f.bin, 4072, [4037]);
+    assert.equal(f.ok("dispatch", "4072", "finisher-pr-4072").agent, "fleet-finisher", closed);
+    assert.deepEqual(f.read().dispatched, ["finisher-pr-4072"], closed);
+  }
 });
 
 test("a closing reference to the PR's own suggestion-band record refuses the finisher, whatever the ruling", (t) => {
@@ -1614,13 +1619,13 @@ test("a closing reference to the PR's own suggestion-band record refuses the fin
   assert.deepEqual(f.read().dispatched, []);
 });
 
-test("a ruling the body fails and an own-record reference are both named in the one refusal", (t) => {
+test("a body that fails to close its ticket and an own-record reference are both named in the one refusal", (t) => {
   const f = fixture(t);
   f.put("3545", RULED_ROW);
   f.rule(3606, "3545");
   closes(f.bin, 3606, [3637]);
   titled(f.bin, 3637, "PR #3606 review: the suggestion band, checked");
-  f.refused(["dispatch", "3606", "finisher-pr-3606"], /finisher-pr-3606: PR #3606 does not close #3545, ruled closed_own_ticket=yes .*; PR #3606 closes #3637, its own suggestion-band record/);
+  f.refused(["dispatch", "3606", "finisher-pr-3606"], /finisher-pr-3606: PR #3606 does not close #3545, its own ticket .*; PR #3606 closes #3637, its own suggestion-band record/);
 });
 
 // A claim's ticket is closed only by the claim's own PR: a closing reference,
@@ -1640,14 +1645,14 @@ test("a PR closing its own ticket and one another claim holds is refused, naming
   assert.equal(f.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher");
 });
 
-test("each ticket another claim holds is a failure line of its own, beside the ruling's", (t) => {
+test("each ticket another claim holds is a failure line of its own, beside the own ticket's", (t) => {
   const f = fixture(t);
   f.put("3545", RULED_ROW);
   f.rule(3606, "3545", "yes", [3637, 3638, 3639]);
   issueLabelled(f.bin, 3637, ["in-progress"]);
   issueLabelled(f.bin, 3639, ["in-progress"]);
   f.refused(["dispatch", "3606", "finisher-pr-3606"],
-    /PR #3606 does not close #3545, ruled closed_own_ticket=yes .*; PR #3606 closes #3637, which another claim holds — rephrase it as "Refs #3637"; PR #3606 closes #3639, which another claim holds — rephrase it as "Refs #3639" — not dispatching/);
+    /PR #3606 does not close #3545, its own ticket .*; PR #3606 closes #3637, which another claim holds — rephrase it as "Refs #3637"; PR #3606 closes #3639, which another claim holds — rephrase it as "Refs #3639" — not dispatching/);
 });
 
 test("the in-progress string is the Label map's: a map spelling the role wip refuses wip on a closed ticket and lets in-progress through", (t) => {
@@ -1669,7 +1674,7 @@ test("the in-progress string is the Label map's: a map spelling the role wip ref
 // its head: a claim branch's ticket is that claim's own, in-progress or not.
 const INHERITED_ROW = `PR#3606 · inherited (closes #3545) · review=member:review-pr-3606 · reviewed=${GATE_HEAD}:0/0/0:${GATE_RUN}`;
 
-test("an inherited PR headed by a claim branch closes that claim's in-progress ticket and is dispatched; headed by no claim branch it is refused", (t) => {
+test("an inherited PR headed by a claim branch closes that claim's in-progress ticket and is dispatched; headed by no claim branch it is refused for a ticket another claim holds", (t) => {
   for (const head of ["implementer/3545-impl-3545", "implementer/3545-impl-3545-b"]) {
     const f = fixture(t);
     f.put("3606", INHERITED_ROW);
@@ -1677,14 +1682,33 @@ test("an inherited PR headed by a claim branch closes that claim's in-progress t
     issueLabelled(f.bin, 3545, ["in-progress"]);
     assert.equal(f.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher", head);
   }
-  for (const head of ["feature/topic", "implementer/3546-impl-3546", "implementer/3545-impl-3546"]) {
+  // A claim branch of another ticket makes #3546 the PR's own, so its failure
+  // line comes beside the other claim's.
+  for (const [head, own] of [["feature/topic", null], ["implementer/3546-impl-3546", 3546], ["implementer/3545-impl-3546", null]]) {
     const f = fixture(t);
     f.put("3606", INHERITED_ROW);
     closes(f.bin, 3606, [3545], head);
     issueLabelled(f.bin, 3545, ["in-progress"]);
-    f.refused(["dispatch", "3606", "finisher-pr-3606"], /finisher-pr-3606: PR #3606 closes #3545, which another claim holds — rephrase it as "Refs #3545"/);
+    const notClosed = own === null ? "" : `PR #3606 does not close #${own}, its own ticket — add "Closes #${own}" to its body \\(gh pr edit 3606 --body-file …\\); `;
+    f.refused(["dispatch", "3606", "finisher-pr-3606"], new RegExp(`finisher-pr-3606: ${notClosed}PR #3606 closes #3545, which another claim holds — rephrase it as "Refs #3545"`));
     assert.deepEqual(f.read().dispatched, [], head);
   }
+});
+
+test("an inherited PR headed by a claim branch is refused while its body does not close that claim's ticket, and dispatched once it does; headed by no claim branch and closing nothing it is dispatched", (t) => {
+  for (const head of ["implementer/3545-impl-3545", "implementer/3545-impl-3545-b"]) {
+    const f = fixture(t);
+    f.put("3606", INHERITED_ROW);
+    closes(f.bin, 3606, [], head);
+    f.refused(["dispatch", "3606", "finisher-pr-3606"], /finisher-pr-3606: PR #3606 does not close #3545, its own ticket — add "Closes #3545" to its body/);
+    assert.deepEqual(f.read().dispatched, [], head);
+    closes(f.bin, 3606, [3545], head);
+    assert.equal(f.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher", head);
+  }
+  const f = fixture(t);
+  f.put("3606", INHERITED_ROW);
+  closes(f.bin, 3606, [], "feature/topic");
+  assert.equal(f.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher");
 });
 
 test("an inherited PR headed by a claim branch is still refused for another claim's ticket, and only for that one", (t) => {
@@ -1715,32 +1739,7 @@ test("every ticket claiming the PR is checked against the body, not only the fir
   f.put("3546", `impl-3546=PR#3606 · reviewed=${GATE_HEAD}:0/0/0:${GATE_RUN}`);
   f.rule(3606, "3545");
   closes(f.bin, 3606, [3545]);
-  f.refused(["dispatch", "3606", "finisher-pr-3606"], /PR #3606 does not close #3546, ruled closed_own_ticket=yes/);
-});
-
-test("a blank closing-reference verdict, with a ticket claiming the PR, refuses the finisher", (t) => {
-  const f = fixture(t);
-  f.put("3545", RULED_ROW);
-  mkdirSync(dirname(f.tierOutcomes), { recursive: true });
-  writeFileSync(f.tierOutcomes, "2026-10-21\t3606\t3545\troutine\tslow-high\t\t\tnote\n");
-  f.refused(["dispatch", "3606", "finisher-pr-3606"], /finisher-pr-3606: PR #3606's row in \S+tier-outcomes\.tsv has no closed_own_ticket verdict/);
-  assert.deepEqual(f.read().dispatched, []);
-});
-
-test("the PR's latest tier-outcomes row is its ruling, so a re-ruling replaces an earlier row's verdict", (t) => {
-  // An earlier blank verdict, ruled yes later: the body closing the ticket passes.
-  const blankThenYes = fixture(t);
-  blankThenYes.put("3545", RULED_ROW);
-  mkdirSync(dirname(blankThenYes.tierOutcomes), { recursive: true });
-  writeFileSync(blankThenYes.tierOutcomes, "2026-10-20\t3606\t3545\troutine\tslow-high\t\t\tnote\n");
-  blankThenYes.rule(3606, "3545", "yes", [3545]);
-  assert.equal(blankThenYes.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher");
-  // An earlier yes, ruled no later: the body closing nothing passes.
-  const yesThenNo = fixture(t);
-  yesThenNo.put("3545", RULED_ROW);
-  yesThenNo.rule(3606, "3545", "yes");
-  yesThenNo.rule(3606, "3545", "no");
-  assert.equal(yesThenNo.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher");
+  f.refused(["dispatch", "3606", "finisher-pr-3606"], /PR #3606 does not close #3546, its own ticket/);
 });
 
 test("a closing reference titled the PR's own record past surrounding whitespace still refuses the finisher", (t) => {
@@ -1775,21 +1774,13 @@ test("a gh issue view that fails refuses the finisher, naming the read, and writ
 // repository closes that repository's issue, whatever its number.
 const FOREIGN = "other-org/other-repo";
 
-test("a PR ruled closed_own_ticket=yes whose only reference to the ticket's number is another repository's is refused", (t) => {
+test("a PR whose only reference to the ticket's number is another repository's is refused", (t) => {
   const f = fixture(t);
   f.put("3545", RULED_ROW);
   f.rule(3606, "3545");
   closes(f.bin, 3606, [ref(3545, FOREIGN)]);
-  f.refused(["dispatch", "3606", "finisher-pr-3606"], /finisher-pr-3606: PR #3606 does not close #3545, ruled closed_own_ticket=yes/);
+  f.refused(["dispatch", "3606", "finisher-pr-3606"], /finisher-pr-3606: PR #3606 does not close #3545, its own ticket/);
   assert.deepEqual(f.read().dispatched, []);
-});
-
-test("a PR ruled closed_own_ticket=no whose reference to the ticket's number is another repository's is recorded", (t) => {
-  const f = fixture(t);
-  f.put("3545", RULED_ROW);
-  f.rule(3606, "3545", "no");
-  closes(f.bin, 3606, [ref(3545, FOREIGN)]);
-  assert.equal(f.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher");
 });
 
 test("another repository's reference numbered as the PR's suggestion-band record is never looked up", (t) => {
@@ -1821,7 +1812,7 @@ test("a reference with a repository and no url, or an empty one, is placed by it
     f.put("3545", RULED_ROW);
     f.rule(3606, "3545");
     closes(f.bin, 3606, [urlless(repo)]);
-    f.refused(["dispatch", "3606", "finisher-pr-3606"], /PR #3606 does not close #3545, ruled closed_own_ticket=yes/);
+    f.refused(["dispatch", "3606", "finisher-pr-3606"], /PR #3606 does not close #3545, its own ticket/);
   }
 });
 
@@ -1831,7 +1822,7 @@ test("a reference whose url is not its own issue's in the PR's repository is not
     f.put("3545", RULED_ROW);
     f.rule(3606, "3545");
     closes(f.bin, 3606, [{ ...ref(3545), url }]);
-    f.refused(["dispatch", "3606", "finisher-pr-3606"], /PR #3606 does not close #3545, ruled closed_own_ticket=yes/);
+    f.refused(["dispatch", "3606", "finisher-pr-3606"], /PR #3606 does not close #3545, its own ticket/);
     assert.deepEqual(f.read().dispatched, []);
   }
 });
@@ -1967,13 +1958,13 @@ test("a PR with no release label that closes a ticket is refused, naming the tic
   }
 });
 
-test("a PR with no release label that closes nothing but is an implementer's is refused, picking no bump", (t) => {
+test("a PR with no release label that closes nothing but is an implementer's is refused for its ticket and the label, picking no bump", (t) => {
   const f = fixture(t);
   f.put("3545", RULED_ROW);
-  f.rule(3606, "3545", "no");
+  f.rule(3606, "3545");
   labelled(f.bin, 3606, []);
   f.refused(["dispatch", "3606", "finisher-pr-3606"],
-    /finisher-pr-3606: PR #3606 carries no release label \(patch, minor, major\) and closes no ticket, and is the implementer PR of #3545 — add exactly one, the bump its change calls for: gh pr edit 3606 --add-label <patch\|minor\|major> — not dispatching finisher-pr-3606/);
+    /finisher-pr-3606: PR #3606 does not close #3545, its own ticket .*; PR #3606 carries no release label \(patch, minor, major\) and closes no ticket, and is the implementer PR of #3545 — add exactly one, the bump its change calls for: gh pr edit 3606 --add-label <patch\|minor\|major> — not dispatching finisher-pr-3606/);
   assert.deepEqual(f.read().dispatched, []);
 });
 
@@ -2103,7 +2094,7 @@ test("a closing-reference failure and a release-label failure are named in one r
   f.rule(3606, "3545");
   labelled(f.bin, 3606, []);
   f.refused(["dispatch", "3606", "finisher-pr-3606"],
-    /finisher-pr-3606: PR #3606 does not close #3545, ruled closed_own_ticket=yes .*; PR #3606 carries no release label \(patch, minor, major\) and closes no ticket, and is the implementer PR of #3545 — .* — not dispatching finisher-pr-3606/);
+    /finisher-pr-3606: PR #3606 does not close #3545, its own ticket .*; PR #3606 carries no release label \(patch, minor, major\) and closes no ticket, and is the implementer PR of #3545 — .* — not dispatching finisher-pr-3606/);
 });
 
 // ── the rendered brief ───────────────────────────────────────────────────────

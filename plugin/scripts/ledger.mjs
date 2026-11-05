@@ -1996,14 +1996,13 @@ function dispositionsRefusal(pr, review) {
   return null;
 }
 
-// PR `pr`'s ruling, as `{tickets, ruling, tsv, refusal}`: `tickets` the
-// tickets a settled `impl-<N>=PR#<pr>` token on a row names — the token
-// tier-outcomes.mjs `append` resolves a ticket from — and `ruling` the PR's
-// latest row in `tsv`, the main checkout's tier-outcomes.tsv, or null when
-// `refusal` is set or `tickets` is empty. `refusal` says why the
+// PR `pr`'s ruling gate, as `{tickets, refusal}`: `tickets` the tickets a
+// settled `impl-<N>=PR#<pr>` token on a row names — the token
+// tier-outcomes.mjs `append` resolves a ticket from. `refusal` says why the
 // finisher waits, or is null when it does not: the PR is an implementer's and
-// the file has no row whose `pr` is it. Any row passes, whatever its date or
-// verdicts, so a replacement finisher is never held once the first passed.
+// the main checkout's tier-outcomes.tsv has no row whose `pr` is it. Any row
+// passes, whatever its date or verdicts, so a replacement finisher is never
+// held once the first passed; the row's verdicts are read by nothing here.
 // The ledger lives in the main checkout's `.fleet/` (fleet-dir.mjs), so the
 // file is found beside that directory — no git, no gh. A missing file is no
 // row (`append` creates it); one that cannot be read or parsed refuses,
@@ -2013,19 +2012,18 @@ function dispositionsRefusal(pr, review) {
 async function rulingOf(pr) {
   const { parseTierOutcomes, implementerClaims } = await import("./tier-outcomes.mjs");
   const tickets = [...new Set(implementerClaims(data, pr).map((c) => c.ticket))];
-  if (tickets.length === 0) return { tickets, ruling: null, refusal: null };
+  if (tickets.length === 0) return { tickets, refusal: null };
   const tsv = join(dirname(dirname(resolve(file))), "docs", "metrics", "tier-outcomes.tsv");
   if (existsSync(tsv)) {
     let rows;
     try {
       rows = parseTierOutcomes(readFileSync(tsv, "utf8"));
     } catch (e) {
-      return { tickets, ruling: null, refusal: `cannot read the PR's ruling off ${tsv}: ${e.code ?? e.message} — fix the file, then dispatch the finisher again` };
+      return { tickets, refusal: `cannot read the PR's ruling off ${tsv}: ${e.code ?? e.message} — fix the file, then dispatch the finisher again` };
     }
-    const ruling = rows.findLast((r) => r.pr === String(pr));
-    if (ruling !== undefined) return { tickets, ruling, tsv, refusal: null };
+    if (rows.some((r) => r.pr === String(pr))) return { tickets, refusal: null };
   }
-  return { tickets, ruling: null, refusal: `PR #${pr}, the implementer PR of ${tickets.length === 1 ? "ticket" : "tickets"} ${tickets.map((n) => `#${n}`).join(", ")}, has no ruling — `
+  return { tickets, refusal: `PR #${pr}, the implementer PR of ${tickets.length === 1 ? "ticket" : "tickets"} ${tickets.map((n) => `#${n}`).join(", ")}, has no ruling — `
     + `${tsv} has no row for it; rule its review with \`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run tier-outcomes.mjs append ${pr}\`, `
     + "then dispatch the finisher again" };
 }
@@ -2165,43 +2163,34 @@ function checkReaders(where) {
 // read off the PR's closingIssuesReferences in its own repository — a
 // reference into another repository closes no issue here, whatever its
 // number — its head branch, and the titles and labels of the issues they
-// name; its second argument is rulingOf()'s answer, which let the PR through.
-// Check 1, when a settled implementer's token names the PR: each ticket it
-// names is closed by the body when the PR's ruling is closed_own_ticket=yes,
-// and is not when the ruling is no. Check 2, for every PR: no reference may
-// be the suggestion-band record of this PR's review — an issue whose title,
-// trimmed, is recordTitle(), as dispositions-check.mjs finds the record.
-// Check 3, for every PR, Ticketless ones included: no reference besides the
-// PR's own tickets may be a ticket another claim holds, its issue carrying
-// the Label map's in-progress string (claimedElsewhere()). The PR's own
-// tickets are the ones its settled tokens name and, when its head is a claim
-// branch (stranded.mjs's CLAIM_BRANCH), that claim's ticket — a PR a run
-// inherited carries no token, and its own claim holds its ticket until it
-// merges. Returns `{refs, failures}`: the issue numbers the PR closes, its
-// own suggestion-band record aside — that one is a failure here, not a
-// ticket — and one line per failure. A read the checks need dies, naming the
-// read, and writes nothing.
-async function closingRefusals(member, { tickets, ruling, tsv }) {
+// name; `tickets` are the ones rulingOf() found settled implementer tokens
+// naming the PR for. Check 1, for every PR: each of its own tickets is among
+// its closing references, so an implementer PR closes its own ticket whatever
+// its Ruling, which judges the work as first submitted. Check 2, for every PR:
+// no reference may be the suggestion-band record of this PR's review — an
+// issue whose title, trimmed, is recordTitle(), as dispositions-check.mjs
+// finds the record. Check 3, for every PR, Ticketless ones included: no
+// reference besides the PR's own tickets may be a ticket another claim holds,
+// its issue carrying the Label map's in-progress string (claimedElsewhere()).
+// The PR's own tickets are the ones its settled tokens name and, when its
+// head is a claim branch (stranded.mjs's CLAIM_BRANCH), that claim's ticket —
+// a PR a run inherited carries no token, and its own claim holds its ticket
+// until it merges. Returns `{refs, failures}`: the issue numbers the PR
+// closes, its own suggestion-band record aside — that one is a failure here,
+// not a ticket — and one line per failure. A read the checks need dies,
+// naming the read, and writes nothing.
+async function closingRefusals(member, { tickets }) {
   const pr = member.number;
   const where = `dispatch ${member.name}`;
   const { recordTitle } = await import("./dispositions-check.mjs");
   const { CLAIM_BRANCH } = await import("./stranded.mjs");
   const { prViewClosing, issueRead, claimedElsewhere } = checkReaders(where);
   const { view, numbers: refs } = prViewClosing(pr, "closingIssuesReferences,url,headRefName");
+  const claim = CLAIM_BRANCH.exec(view.headRefName);
+  const ownTickets = [...new Set(claim === null ? tickets : [...tickets, Number(claim[1])])];
   const failures = [];
-  if (tickets.length > 0) {
-    const verdict = ruling.closed_own_ticket;
-    if (verdict === "") {
-      failures.push(`PR #${pr}'s row in ${tsv} has no closed_own_ticket verdict, so its closing references cannot be checked — set the verdict in that row, then dispatch the finisher again`);
-    } else if (verdict === "yes") {
-      for (const n of tickets) {
-        if (!refs.includes(n)) failures.push(`PR #${pr} does not close #${n}, ruled closed_own_ticket=yes — add "Closes #${n}" to its body (gh pr edit ${pr} --body-file …)`);
-      }
-    } else {
-      for (const n of tickets) {
-        if (refs.includes(n)) failures.push(`PR #${pr} closes #${n}, ruled closed_own_ticket=no — rephrase it as "Refs #${n}"`);
-      }
-    }
+  for (const n of ownTickets) {
+    if (!refs.includes(n)) failures.push(`PR #${pr} does not close #${n}, its own ticket — add "Closes #${n}" to its body (gh pr edit ${pr} --body-file …)`);
   }
   const own = recordTitle(pr);
   // The label names of each issue the PR closes, its own record aside.
@@ -2215,8 +2204,6 @@ async function closingRefusals(member, { tickets, ruling, tsv }) {
     }
   }
   const closed = [...labels.keys()];
-  const claim = CLAIM_BRANCH.exec(view.headRefName);
-  const ownTickets = claim === null ? tickets : [...tickets, Number(claim[1])];
   for (const n of claimedElsewhere(closed, ownTickets, (m) => labels.get(m))) {
     failures.push(`PR #${pr} closes #${n}, which another claim holds — rephrase it as "Refs #${n}"`);
   }
@@ -2461,9 +2448,11 @@ async function runDispatch() {
   // review file: neither is gated on a verdict. Then an implementer's PR
   // waits on its ruling, its tier-outcomes row, written while the PR is open
   // and its review evidence still in scratch; see rulingOf(). Last, the
-  // PR's closing references must match that ruling and exclude its own
-  // suggestion-band record, and the PR must carry no `ready-to-merge` and
-  // exactly one release label, all read off gh from the ledger's repository; see closingRefusals() and
+  // PR must close its own tickets, whatever its ruling, and no closing
+  // reference may be its own
+  // suggestion-band record or a ticket another claim holds, and the PR must
+  // carry no `ready-to-merge` and exactly one release label, all read off gh
+  // from the ledger's repository; see closingRefusals() and
   // labelRefusal(). Refused here, before anything is written, so no
   // check can be skipped by forgetting to run it.
   if (member.family === "finisher-pr") {
