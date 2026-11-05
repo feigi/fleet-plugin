@@ -906,6 +906,18 @@ test("watchWindow: a landing past a candidate nothing held is not excused by an 
   } finally { await watch.stop(); }
 });
 
+// With several candidates ahead of the landing and every one of them held for
+// the whole watch, the port named is the first of them, the one the launch
+// scanned first, so the rows that name it in a skip reason name the holder the
+// scan met first and not a later one.
+test("watchWindow: with several held candidates ahead of the landing, blockerBefore() names the first", async () => {
+  const [first, second, landed] = [40001, 40002, 40003];
+  const watch = await scriptedWatch([first, second, landed], first, second);
+  try {
+    assert.equal(await watch.blockerBefore(landed), first, "blockerBefore() named a later held candidate, not the first one ahead of the landing");
+  } finally { await watch.stop(); }
+});
+
 // allHeld()'s two answers: a window with one candidate free is not
 // exhausted by its holders, and the rows have to fail on a launch that gave up
 // on it; a window whose every candidate answered is.
