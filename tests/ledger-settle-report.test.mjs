@@ -165,11 +165,12 @@ test("impl-N=PR#M: a head on the branch and an OPEN PR closing N settles", () =>
   assert.deepEqual(receipt, {
     member: "impl-5", outcome: "PR#6", filed: [], ruled: [],
     checks: [
-      { name: `verify-sha.sh ${CLAIM} ${f.head} exits 0`, ok: true },
+      { name: `the report's branch is ${CLAIM} (report: ${CLAIM})`, ok: true },
       { name: "PR #6 reads OPEN", ok: true },
       { name: "PR #6 closes #5", ok: true },
       { name: "PR #6 closes no ticket another claim holds (in-progress: none)", ok: true },
       { name: `PR #6's head is ${CLAIM} (GitHub: ${CLAIM})`, ok: true },
+      { name: `verify-sha.sh ${CLAIM} ${f.head} exits 0`, ok: true },
     ],
   });
   assert.equal(dispatched(f, "impl-5"), "impl-5=PR#6");
@@ -208,7 +209,7 @@ test("impl-N=PR#M: a replacement impl-N-x's PR on the claim branch settles — t
   f.pr(6, { state: "OPEN", closingIssuesReferences: [ref(5)], headRefName: CLAIM });
   const receipt = f.settled("impl-5-b");
   assert.equal(receipt.outcome, "PR#6");
-  assert.deepEqual(receipt.checks.at(-1), { name: `PR #6's head is ${CLAIM} (GitHub: ${CLAIM})`, ok: true });
+  assert.deepEqual(receipt.checks.at(-1), { name: `verify-sha.sh ${CLAIM} ${f.head} exits 0`, ok: true });
 });
 
 test("impl-N=PR#M: a head verify-sha.sh does not find on the branch is exit 3", () => {
@@ -217,6 +218,69 @@ test("impl-N=PR#M: a head verify-sha.sh does not find on the branch is exit 3", 
   f.report("impl-5", implReport(f, { head: f.stray }));
   f.pr(6, { state: "OPEN", closingIssuesReferences: [ref(5)] });
   f.refused("impl-5", 3, new RegExp(`failed: verify-sha\\.sh ${CLAIM} ${f.stray} exits 0`));
+});
+
+// The report's branch is the claim branch, whatever else holds. The check
+// reads nothing, so a refusal on the branch or the PR is exit 3 whatever
+// origin holds, and git is read only once every other check has passed.
+
+test("impl-N=PR#M: a report naming a branch other than the claim's is exit 3 naming the check, though its head is on origin and the PR is on the claim branch", () => {
+  const f = fixture();
+  f.ok("dispatch", "5", "impl-5");
+  f.report("impl-5", implReport(f, { branch: "feat" }));
+  f.pr(6, { state: "OPEN", closingIssuesReferences: [ref(5)] });
+  const r = f.refused("impl-5", 3, /failed: the report's branch is implementer\/5-impl-5 \(report: feat\)/);
+  assert.doesNotMatch(r.stderr, /verify-sha/, "git is not read beside a failed check");
+  assert.equal(dispatched(f, "impl-5"), "impl-5", "the member stays dispatched, unsettled");
+});
+
+test("impl-N=PR#M: a report naming a branch origin does not have is exit 3 for the same check, not exit 2", () => {
+  const f = fixture();
+  f.ok("dispatch", "5", "impl-5");
+  f.report("impl-5", implReport(f, { branch: "no-such-branch" }));
+  f.pr(6, { state: "OPEN", closingIssuesReferences: [ref(5)] });
+  f.refused("impl-5", 3, /failed: the report's branch is implementer\/5-impl-5 \(report: no-such-branch\)/);
+});
+
+test("impl-N=PR#M: a report naming another ticket's claim branch is exit 3 for the same check", () => {
+  const f = fixture();
+  f.ok("dispatch", "5", "impl-5");
+  f.report("impl-5", implReport(f, { branch: "implementer/6-impl-6" }));
+  f.pr(6, { state: "OPEN", closingIssuesReferences: [ref(5)] });
+  f.refused("impl-5", 3, /failed: the report's branch is implementer\/5-impl-5 \(report: implementer\/6-impl-6\)/);
+});
+
+test("impl-N=PR#M: the claim branch absent on origin, with the PR headed on another branch, is exit 3 naming the PR's head, not exit 2", () => {
+  const f = fixture();
+  f.ok("dispatch", "5", "impl-5");
+  f.git(f.work, "push", "-q", "origin", "--delete", CLAIM);
+  f.report("impl-5", implReport(f));
+  f.pr(6, { state: "OPEN", closingIssuesReferences: [ref(5)], headRefName: "feat" });
+  const r = f.refused("impl-5", 3, /failed: PR #6's head is implementer\/5-impl-5 \(GitHub: feat\)/);
+  assert.doesNotMatch(r.stderr, /verify-sha/, "git is not read beside a failed check");
+});
+
+test("impl-N=PR#M: a PR that reads CLOSED, whose branch origin no longer has, is exit 3 naming OPEN, not exit 2", () => {
+  const f = fixture();
+  f.ok("dispatch", "5", "impl-5");
+  f.git(f.work, "push", "-q", "origin", "--delete", CLAIM);
+  f.report("impl-5", implReport(f));
+  f.pr(6, { state: "CLOSED", closingIssuesReferences: [ref(5)] });
+  f.refused("impl-5", 3, /failed: PR #6 reads OPEN/);
+});
+
+test("impl-N=PR#M: a commit pushed on top of the reported head after the report still settles", () => {
+  const f = fixture();
+  f.ok("dispatch", "5", "impl-5");
+  f.report("impl-5", implReport(f));
+  f.pr(6, { state: "OPEN", closingIssuesReferences: [ref(5)] });
+  f.git(f.work, "checkout", "-q", "feat");
+  f.git(f.work, "commit", "-q", "--allow-empty", "-m", "pushed after the report");
+  f.git(f.work, "push", "-q", "origin", `feat:refs/heads/${CLAIM}`);
+  assert.notEqual(f.git(f.work, "rev-parse", "HEAD"), f.head, "fixture: the branch moved past the reported head");
+  const receipt = f.settled("impl-5");
+  assert.equal(receipt.outcome, "PR#6");
+  assert.match(readFileSync(join(f.root, "gh.log"), "utf8"), /^pr view 6 --json state,closingIssuesReferences,url,headRefName$/m);
 });
 
 test("impl-N=PR#M: a PR that is not OPEN is exit 3", () => {
@@ -420,6 +484,15 @@ test("impl-N=bailed: a bail cause settles, and the receipt names it", () => {
   assert.equal(dispatched(f, "impl-5"), "impl-5=bailed");
 });
 
+test("impl-N=bailed: a bail's branch is not checked — a report naming another branch settles bailed", () => {
+  const f = fixture();
+  f.ok("dispatch", "5", "impl-5");
+  f.report("impl-5", implReport(f, { outcome: "bailed", pr: null, head: null, branch: "feat", bailCause: "hands", bailDetail: "needs a token" }));
+  const receipt = f.settled("impl-5");
+  assert.equal(receipt.outcome, "bailed");
+  assert.deepEqual(receipt.checks, [{ name: "bailCause: hands", ok: true }]);
+});
+
 test("impl-N=bailed: a null bailCause is exit 3", () => {
   const f = fixture();
   f.ok("dispatch", "5", "impl-5");
@@ -451,6 +524,15 @@ test("impl-N=blocked: a block with its reason settles blocked, unchecked", () =>
   assert.equal(receipt.outcome, "blocked");
   assert.deepEqual(receipt.checks, []);
   assert.equal(dispatched(f, "impl-5"), "impl-5=blocked");
+});
+
+test("impl-N=blocked: a block's branch is not checked — a report naming another branch settles blocked", () => {
+  const f = fixture();
+  f.ok("dispatch", "5", "impl-5");
+  f.report("impl-5", blockedReport(f, { branch: "feat" }));
+  const receipt = f.settled("impl-5");
+  assert.equal(receipt.outcome, "blocked");
+  assert.deepEqual(receipt.checks, []);
 });
 
 test("impl-N=blocked: a block with no bailDetail, or with a bailCause, is not a report — exit 2 naming why", () => {

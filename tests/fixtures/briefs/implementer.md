@@ -1,8 +1,9 @@
 Implement ticket 4120. You are ALREADY in worktree `/abs/wt-impl`, whose PR branch is
 `impl-branch`: commit on it and open your PR from it, even when the ticket below names
-another branch; the settle refuses a PR from any other branch. If the ticket names
-one, say in the PR body that you used `impl-branch`. Label names in this file are roles;
-the Label map gives the string to type; a member never derives the map. Close no ticket
+another branch; the settle refuses a PR from any other branch, and a report that names
+one. If the ticket names one, say in the PR body that you used `impl-branch`. Label names
+in this file are roles; the Label map gives the string to type; a member never derives
+the map. Close no ticket
 another claim holds — one whose issue carries the in-progress label — even when the
 ticket below asks for one PR with it: write `Refs #M` instead; the settle refuses a PR
 that closes one. Your scratch directory is `/abs/scratch-impl/impl-4120/`; outside the worktree,
@@ -59,7 +60,7 @@ maintainer.
 
 Your report is a file, `/abs/scratch-impl/reports/<your name>.json`, `<your name>` the
 `impl-4120[-x]` you were dispatched as, in the shape
-`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run report-schema.mjs print impl` prints. Write it before
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run report-schema.mjs print impl` prints, with `branch` `impl-branch`. Write it before
 your final message, and send nothing until
 `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run report-schema.mjs validate impl /abs/scratch-impl/reports/<your name>.json`
 answers `valid`. Your final message is then one line,

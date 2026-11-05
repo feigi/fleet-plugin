@@ -2755,13 +2755,15 @@ function recordFiled(id, subject) {
 // from it, and an outcome that asserts a git or GitHub state has that state
 // checked before anything is written:
 //
-//   impl-N=PR#M               verify-sha.sh <branch> <head> exits 0; PR M
+//   impl-N=PR#M               the report's branch is implementer/N-impl-N; PR M
 //                             reads OPEN and its closingIssuesReferences in its
 //                             own repository name N; no other closing
 //                             reference there is a ticket another claim holds,
 //                             its issue carrying in-progress; its head branch
-//                             is implementer/N-impl-N;
-//                             the Check-step record (below) holds for <head>
+//                             is implementer/N-impl-N. Last, and only when
+//                             every other check passed: verify-sha.sh <branch>
+//                             <head> exits 0, and the Check-step record
+//                             (below) holds for <head>
 //   impl-N=bailed             bailCause is not null; the receipt names it.
 //                             report-schema.mjs already refuses a bail that
 //                             names a pr or a head
@@ -2941,9 +2943,15 @@ async function runSettleFromReport() {
       if (report.pr === null) invalid('$.pr: null is not a PR number, with outcome "pr"');
       if (report.head === null) invalid('$.head: null, with outcome "pr"');
       outcome = `PR#${report.pr}`;
-      const sha = verifyShaOf(report.branch, report.head);
-      check(`verify-sha.sh ${report.branch} ${report.head} exits 0`, sha.status === 0);
-      recipeGate(report.head);
+      // The claim's branch comes from the ticket: the Pull claims with member
+      // impl-N, so its branch is implementer/N-impl-N, and close-out releases
+      // impl-N. Never from the settling member's name or its report — a
+      // replacement impl-N-x holds the same claim as impl-N — and the report's
+      // `branch` must name it: the head verified below is then the head of the
+      // branch the PR is checked to be on. This check reads nothing, so a report
+      // naming another branch is refused whatever origin holds.
+      const claimBranch = `implementer/${live.number}-impl-${live.number}`;
+      check(`the report's branch is ${claimBranch} (report: ${report.branch})`, report.branch === claimBranch);
       const { view: pr, numbers } = prViewClosing(report.pr, "state,closingIssuesReferences,url,headRefName");
       check(`PR #${report.pr} reads OPEN`, pr.state === "OPEN");
       check(`PR #${report.pr} closes #${live.number}`, numbers.includes(live.number));
@@ -2956,12 +2964,15 @@ async function runSettleFromReport() {
         const held = claimedElsewhere(numbers, [live.number], issueLabels);
         check(`PR #${report.pr} closes no ticket another claim holds (in-progress: ${held.length === 0 ? "none" : held.map((n) => `#${n}`).join(", ")})`, held.length === 0);
       }
-      // The claim's branch comes from the ticket: the Pull claims with member
-      // impl-N, so its branch is implementer/N-impl-N, and close-out releases
-      // impl-N. Never from the settling member's name or its report: a
-      // replacement impl-N-x holds the same claim as impl-N.
-      const claimBranch = `implementer/${live.number}-impl-${live.number}`;
       check(`PR #${report.pr}'s head is ${claimBranch} (GitHub: ${pr.headRefName})`, pr.headRefName === claimBranch);
+      // git is read last, and only once every check above has passed: a
+      // branch origin lacks, or a PR that is closed with its branch gone, is
+      // a refusal of the claim, never a verify-sha.sh that could not look.
+      if (checks.every((c) => c.ok)) {
+        const sha = verifyShaOf(claimBranch, report.head);
+        check(`verify-sha.sh ${claimBranch} ${report.head} exits 0`, sha.status === 0);
+        recipeGate(report.head);
+      }
     } else if (report.outcome === "blocked") {
       outcome = "blocked";
     } else {
