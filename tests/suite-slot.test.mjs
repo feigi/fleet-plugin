@@ -14,6 +14,7 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
 import { slotHome, holdSlots, deadPid, SUITE_SLOT } from "./support/suite-slot-home.mjs";
 
@@ -53,6 +54,20 @@ const waitMs = (stderr) => Number(/^SUITE_SLOT_WAIT_MS=(\d+)$/m.exec(stderr)?.[1
 
 // What a full run that found every slot held prints once, before it sleeps.
 const WAITING = /^suite-slot: waiting up to \d+s for a slot$/m;
+
+// `NODE_OPTIONS` that preload a clock into a wrapper child: its first
+// `Date.now()` — the wrapper's `started` — is real, and every later one reads
+// `offsetMs` ahead. The wait loop's first reading is then always past `started`,
+// so the time left is below the cap however fast the first pass over the slots
+// ran, and a waiting line that printed the time left would not read as the cap.
+// An offset of a whole second keeps that true when the time left is rounded to
+// whole seconds: a time left of at most the cap less a second floors, rounds
+// and ceils to below the cap.
+function lateClock(dir, offsetMs) {
+  const file = join(dir, "late-clock.mjs");
+  writeFileSync(file, `const real = Date.now.bind(Date);\nlet calls = 0;\nDate.now = () => (calls++ === 0 ? real() : real() + ${offsetMs});\n`);
+  return `--import ${pathToFileURL(file).href}`;
+}
 
 test("a full run takes one slot stamped with the wrapper's pid, prints its wait, and releases it", () => {
   const host = slotHome();
@@ -139,17 +154,18 @@ test("a wait that outlasts the cap exits 75 naming the wait, having launched not
   assert.doesNotMatch(r.stderr, /by hand/, "a live holder is named as a wedge to remove");
 });
 
-test("a wait that goes round its loop more than once prints its waiting line once, before it gives up", () => {
+test("a wait that goes round its loop more than once prints its waiting line once, naming the cap, before it gives up", () => {
   const host = slotHome();
   const mark = join(tempDir("slot-once-"), "ran");
   holdSlots(host, 2);
-  // 3 s is more than one 2 s cycle: the wrapper wakes, finds the slots still
-  // held and sleeps again before the cap expires.
-  const r = run(host, 'touch "$MARK"', [], { FLEET_SUITE_WAIT_S: "3", MARK: mark });
+  // 4 s is more than one 2 s cycle even with the clock a second ahead: the
+  // wrapper wakes, finds the slots still held and sleeps again before the cap
+  // expires.
+  const r = run(host, 'touch "$MARK"', [], { FLEET_SUITE_WAIT_S: "4", MARK: mark, NODE_OPTIONS: lateClock(tempDir("slot-clock-"), 1000) });
   assert.equal(r.status, 75, r.stdout + r.stderr);
   const waiting = r.stderr.match(new RegExp(WAITING.source, "gm")) ?? [];
-  assert.deepEqual(waiting, ["suite-slot: waiting up to 3s for a slot"], `the waiting line does not print exactly once, naming the cap: ${r.stderr}`);
-  const gaveUp = r.stderr.search(/^suite-slot: no slot after 3s$/m);
+  assert.deepEqual(waiting, ["suite-slot: waiting up to 4s for a slot"], `the waiting line does not print exactly once, naming the cap: ${r.stderr}`);
+  const gaveUp = r.stderr.search(/^suite-slot: no slot after 4s$/m);
   assert.ok(gaveUp >= 0, r.stderr);
   assert.ok(r.stderr.search(WAITING) < gaveUp, `the waiting line does not precede the give-up line: ${r.stderr}`);
   assert.equal(existsSync(mark), false, "the entrypoint ran without a slot");
