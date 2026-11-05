@@ -474,10 +474,13 @@ export function gateVerdictWriter(word) {
  * Why `ledger.mjs row` must not write `line` over `oldLine` (null for a new
  * row), or null when it may: the row's Gate verdicts, in row order, must
  * equal the rewrite's. That refuses adding, changing, dropping or reordering
- * one, and a whole-row wipe of a row that holds one. A verdict-shaped word
- * no grammar parses is held to the one-way half: adding one is refused,
- * dropping one is allowed, so a runless `reviewed=` and a legacy head-named
- * verdict can still be cleaned off a row.
+ * one, and a whole-row wipe of a row that holds one. A row holding a Gate
+ * verdict keeps its PR, as rowNums() reads it: a rewrite that carries every
+ * verdict but maps the row to another PR moves them off their own PR's
+ * stream, so it is refused too. A verdict-shaped word no grammar parses is
+ * held to the one-way half: adding one is refused, dropping one is allowed,
+ * so a runless `reviewed=` and a legacy head-named verdict can still be
+ * cleaned off a row.
  */
 export function gateVerdictRefusal(oldLine, line) {
   const words = (text) => (text === null ? [] : text.split(/\s+/).filter(Boolean));
@@ -488,7 +491,13 @@ export function gateVerdictRefusal(oldLine, line) {
   if (badWord !== undefined) {
     return `adds '${badWord}', a word shaped like a Gate verdict that no grammar parses — ${carried}; ${gateVerdictWriter(badWord)} writes the verdict`;
   }
-  if (before.length === after.length && before.every((w, i) => w === after[i])) return null;
+  if (before.length === after.length && before.every((w, i) => w === after[i])) {
+    if (before.length === 0) return null;
+    const [from, to] = [rowNums(oldLine).pr, rowNums(line).pr];
+    if (from === to) return null;
+    const name = (pr) => (pr === null ? "no PR" : `PR #${pr}`);
+    return `moves its Gate verdicts from ${name(from)} to ${name(to)} — ${carried}, on the PR it maps to`;
+  }
   const gained = added(before, after)[0];
   if (gained !== undefined) {
     return `adds or changes Gate verdict '${gained}' — ${carried}; ${gateVerdictWriter(gained)} writes it`;

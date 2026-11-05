@@ -223,12 +223,12 @@ const COVERED_MJS = {
   // touched lines come from, and `rev-parse --show-toplevel` (#2342). An
   // ambient GIT_DIR would answer each of them for another repository and
   // judge the record against that repository's diff. Measured in
-  // dispositions-check.test.mjs, "an ambient GIT_DIR naming another
+  // ledger-dispositions.test.mjs, "an ambient GIT_DIR naming another
   // repository does not change the answer". A second
   // `gitEnv(` call scrubs the `gh issue view` child that reads back where each
   // deferral was filed: gh resolves its repository from the cwd's git
   // remotes, so an ambient GIT_DIR would read another repository's tracker.
-  // Measured in dispositions-check.test.mjs, "gh is run from the repository
+  // Measured in ledger-dispositions.test.mjs, "gh is run from the repository
   // with no ambient GIT_DIR".
   "dispositions-check.mjs": 2,
   // ONE scrubbed env, built once and handed to every child — the `git(args,

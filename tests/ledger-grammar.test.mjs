@@ -518,7 +518,7 @@ test("each Gate verdict names its writer: the verb for a verdict and an answer, 
   assert.match(gateVerdictWriter("reviewed=7685c46:3/1/19:run-B7CP3bIU"), /fleet-event\.mjs review-result <pr> <path>/);
 });
 
-test("gateVerdictRefusal: the Gate verdicts of the row, in order, must equal the rewrite's; a malformed one may be dropped, never added", () => {
+test("gateVerdictRefusal: the Gate verdicts of the row, in order, must equal the rewrite's, on the row's own PR; a malformed one may be dropped, never added", () => {
   const [a, b] = VERDICT_WORDS;
   const rev = "reviewed=7685c46:3/1/19:run-B7CP3bIU";
   const row = `#1 impl-1=PR#2 · ${rev} · ${a} · ${b} · ci=1:1:success`;
@@ -532,6 +532,8 @@ test("gateVerdictRefusal: the Gate verdicts of the row, in order, must equal the
   assert.equal(gateVerdictRefusal(legacy, `#5 impl-5=PR#5 · ${rev}`), null);
   assert.equal(gateVerdictRefusal(legacy, legacy), null);
   assert.match(gateVerdictRefusal(row, `${row} · dispositions-ok=x`), /adds 'dispositions-ok=x'/);
+  // A malformed `reviewed=` is refused too; through `row`, addedReviewToken() refuses it first.
+  assert.match(gateVerdictRefusal(row, `${row} · reviewed=zzz`), /adds 'reviewed=zzz', a word shaped like a Gate verdict/);
   // What must be REFUSED, each naming the token.
   assert.match(gateVerdictRefusal(row, `${row} · ${VERDICT_WORDS[2]}`), /adds or changes Gate verdict 'dispositions-escalate=fix-pr-3724-b:run-B7CP3bIU'/);
   assert.match(gateVerdictRefusal(row, row.replace(` · ${a}`, "")), /drops Gate verdict 'dispositions-ok=fix-pr-3724-z:run-B7CP3bIU'/);
@@ -539,6 +541,13 @@ test("gateVerdictRefusal: the Gate verdicts of the row, in order, must equal the
   assert.match(gateVerdictRefusal(row, `#1 impl-1=PR#2 · ${b} · ${a} · ${rev}`), /reorders its Gate verdicts/);
   assert.match(gateVerdictRefusal(row, "#1 2"), /drops Gate verdict/);
   assert.match(gateVerdictRefusal(null, `#1 ${a}`), /adds or changes Gate verdict/);
+  // A row holding a verdict keeps its PR: remapping its impl outcome, or a
+  // plain row's PR# mention, moves the verdicts to another PR's stream.
+  assert.match(gateVerdictRefusal(row, row.replace("impl-1=PR#2", "impl-1=PR#3")), /moves its Gate verdicts from PR #2 to PR #3/);
+  assert.match(gateVerdictRefusal(`#50 PR#40 note · ${rev}`, `#50 PR#41 note · ${rev}`), /moves its Gate verdicts from PR #40 to PR #41/);
+  // A PR# in an impl row's prose never decides its PR, and a row with no verdict may be remapped.
+  assert.equal(gateVerdictRefusal(row, `${row} · note → PR#9`), null);
+  assert.equal(gateVerdictRefusal("#1 impl-1=PR#2 · class=routine", "#1 impl-1=PR#3 · class=routine"), null);
 });
 
 test("token refuses every dispositions verdict and Escalation answer, parseable or not, in any case of the prefix, naming the verb, and writes nothing", (t) => {
@@ -556,6 +565,9 @@ test("token refuses every dispositions verdict and Escalation answer, parseable 
     assert.equal(r.status, 2, `${tok}: got exit ${r.status}\n${r.stderr}`);
     assert.match(r.stderr, /ledger\.mjs dispositions /, tok);
     assert.match(r.stderr, /running that again is how a verdict is restored/, tok);
+    // An answer is told it is taken only against an escalate; a verdict, that it is derived.
+    const answer = tok.startsWith("escalation-answer=");
+    assert.match(r.stderr, answer ? /is an Escalation answer — .*only against an escalate/ : /is a dispositions verdict — .*derives it from the disposition record/, tok);
     assert.equal(r.stdout, "");
     assert.equal(readFileSync(file, "utf8"), body, `${tok}: a refusal writes nothing`);
   }

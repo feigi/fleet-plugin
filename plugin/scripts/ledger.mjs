@@ -40,15 +40,17 @@
 // `## Retired`, where `dispatch` and that numbering still read it.
 //
 // Writer policy: a Gate verdict — a dispositions verdict, an Escalation
-// answer, a `reviewed=` — is written only by the verb that derives it from
-// its evidence, whoever calls it: `dispositions` for the first two, `review`
-// for the third. `token` refuses a dispositions verdict and an answer, and
-// `row` carries every Gate verdict exactly as the row holds it, so no other
-// verb adds, changes or drops one. `filed` appends filings, and all writes
-// are serialized by `<file>.lock`; the other tokens of a row are freeform to
-// the writers that have them (`row`/`token`/`settle`/`dispatch`/`drain`/
-// `ruled`/`rotate`). Every write subcommand except `rotate` — which moves the
-// file whole and never loads it, see runRotate() — rewrites the WHOLE file
+// answer, a `reviewed=` — is written only by its own verb, whoever calls it:
+// `dispositions` for the first two, which it derives from their evidence,
+// and `review` for the third, which still takes its `reviewed=` as an
+// argument, not yet deriving it from the review's result file. `token`
+// refuses all three, and `row` carries every Gate verdict exactly as the row
+// holds it, so no other verb adds, changes or drops one. `filed` appends
+// filings, and all writes are serialized by `<file>.lock`; the other tokens
+// of a row are freeform to the writers that have them (`row`/`token`/
+// `settle`/`dispatch`/`drain`/`ruled`/`rotate`). Every write subcommand
+// except `rotate` — which moves the file whole and never loads it, see
+// runRotate() — rewrites the WHOLE file
 // from what it loaded,
 // so two unlocked writers are last-writer-wins — measured, 8 concurrent
 // `filed` kept 2-5 of 8 rows — and the lock is what lets a second kind of
@@ -3170,8 +3172,12 @@ function runReview() {
 // carried, never dropped. The verdict is judged against the review that was
 // the latest when it was read; one written for a review that has since been
 // superseded does nothing, since the gate and the tick read only verdicts
-// naming the latest run. A verdict the row already carries is not written
-// again, and its findings are printed all the same. The write passes
+// naming the latest run. A run recording answers is the exception: under the
+// lock it asks again that the escalate they answer is still the PR's current
+// verdict on that same review and that no fix-applier is live, and exits 2
+// with nothing written when either has changed, so two answer runs that read
+// one escalate cannot both write. A verdict the row already carries is not
+// written again, and its findings are printed all the same. The write passes
 // rowWriteRefusal() like any other. Its payload, stderr lines and exit status
 // are printVerdict()'s: 0 ok, 1 mismatch, escalate or unchecked, 2 nothing
 // judged and nothing written.
@@ -3195,7 +3201,7 @@ async function runDispositions() {
     flags.set(name, value);
   }
   if (member === null || !flags.has("scratch")) die(usage);
-  const { judgeMember, answerMap, addressList, printVerdict, withVerdict, CheckRefusal } = await import("./dispositions-check.mjs");
+  const { judgeMember, latestReview, answerMap, printVerdict, withVerdict, CheckRefusal } = await import("./dispositions-check.mjs");
   const refusing = (fn) => {
     try {
       return fn();
@@ -3204,7 +3210,7 @@ async function runDispositions() {
       throw e;
     }
   };
-  const listed = refusing(() => answerMap(addressList("uphold", flags.get("uphold") ?? null), addressList("send-back", flags.get("send-back") ?? null)));
+  const listed = refusing(() => answerMap(flags.get("uphold") ?? null, flags.get("send-back") ?? null));
   const result = refusing(() => judgeMember({
     name: member, scratch: flags.get("scratch"), repo: flags.get("repo") ?? process.cwd(), ledger: data, listed,
   }));
@@ -3212,6 +3218,22 @@ async function runDispositions() {
   await acquireLock();
   data = load();
   const { pr, run, token } = result;
+  // Answers clear the escalate they answer, so what recording them needs is
+  // asked again on the ledger as it stands under the lock: two answer runs
+  // that both read the same escalate would otherwise both write.
+  if (result.recorded.length > 0) {
+    let why = null;
+    try {
+      const latest = latestReview(data, pr, result.member, true);
+      if (latest.run !== run) why = `PR #${pr}'s latest review is ${latest.run} now, not ${run}`;
+    } catch (e) {
+      if (!(e instanceof CheckRefusal)) throw e;
+      why = e.message;
+    }
+    if (why !== null) {
+      die(`dispositions: the ledger changed while ${result.member}'s record was judged — ${why}; nothing written, run \`ledger.mjs dispositions ${result.member} --scratch ${flags.get("scratch")}\` again to judge it as it stands`);
+    }
+  }
   const i = data.rows.findIndex((r) => rowNums(r).pr === pr && memberTokens(r).some((t) => t.name === result.member));
   if (i === -1) {
     die(`dispositions: ${result.member} is on no row of PR #${pr} now — the ledger changed while its record was judged; nothing written, run \`ledger.mjs dispositions ${result.member} --scratch ${flags.get("scratch")}\` again`);

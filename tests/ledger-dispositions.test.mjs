@@ -10,223 +10,30 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync, execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, symlinkSync, existsSync, realpathSync, chmodSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
+import { rmSync, writeFileSync, readFileSync, mkdirSync, symlinkSync, existsSync, realpathSync, chmodSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { deriveRun } from "../plugin/scripts/fleet-tick.mjs";
+import { recordTitle } from "../plugin/scripts/dispositions-check.mjs";
 import {
-  checkDispositions, formatViolation, recordTitle,
-} from "../plugin/scripts/dispositions-check.mjs";
-import { rendering } from "./support/rendered-brief.mjs";
-import { ref, prUrl } from "./support/queue-gh.mjs";
-import { seedLabelMap } from "./support/label-map-seed.mjs";
-import { LABEL_ROLES } from "../plugin/scripts/label-map.mjs";
+  LEDGER, REMAP, openIssue, cleanEnv, git, lines, fixture as sharedFixture, mismatch, okVerdict, core, escalated, deferOutside, withSeverity,
+} from "./support/dispositions-fixture.mjs";
 
-const LEDGER = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
-
-// The `gh` stub: `issue view <n> --json labels,state,title` (or `--json
-// title,labels`)
-// answered from FAKE_GH_ISSUES, an issue it does not hold answered the way gh
-// answers one that does not exist. `pr view <n> --json
-// closingIssuesReferences,url,headRefName` answered from FAKE_GH_PRS, a PR it
-// does not hold with no references, in queue-gh.mjs's own repository, headed
-// by a branch that is no claim's; `pr view <n> --json labels` answered from
-// FAKE_GH_PRS too, a PR it does not hold carrying `patch`.
-// FAKE_GH_DOWN answers every call as an unreachable API. FAKE_GH_LOG, when set,
-// gets one line per call: its argv, cwd and GIT_DIR.
-const GH_STUB = `#!${process.execPath}
-const fs = require("node:fs");
-const argv = process.argv.slice(2);
-const { FAKE_GH_ISSUES, FAKE_GH_DOWN, FAKE_GH_LOG, FAKE_GH_PRS } = process.env;
-if (FAKE_GH_LOG) fs.appendFileSync(FAKE_GH_LOG, JSON.stringify({ argv, cwd: process.cwd(), GIT_DIR: process.env.GIT_DIR ?? null }) + "\\n");
-if (FAKE_GH_DOWN) { process.stderr.write("error connecting to api.github.com\\n"); process.exit(1); }
-const [cmd, sub, n, flag, fields] = argv;
-if (argv.length === 5 && cmd === "pr" && sub === "view" && flag === "--json" && fields === "closingIssuesReferences,url,headRefName") {
-  const prs = JSON.parse(fs.readFileSync(FAKE_GH_PRS, "utf8"));
-  process.stdout.write(JSON.stringify({ closingIssuesReferences: prs[n]?.closingIssuesReferences ?? [], url: ${JSON.stringify(prUrl(""))} + n, headRefName: "feature/topic" }));
-  process.exit(0);
-}
-if (argv.length === 5 && cmd === "pr" && sub === "view" && flag === "--json" && fields === "labels") {
-  const prs = JSON.parse(fs.readFileSync(FAKE_GH_PRS, "utf8"));
-  process.stdout.write(JSON.stringify({ labels: (prs[n]?.labels ?? ["patch"]).map((name) => ({ name })) }));
-  process.exit(0);
-}
-// FAKE_GH_HOOK, a JSON argv, is run on each issue view before it is answered: another writer acting while the tracker is read.
-if (process.env.FAKE_GH_HOOK && cmd === "issue") {
-  const [bin, ...args] = JSON.parse(process.env.FAKE_GH_HOOK);
-  require("node:child_process").execFileSync(bin, args, { stdio: ["ignore", "ignore", "inherit"] });
-}
-if (argv.length !== 5 || cmd !== "issue" || sub !== "view" || flag !== "--json" || (fields !== "labels,state,title" && fields !== "title,labels")) {
-  process.stderr.write("gh stub: unexpected call " + JSON.stringify(argv) + "\\n");
-  process.exit(2);
-}
-const issue = JSON.parse(fs.readFileSync(FAKE_GH_ISSUES, "utf8"))[n];
-if (!issue) {
-  process.stderr.write("GraphQL: Could not resolve to an issue or pull request with the number of " + n + ". (repository.issue)\\n");
-  process.exit(1);
-}
-process.stdout.write(JSON.stringify({ labels: issue.labels.map((name) => ({ name })), state: issue.state, title: issue.title }));
-`;
-const openIssue = (label) => ({ state: "OPEN", title: "a deferred finding", labels: [label] });
 const bandRecord = (pr = 40) => ({ state: "CLOSED", title: recordTitle(pr), labels: ["wontfix"] });
-// The identity Label map as the pure core takes it: every role its own name.
-const IDENTITY = Object.fromEntries(LABEL_ROLES.map((role) => [role, role]));
-// The three roles this check reads, remapped: no mapped string is a role name.
-const REMAP = { "needs-triage": "triage", "ready-for-agent": "agent-ready", wontfix: "wont-fix" };
 
-const cleanEnv = (extra = {}) => {
-  const env = { ...process.env, ...extra };
-  delete env.GIT_DIR;
-  delete env.GIT_WORK_TREE;
-  return env;
-};
-
-function git(dir, ...args) {
-  return execFileSync("git", ["-C", dir, ...args], {
-    encoding: "utf8",
-    env: cleanEnv({ GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" }),
-  }).trim();
-}
-
-const lines = (n, tag) => Array.from({ length: n }, (_, i) => `${tag} ${i + 1}`).join("\n") + "\n";
-
-// A repository whose `origin/main` holds src/a.js (20 lines) and src/b.js,
-// and whose PR head rewrites src/a.js lines 5-6 and appends line 21. Lines
-// 1-4 and 7-20 are untouched; src/b.js is not in the diff at all.
-// `labelMap` is seedLabelMap's overrides for the repository's `.fleet/labels.json`;
-// null seeds none.
-function fixture(t, { labelMap = {} } = {}) {
-  // `dir` sits in `root` as a run's `.fleet/` sits in its main checkout, so
-  // the ledger in `dir` reads `root`'s tier-outcomes file, which holds PR 40's
-  // ruling: every finisher dispatched here turns on its dispositions verdict.
-  const root = mkdtempSync(join(tmpdir(), "dispositions-check-"));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  const dir = join(root, "run");
-  mkdirSync(dir);
-  git(dir, "init", "-q");
-  // The ledger in `dir` is dispatched against: a finisher dispatch reads this repository's Label map.
-  if (labelMap !== null) seedLabelMap(dir);
-  mkdirSync(join(root, "docs", "metrics"), { recursive: true });
-  writeFileSync(join(root, "docs", "metrics", "tier-outcomes.tsv"), "2026-10-21\t40\t10\troutine\tslow-high\tyes\tno\truled\n");
-  const repo = join(dir, "repo");
-  mkdirSync(join(repo, "src"), { recursive: true });
-  git(repo, "init", "-q", "-b", "main");
-  writeFileSync(join(repo, "src", "a.js"), lines(20, "a"));
-  writeFileSync(join(repo, "src", "b.js"), lines(10, "b"));
-  git(repo, "add", "-A");
-  git(repo, "commit", "-qm", "base");
-  git(repo, "update-ref", "refs/remotes/origin/main", "HEAD");
-  const a = lines(20, "a").split("\n");
-  a[4] = "a 5 changed";
-  a[5] = "a 6 changed";
-  a.splice(20, 0, "a 21 added");
-  writeFileSync(join(repo, "src", "a.js"), a.join("\n"));
-  git(repo, "commit", "-qam", "pr");
-  const head = git(repo, "rev-parse", "HEAD");
-  // After the commits: the cache is no part of the PR's diff or its base.
-  if (labelMap !== null) seedLabelMap(repo, labelMap);
-
-  const scratch = join(dir, "scratch");
-  mkdirSync(scratch);
-  const ledger = join(dir, "ledger.md");
-  const bin = join(dir, "bin");
-  const issuesFile = join(dir, "issues.json");
-  const prsFile = join(dir, "prs.json");
-  // The `gh` stub first on PATH, and the tracker files it answers from.
-  const stubEnv = (base) => ({ ...base, PATH: `${bin}:${base.PATH ?? ""}`, FAKE_GH_ISSUES: issuesFile, FAKE_GH_PRS: prsFile });
-  const ledgerCli = rendering(dir, (...args) => spawnSync(process.execPath, [LEDGER, "--file", ledger, ...args], { encoding: "utf8", env: stubEnv(cleanEnv()) }));
-  const okLedger = (...args) => {
-    const r = ledgerCli(...args);
-    assert.equal(r.status, 0, `ledger ${args.join(" ")}: exit ${r.status}\n${r.stderr}`);
-    return JSON.parse(r.stdout);
-  };
-  // The review's own run root, as review-core.mjs's snapshot step makes it
-  // and the latest `reviewed=` names it.
-  const run = "run-Rv40Aa01";
-  okLedger("row", "10", "impl-10=PR#40 → PR#40");
-  okLedger("review", "40", "review=member:review-pr-40", `reviewed=${head}:2/1/1:${run}`);
-  okLedger("dispatch", "40", "fix-pr-40");
-  okLedger("settle", "fix-pr-40", `applied:${head.slice(0, 7)}`);
-
-  const finding = (file, line, severity = "important") => ({ severity, file, line, claim: "c", evidence: "e" });
-  const review = {
-    pr: 40, head, snapshot: join(dir, "snap"),
-    counts: { survived: 2, refuted: 1, unverified: 1, crashed: 0 },
-    // survived[0] on a touched line; survived[1] on an untouched one.
-    survived: [finding("src/a.js", 5), finding("src/a.js", 12)],
-    refuted: [finding("src/b.js", 3)],
-    unverified: [finding("src/a.js", 15, "suggestion")],
-  };
-  const reviewPath = join(scratch, "pr40", run, "review.json");
-  mkdirSync(join(scratch, "pr40", run), { recursive: true });
-  const writeReview = (r = review) => writeFileSync(reviewPath, JSON.stringify(r));
-  writeReview();
-  // The review above is PR 40's first review, so its record carries a Charge
-  // on every standing entry: a survived or refuted one is charged none, for a
-  // reason, unless a case says otherwise. An unverified one carries none.
-  const CHARGED = { charge: "none", chargeReason: "defect-outside-acceptance" };
-  const entry = (bucket, index, more = {}) => ({
-    bucket, index, scope: "in", claimKind: "behavior", disposition: "apply", ...(bucket === "unverified" ? {} : CHARGED), ...more,
-  });
-  // Every finding answered, every in-scope survivor applied, the out-of-scope
-  // suggestion checked by its refuter, which let it survive, and filed open
-  // `needs-triage` (row 6b): an ok record.
-  const baseEntries = () => [entry("survived", 0), entry("survived", 1),
-    entry("unverified", 0, { scope: "out", disposition: "defer", issue: 77, verdictPath: writeVerdict({ refuted: false, reason: "the claim held" }, "0") })];
-  // One record per fix-applier, named by the member that wrote it.
-  const recordPath = (member = "fix-pr-40") => join(scratch, `dispositions-${member}.json`);
-  const writeRecord = (entries, recHead = head, member = "fix-pr-40", recRun = run) =>
-    writeFileSync(recordPath(member), JSON.stringify({ head: recHead, run: recRun, entries }));
-
-  // The tracker the `gh` stub answers from, issue number → {state, title, labels}.
-  mkdirSync(bin);
-  writeFileSync(join(bin, "gh"), GH_STUB, { mode: 0o755 });
-  // 77 is the base record's row-6b home; 81 the row-1 home a deferred survivor
-  // in these cases is filed to.
-  const issues = { 10: openIssue("ready-for-agent"), 77: openIssue("needs-triage"), 81: openIssue("ready-for-agent") };
-  // PR 40 closes its ticket 10 by default; a test that needs otherwise rewrites this file.
-  writeFileSync(prsFile, JSON.stringify({ 40: { closingIssuesReferences: [ref(10)] } }));
-  const setIssues = (more) => {
-    Object.assign(issues, more);
-    writeFileSync(issuesFile, JSON.stringify(issues));
-  };
-  setIssues({});
-  // Any env, with the stub first on PATH.
-  const env = (base = cleanEnv(), extra = {}) => ({ ...stubEnv(base), ...extra });
-  // A refuter verdict under the fix-applier's run root, as step 2 writes it;
-  // `value` an object written as JSON, or a string written as it stands.
-  const writeVerdict = (value, finding = "1", runRoot = join(scratch, "pr40", "fix-Ab12Cd34")) => {
-    const path = join(runRoot, finding, "verdict.json");
-    mkdirSync(join(runRoot, finding), { recursive: true });
-    writeFileSync(path, typeof value === "string" ? value : JSON.stringify(value));
-    return path;
-  };
-
-  // The verb itself: `ledger.mjs dispositions <member> --scratch … --repo …`
-  // against the fixture's ledger, `extra` the flags after them.
+// The shared fixture, plus the verb itself — `ledger.mjs dispositions
+// <member> --scratch … --repo …` against the fixture's ledger, `extra` the
+// flags after them — and PR 40's row as the ledger holds it.
+function fixture(t, opts) {
+  const f = sharedFixture(t, opts);
   const check = (member = "fix-pr-40", base = cleanEnv(), extra = []) => {
-    const r = spawnSync(process.execPath, [LEDGER, "--file", ledger, "dispositions", member, "--scratch", scratch, "--repo", repo, ...extra],
-      { encoding: "utf8", env: env(base), cwd: dir });
+    const r = spawnSync(process.execPath, [LEDGER, "--file", f.ledger, "dispositions", member, "--scratch", f.scratch, "--repo", f.repo, ...extra],
+      { encoding: "utf8", env: f.env(base), cwd: f.dir });
     return { ...r, json: r.status === 0 || r.status === 1 ? JSON.parse(r.stdout) : null };
   };
-  const row = () => okLedger("read").rows.find((r) => r.startsWith("#10 "));
-  return {
-    dir, repo, head, run, scratch, review, reviewPath, writeReview, entry, baseEntries, recordPath, writeRecord, check, row, ledgerCli, okLedger,
-    env, setIssues, writeVerdict,
-  };
+  const row = () => f.okLedger("read").rows.find((r) => r.startsWith("#10 "));
+  return { ...f, check, row };
 }
-
-const mismatch = (r, re) => {
-  assert.equal(r.status, 1, `expected a mismatch, got exit ${r.status}\n${r.stderr}`);
-  assert.equal(r.json.verdict, "mismatch");
-  if (re) assert.match(r.stderr, re);
-};
-const okVerdict = (r) => {
-  assert.equal(r.status, 0, `expected ok, got exit ${r.status}\n${r.stderr}`);
-  assert.equal(r.json.verdict, "ok");
-};
 
 test("an in-scope survivor deferred with no reason is a mismatch, and the finisher is refused with nothing written", (t) => {
   const f = fixture(t);
@@ -623,40 +430,6 @@ test("nothing is judged or written for a review finding that is no object, an un
   assert.notEqual(f.row(), before);
 });
 
-// The pure core, on one review: survived[0] on touched src/a.js:5, one refuted finding.
-const H40 = "abc1234abc1234abc1234abc1234abc1234abcde";
-// `issues` the tracker by number — an issue it does not hold is an open
-// `ready-for-agent` one — and `verdicts` the refuter verdicts by path.
-const coreRun = (entries, {
-  head = H40, reviewHead = H40, survived = [{ file: "src/a.js", line: 5 }], unverified = [], record, diffFiles = ["src/a.js"],
-  issues = {}, verdicts = {}, charges = false, roles = IDENTITY, answers = new Map(),
-} = {}) => checkDispositions({
-  review: { head: reviewHead, survived, unverified, refuted: [{ file: "src/b.js", line: 1 }] },
-  record: record === undefined ? { head, entries } : record,
-  touched: new Map([["src/a.js", new Set([5])]]),
-  diffFiles,
-  roots: ["/snap"],
-  filing: {
-    pr: 40, roles,
-    issue: (n) => issues[n] ?? { state: "OPEN", title: "a deferred finding", labels: ["ready-for-agent"] },
-    verdict: (p) => verdicts[p] ?? { problem: "names no file that exists" },
-  },
-  charges, answers,
-});
-const core = (entries, opts) => coreRun(entries, opts).violations.map(formatViolation);
-const applied = { bucket: "survived", index: 0, scope: "in", claimKind: "behavior", disposition: "apply" };
-
-const escalated = (r) => {
-  assert.equal(r.status, 1, `expected an escalation, got exit ${r.status}\n${r.stderr}`);
-  assert.equal(r.json.verdict, "escalate");
-};
-// survived[0], on touched line 5, deferred remedy-outside-diff.
-const deferOutside = (f, remedyFiles, recHead) => {
-  const entries = f.baseEntries();
-  entries[0] = f.entry("survived", 0, { disposition: "defer", reason: "remedy-outside-diff", issue: 81, remedyFiles });
-  f.writeRecord(entries, recHead);
-};
-const withSeverity = (f, severity) => f.writeReview({ ...f.review, survived: [{ ...f.review.survived[0], severity }, f.review.survived[1]] });
 // The same review row with no fix-applier landed on it is fix-due: the control
 // that shows fixDueFor can see a PR become fix-due at all.
 const dueUntilFixed = (f) => deriveRun({ rows: [`#10 impl-10=PR#40 → PR#40 · reviewed=${f.head}:2/1/1:${f.run}`], dispatched: [], drain: null },
@@ -1343,6 +1116,40 @@ test("a row that stopped carrying the member while its record was judged refuses
   assert.match(r.stderr, /fix-pr-40 is on no row of PR #40 now .* run `ledger\.mjs dispositions fix-pr-40 --scratch .*` again/);
   assert.equal(r.stdout, "");
   assert.ok(!readFileSync(p, "utf8").includes("dispositions-"), "nothing was written");
+});
+
+// Two answer runs that read the same escalate: the hook runs the first, a
+// --send-back, once, while the second, an --uphold, reads the tracker. The
+// second takes the lock after the first wrote, so the escalate it answers is
+// gone, and it must not lay an upheld answer and an ok over the sent-back one.
+test("an answer run whose escalate another answer run cleared while the tracker was read writes nothing and exits 2, naming the verb to run again", (t) => {
+  const f = fixture(t);
+  deferOutside(f, ["src/b.js"]);
+  escalated(f.check());
+  const p = join(f.dir, "ledger.md");
+  const [marker, firstOut, hookScript] = ["first-ran", "first.json", "send-back-first.mjs"].map((n) => join(f.dir, n));
+  const firstArgv = [LEDGER, "--file", p, "dispositions", "fix-pr-40", "--scratch", f.scratch, "--repo", f.repo, "--send-back", "survived[0]"];
+  writeFileSync(hookScript, `import { existsSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+if (!existsSync(${JSON.stringify(marker)})) {
+  writeFileSync(${JSON.stringify(marker)}, "");
+  const env = { ...process.env };
+  delete env.FAKE_GH_HOOK;
+  const r = spawnSync(process.execPath, ${JSON.stringify(firstArgv)}, { encoding: "utf8", env, cwd: ${JSON.stringify(f.dir)} });
+  writeFileSync(${JSON.stringify(firstOut)}, JSON.stringify({ status: r.status, stderr: r.stderr }));
+}
+`);
+  const r = f.check("fix-pr-40", cleanEnv({ FAKE_GH_HOOK: JSON.stringify([process.execPath, hookScript]) }), ["--uphold", "survived[0]"]);
+  const first = JSON.parse(readFileSync(firstOut, "utf8"));
+  assert.equal(first.status, 1, `control: the first answer run wrote its mismatch\n${first.stderr}`);
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /the ledger changed while fix-pr-40's record was judged — PR #40's current dispositions verdict on review run-Rv40Aa01 is mismatch from fix-pr-40, not an escalate .*; nothing written, run `ledger\.mjs dispositions fix-pr-40 --scratch .*` again/);
+  assert.equal(r.stdout, "");
+  const row = f.row();
+  assert.ok(row.includes(`escalation-answer=${f.run}:survived[0]:sent-back`), row);
+  assert.ok(row.includes(`dispositions-mismatch=fix-pr-40:${f.run}`), row);
+  assert.doesNotMatch(row, /:upheld|dispositions-ok=/);
+  assert.equal(f.ledgerCli("dispatch", "40", "finisher-pr-40").status, 2, "the finisher stays refused");
 });
 
 test("an in-scope suggestion with no verdictPath, a missing file, one outside the run root, or one failing the schema is a mismatch", (t) => {

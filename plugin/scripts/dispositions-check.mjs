@@ -737,7 +737,7 @@ const refuse = (message) => {
 };
 
 /** The parsed fix-applier `name` names, or a CheckRefusal. */
-export function parseFixApplier(name) {
+function parseFixApplier(name) {
   const member = parseMember(name);
   if (member === null || member.family !== "fix-pr") refuse(`'${name}' is not a fix-applier — expected fix-pr-<M>, a -b, -c … suffix allowed`);
   return member;
@@ -875,7 +875,7 @@ const ADDRESS = new RegExp(`^(${BUCKETS.join("|")})\\[(0|[1-9][0-9]*)\\]$`);
 
 /** The findings a `--uphold` or `--send-back` list `raw` names, each
  * `<bucket>[<index>]`, or null when the flag is absent. */
-export function addressList(flag, raw) {
+function addressList(flag, raw) {
   if (raw === null) return null;
   const list = raw.split(",").map((a) => a.trim());
   const bad = list.find((a) => !ADDRESS.test(a));
@@ -883,11 +883,13 @@ export function addressList(flag, raw) {
   return list;
 }
 
-/** The maintainer's answers the two lists give, a Map from a finding's
- * address to `upheld` or `sent-back`; a finding listed twice, or both ways, is
- * refused. Told before anything is read, since a list that cannot be one is a
- * usage error. */
-export function answerMap(uphold, sendBack) {
+/** The maintainer's answers the raw `--uphold` and `--send-back` lists give
+ * (null for an absent flag), a Map from a finding's address to `upheld` or
+ * `sent-back`; an address that is none, or a finding listed twice or both
+ * ways, is refused. Told before anything is read, since a list that cannot
+ * be one is a usage error. */
+export function answerMap(upholdRaw, sendBackRaw) {
+  const [uphold, sendBack] = [addressList("uphold", upholdRaw), addressList("send-back", sendBackRaw)];
   const listed = new Map();
   for (const [flag, list, answer] of [["--uphold", uphold, "upheld"], ["--send-back", sendBack, "sent-back"]]) {
     for (const a of list ?? []) {
@@ -905,11 +907,46 @@ const byAddress = (a, b) => {
 };
 
 /**
+ * PR `pr`'s latest review on `ledger` (`{rows, dispatched, drain}`), as
+ * fleet-tick.mjs's deriveRun folds it — the fold `ledger.mjs dispatch` gates
+ * the finisher by. With `answering`, it also holds what recording the
+ * maintainer's answers needs: the PR's current verdict on that review is an
+ * escalate from fix-applier `memberName`, and no fix-applier on the PR is
+ * live. `ledger.mjs dispositions` asks again under its lock, against the
+ * ledger as it stands then, so two answer runs that read the same escalate
+ * cannot both write. Throws a CheckRefusal otherwise.
+ */
+export function latestReview(ledger, pr, memberName, answering) {
+  let latest;
+  try {
+    latest = deriveRun({ rows: ledger.rows, dispatched: ledger.dispatched, drain: ledger.drain }, []).reviewed.find((r) => r.pr === pr);
+  } catch (e) {
+    if (!(e instanceof LedgerError)) throw e;
+    refuse(`${e.message} — fleet-tick.mjs refuses this ledger, so PR #${pr}'s latest review cannot be read off it`);
+  }
+  if (latest === undefined) refuse(`PR #${pr} has no reviewed= on the ledger — no review for ${memberName}'s record to answer`);
+  // Answers clear the escalate they answer and nothing else: the PR's current
+  // verdict on this review must be that escalate, and no fix-applier on the PR
+  // may be working — its landing would answer the review in its own right.
+  if (answering) {
+    const current = latest.dispositions;
+    if (current === null || current.verdict !== "escalate" || current.member !== memberName) {
+      refuse(`PR #${pr}'s current dispositions verdict on review ${latest.run} is ${current === null ? "none" : `${current.verdict} from ${current.member}`}, not an escalate from ${memberName} — escalation answers clear the escalate they answer, and nothing else`);
+    }
+    if (latest.fixLive.length > 0) {
+      refuse(`${latest.fixLive.join(", ")} still live on PR #${pr} — a fix-applier answering review ${latest.run} has not settled, so the answers wait: settle it, then record them`);
+    }
+  }
+  return latest;
+}
+
+/**
  * Fix-applier `name`'s record judged against the review it answers.
  * `ledger` is the snapshot to judge against, `{rows, dispatched, drain}` as
  * `ledger.mjs read` prints them, or null for a standalone check, which names
  * its review with `reviewPath`. `listed` is the maintainer's answers to
- * record (answerMap()), empty when this run records none. Never writes a
+ * record (answerMap()), empty when this run records none, and non-empty only
+ * with a `ledger`, the row they are recorded on. Never writes a
  * ledger: the caller does, and learns what to write from the result,
  * `{member, pr, head, verdict, token, violations, escalations, unchecked,
  * run, recorded, secondMismatch}` — `token` null with no ledger, `recorded`
@@ -926,9 +963,6 @@ export function judgeMember({ name, scratch, repo, ledger = null, reviewPath = n
   const member = parseFixApplier(name);
   const pr = member.number;
   const recording = listed.size > 0;
-  if (recording && ledger === null) {
-    refuse("--uphold and --send-back record the maintainer's answer on the ledger row, and no ledger is in use");
-  }
   // The Label map, read once, here at the I/O boundary — before the ledger or
   // the tracker is read: a home's labels are compared and worded in the
   // tracker's own spelling. No valid map is "nothing judged", never a verdict;
@@ -953,27 +987,7 @@ export function judgeMember({ name, scratch, repo, ledger = null, reviewPath = n
     if (!ledger.rows.some((r) => rowNums(r).pr === pr && memberTokens(r).some((t) => t.name === member.name))) {
       refuse(`${member.name} is on no row of PR #${pr} — \`ledger.mjs dispatch\` records a fix-applier before its record can be checked; with no controller, run dispositions-check.mjs with --no-ledger --review <path>`);
     }
-    let latest;
-    try {
-      latest = deriveRun({ rows: ledger.rows, dispatched: ledger.dispatched, drain: ledger.drain }, []).reviewed.find((r) => r.pr === pr);
-    } catch (e) {
-      if (!(e instanceof LedgerError)) throw e;
-      refuse(`${e.message} — fleet-tick.mjs refuses this ledger, so PR #${pr}'s latest review cannot be read off it`);
-    }
-    if (latest === undefined) refuse(`PR #${pr} has no reviewed= on the ledger — no review for ${member.name}'s record to answer`);
-    run = latest.run;
-    // Answers clear the escalate they answer and nothing else: the PR's current
-    // verdict on this review must be that escalate, and no fix-applier on the PR
-    // may be working — its landing would answer the review in its own right.
-    if (recording) {
-      const current = latest.dispositions;
-      if (current === null || current.verdict !== "escalate" || current.member !== member.name) {
-        refuse(`PR #${pr}'s current dispositions verdict on review ${run} is ${current === null ? "none" : `${current.verdict} from ${current.member}`}, not an escalate from ${member.name} — escalation answers clear the escalate they answer, and nothing else`);
-      }
-      if (latest.fixLive.length > 0) {
-        refuse(`${latest.fixLive.join(", ")} still live on PR #${pr} — a fix-applier answering review ${run} has not settled, so the answers wait: settle it, then record them`);
-      }
-    }
+    run = latestReview(ledger, pr, member.name, recording).run;
     // Every record judged against this review reads the answers recorded for it.
     // A token that only looks like one answers nothing, and says so.
     const tokens = prTokens(ledger.rows, pr);
