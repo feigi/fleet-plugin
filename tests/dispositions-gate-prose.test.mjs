@@ -80,7 +80,7 @@ test("the fix-applier bullet dispatches on DISPATCH fix-pr for a review counting
 test("the gate says what each refusal asks of the controller", () => {
   const s = gate();
   assert.match(s, Pin.phrase(
-    "`dispositions unchecked` — no verdict answers that review: run `dispositions-check.mjs` for the fix-applier that answered the review",
+    "`dispositions unchecked` — no verdict answers that review: run `ledger.mjs dispositions` for the fix-applier that answered the review",
   ));
   assert.match(s, Pin.phrase(
     "`dispositions mismatch` — no finisher: the tick prints `DISPATCH fix-pr PR#<M>` for it, and the next-suffix fix-applier answers it",
@@ -89,7 +89,7 @@ test("the gate says what each refusal asks of the controller", () => {
     "`dispositions escalate` — no finisher, no `fix-due` row: a finding above `suggestion` deferred `remedy-outside-diff` clears with the maintainer's answers, a second mismatch only with a new review (**Dispositions escalation**).",
   ));
   assert.match(s, Pin.phrase(
-    "it refuses too while a fix-applier on the PR is still live, verdict or not** — `fix-pr-<M>[-x] still live`: settle it, run the check for it, then dispatch again.",
+    "it refuses too while a fix-applier on the PR is still live, verdict or not** — `fix-pr-<M>[-x] still live`: settle it, run `ledger.mjs dispositions` for it, then dispatch again.",
   ));
 });
 
@@ -106,17 +106,17 @@ test("a mismatch is retried once by the next suffix, whose prompt carries the vi
   assert.match(brief, Pin.phrase(`The mismatched member's record is \`${retry["mismatched-record"]}\``));
   assert.match(brief, Pin.phrase(`each naming a bucket, an index and a rule: ${retry.violations}`));
   assert.match(s, Pin.phrase(
-    "A second failure on the same review is written as `dispositions-escalate=fix-pr-<M>-b:<run>` in place of a mismatch: the tick prints no `DISPATCH fix-pr` for it. Post the check's output with `gh pr comment <M>`. A second failure is flagged for a human. A new review of the PR counts again from none.",
+    "A second failure on the same review is written as `dispositions-escalate=fix-pr-<M>-b:<run>` in place of a mismatch: the tick prints no `DISPATCH fix-pr` for it. Post the verb's output with `gh pr comment <M>`. A second failure is flagged for a human. A new review of the PR counts again from none.",
   ));
 });
 
-test("an escalate whose check printed no violations is the maintainer's to answer, and the answers are recorded through the check", () => {
+test("an escalate whose verb printed no violations is the maintainer's to answer, and the answers are recorded through the verb", () => {
   const s = SKILL.paragraph("`DISPATCH fix-pr PR#<M>` on a dispositions mismatch", "run-team/SKILL.md", "### The main-gain hit", { emphasisTolerant: true }).text;
   assert.match(s, Pin.phrase(
-    "An escalate whose check printed no violations is the maintainer's to answer instead, one yes/no per escalated finding: yes upholds the deferral, no sends it back to be applied in this PR.",
+    "An escalate whose verb printed no violations is the maintainer's to answer instead, one yes/no per escalated finding: yes upholds the deferral, no sends it back to be applied in this PR.",
   ));
   assert.match(s, Pin.phrase(
-    "With every finding explicitly answered this session, record them with `dispositions-check.mjs` `--uphold` and `--send-back`: `ok` gets the finisher, `mismatch` the tick's retry, `escalate` is a second failure. See references/dispositions-escalation.md.",
+    "With every finding explicitly answered this session, record them with `ledger.mjs dispositions` and its `--uphold` and `--send-back`: `ok` gets the finisher, `mismatch` the tick's retry, `escalate` is a second failure.",
   ));
   // The flags the prose names are the ones the check takes, and its header names the token they write.
   const header = CHECK.stripGutter("//").text;
@@ -134,10 +134,10 @@ test("the escalation reference has the controller ask one yes/no per finding, re
   assert.match(s, Pin.phrase("the issue it was filed to and the fix-applier's reason, read from the escalated member's record `<scratch>/dispositions-<member>.json`."));
   assert.match(s, Pin.phrase("Yes means upheld: the deferral stands. No means sent back: the finding is applied in this PR."));
   assert.match(s, Pin.phrase("Record nothing until every finding has an answer, and nothing without the maintainer's explicit answer in this session."));
-  assert.match(s, Pin.phrase("Run `dispositions-check.mjs --member <member> --scratch <scratch> --uphold '<list>' --send-back '<list>'`"));
+  assert.match(s, Pin.phrase("Run `ledger.mjs dispositions <member> --scratch <scratch> --uphold '<list>' --send-back '<list>'`"));
   assert.match(s, Pin.phrase("Record one line per finding: `ledger.mjs ruled <M> \"escalation answer <bucket>[<index>]: upheld|sent back — <reason>\"`, the maintainer's reason."));
   assert.match(s, Pin.phrase("Post one PR comment under the escalate comment, quoting the answers."));
-  assert.ok(s.indexOf("Run `dispositions-check.mjs") < s.indexOf("Record one line per finding") && s.indexOf("Record one line per finding") < s.indexOf("Post one PR comment"));
+  assert.ok(s.indexOf("Run `ledger.mjs dispositions") < s.indexOf("Record one line per finding") && s.indexOf("Record one line per finding") < s.indexOf("Post one PR comment"));
 });
 
 test("the escalation reference says what each verdict of the answers earns, and what any other answer is", () => {
@@ -150,7 +150,7 @@ test("the escalation reference says what each verdict of the answers earns, and 
   assert.match(s, Pin.phrase(
     "`escalate`: an earlier fix-applier on the review had already failed, so the send-back is the second failure. Comment, flag the PR for a human, and a new review of the PR counts again from none.",
   ));
-  assert.match(s, Pin.phrase("An escalate whose check printed violations is a second mismatch on one review: no answer clears it, you comment and flag the PR for a human, and a new review of the PR counts again from none."));
+  assert.match(s, Pin.phrase("An escalate whose verb printed violations is a second mismatch on one review: no answer clears it, you comment and flag the PR for a human, and a new review of the PR counts again from none."));
   assert.match(s, Pin.phrase("Record `ledger.mjs ruled <M> <decision>` and carry it out."));
 });
 
@@ -216,7 +216,7 @@ test("step 6 has a standalone member pass --no-ledger and --review: no token is 
     "standalone you pass `--no-ledger` with it, so it writes no token and the exit status is the verdict",
   ));
   assert.match(labelStep(), Pin.phrase(
-    "without the flag it exits 2 for a ledger with no row for you",
+    "without the flag it exits 2 whenever a ledger exists",
   ));
 });
 
@@ -276,9 +276,9 @@ test("step 5 lands a duplicate as a comment citing the refuters and changing no 
   assert.doesNotMatch(s, /--add-label ready-for-agent/, "step 5's duplicate duty relabels up to `ready-for-agent` again — only triage sets that label");
 });
 
-test("the gate refuses a finisher on an unchecked verdict, which re-running the check answers", () => {
+test("the gate refuses a finisher on an unchecked verdict, which running the verb again answers", () => {
   assert.match(gate(), Pin.phrase(
-    "It names a `dispositions-unchecked=` verdict too — no rule broke, but the check could not read where a deferral was filed, `gh` unreachable or an issue unreadable: run the check again for that fix-applier once `gh` answers (an issue that does not exist is unreadable too, and no re-run answers that one: the check's stderr names it, and the record's issue number needs correcting); the tick offers no fix-applier for it.",
+    "It names a `dispositions-unchecked=` verdict too — no rule broke, but the verb could not read where a deferral was filed, `gh` unreachable or an issue unreadable: run the verb again for that fix-applier once `gh` answers (an issue that does not exist is unreadable too, and no re-run answers that one: the verb's stderr names it, and the record's issue number needs correcting); the tick offers no fix-applier for it.",
   ));
 });
 

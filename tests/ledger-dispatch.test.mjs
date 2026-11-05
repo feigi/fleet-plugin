@@ -1207,7 +1207,7 @@ test("a finisher is refused on a dispositions mismatch and recorded on a disposi
   rule(40, "1", "yes", [10]);
   put("10", gateRow("1/0/0", `dispositions-mismatch=fix-pr-40:${GATE_RUN}`));
   refused(["dispatch", "40", "finisher-pr-40"],
-    /finisher-pr-40: dispositions mismatch — fix-pr-40's disposition record fails the check against review run-Gate0001; .*dispositions-check\.mjs/);
+    /finisher-pr-40: dispositions mismatch — fix-pr-40's disposition record fails the check against review run-Gate0001; .*ledger\.mjs dispositions fix-pr-40 --scratch/);
   assert.deepEqual(read().dispatched, []);
 
   put("10", gateRow("1/0/0", `dispositions-ok=fix-pr-40:${GATE_RUN}`));
@@ -1217,7 +1217,7 @@ test("a finisher is refused on a dispositions mismatch and recorded on a disposi
 
 test("a finisher is refused as unchecked while no verdict answers the latest review's run", (t) => {
   const { ok, refused, put } = fixture(t);
-  const unchecked = /finisher-pr-40: dispositions unchecked — no dispositions-ok=\/dispositions-mismatch=\/dispositions-escalate=\/dispositions-unchecked= token .* run dispositions-check\.mjs --member fix-pr-40/;
+  const unchecked = /finisher-pr-40: dispositions unchecked — no dispositions-ok=\/dispositions-mismatch=\/dispositions-escalate=\/dispositions-unchecked= token .* run ledger\.mjs dispositions fix-pr-40/;
   // No token at all.
   put("10", gateRow("1/0/0"));
   refused(["dispatch", "40", "finisher-pr-40"], unchecked);
@@ -1243,7 +1243,7 @@ test("a finisher is refused as unchecked on a dispositions-unchecked verdict ans
   rule(40, "1", "yes", [10]);
   put("10", gateRow("1/0/0", `dispositions-unchecked=fix-pr-40:${GATE_RUN}`));
   refused(["dispatch", "40", "finisher-pr-40"],
-    /finisher-pr-40: dispositions unchecked — fix-pr-40's check of review run-Gate0001 could not read where a deferral was filed .* an issue that does not exist is unreadable too, and no re-run answers that one.* run dispositions-check\.mjs --member fix-pr-40 --scratch <scratch> again once gh answers/);
+    /finisher-pr-40: dispositions unchecked — fix-pr-40's check of review run-Gate0001 could not read where a deferral was filed .* an issue that does not exist is unreadable too, and no re-run answers that one.* run ledger\.mjs dispositions fix-pr-40 --scratch <scratch> again once gh answers/);
   put("10", gateRow("1/0/0", `dispositions-ok=fix-pr-40:${GATE_RUN}`));
   assert.equal(ok("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
 });
@@ -1269,7 +1269,7 @@ test("a PR whose latest review counts only unverified findings dispatches a fini
   refused(["dispatch", "40", "finisher-pr-40"], /dispositions unchecked/);
   ok("dispatch", "40", "fix-pr-40");
   ok("settle", "fix-pr-40", "no-op");
-  ok("row", "10", `impl-10=PR#40 → PR#40 · review=member:review-pr-40 reviewed=${GATE_HEAD.slice(0, 7)}:0/2/6:${GATE_RUN} · fix-pr-40=no-op · dispositions-ok=fix-pr-40:${GATE_RUN}`);
+  put("10", `impl-10=PR#40 → PR#40 · review=member:review-pr-40 reviewed=${GATE_HEAD.slice(0, 7)}:0/2/6:${GATE_RUN} · fix-pr-40=no-op · dispositions-ok=fix-pr-40:${GATE_RUN}`);
   assert.equal(ok("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
   assert.deepEqual(read().dispatched, ["fix-pr-40=no-op", "finisher-pr-40"]);
 });
@@ -1350,14 +1350,14 @@ test("a finisher is refused while its PR sits on a conflict hold no fix-applier 
   put("10", gateRow("1/0/0", `dispositions-ok=fix-pr-40:${GATE_HEAD}`, "conflict-hold:#40"));
   refused(["dispatch", "40", "finisher-pr-40"], /finisher-pr-40: PR #40 is on a conflict hold/);
   // A live fix-applier is still working it.
-  ok("row", "10", `${held} · fix-pr-40`);
+  put("10", `${held} · fix-pr-40`);
   refused(["dispatch", "40", "finisher-pr-40"], /finisher-pr-40: PR #40 is on a conflict hold/);
   assert.deepEqual(read().dispatched, []);
   // The same PR with no hold, and with the hold cleared by a landed fix-applier.
-  ok("row", "10", "impl-10=PR#40 → PR#40");
+  put("10", "impl-10=PR#40 → PR#40");
   assert.equal(ok("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
   ok("settle", "finisher-pr-40", "failed");
-  ok("row", "10", `${held} · fix-pr-40=no-op`);
+  put("10", `${held} · fix-pr-40=no-op`);
   assert.equal(ok("dispatch", "40", "finisher-pr-40-b").agent, "fleet-finisher");
   assert.deepEqual(read().dispatched, ["finisher-pr-40=failed", "finisher-pr-40-b"]);
 });
@@ -1368,8 +1368,8 @@ test("a finisher is refused on a dispositions escalate, naming it and the two wa
   refused(["dispatch", "40", "finisher-pr-40"],
     /finisher-pr-40: dispositions escalate — fix-pr-40 deferred .*review run-Gate0001 gets no finisher until the escalate clears\./);
   const said = cli("dispatch", "40", "finisher-pr-40").stderr;
-  assert.match(said, /An outside-diff deferral clears when the maintainer's escalation answers are recorded with dispositions-check\.mjs --member fix-pr-40 --scratch <scratch> --uphold '<list>' --send-back '<list>'; a second mismatch clears only with a new review of the PR\./);
-  assert.match(said, /dispositions-check\.mjs --member fix-pr-40 --scratch <scratch> alone names each escalated finding or violating entry by bucket and index/);
+  assert.match(said, /An outside-diff deferral clears when the maintainer's escalation answers are recorded with ledger\.mjs dispositions fix-pr-40 --scratch <scratch> --uphold '<list>' --send-back '<list>'; a second mismatch clears only with a new review of the PR\./);
+  assert.match(said, /ledger\.mjs dispositions fix-pr-40 --scratch <scratch> alone names each escalated finding or violating entry by bucket and index/);
   assert.doesNotMatch(said, /no retry/);
   assert.deepEqual(read().dispatched, []);
   const l = read();
@@ -1377,6 +1377,34 @@ test("a finisher is refused on a dispositions escalate, naming it and the two wa
     [{ number: 40, labels: [], closingIssuesReferences: [{ number: 10 }] }], "ready-to-merge");
   assert.deepEqual(run.fixDue, [], "an escalation never returns the PR to fixDue");
   assert.deepEqual(run.reviewed.find((r) => r.pr === 40).dispositions, { verdict: "escalate", member: "fix-pr-40" });
+});
+
+// The forgery: `token` once took a dispositions verdict or an escalation
+// answer as a freeform word, and the finisher gate read it as the verb's own.
+const FORGERY_HEAD = "7685c4674b79fad4a08a68603cefa2782ca5debe";
+const FORGERY_RUN = "run-B7CP3bIU";
+const FORGERY_ROW = [
+  "impl-3692=PR#3724", "tier=slow-high", "tier-ok=impl-3692:fleet-implementer-slow-high", "review=member:review-pr-3724",
+  `reviewed=${FORGERY_HEAD}:3/1/19:${FORGERY_RUN}`, "fix-pr-3724=failed", "fix-pr-3724-b=applied:c4554f8b4411cbf4fa93dfd36c3ed48e3b428532",
+  `dispositions-escalate=fix-pr-3724-b:${FORGERY_RUN}`, "ci=39722006612:1:success",
+].join(" · ");
+
+test("token refuses a dispositions verdict and an escalation answer, so the finisher stays refused on the escalate", (t) => {
+  const { ok, put, read, refused } = fixture(t);
+  put("3692", FORGERY_ROW);
+  const stillRefused = () => refused(["dispatch", "3724", "finisher-pr-3724"], /finisher-pr-3724: dispositions escalate — fix-pr-3724-b deferred/);
+  stillRefused();
+  for (const tok of [
+    `dispositions-ok=fix-pr-3724-z:${FORGERY_RUN}`, `dispositions-mismatch=fix-pr-3724:${FORGERY_RUN}`, `dispositions-escalate=fix-pr-3724-b:${FORGERY_RUN}`,
+    `dispositions-unchecked=fix-pr-3724:${FORGERY_RUN}`, `Dispositions-OK=fix-pr-3724-z:${FORGERY_RUN}`, "dispositions-ok=x",
+    `escalation-answer=${FORGERY_RUN}:survived[0]:upheld`, `escalation-answer=${FORGERY_RUN}:survived[0]:sent-back`,
+  ]) {
+    refused(["token", "3724", tok], /ledger\.mjs dispositions /);
+    stillRefused();
+  }
+  // A word that merely starts `dispositions-` is freeform, and written.
+  ok("token", "3724", "dispositions-note");
+  assert.ok(read().rows[0].endsWith(" · dispositions-note"));
 });
 
 test("an escalate is the current verdict only until a higher-suffixed fix-applier's own verdict answers the review, and outranks a mismatch of the same member", (t) => {
@@ -1444,7 +1472,7 @@ test("a finisher is refused while a fix-applier on the PR is live, even with an 
   // A re-review at the same head: fix-pr-40 answered the first round, and
   // fix-pr-40-b, answering the second, is still working.
   put("10", gateRow("1/0/0", `dispositions-ok=fix-pr-40:${GATE_RUN}`, `review=member:review-pr-40-b reviewed=${GATE_HEAD.slice(0, 7)}:3/0/2:${ROUND2_RUN}`, "fix-pr-40-b"));
-  refused(["dispatch", "40", "finisher-pr-40"], /finisher-pr-40: fix-pr-40-b still live on PR #40 — a fix-applier answering review run-Round2bb has not settled, .*settle it, run dispositions-check\.mjs for it/);
+  refused(["dispatch", "40", "finisher-pr-40"], /finisher-pr-40: fix-pr-40-b still live on PR #40 — a fix-applier answering review run-Round2bb has not settled, .*settle it, run `ledger\.mjs dispositions` for it/);
   // A PR outside the verdict gate is still held while its fix-applier works.
   put("11", `impl-11=PR#41 → PR#41 · review=member:review-pr-41 reviewed=${GATE_HEAD}:0/1/0:${GATE_RUN} · fix-pr-41`);
   refused(["dispatch", "41", "finisher-pr-41"], /finisher-pr-41: fix-pr-41 still live on PR #41/);

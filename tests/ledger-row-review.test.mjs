@@ -252,10 +252,10 @@ test("the same member twice on one line is refused, naming the member, whatever 
 test("an already-invalid row carried forward is accepted, new tokens before its bad one included; a second copy is refused", (t) => {
   const { ok, refused, reviewRefused, rows } = fixture(t, [`#1 ${IMPL} · ${A} ${r1} ${r2}`]);
   ok("1", `${IMPL} · class=routine · ${A} ${r1} finisher-pr-482 ${r2}`);
-  ok("1", `${r2} ${IMPL} · ${A} ${r1}`);
+  ok("1", `${IMPL} · ${A} class=routine ${r1} ${r2}`);
   reviewRefused("482", [r2], /'reviewed=b7adf86/);
   refused("1", `${IMPL} · ${A} ${r1} ${r2} ${r2}`, /'reviewed=b7adf86/);
-  assert.deepEqual(rows(), [`#1 ${r2} ${IMPL} · ${A} ${r1}`]);
+  assert.deepEqual(rows(), [`#1 ${IMPL} · ${A} class=routine ${r1} ${r2}`]);
 });
 
 test("a repeated member already on the row is carried; a third copy is refused", (t) => {
@@ -315,11 +315,12 @@ test("row dropping an open launch is refused; review only appends or settles in 
   assert.deepEqual(rows(), [`#1 ${IMPL} · ${A} · ${r1}`]);
 });
 
-test("an answered or failed launch may be dropped", (t) => {
-  const answered = fixture(t, [`#1 ${IMPL} · ${A} ${r1}`]);
-  answered.ok("1", `${IMPL} · class=routine`);
+test("a failed launch may be dropped, and an answered one only with the reviewed= that answers it, which a rewrite never drops", (t) => {
   const failed = fixture(t, [`#1 ${IMPL} · ${A}=failed`]);
   failed.ok("1", `${IMPL}`);
+  const answered = fixture(t, [`#1 ${IMPL} · ${A} ${r1}`]);
+  answered.refused("1", `${IMPL} · class=routine`, /drops Gate verdict 'reviewed=aaaaaaa/, /fleet-event\.mjs review-result/);
+  answered.ok("1", `${IMPL} · class=routine · ${A} ${r1}`);
 });
 
 test("moving an open launch to another row of its PR is accepted", () => {
@@ -471,9 +472,10 @@ test("#2288: a finisher halted past-pin after the fix re-queues the review", (t)
   f.rule(724);
   closes(f.bin, 724, [658]);
   reviewedAndFixed(f);
-  // The fix-applier's dispositions verdict, as dispositions-check.mjs records it.
+  // The fix-applier's dispositions verdict, as `ledger.mjs dispositions` records
+  // it: written into the file, since `row` carries a verdict and adds none.
   const [row] = f.rows();
-  f.ok("658", `${row.slice("#658 ".length)} · dispositions-ok=fix-pr-724:run-AAAAAAAA`);
+  writeFileSync(f.file, readFileSync(f.file, "utf8").replace(row, `${row} · dispositions-ok=fix-pr-724:run-AAAAAAAA`));
   f.run("dispatch", "724", "finisher-pr-724");
   f.run("settle", "finisher-pr-724", "halted:past-pin");
   assert.equal(f.rows().length, 1);
@@ -494,4 +496,53 @@ test("#2288: a review recorded before the implementer settles is folded into the
   f.run("settle", "fix-pr-724", `applied:${HEAD_FIXED}`);
   assert.equal(f.rows().length, 1);
   assert.deepEqual(tick(f.read).fixDue, []);
+});
+
+// ---- Gate verdicts: `row` carries them exactly as the row holds them ----
+//
+// A dispositions verdict, an Escalation answer and a `reviewed=` are each
+// written by the verb that derives it. A rewrite may carry them, none added,
+// changed, dropped or reordered, which is also what refuses the whole-row wipe
+// of a row holding one.
+const HEAD_3724 = "7685c4674b79fad4a08a68603cefa2782ca5debe";
+const RUN_3724 = "run-B7CP3bIU";
+const TAIL_3724 = [
+  "impl-3692=PR#3724", "tier=slow-high", "tier-ok=impl-3692:fleet-implementer-slow-high", "review=member:review-pr-3724",
+  `reviewed=${HEAD_3724}:3/1/19:${RUN_3724}`, "fix-pr-3724=failed", "fix-pr-3724-b=applied:c4554f8b4411cbf4fa93dfd36c3ed48e3b428532",
+  `dispositions-escalate=fix-pr-3724-b:${RUN_3724}`, "ci=39722006612:1:success",
+].join(" · ");
+const ESCALATE = `dispositions-escalate=fix-pr-3724-b:${RUN_3724}`;
+
+test("row refuses to add, change, drop or reorder a Gate verdict, naming it and its writer, and writes nothing", (t) => {
+  const { refused } = fixture(t, [`#3692 ${TAIL_3724}`]);
+  refused("3692", `${TAIL_3724} · dispositions-ok=fix-pr-3724-z:${RUN_3724}`, /'dispositions-ok=fix-pr-3724-z:run-B7CP3bIU'/, /carries every Gate verdict exactly as the row holds it/, /ledger\.mjs dispositions fix-pr-3724-z/);
+  refused("3692", `${TAIL_3724} · escalation-answer=${RUN_3724}:survived[0]:upheld`, /escalation-answer=run-B7CP3bIU:survived\[0\]:upheld/, /--uphold/);
+  refused("3692", TAIL_3724.replace(ESCALATE, `dispositions-ok=fix-pr-3724-b:${RUN_3724}`), /dispositions-ok=fix-pr-3724-b:run-B7CP3bIU/, /ledger\.mjs dispositions fix-pr-3724-b/);
+  refused("3692", TAIL_3724.replace(ESCALATE, `DISPOSITIONS-OK=fix-pr-3724-b:${RUN_3724}`), /DISPOSITIONS-OK=fix-pr-3724-b/);
+  refused("3692", TAIL_3724.replace(` · reviewed=${HEAD_3724}:3/1/19:${RUN_3724}`, ""), /drops Gate verdict 'reviewed=7685c46/, /fleet-event\.mjs review-result/);
+  refused("3692", TAIL_3724.replace(` · ${ESCALATE}`, ""), /drops Gate verdict 'dispositions-escalate=fix-pr-3724-b/);
+  // The 3686-shaped wipe: a PR number given where the row's text goes.
+  refused("3692", "3724", /drops Gate verdict/);
+  // Reordering two verdicts is a change of what the tick reads in row order.
+  const both = `${TAIL_3724} · dispositions-ok=fix-pr-3724-c:${RUN_3724}`;
+  const two = fixture(t, [`#3692 ${both}`]);
+  two.refused("3692", both.replace(` · ${ESCALATE}`, "").replace(` · dispositions-ok=fix-pr-3724-c:${RUN_3724}`, ` · dispositions-ok=fix-pr-3724-c:${RUN_3724} · ${ESCALATE}`),
+    /reorders its Gate verdicts/);
+  // A malformed verdict-shaped word added is refused as a review token is.
+  refused("3692", `${TAIL_3724} · dispositions-ok=x`, /'dispositions-ok=x'/);
+  refused("3692", `${TAIL_3724} · escalation-answer=nonsense`, /'escalation-answer=nonsense'/);
+});
+
+test("row accepts a rewrite that carries every Gate verdict as the row holds it, and cleans off the malformed ones", (t) => {
+  const { ok, rows } = fixture(t, [`#3692 ${TAIL_3724}`]);
+  // The merge bot's rewrite: the row as it stands, the hold appended.
+  ok("3692", `${TAIL_3724} · conflict-hold:#3724 (conflict: a.mjs)`);
+  assert.deepEqual(rows(), [`#3692 ${TAIL_3724} · conflict-hold:#3724 (conflict: a.mjs)`]);
+  // Another token changed beside the carried verdicts.
+  ok("3692", `${TAIL_3724.replace("tier-ok=impl-3692:fleet-implementer-slow-high", "tier-mismatch=impl-3692:fleet-implementer-task-low")} · conflict-hold:#3724 (conflict: a.mjs)`);
+
+  // A runless `reviewed=` and a head-named verdict parse as no Gate verdict, so dropping them is allowed.
+  const legacy = fixture(t, [`#5 impl-5=PR#5 · reviewed=abc1234:1/0/0 · dispositions-ok=fix-pr-5:${HEAD_3724}`]);
+  legacy.ok("5", "impl-5=PR#5");
+  assert.deepEqual(legacy.rows(), ["#5 impl-5=PR#5"]);
 });

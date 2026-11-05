@@ -56,6 +56,7 @@ const occurrences = (haystack, needle) => {
 // placeholder; a positional pointer whose target stayed in SKILL.md would point
 // at nothing in the reference file, so it names where the target is.
 const CORRECTIONS = [
+  ["`dispositions-ok` verdict from `dispositions-check.mjs` on that review", "`dispositions-ok` verdict from `ledger.mjs dispositions` on that review"],
   ["`fix-pr-1184` backgrounded its suite", "`fix-pr-<M>` backgrounded its suite"],
   ["`finisher-pr-1184` reached", "`finisher-pr-<M>` reached"],
   ["`pgrep -f 'finish-finisher-pr-1184'`", "`pgrep -f 'finish-finisher-pr-<M>'`"],

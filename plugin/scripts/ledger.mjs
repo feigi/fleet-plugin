@@ -39,11 +39,19 @@
 // name whose outcome is outside its family's vocabulary — into
 // `## Retired`, where `dispatch` and that numbering still read it.
 //
-// Writer policy: the controller owns run state
-// (`row`/`token`/`settle`/`dispatch`/`review`/`drain`/`ruled`/`rotate`); filers append
-// filings with `filed`; all writes are serialized by `<file>.lock`. Every
-// write subcommand except `rotate` — which moves the file whole and never
-// loads it, see runRotate() — rewrites the WHOLE file from what it loaded,
+// Writer policy: a Gate verdict — a dispositions verdict, an Escalation
+// answer, a `reviewed=` — is written only by its own verb, whoever calls it:
+// `dispositions` for the first two, which it derives from their evidence,
+// and `review` for the third, which still takes its `reviewed=` as an
+// argument, not yet deriving it from the review's result file. `token`
+// refuses all three, and `row` carries every Gate verdict exactly as the row
+// holds it, so no other verb adds, changes or drops one. `filed` appends
+// filings, and all writes are serialized by `<file>.lock`; the other tokens
+// of a row are freeform to the writers that have them (`row`/`token`/
+// `settle`/`dispatch`/`drain`/`ruled`/`rotate`). Every write subcommand
+// except `rotate` — which moves the file whole and never loads it, see
+// runRotate() — rewrites the WHOLE file
+// from what it loaded,
 // so two unlocked writers are last-writer-wins — measured, 8 concurrent
 // `filed` kept 2-5 of 8 rows — and the lock is what lets a second kind of
 // writer exist at all. The reasoning for each part of the lock lives at
@@ -63,7 +71,7 @@ import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits, writeAll } from "./arg.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { readReceipt } from "./phase0-receipt.mjs";
-import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, settledOnLedger, retiredOnLedger, retiredName, readRetired, agentDefinition, expectedDefinition, CELL, POLICY_CELL, tierValues, cellValues, decidingCell, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, HALT_CAUSES, ROWS, DISPATCHED, ROUTED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, CLOSEOUT_RECEIPT, closeoutArchiveName, BRIEFS, briefsArchiveName, memberRole, parseDispatchedEntry, dispatchedEntry, parseRouting, parseRoutedEntry, routedEntry, headerRe, escapeText, ledgerSection, nextReviewerName, isOmpSessionDirName } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, settledOnLedger, retiredOnLedger, retiredName, readRetired, agentDefinition, expectedDefinition, CELL, POLICY_CELL, tierValues, cellValues, decidingCell, rowPr, rowNums, rowWriteRefusal, isReviewToken, addedReviewToken, isDispositionsWord, gateVerdictWriter, gateVerdictRefusal, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, HALT_CAUSES, ROWS, DISPATCHED, ROUTED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, CLOSEOUT_RECEIPT, closeoutArchiveName, BRIEFS, briefsArchiveName, memberRole, parseDispatchedEntry, dispatchedEntry, parseRouting, parseRoutedEntry, routedEntry, headerRe, escapeText, ledgerSection, nextReviewerName, isOmpSessionDirName } from "./ledger-grammar.mjs";
 import { deriveRun, LedgerError, labelOffMember, CONFLICT_HOLD, PARKED } from "./fleet-tick.mjs";
 import { stateFileIn, readState, writeState, assessBeat, stallsAt } from "./fleet-state.mjs";
 import { processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "./proc.mjs";
@@ -284,7 +292,7 @@ const requireFile = requireFileIdx !== -1;
 if (requireFileIdx !== -1) argv.splice(requireFileIdx, 1);
 
 const [cmd, ...rest] = argv;
-if (!cmd) die("usage: ledger.mjs [--file <path>] [--require-file] row|token|filed|ruled|check|read|dispatch|settle|review|drain|undrain|rotate [args]");
+if (!cmd) die("usage: ledger.mjs [--file <path>] [--require-file] row|token|filed|ruled|check|read|dispatch|settle|review|dispositions|drain|undrain|rotate [args]");
 
 // A `--`-prefixed token in `check`'s free-text tail used to fold
 // straight into the duplicate-filing subject, so a misspelled flag searched
@@ -700,14 +708,16 @@ async function acquireLock() {
 // so a caller gating on the exit code reads the same failure either way.
 if (requireFile && !existsSync(file)) die(`--require-file given but ledger file does not exist: ${file}`);
 
-const WRITE_COMMANDS = new Set(["row", "token", "filed", "ruled", "dispatch", "settle", "review", "drain", "undrain", "rotate"]);
+const WRITE_COMMANDS = new Set(["row", "token", "filed", "ruled", "dispatch", "settle", "review", "dispositions", "drain", "undrain", "rotate"]);
 // `settle --from-report` takes the lock itself, once its checks have run —
-// see runSettleFromReport().
+// see runSettleFromReport(). So does `dispositions`, once every git, gh and
+// file read has run — see runDispositions().
 const FROM_REPORT = cmd === "settle" && rest.includes("--from-report");
+const LATE_LOCK = FROM_REPORT || cmd === "dispositions";
 // A merge bot's dispatch reads the queue it records before the lock, for the
 // same reason: a gh call held under the lock stalls every other writer.
 const QUEUED = cmd === "dispatch" && rest.length === 1 && /^merge-bot(-[0-9]+)?$/.test(rest[0]) ? queueSnapshot() : null;
-if (WRITE_COMMANDS.has(cmd) && !FROM_REPORT) await acquireLock();
+if (WRITE_COMMANDS.has(cmd) && !LATE_LOCK) await acquireLock();
 // `rotate` never load()s: a ledger load() would refuse is still the previous
 // run's record, and it is archived as-is — and read line by line when it
 // carries live members forward, see carryOf().
@@ -796,6 +806,11 @@ if (cmd === "read") {
   if (reviewToken !== undefined) {
     die(`row ${key}: adds review token '${reviewToken}' — review tokens are written only with \`ledger.mjs review <pr> <token>…\`, which puts them on the PR's row`);
   }
+  // Every Gate verdict is its own verb's to write, so a rewrite carries the
+  // row's as they stand — none added, changed, dropped or reordered, which
+  // also refuses a whole-row wipe of a row that holds one.
+  const gateWhy = gateVerdictRefusal(oldRow, line);
+  if (gateWhy !== null) die(`row ${key}: ${gateWhy}`);
   // Every token about a PR lives on the PR's row, so a write that makes a PR
   // map to a second row splits its history across two rows the tick reads in
   // row order, not write order. Added only: a split already on disk is
@@ -901,6 +916,8 @@ if (cmd === "read") {
   runToken();
 } else if (cmd === "review") {
   runReview();
+} else if (cmd === "dispositions") {
+  await runDispositions();
 } else if (cmd === "drain") {
   // One marker per run. A second `drain` — a replacement controller that
   // cannot tell whether its predecessor got this far — is answered with the
@@ -932,7 +949,7 @@ if (cmd === "read") {
   if (rest.length) die("usage: ledger.mjs rotate");
   runRotate();
 } else {
-  die(`unknown subcommand '${cmd}' — expected row, token, filed, ruled, check, read, dispatch, settle, review, drain, undrain or rotate`);
+  die(`unknown subcommand '${cmd}' — expected row, token, filed, ruled, check, read, dispatch, settle, review, dispositions, drain, undrain or rotate`);
 }
 
 // Reached only by an arm that did not die, so every write subcommand that did
@@ -1965,32 +1982,32 @@ function dispositionsRefusal(pr, review) {
   if (review === undefined) return null;
   if (review.fixLive.length > 0) {
     return `${review.fixLive.join(", ")} still live on PR #${pr} — a fix-applier answering review ${review.run} has not settled, `
-      + "so no dispositions verdict answers its work yet; settle it, run dispositions-check.mjs for it, then dispatch the finisher again";
+      + "so no dispositions verdict answers its work yet; settle it, run `ledger.mjs dispositions` for it, then dispatch the finisher again";
   }
   if (review.survived === 0 && review.unverified === 0) return null;
   const v = review.dispositions;
   if (v === null) {
     return `dispositions unchecked — no dispositions-ok=/dispositions-mismatch=/dispositions-escalate=/dispositions-unchecked= token answers PR #${pr}'s latest review, `
-      + `${review.run} at ${review.head}; run dispositions-check.mjs --member fix-pr-${pr}[-<x>] --scratch <scratch> for the fix-applier `
+      + `${review.run} at ${review.head}; run ledger.mjs dispositions fix-pr-${pr}[-<x>] --scratch <scratch> for the fix-applier `
       + "that answered that review, then dispatch the finisher again";
   }
   if (v.verdict === "unchecked") {
     return `dispositions unchecked — ${v.member}'s check of review ${review.run} could not read where a deferral was filed (gh unreachable, `
       + "or an issue unreadable — an issue that does not exist is unreadable too, and no re-run answers that one: the check's stderr names "
-      + `it, and the record's issue number needs correcting); run dispositions-check.mjs --member ${v.member} --scratch <scratch> again once gh answers, `
+      + `it, and the record's issue number needs correcting); run ledger.mjs dispositions ${v.member} --scratch <scratch> again once gh answers, `
       + "then dispatch the finisher again";
   }
   if (v.verdict === "mismatch") {
     return `dispositions mismatch — ${v.member}'s disposition record fails the check against review ${review.run}; `
-      + `dispositions-check.mjs --member ${v.member} --scratch <scratch> names each violating entry by bucket, index and rule`;
+      + `ledger.mjs dispositions ${v.member} --scratch <scratch> names each violating entry by bucket, index and rule`;
   }
   if (v.verdict === "escalate") {
     return `dispositions escalate — ${v.member} deferred a finding above suggestion severity because its remedy lies outside the PR's diff, `
       + `or its record drew a second mismatch on this review: review ${review.run} gets no finisher until the escalate clears. `
       + "An outside-diff deferral clears when the maintainer's escalation answers are recorded with "
-      + `dispositions-check.mjs --member ${v.member} --scratch <scratch> --uphold '<list>' --send-back '<list>'; `
+      + `ledger.mjs dispositions ${v.member} --scratch <scratch> --uphold '<list>' --send-back '<list>'; `
       + "a second mismatch clears only with a new review of the PR. "
-      + `dispositions-check.mjs --member ${v.member} --scratch <scratch> alone names each escalated finding or violating entry by bucket and index, `
+      + `ledger.mjs dispositions ${v.member} --scratch <scratch> alone names each escalated finding or violating entry by bucket and index, `
       + "for the PR comment that hands it to the maintainer";
   }
   return null;
@@ -3143,6 +3160,103 @@ function runReview() {
   console.log(JSON.stringify({ pr: prNum, row: key, line, created, next: nextReviewerName(data.rows, prNum, retired) }));
 }
 
+// `dispositions <member> --scratch <dir> [--repo <path>] [--uphold <list>]
+// [--send-back <list>]`: the only writer of a PR's `dispositions-*=` verdict
+// and `escalation-answer=` tokens. It judges the fix-applier's disposition
+// record in-process, through the module dispositions-check.mjs exports,
+// against the ledger this call loaded — every git, gh and file read happens
+// first, with no lock held, since a gh call under the lock stalls every other
+// writer. Only then does it take the lock, load the ledger again and write
+// onto the row that carries the member as it stands now, every other token
+// kept: a token another writer put on that row while the tracker was read is
+// carried, never dropped. The verdict is judged against the review that was
+// the latest when it was read; one written for a review that has since been
+// superseded does nothing, since the gate and the tick read only verdicts
+// naming the latest run. A run recording answers is the exception: under the
+// lock it asks again that the escalate they answer is still the PR's current
+// verdict on that same review and that no fix-applier is live, and exits 2
+// with nothing written when either has changed, so two answer runs that read
+// one escalate cannot both write. A verdict the row already carries is not
+// written again, and its findings are printed all the same. The write passes
+// rowWriteRefusal() like any other. Its payload, stderr lines and exit status
+// are printVerdict()'s: 0 ok, 1 mismatch, escalate or unchecked, 2 nothing
+// judged and nothing written.
+async function runDispositions() {
+  const usage = "usage: ledger.mjs dispositions <fix-pr-M[-x]> --scratch <dir> [--repo <path>] [--uphold <list>] [--send-back <list>]";
+  const flags = new Map();
+  let member = null;
+  for (let i = 0; i < rest.length; i++) {
+    const word = rest[i];
+    if (!word.startsWith("--")) {
+      if (member !== null) die(`dispositions: unexpected argument '${word}' — ${usage}`);
+      member = word;
+      continue;
+    }
+    const name = word.slice(2).split("=")[0];
+    if (!["scratch", "repo", "uphold", "send-back"].includes(name)) die(`dispositions: unknown flag ${word} — ${usage}`);
+    if (hasEqualsForm(name, rest)) die(`dispositions: --${name} needs a space-separated value, not --${name}=`);
+    if (flags.has(name)) die(`dispositions: --${name} is given twice${name === "uphold" || name === "send-back" ? " — name every finding in one comma-separated list" : ""}`);
+    const value = rest[++i];
+    if (isFlagLike(value)) die(`dispositions: --${name} needs a value — ${usage}`);
+    flags.set(name, value);
+  }
+  if (member === null || !flags.has("scratch")) die(usage);
+  const { judgeMember, latestReview, answerMap, printVerdict, withVerdict, CheckRefusal } = await import("./dispositions-check.mjs");
+  const refusing = (fn) => {
+    try {
+      return fn();
+    } catch (e) {
+      if (e instanceof CheckRefusal) die(e.message);
+      throw e;
+    }
+  };
+  const listed = refusing(() => answerMap(flags.get("uphold") ?? null, flags.get("send-back") ?? null));
+  const result = refusing(() => judgeMember({
+    name: member, scratch: flags.get("scratch"), repo: flags.get("repo") ?? process.cwd(), ledger: data, listed,
+  }));
+
+  await acquireLock();
+  data = load();
+  const { pr, run, token } = result;
+  // Answers clear the escalate they answer, so what recording them needs is
+  // asked again on the ledger as it stands under the lock: two answer runs
+  // that both read the same escalate would otherwise both write.
+  if (result.recorded.length > 0) {
+    let why = null;
+    try {
+      const latest = latestReview(data, pr, result.member, true);
+      if (latest.run !== run) why = `PR #${pr}'s latest review is ${latest.run} now, not ${run}`;
+    } catch (e) {
+      if (!(e instanceof CheckRefusal)) throw e;
+      why = e.message;
+    }
+    if (why !== null) {
+      die(`dispositions: the ledger changed while ${result.member}'s record was judged — ${why}; nothing written, run \`ledger.mjs dispositions ${result.member} --scratch ${flags.get("scratch")}\` again to judge it as it stands`);
+    }
+  }
+  const i = data.rows.findIndex((r) => rowNums(r).pr === pr && memberTokens(r).some((t) => t.name === result.member));
+  if (i === -1) {
+    die(`dispositions: ${result.member} is on no row of PR #${pr} now — the ledger changed while its record was judged; nothing written, run \`ledger.mjs dispositions ${result.member} --scratch ${flags.get("scratch")}\` again`);
+  }
+  const oldRow = data.rows[i];
+  const key = rowKey(oldRow);
+  if (!/^#[0-9]+$/.test(key)) die(`dispositions: the row carrying ${result.member} has no #<n> key to be rewritten by: ${oldRow}`);
+  const text = oldRow.slice(key.length).trim();
+  const answerTokens = result.recorded.map(([a, answer]) => `escalation-answer=${run}:${a}:${answer}`);
+  const updated = withVerdict([text, ...answerTokens].join(" · "), token);
+  if (updated === text) {
+    console.error(`    ${result.member}: row ${key} already carries ${token} — not written again`);
+  } else {
+    const line = `${key} ${updated}`;
+    const after = data.rows.with(i, line);
+    const refusal = rowWriteRefusal(data.rows, after, oldRow, line, readRetired(data.retired).names);
+    if (refusal !== null) die(`dispositions: row ${key}: ${refusal}`);
+    data.rows = after;
+    save(data);
+  }
+  printVerdict(result);
+}
+
 // A row's tokens: its words after the key, bar the ` · ` separators between
 // them.
 function rowTokens(text) {
@@ -3235,7 +3349,9 @@ function withTier(line, tok) {
 // call's tokens before it. A token is one word: an empty argument, one with
 // a space in it (prose, which would split into words the row's own words
 // then dedupe against), and the row's ` · ` separator are no token. A member
-// token is `dispatch`'s or `settle`'s, a review token `review`'s. A word
+// token is `dispatch`'s or `settle`'s, a review token `review`'s, and a
+// dispositions verdict or an Escalation answer `dispositions`' — any word
+// beginning like one, parseable or not. A word
 // shaped like a member that the grammar cannot parse, a `tier=` that is not
 // a cell, a `tier=` naming a second tier in one call, any `cell=` (the row
 // step's, never a token), a `conflict-hold` or `parked` token the tick cannot
@@ -3252,6 +3368,11 @@ function tokenRefusal(tok, earlier) {
   }
   if (isReviewToken(tok)) {
     return "is a review token — review tokens are written only with `ledger.mjs review <pr> <token>…`, which puts them on the PR's row";
+  }
+  if (isDispositionsWord(tok)) {
+    return tok.startsWith("escalation-answer=")
+      ? `is an Escalation answer — a Gate verdict is written only by ${gateVerdictWriter(tok)}, which takes the maintainer's answer only against an escalate its own check raised; running that again is how a verdict is restored`
+      : `is a dispositions verdict — a Gate verdict is written only by ${gateVerdictWriter(tok)}, which derives it from the disposition record and the review; running that again is how a verdict is restored`;
   }
   const name = tok.split("=")[0];
   if (MEMBER_FAMILIES.some((family) => name.startsWith(`${family}-`))) {

@@ -67,7 +67,7 @@ every other, not a spelling for you to correct.
 the merge.** A deferral of a finding in the review's result is not yours to
 re-judge when the PR's latest review counted a survived or unverified finding:
 `ledger.mjs dispatch` then dispatched you only once the PR's ledger row held a
-`dispositions-ok` verdict from `dispositions-check.mjs` on that review
+`dispositions-ok` verdict from `ledger.mjs dispositions` on that review
 (`dispositionsRefusal`), and that check had already read back where the
 fix-applier's disposition record says each deferral was filed. That verdict is
 the judgement of those homes: do not halt on a home the script accepted, and

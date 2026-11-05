@@ -42,7 +42,7 @@ test("duty 2 defers a deferral of a finding in the review's result to the dispos
     );
     assert.match(
       d,
-      Pin.phrase("`ledger.mjs dispatch` then dispatched you only once the PR's ledger row held a `dispositions-ok` verdict from `dispositions-check.mjs` on that review (`dispositionsRefusal`)"),
+      Pin.phrase("`ledger.mjs dispatch` then dispatched you only once the PR's ledger row held a `dispositions-ok` verdict from `ledger.mjs dispositions` on that review (`dispositionsRefusal`)"),
       `${where}: duty 2 no longer says dispatch required the ok verdict`,
     );
     assert.match(

@@ -4,10 +4,10 @@
 // Every case runs the real script from a throwaway repository whose `.fleet/`
 // holds a fixture ledger, a phase-0 receipt naming the scratch root and the
 // caps, and the rendered briefs. The scripts directory is a copy of the
-// plugin's in which `fleet-tick.mjs`, `dispositions-check.mjs`,
+// plugin's in which `fleet-tick.mjs`,
 // `dispatch-prompt.mjs`, `release-ticket.sh` and `verify-sha.sh` are stubs that log their call
 // to `order.log` and answer from a control file the case writes, and
-// `ledger.mjs` is a shim: `settle --from-report` is stubbed — it logs, then
+// `ledger.mjs` is a shim: `dispositions` is a stub like the others, `settle --from-report` is stubbed — it logs, then
 // refuses as the control file says, or prints the control file's own stdout
 // and stderr and exits 0, or settles the outcome the control file names
 // through the real script's bare form — and every other subcommand
@@ -97,8 +97,6 @@ import { writeFileSync } from "node:fs";
 if (isCLI(import.meta.url) && process.env.TICK_ENV_LOG) writeFileSync(process.env.TICK_ENV_LOG, JSON.stringify({ GIT_DIR: process.env.GIT_DIR ?? null }));
 if (isCLI(import.meta.url)) drive("fleet-tick", process.argv.slice(2));
 `);
-// dispositions-check.mjs is only ever run, never imported, by the scripts.
-writeFileSync(join(SCRIPTS, "dispositions-check.mjs"), `import { drive } from "./stub-driver.mjs";\ndrive("dispositions-check", process.argv.slice(2));\n`);
 // dispatch-prompt.mjs runs on import, so nothing imports it: a plain stub.
 writeFileSync(join(SCRIPTS, "dispatch-prompt.mjs"), `import { drive } from "./stub-driver.mjs";\ndrive("dispatch-prompt", process.argv.slice(2));\n`);
 // ci-state.mjs is only ever run, never imported, by the scripts.
@@ -110,6 +108,10 @@ writeFileSync(join(SCRIPTS, "ledger.mjs"), `import { appendFileSync, readFileSyn
 import { join } from "node:path";
 const dir = process.env.EVENT_STUBS;
 const argv = process.argv.slice(2);
+if (argv[0] === "dispositions") {
+  const { drive } = await import("./stub-driver.mjs");
+  drive("dispositions", argv.slice(1));
+}
 if (argv[0] === "settle" && argv.includes("--from-report")) {
   appendFileSync(join(dir, "order.log"), ["settle", ...argv.slice(1)].join(" ") + "\\n");
   let c = {};
@@ -889,21 +891,23 @@ test("the retired cap flags are refused before anything is written or ticked", (
 
 const FIX_ROW = `#412 impl-412=PR#88 · review=member:review-pr-88 · ${REVIEWED} · fix-pr-88`;
 
-test("fix-report on a review fix-applier settles, runs dispositions-check for that member with the scratch root and prints its stdout, then ticks; a second run only ticks", () => {
+test("fix-report on a review fix-applier settles, runs the dispositions verb for that member with the scratch root and prints its stdout, then ticks; a second run only ticks", () => {
   const f = fixture({ rows: [FIX_ROW] });
   f.brief("fix-pr-88", "review");
   f.control("settle", { "fix-pr-88": { outcome: `applied:${HEAD_B}` } });
-  f.control("dispositions-check", { out: "dispositions: ok — 3 entries\n", ledger: ["token", "88", `dispositions-ok=fix-pr-88:${RUN}`] });
+  f.control("dispositions", { out: "dispositions: ok — 3 entries\n" });
   const first = f.run(["fix-report", "fix-pr-88"]);
   assert.equal(first.status, 0, first.err + first.stdout);
   assert.deepEqual(first.order, [
     `settle fix-pr-88 --from-report --reports ${join(f.scratch, "reports")}`,
-    `dispositions-check --member fix-pr-88 --scratch ${f.scratch}`,
+    `dispositions fix-pr-88 --scratch ${f.scratch}`,
     TICK,
   ]);
   assert.ok(first.out.includes("dispositions: ok — 3 entries"), first.stdout);
   assert.match(eventLine(first), /settled fix-pr-88=applied:b+; dispositions checked \(exit 0\)/);
 
+  // The verb writes the verdict; the stub does not, so the case writes what the verb would have.
+  writeFileSync(join(f.fleet, "ledger.md"), f.ledger().replace(/^(- #412 .*)$/m, `$1 · dispositions-ok=fix-pr-88:${RUN}`));
   const ledger = f.ledger();
   const second = f.run(["fix-report", "fix-pr-88"]);
   assert.equal(second.status, 0, second.err);
@@ -912,11 +916,11 @@ test("fix-report on a review fix-applier settles, runs dispositions-check for th
   assert.equal(f.ledger(), ledger);
 });
 
-test("fix-report's dispositions-check exit 1 is a verdict, its exit 2 a NEED", () => {
+test("fix-report's dispositions verb exit 1 is a verdict, any other nonzero exit a NEED", () => {
   const f = fixture({ rows: [FIX_ROW] });
   f.brief("fix-pr-88", "dispositions-retry");
   f.control("settle", { "fix-pr-88": { outcome: "no-op" } });
-  f.control("dispositions-check", { exit: 1, out: "survived[0]: dropped\n" });
+  f.control("dispositions", { exit: 1, out: "survived[0]: dropped\n" });
   const verdict = f.run(["fix-report", "fix-pr-88"]);
   assert.equal(verdict.status, 0, verdict.err + verdict.stdout);
   assert.ok(verdict.out.includes("survived[0]: dropped"));
@@ -924,17 +928,17 @@ test("fix-report's dispositions-check exit 1 is a verdict, its exit 2 a NEED", (
   const g = fixture({ rows: [FIX_ROW] });
   g.brief("fix-pr-88", "review");
   g.control("settle", { "fix-pr-88": { outcome: "no-op" } });
-  g.control("dispositions-check", { exit: 2, err: "dispositions-check: cannot read review file\n" });
+  g.control("dispositions", { exit: 2, err: "ledger: cannot read review file\n" });
   const fault = g.run(["fix-report", "fix-pr-88"]);
   assert.equal(fault.status, 4, fault.err + fault.stdout);
-  assert.match(fault.stdout, /^NEED dispositions-check fix-pr-88 — nothing judged \(exit 2\): dispositions-check: cannot read review file/m);
+  assert.match(fault.stdout, /^NEED dispositions fix-pr-88 — nothing judged \(exit 2\): ledger: cannot read review file/m);
 });
 
 for (const [why, setup] of [
   ["a conflict fix-applier", (f) => f.brief("fix-pr-88", "conflict")],
   ["a red-check fixer", (f) => f.brief("fix-pr-88", "red-check")],
 ]) {
-  test(`fix-report runs no dispositions-check for ${why}`, () => {
+  test(`fix-report runs no dispositions verb for ${why}`, () => {
     const f = fixture({ rows: [FIX_ROW] });
     setup(f);
     f.control("settle", { "fix-pr-88": { outcome: `applied:${HEAD_B}` } });
@@ -944,7 +948,7 @@ for (const [why, setup] of [
   });
 }
 
-test("fix-report runs no dispositions-check on a PR with no reviewed=, nor for a fix-applier settled failed", () => {
+test("fix-report runs no dispositions verb on a PR with no reviewed=, nor for a fix-applier settled failed", () => {
   const f = fixture({ rows: ["#412 impl-412=PR#88 · fix-pr-88"] });
   f.brief("fix-pr-88", "review");
   f.control("settle", { "fix-pr-88": { outcome: `applied:${HEAD_B}` } });
@@ -955,12 +959,12 @@ test("fix-report runs no dispositions-check on a PR with no reviewed=, nor for a
   assert.deepEqual(g.run(["fix-report", "fix-pr-88"]).order.slice(1), [TICK]);
 });
 
-test("fix-report with no brief on disk prints a NEED naming the check to run instead of guessing the fix-applier's job", () => {
+test("fix-report with no brief on disk prints a NEED naming the verb to run instead of guessing the fix-applier's job", () => {
   const f = fixture({ rows: [FIX_ROW] });
   f.control("settle", { "fix-pr-88": { outcome: "no-op" } });
   const r = f.run(["fix-report", "fix-pr-88"]);
   assert.equal(r.status, 4, r.err + r.stdout);
-  assert.match(r.stdout, new RegExp(`^NEED dispositions-check fix-pr-88 — its brief .*fix-pr-88\\.json is unreadable \\(ENOENT\\).*run dispositions-check\\.mjs --member fix-pr-88 --scratch ${f.scratch}`, "m"));
+  assert.match(r.stdout, new RegExp(`^NEED dispositions fix-pr-88 — its brief .*fix-pr-88\\.json is unreadable \\(ENOENT\\).*run ledger\\.mjs dispositions fix-pr-88 --scratch ${f.scratch}`, "m"));
 });
 
 // ── finisher-report ──────────────────────────────────────────────────────────

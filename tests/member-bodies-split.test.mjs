@@ -174,6 +174,8 @@ const CLOSED_RECORD_RETIRED = [
   "**Out of scope → defer and file, never apply** — but the claim bar runs first: an out-of-scope suggestion whose claim is about shape (`claimKind: shape`) gets no refuter and goes to the closed suggestion-band record, and every other one gets the same refuter an in-scope one does, dispatched the same way, before it is filed.",
   "**Out of scope, the refuter decides only where the suggestion is filed — it defers either way, never applied.** Refuted → the closed suggestion-band record, never an open issue.",
   "`disposition` has no `dismiss`: an in-scope `survived` finding verified correct, needing no change, is deferred with `reason` `false-rationale` and filed on the closed suggestion-band record.",
+  // The record's checker is `ledger.mjs dispositions`, the one writer of the verdict.
+  "**Before you report, write every ruling to `<scratch>/dispositions-<your name>.json`**, `<your name>` the `fix-pr-<pr>[-x]` you were dispatched as — the record the controller checks with `dispositions-check.mjs` before it dispatches any finisher.",
 ];
 // `## Phase 3 — event loop` left run-team's SKILL.md (#3540), so the merge
 // bot's copy of the shell traps names **Own the CI waits**, the section that

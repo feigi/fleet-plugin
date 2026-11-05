@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { parseMember, parseToken, memberTokens, rowPr, premisesOf, nextMergeBot, nextRetry, liveOnLedger, settledOnLedger, retiredOnLedger, isRetirable, readRetired, escapeText, unescapeText, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell, REVIEW, isReviewToken, parseDispatchedEntry, dispatchedEntry, memberRole, firstReview, prTokens, ledgerSection, ROUTED, ROUTING_REASONS, parseRouting, formatRouting, routedEntry, parseRoutedEntry, dispositionsToken, escalationAnswerToken, escalationAnswers } from "../plugin/scripts/ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, rowPr, premisesOf, nextMergeBot, nextRetry, liveOnLedger, settledOnLedger, retiredOnLedger, isRetirable, readRetired, escapeText, unescapeText, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell, REVIEW, isReviewToken, parseDispatchedEntry, dispatchedEntry, memberRole, firstReview, prTokens, ledgerSection, ROUTED, ROUTING_REASONS, parseRouting, formatRouting, routedEntry, parseRoutedEntry, dispositionsToken, escalationAnswerToken, escalationAnswers, isDispositionsWord, isGateVerdict, gateVerdictRefusal, gateVerdictWriter } from "../plugin/scripts/ledger-grammar.mjs";
 
 // Every outcome word the spec names, per family, verbatim — the must-ACCEPT
 // half. A parser that refused everything would pass every refusal below.
@@ -445,10 +445,11 @@ test("drawCell never draws the policy cell, reaches every other one, and with no
   assert.deepEqual([...burnIn].sort(), [...GRID].sort());
 });
 
-// `ledger.mjs token` writes every row token that is neither a member's nor
-// the review pair's. The grammar claims those two kinds and no other, so the
-// must-ACCEPT half is every other family a real row carries: a `token` that
-// refused one would leave the controller to re-type the whole row with `row`.
+// `ledger.mjs token` writes every row token that is neither a member's, the
+// review pair's nor a Gate verdict. The grammar claims those three kinds and
+// no other, so the must-ACCEPT half is every other family a real row carries:
+// a `token` that refused one would leave the controller to re-type the whole
+// row with `row`. A word that merely starts `dispositions-` is such a family.
 const FREEFORM_FAMILIES = [
   "ci=123:1:success",
   "held-behind:#313",
@@ -459,14 +460,12 @@ const FREEFORM_FAMILIES = [
   "tier-ok=impl-324:fleet-implementer-slow-high",
   "tier-mismatch=impl-324:fleet-implementer-task-low",
   "tier-unverifiable=impl-324:no-transcript",
-  "dispositions-ok=fix-pr-346:run-abcd1234",
-  "dispositions-mismatch=fix-pr-346:run-abcd1234",
-  "dispositions-escalate=fix-pr-346:run-abcd1234",
-  "dispositions-unchecked=fix-pr-346:run-abcd1234",
+  "dispositions-note",
+  "dispositions-maybe=fix-pr-346:run-abcd1234",
   "ports=16324",
 ];
 
-test("token accepts every non-member, non-review token family a row carries, each appended after what the row held", (t) => {
+test("token accepts every non-member, non-review, non-verdict token family a row carries, each appended after what the row held", (t) => {
   for (const tok of FREEFORM_FAMILIES) {
     assert.equal(parseToken(tok), null, `${tok}: a member token is dispatch's or settle's, not token's`);
     assert.equal(isReviewToken(tok), false, `${tok}: a review token is review's, not token's`);
@@ -488,6 +487,93 @@ test("token accepts every non-member, non-review token family a row carries, eac
   const written = JSON.parse(spawnSync(process.execPath, [script, "--file", file, "read"], { encoding: "utf8", env, cwd: dir }).stdout);
   assert.deepEqual(written.rows, [`${row} · ${FREEFORM_FAMILIES.join(" · ")}`]);
   assert.ok(readFileSync(file, "utf8").includes(FREEFORM_FAMILIES.at(-1)));
+});
+
+// A Gate verdict is a dispositions verdict, an Escalation answer or a
+// `reviewed=`: the words a dispatch gate reads. `token` refuses the first two
+// (the third is a review token) parseable or not, and `row` carries all
+// three exactly as the row holds them.
+const VERDICT_WORDS = [
+  "dispositions-ok=fix-pr-3724-z:run-B7CP3bIU", "dispositions-mismatch=fix-pr-3724:run-B7CP3bIU",
+  "dispositions-escalate=fix-pr-3724-b:run-B7CP3bIU", "dispositions-unchecked=fix-pr-3724:run-B7CP3bIU",
+  "escalation-answer=run-B7CP3bIU:survived[0]:upheld", "escalation-answer=run-B7CP3bIU:unverified[12]:sent-back",
+];
+const SHAPED_BADLY = ["dispositions-ok=x", "Dispositions-OK=fix-pr-1:abcdef", "DISPOSITIONS-ESCALATE=", "escalation-answer=nonsense", "escalation-answer="];
+
+test("a Gate verdict word is one dispositionsToken(), escalationAnswerToken() or REVIEWED parses, and a refusable word is one that begins like one", () => {
+  for (const w of [...VERDICT_WORDS, "Dispositions-OK=fix-pr-3724-z:run-B7CP3bIU", "reviewed=7685c46:3/1/19:run-B7CP3bIU"]) assert.equal(isGateVerdict(w), true, w);
+  for (const w of [...SHAPED_BADLY, "reviewed=abc1234:1/0/0", "dispositions-note", "dispositions-maybe=fix-pr-346:run-abcd1234", "ci=1:1:success"]) {
+    assert.equal(isGateVerdict(w), false, w);
+  }
+  for (const w of [...VERDICT_WORDS, ...SHAPED_BADLY, "DISPOSITIONS-OK=fix-pr-3724-z:run-B7CP3bIU"]) assert.equal(isDispositionsWord(w), true, w);
+  for (const w of ["dispositions-note", "dispositions-maybe=fix-pr-346:run-abcd1234", "reviewed=7685c46:3/1/19:run-B7CP3bIU", "Escalation-Answer=x", "tier-ok=impl-1:x"]) {
+    assert.equal(isDispositionsWord(w), false, w);
+  }
+});
+
+test("each Gate verdict names its writer: the verb for a verdict and an answer, review-result for a reviewed=", () => {
+  assert.match(gateVerdictWriter("dispositions-ok=fix-pr-3724-z:run-B7CP3bIU"), /^`ledger\.mjs dispositions fix-pr-3724-z --scratch <scratch>`$/);
+  assert.match(gateVerdictWriter("dispositions-ok=x"), /^`ledger\.mjs dispositions <member> --scratch <scratch>`$/);
+  assert.match(gateVerdictWriter("escalation-answer=run-B7CP3bIU:survived[0]:upheld"), /--uphold '<list>' --send-back '<list>'/);
+  assert.match(gateVerdictWriter("reviewed=7685c46:3/1/19:run-B7CP3bIU"), /fleet-event\.mjs review-result <pr> <path>/);
+});
+
+test("gateVerdictRefusal: the Gate verdicts of the row, in order, must equal the rewrite's, on the row's own PR; a malformed one may be dropped, never added", () => {
+  const [a, b] = VERDICT_WORDS;
+  const rev = "reviewed=7685c46:3/1/19:run-B7CP3bIU";
+  const row = `#1 impl-1=PR#2 · ${rev} · ${a} · ${b} · ci=1:1:success`;
+  // What must be ACCEPTED: any rewrite carrying them as they stand, a new row with none, a row with none.
+  assert.equal(gateVerdictRefusal(row, `${row} · conflict-hold:#2 (conflict: x.mjs)`), null);
+  assert.equal(gateVerdictRefusal(row, row.replace("ci=1:1:success", "tier-ok=impl-1:x")), null);
+  assert.equal(gateVerdictRefusal(null, "#1 impl-1=PR#2 · class=routine"), null);
+  assert.equal(gateVerdictRefusal("#1 impl-1", "#1 impl-1 · class=routine"), null);
+  // A malformed verdict-shaped word on the row may be dropped, or carried; adding one is refused.
+  const legacy = `#5 impl-5=PR#5 · reviewed=abc1234:1/0/0 · dispositions-ok=fix-pr-5:${"a".repeat(40)} · ${rev}`;
+  assert.equal(gateVerdictRefusal(legacy, `#5 impl-5=PR#5 · ${rev}`), null);
+  assert.equal(gateVerdictRefusal(legacy, legacy), null);
+  assert.match(gateVerdictRefusal(row, `${row} · dispositions-ok=x`), /adds 'dispositions-ok=x'/);
+  // A malformed `reviewed=` is refused too; through `row`, addedReviewToken() refuses it first.
+  assert.match(gateVerdictRefusal(row, `${row} · reviewed=zzz`), /adds 'reviewed=zzz', a word shaped like a Gate verdict/);
+  // What must be REFUSED, each naming the token.
+  assert.match(gateVerdictRefusal(row, `${row} · ${VERDICT_WORDS[2]}`), /adds or changes Gate verdict 'dispositions-escalate=fix-pr-3724-b:run-B7CP3bIU'/);
+  assert.match(gateVerdictRefusal(row, row.replace(` · ${a}`, "")), /drops Gate verdict 'dispositions-ok=fix-pr-3724-z:run-B7CP3bIU'/);
+  assert.match(gateVerdictRefusal(row, row.replace(a, VERDICT_WORDS[3])), /adds or changes Gate verdict 'dispositions-unchecked=/);
+  assert.match(gateVerdictRefusal(row, `#1 impl-1=PR#2 · ${b} · ${a} · ${rev}`), /reorders its Gate verdicts/);
+  assert.match(gateVerdictRefusal(row, "#1 2"), /drops Gate verdict/);
+  assert.match(gateVerdictRefusal(null, `#1 ${a}`), /adds or changes Gate verdict/);
+  // A row holding a verdict keeps its PR: remapping its impl outcome, or a
+  // plain row's PR# mention, moves the verdicts to another PR's stream.
+  assert.match(gateVerdictRefusal(row, row.replace("impl-1=PR#2", "impl-1=PR#3")), /moves its Gate verdicts from PR #2 to PR #3/);
+  assert.match(gateVerdictRefusal(`#50 PR#40 note · ${rev}`, `#50 PR#41 note · ${rev}`), /moves its Gate verdicts from PR #40 to PR #41/);
+  // A PR# in an impl row's prose never decides its PR, and a row with no verdict may be remapped.
+  assert.equal(gateVerdictRefusal(row, `${row} · note → PR#9`), null);
+  assert.equal(gateVerdictRefusal("#1 impl-1=PR#2 · class=routine", "#1 impl-1=PR#3 · class=routine"), null);
+});
+
+test("token refuses every dispositions verdict and Escalation answer, parseable or not, in any case of the prefix, naming the verb, and writes nothing", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "ledger-token-verdicts-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = join(dir, "ledger.md");
+  const body = `# Fleet run ledger\n\n## Rows\n\n- #3692 impl-3692=PR#3724 · review=member:review-pr-3724 · ${VERDICT_WORDS[2]} · ci=39722006612:1:success\n\n## Filed\n\n## Ruled\n\n`;
+  writeFileSync(file, body);
+  const script = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
+  const env = { ...process.env, PATH: dir };
+  delete env.GIT_DIR;
+  delete env.GIT_WORK_TREE;
+  for (const tok of [...VERDICT_WORDS, ...SHAPED_BADLY, "Dispositions-OK=fix-pr-3724-z:run-B7CP3bIU"]) {
+    const r = spawnSync(process.execPath, [script, "--file", file, "token", "3724", tok], { encoding: "utf8", env, cwd: dir });
+    assert.equal(r.status, 2, `${tok}: got exit ${r.status}\n${r.stderr}`);
+    assert.match(r.stderr, /ledger\.mjs dispositions /, tok);
+    assert.match(r.stderr, /running that again is how a verdict is restored/, tok);
+    // An answer is told it is taken only against an escalate; a verdict, that it is derived.
+    const answer = tok.startsWith("escalation-answer=");
+    assert.match(r.stderr, answer ? /is an Escalation answer — .*only against an escalate/ : /is a dispositions verdict — .*derives it from the disposition record/, tok);
+    assert.equal(r.stdout, "");
+    assert.equal(readFileSync(file, "utf8"), body, `${tok}: a refusal writes nothing`);
+  }
+  // A word that merely starts `dispositions-` is a freeform token, still written.
+  const note = spawnSync(process.execPath, [script, "--file", file, "token", "3724", "dispositions-note"], { encoding: "utf8", env, cwd: dir });
+  assert.equal(note.status, 0, note.stderr);
 });
 
 test("a ## Dispatched entry's brief= word is parsed off its member token, live or settled, and written back beside it", () => {

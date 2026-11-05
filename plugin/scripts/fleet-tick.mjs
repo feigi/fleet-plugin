@@ -1291,7 +1291,7 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, queued
     // `ledger.mjs dispatch` gates a finisher off this, read from the same
     // per-PR fold as everything above, `ledger.mjs settle --from-report`
     // checks a fix-applier's `no-op` against `fleetHead`, and
-    // dispositions-check.mjs reads the review file it judges against off
+    // `ledger.mjs dispositions` reads the review file it judges against off
     // `run`. Nothing in this tick acts on it.
     reviewed: [...byPr.entries()].filter(([, st]) => st.reviewedHead !== null)
       .map(([n, st]) => ({

@@ -98,6 +98,16 @@ warning that names every
 token the rewrite dropped. `fleet-event.mjs` never calls `row` on an
 existing line.
 
+*Amended (#4211): `dispositions-*=…` is no longer freeform. `token` refuses a
+word beginning `dispositions-ok=`, `dispositions-mismatch=`,
+`dispositions-escalate=` or `dispositions-unchecked=` (any case of the
+prefix) and one beginning `escalation-answer=`, parseable or not; only
+`ledger.mjs dispositions` writes them. `row` carries every Gate verdict —
+those two and a `reviewed=` — exactly as the row holds it: none added,
+changed, dropped or reordered, so the whole-row rewrite D2 keeps for creating
+a row and rewriting one no longer drops a verdict. A verdict-shaped word no
+grammar parses may still be dropped, never added. See ADR 0038.*
+
 **D3. `fleet-tick.mjs --apply`.** Before computing its rows, the tick runs
 the idempotent follow-ups whose trigger it can read off the ledger and its
 own state, and prints one `APPLIED <duty>: <receipt summary>` line each:
@@ -147,7 +157,8 @@ is chosen.
 **D6. Tests.** A fixture ledger drives every `fleet-event.mjs` kind twice
 and asserts the second run writes nothing new; `tests/ledger.test.mjs`
 proves `token` keeps every existing token and refuses each refusal D2 lists,
-and `tests/ledger-grammar.test.mjs` proves it accepts the freeform tokens;
+and `tests/ledger-grammar.test.mjs` proves it accepts the freeform tokens
+and refuses a dispositions verdict and an Escalation answer (see D2's amendment);
 a tick test proves `--apply` reaps exactly once per `merge-bot-<n>=done`,
 and again for a same-numbered bot in a later run, and that without `--apply`
 nothing is executed; a reconcile test with a fixture session directory for

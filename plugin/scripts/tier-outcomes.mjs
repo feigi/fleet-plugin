@@ -788,7 +788,7 @@ function nextStep(pr, state) {
   if (state === "MERGED") {
     return `the PR is merged and its evidence is not there to read — give the verdicts by hand: append ${pr} --closed-own-ticket yes|no --minted-false-claim yes|no --note "<the evidence>"`;
   }
-  return `check the record again (\`dispositions-check.mjs --member fix-pr-${pr} --scratch <scratch>\`), or dispatch the fix-applier again as a dispositions retry (\`--kind dispositions-retry\`), then run append ${pr} again`;
+  return `check the record again (\`ledger.mjs dispositions fix-pr-${pr} --scratch <scratch>\`), or dispatch the fix-applier again as a dispositions retry (\`--kind dispositions-retry\`), then run append ${pr} again`;
 }
 
 // The PR's state as GitHub gives it: OPEN, CLOSED (never merged) or MERGED.
