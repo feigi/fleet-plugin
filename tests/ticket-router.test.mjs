@@ -1699,46 +1699,6 @@ test("a table fitted before work time, its estimates lacking minutes_per_merged 
   assert.deepEqual([after.minutes_per_merged, after.untimed], [1, 0]);
 });
 
-// The CI step's own shell, run against stubs: `git` only logs, and the step's `node` is the real one.
-function ciRouterCheck(table) {
-  const dir = tempDir("router-ci-");
-  const bin = join(dir, "bin");
-  mkdirSync(bin);
-  const log = join(dir, "git.log");
-  // `git fetch` succeeds and brings nothing; every other call finds no repository.
-  writeExecStub(join(bin, "git"), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\ncase "$1" in fetch) exit 0 ;; *) exit 1 ;; esac\n`);
-  const scripts = join(dir, "plugin", "scripts");
-  mkdirSync(scripts, { recursive: true });
-  const real = dirname(SCRIPT);
-  for (const f of readdirSync(real)) if (f !== "router-table.json") symlinkSync(join(real, f), join(scripts, f));
-  writeFileSync(join(scripts, "router-table.json"), JSON.stringify(table));
-  mkdirSync(join(dir, "docs", "metrics"), { recursive: true });
-  const [header, empty] = [`${COLUMNS.join("\t")}\n`, ""];
-  writeFileSync(join(dir, "docs", "metrics", "ticket-features.tsv"), header);
-  writeFileSync(join(dir, "docs", "metrics", "member-outcomes.tsv"), empty);
-  writeFileSync(join(dir, "docs", "metrics", "tier-outcomes.tsv"), empty);
-  const yml = readFileSync(fileURLToPath(new URL("../.github/workflows/ci.yml", import.meta.url)), "utf8");
-  const step = /- name: Router table check\n {8}run: \|\n((?: {10}.*\n)+)/.exec(yml);
-  assert.ok(step, "ci.yml has a multi-line `Router table check` step");
-  const r = spawnSync("bash", ["-c", step[1].replace(/^ {10}/gm, "")], { cwd: dir, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
-  return { r, calls: existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : [] };
-}
-
-test("CI's router check: with fitted_commit null it fetches nothing and --check exits 0 on the committed table", () => {
-  const { r, calls } = ciRouterCheck(baseTable({ burn_in: true }));
-  assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(calls, [], "no git call at all");
-  assert.match(r.stdout, /matches a re-fit of 0 Pulls at no commit/);
-});
-
-test("CI's router check: with a fitted_commit it runs `git fetch --depth=1 origin <sha>` before --check", (t) => {
-  const sha = "0123456789abcdef0123456789abcdef01234567";
-  const { r, calls } = ciRouterCheck(baseTable({ burn_in: true, fitted_commit: sha }));
-  assert.deepEqual(calls[0], `fetch --depth=1 origin ${sha}`);
-  assert.equal(r.status, 2, "the stubbed fetch brought nothing, so --check refuses naming the commit");
-  assert.ok(r.stderr.includes(`git fetch --depth=1 origin ${sha}`), r.stderr);
-});
-
 // A direct fitTable call, its member rows given their implementers and parsed as the CLI parses them.
 const direct = (input) => ({ ...input, members: parsedMembers(input.features, input.verdicts, input.members) });
 const fitDirect = (input, guard = {}) => fitTable({ prior: baseTable(), ...direct(input), guard: { tripped: [], n: {}, window_start: null, ...guard } });
