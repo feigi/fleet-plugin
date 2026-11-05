@@ -87,8 +87,8 @@ test("two reviews of one PR at one head leave two files, two paths and two ledge
   const dir = scratch();
   const first = resultIn(dir, "run-Ab12Cd34");
   const second = { ...resultIn(dir, "run-Zz98Yy76"), counts: { survived: 0, refuted: 3, unverified: 0, crashed: 0 } };
-  const a = await runReviewToFile({ pr: 7, scratch: dir, worktree: "/wt" }, scriptedRun([first]).run);
-  const b = await runReviewToFile({ pr: 7, scratch: dir, worktree: "/wt" }, scriptedRun([second]).run);
+  const a = await runReviewToFile({ pr: 7, scratch: dir, worktree: "/wt", testCmd: "node --test" }, scriptedRun([first]).run);
+  const b = await runReviewToFile({ pr: 7, scratch: dir, worktree: "/wt", testCmd: "node --test" }, scriptedRun([second]).run);
   assert.notEqual(a.path, b.path);
   assert.notEqual(a.ledger, b.ledger);
   assert.equal(b.ledger, "reviewed=abc123:0/3/0:run-Zz98Yy76");
@@ -100,7 +100,7 @@ test("a scratch passed with a trailing slash still finds the run root the review
   const dir = scratch();
   // review-core.mjs builds the run root by string, `${scratch}/pr<N>/run-…`.
   const result = { ...resultIn(dir), snapshot: `${dir}//pr7/run-Ab12Cd34/snapshot-abc123` };
-  const out = await runReviewToFile({ pr: 7, scratch: `${dir}/`, worktree: "/wt" }, scriptedRun([result]).run);
+  const out = await runReviewToFile({ pr: 7, scratch: `${dir}/`, worktree: "/wt", testCmd: "node --test" }, scriptedRun([result]).run);
   assert.equal(out.status, "completed", out.errors.join("\n"));
   assert.equal(out.path, join(dir, "pr7", "run-Ab12Cd34", "review.json"));
   assert.equal(out.ledger, "reviewed=abc123:1/2/3:run-Ab12Cd34");
@@ -112,7 +112,7 @@ test("a review file already at the run root is never replaced: the attempt fails
   mkdirSync(taken, { recursive: true });
   writeFileSync(join(taken, "review.json"), "round one\n");
   const { run, calls } = scriptedRun([resultIn(dir, "run-Ab12Cd34"), resultIn(dir, "run-Qq11Ww22")]);
-  const out = await runReviewToFile({ pr: 7, scratch: dir, worktree: "/wt" }, run);
+  const out = await runReviewToFile({ pr: 7, scratch: dir, worktree: "/wt", testCmd: "node --test" }, run);
   assert.equal(calls.length, 2);
   assert.equal(out.status, "completed");
   assert.match(out.errors[0], /EEXIST/);
@@ -127,7 +127,7 @@ test("a write fault other than a taken file throws and does not re-run the revie
   const dir = scratch();
   writeFileSync(join(dir, "pr7"), "not a directory\n");
   const { run, calls } = scriptedRun([resultIn(dir), resultIn(dir)]);
-  await assert.rejects(runReviewToFile({ pr: 7, scratch: dir, worktree: "/wt" }, run), (e) => e.code !== "EEXIST" && typeof e.code === "string");
+  await assert.rejects(runReviewToFile({ pr: 7, scratch: dir, worktree: "/wt", testCmd: "node --test" }, run), (e) => e.code !== "EEXIST" && typeof e.code === "string");
   assert.equal(calls.length, 1, "a second full review was bought for a fault it would hit again");
 });
 
@@ -147,7 +147,7 @@ test("a write that fails partway throws and removes the truncated file", { skip:
       survived: [{ claim: "x".repeat(200000) }], refuted: [], unverified: [],
     };
     try {
-      const out = await runReviewToFile({ pr: 7, scratch: dir, worktree: "/wt" }, async () => result);
+      const out = await runReviewToFile({ pr: 7, scratch: dir, worktree: "/wt", testCmd: "node --test" }, async () => result);
       console.log(JSON.stringify({ status: out.status }));
     } catch (e) {
       console.log(JSON.stringify({ threw: e.code }));
@@ -170,7 +170,7 @@ test("a review run for another PR number lands in that PR's run root", async () 
   const dir = scratch();
   const result = { ...resultIn(dir), pr: 42, snapshot: join(dir, "pr42", "run-Ab12Cd34", "snapshot-abc123") };
   const { run, calls } = scriptedRun([result]);
-  const out = await runReviewToFile({ pr: 42, scratch: dir, worktree: "/wt" }, run);
+  const out = await runReviewToFile({ pr: 42, scratch: dir, worktree: "/wt", testCmd: "node --test" }, run);
   assert.equal(calls.length, 1);
   assert.equal(out.status, "completed", out.errors.join("\n"));
   assert.equal(out.path, join(dir, "pr42", "run-Ab12Cd34", "review.json"));
@@ -194,7 +194,7 @@ test("a result whose snapshot is not in a run root of this PR under this scratch
     const dir = scratch();
     const bad = make(dir);
     const { run, calls } = scriptedRun([bad, resultIn(dir)]);
-    const out = await runReviewToFile({ pr: 7, scratch: dir, worktree: "/wt" }, run);
+    const out = await runReviewToFile({ pr: 7, scratch: dir, worktree: "/wt", testCmd: "node --test" }, run);
     assert.equal(calls.length, 2, `${bad.snapshot}: not retried`);
     assert.equal(out.status, "completed");
     assert.match(out.errors[0], /run root/, String(bad.snapshot));
@@ -213,7 +213,7 @@ test("the args reach the review unchanged — the runner adds and drops nothing"
 test("a thrown first run is retried once, and the second run's result is the one written", async () => {
   const dir = scratch();
   const { run, calls } = scriptedRun([new Error("snapshot agent returned no tree"), resultIn(dir)]);
-  const out = await runReviewToFile({ pr: 7, scratch: dir, worktree: "/wt" }, run);
+  const out = await runReviewToFile({ pr: 7, scratch: dir, worktree: "/wt", testCmd: "node --test" }, run);
   assert.equal(calls.length, 2);
   assert.equal(out.status, "completed");
   assert.equal(out.attempts, 2);
@@ -224,7 +224,7 @@ test("a thrown first run is retried once, and the second run's result is the one
 test("an empty return is a failure too, and is retried", async () => {
   const dir = scratch();
   const { run, calls } = scriptedRun([undefined, resultIn(dir)]);
-  const out = await runReviewToFile({ pr: 7, scratch: dir, worktree: "/wt" }, run);
+  const out = await runReviewToFile({ pr: 7, scratch: dir, worktree: "/wt", testCmd: "node --test" }, run);
   assert.equal(calls.length, 2);
   assert.equal(out.status, "completed");
   assert.match(out.errors[0], /empty/);
@@ -240,7 +240,7 @@ test("a result missing .counts is a failure too, retried, and leaves no half-wri
   const dir = scratch();
   const malformed = { pr: 7, head: "abc123", snapshot: join(dir, "pr7", "run-Mm00Nn11", "snapshot-abc123"), survived: [], refuted: [], unverified: [] };
   const { run, calls } = scriptedRun([malformed, resultIn(dir)]);
-  const out = await runReviewToFile({ pr: 7, scratch: dir, worktree: "/wt" }, run);
+  const out = await runReviewToFile({ pr: 7, scratch: dir, worktree: "/wt", testCmd: "node --test" }, run);
   assert.equal(calls.length, 2, "the malformed attempt was retried, not thrown past");
   assert.equal(out.status, "completed");
   assert.match(out.errors[0], /empty/);
@@ -252,7 +252,7 @@ test("two malformed results in a row report failed and write no file", async () 
   const dir = scratch();
   const malformed = { pr: 7, head: "abc123", snapshot: join(dir, "pr7", "run-Mm00Nn11", "snapshot-abc123"), survived: [], refuted: [], unverified: [] };
   const { run, calls } = scriptedRun([malformed, malformed]);
-  const out = await runReviewToFile({ pr: 7, scratch: dir, worktree: "/wt" }, run);
+  const out = await runReviewToFile({ pr: 7, scratch: dir, worktree: "/wt", testCmd: "node --test" }, run);
   assert.equal(calls.length, 2);
   assert.equal(out.status, "failed");
   assert.deepEqual(filesUnder(dir), [], "a malformed result left a partial file behind");
@@ -261,7 +261,7 @@ test("two malformed results in a row report failed and write no file", async () 
 test("a second failure reports failed with BOTH errors and writes no file", async () => {
   const dir = scratch();
   const { run, calls } = scriptedRun([new Error("first: spend limit"), null]);
-  const out = await runReviewToFile({ pr: 7, scratch: dir, worktree: "/wt" }, run);
+  const out = await runReviewToFile({ pr: 7, scratch: dir, worktree: "/wt", testCmd: "node --test" }, run);
   assert.equal(calls.length, 2, "the retry is ONE re-run, not a loop");
   assert.equal(out.status, "failed");
   assert.equal(out.errors.length, 2);
@@ -274,7 +274,7 @@ test("a second failure reports failed with BOTH errors and writes no file", asyn
 test("a scratch that is missing or relative is refused before any review runs", async () => {
   for (const bad of [undefined, "", "scratch/fleet", "./x"]) {
     const { run, calls } = scriptedRun([RESULT]);
-    await assert.rejects(runReviewToFile({ pr: 7, scratch: bad, worktree: "/wt" }, run), /args\.scratch must be an absolute path/, JSON.stringify(bad));
+    await assert.rejects(runReviewToFile({ pr: 7, scratch: bad, worktree: "/wt", testCmd: "node --test" }, run), /args\.scratch must be an absolute path/, JSON.stringify(bad));
     assert.equal(calls.length, 0, `${JSON.stringify(bad)}: a review ran for a dispatch whose result file could land in the kernel's cwd`);
   }
 });
@@ -285,7 +285,7 @@ test("a scratch that is missing or relative is refused before any review runs", 
 test("a scratch already ending in pr<N> is refused before any review runs, not retried", async () => {
   for (const bad of ["/x/pr7", "/x/pr7/", "/x/pr42"]) {
     const { run, calls } = scriptedRun([RESULT]);
-    await assert.rejects(runReviewToFile({ pr: 7, scratch: bad, worktree: "/wt" }, run), /pass the scratch root/, bad);
+    await assert.rejects(runReviewToFile({ pr: 7, scratch: bad, worktree: "/wt", testCmd: "node --test" }, run), /pass the scratch root/, bad);
     assert.equal(calls.length, 0, `${bad}: a partitioned scratch reached the review`);
   }
 });
@@ -293,7 +293,54 @@ test("a scratch already ending in pr<N> is refused before any review runs, not r
 test("a pr that is not a PR number is refused before any review runs", async () => {
   for (const bad of [undefined, "my-branch", "7/../../x", -7]) {
     const { run, calls } = scriptedRun([RESULT]);
-    await assert.rejects(runReviewToFile({ pr: bad, scratch: scratch(), worktree: "/wt" }, run), /args\.pr must be a PR number/, JSON.stringify(bad));
+    await assert.rejects(runReviewToFile({ pr: bad, scratch: scratch(), worktree: "/wt", testCmd: "node --test" }, run), /args\.pr must be a PR number/, JSON.stringify(bad));
     assert.equal(calls.length, 0);
   }
+});
+
+// A review that cannot start — its Test entrypoint or worktree missing — is a
+// dispatch mistake like the two above: `runReview` refuses it too, but inside
+// `run`, where the retry loop would read it as an attempt failure and run it
+// a second time.
+test("a testCmd that is missing, empty or blank is refused before any review runs, not retried", async () => {
+  for (const bad of [undefined, "", "   ", "\t\n", null, 7]) {
+    const { run, calls } = scriptedRun([RESULT]);
+    const args = { pr: 7, scratch: scratch(), worktree: "/wt" };
+    if (bad !== undefined) args.testCmd = bad;
+    await assert.rejects(runReviewToFile(args, run), /^Error: review-runner: args\.testCmd is required.*got /, JSON.stringify(bad));
+    assert.equal(calls.length, 0, `${JSON.stringify(bad)}: a review ran for a dispatch with no Test entrypoint`);
+  }
+});
+
+test("a testCmd refusal names the value it received", async () => {
+  await assert.rejects(runReviewToFile({ pr: 7, scratch: scratch(), worktree: "/wt", testCmd: "  " }, scriptedRun([RESULT]).run), /got "  "/);
+});
+
+test("a worktree that is missing or empty is refused before any review runs, not retried", async () => {
+  for (const bad of [undefined, "", null]) {
+    const { run, calls } = scriptedRun([RESULT]);
+    const args = { pr: 7, scratch: scratch(), testCmd: "node --test" };
+    if (bad !== undefined) args.worktree = bad;
+    await assert.rejects(runReviewToFile(args, run), /^Error: review-runner: args\.worktree is required.*got /, JSON.stringify(bad));
+    assert.equal(calls.length, 0, `${JSON.stringify(bad)}: a review ran for a dispatch with no worktree`);
+  }
+});
+
+// What the new refusals must still ACCEPT: a branch is not one of them, and a
+// testCmd with surrounding whitespace is a command.
+test("a missing branch and a padded testCmd still run the review", async () => {
+  const dir = scratch();
+  const { run, calls } = scriptedRun([resultIn(dir)]);
+  const out = await runReviewToFile({ pr: 7, scratch: dir, worktree: "/wt", testCmd: " node --test " }, run);
+  assert.equal(calls.length, 1);
+  assert.equal(out.status, "completed");
+});
+
+test("a genuine thrown or empty review result is still retried once with valid args", async () => {
+  const dir = scratch();
+  const { run, calls } = scriptedRun([new Error("snapshot agent returned no tree"), undefined]);
+  const out = await runReviewToFile({ pr: 7, scratch: dir, worktree: "/wt", testCmd: "node --test" }, run);
+  assert.equal(calls.length, 2);
+  assert.equal(out.status, "failed");
+  assert.equal(out.errors.length, 2);
 });

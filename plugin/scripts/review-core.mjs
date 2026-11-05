@@ -937,6 +937,17 @@ export function runnerScratchRefusal(scratch) {
   return `args.scratch ${JSON.stringify(scratch)} already ends in a pr<N> directory — pass the scratch root; the review creates <root>/pr<N>/ itself`;
 }
 
+// The Test entrypoint refusal `runReview` and review-eval.mjs's
+// `runReviewToFile` share, for the reason the two rules above are: the review
+// refuses a `testCmd` that is not a non-empty string — blank or whitespace-only
+// counts as empty — and only the runner's refusal, before its first attempt,
+// keeps that dispatch mistake from being retried. Null when `testCmd` is a
+// command.
+export function runnerTestCmdRefusal(testCmd) {
+  if (typeof testCmd === "string" && testCmd.trim() !== "") return null;
+  return `args.testCmd is required — the Test entrypoint the shared run executes, got ${JSON.stringify(testCmd)}`;
+}
+
 // --- Orchestration ----------------------------------------------------
 // `host` supplies `agent(prompt, opts)` (must resolve to PARSED DATA — a
 // rejection or an unresolvable dispatch must resolve to `null`, the
@@ -1092,9 +1103,8 @@ async function reviewRun(host, args, run) {
   // other argument refusals, so a review that could never run its suite costs
   // no snapshot.
   const testCmd = A.testCmd;
-  if (typeof testCmd !== "string" || testCmd.trim() === "") {
-    throw new Error(`review-pr: args.testCmd is required — the Test entrypoint the shared run executes, got ${JSON.stringify(testCmd)}`);
-  }
+  const testCmdRefusal = runnerTestCmdRefusal(testCmd);
+  if (testCmdRefusal) throw new Error(`review-pr: ${testCmdRefusal}`);
 
   // Resolved only now: the default spawns git, so a missing or malformed `pr`
   // is refused on its own terms before anything is resolved or spawned.
