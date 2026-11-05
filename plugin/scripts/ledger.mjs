@@ -2002,11 +2002,12 @@ function dispositionsRefusal(pr, review) {
 // finisher waits, or is null when it does not: the PR is an implementer's and
 // the main checkout's tier-outcomes.tsv has no row whose `pr` is it. Any row
 // passes, whatever its date or verdicts, so a replacement finisher is never
-// held once the first passed; the row's verdicts are read by nothing here.
+// held once the first passed: no verdict decides the gate.
 // The ledger lives in the main checkout's `.fleet/` (fleet-dir.mjs), so the
 // file is found beside that directory — no git, no gh. A missing file is no
-// row (`append` creates it); one that cannot be read or parsed refuses,
-// naming it, and is never a pass.
+// row (`append` creates it); one that cannot be read or parsed — a row with a
+// malformed verdict cell included, which parseTierOutcomes() throws on —
+// refuses, naming it, and is never a pass.
 // tier-outcomes.mjs is imported here, not at the top: its import graph is
 // several modules no other subcommand loads.
 async function rulingOf(pr) {
@@ -2179,7 +2180,7 @@ function checkReaders(where) {
 // closes, its own suggestion-band record aside — that one is a failure here,
 // not a ticket — and one line per failure. A read the checks need dies,
 // naming the read, and writes nothing.
-async function closingRefusals(member, { tickets }) {
+async function closingRefusals(member, tickets) {
   const pr = member.number;
   const where = `dispatch ${member.name}`;
   const { recordTitle } = await import("./dispositions-check.mjs");
@@ -2449,12 +2450,11 @@ async function runDispatch() {
   // waits on its ruling, its tier-outcomes row, written while the PR is open
   // and its review evidence still in scratch; see rulingOf(). Last, the
   // PR must close its own tickets, whatever its ruling, and no closing
-  // reference may be its own
-  // suggestion-band record or a ticket another claim holds, and the PR must
-  // carry no `ready-to-merge` and exactly one release label, all read off gh
-  // from the ledger's repository; see closingRefusals() and
-  // labelRefusal(). Refused here, before anything is written, so no
-  // check can be skipped by forgetting to run it.
+  // reference may be its own suggestion-band record or a ticket another
+  // claim holds, and the PR must carry no `ready-to-merge` and exactly one
+  // release label, all read off gh from the ledger's repository; see
+  // closingRefusals() and labelRefusal(). Refused here, before anything is
+  // written, so no check can be skipped by forgetting to run it.
   if (member.family === "finisher-pr") {
     const fold = tickFold("conflict hold and dispositions verdict");
     if (fold.conflictHeld.includes(member.number)) {
@@ -2466,7 +2466,7 @@ async function runDispatch() {
     if (disposed !== null) die(`${member.name}: ${disposed} — not dispatching ${member.name}`);
     const ruled = await rulingOf(member.number);
     if (ruled.refusal !== null) die(`${member.name}: ${ruled.refusal} — not dispatching ${member.name}`);
-    const closing = await closingRefusals(member, ruled);
+    const closing = await closingRefusals(member, ruled.tickets);
     const labelFailure = labelRefusal(member, ruled.tickets, closing.refs);
     const failures = labelFailure === null ? closing.failures : [...closing.failures, labelFailure];
     if (failures.length > 0) die(`${member.name}: ${failures.join("; ")} — not dispatching ${member.name}`);

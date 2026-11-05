@@ -1572,16 +1572,6 @@ test("implementer, fix-applier and merge-bot dispatches are not gated on a rulin
 // be the suggestion-band record of the PR's own review. A read that cannot
 // answer dies, naming the read.
 
-test("a PR is refused while its body does not close its ticket, and recorded once it does", (t) => {
-  const f = fixture(t);
-  f.put("3545", RULED_ROW);
-  f.rule(3606, "3545");
-  f.refused(["dispatch", "3606", "finisher-pr-3606"], /finisher-pr-3606: PR #3606 does not close #3545, its own ticket — add "Closes #3545" to its body/);
-  assert.deepEqual(f.read().dispatched, []);
-  closes(f.bin, 3606, [3545]);
-  assert.equal(f.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher");
-});
-
 test("an ordinary issue among a PR's closing references does not refuse it", (t) => {
   const f = fixture(t);
   f.put("3545", RULED_ROW);
@@ -1709,6 +1699,15 @@ test("an inherited PR headed by a claim branch is refused while its body does no
   f.put("3606", INHERITED_ROW);
   closes(f.bin, 3606, [], "feature/topic");
   assert.equal(f.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher");
+});
+
+test("a ticket that both a settled token and the PR's claim branch name is one own ticket: the body not closing it is one failure line, not two", (t) => {
+  const f = fixture(t);
+  f.put("3545", RULED_ROW);
+  f.rule(3606, "3545");
+  closes(f.bin, 3606, [], "implementer/3545-impl-3545");
+  f.refused(["dispatch", "3606", "finisher-pr-3606"], /finisher-pr-3606: PR #3606 does not close #3545, its own ticket — add "Closes #3545" to its body \(gh pr edit 3606 --body-file …\) — not dispatching finisher-pr-3606/);
+  assert.deepEqual(f.read().dispatched, []);
 });
 
 test("an inherited PR headed by a claim branch is still refused for another claim's ticket, and only for that one", (t) => {
