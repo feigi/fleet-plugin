@@ -385,14 +385,14 @@ absent; `carries` null: the read could not be told, and `error` says why). A
 commit that undoes something the pin carries reads clean by content (`paths`
 empty) and only its `+` line catches it, so a `+` beside empty `paths` is not
 by itself safe to discard. A pushed stray is a head no reviewer read: record
-its review by hand with `ledger.mjs review <M>`, under the next runner letter
+its review launch by hand with `ledger.mjs review <M>`, under the next runner letter
 as for a `past-pin` re-review below, before any finisher is dispatched.
 
 A `human` halt is a Ticketless PR whose diff is not inert: the maintainer adds
 `ready-to-merge` at the pinned head, which the merge bot merges off the
 finisher's `ready-to-merge-head:` comment; a moved head is merged by hand.
 
-The tick prints `DISPATCH review PR#<M>` for a PR whose latest finisher is `halted:past-pin` and whose latest `reviewed=<head>` is not its current head, until a review of it is running or has returned; record that review's tokens as any review's, with `ledger.mjs review <M>` onto the PR's row, its runner under the next letter the PR's rows do not carry yet (`review-pr-<M>-b`, or `-c` where a retry already took `-b`) — `review` refuses a second `review-pr-<M>` and names the free one — and its result reaches a fresh finisher through the same gate.
+The tick prints `DISPATCH review PR#<M>` for a PR whose latest finisher is `halted:past-pin` and whose latest `reviewed=<head>` is not its current head, until a review of it is running or has returned; record that review's launch as any review's, with `ledger.mjs review <M>` onto the PR's row, its runner under the next letter the PR's rows do not carry yet (`review-pr-<M>-b`, or `-c` where a retry already took `-b`) — `review` refuses a second `review-pr-<M>` and names the free one — and its result, recorded by the `review-result` wake, reaches a fresh finisher through the same gate.
 
 A halt at duty 1 reads identical from a bare SHA mismatch whatever caused it,
 and the causes `finisher-audit.mjs` names are the ones seen so far, not a

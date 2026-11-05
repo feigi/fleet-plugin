@@ -20,7 +20,7 @@ Three facts made that open. `token` took `dispositions-*=…` and `escalation-an
 2. `dispositions-check.mjs` keeps only its standalone mode (`--no-ledger --review <path>`, or no ledger present). A ledger at the default path without `--no-ledger`, and any `--ledger`, `--uphold` or `--send-back`, exit 2 naming the verb.
 3. `token` refuses any word beginning `dispositions-ok=`, `-mismatch=`, `-escalate=`, `-unchecked=` (any case) or `escalation-answer=`, parseable or not.
 4. `row` carries Gate verdicts exactly: those in the row, in row order, must equal the rewrite's. A verdict-shaped word no grammar parses may be dropped, never added, so the tick's repair of a runless `reviewed=` and the cleanup of legacy head-named verdicts still work.
-5. `review` writes `reviewed=` only from a result file (#4359). **Open** until that lands: `ledger.mjs review` still takes a `reviewed=` token as an argument.
+5. `ledger.mjs review <pr> --result <path>` is the only writer of `reviewed=` (#4359). It derives the token from the review result file, which must be `<scratch>/pr<pr>/<run>/<file>` with a run-root `<run>` and no `..` segment, whose `pr` is the PR's, and whose `head` and `counts` make a token the grammar parses; a token the PR's rows already carry is skipped. A `reviewed=` word among its arguments is refused, parseable or not. Review launch tokens stay arguments, and may come in the same call.
 
 **No override flag.** Running the writer again is the only restore path. **Writer side only:** the tick's `currentDispositions` and the finisher gate read verdicts as before, with no check against `## Dispatched`; `fix-report`'s skip, taken when the member's own verdict is already on the PR's rows, stays, since a self-named verdict can now come only from the verb.
 

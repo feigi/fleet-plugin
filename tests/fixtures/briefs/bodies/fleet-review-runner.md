@@ -60,11 +60,9 @@ retries it under the next letter.
    the file, for the fix-applier, and the controller reads only the digest.
    - `status: "completed"` → first line `<your name>: completed <path>` — the
      member name you were dispatched as, `review-pr-<pr>` or a later letter —
-     then the returned `path`, `ledger`, `attempts`, `errors` and `digest`,
-     verbatim, as JSON. `ledger` is the `reviewed=` token the controller
-     records on the PR's row with `ledger.mjs review <pr>`; you write no
-     ledger token yourself. `errors` is non-empty when the first attempt failed
-     and the retry completed — report it anyway.
+     then the returned `path`, `attempts`, `errors` and `digest`, verbatim, as
+     JSON; you write no ledger token yourself. `errors` is non-empty when the
+     first attempt failed and the retry completed — report it anyway.
    - `status: "failed"` → first line `<your name>: failed`, then both
      `errors` verbatim. Do not run the cell again — the one retry already
      happened inside it.

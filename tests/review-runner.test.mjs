@@ -82,19 +82,18 @@ test("a completed review writes the whole result to <run root>/review.json and r
   for (const bulk of ["snapshot", "survived", "refuted", "unverified"]) {
     assert.equal(bulk in out.digest, false, `the report carries ${bulk} — findings must reach the fix-applier through the file, not the controller`);
   }
-  assert.equal(out.ledger, "reviewed=abc123:1/2/3:run-Ab12Cd34", "the ledger token is not reviewed=<head>:<survived>/<refuted>/<unverified>:<run>");
+  assert.equal("ledger" in out, false, "the report carries a reviewed= token — a reviewed= is derived from the result file by `ledger.mjs review --result`, never passed on");
   assert.equal(out.attempts, 1);
 });
 
-test("two reviews of one PR at one head leave two files, two paths and two ledger tokens", async () => {
+test("two reviews of one PR at one head leave two files and two paths", async () => {
   const dir = scratch();
   const first = resultIn(dir, "run-Ab12Cd34");
   const second = { ...resultIn(dir, "run-Zz98Yy76"), counts: { survived: 0, refuted: 3, unverified: 0, crashed: 0 } };
   const a = await runReviewToFile({ pr: 7, scratch: dir, ...VALID }, scriptedRun([first]).run);
   const b = await runReviewToFile({ pr: 7, scratch: dir, ...VALID }, scriptedRun([second]).run);
   assert.notEqual(a.path, b.path);
-  assert.notEqual(a.ledger, b.ledger);
-  assert.equal(b.ledger, "reviewed=abc123:0/3/0:run-Zz98Yy76");
+  assert.equal("ledger" in a || "ledger" in b, false);
   assert.deepEqual(JSON.parse(readFileSync(a.path, "utf8")), first, "the second review replaced the first one's findings");
   assert.deepEqual(JSON.parse(readFileSync(b.path, "utf8")), second);
 });
@@ -106,7 +105,7 @@ test("a scratch passed with a trailing slash still finds the run root the review
   const out = await runReviewToFile({ pr: 7, scratch: `${dir}/`, ...VALID }, scriptedRun([result]).run);
   assert.equal(out.status, "completed", out.errors.join("\n"));
   assert.equal(out.path, join(dir, "pr7", "run-Ab12Cd34", "review.json"));
-  assert.equal(out.ledger, "reviewed=abc123:1/2/3:run-Ab12Cd34");
+  assert.equal("ledger" in out, false);
 });
 
 test("a review file already at the run root is never replaced: the attempt fails and is retried", async () => {

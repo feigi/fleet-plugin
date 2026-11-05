@@ -22,6 +22,7 @@ import { rendering, renderBrief } from "./support/rendered-brief.mjs";
 import { writeQueueGh, closes, titled, failsOn, ghCalls, ref, prUrl, labelled, defines, issueLabelled } from "./support/queue-gh.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { identityRoles } from "./support/label-map-seed.mjs";
+import { viaResult } from "./support/review-result.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
 
@@ -62,7 +63,7 @@ function fixture(t, body = null) {
   // ledger, as a controller's does; `bare` renders nothing, for the tests of
   // that gate.
   const bare = (...args) => {
-    const r = spawnSync(process.execPath, [SCRIPT, "--file", file, ...args], { encoding: "utf8", env, cwd: dir });
+    const r = spawnSync(process.execPath, [SCRIPT, "--file", file, ...viaResult(join(dir, "scratch"), args)], { encoding: "utf8", env, cwd: dir });
     return { ...r, json: r.status === 0 ? JSON.parse(r.stdout) : null };
   };
   const cli = rendering(dir, bare);

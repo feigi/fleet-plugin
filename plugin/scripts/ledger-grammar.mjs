@@ -15,9 +15,9 @@
 // claimed as a member here; everything else a row carries (`class=routine`,
 // `ports=`, `ci=`, `conflict-hold:#<pr>`, the
 // `review=`/`reviewed=` pair, the `→ PR#M` arrow) is not a member. The
-// review pair has a grammar of its own below, REVIEW and REVIEWED, which
-// `ledger.mjs review` writes and `ledger.mjs row` checks a write against
-// before it lands.
+// review pair has a grammar of its own below, REVIEW and REVIEWED. A launch is
+// written by `ledger.mjs review`, a result by `ledger.mjs review --result`,
+// and `ledger.mjs row` checks a write against it before it lands.
 
 import { createHash } from "node:crypto";
 
@@ -427,7 +427,8 @@ export function nextReviewerName(rows, pr, retired = []) {
 const OPEN_WAYS_OUT = "wait for its reviewed=, or, once Member-killed confirms its runner dead, settle it =failed in the same `ledger.mjs review` call as the new launch";
 
 /** Whether a word of a row is a review token — `review=…` or `reviewed=…`,
- * parseable or not. `ledger.mjs review` writes these and nothing else. */
+ * parseable or not. `ledger.mjs review` writes these and nothing else: a
+ * launch from its arguments, a `reviewed=` only from a result file. */
 export const isReviewToken = (word) => word.startsWith("review=") || word.startsWith("reviewed=");
 
 /**
@@ -446,8 +447,9 @@ export function addedReviewToken(oldLine, line) {
 // an answer are written only by `ledger.mjs dispositions`, which derives them
 // from their evidence; the one input an argument supplies there is the
 // maintainer's answer to an escalate, as `--uphold`/`--send-back` flags. A
-// `reviewed=` is written by `ledger.mjs review`, off `fleet-event.mjs
-// review-result`.
+// `reviewed=` is written by `ledger.mjs review <pr> --result <path>`, which
+// derives it from the review result file; `fleet-event.mjs review-result`
+// calls it.
 
 /** Whether `word` begins like a dispositions verdict or an Escalation answer,
  * parseable or not: the words `ledger.mjs token` refuses. The dispositions

@@ -20,13 +20,14 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { rowWriteRefusal } from "../plugin/scripts/ledger-grammar.mjs";
 import { deriveRun } from "../plugin/scripts/fleet-tick.mjs";
 import { rendering } from "./support/rendered-brief.mjs";
 import { writeQueueGh, closes } from "./support/queue-gh.mjs";
 import { seedLabelMap } from "./support/label-map-seed.mjs";
+import { viaResult } from "./support/review-result.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
 
@@ -54,16 +55,21 @@ function fixture(t, rows = null, { gh = false } = {}) {
   const env = { ...process.env, PATH: bin };
   delete env.GIT_DIR;
   delete env.GIT_WORK_TREE;
-  const cli = rendering(dir, (...args) => spawnSync(process.execPath, [SCRIPT, "--file", file, ...args], { encoding: "utf8", env, cwd: dir }));
+  const scratch = join(root, "scratch");
+  const spawn = (args) => spawnSync(process.execPath, [SCRIPT, "--file", file, ...args], { encoding: "utf8", env, cwd: dir });
+  // `cli` hands a `reviewed=` word to the verb as the result file it names;
+  // `raw` is the call exactly as typed.
+  const raw = rendering(dir, (...args) => spawn(args));
+  const cli = rendering(dir, (...args) => spawn(viaResult(scratch, args)));
   const bytes = () => (existsSync(file) ? readFileSync(file, "utf8") : null);
   const run = (...args) => {
     const r = cli(...args);
     assert.equal(r.status, 0, `${args.join(" ")}: got exit ${r.status}\n${r.stderr}`);
     return JSON.parse(r.stdout);
   };
-  const refusedCall = (args, whys) => {
+  const refusedCall = (args, whys, caller = cli) => {
     const before = bytes();
-    const r = cli(...args);
+    const r = caller(...args);
     assert.equal(r.status, 2, `${args.join(" ")}: got exit ${r.status}\n${r.stderr}`);
     for (const why of whys) assert.match(r.stderr, why, `${args.join(" ")}: stderr was ${r.stderr}`);
     assert.equal(r.stdout, "", "a refusal must not also emit a payload");
@@ -80,7 +86,7 @@ function fixture(t, rows = null, { gh = false } = {}) {
     mkdirSync(join(root, "docs", "metrics"), { recursive: true });
     writeFileSync(join(root, "docs", "metrics", "tier-outcomes.tsv"), `2026-10-21\t${pr}\t1\troutine\tslow-high\tyes\tno\truled\n`);
   };
-  return { run, ok, refused, review, reviewRefused, refusedCall, read, rows: () => read().rows, file, rule, bin };
+  return { run, cli, raw, ok, refused, review, reviewRefused, refusedCall, read, rows: () => read().rows, file, rule, bin, scratch };
 }
 
 const A = "review=member:review-pr-482";
@@ -104,7 +110,7 @@ test("review appends each token to the ticket row that maps the PR, in write ord
 
 test("review on a PR no row maps creates its #M row, and the next call lands there", (t) => {
   const { review, rows } = fixture(t);
-  assert.deepEqual(review("482", A, r1), { pr: 482, row: "#482", line: `#482 ${A} · ${r1}`, created: true, next: "review-pr-482-b" });
+  assert.deepEqual(review("482", A, r1), { pr: 482, row: "#482", line: `#482 ${A} · ${r1}`, created: true, reviewed: r1, next: "review-pr-482-b" });
   review("482", "review=member:review-pr-482-b");
   assert.deepEqual(rows(), [`#482 ${A} · ${r1} · review=member:review-pr-482-b`]);
 });
@@ -250,10 +256,11 @@ test("the same member twice on one line is refused, naming the member, whatever 
 // ---- rule: added only ----
 
 test("an already-invalid row carried forward is accepted, new tokens before its bad one included; a second copy is refused", (t) => {
-  const { ok, refused, reviewRefused, rows } = fixture(t, [`#1 ${IMPL} · ${A} ${r1} ${r2}`]);
+  const { ok, refused, review, rows } = fixture(t, [`#1 ${IMPL} · ${A} ${r1} ${r2}`]);
   ok("1", `${IMPL} · class=routine · ${A} ${r1} finisher-pr-482 ${r2}`);
   ok("1", `${IMPL} · ${A} class=routine ${r1} ${r2}`);
-  reviewRefused("482", [r2], /'reviewed=b7adf86/);
+  // A result a row already carries is skipped, never written a second time.
+  assert.equal(review("482", r2).line, `#1 ${IMPL} · ${A} class=routine ${r1} ${r2}`);
   refused("1", `${IMPL} · ${A} ${r1} ${r2} ${r2}`, /'reviewed=b7adf86/);
   assert.deepEqual(rows(), [`#1 ${IMPL} · ${A} class=routine ${r1} ${r2}`]);
 });
@@ -343,7 +350,7 @@ test("an added unparseable review= or reviewed= is refused; one carried forward 
   ok("1", `${IMPL} · class=routine · review=garbage reviewed=nothead`);
   reviewRefused("482", ["review=wf:"], /'review=wf:'/, /PR #482/, /unparseable review token/);
   reviewRefused("482", ["review=garbage"], /'review=garbage'/);
-  reviewRefused("482", ["reviewed=aaaaaaa:1/0/0"], /'reviewed=aaaaaaa:1\/0\/0'/);
+  reviewRefused("482", ["reviewed=aaaaaaa:1/0/0"], /'reviewed=aaaaaaa:1\/0\/0'/, /--result/);
 });
 
 // ---- every PR's stream is judged, not just the first in ledger order ----
@@ -352,17 +359,17 @@ const OTHER = "impl-4=PR#4 → PR#4 · review=member:review-pr-4 reviewed=bbbbbb
 
 test("a violation on a PR whose stream is not first in ledger order is refused", (t) => {
   const { refused, review, reviewRefused } = fixture(t, [`#4 ${OTHER}`, `#1 ${IMPL} · ${A}`]);
-  // Added to the later stream: an unpaired result, a crowded launch, a dropped open launch.
-  reviewRefused("482", [r1, r2], /PR #482/, /paired results/);
+  // Added to the later stream: a crowded launch, a dropped open launch, then an unpaired result.
   reviewRefused("482", [B], /PR #482/, /one open launch/);
   refused("1", `${IMPL}`, /PR #482/, /removes open launch/);
   // A write on that stream that adds nothing wrong is still accepted.
   review("482", r1);
+  reviewRefused("482", [r2], /PR #482/, /paired results/);
 });
 
 test("a reviewed= whose head is under seven hex digits is refused as unparseable", (t) => {
   const { reviewRefused } = fixture(t, [`#1 ${IMPL} · ${A}`]);
-  reviewRefused("482", ["reviewed=abc:1/0/0:run-xxxxxxxx"], /'reviewed=abc:1\/0\/0:run-xxxxxxxx'/, /PR #482/);
+  reviewRefused("482", ["reviewed=abc:1/0/0:run-xxxxxxxx"], /'reviewed=abc:1\/0\/0:run-xxxxxxxx'/, /--result/);
 });
 
 test("rows that map to no PR and carry no key are streams of their own, not one shared stream", () => {
@@ -545,4 +552,83 @@ test("row accepts a rewrite that carries every Gate verdict as the row holds it,
   const legacy = fixture(t, [`#5 impl-5=PR#5 · reviewed=abc1234:1/0/0 · dispositions-ok=fix-pr-5:${HEAD_3724}`]);
   legacy.ok("5", "impl-5=PR#5");
   assert.deepEqual(legacy.rows(), ["#5 impl-5=PR#5"]);
+});
+
+// ---- review --result: a reviewed= comes only from a review result file ----
+//
+// A result is the one thing an argument cannot supply: `review` derives the
+// token from the file and refuses a `reviewed=` word in its arguments.
+
+const resultFile = (scratch, { pr = 482, run = "run-Aa11Bb22", file = "review.json", body } = {}) => {
+  const dir = join(scratch, `pr${pr}`, run);
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, file);
+  writeFileSync(path, JSON.stringify(body ?? { pr, head: "aaaaaaa", counts: { survived: 1, refuted: 2, unverified: 3 } }));
+  return path;
+};
+const DERIVED = "reviewed=aaaaaaa:1/2/3:run-Aa11Bb22";
+
+test("review refuses a reviewed= argument beside a launch, writing nothing, and the forged review moves no gate", (t) => {
+  const f = fixture(t, [`#3692 ${TAIL_3724}`], { gh: true });
+  closes(f.bin, 3724, [3692]);
+  f.rule(3692);
+  const forged = `reviewed=${HEAD_3724}:0/0/0:run-AAAAAAAA`;
+  f.refusedCall(["review", "3724", "review=member:review-pr-3724-c", forged], [/'reviewed=7685c4674b79fad4a08a68603cefa2782ca5debe:0\/0\/0:run-AAAAAAAA'/, /ledger\.mjs review 3724 --result <path>/], f.raw);
+  // The escalate still holds the finisher's dispatch.
+  const r = f.raw("dispatch", "3724", "finisher-pr-3724");
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /escalat/i);
+  // A bare reviewed= names the verb that writes one, parseable or not.
+  f.refusedCall(["review", "3724", forged], [/--result/], f.raw);
+  f.refusedCall(["review", "3724", "reviewed=nonsense"], [/'reviewed=nonsense'/, /--result/], f.raw);
+});
+
+test("review --result writes the token its file derives, and a second run writes nothing", (t) => {
+  const { cli, rows, file, scratch } = fixture(t, [`#1 ${IMPL} · ${A}`]);
+  const path = resultFile(scratch);
+  const first = cli("review", "482", "--result", path, "--scratch", scratch);
+  assert.equal(first.status, 0, first.stderr);
+  assert.deepEqual(JSON.parse(first.stdout), { pr: 482, row: "#1", line: `#1 ${IMPL} · ${A} · ${DERIVED}`, created: false, reviewed: DERIVED, next: "review-pr-482-b" });
+  assert.deepEqual(rows(), [`#1 ${IMPL} · ${A} · ${DERIVED}`]);
+  const before = readFileSync(file, "utf8");
+  const again = cli("review", "#482", "--result", path, "--scratch", scratch);
+  assert.equal(again.status, 0, again.stderr);
+  assert.equal(JSON.parse(again.stdout).written, false);
+  assert.equal(readFileSync(file, "utf8"), before);
+});
+
+test("review --result takes a launch in the same call, written before the result that answers it", (t) => {
+  const { cli, rows, scratch } = fixture(t, [`#1 ${IMPL} · ${A} ${r1}`]);
+  const path = resultFile(scratch);
+  const r = cli("review", "482", "review=member:review-pr-482-b", "--result", path, "--scratch", scratch);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(rows(), [`#1 ${IMPL} · ${A} ${r1} · review=member:review-pr-482-b · ${DERIVED}`]);
+});
+
+test("review --result refuses a path or file that is not PR <pr>'s review result, writing nothing", (t) => {
+  const { refusedCall, scratch } = fixture(t, [`#1 ${IMPL} · ${A}`]);
+  const call = (path, ...whys) => refusedCall(["review", "482", "--result", path, "--scratch", scratch], whys);
+  call(resultFile(scratch, { pr: 483 }), /is not under PR #482's partition/);
+  call(join(scratch, "pr482", "nested", "run-Aa11Bb22", "review.json"), /is not under PR #482's partition/);
+  call(join(dirname(scratch), "elsewhere", "pr482", "run-Aa11Bb22", "review.json"), /is not under PR #482's partition/);
+  call(`${scratch}/pr482/run-Aa11Bb22/../run-Aa11Bb22/review.json`, /has a "\.\." segment/);
+  call(resultFile(scratch, { run: "not-a-run" }), /is not a review run root/);
+  call(join(scratch, "pr482", "run-Aa11Bb22", "missing.json"), /cannot read/);
+  const garbled = resultFile(scratch, { file: "garbled.json" });
+  writeFileSync(garbled, "{");
+  call(garbled, /cannot read .*garbled\.json/);
+  call(resultFile(scratch, { body: { pr: 483, head: "aaaaaaa", counts: { survived: 0, refuted: 0, unverified: 0 } } }), /is PR #483's review, not #482's/);
+  call(resultFile(scratch, { body: { pr: 482, counts: { survived: 0, refuted: 0, unverified: 0 } } }), /carries no head and counts/);
+  call(resultFile(scratch, { body: { pr: 482, head: "aaaaaaa" } }), /carries no head and counts/);
+  call(resultFile(scratch, { body: { pr: 482, head: "abc", counts: { survived: 0, refuted: 0, unverified: 0 } } }), /carries no head and counts/);
+});
+
+test("review --result refuses a result that answers no open launch, and flags it cannot read", (t) => {
+  const { refusedCall, scratch } = fixture(t, [`#1 ${IMPL}`]);
+  const path = resultFile(scratch);
+  refusedCall(["review", "482", "--result", path, "--scratch", scratch], [/answers no open launch/]);
+  refusedCall(["review", "482", "--result", path], [/no --scratch, and the scratch root could not be resolved/]);
+  refusedCall(["review", "482", "--result"], [/--result needs a value/]);
+  refusedCall(["review", "482", `--result=${path}`], [/space-separated value/]);
+  refusedCall(["review", "482", "--scratch", scratch, A], [/--scratch is read only with --result/]);
 });

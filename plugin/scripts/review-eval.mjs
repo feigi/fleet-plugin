@@ -231,12 +231,9 @@ export async function runReviewToFile(args, run = runReviewOnOmp) {
       errors.push(`attempt ${attempt}: could not write ${path}: ${e?.message ?? String(e)}`);
       continue;
     }
-    const { survived, refuted, unverified } = result.counts;
     return {
       status: "completed",
       path,
-      // The review's result token, ready for `ledger.mjs review <pr>`.
-      ledger: `reviewed=${result.head}:${survived}/${refuted}/${unverified}:${basename(runRoot)}`,
       attempts: attempt,
       errors,
       digest: digestOf(result),

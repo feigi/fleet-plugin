@@ -477,7 +477,11 @@ const CHANGED = [
   ],
   [
     "`jq '{pr, head, resume, testEnvironment, dimensionsRun, dimensionsUnrun, cwdAudit, counts}' <scratch>/pr<pr>/<run>/review.json` is the whole of your read, and it is what you record: `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>`, off `head`, `counts` and the run root's name — the runner's `ledger` field — on the PR's row, with `ledger.mjs review <pr>`.",
-    "`jq '{pr, head, resume, testEnvironment, suiteVerdict, dimensionsRun, dimensionsUnrun, cwdAudit, counts}' <scratch>/pr<pr>/<run>/review.json` is the whole of your read, and it is what you record: `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>`, off `head`, `counts` and the run root's name — the runner's `ledger` field — on the PR's row, with `ledger.mjs review <pr>`."
+    "`jq '{pr, head, resume, testEnvironment, suiteVerdict, dimensionsRun, dimensionsUnrun, cwdAudit, counts}' <scratch>/pr<pr>/<run>/review.json` is the whole of your read."
+  ],
+  [
+    "The tick prints `DISPATCH review PR#<M>` for a PR whose latest finisher is `halted:past-pin` and whose latest `reviewed=<head>` is not its current head, until a review of it is running or has returned; record that review's tokens as any review's, with `ledger.mjs review <M>` onto the PR's row, its runner under the next letter the PR's rows do not carry yet (`review-pr-<M>-b`, or `-c` where a retry already took `-b`) — `review` refuses a second `review-pr-<M>` and names the free one — and its result reaches a fresh finisher through the same gate.",
+    "The tick prints `DISPATCH review PR#<M>` for a PR whose latest finisher is `halted:past-pin` and whose latest `reviewed=<head>` is not its current head, until a review of it is running or has returned; record that review's launch as any review's, with `ledger.mjs review <M>` onto the PR's row, its runner under the next letter the PR's rows do not carry yet (`review-pr-<M>-b`, or `-c` where a retry already took `-b`) — `review` refuses a second `review-pr-<M>` and names the free one — and its result, recorded by the `review-result` wake, reaches a fresh finisher through the same gate."
   ],
   [
     "A specialist that dies contributes zero findings while its key stays in `dimensionsRun`; a review whose one shared test run executed nothing — the review runs the test command once, and every specialist reads that run instead of running its own — leaves every key there with no suite behind it.",

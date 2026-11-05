@@ -1426,22 +1426,25 @@ function reviewFile(f, { pr = 88, run = RUN, body = { pr: 88, head: HEAD, counts
   return join(dir, "review.json");
 }
 
-test("review-result records reviewed= off the result file's digest, its run the file's directory, then ticks; a second run only ticks", () => {
+test("review-result hands the file to `ledger.mjs review --result`, which records reviewed= off its digest, the run the file's directory, then ticks; a second run writes nothing and only ticks", () => {
   const f = fixture({ rows: [REVIEW_ROW] });
   const path = reviewFile(f);
+  const call = `ledger review 88 --result ${path} --scratch ${f.scratch}`;
   const first = f.run(["review-result", "88", path]);
   assert.equal(first.status, 0, first.err + first.stdout);
-  assert.deepEqual(first.order, [`ledger review 88 ${REVIEWED}`, TICK]);
+  assert.deepEqual(first.order, [call, TICK]);
+  assert.match(eventLine(first), new RegExp(`PR #88 ${REVIEWED}`));
   assert.deepEqual(f.rows(), [`${REVIEW_ROW} · ${REVIEWED}`]);
 
   const ledger = f.ledger();
   const second = f.run(["review-result", "#88", path]);
   assert.equal(second.status, 0, second.err);
-  assert.deepEqual(second.order, [TICK]);
+  assert.deepEqual(second.order, [`ledger review 88 --result ${path} --scratch ${f.scratch}`, TICK]);
+  assert.match(eventLine(second), new RegExp(`PR #88 already ${REVIEWED}`));
   assert.equal(f.ledger(), ledger);
 });
 
-test("review-result refuses a path outside the PR's partition, writing nothing and ticking nothing", () => {
+test("review-result passes the ledger's refusal of a path or file through, writing nothing, and still ticks", () => {
   const f = fixture({ rows: [REVIEW_ROW] });
   const ledger = f.ledger();
   for (const [path, why] of [
@@ -1450,16 +1453,14 @@ test("review-result refuses a path outside the PR's partition, writing nothing a
     [join(f.dir, "elsewhere", "pr88", RUN, "review.json"), /is not under PR #88's partition/],
     [`${f.scratch}/pr88/${RUN}/../${RUN}/review.json`, /has a "\.\." segment/],
     [reviewFile(f, { run: "not-a-run" }), /is not a review run root/],
+    [reviewFile(f, { body: { pr: 89, head: HEAD, counts: { survived: 0, refuted: 0, unverified: 0 } } }), /is PR #89's review, not #88's/],
   ]) {
     const r = f.run(["review-result", "88", path]);
     assert.equal(r.status, 2, `${path}: ${r.err}`);
     assert.match(r.err, why);
-    assert.deepEqual(r.order, [], `${path}: nothing written, no tick`);
+    assert.equal(r.order.at(-1), TICK, `${path}: the tick still runs`);
+    assert.equal(f.ledger(), ledger, `${path}: nothing written`);
   }
-  const other = f.run(["review-result", "88", reviewFile(f, { body: { pr: 89, head: HEAD, counts: { survived: 0, refuted: 0, unverified: 0 } } })]);
-  assert.equal(other.status, 2);
-  assert.match(other.err, /is PR #89's review, not #88's/);
-  assert.equal(f.ledger(), ledger);
 });
 
 test("review-result passes the ledger's own refusal through, and still ticks", () => {
@@ -1480,7 +1481,7 @@ for (const [why, receiptIsLink] of [["the receipt names the symlink and the path
     const path = receiptIsLink ? file : join(link, "pr88", RUN, "review.json");
     const r = f.run(["review-result", "88", path]);
     assert.equal(r.status, 0, r.err + r.stdout);
-    assert.deepEqual(r.order, [`ledger review 88 ${REVIEWED}`, TICK]);
+    assert.deepEqual(r.order, [`ledger review 88 --result ${path} --scratch ${receiptIsLink ? link : f.scratch}`, TICK]);
     assert.deepEqual(f.rows(), [`${REVIEW_ROW} · ${REVIEWED}`]);
   });
 }

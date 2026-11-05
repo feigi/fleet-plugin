@@ -42,8 +42,8 @@
 // Writer policy: a Gate verdict — a dispositions verdict, an Escalation
 // answer, a `reviewed=` — is written only by its own verb, whoever calls it:
 // `dispositions` for the first two, which it derives from their evidence,
-// and `review` for the third, which still takes its `reviewed=` as an
-// argument, not yet deriving it from the review's result file. `token`
+// and `review --result` for the third, which it derives from the review's
+// result file and refuses as an argument. `token`
 // refuses all three, and `row` carries every Gate verdict exactly as the row
 // holds it, so no other verb adds, changes or drops one. `filed` appends
 // filings, and all writes are serialized by `<file>.lock`; the other tokens
@@ -63,7 +63,7 @@
 // life, so the stall readers judge a busy run by them (fleet-state.mjs has
 // the rule).
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, unlinkSync, linkSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, unlinkSync, linkSync, realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, resolve, join, basename, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -82,6 +82,7 @@ import { ownClosingIssues } from "./closing-refs.mjs";
 import { isTicketless } from "./ticketless.mjs";
 import { RELEASE_LABELS, LABEL_LIST_ARGS, LABEL_LIST_LIMIT, releaseLabelsIn, releaseLabelsDefined } from "./release-labels.mjs";
 import { LabelMapUnreadable, readLabelMap } from "./label-map.mjs";
+import { REVIEWED, prTokens } from "./ledger-grammar.mjs";
 
 const NAME = "ledger";
 // The plugin's own agent definitions — the directory tier-check.mjs reads
@@ -804,7 +805,7 @@ if (cmd === "read") {
   // order, so `row` adds none; one the row already holds is carried.
   const reviewToken = addedReviewToken(oldRow, line);
   if (reviewToken !== undefined) {
-    die(`row ${key}: adds review token '${reviewToken}' — review tokens are written only with \`ledger.mjs review <pr> <token>…\`, which puts them on the PR's row`);
+    die(`row ${key}: adds review token '${reviewToken}' — ${reviewTokenWriter(reviewToken)}`);
   }
   // Every Gate verdict is its own verb's to write, so a rewrite carries the
   // row's as they stand — none added, changed, dropped or reordered, which
@@ -3115,38 +3116,132 @@ function numberArg(arg, what, usage) {
   return Number(digits);
 }
 
-// `review <pr> <token>…`: the only writer of a PR's `review=`/`reviewed=`
-// tokens. Each lands on the PR's row — the ticket row once `settle
+// What a refusal names as the writer of review token `tok`: a `reviewed=` is a
+// Gate verdict `review` derives from a result file; a launch is an argument.
+function reviewTokenWriter(tok) {
+  return tok.startsWith("reviewed=")
+    ? "a reviewed= is written only with `ledger.mjs review <pr> --result <path>`, which derives it from the review's result file and puts it on the PR's row"
+    : "review tokens are written only with `ledger.mjs review <pr> <token>…`, which puts them on the PR's row";
+}
+
+// The `reviewed=` token a review result file at `path` derives, for PR `pr`.
+// `path` is `<scratch>/pr<pr>/<run>/<file>` with no `..` segment, `<run>` a
+// review run root (`run-` and eight characters); `scratch` is `--scratch`, else
+// the root `settle --from-report` falls back to. The token is the file's
+// `head` and `counts` with that run, and the file's `pr` must be `pr`. Dies,
+// writing nothing, naming the first check the file fails.
+function reviewResultToken(pr, path, scratchArg) {
+  const where = `review #${pr} --result`;
+  if (path.split("/").includes("..")) die(`${where}: ${path} has a ".." segment — pass the result file's path without one`);
+  let scratch = scratchArg;
+  if (scratch === null) {
+    try {
+      scratch = defaultScratch();
+    } catch (e) {
+      if (!(e instanceof FleetDirUnresolvable)) throw e;
+      die(`${where}: no --scratch, and the scratch root could not be resolved — ${e.message}`);
+    }
+  }
+  const real = (p) => {
+    try {
+      return realpathSync(p);
+    } catch {
+      return p;
+    }
+  };
+  const file = resolve(path);
+  const runRoot = dirname(file);
+  const partition = join(resolve(scratch), `pr${pr}`);
+  if (real(dirname(runRoot)) !== real(partition)) die(`${where}: ${file} is not under PR #${pr}'s partition ${partition}/ — nothing written`);
+  const run = basename(runRoot);
+  if (!/^run-[A-Za-z0-9]{8}$/.test(run)) die(`${where}: ${runRoot} is not a review run root (run- and eight characters) — nothing written`);
+  let result;
+  try {
+    result = JSON.parse(readFileSync(file, "utf8"));
+  } catch (e) {
+    die(`${where}: cannot read ${file}: ${e.code ?? e.message} — nothing written`);
+  }
+  if (result?.pr !== undefined && Number(result.pr) !== pr) die(`${where}: ${file} is PR #${result.pr}'s review, not #${pr}'s — nothing written`);
+  const { survived, refuted, unverified } = result?.counts ?? {};
+  const token = `reviewed=${result?.head}:${survived}/${refuted}/${unverified}:${run}`;
+  if (!REVIEWED.test(token)) die(`${where}: ${file} carries no head and counts a reviewed= token can name (${token}) — nothing written`);
+  return token;
+}
+
+// `review <pr> [--result <path> [--scratch <dir>]] [<review=…>…]`: the only
+// writer of a PR's `review=`/`reviewed=` tokens. A `reviewed=` is a Gate
+// verdict, so it is written only from `--result`, which derives it from the
+// review result file (reviewResultToken()); a `reviewed=` word among the
+// arguments is refused, parseable or not, since an argument is not evidence.
+// `--scratch` names the scratch root the file must sit under, as `settle
+// --from-report`'s `--reports` names its reports root, else the root
+// scratch-root.mjs prints. A launch token (`review=…`, `review=…=failed`) is an
+// argument token and may come in the same call, written before the result it
+// answers. Each token lands on the PR's row — the ticket row once `settle
 // impl-<N>=PR#M` has run, else `#M`, created when neither exists — so the
 // row's token order is write order, the order the tick folds the PR's review
 // record in. `review=X=failed` for a launch the row holds open as `review=X`
 // rewrites that token in place; every other token is appended as ` · <token>`.
-// The whole ledger before and after is judged by rowWriteRefusal() under the
-// lock, and a refusal writes nothing. The receipt's `next` is the runner name
-// the PR's next launch takes as the ledger stands after the write, null with
-// every letter taken.
+// A result token the PR's rows already carry is not written again: exit 0 with
+// nothing written, `written: false` in the receipt. The whole ledger before
+// and after is judged by rowWriteRefusal() under the lock, and a refusal
+// writes nothing. The receipt names the derived token as `reviewed`, and its
+// `next` is the runner name the PR's next launch takes as the ledger stands
+// after the write, null with every letter taken.
 function runReview() {
-  const usage = "usage: ledger.mjs review <pr> <review=…|reviewed=…>…";
+  const usage = "usage: ledger.mjs review <pr> [--result <path> [--scratch <dir>]] [<review=…>…]";
   const [pr, ...parts] = rest;
   if (!pr || parts.length === 0) die(usage);
   const prNum = numberArg(pr, "a PR number", usage);
-  const tokens = parts.join(" ").split(/\s+/).filter(Boolean);
+  const flags = new Map();
+  const words = [];
+  for (let k = 0; k < parts.length; k++) {
+    const word = parts[k];
+    if (word !== "--result" && word !== "--scratch") {
+      if (word.startsWith("--result=") || word.startsWith("--scratch=")) {
+        die(`review #${prNum}: ${word.split("=")[0]} needs a space-separated value, not ${word.split("=")[0]}= — ${usage}`);
+      }
+      words.push(word);
+      continue;
+    }
+    if (flags.has(word)) die(`review #${prNum}: ${word} is given twice — ${usage}`);
+    const value = parts[++k];
+    if (value === undefined || isFlagLike(value)) die(`review #${prNum}: ${word} needs a value — ${usage}`);
+    flags.set(word, value);
+  }
+  if (flags.has("--scratch") && !flags.has("--result")) die(`review #${prNum}: --scratch is read only with --result — ${usage}`);
+  const tokens = words.join(" ").split(/\s+/).filter(Boolean);
+  const typed = tokens.find((tok) => tok.startsWith("reviewed="));
+  if (typed !== undefined) {
+    die(`review #${prNum}: '${typed}' is a reviewed= token — a reviewed= is a Gate verdict, written only with \`ledger.mjs review ${prNum} --result <path>\`, which derives it from the review's result file; no argument supplies one`);
+  }
   const other = tokens.find((tok) => !isReviewToken(tok));
   if (other !== undefined) {
-    die(`review #${prNum}: '${other}' is not a review token — review writes only review=… and reviewed=…; every other token goes through row, dispatch or settle`);
+    die(`review #${prNum}: '${other}' is not a review token — review writes only review=… launches and the reviewed= its --result derives; every other token goes through row, dispatch or settle`);
   }
+  if (tokens.length === 0 && !flags.has("--result")) die(usage);
   const retired = retiredNames("review");
+  let reviewed = null;
+  if (flags.has("--result")) {
+    reviewed = reviewResultToken(prNum, flags.get("--result"), flags.get("--scratch") ?? null);
+    if (!prTokens(data.rows, prNum).includes(reviewed)) tokens.push(reviewed);
+  }
   const i = prRowIndex(prNum);
   const created = i === -1;
   const oldLine = created ? null : data.rows[i];
-  const words = created ? [`#${prNum}`] : oldLine.split(/(\s+)/);
+  if (tokens.length === 0) {
+    console.error(`    review on row ${rowKey(oldLine)}: already carries ${reviewed} — not written again`);
+    console.log(JSON.stringify({ pr: prNum, row: rowKey(oldLine), line: oldLine, created: false, written: false, reviewed, next: nextReviewerName(data.rows, prNum, retired) }));
+    return;
+  }
+  const cells = created ? [`#${prNum}`] : oldLine.split(/(\s+)/);
   const appended = [];
   for (const tok of tokens) {
-    const open = tok.endsWith("=failed") ? words.lastIndexOf(tok.slice(0, -"=failed".length)) : -1;
-    if (open > 0) words[open] = tok;
+    const open = tok.endsWith("=failed") ? cells.lastIndexOf(tok.slice(0, -"=failed".length)) : -1;
+    if (open > 0) cells[open] = tok;
     else appended.push(tok);
   }
-  const head = words.join("");
+  const head = cells.join("");
   const line = appended.length === 0 ? head
     : created ? `${head} ${appended.join(" · ")}`
     : `${head} · ${appended.join(" · ")}`;
@@ -3157,7 +3252,7 @@ function runReview() {
   save(data);
   const key = rowKey(line);
   console.error(`    review on row ${key}`);
-  console.log(JSON.stringify({ pr: prNum, row: key, line, created, next: nextReviewerName(data.rows, prNum, retired) }));
+  console.log(JSON.stringify({ pr: prNum, row: key, line, created, ...(reviewed === null ? {} : { reviewed }), next: nextReviewerName(data.rows, prNum, retired) }));
 }
 
 // `dispositions <member> --scratch <dir> [--repo <path>] [--uphold <list>]
@@ -3367,7 +3462,7 @@ function tokenRefusal(tok, earlier) {
     return "is a member token — members are written only with `ledger.mjs dispatch` and `ledger.mjs settle`";
   }
   if (isReviewToken(tok)) {
-    return "is a review token — review tokens are written only with `ledger.mjs review <pr> <token>…`, which puts them on the PR's row";
+    return `is a review token — ${reviewTokenWriter(tok)}`;
   }
   if (isDispositionsWord(tok)) {
     return tok.startsWith("escalation-answer=")
