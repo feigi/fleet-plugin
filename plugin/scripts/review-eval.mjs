@@ -156,7 +156,7 @@ export async function runReviewOnOmp(args) {
 // file, so nothing reads a half-review as a review. A dispatch mistake — a pr
 // that is not a PR number, a scratch that is not absolute (eval's cwd is the
 // MAIN CHECKOUT, so a relative one would put the file there), a scratch that
-// already ends in `pr<N>`, a testCmd that is not a non-empty string, a
+// already ends in `pr<N>`, a testCmd that is not a non-blank string, a
 // worktree that is absent or empty
 // — throws before any run: it is not a review failure, and retrying or falling
 // back would only repeat it. So does a write fault other than a file already
@@ -172,10 +172,10 @@ export async function runReviewToFile(args, run = runReviewOnOmp) {
   }
   const scratchRefusal = runnerScratchRefusal(scratch);
   if (scratchRefusal) throw new Error(`review-runner: ${scratchRefusal}`);
-  const testCmdRefusal = runnerTestCmdRefusal(args?.testCmd);
+  const testCmdRefusal = runnerTestCmdRefusal(args.testCmd);
   if (testCmdRefusal) throw new Error(`review-runner: ${testCmdRefusal}`);
-  if (!args?.worktree) {
-    throw new Error(`review-runner: args.worktree is required — the checkout the review snapshots, got ${JSON.stringify(args?.worktree)}`);
+  if (!args.worktree) {
+    throw new Error(`review-runner: args.worktree is required — the checkout the review snapshots, got ${JSON.stringify(args.worktree)}`);
   }
   const errors = [];
   for (let attempt = 1; attempt <= 2; attempt++) {
