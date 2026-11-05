@@ -3128,8 +3128,8 @@ function reviewTokenWriter(tok) {
 // `path` is `<scratch>/pr<pr>/<run>/<file>` with no `..` segment, `<run>` a
 // review run root (`run-` and eight characters); `scratch` is `--scratch`, else
 // the root `settle --from-report` falls back to. The token is the file's
-// `head` and `counts` with that run, and the file's `pr` must be `pr`. Dies,
-// writing nothing, naming the first check the file fails.
+// `head` and `counts` with that run, and a `pr` the file carries must be
+// `pr`. Dies, writing nothing, naming the first check the file fails.
 function reviewResultToken(pr, path, scratchArg) {
   const where = `review #${pr} --result`;
   if (path.split("/").includes("..")) die(`${where}: ${path} has a ".." segment — pass the result file's path without one`);
@@ -3182,12 +3182,13 @@ function reviewResultToken(pr, path, scratchArg) {
 // row's token order is write order, the order the tick folds the PR's review
 // record in. `review=X=failed` for a launch the row holds open as `review=X`
 // rewrites that token in place; every other token is appended as ` · <token>`.
-// A result token the PR's rows already carry is not written again: exit 0 with
-// nothing written, `written: false` in the receipt. The whole ledger before
+// A result token the PR's rows already carry is not written again: with no
+// launch in the call, exit 0 with nothing written. The whole ledger before
 // and after is judged by rowWriteRefusal() under the lock, and a refusal
-// writes nothing. The receipt names the derived token as `reviewed`, and its
-// `next` is the runner name the PR's next launch takes as the ledger stands
-// after the write, null with every letter taken.
+// writes nothing. The receipt names the derived token as `reviewed`, with
+// `written` saying whether this call put it on the row, and its `next` is the
+// runner name the PR's next launch takes as the ledger stands after the
+// write, null with every letter taken.
 function runReview() {
   const usage = "usage: ledger.mjs review <pr> [--result <path> [--scratch <dir>]] [<review=…>…]";
   const [pr, ...parts] = rest;
@@ -3197,13 +3198,12 @@ function runReview() {
   const words = [];
   for (let k = 0; k < parts.length; k++) {
     const word = parts[k];
-    if (word !== "--result" && word !== "--scratch") {
-      if (word.startsWith("--result=") || word.startsWith("--scratch=")) {
-        die(`review #${prNum}: ${word.split("=")[0]} needs a space-separated value, not ${word.split("=")[0]}= — ${usage}`);
-      }
+    const flag = word.split("=")[0];
+    if (flag !== "--result" && flag !== "--scratch") {
       words.push(word);
       continue;
     }
+    if (flag !== word) die(`review #${prNum}: ${flag} needs a space-separated value, not ${flag}= — ${usage}`);
     if (flags.has(word)) die(`review #${prNum}: ${word} is given twice — ${usage}`);
     const value = parts[++k];
     if (value === undefined || isFlagLike(value)) die(`review #${prNum}: ${word} needs a value — ${usage}`);
@@ -3252,7 +3252,7 @@ function runReview() {
   save(data);
   const key = rowKey(line);
   console.error(`    review on row ${key}`);
-  console.log(JSON.stringify({ pr: prNum, row: key, line, created, ...(reviewed === null ? {} : { reviewed }), next: nextReviewerName(data.rows, prNum, retired) }));
+  console.log(JSON.stringify({ pr: prNum, row: key, line, created, ...(reviewed === null ? {} : { reviewed, written: tokens.includes(reviewed) }), next: nextReviewerName(data.rows, prNum, retired) }));
 }
 
 // `dispositions <member> --scratch <dir> [--repo <path>] [--uphold <list>]

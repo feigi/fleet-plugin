@@ -187,15 +187,11 @@ export async function runReviewToFile(args, run = runReviewOnOmp) {
       errors.push(`attempt ${attempt}: ${e?.message ?? String(e)}`);
       continue;
     }
-    // `result.counts` is read below to build the digest, but
-    // that read happens AFTER `mkdir`/`writeFile` have already put
-    // the file on disk — so a `run` that resolves to a truthy, object-shaped
-    // result missing `.counts` would otherwise throw on the destructure below
-    // OUTSIDE this function's own retry try/catch (which wraps only the
-    // `run(args)` call), leaving a half-written review file on disk
-    // that a fix-applier reading it would mistake for a completed review that
-    // never actually finished. Treated the same as an empty return: retried,
-    // then reported `failed`, and no file is written for it.
+    // A result with no object `counts` is no completed review: its digest
+    // would carry no counts, and `ledger.mjs review --result` derives no
+    // `reviewed=` from a file without them, so a fix-applier reading it would
+    // hold a review nothing can record. Treated the same as an empty return:
+    // retried, then reported `failed`, and no file is written for it.
     if (!result || typeof result !== "object" || !result.counts || typeof result.counts !== "object") {
       errors.push(`attempt ${attempt}: empty return (${String(result)})`);
       continue;

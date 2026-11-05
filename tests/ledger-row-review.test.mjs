@@ -110,7 +110,7 @@ test("review appends each token to the ticket row that maps the PR, in write ord
 
 test("review on a PR no row maps creates its #M row, and the next call lands there", (t) => {
   const { review, rows } = fixture(t);
-  assert.deepEqual(review("482", A, r1), { pr: 482, row: "#482", line: `#482 ${A} · ${r1}`, created: true, reviewed: r1, next: "review-pr-482-b" });
+  assert.deepEqual(review("482", A, r1), { pr: 482, row: "#482", line: `#482 ${A} · ${r1}`, created: true, reviewed: r1, written: true, next: "review-pr-482-b" });
   review("482", "review=member:review-pr-482-b");
   assert.deepEqual(rows(), [`#482 ${A} · ${r1} · review=member:review-pr-482-b`]);
 });
@@ -588,7 +588,7 @@ test("review --result writes the token its file derives, and a second run writes
   const path = resultFile(scratch);
   const first = cli("review", "482", "--result", path, "--scratch", scratch);
   assert.equal(first.status, 0, first.stderr);
-  assert.deepEqual(JSON.parse(first.stdout), { pr: 482, row: "#1", line: `#1 ${IMPL} · ${A} · ${DERIVED}`, created: false, reviewed: DERIVED, next: "review-pr-482-b" });
+  assert.deepEqual(JSON.parse(first.stdout), { pr: 482, row: "#1", line: `#1 ${IMPL} · ${A} · ${DERIVED}`, created: false, reviewed: DERIVED, written: true, next: "review-pr-482-b" });
   assert.deepEqual(rows(), [`#1 ${IMPL} · ${A} · ${DERIVED}`]);
   const before = readFileSync(file, "utf8");
   const again = cli("review", "#482", "--result", path, "--scratch", scratch);
@@ -597,12 +597,25 @@ test("review --result writes the token its file derives, and a second run writes
   assert.equal(readFileSync(file, "utf8"), before);
 });
 
-test("review --result takes a launch in the same call, written before the result that answers it", (t) => {
+test("review --result accepts a result file that carries no pr, the partition it sits in naming the PR", (t) => {
+  const { cli, rows, scratch } = fixture(t, [`#1 ${IMPL} · ${A}`]);
+  const path = resultFile(scratch, { body: { head: "aaaaaaa", counts: { survived: 1, refuted: 2, unverified: 3 } } });
+  const r = cli("review", "482", "--result", path, "--scratch", scratch);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(rows(), [`#1 ${IMPL} · ${A} · ${DERIVED}`]);
+});
+
+test("review --result takes a launch in the same call, written before the result that answers it, and a carried result beside a new launch is not written again", (t) => {
   const { cli, rows, scratch } = fixture(t, [`#1 ${IMPL} · ${A} ${r1}`]);
   const path = resultFile(scratch);
   const r = cli("review", "482", "review=member:review-pr-482-b", "--result", path, "--scratch", scratch);
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(rows(), [`#1 ${IMPL} · ${A} ${r1} · review=member:review-pr-482-b · ${DERIVED}`]);
+  // The same result beside a new launch: the launch lands, the result does not again.
+  const again = cli("review", "482", "review=member:review-pr-482-c", "--result", path, "--scratch", scratch);
+  assert.equal(again.status, 0, again.stderr);
+  assert.equal(JSON.parse(again.stdout).written, false);
+  assert.deepEqual(rows(), [`#1 ${IMPL} · ${A} ${r1} · review=member:review-pr-482-b · ${DERIVED} · review=member:review-pr-482-c`]);
 });
 
 test("review --result refuses a path or file that is not PR <pr>'s review result, writing nothing", (t) => {
@@ -613,6 +626,9 @@ test("review --result refuses a path or file that is not PR <pr>'s review result
   call(join(dirname(scratch), "elsewhere", "pr482", "run-Aa11Bb22", "review.json"), /is not under PR #482's partition/);
   call(`${scratch}/pr482/run-Aa11Bb22/../run-Aa11Bb22/review.json`, /has a "\.\." segment/);
   call(resultFile(scratch, { run: "not-a-run" }), /is not a review run root/);
+  call(resultFile(scratch, { run: "run-Aa11Bb22c" }), /is not a review run root/);
+  call(resultFile(scratch, { run: "run-Aa11Bb2" }), /is not a review run root/);
+  call(resultFile(scratch, { run: "run-Aa11Bb2!" }), /is not a review run root/);
   call(join(scratch, "pr482", "run-Aa11Bb22", "missing.json"), /cannot read/);
   const garbled = resultFile(scratch, { file: "garbled.json" });
   writeFileSync(garbled, "{");
@@ -629,6 +645,9 @@ test("review --result refuses a result that answers no open launch, and flags it
   refusedCall(["review", "482", "--result", path, "--scratch", scratch], [/answers no open launch/]);
   refusedCall(["review", "482", "--result", path], [/no --scratch, and the scratch root could not be resolved/]);
   refusedCall(["review", "482", "--result"], [/--result needs a value/]);
-  refusedCall(["review", "482", `--result=${path}`], [/space-separated value/]);
+  refusedCall(["review", "482", "--result", path, "--result", path, "--scratch", scratch], [/--result is given twice/]);
+  refusedCall(["review", "482", "--result", path, "--scratch", scratch, "--scratch", scratch], [/--scratch is given twice/]);
+  refusedCall(["review", "482", `--result=${path}`], [/--result needs a space-separated value/]);
+  refusedCall(["review", "482", "--result", path, `--scratch=${scratch}`], [/--scratch needs a space-separated value/]);
   refusedCall(["review", "482", "--scratch", scratch, A], [/--scratch is read only with --result/]);
 });

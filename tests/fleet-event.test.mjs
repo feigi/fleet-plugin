@@ -1439,7 +1439,7 @@ test("review-result hands the file to `ledger.mjs review --result`, which record
   const ledger = f.ledger();
   const second = f.run(["review-result", "#88", path]);
   assert.equal(second.status, 0, second.err);
-  assert.deepEqual(second.order, [`ledger review 88 --result ${path} --scratch ${f.scratch}`, TICK]);
+  assert.deepEqual(second.order, [call, TICK]);
   assert.match(eventLine(second), new RegExp(`PR #88 already ${REVIEWED}`));
   assert.equal(f.ledger(), ledger);
 });

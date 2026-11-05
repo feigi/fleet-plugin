@@ -10,12 +10,11 @@
 
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-
-const REVIEWED_WORD = /^reviewed=([0-9a-fA-F]{7,40}):(\d+)\/(\d+)\/(\d+):(run-[A-Za-z0-9]{8})$/;
+import { REVIEWED } from "../../plugin/scripts/ledger-grammar.mjs";
 
 /** The review result file `token` names, in PR `pr`'s partition of `scratch`. */
-export function writeReviewResult(scratch, pr, token, extra = {}) {
-  const m = REVIEWED_WORD.exec(token);
+function writeReviewResult(scratch, pr, token) {
+  const m = REVIEWED.exec(token);
   if (m === null) throw new Error(`${token} is not a reviewed= token a result file can carry`);
   const [, head, survived, refuted, unverified, run] = m;
   const dir = join(scratch, `pr${pr}`, run);
@@ -25,7 +24,6 @@ export function writeReviewResult(scratch, pr, token, extra = {}) {
   writeFileSync(path, JSON.stringify({
     pr: Number(pr), head,
     counts: { survived: Number(survived), refuted: Number(refuted), unverified: Number(unverified), crashed: 0 },
-    ...extra,
   }));
   return path;
 }
@@ -37,7 +35,7 @@ export function viaResult(scratch, args) {
   const results = [];
   for (const arg of args.slice(2)) {
     for (const word of String(arg).split(/\s+/).filter(Boolean)) {
-      if (REVIEWED_WORD.test(word)) results.push(word);
+      if (REVIEWED.test(word)) results.push(word);
       else kept.push(word);
     }
   }

@@ -101,10 +101,10 @@
 //       ledger derives `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>`
 //       from the review result file at `<path>`, which must be
 //       `<scratch>/pr<pr>/<run>/<file>`, `<run>` a review run root
-//       (`run-` and eight characters) and no `..` segment, its `pr` this PR
-//       and its `head` and `counts` naming a token. A token the PR's rows
-//       already carry is not written again. A refusal is the ledger's, passed
-//       through, nothing written.
+//       (`run-` and eight characters) and no `..` segment, a `pr` it carries
+//       this PR and its `head` and `counts` naming a token. A token the PR's
+//       rows already carry is not written again. A refusal is the ledger's,
+//       passed through, nothing written.
 //       The result file is `<scratch>/pr<pr>/<run>/review.json`, `<run>` the review's own `run-XXXXXXXX` run root.
 //   review-failed <pr> <launch>
 //       `ledger.mjs review <pr> review=<launch>=failed`, `<launch>` as the
