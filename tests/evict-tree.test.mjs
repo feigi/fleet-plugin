@@ -138,6 +138,22 @@ test("a tree whose .git is present but resolves to an enclosing repository is sk
   assert.ok(existsSync(installedAt(outer)), "the enclosing repository was stripped");
 });
 
+test("a tree whose git names a top-level realpath cannot resolve is skipped with the comparison's code, and keeps its ignored paths", (t) => {
+  const dir = base(t);
+  const run = join(dir, "run");
+  const tree = makeTree(join(run, "copy"));
+  // rev-parse prints core.worktree as the top-level, exit 0, whether or not it exists.
+  const gone = join(dir, "gone");
+  gitIn(tree, "config", "core.worktree", gone);
+
+  const r = evictTrees(run, { apply: true });
+
+  assert.deepEqual(r.failed, []);
+  assert.deepEqual(r.evicted, []);
+  assert.deepEqual(r.skipped, [{ path: tree, reason: `comparing git's top-level ${gone} with it failed (ENOENT)` }]);
+  assert.ok(existsSync(installedAt(tree)));
+});
+
 test("a tree under a mode-000 directory gives failed [] and a skip naming that directory with its EACCES or EPERM code", { skip: asRoot }, (t) => {
   const dir = base(t);
   const run = join(dir, "run");
@@ -170,6 +186,49 @@ test("a root that is itself mode 000 is skipped", { skip: asRoot }, (t) => {
   assert.deepEqual(r.skipped.map((s) => s.path), [run]);
 });
 
+test("a tree the walk can list but cannot look in for its .git is skipped naming its EACCES or EPERM code, and keeps its ignored paths", { skip: asRoot }, (t) => {
+  const dir = base(t);
+  const run = join(dir, "run");
+  // A flat tree, no subdirectory but its .git: readdir lists a mode-444
+  // directory, so only the lookup of its .git can fail.
+  const tree = join(run, "copy");
+  mkdirSync(tree, { recursive: true });
+  gitIn(tree, "init", "-q");
+  writeFileSync(join(tree, ".gitignore"), "*.log\n");
+  writeFileSync(join(tree, "a.txt"), "a\n");
+  gitIn(tree, "add", "-A");
+  gitIn(tree, "commit", "-q", "-m", "tree");
+  writeFileSync(join(tree, "big.log"), "x\n");
+  chmodSync(tree, 0o444);
+
+  for (const apply of [true, false]) {
+    const r = evictTrees(run, { apply });
+
+    assert.deepEqual(r.failed, [], `apply ${apply}`);
+    assert.deepEqual(r.evicted, [], `apply ${apply}`);
+    assert.equal(r.skipped.length, 1, `apply ${apply}: ${JSON.stringify(r.skipped)}`);
+    assert.equal(r.skipped[0].path, tree);
+    assert.match(r.skipped[0].reason, /^cannot look for a \.git in it \((EACCES|EPERM)\)$/);
+  }
+  chmodSync(tree, 0o755);
+  assert.ok(existsSync(join(tree, "big.log")));
+});
+
+test("a directory with a .git git will not answer for, which the walk also cannot list, is named once with both reasons", { skip: asRoot }, (t) => {
+  const dir = base(t);
+  const run = join(dir, "run");
+  const tree = makeTree(join(run, "copy"));
+  renameSync(join(tree, ".git", "HEAD"), join(tree, ".git", "HEAD.moved"));
+  chmodSync(tree, 0o100);
+
+  const r = evictTrees(run, { apply: true });
+
+  assert.deepEqual(r.failed, []);
+  assert.equal(r.skipped.length, 1, JSON.stringify(r.skipped));
+  assert.equal(r.skipped[0].path, tree);
+  assert.match(r.skipped[0].reason, /^git rev-parse --show-toplevel did not answer for it \(exit 128: .*; cannot list it \((EACCES|EPERM)\)$/s);
+});
+
 test("a skipped directory does not stop the walk: the healthy trees around it are evicted, and skipped is sorted by path", { skip: asRoot }, (t) => {
   const dir = base(t);
   const run = join(dir, "run");
@@ -180,7 +239,7 @@ test("a skipped directory does not stop the walk: the healthy trees around it ar
   mkdirSync(locked, { recursive: true });
   chmodSync(locked, 0);
   const after = makeTree(join(run, "dd-healthy"));
-  // Beside the skipped tree's own subdirectories, a healthy tree under it is still reached.
+  // A healthy tree nested under the skipped tree is still reached.
   const inner = makeTree(join(brokenTree, "inner"));
 
   const r = evictTrees(run, { apply: true });
@@ -192,7 +251,7 @@ test("a skipped directory does not stop the walk: the healthy trees around it ar
   assert.ok(existsSync(installedAt(brokenTree)));
 });
 
-test("a directory with no .git of its own, and a listing that fails with ENOENT or ENOTDIR, are not skipped", (t) => {
+test("a directory with no .git of its own, and a listing that fails with ENOENT or ENOTDIR, are not skipped, and ENOTDIR is no failure", (t) => {
   const dir = base(t);
   const run = join(dir, "run");
   mkdirSync(join(run, "plain", "deeper"), { recursive: true });
@@ -200,7 +259,7 @@ test("a directory with no .git of its own, and a listing that fails with ENOENT 
 
   assert.deepEqual(evictTrees(run, { apply: true }).skipped, []);
   assert.deepEqual(evictTrees(join(run, "gone"), { apply: true }).skipped, []);
-  assert.deepEqual(evictTrees(join(run, "file.txt"), { apply: true }).skipped, []);
+  assert.deepEqual(evictTrees(join(run, "file.txt"), { apply: true }), { evicted: [], failed: [], skipped: [] });
 });
 
 test("a repository inside an ignored directory the walk removes, or would remove, is neither evicted nor skipped", (t) => {

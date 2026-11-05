@@ -58,9 +58,10 @@ work in flight rather than every run's history.
    inside an ignored directory goes with that directory. A directory that holds
    a `.git` of its own which git will not answer for — rev-parse errors, times
    out or exits non-zero, the realpath comparison throws, or git resolves it to
-   a different top level — and a directory the walk cannot list for EACCES or
-   EPERM, the run root included, is skipped: it is not evicted, the walk goes
-   on, and the receipt names it under `skipped[]` with its reason, never under
+   a different top level — a directory the walk cannot look in for a `.git`,
+   and a directory the walk cannot list for EACCES or EPERM, the run root
+   included, is skipped: it is not evicted, the walk goes on, and the receipt
+   names it once under `skipped[]` with every reason it has, never under
    `failed[]`. The step prints `SNAPSHOT_PRUNE_FAILED` when the receipt's
    `failed[]` is non-empty, so a skipped directory never prints it, and a tree
    that failed is tried again by the next review's pass. `runReview`

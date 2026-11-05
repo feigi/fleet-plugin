@@ -20,13 +20,15 @@
 // `.git` with no HEAD, dubious ownership), the realpath comparison throws, or
 // git names another top-level — is SKIPPED: not evicted, and named with its
 // reason in `skipped`, never in `failed`. So is a directory the walk cannot
-// list because of EACCES or EPERM, the root included. A directory with no
-// `.git` of its own, and one whose listing fails with ENOENT or ENOTDIR, are
-// neither. The walk goes down from `root` at any depth and never follows a
-// symlink, never enters a `.git`, and never enters a path it removes (or, in a
-// dry run, would remove) as ignored, so a repository inside `node_modules`
-// goes with that directory and is not a tree of its own, nor skipped. A
-// skipped directory does not stop the walk.
+// look in for a `.git` (any error but ENOENT or ENOTDIR — a parent with no
+// search permission), or cannot list because of EACCES or EPERM, the root
+// included; a directory with more than one reason is named once, the reasons
+// joined. A directory with no `.git` of its own, and one whose listing fails
+// with ENOENT or ENOTDIR, are neither. The walk goes down from `root` at any
+// depth and never follows a symlink, never enters a `.git`, and never enters a
+// path it removes (or, in a dry run, would remove) as ignored, so a repository
+// inside `node_modules` goes with that directory and is not a tree of its own,
+// nor skipped. A skipped directory does not stop the walk.
 //
 // No status check, no mark, no restore: a tree is evicted whatever `git status`
 // says. A claim tree's status check and its mark are evict.mjs's own.
@@ -97,12 +99,13 @@ export function removeIgnored(tree, ignored) {
 // What `dir` is to the walk: `{tree: false}` when it holds no `.git` of its
 // own, `{tree: true}` when it does and git answers for this directory rather
 // than for an enclosing repository, and `{skip}` — why — when it holds one and
-// git does not.
+// git does not, or when looking for one fails for any reason but its absence.
 function treeVerdict(dir) {
   try {
     lstatSync(join(dir, ".git"));
-  } catch {
-    return { tree: false };
+  } catch (e) {
+    if (e.code === "ENOENT" || e.code === "ENOTDIR") return { tree: false };
+    return { skip: `cannot look for a .git in it (${e.code ?? e.message})` };
   }
   const r = git(dir, ["rev-parse", "--show-toplevel"]);
   if (r.error || r.status !== 0) return { skip: `git rev-parse --show-toplevel did not answer for it (${how(r)})` };
@@ -128,7 +131,8 @@ const byPath = (a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
  * directory the walk cannot evaluate, and so leaves as it is — one that holds
  * a `.git` of its own which git does not resolve to that directory (rev-parse
  * errors, times out or exits non-zero, the realpath comparison throws, or
- * another top-level), and one whose listing fails with EACCES or EPERM. Never a
+ * another top-level), one it cannot look in for a `.git`, and one whose listing
+ * fails with EACCES or EPERM, each named once with every reason it has. Never a
  * failure, and never a path inside an ignored directory the walk removes.
  * Best-effort: the walk goes on.
  */
@@ -141,7 +145,7 @@ export function evictTrees(root, { apply }) {
   while (stack.length) {
     const dir = stack.pop();
     const verdict = treeVerdict(dir);
-    if (verdict.skip !== undefined) skipped.push({ path: dir, reason: verdict.skip });
+    const reasons = verdict.skip === undefined ? [] : [verdict.skip];
     if (verdict.tree) {
       let ignored;
       try {
@@ -164,10 +168,11 @@ export function evictTrees(root, { apply }) {
       // A directory the walk cannot list or search holds no tree it can reach:
       // skipped and named, as freshUnder() skips one it cannot read, and never
       // a failure.
-      if (e.code === "EACCES" || e.code === "EPERM") skipped.push({ path: dir, reason: `cannot list it (${e.code})` });
+      if (e.code === "EACCES" || e.code === "EPERM") reasons.push(`cannot list it (${e.code})`);
       else if (e.code !== "ENOENT" && e.code !== "ENOTDIR") failed.push({ path: dir, error: `cannot list it (${e.code ?? e.message})` });
-      continue;
     }
+    if (reasons.length > 0) skipped.push({ path: dir, reason: reasons.join("; ") });
+    if (entries === undefined) continue;
     for (const e of entries) {
       if (e.name === ".git" || !e.isDirectory()) continue;
       const path = join(dir, e.name);

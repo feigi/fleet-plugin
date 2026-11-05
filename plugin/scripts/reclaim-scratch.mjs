@@ -124,9 +124,9 @@
 // each tree that held ignored paths, `ignored` naming them, and
 // `"skipped":[{"path","reason"}]` after `failed`: each directory in a kept run
 // root that evict-tree.mjs could not evaluate — one with a `.git` git does not
-// resolve to it, or one it cannot list for EACCES or EPERM. A skipped
-// directory is never in `failed`, so the snapshot step's marker, which reads
-// `failed`, does not fire for it.
+// resolve to it, one it cannot look in for a `.git`, or one it cannot list for
+// EACCES or EPERM. A skipped directory is never in `failed`, so the snapshot
+// step's marker, which reads `failed`, does not fire for it.
 // `ledger` is the file read, or null when none was (`--pr` mode, or
 // `--after-rotate` with no file) — so "never read" stays distinct from "read
 // and found empty". A dry run prints the same receipt with "applied":false,
@@ -691,9 +691,9 @@ function main() {
 
   const now = Date.now();
   let ledger = null;
-  // `--pr` mode's evictions and skipped directories; null in every other mode.
-  let evicted = null;
-  let skipped = null;
+  // `--pr` mode's evictions and skipped directories, in its receipt only.
+  const evicted = [];
+  const skipped = [];
   let remove;
   let kept = [];
   const failed = [];
@@ -706,8 +706,6 @@ function main() {
       failed.push({ path: parent, error: e.message });
     }
     // `--pr` mode also evicts the trees in every run root it keeps.
-    evicted = [];
-    skipped = [];
     for (const run of kept) {
       const done = evictTrees(run.path, { apply });
       for (const t of done.evicted) evicted.push({ path: t.path, reason: "a tree in a kept review run root", ignored: t.ignored });
@@ -767,7 +765,7 @@ function main() {
     if (error === null) removed.push(entry);
     else failed.push({ path: entry.path, error });
   }
-  const receipt = { applied: apply, ledger, removed, ...(evicted === null ? {} : { evicted }), kept, failed, ...(skipped === null ? {} : { skipped }) };
+  const receipt = { applied: apply, ledger, removed, ...(pr === null ? {} : { evicted }), kept, failed, ...(pr === null ? {} : { skipped }) };
   writeAll(1, `${JSON.stringify(receipt)}\n`);
 }
 
