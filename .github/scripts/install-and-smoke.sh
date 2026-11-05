@@ -232,9 +232,8 @@ fi
 # run executes nothing.
 pack_rc=0
 PACKED_JSON="$(cd plugin && HOME="$SCRATCH_HOME" npm pack --dry-run --json 2>"$SCRATCH_HOME/npm-pack.err")" || pack_rc=$?
-PACKED=""
 if [ "$pack_rc" -eq 0 ]; then
-  PACKED="$(jq -r '.[0].files[].path' <<<"$PACKED_JSON" | sort -u)" || pack_rc=$?
+  PACKED="$(jq -r '.[0].files[].path' <<<"$PACKED_JSON" 2>>"$SCRATCH_HOME/npm-pack.err" | sort -u)" || pack_rc=$?
 fi
 if [ "$pack_rc" -ne 0 ] || [ -z "$PACKED" ]; then
   echo "::error::install-and-smoke: npm pack --dry-run --json in plugin/ gave no file list (exit $pack_rc): $(cat "$SCRATCH_HOME/npm-pack.err")"
@@ -247,7 +246,7 @@ else
     fail=1
   elif [ -n "$MISSING" ]; then
     while IFS= read -r missing; do
-      echo "::error::install-and-smoke: plugin/$missing is tracked but npm pack leaves it out — add it to plugin/package.json's \`files\`"
+      echo "::error::install-and-smoke: plugin/$missing is tracked but npm pack leaves it out — plugin/package.json's \`files\` does not list it, or npm leaves that file out whatever \`files\` says"
     done <<<"$MISSING"
     fail=1
   else

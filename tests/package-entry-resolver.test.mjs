@@ -83,3 +83,9 @@ test("installationCommands returns the bare-fenced commands block, not a fenced 
   assert.deepEqual(installationCommands(readme(`${fence}\none\n${fence}\n\n${fence}yaml\nx: 1\n${fence}`)), ["one"]);
   assert.throws(() => installationCommands(readme(`${fence}yaml\nx: 1\n${fence}`)), /no code block/);
 });
+
+test("installationCommands closes a block only on a bare fence, so a fence line with an info string inside the block is content", () => {
+  const fence = "```";
+  const readme = (body) => `## Installation\n\n${body}\n\n## Next\n`;
+  assert.deepEqual(installationCommands(readme(`${fence}\none\n${fence}yaml\ntwo\n${fence}`)), ["one", `${fence}yaml`, "two"]);
+});
