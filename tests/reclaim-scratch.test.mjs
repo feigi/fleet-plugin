@@ -866,7 +866,7 @@ test("(8) --pr <N> on a PR with no pr<N>/ yet answers an empty receipt", (t) => 
   const f = fixture(t);
   const r = f.run(["--pr", "9", "--root", f.root, "--apply"]);
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(r.out, { applied: true, ledger: null, removed: [], evicted: [], kept: [], failed: [] });
+  assert.deepEqual(r.out, { applied: true, ledger: null, removed: [], evicted: [], kept: [], failed: [], skipped: [] });
 });
 
 // ----------------------------------------------------------------------------
@@ -988,6 +988,7 @@ test("(8) --pr <N> strips no directory that resolves to an enclosing repository"
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.out.evicted, []);
   assert.deepEqual(r.out.failed, []);
+  assert.deepEqual(paths(r.out.skipped), [broken], "the directory git resolved to the enclosing repository was not named");
   for (const d of [plain, broken, partition]) assert.ok(existsSync(join(d, "node_modules")), `${d} lost its node_modules`);
   assert.ok(existsSync(join(partition, "node_modules", "own", "i.js")));
 });
@@ -1064,6 +1065,49 @@ test("(8) --pr <N>: a second pass over an evicted run root evicts nothing and re
   assert.equal(second.status, 0, second.stderr);
   assert.deepEqual(second.out.evicted, []);
   assert.deepEqual(second.out.failed, []);
+});
+
+// #4336. A directory evictTrees cannot evaluate is named under the receipt's
+// `skipped`, after `failed`, and never in `failed`: the snapshot step's marker
+// greps `"failed":[]` and must stay quiet about it.
+test("(8) --pr <N> names a tree git will not answer for and a directory it cannot list under skipped, with failed [], and still evicts the other trees", { skip: process.getuid?.() === 0 && "root reads a mode-000 directory" }, (t) => {
+  const f = fixture(t);
+  const { run, trees } = reviewRunRoot(f);
+  const broken = makeTree(join(run, "zz-broken"));
+  chmodSync(join(broken, ".git"), 0);
+  const locked = join(run, "zz-locked");
+  mkdirSync(locked);
+  chmodSync(locked, 0);
+
+  const dry = f.run(["--pr", "7", "--root", f.root]);
+  const r = f.run(["--pr", "7", "--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.failed, []);
+  assert.ok(r.stdout.includes('"failed":[]'), `the snapshot step's marker would fire: ${r.stdout}`);
+  assert.deepEqual(Object.keys(r.out), ["applied", "ledger", "removed", "evicted", "kept", "failed", "skipped"]);
+  assert.deepEqual(paths(r.out.skipped), [broken, locked]);
+  assert.match(reasonOf(r.out.skipped, broken), /^git rev-parse --show-toplevel did not answer for it \(exit 128: /);
+  assert.match(reasonOf(r.out.skipped, locked), /\((EACCES|EPERM)\)/);
+  assert.deepEqual(paths(r.out.evicted), [...trees].sort());
+  assert.ok(existsSync(installedDir(broken)), "a tree git would not answer for was evicted");
+  assert.deepEqual(dry.out.skipped, r.out.skipped, "a dry run names different skips than --apply");
+});
+
+test("(8) --pr <N> prints an empty skipped after failed when nothing was skipped, and the other modes' receipts carry no such key", (t) => {
+  const f = fixture(t);
+  f.ledger();
+  f.states({});
+  reviewRunRoot(f);
+
+  const pr = f.run(["--pr", "7", "--root", f.root, "--apply"]);
+  const sweep = f.run(["--root", f.root]);
+  const siblings = f.run(["--siblings", "--root", f.root]);
+
+  assert.deepEqual(pr.out.skipped, []);
+  assert.deepEqual(Object.keys(pr.out), ["applied", "ledger", "removed", "evicted", "kept", "failed", "skipped"]);
+  assert.deepEqual(Object.keys(sweep.out), ["applied", "ledger", "removed", "kept", "failed"]);
+  assert.deepEqual(Object.keys(siblings.out), ["applied", "ledger", "removed", "kept", "failed"]);
 });
 
 test("(8) --pr <N>: the runner a tree tracks or ignores is never listed as an ignored path", (t) => {

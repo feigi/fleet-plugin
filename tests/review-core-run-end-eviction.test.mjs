@@ -269,3 +269,32 @@ test("a failed eviction at the end of the review is logged and changes nothing t
   assert.equal(said.length, 1, `expected one eviction failure in the log, got ${JSON.stringify(logs)}`);
   assert.match(said[0], /zz-stuck: could not remove sub\/node_modules\//);
 });
+
+test("a skipped directory in the run root is logged once as a skip at the end of the review and changes nothing the review returns", { skip: process.getuid?.() === 0 && "root reads a mode-000 directory" }, async (t) => {
+  const plain = scratchDir(t);
+  const skipping = scratchDir(t);
+  const results = [];
+  let logs;
+  let locked;
+  for (const [{ scratch }, skip] of [[plain, false], [skipping, true]]) {
+    const run = join(scratch, "pr7", RUN);
+    const h = hostFor(() => {
+      buildRunRoot(run);
+      if (!skip) return;
+      locked = join(run, "zz-locked");
+      mkdirSync(locked);
+      chmodSync(locked, 0);
+      readOnly.push(locked);
+    }, reportFor(run));
+    const result = await runReview(h.host, { ...ARGS, scratch });
+    results.push(JSON.stringify(result).replaceAll(scratch, "<scratch>"));
+    if (skip) logs = h.logs;
+  }
+
+  assert.equal(results[1], results[0], "a skipped directory changed what the review returned");
+  const said = logs.filter((m) => /eviction/.test(m));
+  assert.equal(said.length, 1, `expected one eviction line in the log, got ${JSON.stringify(logs)}`);
+  assert.ok(said[0].startsWith(`eviction at the end of the review skipped ${locked}: `), said[0]);
+  assert.match(said[0], /cannot list it \((EACCES|EPERM)\)$/);
+  assert.doesNotMatch(said[0], /failed/);
+});

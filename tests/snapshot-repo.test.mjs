@@ -884,6 +884,30 @@ for (const [name, path] of SOURCES) {
     assert.ok(existsSync(join(tree, "tracked.txt")));
   });
 
+  // A directory the eviction cannot evaluate — a tree whose .git git will not
+  // answer for, and a directory nobody can list — is named in the receipt's
+  // `skipped`, never `failed`, so the step stays quiet about it.
+  test(`${name}: a kept run root holding a tree git will not answer for and a mode-000 directory prints nothing, and the other trees are evicted`, { skip: process.getuid?.() === 0 && "root reads a mode-000 directory" }, (t) => {
+    const root = scratch(t, "snapshot-repo-evict-skip-");
+    const run = join(root, "pr7", "run-recentaa");
+    const healthy = makeTree(join(run, "snapshot-abc1234"));
+    const broken = makeTree(join(run, "correctness", "copy"));
+    chmodSync(join(broken, ".git"), 0);
+    const locked = join(run, "locked");
+    mkdirSync(locked, { recursive: true });
+    chmodSync(locked, 0);
+    try {
+      const r = spawnSync("sh", ["-c", `${renderPrune(path, root, 7)}\necho AFTER_PRUNE`], { env: pruneEnv(t), encoding: "utf8" });
+
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(r.stdout ?? "", "AFTER_PRUNE\n", `a skipped directory made the prune print: ${r.stdout}`);
+      assert.ok(!existsSync(join(healthy, "node_modules")), "a tree beside the skipped ones was not evicted");
+      assert.ok(existsSync(join(broken, "node_modules")), "a tree git would not answer for was evicted");
+    } finally {
+      unlock(root);
+    }
+  });
+
   // #1616. The ref-head operand, measured where it is PRODUCED rather than
   // where it is consumed — the two guards that compare against it were never
   // the defect, and this ticket changed neither. Six shapes, because the
