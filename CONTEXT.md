@@ -677,10 +677,11 @@ _Avoid_: route (bare: the Tier route is the `modelRoles` mapping), routing
 line, verdict (that word belongs to a Ruling)
 
 **Fit**:
-The Router's table recomputed from the repository's own records, at every phase
-0 and kept beside the cost guard (`.fleet/`); never committed, with the blob id
-of each metrics file it read and the guard it used recorded so it can be
-recomputed. It routes that run; each close-out's evidence routes the next. A run
+The Router's table recomputed from the repository's own records, at each phase
+0 whose cost guard duty writes a guard, and kept beside the cost guard
+(`.fleet/`); never committed, with the blob id of each metrics file it read and
+the guard it used recorded so it can be recomputed. It routes that run; each
+close-out's evidence routes the next. A run
 whose Fit fails routes by the last Fit that computed, else by the **Starting
 table**. It holds the tree of Strata, each Stratum's rows and every candidate
 Cell's verdict, and what the split gate found at this Fit — what passed, what
