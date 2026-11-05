@@ -304,7 +304,9 @@ first copy**: `mktemp -d` once per round for `<scratch>/pr<N>/fix-XXXXXXXX/`,
 never bare `pr<N>` and never a directory of your own naming. Build the copy
 there with the script that builds every measuring copy, pinned to your own
 commit (the full SHA `git rev-parse HEAD` prints in your worktree once you have
-committed): `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run measure-copy.mjs --worktree <abs-path> --pin <your commit> --dest <round root>/mutate --pr <pr> --scratch <scratch>`.
+committed): `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run measure-copy.mjs --worktree <abs-path> --pin <your commit> --dest <round root>/mutate-<k> --pr <pr> --scratch <scratch>`,
+`<k>` 1 for your first copy and the next number for each further one: a copy at
+a later commit is another new directory, since the script refuses one that exists.
 It runs the Install step in the copy, which can take minutes: run it as ONE
 blocking foreground command with a command deadline of 3600 seconds, never
 backgrounded and never polled; any non-zero exit is no usable copy, so measure

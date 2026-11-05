@@ -744,23 +744,22 @@ function countsOf(run) {
 
 // How a specialist or refuter makes "your own copy of the snapshot", in
 // every prompt that sends one to work there: by measure-copy.mjs, the one
-// script that builds every measuring copy. It archives the PR worktree at the
-// reviewed head, makes the copy a repository of its own and runs the Install
-// step in it, so the copy holds what an install leaves — which one that shares
-// the snapshot's installed output would not, since an install can record
+// script that builds every measuring copy. It builds the copy from the PR
+// worktree at the reviewed head, makes it a repository of its own and runs the
+// Install step in it, so the copy holds what an install leaves — which one that
+// shares the snapshot's installed output would not, since an install can record
 // absolute paths back into the tree it ran in and a mutation made there would
 // never run. `worktree` is the PR worktree, never the snapshot: the snapshot
-// holds tracked files only, and the Recipe cache the Install step is read from
-// sits in the worktree's ignored .fleet directory. `dir` is the agent's own
-// directory of the run root; the copy is built under it. The `--pr` and
-// `--scratch` arguments are read off the run root's own path,
-// `<scratch>/pr<N>/run-XXXXXXXX`.
-export function copyRule(snap, worktree, dir) {
-  const [, scratch, pr] = /^(.*)\/pr([1-9][0-9]*)\/run-[^/]+$/.exec(snap.runRoot) ?? [];
+// holds tracked files only, and the Install step is read from the repository's
+// shared Recipe cache, which every worktree reads. `dir` is the agent's own
+// directory of the run root; the copy is built under it. `scratch` and `pr`
+// are runReview's own, the ones the run root was checked against, never read
+// back off the run root the snapshot agent reported.
+export function copyRule(snap, worktree, dir, scratch, pr) {
   return `Make your own copy of the tree at the reviewed head with the one script that
-builds every measuring copy, never by hand — it archives the PR worktree at
-that commit, makes the copy a repository of its own and runs the Install step
-from the copy's root:
+builds every measuring copy, never by hand — it builds the copy from the PR
+worktree at that commit, makes it a repository of its own and runs the Install
+step from the copy's root:
 ~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run measure-copy.mjs --worktree ${worktree} --pin ${snap.head} --dest ${dir}/copy --pr ${pr} --scratch ${scratch}
 For each further copy, give \`--dest\` another new directory under ${dir}/. The
 Install step can take minutes: run the command as ONE blocking foreground
@@ -1476,7 +1475,7 @@ READ ONLY FROM THE SNAPSHOT: ${snap.path} (HEAD ${snap.head}) — plus the diff
 file named below, if one is given.
 Never read or write ${worktree} — other agents are using it.
 Run any mutation or probe work inside your own copy of the snapshot.
-${copyRule(snap, worktree, `${snap.runRoot}/${d.key}`)}
+${copyRule(snap, worktree, `${snap.runRoot}/${d.key}`, scratch, pr)}
 
 Your shell starts in NEITHER of those directories, and what it does start in is
 a tree you must not write to: this dispatch carries no working directory of its
@@ -1575,7 +1574,7 @@ decide it and nothing else:
 
 ${KILL_RULES}
 
-${copyRule(snap, worktree, `${snap.runRoot}/verify-${d.key}/f${fi + 1}-l${i + 1}`)}
+${copyRule(snap, worktree, `${snap.runRoot}/verify-${d.key}/f${fi + 1}-l${i + 1}`, scratch, pr)}
 
 ${PATTERN_KILL_RULE}
 

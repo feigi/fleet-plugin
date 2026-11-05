@@ -2083,6 +2083,19 @@ test("(12) an open review launch of PR <N> keeps the run-* trees — and only th
   for (const tree of d.review.trees) assert.ok(installed(tree), `${tree} was evicted under an open review launch`);
 });
 
+test("(12) an open workflow review launch of PR <N>, named by its runId, keeps the run-* trees too", (t) => {
+  const f = fixture(t);
+  f.ledger(["#6 impl-6=PR#7 → PR#7 · review=wf:abc123"], ["impl-6=PR#7"]);
+  f.states({ 7: PR("OPEN") });
+  const d = prDirectory(f);
+
+  const r = f.run(["--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r.out.evicted), [...d.fixes, d.mutate, d.finish].sort());
+  for (const tree of d.review.trees) assert.ok(installed(tree), `${tree} was evicted under an open workflow review launch`);
+});
+
 test("(12) a review launch that ended =failed no longer keeps the run-* trees", (t) => {
   const f = fixture(t);
   f.ledger(["#6 impl-6=PR#7 → PR#7 · review=member:review-pr-7=failed"], ["impl-6=PR#7"]);
@@ -2110,7 +2123,10 @@ test("(12) a live finisher-pr-<N> keeps the finish-* tree — and only that", (t
 
 test("(12) a member of another PR holds nothing of this one's", (t) => {
   const f = fixture(t);
-  f.ledger(["#6 impl-6=PR#8 → PR#8 · fix-pr-8", "#9 impl-9=PR#70 → PR#70 · finisher-pr-70"], ["impl-6=PR#8", "fix-pr-8", "impl-9=PR#70", "finisher-pr-70"]);
+  f.ledger(
+    ["#6 impl-6=PR#8 → PR#8 · fix-pr-8 · review=wf:abc123", "#9 impl-9=PR#70 → PR#70 · finisher-pr-70"],
+    ["impl-6=PR#8", "fix-pr-8", "impl-9=PR#70", "finisher-pr-70"],
+  );
   f.states({ 7: PR("OPEN") });
   const d = prDirectory(f);
 

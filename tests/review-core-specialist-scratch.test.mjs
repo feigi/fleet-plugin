@@ -67,7 +67,7 @@ const TEMPLATE_END = "label: `review:";
 // they return is not under test here, and binding them keeps a render that
 // stops passing one from dropping a paragraph silently — it throws a
 // ReferenceError instead.
-const SCOPE = ["pr", "branch", "d", "snap", "worktree", "stats", "sharedRunNote", "sharedRun", "failureOwner", "readRules", "usableDiff", "environmentNote", "copyRule", "PATTERN_KILL_RULE"];
+const SCOPE = ["pr", "branch", "d", "snap", "worktree", "scratch", "stats", "sharedRunNote", "sharedRun", "failureOwner", "readRules", "usableDiff", "environmentNote", "copyRule", "PATTERN_KILL_RULE"];
 
 // `between` owns the bounded-slice extraction (and both failure messages);
 // only the backtick trim below is specific to a template literal and stays
@@ -89,6 +89,7 @@ const render = () =>
     { key: "correctness", prompt: "does it do what it says" },
     { path: "/scr/run-1/snapshot-abc1234", head: "abc1234", runRoot: "/scr/run-1" },
     "/repo/.worktrees/7-x",
+    "/scr",
     null,
     () => "SHARED RUN NOTE",
     {},

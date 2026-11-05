@@ -124,7 +124,7 @@ test("the skipped run's note tells a specialist not to replace the run and not t
 // --- your own copy of the snapshot ---------------------------------------
 
 test("copyRule names measure-copy.mjs with the PR worktree, the reviewed head, a destination in the agent's own directory and the run's scratch — never the snapshot's tracked-files-only recipe", () => {
-  const rule = copyRule(SNAP, "/repo/.worktrees/7-x", "/scr/pr7/run-ab12/correctness");
+  const rule = copyRule(SNAP, "/repo/.worktrees/7-x", "/scr/pr7/run-ab12/correctness", "/scr", 7);
   for (const clause of [
     "Make your own copy of the tree at the reviewed head with the one script that builds every measuring copy, never by hand",
     "~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run measure-copy.mjs --worktree /repo/.worktrees/7-x --pin abc123 --dest /scr/pr7/run-ab12/correctness/copy --pr 7 --scratch /scr",
@@ -136,7 +136,13 @@ test("copyRule names measure-copy.mjs with the PR worktree, the reviewed head, a
   }
   assert.doesNotMatch(rule, /--worktree \/scr\/pr7\/run-ab12\/snapshot/, "the snapshot was named as the worktree");
   assert.doesNotMatch(rule, /git -C [^\n]* archive/, "the rule still spells the copy out by hand");
-  assert.equal(copyRule(UNREAD, "/repo/.worktrees/7-x", "/scr/pr7/run-ab12/correctness"), rule, "the rule depends on what the snapshot's Install step read — the script reads the Recipe itself");
+  assert.equal(copyRule(UNREAD, "/repo/.worktrees/7-x", "/scr/pr7/run-ab12/correctness", "/scr", 7), rule, "the rule depends on what the snapshot's Install step read — the script reads the Recipe itself");
+});
+
+test("copyRule names the scratch root and PR it is given, never ones read back off the reported run root", () => {
+  const rule = copyRule({ ...SNAP, runRoot: "/elsewhere/run-ab12" }, "/repo/.worktrees/7-x", "/scr/pr7/run-ab12/correctness", "/scr", 7);
+  assert.match(rule, Pin.phrase("--dest /scr/pr7/run-ab12/correctness/copy --pr 7 --scratch /scr"));
+  assert.doesNotMatch(rule, /undefined/);
 });
 
 test("every dispatched prompt that sends an agent into its own copy of the snapshot carries the rule for making it, with that agent's own directory", async () => {
@@ -150,7 +156,7 @@ test("every dispatched prompt that sends an agent into its own copy of the snaps
     "verify:correctness": ["verify-correctness/f1-l1", "verify-correctness/f1-l2"],
   };
   for (const [label, p] of own) {
-    const rules = dirs[label].map((d) => copyRule(SNAP, ARGS.worktree, `${SNAP.runRoot}/${d}`));
+    const rules = dirs[label].map((d) => copyRule(SNAP, ARGS.worktree, `${SNAP.runRoot}/${d}`, ARGS.scratch, ARGS.pr));
     assert.ok(rules.some((rule) => p.includes(rule)), `${label} sends an agent into its own copy of the snapshot without saying how to make it`);
     assert.ok(p.includes(`--worktree ${ARGS.worktree} `), `${label} names a worktree other than the PR's`);
   }

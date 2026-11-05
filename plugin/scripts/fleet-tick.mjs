@@ -1551,35 +1551,41 @@ export function ageChecks({ live, stems }) {
   ];
 }
 
-// --apply's pure half. The merge-bot numbers `applied.reapAfter` names for
-// THIS run: none when its `run` is not the controller record's `at`, since
-// merge-bot numbering restarts with a run and the state file outlives it
-// (fleet-state.mjs's `applied`). `controllerAt` is null with no record, and
-// with no record nothing tells this run from the one before it: a list then
-// names nothing, and the sweeps run again on the next tick.
+// --apply's pure half. `applied` when its `run` is THIS run's controller
+// record `at`, else null: merge-bot numbering restarts with a run, a name such
+// as `fix-pr-7` is reused by the next run's first member of its PR, and the
+// state file outlives both (fleet-state.mjs's `applied`). `controllerAt` is
+// null with no record, and with no record nothing tells this run from the one
+// before it: a list then names nothing, and the sweeps run again on the next
+// tick.
+const ofThisRun = (applied, controllerAt) => (applied !== null && controllerAt != null && applied.run === controllerAt ? applied : null);
+
+// The entries of `names` that `ran` does not hold.
+const notIn = (names, ran) => {
+  const done = new Set(ran);
+  return names.filter((name) => !done.has(name));
+};
+
+// The merge-bot numbers `applied.reapAfter` names for THIS run.
 export function reapedAfter(applied, controllerAt) {
-  return applied !== null && controllerAt != null && applied.run === controllerAt ? applied.reapAfter : [];
+  return ofThisRun(applied, controllerAt)?.reapAfter ?? [];
 }
 
 // The merge passes owed their reap, reclaim and evict: every merge bot settled
 // `done` that reapedAfter() does not name.
 export function reapDue(done, applied, controllerAt) {
-  const ran = new Set(reapedAfter(applied, controllerAt));
-  return done.filter((n) => !ran.has(n));
+  return notIn(done, reapedAfter(applied, controllerAt));
 }
 
-// The members `applied.sweptAfter` names for THIS run, on reapedAfter()'s
-// terms: none when its `run` is not the controller record's `at`, since a
-// name such as `fix-pr-7` is reused by the next run's first member of its PR.
+// The members `applied.sweptAfter` names for THIS run.
 export function sweptAfter(applied, controllerAt) {
-  return applied !== null && controllerAt != null && applied.run === controllerAt ? (applied.sweptAfter ?? []) : [];
+  return ofThisRun(applied, controllerAt)?.sweptAfter ?? [];
 }
 
 // The settles owed the root sweep: every member in `settled` (run.sweepAfter)
 // that sweptAfter() does not name.
 export function sweepDue(settled, applied, controllerAt) {
-  const ran = new Set(sweptAfter(applied, controllerAt));
-  return settled.filter((name) => !ran.has(name));
+  return notIn(settled, sweptAfter(applied, controllerAt));
 }
 
 // The implementers the tick would print `HOLD (tier unchecked …)` for: read
@@ -2401,7 +2407,10 @@ function main() {
 
   if (apply) {
     // Reap, reclaim and evict after every merge pass settled `done` since the
-    // last time they ran. Recorded only once all three applied, on a fresh read of the
+    // last time they ran, and the root sweep after every settle `sweepAfter`
+    // names that `sweptAfter` does not. A merge pass is recorded in `reapAfter`
+    // only once all three applied, and a settle in `sweptAfter` once a root
+    // sweep applied, the merge pass's own included; each on a fresh read of the
     // state file so nothing the heartbeat wrote meanwhile is reverted, never
     // onto a file that could not be read, and never with no controller
     // record: nothing could tell a list recorded then from the next run's.
@@ -2410,8 +2419,8 @@ function main() {
     const owed = sweepDue(run.sweepAfter, priorState.applied, run0);
     const reap = due.length ? applyReap(due) : null;
     // The root sweep a merge pass ran is the one a settled member owes too.
-    const swept = owed.length > 0 && (reap?.reclaimed === true || applySweep(`reclaim after ${owed.join(" ")}`));
-    const reaped = reap?.all === true ? due : [];
+    const swept = owed.length > 0 && (reap?.reclaimed || applySweep(`reclaim after ${owed.join(" ")}`));
+    const reaped = reap?.all ? due : [];
     if (run0 !== null && (reaped.length > 0 || swept)) {
       const now = readState(path, NAME);
       if (!now.degraded) {

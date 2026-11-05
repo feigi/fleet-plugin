@@ -26,13 +26,17 @@
 //     exists may be a symlink; and nothing may exist at the destination itself,
 //     a dangling symlink or an empty directory included. Anything else builds
 //     nothing.
-//   2 `git -C <worktree> archive <pin> | tar -x -C <dest>`, then `git init`,
-//     `git add -A -f` and a commit. The commit's tree must be the pin's tree.
+//   2 `git init` in it, then the pin's objects fetched from the worktree, its
+//     tree read into the index and checked out, `git add -A` and a commit.
+//     The commit's tree must be the pin's tree. Never `git archive`, which
+//     leaves out gitlinks and `export-ignore` paths and rewrites
+//     `export-subst` files.
 //   3 The Install step, by evict.mjs's `installIn()`: read from the worktree
 //     with `derive-testcmd.sh <worktree> install --at origin/main`, run from the
 //     copy's root through `sh -c` with `CI` unset, no timeout, under no suite
 //     slot, a clean `git status --porcelain -uall` required before it. What the
-//     step leaves untracked afterwards is reported, never refused.
+//     step leaves untracked afterwards is reported, never refused; a tracked
+//     file it changed is a refusal.
 //
 // Stdout is one JSON line, the receipt, whatever happened after the arguments
 // parsed:
@@ -44,10 +48,10 @@
 // tree            the copy's commit tree, null when never read
 // install         the Install step's command, null when never read
 // kind            `built`, or what stopped it: `outside`, `occupied`,
-//                 `unreadable`, `pin-unreadable`, `archive-failed`, `init-failed`,
-//                 `tree-mismatch`, or one of evict.mjs's `installIn()` kinds:
-//                 `derive`, `status-before`, `dirty-before`, `not-run`,
-//                 `failed`, `status-after`
+//                 `unreadable`, `pin-unreadable`, `init-failed`,
+//                 `fetch-failed`, `checkout-failed`, `tree-mismatch`, or one of
+//                 evict.mjs's `installIn()` kinds: `derive`, `status-before`,
+//                 `dirty-before`, `not-run`, `failed`, `dirtied`, `status-after`
 // exit            the Install step's own exit status, null when it produced none
 // untracked       the first 20 lines of `git status --porcelain -uall` in the
 //                 copy after the Install step, null when it was never read
@@ -58,13 +62,15 @@
 //
 //   0  built: the copy is the pin's tree and its Install step exited 0
 //   1  no usable copy, nothing the Install step did: a destination outside a
-//      round root or run root, or one that exists; an archive, an init or a
-//      commit that failed; a tree that is not the pin's; a Recipe that could
-//      not be read; a status that could not be read before the Install step
+//      round root or run root, or one that exists; an init, a fetch, a
+//      checkout or a commit that failed; a tree that is not the pin's; a Recipe
+//      that could not be read; a status that could not be read before the
+//      Install step
 //   2  a refusal on stderr with no receipt: a usage refusal, as in every other
 //      script, or a receipt that could not be written to stdout
 //   3  the Install step did not run: exit 126 or 127, or it could not be started
-//   4  the Install step failed: another non-zero exit, or a signal
+//   4  the Install step failed: another non-zero exit, or a signal, or it
+//      changed a tracked file
 //   5  the Install step ran and the copy's state could not be read after it
 //
 // Any non-zero exit leaves the copy where it stands: this script removes
@@ -92,6 +98,7 @@ const MAX_BUFFER = 64 * 1024 * 1024;
 const EXIT = {
   "not-run": 3,
   failed: 4,
+  dirtied: 4,
   "status-after": 5,
 };
 
@@ -188,20 +195,25 @@ function main() {
   } catch (e) {
     return finish(1, "unreadable", `cannot make ${dest} (${e.code ?? e.message})`);
   }
-  const archived = spawnSync("sh", ["-c", 'git -C "$1" archive "$2" | tar -x -C "$3"', "sh", worktree, pin, dest], {
-    encoding: "utf8",
-    maxBuffer: MAX_BUFFER,
-    env: gitEnv(),
-  });
-  if (archived.error || archived.status !== 0) return finish(1, "archive-failed", `git -C ${worktree} archive ${pin} | tar -x -C ${dest} failed (${how(archived)})`);
+  // The pin's objects are fetched into the copy and its tree checked out from
+  // them, never archived: `git archive` leaves out a submodule's gitlink and
+  // every `export-ignore` path and rewrites an `export-subst` file, so its copy
+  // of such a pin is never the pin's tree. A gitlink is checked out as an empty
+  // directory and stays in the index as the pin holds it. The add reads the
+  // checked-out files back, so one the checkout does not carry back unchanged
+  // is a tree mismatch below. Each step is its own child, so the one that
+  // failed names the refusal with git's own words.
   const made = [
-    ["init", "-q"],
-    ["add", "-A", "-f"],
-    ["-c", "user.name=fleet", "-c", "user.email=fleet@invalid", "-c", "commit.gpgsign=false", "commit", "-q", "--no-verify", "--allow-empty", "-m", `measuring copy of ${pin}`],
+    ["init-failed", ["init", "-q"]],
+    ["fetch-failed", ["-c", "protocol.version=2", "fetch", "-q", "--no-tags", "--depth=1", worktree, pin]],
+    ["checkout-failed", ["read-tree", pin]],
+    ["checkout-failed", ["checkout-index", "-a", "-f"]],
+    ["init-failed", ["add", "-A"]],
+    ["init-failed", ["-c", "user.name=fleet", "-c", "user.email=fleet@invalid", "-c", "commit.gpgsign=false", "commit", "-q", "--no-verify", "--allow-empty", "-m", `measuring copy of ${pin}`]],
   ];
-  for (const args of made) {
+  for (const [kind, args] of made) {
     const step = git(dest, args);
-    if (step.error || step.status !== 0) return finish(1, "init-failed", `git ${args.filter((a) => a !== "-c" && !a.includes("=")).join(" ")} failed in ${dest} (${how(step)})`);
+    if (step.error || step.status !== 0) return finish(1, kind, `git ${args.filter((a) => a !== "-c" && !a.includes("=")).join(" ")} failed in ${dest} (${how(step)})`);
   }
   const head = git(dest, ["rev-parse", "HEAD", "HEAD^{tree}"]);
   const [at, tree] = String(head.stdout ?? "").trim().split("\n");

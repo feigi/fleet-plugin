@@ -23,7 +23,8 @@ rather than the script, and every removal and eviction goes through it. Amended
 by #4274: the root sweep also evicts the trees in every `pr<N>` directory it
 keeps whose kind of member is not live on the ledger (fix-applier round roots,
 review run roots, finisher trees), and the tick runs it after every
-fix-applier, failed review launch and finisher settle.
+fix-applier, failed review launch and finisher settle. That tick is a third
+trigger beside decision 3's two controller edges.
 
 ## Context
 

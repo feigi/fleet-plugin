@@ -422,10 +422,11 @@ function sweep({ afterRotate, apply }) {
  * Install step is read from, `tree` itself by default: a copy holds no Recipe
  * cache of its own, so its caller names the worktree whose cache every
  * worktree of the repository shares. `untracked`, set, makes an Install step
- * that leaves the tree changed no refusal: the result is then `{install,
+ * that leaves untracked paths no refusal: the result is then `{install,
  * untracked: {count, first}}`, `first` the first 20 lines of `git status
- * --porcelain -uall` and `count` how many there are, and a status that cannot
- * be read after the step is still `status-after`. Nothing here writes a mark
+ * --porcelain -uall` and `count` how many there are; a tracked file the step
+ * changed is still `dirtied`, and a status that cannot be read after the step
+ * is still `status-after`. Nothing here writes a mark
  * or a restore time, and it never exits the process.
  */
 export function installIn(tree, apply, { verb = "restore", retry = true, beforeRun = () => null, source = tree, untracked = false } = {}) {
@@ -457,14 +458,16 @@ export function installIn(tree, apply, { verb = "restore", retry = true, beforeR
   if (r.status !== 0) return refuse("failed", `install failed in ${tree} (exit ${r.status})`, install, r.status);
   const status = git(tree, ["status", "--porcelain", "-uall"]);
   if (status.error || status.status !== 0) return refuse("status-after", `could not verify the tree state in ${tree} after the Install step`, install, 0);
-  if (status.stdout !== "") {
-    if (untracked) {
-      const lines = status.stdout.split("\n").filter((l) => l !== "");
-      return { install, untracked: { count: lines.length, first: lines.slice(0, 20) } };
-    }
-    return refuse("dirtied", `the Install step '${install}' changed the tree in ${tree} (first: ${status.stdout.split("\n")[0]}) — ${REDERIVE}`, install, 0);
+  if (untracked) {
+    const lines = status.stdout.split("\n").filter((l) => l !== "");
+    // An untracked path is reported; a tracked file the step changed leaves
+    // a tree that is no longer the one the step was run in.
+    const changed = lines.find((l) => !l.startsWith("?? "));
+    if (changed === undefined) return { install, untracked: { count: lines.length, first: lines.slice(0, 20) } };
+    return refuse("dirtied", `the Install step '${install}' changed a tracked file in ${tree} (first: ${changed}) — ${REDERIVE}`, install, 0);
   }
-  return untracked ? { install, untracked: { count: 0, first: [] } } : { install };
+  if (status.stdout !== "") return refuse("dirtied", `the Install step '${install}' changed the tree in ${tree} (first: ${status.stdout.split("\n")[0]}) — ${REDERIVE}`, install, 0);
+  return { install };
 }
 
 function restore(tree, apply) {

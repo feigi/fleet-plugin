@@ -37,6 +37,8 @@ const INSTALL = `#!/bin/sh
 [ -n "\${INSTALL_KILL:-}" ] && kill -9 $$
 mkdir -p node_modules/pkg && echo installed > node_modules/pkg/index.js
 [ -z "\${INSTALL_NO_LEFTOVER:-}" ] && echo left > leftover.txt
+[ -n "\${INSTALL_REWRITE:-}" ] && echo rewritten > tracked.txt
+[ -n "\${INSTALL_DELETE:-}" ] && rm tracked.txt
 [ -n "\${INSTALL_RMGIT:-}" ] && rm -rf .git
 exit "\${INSTALL_EXIT:-0}"
 `;
@@ -130,6 +132,7 @@ test("a destination that would be outside a fix-* or run-* root of this PR is re
   symlinkSync(outside, join(f.scratch, "pr7", "run-linked"));
   const cases = {
     "a .. segment": `${f.round}/f1/../../../../x`,
+    "an empty segment": `${f.round}//f1/copy`,
     "the PR directory itself": join(f.scratch, "pr7"),
     "a directory straight under the PR directory": join(f.scratch, "pr7", "copy"),
     "a root that is neither fix-* nor run-*": join(f.scratch, "pr7", "other-root", "copy"),
@@ -179,12 +182,16 @@ test("a destination that already exists — a directory, an empty one, a file, a
 test("a copy whose tree is not the pin's is refused with exit 1 and the Install step never runs", (t) => {
   const f = fixture(t);
   const log = join(f.dir, "install.log");
-  // A tracked file whose mode git cannot carry through the archive: an
-  // attribute that rewrites it on export makes the extracted tree differ.
-  writeFileSync(join(f.repo, ".gitattributes"), "tracked.txt export-subst\n");
-  writeFileSync(join(f.repo, "tracked.txt"), "id: $Format:%H$\n");
-  git(f.repo, ["add", "-A"]);
-  git(f.repo, ["commit", "-q", "-m", "export-subst"]);
+  // A tracked file whose content the checkout and the add do not carry back
+  // unchanged: a blob stored with CRLF line endings under a `text` attribute
+  // is normalized to LF when the copy adds it, so the copy's tree differs. The
+  // blob is written unfiltered and staged by id, so no add here normalizes it.
+  writeFileSync(join(f.repo, "crlf.txt"), "a\r\nb\r\n");
+  const blob = git(f.repo, ["hash-object", "-w", "--no-filters", "crlf.txt"]);
+  writeFileSync(join(f.repo, ".gitattributes"), "crlf.txt text\n");
+  git(f.repo, ["add", ".gitattributes"]);
+  git(f.repo, ["update-index", "--add", "--cacheinfo", `100644,${blob},crlf.txt`]);
+  git(f.repo, ["commit", "-q", "-m", "crlf"]);
   const pin = git(f.repo, ["rev-parse", "HEAD"]);
 
   const r = f.run({ pin }, { env: { INSTALL_LOG: log } });
@@ -192,6 +199,52 @@ test("a copy whose tree is not the pin's is refused with exit 1 and the Install 
   assert.equal(r.status, 1, r.stderr + r.stdout);
   assert.equal(r.receipt.kind, "tree-mismatch");
   assert.equal(existsSync(log), false, "the Install step ran on a copy that is not the pin's");
+  assert.equal(r.receipt.install, null);
+});
+
+test("a pin whose tree is empty still makes the copy's commit, and the Install step it cannot hold is not run", (t) => {
+  const f = fixture(t);
+  const empty = git(f.repo, ["hash-object", "-t", "tree", "-w", "/dev/null"]);
+  const pin = git(f.repo, ["commit-tree", empty, "-m", "empty"]);
+
+  const r = f.run({ pin });
+
+  assert.equal(r.status, 3, r.stderr + r.stdout);
+  assert.equal(r.receipt.kind, "not-run");
+  assert.equal(r.receipt.tree, empty);
+  assert.equal(git(f.dest, ["rev-parse", "HEAD^{tree}"]), empty);
+});
+
+test("a pin holding a submodule gitlink, an export-ignore path and an export-subst file still copies as the pin's tree", (t) => {
+  const f = fixture(t);
+  writeFileSync(join(f.repo, ".gitattributes"), "gone.txt export-ignore\nsubst.txt export-subst\n");
+  writeFileSync(join(f.repo, "gone.txt"), "kept\n");
+  writeFileSync(join(f.repo, "subst.txt"), "id: $Format:%H$\n");
+  git(f.repo, ["add", "-A"]);
+  git(f.repo, ["update-index", "--add", "--cacheinfo", `160000,${f.pin},sub`]);
+  git(f.repo, ["commit", "-q", "-m", "gitlink and export attributes"]);
+  const pin = git(f.repo, ["rev-parse", "HEAD"]);
+
+  const r = f.run({ pin });
+
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  assert.equal(r.receipt.kind, "built");
+  assert.equal(git(f.dest, ["rev-parse", "HEAD^{tree}"]), git(f.repo, ["rev-parse", `${pin}^{tree}`]), "the copy's HEAD tree is not the pin's tree");
+  assert.equal(git(f.dest, ["ls-files", "-s", "sub"]).split(/\s/)[0], "160000", "the gitlink is not in the copy's index");
+  assert.equal(readFileSync(join(f.dest, "gone.txt"), "utf8"), "kept\n", "an export-ignore path is missing from the copy");
+  assert.equal(readFileSync(join(f.dest, "subst.txt"), "utf8"), "id: $Format:%H$\n", "an export-subst file was rewritten in the copy");
+});
+
+test("a pin whose objects cannot all be fetched is refused as fetch-failed with git's own words, never as a tree mismatch", (t) => {
+  const f = fixture(t);
+  const blob = git(f.repo, ["rev-parse", `${f.pin}:tracked.txt`]);
+  rmSync(join(f.repo, ".git", "objects", blob.slice(0, 2), blob.slice(2)));
+
+  const r = f.run();
+
+  assert.equal(r.status, 1, r.stderr + r.stdout);
+  assert.equal(r.receipt.kind, "fetch-failed");
+  assert.match(r.receipt.message, /^git fetch .* failed in .* \(exit \d+: .+\)$/);
   assert.equal(r.receipt.install, null);
 });
 
@@ -205,13 +258,15 @@ test("a pin the worktree does not hold is refused with exit 1", (t) => {
   assert.equal(existsSync(f.dest), false, "a copy was started for a pin that is not there");
 });
 
-test("an Install step that cannot run is exit 3, one that fails is exit 4, one that hides the copy's state is exit 5, each with a receipt", (t) => {
+test("an Install step that cannot run is exit 3, one that fails or changes a tracked file is exit 4, one that hides the copy's state is exit 5, each with a receipt", (t) => {
   const cases = [
     [{ INSTALL_MISSING: "1" }, 3, "not-run", 127],
     [{ INSTALL_EXIT: "126" }, 3, "not-run", 126],
     [{ INSTALL_EXIT: "1" }, 4, "failed", 1],
     [{ INSTALL_EXIT: "9" }, 4, "failed", 9],
     [{ INSTALL_KILL: "1" }, 4, "failed", null],
+    [{ INSTALL_REWRITE: "1" }, 4, "dirtied", 0],
+    [{ INSTALL_DELETE: "1" }, 4, "dirtied", 0],
     [{ INSTALL_RMGIT: "1" }, 5, "status-after", 0],
   ];
   for (const [env, code, kind, exit] of cases) {
@@ -266,6 +321,16 @@ test("a run-* run root takes a copy too, at any depth, and two copies of one pin
   assert.notEqual(a.receipt.dest, b.receipt.dest);
 });
 
+test("a destination written with a trailing slash builds at the path without it", (t) => {
+  const f = fixture(t);
+
+  const r = f.run({ dest: `${f.dest}/` });
+
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  assert.equal(r.receipt.dest, f.dest);
+  assert.equal(git(f.dest, ["rev-parse", "HEAD^{tree}"]), git(f.repo, ["rev-parse", `${f.pin}^{tree}`]));
+});
+
 test("a scratch root named through a symlink takes a destination written either way", (t) => {
   const f = fixture(t);
   const link = join(f.dir, "scratch-link");
@@ -284,7 +349,7 @@ test("the script runs the install sequence through evict.mjs's installIn and car
   assert.doesNotMatch(SOURCE.replace(/^\/\/.*$/gm, ""), /derive-testcmd\.sh/, "the script reads the Install step itself instead of through installIn");
 });
 
-test("an inherited GIT_DIR naming another repository cannot retarget the archive, the init or the commit", (t) => {
+test("an inherited GIT_DIR naming another repository cannot retarget the fetch, the init or the commit", (t) => {
   const f = fixture(t);
   const other = join(f.dir, "other");
   git(f.dir, ["-c", "init.defaultBranch=main", "init", "-q", other]);

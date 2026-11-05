@@ -70,7 +70,7 @@ const TEMPLATE_END = "{ label: `verify:";
 // here. `environmentNote` is bound for the same reason as the workflow's copy:
 // a render that stops binding it throws a ReferenceError rather than dropping
 // a paragraph silently.
-const SCOPE = ["pr", "f", "snap", "worktree", "stats", "d", "i", "fi", "readRules", "usableDiff", "environmentNote", "testCmd", "KILL_RULES", "copyRule", "PATTERN_KILL_RULE"];
+const SCOPE = ["pr", "f", "snap", "worktree", "scratch", "stats", "d", "i", "fi", "readRules", "usableDiff", "environmentNote", "testCmd", "KILL_RULES", "copyRule", "PATTERN_KILL_RULE"];
 
 function refuterTemplate() {
   const start = CODE.indexOf(TEMPLATE_START);
@@ -96,6 +96,7 @@ const render = () =>
     { claim: "the guard fails open", file: "a.js", line: 12, evidence: "line 12 has no else" },
     { path: "/scr/run-1/snapshot-abc1234", head: "abc1234", runRoot: "/scr/run-1" },
     "/repo/.worktrees/7-x",
+    "/scr",
     null,
     { key: "correctness" },
     0,

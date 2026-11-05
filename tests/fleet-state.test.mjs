@@ -417,6 +417,10 @@ test("readState: `applied` is read against a run or not at all; a junk entry cos
     assert.equal(read(bad).applied, null, JSON.stringify(bad));
   }
   assert.deepEqual(read({ run: 5, reapAfter: [1, 0, -2, 1.5, "3", null, 4] }).applied, { run: 5, reapAfter: [1, 4] });
+  assert.deepEqual(read({ run: 5, reapAfter: [], sweptAfter: ["fix-pr-7", "", 3, null, "finisher-pr-7"] }).applied, { run: 5, reapAfter: [], sweptAfter: ["fix-pr-7", "finisher-pr-7"] });
+  for (const junk of [["", 3, null], "fix-pr-7", []]) {
+    assert.deepEqual(read({ run: 5, reapAfter: [1], sweptAfter: junk }).applied, { run: 5, reapAfter: [1] }, `sweptAfter ${JSON.stringify(junk)} leaves no key`);
+  }
   assert.equal(read("junk").quiet, 3, "a junk `applied` costs the streak beside it");
   rmSync(dir, { recursive: true, force: true });
 });

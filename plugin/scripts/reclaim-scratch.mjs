@@ -35,9 +35,10 @@
 //            finisher-pr-<M>[-x]. A live merge-bot-<n> token holds every one
 //            of them: a bot's token names no PR, and GitHub reads MERGED
 //            while the bot is still writing under pr<M>/merge-bot-<n>/. An
-//            OPEN PR's pr<M>/ is kept whole except its run-* roots, which
-//            follow the --pr rule below. A MERGED PR's entry that holds
-//            review evidence — a `<run>/review.json` under pr<M>/, or a
+//            OPEN PR's pr<M>/ is kept, but for its run-* roots, which follow
+//            the --pr rule below, and the trees named below. A MERGED PR's
+//            entry that holds review evidence — a `<run>/review.json` under
+//            pr<M>/, or a
 //            Charges file naming its run — is also kept until origin/main
 //            holds every file of it where run-records.mjs's reviewTargets()
 //            puts it, under docs/metrics/reviews/<M>/: the Close-out PR
@@ -167,7 +168,7 @@ import { fleetFile, FleetDirUnresolvable, SCRATCH_KEY_SHAPE, scratchRoot } from 
 import { gitEnv } from "./git-env.mjs";
 import { ghAliasedRead, how } from "./gh-aliased-read.mjs";
 import { isCLI } from "./is-cli.mjs";
-import { liveOnLedger, parseMember, REVIEWER } from "./ledger-grammar.mjs";
+import { liveOnLedger, parseMember, REVIEW, REVIEWER, rowNums } from "./ledger-grammar.mjs";
 import { REVIEWS_DIR, reviewTargets } from "./run-records.mjs";
 
 const NAME = "reclaim-scratch";
@@ -247,18 +248,18 @@ export function readLedger(file, die, undone) {
   return { rows: d.rows, dispatched: d.dispatched };
 }
 
-// The live tokens the ledger holds, by name.
-function liveNames(file) {
-  const { rows, dispatched } = readLedger(file, die, "reclaimed");
-  return liveOnLedger(rows, dispatched).tokens.map((t) => t.name);
-}
-
-// The same, for a read made after removals have started: a ledger that cannot
-// be read throws, so the one directory's eviction is a failure on the receipt
-// and the sweep goes on.
-function liveNamesOrThrow(file) {
-  const { rows, dispatched } = readLedger(file, (message) => { throw new Error(message); }, "evicted");
-  return liveOnLedger(rows, dispatched).tokens.map((t) => t.name);
+// The live tokens the ledger holds, as `{name, launchOf}`: `launchOf` the PR
+// whose rows carry the token when it is an open review launch — a runner's, or
+// a workflow's, whose name is its runId — else null. `fail` and `undone` are
+// readLedger()'s: a read made after removals have started throws, so the one
+// directory's eviction is a failure on the receipt and the sweep goes on.
+function liveTokens(file, fail = die, undone = "reclaimed") {
+  const { rows, dispatched } = readLedger(file, fail, undone);
+  const launchPr = new Map();
+  for (const text of rows) {
+    for (const word of text.split(/\s+/)) if (REVIEW.test(word) && !launchPr.has(word)) launchPr.set(word, rowNums(text).pr);
+  }
+  return liveOnLedger(rows, dispatched).tokens.map((t) => ({ name: t.name, launchOf: launchPr.get(t.token) ?? null }));
 }
 
 // The checkout the fleet dir sits in, and its ledger file — `file` null when it
@@ -398,18 +399,19 @@ function treeRoots(pdir, skip) {
   return roots;
 }
 
-// The live member of the kind `kind` names on PR `n`, by name, or undefined:
-// a `fix-pr-<n>[-x]`, a `finisher-pr-<n>[-x]`, or the open review launch
-// `review-pr-<n>[-x]`.
-export function kindHolder(live, kind, n) {
-  return live.find((name) => {
+// The live holder of the kind `kind` names on PR `n`, by name, or undefined:
+// a `fix-pr-<n>[-x]`, a `finisher-pr-<n>[-x]`, or an open review launch of PR
+// #n — `review-pr-<n>[-x]`, or a workflow launch on PR #n's rows, named by its
+// runId. `live` is liveTokens()'s list.
+function kindHolder(live, kind, n) {
+  return live.find(({ name, launchOf }) => {
     if (kind === "run") {
       const r = REVIEWER.exec(name);
-      return r !== null && Number(r[1]) === n;
+      return launchOf === n || (r !== null && Number(r[1]) === n);
     }
     const m = parseMember(name);
     return m !== null && m.family === (kind === "fix" ? "fix-pr" : "finisher-pr") && m.number === n;
-  });
+  })?.name;
 }
 
 const EVICT_RULE = {
@@ -792,6 +794,13 @@ function main() {
   let kept = [];
   let evict = [];
   const failed = [];
+  // Evicts the trees under `path`, each named on the receipt with `reason`.
+  const evictRoot = (path, reason) => {
+    const done = evictTrees(path, { apply });
+    for (const t of done.evicted) evicted.push({ path: t.path, reason, ignored: t.ignored });
+    failed.push(...done.failed);
+    skipped.push(...done.skipped);
+  };
   if (pr !== null) {
     const parent = join(root, `pr${Number(pr)}`);
     try {
@@ -801,12 +810,7 @@ function main() {
       failed.push({ path: parent, error: e.message });
     }
     // `--pr` mode also evicts the trees in every run root it keeps.
-    for (const run of kept) {
-      const done = evictTrees(run.path, { apply });
-      for (const t of done.evicted) evicted.push({ path: t.path, reason: "a tree in a kept review run root", ignored: t.ignored });
-      failed.push(...done.failed);
-      skipped.push(...done.skipped);
-    }
+    for (const run of kept) evictRoot(run.path, "a tree in a kept review run root");
   } else if (siblings) {
     if (apply) {
       const wrote = writeCheckout(root);
@@ -825,7 +829,7 @@ function main() {
     const found = ledgerFile(die);
     ledger = found.file;
     if (ledger === null && !afterRotate) die("no .fleet/ledger.md — without it no live member can hold its scratch, so nothing is reclaimed; pass --after-rotate only straight after `ledger.mjs rotate`");
-    const live = ledger === null ? [] : liveNames(ledger);
+    const live = ledger === null ? [] : liveTokens(ledger).map((t) => t.name);
     let names;
     try {
       names = readdirSync(root).sort();
@@ -872,22 +876,16 @@ function main() {
     if (dir.roots.length === 0) continue;
     let liveNow;
     try {
-      liveNow = ledger === null ? [] : liveNamesOrThrow(ledger);
+      liveNow = ledger === null ? [] : liveTokens(ledger, (message) => { throw new Error(message); }, "evicted");
     } catch (e) {
       failed.push({ path: dir.path, error: e.message });
       continue;
     }
     for (const r of dir.roots) {
-      if (kindHolder(liveNow, r.kind, dir.n) !== undefined) continue;
-      const done = evictTrees(r.path, { apply });
-      const reason = EVICT_RULE[r.kind](dir.n, basename(r.path));
-      for (const t of done.evicted) evicted.push({ path: t.path, reason, ignored: t.ignored });
-      failed.push(...done.failed);
-      skipped.push(...done.skipped);
+      if (kindHolder(liveNow, r.kind, dir.n) === undefined) evictRoot(r.path, EVICT_RULE[r.kind](dir.n, basename(r.path)));
     }
   }
-  const withTrees = pr !== null || !siblings;
-  const receipt = { applied: apply, ledger, removed, ...(withTrees ? { evicted } : {}), kept, failed, ...(withTrees ? { skipped } : {}) };
+  const receipt = { applied: apply, ledger, removed, ...(siblings ? {} : { evicted }), kept, failed, ...(siblings ? {} : { skipped }) };
   writeAll(1, `${JSON.stringify(receipt)}\n`);
 }
 

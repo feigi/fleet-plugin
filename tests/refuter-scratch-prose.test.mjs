@@ -180,7 +180,8 @@ test("review-and-fix.md's last numbered step runs the root sweep standalone, and
 test("the fix-applier body builds its own mutation copy with the script, pinned to its own commit and inside its round root, and makes no pr<N>/mutate/", () => {
   const body = stripQuoteGutter(FIX_APPLIER());
   assert.match(body, Pin.phrase("**Every kind of dispatch makes its round root before its first copy**: `mktemp -d` once per round for `<scratch>/pr<N>/fix-XXXXXXXX/`"));
-  assert.match(body, Pin.phrase("fleet-run measure-copy.mjs --worktree <abs-path> --pin <your commit> --dest <round root>/mutate --pr <pr> --scratch <scratch>"));
+  assert.match(body, Pin.phrase("fleet-run measure-copy.mjs --worktree <abs-path> --pin <your commit> --dest <round root>/mutate-<k> --pr <pr> --scratch <scratch>"));
+  assert.match(body, Pin.phrase("a copy at a later commit is another new directory"));
   assert.match(body, Pin.phrase("never make `<scratch>/pr<N>/mutate/`"));
   assert.match(body, Pin.phrase("run no eviction step"));
   assert.doesNotMatch(body, /mutate a copy under\s+`<scratch>\/pr<N>\/mutate\/`/, "the fix-applier is told to mutate in pr<N>/mutate/ again");
