@@ -1674,18 +1674,35 @@ test("an untracked file the check mutation creates does not reach the Test run",
   assert.match(JSON.parse(readFileSync(cachePath(dir), "utf8")).checkMutation, /changed status\.txt$/);
 });
 
-test("a tree that cannot be read after the Check step names the check output, not the install output", () => {
+// A Check step that removes `.git` leaves a tree git cannot read: the refusal
+// gives git's reason, then the Check step's log, never the install output.
+function refusesUnreadableAfterCheck(env) {
   const { dir } = repo(CHECK_FILES);
   const r = prove(dir, [
     ...TEST_PROOF,
     "--check", "rm -f .git",
     "--check-mutate", "printf 'dirty\\n' > status.txt",
     "--check-mutation", "the lint step fails on a dirty status",
-  ]);
+  ], { env });
   assert.equal(r.status, 1, r.err);
-  assert.match(r.err, /could not read the tree state in the throwaway worktree: .*; check output: \S*check\.log/);
+  assert.match(r.err, /could not read the tree state in the throwaway worktree: .*; check output: \S*check\.log/s);
   assert.doesNotMatch(r.err, /install output/);
   assert.equal(existsSync(cachePath(dir)), false);
+  return r;
+}
+
+test("a tree that cannot be read after the Check step names the check output, not the install output", () => {
+  refusesUnreadableAfterCheck({});
+});
+
+// Where TMPDIR sits on another filesystem than its parent, git's reason is two
+// lines, the second `Stopping at filesystem boundary (…)` (#4339). A stub
+// prints that form once the Check step has removed `.git`, so every host
+// checks the refusal across it, not only a host with such a mount.
+test("a two-line git reason after the Check step still names the check output, not the install output", () => {
+  const boundary = `[ -e .git ] || { printf '%s\\n' 'fatal: not a git repository (or any parent up to mount point /Volumes)' 'Stopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).' >&2; exit 128; }`;
+  const r = refusesUnreadableAfterCheck({ PATH: fakeGit("status*", boundary) });
+  assert.match(r.err, /mount point \/Volumes\)\nStopping at filesystem boundary/);
 });
 
 // The omp agent shell sets `CI=true` (#3445), and a setup script that skips under `CI`
