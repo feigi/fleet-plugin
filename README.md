@@ -18,11 +18,19 @@ supported ([ADR 0009](docs/adr/0009-supported-platforms-are-macos-linux-wsl.md))
 
 One install-time precondition, operator-set: `modelRoles.slow|task|smol`
 pointing at models this install has — the fleet's tier routes (ADR 0011,
-ADR 0014, ADR 0021).
+ADR 0014, ADR 0021). Set them in `config.yml`, in the directory
+`omp config path` prints; `omp models` lists the models this install has:
+
+```yaml
+modelRoles:
+  slow: <provider>/<model>
+  task: <provider>/<model>
+  smol: <provider>/<model>
+```
 
 ```
 omp plugin install @feigi/fleet-ctl
-~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run tier-roles.mjs --check
+~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run tier-roles.mjs --check --in-flight 5
 ```
 
 Working on the plugin itself (this checkout): link the package instead, so

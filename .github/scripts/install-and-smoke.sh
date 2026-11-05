@@ -41,6 +41,12 @@
 #   4. Execs the Package entry's `fleet-run arg.mjs` once and requires exit
 #      0 — one real execution through the Resolver, not just a path
 #      resolution.
+#   5. Runs README's tier line as written, read out of README.md's
+#      Installation section at run time, against a scratch `config.yml`
+#      holding the three `modelRoles` and a dummy API key, and requires
+#      exit 0.
+#   6. Requires `npm pack --dry-run --json` in `plugin/` to list every file
+#      `git ls-files plugin` lists, naming each one it leaves out.
 #
 # No test suite runs from an install anywhere in this script.
 set -euo pipefail
@@ -192,9 +198,66 @@ if ! HOME="$SCRATCH_HOME" node "$RESOLVER" arg.mjs; then
   fail=1
 fi
 
+# ---- README's tier line, run as written ----
+# The line is read out of README.md's Installation section at run time —
+# never kept as a copy here — so a README edit that breaks the check a fresh
+# consumer types is caught on arrival. The fleet-provenance step above runs
+# with nothing placed; the scratch config below is written only for this
+# step. The dummy key gives `omp models` a provider to list.
+TIER_LINES="$(sed -n '/^## Installation$/,/^## /p' README.md | grep -E "^${ENTRY_RE}scripts/fleet-run[[:space:]]+tier-roles\\.mjs([[:space:]]|\$)")" || true
+if [ -z "$TIER_LINES" ] || [ "$(wc -l <<<"$TIER_LINES")" -ne 1 ]; then
+  echo "::error::install-and-smoke: README.md's Installation section has no single tier-check line (the Package entry's fleet-run tier-roles.mjs ...)"
+  fail=1
+else
+  mkdir -p "$SCRATCH_HOME/.omp/agent"
+  cat > "$SCRATCH_HOME/.omp/agent/config.yml" <<'YML'
+modelRoles:
+  smol: anthropic/claude-haiku-4-5:low
+  task: anthropic/claude-sonnet-4-5:medium
+  slow: anthropic/claude-opus-4-7:high
+YML
+  echo "== README's tier line: $TIER_LINES =="
+  tier_rc=0
+  HOME="$SCRATCH_HOME" ANTHROPIC_API_KEY=sk-ant-omp-smoke-dummy-not-real bash -c "$TIER_LINES" || tier_rc=$?
+  if [ "$tier_rc" -ne 0 ]; then
+    echo "::error::install-and-smoke: README's tier line exited $tier_rc (want 0): $TIER_LINES"
+    fail=1
+  fi
+fi
+
+# ---- npm's file list holds every tracked file under plugin/ ----
+# npm publishes what plugin/package.json's `files` lists, and the linked
+# install above holds the whole directory, so nothing else notices a tracked
+# file `files` leaves out. `plugin/package.json` has no `scripts`, so the dry
+# run executes nothing.
+pack_rc=0
+PACKED_JSON="$(cd plugin && HOME="$SCRATCH_HOME" npm pack --dry-run --json 2>"$SCRATCH_HOME/npm-pack.err")" || pack_rc=$?
+PACKED=""
+if [ "$pack_rc" -eq 0 ]; then
+  PACKED="$(jq -r '.[0].files[].path' <<<"$PACKED_JSON" | sort -u)" || pack_rc=$?
+fi
+if [ "$pack_rc" -ne 0 ] || [ -z "$PACKED" ]; then
+  echo "::error::install-and-smoke: npm pack --dry-run --json in plugin/ gave no file list (exit $pack_rc): $(cat "$SCRATCH_HOME/npm-pack.err")"
+  fail=1
+else
+  TRACKED="$(git -c core.quotepath=off ls-files plugin | sed 's#^plugin/##' | sort -u)"
+  MISSING="$(comm -23 <(printf '%s\n' "$TRACKED") <(printf '%s\n' "$PACKED"))"
+  if [ -z "$TRACKED" ]; then
+    echo "::error::install-and-smoke: git ls-files plugin listed nothing"
+    fail=1
+  elif [ -n "$MISSING" ]; then
+    while IFS= read -r missing; do
+      echo "::error::install-and-smoke: plugin/$missing is tracked but npm pack leaves it out — add it to plugin/package.json's \`files\`"
+    done <<<"$MISSING"
+    fail=1
+  else
+    echo "install-and-smoke: npm pack lists every tracked file under plugin/"
+  fi
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo "install-and-smoke: FAILED"
   exit 1
 fi
 
-echo "install-and-smoke: provenance clean, every Package-entry path the prose names is a real file, every fleet-run callsite target resolved, arg.mjs ran clean"
+echo "install-and-smoke: provenance clean, every Package-entry path the prose names is a real file, every fleet-run callsite target resolved, arg.mjs ran clean, README's tier line exited 0, npm pack lists every tracked file under plugin/"
