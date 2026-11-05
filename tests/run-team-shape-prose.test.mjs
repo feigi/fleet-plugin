@@ -690,7 +690,7 @@ const CHANGED = [
   ],
   [
     "Post the check's output, which names each escalated finding or violating entry, with `gh pr comment <M>`, and flag the PR for a human; re-running the check reprints it.",
-    "Post the check's output with `gh pr comment <M>`: it names each escalated finding, and re-running the check for the escalated member reprints it.",
+    "Post the verb's output with `gh pr comment <M>`: it names each escalated finding, and running `ledger.mjs dispositions <member> --scratch <scratch>` again for the escalated member reprints it.",
   ],
   [
     "A second failure on the same review is written as `dispositions-escalate=fix-pr-<M>-b:<run>` in place of a mismatch: the tick prints no `DISPATCH fix-pr` for it, `dispatch` refuses the finisher naming `dispositions escalate`, and you post the check's output with `gh pr comment <M>` and flag the PR for a human.",
@@ -841,6 +841,25 @@ const DELETED = [
   [
     "Dispatch no fix-applier and no finisher for that review, and expect no `fix-due` row for it; a new review of the PR starts the check again.",
     "the gate clause's `no finisher, no fix-due row` and **Dispositions escalation**'s exits: the maintainer's answers clear an outside-diff escalate, and after a second failure a new review of the PR counts again from none",
+  ],
+  // The dispositions check's ledger mode became the ledger.mjs verb that writes
+  // the verdict (#4211): the gate and retry sentences name the verb.
+  [
+    "Its prompt is the first one's with the retry paragraph added: `--mismatched-record`, the mismatched member's record `<scratch>/dispositions-<member>.json` it starts from, and `--violations`, the check's violation list as printed — the lines `dispositions-check.mjs` printed, each naming a bucket, an index and a rule; re-run the check for the mismatched member to reprint them.",
+    "the same sentence naming `ledger.mjs dispositions` as the verb that printed the lines and is run again",
+  ],
+  ["It writes its own record, and when it reports you run the check for it exactly as for the first one.", "the same sentence naming the verb"],
+  [
+    "`dispositions unchecked` — no verdict answers that review: run `dispositions-check.mjs` for the fix-applier that answered the review, as `fleet-event.mjs`'s `fix-report` entry states, then dispatch again.",
+    "the same sentence running `ledger.mjs dispositions`",
+  ],
+  [
+    "It names a `dispositions-unchecked=` verdict too — no rule broke, but the check could not read where a deferral was filed, `gh` unreachable or an issue unreadable: run the check again for that fix-applier once `gh` answers (an issue that does not exist is unreadable too, and no re-run answers that one: the check's stderr names it, and the record's issue number needs correcting); the tick offers no fix-applier for it.",
+    "the same sentence naming the verb and its stderr",
+  ],
+  [
+    "**On any PR with a returned review, `0/<n>/0` included, it refuses too while a fix-applier on the PR is still live, verdict or not** — `fix-pr-<M>[-x] still live`: settle it, run the check for it, then dispatch again.",
+    "the same sentence running `ledger.mjs dispositions` for it",
   ],
 ];
 

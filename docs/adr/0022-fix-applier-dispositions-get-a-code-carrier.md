@@ -68,6 +68,13 @@ session): a Decision 4 escalate clears once the maintainer's escalation
 answers are recorded through the dispositions check; an upheld finding
 passes, and a sent-back finding is a mismatch that gets the mismatch retry;
 Decision 9's escalate still needs a new review.
+Amended by #4211 (ruled 2026-11-05 by the maintainer, from a grilling
+session; ADR 0038): Decision 8's check writing "its verdict to the ledger" is
+now `ledger.mjs dispositions`, the one writer of a dispositions verdict and
+of an escalation answer. The check's verdict and the maintainer's answers reach
+the ledger only through that verb; `dispositions-check.mjs` writes nothing and
+refuses a ledger outside `--no-ledger`. `token` refuses to add a
+verdict or an answer, and `row` refuses to add, change or drop one.
 
 ## Context
 

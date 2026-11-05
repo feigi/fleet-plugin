@@ -603,13 +603,14 @@ answered by none of the first one's verdicts. A PR whose latest review counts
 gated like survivors, and the tick prints `DISPATCH fix-pr PR#<M>` for it: that
 fix-applier's `no-op` and its `ok` verdict are what open the finisher. The
 refusal names its cause. `dispositions
-unchecked` — no verdict answers that review: run `dispositions-check.mjs` for
-the fix-applier that answered the review, as `fleet-event.mjs`'s `fix-report`
-entry states, then dispatch again. It names a `dispositions-unchecked=` verdict too —
-no rule broke, but the check could not read where a deferral was filed, `gh`
-unreachable or an issue unreadable: run the check again for that fix-applier
+unchecked` — no verdict answers that review: run `ledger.mjs dispositions`
+for the fix-applier that answered the review, as
+`fleet-event.mjs`'s `fix-report` entry states, then dispatch again. It names a
+`dispositions-unchecked=` verdict too —
+no rule broke, but the verb could not read where a deferral was filed, `gh`
+unreachable or an issue unreadable: run the verb again for that fix-applier
 once `gh` answers (an issue that does not exist is unreadable too, and no re-run
-answers that one: the check's stderr names it, and the record's issue number
+answers that one: the verb's stderr names it, and the record's issue number
 needs correcting); the tick offers no fix-applier for it. `dispositions
 mismatch` — no finisher: the tick prints `DISPATCH fix-pr PR#<M>` for it, and
 the next-suffix fix-applier answers it (**Then dispatch a fix-applier**).
@@ -618,7 +619,7 @@ the next-suffix fix-applier answers it (**Then dispatch a fix-applier**).
 a second mismatch only with a new review (**Dispositions escalation**). **On any PR with a
 returned review, `0/<n>/0` included, it refuses too while a fix-applier on the
 PR is still live, verdict or not** —
-`fix-pr-<M>[-x] still live`: settle it, run the check for it, then dispatch
+`fix-pr-<M>[-x] still live`: settle it, run `ledger.mjs dispositions` for it, then dispatch
 again.
 
 **It refuses a finisher, too, while the PR sits on a conflict hold no
@@ -774,18 +775,18 @@ next suffix (`fix-pr-<M>-b`) and dispatched like the first, its brief rendered w
 first one's with the retry paragraph added: `--mismatched-record`, the mismatched member's record
 `<scratch>/dispositions-<member>.json` it starts from, and `--violations`, the check's
 violation list as printed — the lines
-`dispositions-check.mjs` printed, each naming a bucket, an index and a rule;
-re-run the check for the mismatched member to reprint them. It writes its own
-record, and when it reports you run the check for it exactly as for the first
-one. `ok` ends it. A second failure on the same review is written as
+`ledger.mjs dispositions` printed, each naming a bucket, an index and a rule;
+run it again for the mismatched member to reprint them. It writes its own
+record, and you run it for that one as for the first. `ok` ends it. A second
+failure on the same review is written as
 `dispositions-escalate=fix-pr-<M>-b:<run>` in place of a mismatch: the tick
-prints no `DISPATCH fix-pr` for it. Post the check's output with
+prints no `DISPATCH fix-pr` for it. Post the verb's output with
 `gh pr comment <M>`. A second failure is flagged for a human. A new review of
-the PR counts again from none. An escalate whose check printed no violations is
+the PR counts again from none. An escalate whose verb printed no violations is
 the maintainer's to answer instead, one yes/no per escalated finding: yes upholds
 the deferral, no sends it back to be applied in this PR. With every finding
-explicitly answered this session, record them with `dispositions-check.mjs`
-`--uphold` and `--send-back`: `ok` gets the finisher, `mismatch` the tick's
+explicitly answered this session, record them with `ledger.mjs dispositions`
+and its `--uphold` and `--send-back`: `ok` gets the finisher, `mismatch` the tick's
 retry, `escalate` is a second failure. See references/dispositions-escalation.md.
 
 ### The main-gain hit

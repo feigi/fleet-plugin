@@ -43,7 +43,7 @@ claim, never your patch.
 
 **Before you report, write every ruling to `/abs/scratch-retry/dispositions-<your name>.json`**,
 `<your name>` the `fix-pr-3294[-x]` you were dispatched as — the record the controller checks with
-`dispositions-check.mjs` before it dispatches any finisher.
+`ledger.mjs dispositions` before it dispatches any finisher.
 
 **Charge every standing entry of that record:** which entries stand, and the
 `charge` and `chargeReason` fields, are in `review-and-fix.md`'s step 2. Read

@@ -4,10 +4,10 @@
 // fix-applier writes its record to `<scratch>/dispositions-fix-pr-<M>[-x].json`,
 // one file per fix-applier; the review result file it answers is
 // `<scratch>/pr<M>/<run>/review.json`, `<run>` the run root the PR's latest
-// `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>` names. This
-// script reads the two together, judges the record, and writes its verdict
-// onto the PR's ledger row as a token `ledger.mjs dispatch` gates the PR's
-// finisher on:
+// `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>` names. This module
+// reads the two together and judges the record; `ledger.mjs dispositions`
+// runs that judgement and writes its verdict onto the PR's ledger row as a
+// token `ledger.mjs dispatch` gates the PR's finisher on:
 //
 //   dispositions-ok=fix-pr-<M>[-x]:<run>        every rule below held
 //   dispositions-mismatch=fix-pr-<M>[-x]:<run>  at least one entry broke one
@@ -21,8 +21,8 @@
 //                                               filed could not be read
 //   escalation-answer=<run>:<bucket>[<index>]:upheld|sent-back
 //                                               the maintainer's answer to one escalated
-//                                               finding, written by --uphold and
-//                                               --send-back and by nothing else
+//                                               finding, written by the verb's --uphold
+//                                               and --send-back and by nothing else
 //
 // `<run>` is the review's own run, so a verdict on one review never answers
 // a later one — a second review at the same head included.
@@ -159,13 +159,14 @@
 // that entry's filing unjudged. With no rule broken and nothing escalated the
 // verdict is `unchecked`, which `ledger.mjs dispatch` refuses a finisher on —
 // never ok, and never a mismatch, since the record broke nothing. Run the
-// check again once `gh` answers.
+// verb again once `gh` answers.
 //
 // Escalation answers: the maintainer answers an escalated finding `upheld` —
 // the deferral stands — or `sent-back` — the finding is applied in this PR.
-// `--uphold <list>` and `--send-back <list>`, each a comma-separated list of
-// `<bucket>[<index>]` as the output prints it, record the answers for the
-// escalated member, `--member fix-pr-<M>[-x]`, in one write that adds
+// `ledger.mjs dispositions <member> --scratch <dir>` takes `--uphold <list>`
+// and `--send-back <list>`, each a comma-separated list of `<bucket>[<index>]`
+// as the output prints it, and records the answers for the escalated member,
+// `fix-pr-<M>[-x]`, in one write that adds
 // `escalation-answer=<run>:<bucket>[<index>]:upheld|sent-back` per finding to
 // the PR's row and replaces the escalate with the verdict the record then
 // earns: `ok` — `unchecked` when a filing could not be read — with every
@@ -177,11 +178,11 @@
 // Every record judged against a review reads that review's answers off the
 // PR's rows, whether or not the run records any: an upheld finding is no
 // escalation, and an entry that defers a sent-back finding is a violation
-// whatever its reason. Running the check again with no answer flags therefore
+// whatever its reason. Running the verb again with no answer flags therefore
 // reproduces the verdict and its violations.
 //
-// A run that records answers refuses — exit 2, the cause named, the ledger
-// byte-identical — unless: a ledger is in use; the PR's current dispositions
+// A run that records answers refuses — nothing judged, the ledger
+// byte-identical — unless: the PR's current dispositions
 // verdict on its latest review is an escalate naming the member; no
 // fix-applier on the PR is live; the record, judged with the answers already
 // on the row, breaks no rule; every listed finding is one the record escalates,
@@ -189,35 +190,32 @@
 // answer. A record that breaks a rule has no outside-diff escalate to answer:
 // a second failure on one review clears only with a new review.
 //
-// Exit status: 0 ok; 1 mismatch, escalate or unchecked; 2 nothing judged and
-// nothing written — a bad flag, an answer the run refuses to record, no valid
-// Label map (the message names `label-map.mjs ensure`), an unreadable or
-// malformed review file, a record file that exists but cannot be read, a git
-// or ledger failure. A missing or unparseable RECORD is judged, not refused:
-// the fix-applier wrote nothing a reader can use, so every finding it had to
-// cover is dropped.
+// Who writes what. This module is the judgement, and writes nothing.
+// `ledger.mjs dispositions` runs judgeMember() in-process over the ledger it
+// loaded and is the only writer of a dispositions verdict and of an
+// escalation answer: its exit status is 0 for `ok`, 1 for `mismatch`,
+// `escalate` or `unchecked` — a verdict, written — and 2 for nothing judged
+// and nothing written, which is a bad flag, an answer the run refuses to
+// record, no valid Label map (the message names `label-map.mjs ensure`), an
+// unreadable or malformed review file, a record file that exists but cannot
+// be read, a git or ledger failure. A missing or unparseable RECORD is judged,
+// not refused: the fix-applier wrote nothing a reader can use, so every
+// finding it had to cover is dropped.
 //
-// Without a ledger the record is judged all the same and the exit status is
-// the whole verdict: no token is written, no row is read, and `token` in the
-// stdout payload is null. That is the shape of a standalone `/review-and-fix`
-// with no controller, chosen by `--no-ledger` or by a ledger path that does
-// not exist. With no `reviewed=` to name the review, `--review <path>` names
-// its file, and is required; with a ledger it is refused, since the ledger
-// already names one.
-// A repository's `.fleet/ledger.md` outlives the fleet run that wrote it, so a
-// standalone member in a worktree of such a repository would otherwise find
-// the previous run's ledger, and a ledger that exists is never skipped: one
-// holding no row for the member is a fault (exit 2), as is a ledger path that
-// cannot be looked up (a parent that is a file, no permission, a symlink loop).
-// Only a path that does not exist is "no ledger": the default path, or one
-// `--ledger` names, which also prints a note on stderr that no token was
-// written. `--no-ledger` names that state outright: no ledger is looked for,
-// whatever the repository holds, and it contradicts `--ledger`.
+// This script is the standalone check, a `/review-and-fix` with no
+// controller: `--no-ledger --review <path>` names the review's file, and the
+// record is judged all the same, the exit status the whole verdict — 0 ok,
+// 1 anything else, 2 nothing judged — with no token written and `token` in the
+// stdout payload null. A repository's `.fleet/ledger.md` outlives the fleet
+// run that wrote it, so a ledger at the default path that exists is never
+// skipped: without `--no-ledger` it is a refusal (exit 2) naming the verb.
+// Only a path that does not exist is "no ledger", and `--no-ledger` names
+// that state outright: no ledger is looked for, whatever the repository
+// holds. `--ledger`, `--uphold` and `--send-back` are the verb's and refused.
 
 import { readFileSync, existsSync, lstatSync, realpathSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, dirname, basename, isAbsolute, relative, posix, sep } from "node:path";
-import { fileURLToPath } from "node:url";
 import { makeDie, defineFlags } from "./arg.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { gitEnv } from "./git-env.mjs";
@@ -228,8 +226,6 @@ import { deriveRun, LedgerError } from "./fleet-tick.mjs";
 import { VERDICT_SCHEMA } from "./review-core.mjs";
 
 const NAME = "dispositions-check";
-const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
-const LEDGER_SCRIPT = join(SCRIPT_DIR, "ledger.mjs");
 
 // Two spellings of one commit: either head a prefix of the other, the way a
 // record's head (7-40 hex) is matched against its review's full head.
@@ -731,13 +727,21 @@ export function failedBefore(rows, pr, member, run) {
 }
 
 // ---------------------------------------------------------------------------
-// CLI
+// the judgement over a ledger snapshot, and the standalone CLI
 // ---------------------------------------------------------------------------
 
-const die = makeDie(NAME);
-const { arg, has, sweep, stray } = defineFlags(die, {
-  flags: { member: "value", scratch: "value", repo: "value", ledger: "value", "no-ledger": "bool", review: "value", uphold: "value", "send-back": "value" },
-});
+/** Nothing judged and nothing written: the cause is the message. */
+export class CheckRefusal extends Error {}
+const refuse = (message) => {
+  throw new CheckRefusal(message);
+};
+
+/** The parsed fix-applier `name` names, or a CheckRefusal. */
+export function parseFixApplier(name) {
+  const member = parseMember(name);
+  if (member === null || member.family !== "fix-pr") refuse(`'${name}' is not a fix-applier — expected fix-pr-<M>, a -b, -c … suffix allowed`);
+  return member;
+}
 
 // The one git primitive. An ambient GIT_DIR or GIT_WORK_TREE — a hook, a
 // `rebase --exec` — would answer for another repository and judge the record
@@ -748,15 +752,7 @@ function git(repo, args, what) {
       encoding: "utf8", env: gitEnv({ LC_ALL: "C" }), maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"],
     });
   } catch (e) {
-    die(`could not ${what}: ${e.stderr?.toString().trim() || e.message}`);
-  }
-}
-
-function runLedger(ledgerFile, args, what) {
-  try {
-    return execFileSync(process.execPath, [LEDGER_SCRIPT, "--file", ledgerFile, ...args], { encoding: "utf8" });
-  } catch (e) {
-    die(`could not ${what}: ${e.stderr?.trim() || e.message}`);
+    refuse(`could not ${what}: ${e.stderr?.toString().trim() || e.message}`);
   }
 }
 
@@ -845,36 +841,27 @@ function verdictReader(scratch, pr) {
   };
 }
 
-// The ledger file this run writes its verdict to, or null when there is none:
-// `--ledger`, else the run's `.fleet/ledger.md` resolved from `repo` by
-// fleet-dir.mjs's fleetFile() — the workspace every worktree of one
-// repository shares, which is where `ledger.mjs dispatch` wrote the member's
-// row. The path is handed to `ledger.mjs` as `--file`, so the existence probe
-// and the calls that follow answer for one file. Only ENOENT means "there is
-// none": any other failure to look the path up is a fault, not a standalone
-// run. An absent path named by `--ledger` is announced on stderr; an absent
-// default path is not.
-// `lstat`, not `stat`, so a dangling symlink is a ledger that cannot be read
-// rather than an absent one.
-function ledgerInUse(explicit, repo) {
-  let file = explicit;
-  if (file == null) {
-    try {
-      file = fleetFile("ledger.md", { cwd: repo });
-    } catch (e) {
-      if (!(e instanceof FleetDirUnresolvable)) throw e;
-      die(e.message);
-    }
+// The ledger file the repository's default path names, or null when there is
+// none: the run's `.fleet/ledger.md` resolved from `repo` by fleet-dir.mjs's
+// fleetFile() — the workspace every worktree of one repository shares, which
+// is where `ledger.mjs dispatch` wrote the member's row. Only ENOENT means
+// "there is none": any other failure to look the path up is a fault, not a
+// standalone run. `lstat`, not `stat`, so a dangling symlink is a ledger that
+// cannot be read rather than an absent one.
+function defaultLedger(repo) {
+  let file;
+  try {
+    file = fleetFile("ledger.md", { cwd: repo });
+  } catch (e) {
+    if (!(e instanceof FleetDirUnresolvable)) throw e;
+    refuse(e.message);
   }
   try {
     lstatSync(file);
     return file;
   } catch (e) {
-    if (e.code === "ENOENT") {
-      if (explicit !== null) console.error(`${NAME}: no ledger at ${file} (named by --ledger) — judged with no ledger, so no token was written; pass --no-ledger to choose that`);
-      return null;
-    }
-    die(`could not look for the ledger ${file}: ${e.message}`);
+    if (e.code === "ENOENT") return null;
+    refuse(`could not look for the ledger ${file}: ${e.message}`);
   }
 }
 
@@ -886,17 +873,29 @@ function readJson(path) {
 // that bucket of the review file.
 const ADDRESS = new RegExp(`^(${BUCKETS.join("|")})\\[(0|[1-9][0-9]*)\\]$`);
 
-// The findings a `--uphold` or `--send-back` list names, each `<bucket>[<index>]`
-// — or null when the flag is absent. A second occurrence of the flag would be
-// read by nothing, so it is refused rather than dropped.
-function addressList(flag) {
-  const raw = arg(flag);
+/** The findings a `--uphold` or `--send-back` list `raw` names, each
+ * `<bucket>[<index>]`, or null when the flag is absent. */
+export function addressList(flag, raw) {
   if (raw === null) return null;
-  if (process.argv.filter((a) => a === `--${flag}`).length > 1) die(`--${flag} is given twice — name every finding in one comma-separated list`);
   const list = raw.split(",").map((a) => a.trim());
   const bad = list.find((a) => !ADDRESS.test(a));
-  if (bad !== undefined) die(`--${flag} names ${JSON.stringify(bad)}, which is no <bucket>[<index>] — a bucket is ${BUCKETS.join(", ")}, an index a whole number from 0`);
+  if (bad !== undefined) refuse(`--${flag} names ${JSON.stringify(bad)}, which is no <bucket>[<index>] — a bucket is ${BUCKETS.join(", ")}, an index a whole number from 0`);
   return list;
+}
+
+/** The maintainer's answers the two lists give, a Map from a finding's
+ * address to `upheld` or `sent-back`; a finding listed twice, or both ways, is
+ * refused. Told before anything is read, since a list that cannot be one is a
+ * usage error. */
+export function answerMap(uphold, sendBack) {
+  const listed = new Map();
+  for (const [flag, list, answer] of [["--uphold", uphold, "upheld"], ["--send-back", sendBack, "sent-back"]]) {
+    for (const a of list ?? []) {
+      if (listed.has(a)) refuse(listed.get(a) === answer ? `${flag} lists ${a} twice` : `${a} is listed in both --uphold and --send-back — a finding is answered one way`);
+      listed.set(a, answer);
+    }
+  }
+  return listed;
 }
 
 // Addresses in the record's own order: by bucket, then by index.
@@ -905,76 +904,63 @@ const byAddress = (a, b) => {
   return BUCKETS.indexOf(x[1]) - BUCKETS.indexOf(y[1]) || Number(x[2]) - Number(y[2]);
 };
 
-function main() {
-  const usage = "usage: dispositions-check.mjs --member fix-pr-<M>[-x] --scratch <dir> [--repo <path>] [--ledger <path> | --no-ledger --review <path>] [--uphold <list>] [--send-back <list>]";
-  const name = arg("member");
-  const scratch = arg("scratch");
-  if (!name || !scratch) die(usage);
-  sweep();
-  stray();
-  const member = parseMember(name);
-  if (member === null || member.family !== "fix-pr") die(`'${name}' is not a fix-applier — expected fix-pr-<M>, a -b, -c … suffix allowed`);
+/**
+ * Fix-applier `name`'s record judged against the review it answers.
+ * `ledger` is the snapshot to judge against, `{rows, dispatched, drain}` as
+ * `ledger.mjs read` prints them, or null for a standalone check, which names
+ * its review with `reviewPath`. `listed` is the maintainer's answers to
+ * record (answerMap()), empty when this run records none. Never writes a
+ * ledger: the caller does, and learns what to write from the result,
+ * `{member, pr, head, verdict, token, violations, escalations, unchecked,
+ * run, recorded, secondMismatch}` — `token` null with no ledger, `recorded`
+ * the `[address, answer]` pairs this run records.
+ *
+ * A CheckRefusal is nothing judged: a bad flag, an answer the run refuses to
+ * record, no valid Label map (the message names `label-map.mjs ensure`), an
+ * unreadable or malformed review file, a record file that exists but cannot
+ * be read, a git or ledger failure. A missing or unparseable RECORD is judged,
+ * not refused: the fix-applier wrote nothing a reader can use, so every
+ * finding it had to cover is dropped.
+ */
+export function judgeMember({ name, scratch, repo, ledger = null, reviewPath = null, listed = new Map() }) {
+  const member = parseFixApplier(name);
   const pr = member.number;
-  const repo = arg("repo") ?? process.cwd();
-  // The maintainer's answers, when this run records them: `--uphold` and
-  // `--send-back`, each a list of the escalated findings answered that way.
-  // Told before anything is read, since a list that cannot be one is a usage error.
-  const uphold = addressList("uphold");
-  const sendBack = addressList("send-back");
-  const listed = new Map();
-  for (const [flag, list, answer] of [["--uphold", uphold, "upheld"], ["--send-back", sendBack, "sent-back"]]) {
-    for (const a of list ?? []) {
-      if (listed.has(a)) die(listed.get(a) === answer ? `${flag} lists ${a} twice` : `${a} is listed in both --uphold and --send-back — a finding is answered one way`);
-      listed.set(a, answer);
-    }
-  }
   const recording = listed.size > 0;
-  const standalone = has("no-ledger");
-  if (standalone && arg("ledger") !== null) die("--no-ledger and --ledger contradict: name one");
-  const ledgerFile = standalone ? null : ledgerInUse(arg("ledger"), repo);
-  if (recording && ledgerFile === null) {
-    die(`${uphold !== null ? "--uphold" : "--send-back"} records the maintainer's answer on the ledger row, and no ledger is in use — run it for the escalated member where the run's ledger is`);
+  if (recording && ledger === null) {
+    refuse("--uphold and --send-back record the maintainer's answer on the ledger row, and no ledger is in use");
   }
-  // Without a ledger nothing names the review the record answers, so `--review`
-  // must; with one, the latest `reviewed=` already does. Both are usage errors,
-  // so they are told before the Label map, the ledger or the tracker is read.
-  if (ledgerFile === null && arg("review") === null) die(`no ledger names PR #${pr}'s review — pass --review <path> for the review file ${member.name}'s record answers`);
-  if (ledgerFile !== null && arg("review") !== null) die(`--review and a ledger contradict: with a ledger the review is the one PR #${pr}'s latest reviewed= names`);
-  // The Label map, read once, here at the I/O boundary — after the flags and the
-  // ledger's location are settled, before the ledger or the tracker is read: a
-  // home's labels are compared and worded in the tracker's own spelling. No
-  // valid map is "nothing judged" (exit 2), never a verdict; the reader's
-  // message names `ensure`.
+  // The Label map, read once, here at the I/O boundary — before the ledger or
+  // the tracker is read: a home's labels are compared and worded in the
+  // tracker's own spelling. No valid map is "nothing judged", never a verdict;
+  // the reader's message names `ensure`.
   let roles;
   try {
     roles = readLabelMap({ cwd: repo });
   } catch (e) {
-    die(e.message);
+    refuse(e.message);
   }
 
   // The review the record answers. With a ledger it is the one PR M's latest
   // `reviewed=` names — `<scratch>/pr<M>/<run>/review.json`, read off the
   // same per-PR fold `ledger.mjs dispatch` gates the finisher by, so the check
   // and the gate never judge two different reviews. Without one it is the
-  // `--review` path the checks above required.
-  let data = null, row = null, run = null, charges = false, reviewPath, answers = new Map();
-  if (ledgerFile === null) {
-    reviewPath = arg("review");
-  } else {
-    data = JSON.parse(runLedger(ledgerFile, ["read"], "read the ledger"));
+  // `reviewPath` the caller named.
+  let run = null, charges = false, answers = new Map();
+  if (ledger !== null) {
     // The verdict lands on the row carrying the member on its own PR's row —
     // where `ledger.mjs dispatch` wrote it, and where the gate reads PR M's
     // tokens from.
-    row = data.rows.find((r) => rowNums(r).pr === pr && memberTokens(r).some((t) => t.name === member.name));
-    if (row === undefined) die(`${member.name} is on no row of PR #${pr} — \`ledger.mjs dispatch\` records a fix-applier before its record can be checked; with no controller, pass --no-ledger`);
+    if (!ledger.rows.some((r) => rowNums(r).pr === pr && memberTokens(r).some((t) => t.name === member.name))) {
+      refuse(`${member.name} is on no row of PR #${pr} — \`ledger.mjs dispatch\` records a fix-applier before its record can be checked; with no controller, run dispositions-check.mjs with --no-ledger --review <path>`);
+    }
     let latest;
     try {
-      latest = deriveRun({ rows: data.rows, dispatched: data.dispatched, drain: data.drain }, []).reviewed.find((r) => r.pr === pr);
+      latest = deriveRun({ rows: ledger.rows, dispatched: ledger.dispatched, drain: ledger.drain }, []).reviewed.find((r) => r.pr === pr);
     } catch (e) {
       if (!(e instanceof LedgerError)) throw e;
-      die(`${e.message} — fleet-tick.mjs refuses this ledger, so PR #${pr}'s latest review cannot be read off it`);
+      refuse(`${e.message} — fleet-tick.mjs refuses this ledger, so PR #${pr}'s latest review cannot be read off it`);
     }
-    if (latest === undefined) die(`PR #${pr} has no reviewed= on the ledger — no review for ${member.name}'s record to answer`);
+    if (latest === undefined) refuse(`PR #${pr} has no reviewed= on the ledger — no review for ${member.name}'s record to answer`);
     run = latest.run;
     // Answers clear the escalate they answer and nothing else: the PR's current
     // verdict on this review must be that escalate, and no fix-applier on the PR
@@ -982,15 +968,15 @@ function main() {
     if (recording) {
       const current = latest.dispositions;
       if (current === null || current.verdict !== "escalate" || current.member !== member.name) {
-        die(`PR #${pr}'s current dispositions verdict on review ${run} is ${current === null ? "none" : `${current.verdict} from ${current.member}`}, not an escalate from ${member.name} — escalation answers clear the escalate they answer, and nothing else`);
+        refuse(`PR #${pr}'s current dispositions verdict on review ${run} is ${current === null ? "none" : `${current.verdict} from ${current.member}`}, not an escalate from ${member.name} — escalation answers clear the escalate they answer, and nothing else`);
       }
       if (latest.fixLive.length > 0) {
-        die(`${latest.fixLive.join(", ")} still live on PR #${pr} — a fix-applier answering review ${run} has not settled, so the answers wait: settle it, then record them`);
+        refuse(`${latest.fixLive.join(", ")} still live on PR #${pr} — a fix-applier answering review ${run} has not settled, so the answers wait: settle it, then record them`);
       }
     }
     // Every record judged against this review reads the answers recorded for it.
     // A token that only looks like one answers nothing, and says so.
-    const tokens = prTokens(data.rows, pr);
+    const tokens = prTokens(ledger.rows, pr);
     answers = escalationAnswers(tokens, run);
     for (const t of tokens) {
       if (t.startsWith("escalation-answer=") && escalationAnswerToken(t) === null) {
@@ -1006,10 +992,10 @@ function main() {
   try {
     review = readJson(reviewPath);
   } catch (e) {
-    die(`could not read the review file ${reviewPath}: ${e.message}`);
+    refuse(`could not read the review file ${reviewPath}: ${e.message}`);
   }
   const problem = reviewProblem(review);
-  if (problem !== null) die(`${reviewPath} ${problem}`);
+  if (problem !== null) refuse(`${reviewPath} ${problem}`);
   const head = String(review.head).toLowerCase();
 
   // One record per fix-applier: a retry, or a fix-applier answering a later
@@ -1027,7 +1013,7 @@ function main() {
     try {
       text = readFileSync(recordPath, "utf8");
     } catch (e) {
-      die(`could not read the disposition record ${recordPath}: ${e.message}`);
+      refuse(`could not read the disposition record ${recordPath}: ${e.message}`);
     }
     try {
       record = JSON.parse(text);
@@ -1059,60 +1045,92 @@ function main() {
     // escalate, or an escalated one left unanswered, makes an answer that
     // settles nothing.
     if (judged.violations.length > 0) {
-      die(`${member.name}'s record breaks a rule, so its escalate is no outside-diff one: the maintainer's answers clear an escalate whose record breaks none. A broken rule is a mismatch, and after an earlier failure on review ${run} a second failure, which only a new review of the PR clears — run the check without --uphold and --send-back to judge it. It breaks:\n`
+      refuse(`${member.name}'s record breaks a rule, so its escalate is no outside-diff one: the maintainer's answers clear an escalate whose record breaks none. A broken rule is a mismatch, and after an earlier failure on review ${run} a second failure, which only a new review of the PR clears — run \`ledger.mjs dispositions ${member.name} --scratch <scratch>\` without --uphold and --send-back to judge it. It breaks:\n`
         + judged.violations.map((v) => `  ${member.name}: ${formatViolation(v)}`).join("\n"));
     }
     const open = judged.escalations.map((x) => `${x.bucket}[${x.index}]`).sort(byAddress);
     for (const a of [...listed.keys()].sort(byAddress)) {
-      if (!open.includes(a)) die(`${a} is not one of ${member.name}'s escalated findings${open.length > 0 ? ` (${open.join(", ")})` : " — its record escalates none"}`);
+      if (!open.includes(a)) refuse(`${a} is not one of ${member.name}'s escalated findings${open.length > 0 ? ` (${open.join(", ")})` : " — its record escalates none"}`);
     }
     const unanswered = open.filter((a) => !listed.has(a));
     if (unanswered.length > 0) {
-      die(`${member.name}'s record escalates ${open.join(", ")}, and ${unanswered.join(", ")} ${unanswered.length === 1 ? "has" : "have"} no answer — every escalated finding is answered in one run, with --uphold or --send-back`);
+      refuse(`${member.name}'s record escalates ${open.join(", ")}, and ${unanswered.join(", ")} ${unanswered.length === 1 ? "has" : "have"} no answer — every escalated finding is answered in one run, with --uphold or --send-back`);
     }
     answers = new Map([...answers, ...listed]);
     judged = judge(answers);
     recorded = open.map((a) => [a, listed.get(a)]);
   }
   const { violations, escalations, unchecked } = judged;
-  // No ledger, no row: the exit status below is the verdict, and with no
-  // earlier fix-applier's verdict to count, a broken rule is always a
-  // mismatch.
+  // No ledger, no row: the exit status is the verdict, and with no earlier
+  // fix-applier's verdict to count, a broken rule is always a mismatch.
   // A mismatch an earlier fix-applier already drew on this review makes this
   // one the second: it is written as an escalate, which only a new review of
   // the PR clears. A finding the maintainer sent back counts as a broken rule
   // like any other, here and in failedBefore(). A broken rule outranks an
   // escalation, and an escalation a filing the tracker could not answer.
-  const secondMismatch = violations.length > 0 && data !== null && failedBefore(data.rows, pr, member, run);
+  const secondMismatch = violations.length > 0 && ledger !== null && failedBefore(ledger.rows, pr, member, run);
   const verdict = violations.length > 0 ? (secondMismatch ? "escalate" : "mismatch")
     : escalations.length > 0 ? "escalate" : unchecked.length > 0 ? "unchecked" : "ok";
-  const token = data === null ? null : `dispositions-${verdict}=${member.name}:${run}`;
+  const token = ledger === null ? null : `dispositions-${verdict}=${member.name}:${run}`;
+  return { member: member.name, pr, head, verdict, token, violations, escalations, unchecked, run, recorded, secondMismatch };
+}
 
-  if (data !== null) {
-    const key = row.split(/\s/)[0];
-    if (!/^#[0-9]+$/.test(key)) die(`the row carrying ${member.name} has no #<n> key for \`ledger.mjs row\` to rewrite it by: ${row}`);
-    const text = row.slice(key.length).trim();
-    const answerTokens = recorded.map(([a, answer]) => `escalation-answer=${run}:${a}:${answer}`);
-    const updated = withVerdict([text, ...answerTokens].join(" · "), token);
-    if (updated === text) console.error(`    ${member.name}: row ${key} already carries ${token} — not written again`);
-    else runLedger(ledgerFile, ["row", key, updated], `write ${recorded.length > 0 ? `the escalation answers and ${token}` : token} onto row ${key}`);
-  }
+/** What a judgement prints: the stderr lines a reader acts on, then the
+ * stdout payload `{member, pr, head, verdict, token, violations, escalations,
+ * unchecked}`. The exit status is the verdict's: 0 ok, 1 anything else. */
+export function printVerdict({ member, pr, head, verdict, token, violations, escalations, unchecked, run, recorded, secondMismatch }) {
   if (recorded.length > 0) {
-    console.error(`${member.name}: recorded the maintainer's escalation answers on review ${run} — ${recorded.map(([a, answer]) => `${a} ${answer === "sent-back" ? "sent back" : answer}`).join(", ")}`);
+    console.error(`${member}: recorded the maintainer's escalation answers on review ${run} — ${recorded.map(([a, answer]) => `${a} ${answer === "sent-back" ? "sent back" : answer}`).join(", ")}`);
   }
-
-  for (const v of violations) console.error(`${member.name}: ${formatViolation(v)}`);
-  for (const x of escalations) console.error(`${member.name}: ${formatEscalation(x)}`);
+  for (const v of violations) console.error(`${member}: ${formatViolation(v)}`);
+  for (const x of escalations) console.error(`${member}: ${formatEscalation(x)}`);
   for (const u of unchecked) {
-    console.error(`${member.name}: ${u.bucket}[${u.index}]: where it was filed is unchecked — #${u.issue} could not be read through gh: ${u.problem}`);
+    console.error(`${member}: ${u.bucket}[${u.index}]: where it was filed is unchecked — #${u.issue} could not be read through gh: ${u.problem}`);
   }
   if (secondMismatch) {
-    console.error(`${member.name}: escalate — an earlier fix-applier's record on review ${run} already failed this check; no further fix-applier answers PR #${pr}, a human does`);
+    console.error(`${member}: escalate — an earlier fix-applier's record on review ${run} already failed this check; no further fix-applier answers PR #${pr}, a human does`);
   }
-  console.log(JSON.stringify({ member: member.name, pr, head, verdict, token, violations, escalations, unchecked }));
+  console.log(JSON.stringify({ member, pr, head, verdict, token, violations, escalations, unchecked }));
   // exitCode, not exit(): stdout to a pipe is written asynchronously, and an
   // exit() here could cut the payload off.
   process.exitCode = verdict === "ok" ? 0 : 1;
+}
+
+const die = makeDie(NAME);
+const { arg, has, sweep, stray } = defineFlags(die, {
+  flags: { member: "value", scratch: "value", repo: "value", ledger: "value", "no-ledger": "bool", review: "value", uphold: "value", "send-back": "value" },
+});
+
+// The standalone check. A fleet run's verdict is `ledger.mjs dispositions`'s,
+// so this script writes nothing and refuses a ledger outside `--no-ledger`.
+function main() {
+  const usage = "usage: dispositions-check.mjs --member fix-pr-<M>[-x] --scratch <dir> [--repo <path>] --no-ledger --review <path>";
+  const name = arg("member");
+  const scratch = arg("scratch");
+  if (!name || !scratch) die(usage);
+  sweep();
+  stray();
+  const verb = `ledger.mjs dispositions ${name} --scratch ${scratch}`;
+  for (const flag of ["ledger", "uphold", "send-back"]) {
+    if (arg(flag) !== null) {
+      die(`--${flag} belongs to the ledger verb: run \`${verb}${flag === "ledger" ? "" : " --uphold '<list>' --send-back '<list>'"}\` — this script writes no ledger`);
+    }
+  }
+  const repo = arg("repo") ?? process.cwd();
+  try {
+    const member = parseFixApplier(name);
+    if (!has("no-ledger")) {
+      const ledgerFile = defaultLedger(repo);
+      if (ledgerFile !== null) {
+        die(`a ledger is in use at ${ledgerFile}, and a fleet run's verdict is the ledger verb's: run \`${verb}\`; to judge a record with no controller, pass --no-ledger --review <path>`);
+      }
+    }
+    if (arg("review") === null) die(`no ledger names PR #${member.number}'s review — pass --review <path> for the review file ${member.name}'s record answers`);
+    printVerdict(judgeMember({ name, scratch, repo, reviewPath: arg("review") }));
+  } catch (e) {
+    if (e instanceof CheckRefusal) die(e.message);
+    throw e;
+  }
 }
 
 // Only run main() as a CLI, never when imported (see is-cli.mjs): a string

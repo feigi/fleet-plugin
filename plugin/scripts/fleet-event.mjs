@@ -58,9 +58,9 @@
 //       (`.fleet/briefs/<member>.json`) is kind `review` or
 //       `dispositions-retry` — a review fix-applier, not one that cleared a
 //       conflict hold or a red check — and with no `dispositions-*=<member>:`
-//       token on the PR's rows yet: `dispositions-check.mjs --member <member>
-//       --scratch <scratch>`, its stdout printed. That script writes its own
-//       verdict token; its exit 1 is a verdict, its exit 2 a NEED.
+//       token on the PR's rows yet: `ledger.mjs dispositions <member> --scratch
+//       <scratch>`, its stdout printed. That verb writes the verdict token
+//       itself; its exit 1 is a verdict, any other nonzero exit a NEED.
 //       A `failed` outcome takes no dispositions check and runs the Recipe read, below.
 //       The Recipe read, after an `impl-report` settled `blocked` or a `fix-report` settled `failed`, whatever the member's cause: `derive-testcmd.sh . install`, `. check` and `. test`, each `--at origin/main`, from the main checkout, the three reads phase0.mjs's `recipe` step makes (recipe-read.mjs is the one reader of both). All three exit 0: nothing printed, the cache is valid. One refused (exit 1): the refused reads, then `NEED derive-recipe`, which is phase 0's mid-run trigger; a refusal naming `--at` is no cache fault, and the controller fetches and reads again. Exit 3 or any other failure of a read: a `NEED recipe-read …` line carrying the environment fault, since the cache's state is unknown and deriving would not help. A cause local to the member's worktree reads valid from the main checkout and prints nothing. No other outcome runs the reads.
 //   finisher-report <finisher-pr-M[-x]>
@@ -655,23 +655,23 @@ function fixReport(ev, member) {
     ev.note(`dispositions already checked for ${member}`);
     return;
   }
-  const by = `dispositions-check.mjs --member ${member} --scratch ${ev.scratch}`;
+  const by = `ledger.mjs dispositions ${member} --scratch ${ev.scratch}`;
   const sidecar = join(ev.fleetDir, BRIEFS, `${member}.json`);
   let kind;
   try {
     ({ kind } = JSON.parse(readFileSync(sidecar, "utf8")));
   } catch (e) {
-    ev.need(`dispositions-check ${member} — its brief ${sidecar} is unreadable (${e.code ?? e.message}), so whether it answered a review is unknown: run ${by} if it did`);
+    ev.need(`dispositions ${member} — its brief ${sidecar} is unreadable (${e.code ?? e.message}), so whether it answered a review is unknown: run ${by} if it did`);
     return;
   }
   if (!REVIEW_FIX_KINDS.has(kind)) {
     ev.note(`no dispositions check: ${member} was a ${kind} fix-applier`);
     return;
   }
-  const r = node("dispositions-check.mjs", ["--member", member, "--scratch", ev.scratch]);
+  const r = node("ledger.mjs", ["dispositions", member, "--scratch", ev.scratch]);
   ev.print(r.stdout);
   if (r.status === 0 || r.status === 1) ev.note(`dispositions checked (exit ${r.status})`);
-  else ev.need(`dispositions-check ${member} — nothing judged (${r.how}): ${said(r)}; run ${by} again`);
+  else ev.need(`dispositions ${member} — nothing judged (${r.how}): ${said(r)}; run ${by} again`);
 }
 
 const listed = (labels) => (labels.length === 0 ? "(none)" : labels.join(", "));

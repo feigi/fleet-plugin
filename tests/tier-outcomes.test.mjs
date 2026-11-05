@@ -1387,7 +1387,7 @@ test("append: a retry's record replaces the first attempt's on the same run, and
   });
 });
 
-test("append: a record whose dispositions-check verdict was escalate still yields a row", (t) => {
+test("append: a record whose dispositions verdict was escalate still yields a row", (t) => {
   const f = ruled(t, {
     tokens: [reviewedToken(HEAD_1, 1, 0, 0, RUN_1), answeredToken(RUN_1, "fix-pr-20", "escalate")],
     reviews: [{ run: RUN_1, head: HEAD_1, survived: [finding("deferred outside the diff")] }],
@@ -1430,7 +1430,7 @@ for (const [what, entries] of [
     assert.notEqual(r.code, 0);
     assert.match(r.stderr, /survived\[1\] "the uncharged one"/);
     assert.doesNotMatch(r.stderr, /survived\[0\]/);
-    assert.match(r.stderr, /check the record again/);
+    assert.match(r.stderr, /check the record again \(`ledger\.mjs dispositions fix-pr-\d+ --scratch <scratch>`\)/);
     assert.match(r.stderr, /dispatch the fix-applier again as a dispositions retry/);
     assert.equal(readFileSync(f.tier, "utf8"), before);
   });
@@ -1449,7 +1449,7 @@ for (const [what, entries, message] of [
     const r = f.derive();
     assert.equal(r.code, 2, r.stderr);
     assert.match(r.stderr, message);
-    assert.match(r.stderr, /check the record again/);
+    assert.match(r.stderr, /check the record again \(`ledger\.mjs dispositions fix-pr-\d+ --scratch <scratch>`\)/);
     assert.equal(readFileSync(f.tier, "utf8"), before);
   });
 }
@@ -1550,7 +1550,7 @@ for (const [what, setup, message] of REFUSALS) {
       const r = f.derive();
       assert.equal(r.code, 2, r.stderr);
       assert.match(r.stderr, message);
-      assert.match(r.stderr, /check the record again/);
+      assert.match(r.stderr, /check the record again \(`ledger\.mjs dispositions fix-pr-\d+ --scratch <scratch>`\)/);
       assert.match(r.stderr, /dispatch the fix-applier again as a dispositions retry/);
       assert.doesNotMatch(r.stderr, /--closed-own-ticket|--minted-false-claim|yes\|no/);
       assert.equal(readFileSync(f.tier, "utf8"), before);
@@ -1715,7 +1715,7 @@ test("append: --minted-false-claim yes is refused on an open PR, naming the reco
   const r = f.run("append", "20", ...BY_HAND, "--scratch", f.scratch);
   assert.equal(r.code, 2, r.stderr);
   assert.match(r.stderr, /PR #20 is open, and verdicts are given by hand only for a merged PR/);
-  assert.match(r.stderr, /check the record again/);
+  assert.match(r.stderr, /check the record again \(`ledger\.mjs dispositions fix-pr-\d+ --scratch <scratch>`\)/);
   assert.match(r.stderr, /dispatch the fix-applier again as a dispositions retry/);
   assert.doesNotMatch(r.stderr, /append 20 --closed-own-ticket/);
   assert.equal(readFileSync(f.tier, "utf8"), before);

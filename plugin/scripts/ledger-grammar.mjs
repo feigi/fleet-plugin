@@ -265,8 +265,8 @@ function streams(rows) {
 /** Every token of PR `pr`'s stream, in ledger row order: the tokens firstReview() reads. */
 export const prTokens = (rows, pr) => streams(rows).get(pr) ?? [];
 
-// dispositions-check.mjs's verdict on a review fix-applier's disposition
-// record: `dispositions-ok=fix-pr-<M>[-x]:<run>`,
+// The verdict `ledger.mjs dispositions` derives from a review fix-applier's
+// disposition record: `dispositions-ok=fix-pr-<M>[-x]:<run>`,
 // `dispositions-mismatch=…`, `dispositions-escalate=…` (a critical or
 // important deferral, or a second mismatch on one review, that the
 // maintainer answers) or `dispositions-unchecked=…` (no rule broke, but where
@@ -274,10 +274,10 @@ export const prTokens = (rows, pr) => streams(rows).get(pr) ?? [];
 // record answers, as its `reviewed=` names it. `ledger.mjs dispatch` refuses a
 // finisher on anything but an ok. A mismatch returns the PR to fixDue for one
 // retry. An escalate clears one of two ways: the maintainer's escalation
-// answers, recorded through dispositions-check.mjs, replace an escalate over
+// answers, recorded through `ledger.mjs dispositions`, replace an escalate over
 // a deferral outside the PR's diff with the verdict they give, and a second
 // mismatch on one review clears only when a new review of the PR counts again
-// from none. An unchecked is answered by running the check again, so the tick
+// from none. An unchecked is answered by running the verb again, so the tick
 // offers no fix-applier for it. A token outside this shape is no verdict at
 // all, which the gate reads as unchecked: fail closed.
 export function dispositionsToken(tok) {
@@ -289,7 +289,8 @@ export function dispositionsToken(tok) {
 }
 
 // The maintainer's answer to one finding a fix-applier's record escalated, as
-// dispositions-check.mjs writes it onto the PR's row, and the only writer:
+// `ledger.mjs dispositions` writes it onto the PR's row with `--uphold` or
+// `--send-back`, and the only writer:
 // `escalation-answer=<run>:<bucket>[<index>]:upheld` (the deferral stands) or
 // `…:sent-back` (the finding is applied in this PR). `<run>` is the run of the
 // review whose escalation it answers, as its `reviewed=` names it, and
@@ -327,8 +328,8 @@ export function escalationAnswers(tokens, run) {
  * verdict anywhere on the stream names its run. A review with findings no
  * fix-applier answered was superseded, and is skipped; a failed review wrote
  * no `reviewed=`, and is no review. `answered` names runs answered on top of
- * the ledger's: dispositions-check.mjs passes the run of the record it is
- * checking, whose verdict is not written yet. `{head, survived, refuted,
+ * the ledger's: `ledger.mjs dispositions` passes the run of the record it is
+ * judging, whose verdict is not written yet. `{head, survived, refuted,
  * unverified, run}`, or null when no review qualifies.
  */
 export function firstReview(tokens, answered = []) {
@@ -438,6 +439,65 @@ export const isReviewToken = (word) => word.startsWith("review=") || word.starts
 export function addedReviewToken(oldLine, line) {
   const words = (text) => (text === null ? [] : text.split(/\s+/).filter(isReviewToken));
   return added(words(oldLine), words(line))[0];
+}
+
+// A Gate verdict is a ledger token a dispatch gate reads: a dispositions
+// verdict, an Escalation answer or a `reviewed=`. A dispositions verdict and
+// an answer are written only by `ledger.mjs dispositions`, which derives them
+// from their evidence; the one input an argument supplies there is the
+// maintainer's answer to an escalate, as `--uphold`/`--send-back` flags. A
+// `reviewed=` is written by `ledger.mjs review`, off `fleet-event.mjs
+// review-result`.
+
+/** Whether `word` begins like a dispositions verdict or an Escalation answer,
+ * parseable or not: the words `ledger.mjs token` refuses. The dispositions
+ * prefixes are matched case-insensitively, as dispositionsToken() parses them. */
+export const isDispositionsWord = (word) => /^dispositions-(?:ok|mismatch|escalate|unchecked)=/i.test(word) || word.startsWith("escalation-answer=");
+
+/** Whether `word` is a Gate verdict: one dispositionsToken(),
+ * escalationAnswerToken() or REVIEWED parses. */
+export const isGateVerdict = (word) => dispositionsToken(word) !== null || escalationAnswerToken(word) !== null || REVIEWED.test(word);
+
+// A word shaped like a Gate verdict that none of the three parses.
+const malformedGateWord = (word) => (isDispositionsWord(word) || word.startsWith("reviewed=")) && !isGateVerdict(word);
+
+/** The command that writes the Gate verdict `word` is shaped like, for a
+ * refusal to name. */
+export function gateVerdictWriter(word) {
+  if (word.startsWith("reviewed=")) return "`fleet-event.mjs review-result <pr> <path>`";
+  if (word.startsWith("escalation-answer=")) return "`ledger.mjs dispositions <member> --scratch <scratch> --uphold '<list>' --send-back '<list>'`";
+  const member = dispositionsToken(word)?.member.name ?? "<member>";
+  return `\`ledger.mjs dispositions ${member} --scratch <scratch>\``;
+}
+
+/**
+ * Why `ledger.mjs row` must not write `line` over `oldLine` (null for a new
+ * row), or null when it may: the row's Gate verdicts, in row order, must
+ * equal the rewrite's. That refuses adding, changing, dropping or reordering
+ * one, and a whole-row wipe of a row that holds one. A verdict-shaped word
+ * no grammar parses is held to the one-way half: adding one is refused,
+ * dropping one is allowed, so a runless `reviewed=` and a legacy head-named
+ * verdict can still be cleaned off a row.
+ */
+export function gateVerdictRefusal(oldLine, line) {
+  const words = (text) => (text === null ? [] : text.split(/\s+/).filter(Boolean));
+  const [was, now] = [words(oldLine), words(line)];
+  const [before, after] = [was.filter(isGateVerdict), now.filter(isGateVerdict)];
+  const carried = "a rewrite carries every Gate verdict exactly as the row holds it";
+  const badWord = added(was.filter(malformedGateWord), now.filter(malformedGateWord))[0];
+  if (badWord !== undefined) {
+    return `adds '${badWord}', a word shaped like a Gate verdict that no grammar parses — ${carried}; ${gateVerdictWriter(badWord)} writes the verdict`;
+  }
+  if (before.length === after.length && before.every((w, i) => w === after[i])) return null;
+  const gained = added(before, after)[0];
+  if (gained !== undefined) {
+    return `adds or changes Gate verdict '${gained}' — ${carried}; ${gateVerdictWriter(gained)} writes it`;
+  }
+  const lost = added(after, before)[0];
+  if (lost !== undefined) {
+    return `drops Gate verdict '${lost}' — ${carried}; ${gateVerdictWriter(lost)} writes it again`;
+  }
+  return `reorders its Gate verdicts — ${carried}`;
 }
 
 // Every row key a ledger's rows map to each PR number under rowNums(), in

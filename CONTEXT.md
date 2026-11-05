@@ -809,6 +809,14 @@ a fix-applier deferred `remedy-outside-diff` on a record that broke no rule:
 one review; a new review counts from none.
 _Avoid_: ruling, waiver, override, ack
 
+**Gate verdict**:
+A ledger token a dispatch gate reads — a dispositions verdict, an Escalation
+answer, a `reviewed=` — written only by the ledger.mjs verb that derives it from
+its evidence. The one input an argument supplies is the maintainer's Escalation
+answer, accepted only against an escalate the check raised. No verb takes a
+verdict token as an argument.
+_Avoid_: claim, freeform token
+
 **Charge**:
 The fix-applier's reading of one finding that stands on a PR's first review: a
 finding that survived its verifiers and was not deferred `false-rationale`, or
