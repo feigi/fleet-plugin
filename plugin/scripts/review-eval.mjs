@@ -32,7 +32,7 @@
 // strings are.
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, normalize } from "node:path";
-import { digestOf, runReview, runnerPrRefusal, runnerScratchRefusal } from "./review-core.mjs";
+import { digestOf, runReview, runnerPrRefusal, runnerScratchRefusal, runnerTestCmdRefusal } from "./review-core.mjs";
 
 // eval's `agent()` returns a HANDLE, not data: `agent(prompt,
 // opts)` resolves near-instantly to an `AgentHandle` with `.wait()`, and only
@@ -156,7 +156,8 @@ export async function runReviewOnOmp(args) {
 // file, so nothing reads a half-review as a review. A dispatch mistake — a pr
 // that is not a PR number, a scratch that is not absolute (eval's cwd is the
 // MAIN CHECKOUT, so a relative one would put the file there), a scratch that
-// already ends in `pr<N>`
+// already ends in `pr<N>`, a testCmd that is not a non-blank string, a
+// worktree that is absent or empty
 // — throws before any run: it is not a review failure, and retrying or falling
 // back would only repeat it. So does a write fault other than a file already
 // at the path: the review ran, the environment could not keep it. `run` is the
@@ -171,6 +172,11 @@ export async function runReviewToFile(args, run = runReviewOnOmp) {
   }
   const scratchRefusal = runnerScratchRefusal(scratch);
   if (scratchRefusal) throw new Error(`review-runner: ${scratchRefusal}`);
+  const testCmdRefusal = runnerTestCmdRefusal(args.testCmd);
+  if (testCmdRefusal) throw new Error(`review-runner: ${testCmdRefusal}`);
+  if (!args.worktree) {
+    throw new Error(`review-runner: args.worktree is required — the checkout the review snapshots, got ${JSON.stringify(args.worktree)}`);
+  }
   const errors = [];
   for (let attempt = 1; attempt <= 2; attempt++) {
     let result;
