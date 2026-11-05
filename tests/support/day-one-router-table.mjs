@@ -5,9 +5,7 @@
 // PR moves it: it changes only by an ordinary change. "route: the shipped
 // table is the starting table" in ticket-router.test.mjs holds the two equal,
 // and "route: the checked-in table is valid" there checks what every shipped
-// table must satisfy. CI's `Router table check` still re-fits it, from no
-// commit while `fitted_commit` is null. Tests that need the table's contents
-// read this literal.
+// table must satisfy. Tests that need the table's contents read this literal.
 //
 // Where the code under test reads the installed table from a scripts
 // directory, `dayOneScripts()` is a copy of plugin/scripts holding this table.
