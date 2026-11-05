@@ -145,11 +145,12 @@ export async function runReviewOnOmp(args) {
 // keep out of its context. The run root is the review's own
 // `<scratch>/pr<pr>/run-XXXXXXXX`, the directory review-core.mjs's snapshot
 // step made with `mktemp` and the snapshot it returns sits in, so two reviews
-// of one PR — at one head or two — never write one file, and the ledger token
-// names the run whose file it is. No file is ever replaced. The file leaves
+// of one PR — at one head or two — never write one file, and the `reviewed=`
+// `ledger.mjs review --result` derives names the run whose file it is. No
+// file is ever replaced. The file leaves
 // with its run root: the snapshot step of a later review of the same PR
-// removes that PR's run roots not touched for seven days, so a token older
-// than that names a file that is gone.
+// removes that PR's run roots not touched for seven days, so a `reviewed=`
+// older than that names a file that is gone.
 //
 // Failure is a throw or an empty return. The holder of the review call retries
 // once; a second failure returns `failed` with both errors, and writes no
@@ -186,8 +187,8 @@ export async function runReviewToFile(args, run = runReviewOnOmp) {
       errors.push(`attempt ${attempt}: ${e?.message ?? String(e)}`);
       continue;
     }
-    // `result.counts` is read below to build the digest and the ledger
-    // token, but that read happens AFTER `mkdir`/`writeFile` have already put
+    // `result.counts` is read below to build the digest, but
+    // that read happens AFTER `mkdir`/`writeFile` have already put
     // the file on disk — so a `run` that resolves to a truthy, object-shaped
     // result missing `.counts` would otherwise throw on the destructure below
     // OUTSIDE this function's own retry try/catch (which wraps only the
@@ -201,7 +202,7 @@ export async function runReviewToFile(args, run = runReviewOnOmp) {
     }
     // The run root is read off the result, never rebuilt: only the snapshot
     // step's shell knew the `mktemp` name. A result whose snapshot is not in
-    // a run root of this PR under this scratch names no run the ledger token
+    // a run root of this PR under this scratch names no run a `reviewed=`
     // could point a reader back to, so it is a failed attempt like the one
     // above.
     const runRoot = runRootOf(result.snapshot, scratch, pr);
