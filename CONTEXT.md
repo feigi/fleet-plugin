@@ -77,7 +77,10 @@ Removing a tree's installed dependencies — every path git ignores in it except
 `agent-test` runner — while the tree stays. A claim tree is evicted once 7 days pass with
 neither a HEAD move nor a restore in it; the claim, its tree, branch and commits stay, and
 the Install step runs again before a member runs code there. A review run's snapshot and
-copies are evicted when the review ends, and nothing restores them. Not Reap, Release or
+copies are evicted when the review ends, and nothing restores them. A fix-applier's round
+copies lose their installed dependencies once no fix-applier is live on the PR, and so do a
+review run root whose runner died and a finisher tree whose finisher died, once no member
+of their kind is live; the root sweep does it, and nothing restores them. Not Reap, Release or
 Reclaim, which remove things.
 _Avoid_: prune, cleanup, reap, dehydrate
 

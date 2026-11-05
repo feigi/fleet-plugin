@@ -237,3 +237,15 @@ diff.
 ## What an unbounded read costs
 
 `review-and-fix.md`'s **Then bound the read** rests on this. The cost of not bounding is never one-off: a specialist that dumps a 37 KB file carries it in its prefix for every remaining turn, re-billed as cache-read on each. Over one run's 92 subagents the 88 unpiped whole-file calls carried 434 KB (~110k tokens) — the single largest attributed line item in that run — against 319 piped ones. Agents already reach for the bounded form; nothing told them when it is required.
+
+## Bracing a ref held in a variable
+
+`review-and-fix.md`'s **Brace a ref held in a variable** rests on this. The history modifier applies inside double quotes as well as outside. Measured, fully quoted: the construct that fails loudly on one path exits 0 on another and prints the *commit* instead of the blob — and the silent shape is the hazard, because a survival `grep -c` scores it as a plausible hit and re-anchors a citation that was correct. A literal ref is unaffected either way; quote regardless — not for zsh's sake, which splits and globs an expansion's *result* only under `SH_WORD_SPLIT`/`GLOB_SUBST`, both off by default (measured: `V="a b"` unquoted still arrives as one argument), but so the same line survives a `bash` runner, where an unquoted path holding a space does split — measured, `fatal: path 'has' does not exist`.
+
+## Two refuters approved changes that could not both land
+
+`review-and-fix.md`'s **Scan the findings against each other for MUTUAL EXCLUSION** rests on this. Two runs produced it; in one, a refuter proved a variable collapse behavior-equivalent over 844 cases while its own blast-radius scan named the two comment blocks a *different* refuter had just established as guarding distinct pinned hazards.
+
+## What a comment's false claim cost
+
+`review-and-fix.md`'s **Comments are findings** rests on this. One run shipped five: an invented citation, a mis-stated failure mode, a test file named as covering what it had zero coverage of, an overstated cast fix, a claim its own dependency's source contradicts.

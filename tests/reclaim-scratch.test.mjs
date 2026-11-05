@@ -1094,7 +1094,7 @@ test("(8) --pr <N> names a tree git will not answer for and a directory it canno
   assert.deepEqual(dry.out.skipped, r.out.skipped, "a dry run names different skips than --apply");
 });
 
-test("(8) --pr <N> prints an empty skipped after failed when nothing was skipped, and the other modes' receipts carry no such key", (t) => {
+test("(8) --pr <N> and the root sweep print evicted and an empty skipped when nothing was skipped, and the sibling pass's receipt carries no such key", (t) => {
   const f = fixture(t);
   f.ledger();
   f.states({});
@@ -1106,7 +1106,7 @@ test("(8) --pr <N> prints an empty skipped after failed when nothing was skipped
 
   assert.deepEqual(pr.out.skipped, []);
   assert.deepEqual(Object.keys(pr.out), ["applied", "ledger", "removed", "evicted", "kept", "failed", "skipped"]);
-  assert.deepEqual(Object.keys(sweep.out), ["applied", "ledger", "removed", "kept", "failed"]);
+  assert.deepEqual(Object.keys(sweep.out), ["applied", "ledger", "removed", "evicted", "kept", "failed", "skipped"]);
   assert.deepEqual(Object.keys(siblings.out), ["applied", "ledger", "removed", "kept", "failed"]);
 });
 
@@ -1985,4 +1985,242 @@ test("(11) a sibling key with a part that cannot be read is kept whole, with tha
   assert.equal(reasonOf(r.out.kept, key), `sibling key could not be read whole (${locked}: EACCES)`);
   assert.equal(r.out.kept[0].idle, true, "nothing found modified within 7 days");
   assert.ok(existsSync(key), "a key with an unreadable part was removed");
+});
+
+// ----------------------------------------------------------------------------
+// The root sweep evicts the trees of every pr<N>/ it keeps, by the kind of
+// member that made them, once none of that kind is live on the ledger.
+
+// An open PR's directory as a fix round, a review and a finisher leave it: two
+// fix-applier round roots whose trees each hold an installed directory and a
+// mutant with a verdict file beside each tree, a pr<N>/mutate/ left from
+// before, a review run root, and a finisher's detached worktree.
+function prDirectory(f, pr = 7) {
+  const base = join(f.root, `pr${pr}`);
+  const fixes = [
+    makeTree(join(base, "fix-aaaaaaaa", "finding-1", "tree"), { untracked: ["mutant.txt"] }),
+    makeTree(join(base, "fix-bbbbbbbb", "tree"), { untracked: ["mutant.txt"] }),
+  ];
+  const verdicts = [join(base, "fix-aaaaaaaa", "finding-1", "verdict.json"), join(base, "fix-bbbbbbbb", "verdict.json")];
+  for (const v of verdicts) writeFileSync(v, "{}\n");
+  const mutate = makeTree(join(base, "mutate"), { untracked: ["mutant.txt"] });
+  const review = reviewRunRoot(f, pr, "run-ddddddd1");
+  const origin = makeTree(join(f.base, `finisher-origin-${pr}`));
+  const finish = join(base, "finish-finisher-pr-" + pr);
+  gitIn(origin, "worktree", "add", "-q", "--detach", finish);
+  mkdirSync(join(finish, "node_modules", "pkg"), { recursive: true });
+  writeFileSync(join(finish, "node_modules", "pkg", "index.js"), "x\n");
+  return { base, fixes, verdicts, mutate, review, finish };
+}
+const installed = (tree) => existsSync(join(tree, "node_modules", "pkg", "index.js"));
+
+test("(12) an OPEN PR's fix round roots, pr<N>/mutate/, dead review run root and dead finisher tree lose their ignored paths — and only those", (t) => {
+  const f = fixture(t);
+  f.ledger();
+  f.states({ 7: PR("OPEN") });
+  const d = prDirectory(f);
+
+  const r = f.run(["--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.failed, []);
+  const trees = [...d.fixes, d.mutate, ...d.review.trees, d.finish].sort();
+  assert.deepEqual(paths(r.out.evicted), trees);
+  for (const e of r.out.evicted) assert.deepEqual(e.ignored, ["node_modules/"], e.path);
+  for (const tree of trees) assert.ok(!installed(tree), `${tree} kept its installed directory`);
+  for (const tree of [...d.fixes, d.mutate, ...d.review.trees]) assert.ok(existsSync(join(tree, ".git", "HEAD")), `${tree} lost its .git`);
+  assert.ok(lstatSync(join(d.finish, ".git")).isFile(), "the finisher's gitfile went");
+  for (const tree of [...d.fixes, d.mutate, ...d.review.trees, d.finish]) {
+    assert.ok(existsSync(join(tree, "tracked.txt")), `${tree} lost a tracked file`);
+  }
+  for (const tree of [...d.fixes, d.mutate, d.review.trees[1]]) assert.ok(existsSync(join(tree, "mutant.txt")), `${tree} lost its mutant`);
+  for (const v of [...d.verdicts, ...d.review.files]) assert.ok(existsSync(v), `${v} was removed`);
+  assert.match(reasonOf(r.out.evicted, d.fixes[0]), /fix-applier round root.*no live fix-pr-7/);
+  assert.match(reasonOf(r.out.evicted, d.mutate), /pr7\/mutate\/.*no live fix-pr-7/);
+  assert.match(reasonOf(r.out.evicted, d.review.trees[0]), /review run root.*no open review launch of PR #7/);
+  assert.match(reasonOf(r.out.evicted, d.finish), /finisher tree.*no live finisher-pr-7/);
+  assert.ok(existsSync(d.base), "an OPEN PR's directory was removed");
+});
+
+test("(12) a dry run names the trees the sweep would evict and changes none", (t) => {
+  const f = fixture(t);
+  f.ledger();
+  f.states({ 7: PR("OPEN") });
+  const d = prDirectory(f);
+
+  const dry = f.run(["--root", f.root]);
+
+  assert.equal(dry.out.applied, false);
+  assert.deepEqual(paths(dry.out.evicted), [...d.fixes, d.mutate, ...d.review.trees, d.finish].sort());
+  for (const tree of [...d.fixes, d.mutate, ...d.review.trees, d.finish]) assert.ok(installed(tree), `the dry run evicted ${tree}`);
+  const wet = f.run(["--root", f.root, "--apply"]);
+  assert.deepEqual({ ...dry.out, applied: true }, wet.out);
+});
+
+test("(12) a live fix-pr-<N>-b keeps the fix round roots and pr<N>/mutate/ — and only those", (t) => {
+  const f = fixture(t);
+  f.ledger(["#6 impl-6=PR#7 → PR#7 · fix-pr-7-b"], ["impl-6=PR#7", "fix-pr-7-b"]);
+  f.states({ 7: PR("OPEN") });
+  const d = prDirectory(f);
+
+  const r = f.run(["--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r.out.evicted), [...d.review.trees, d.finish].sort());
+  for (const tree of [...d.fixes, d.mutate]) assert.ok(installed(tree), `${tree} was evicted under a live fix-applier`);
+});
+
+test("(12) an open review launch of PR <N> keeps the run-* trees — and only those", (t) => {
+  const f = fixture(t);
+  f.ledger(["#6 impl-6=PR#7 → PR#7 · review=member:review-pr-7"], ["impl-6=PR#7"]);
+  f.states({ 7: PR("OPEN") });
+  const d = prDirectory(f);
+
+  const r = f.run(["--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r.out.evicted), [...d.fixes, d.mutate, d.finish].sort());
+  for (const tree of d.review.trees) assert.ok(installed(tree), `${tree} was evicted under an open review launch`);
+});
+
+test("(12) a review launch that ended =failed no longer keeps the run-* trees", (t) => {
+  const f = fixture(t);
+  f.ledger(["#6 impl-6=PR#7 → PR#7 · review=member:review-pr-7=failed"], ["impl-6=PR#7"]);
+  f.states({ 7: PR("OPEN") });
+  const d = prDirectory(f);
+
+  const r = f.run(["--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  for (const tree of d.review.trees) assert.ok(!installed(tree), `${tree} kept its install after its launch failed`);
+});
+
+test("(12) a live finisher-pr-<N> keeps the finish-* tree — and only that", (t) => {
+  const f = fixture(t);
+  f.ledger(["#6 impl-6=PR#7 → PR#7 · finisher-pr-7"], ["impl-6=PR#7", "finisher-pr-7"]);
+  f.states({ 7: PR("OPEN") });
+  const d = prDirectory(f);
+
+  const r = f.run(["--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r.out.evicted), [...d.fixes, d.mutate, ...d.review.trees].sort());
+  assert.ok(installed(d.finish), "the finisher's tree was evicted under a live finisher");
+});
+
+test("(12) a member of another PR holds nothing of this one's", (t) => {
+  const f = fixture(t);
+  f.ledger(["#6 impl-6=PR#8 → PR#8 · fix-pr-8", "#9 impl-9=PR#70 → PR#70 · finisher-pr-70"], ["impl-6=PR#8", "fix-pr-8", "impl-9=PR#70", "finisher-pr-70"]);
+  f.states({ 7: PR("OPEN") });
+  const d = prDirectory(f);
+
+  const r = f.run(["--root", f.root, "--apply"]);
+
+  assert.deepEqual(paths(r.out.evicted), [...d.fixes, d.mutate, ...d.review.trees, d.finish].sort());
+});
+
+test("(12) a live merge bot keeps every pr<N> whole, and its trees are still evicted by the rules above", (t) => {
+  const f = fixture(t);
+  f.ledger([], ["merge-bot-2"]);
+  f.states({ 7: PR("MERGED") });
+  const d = prDirectory(f);
+  const botFile = join(d.base, "merge-bot-2", "notes.txt");
+  mkdirSync(dirname(botFile));
+  writeFileSync(botFile, "x\n");
+  const botTree = makeTree(join(d.base, "merge-bot-2", "copy"));
+
+  const r = f.run(["--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.removed, []);
+  assert.match(reasonOf(r.out.kept, d.base), /live merge-bot-2 holds every pr<N>/);
+  assert.deepEqual(paths(r.out.evicted), [...d.fixes, d.mutate, ...d.review.trees, d.finish].sort());
+  assert.ok(existsSync(botFile), "the bot's own file was removed");
+  assert.ok(installed(botTree), "a tree under the bot's own directory was evicted");
+});
+
+test("(12) a merged PR kept for its review evidence has its trees evicted, and its review.json and disposition records stay", (t) => {
+  const f = fixture(t);
+  f.ledger();
+  f.states({ 7: PR("MERGED") });
+  const d = prDirectory(f);
+  const disp = f.file("dispositions-fix-pr-7.json");
+  writeFileSync(join(d.review.run, "review.json"), "{}\n");
+  writeFileSync(disp, JSON.stringify({ run: "run-ddddddd1", entries: [] }));
+
+  const r = f.run(["--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(reasonOf(r.out.kept, d.base), /MERGED, but .*review evidence/);
+  assert.deepEqual(paths(r.out.evicted), [...d.fixes, d.mutate, ...d.review.trees, d.finish].sort());
+  assert.ok(existsSync(join(d.review.run, "review.json")), "review.json was removed");
+  assert.ok(existsSync(disp), "the disposition record was removed");
+});
+
+test("(12) a PR kept for a live holder has the trees of every kind that holder is not evicted", (t) => {
+  const f = fixture(t);
+  f.ledger(["#6 impl-6=PR#7 → PR#7 · finisher-pr-7"], ["impl-6=PR#7", "finisher-pr-7"]);
+  f.states({ 7: PR("MERGED") });
+  const d = prDirectory(f);
+
+  const r = f.run(["--root", f.root, "--apply"]);
+
+  assert.match(reasonOf(r.out.kept, d.base), /MERGED, but live finisher-pr-7 names it/);
+  assert.deepEqual(paths(r.out.evicted), [...d.fixes, d.mutate, ...d.review.trees].sort());
+  assert.ok(installed(d.finish));
+});
+
+test("(12) a pr<N>/ GitHub did not answer for, or whose number is an issue, has nothing evicted", (t) => {
+  const f = fixture(t);
+  f.ledger();
+  f.states({ 7: { error: { type: "FORBIDDEN", message: "no" } }, 8: ISSUE("OPEN") });
+  const unknown = prDirectory(f, 7);
+  const issue = prDirectory(f, 8);
+
+  const r = f.run(["--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.evicted, []);
+  for (const d of [unknown, issue]) for (const tree of [...d.fixes, d.mutate, ...d.review.trees, d.finish]) assert.ok(installed(tree), `${tree} was evicted without a PR state`);
+});
+
+test("(12) a tree already evicted is not named again, and a second sweep changes nothing", (t) => {
+  const f = fixture(t);
+  f.ledger();
+  f.states({ 7: PR("OPEN") });
+  prDirectory(f);
+  f.run(["--root", f.root, "--apply"]);
+
+  const again = f.run(["--root", f.root, "--apply"]);
+
+  assert.deepEqual(again.out.evicted, []);
+  assert.deepEqual(again.out.failed, []);
+});
+
+test("(12) the root sweep with no ledger after a rotate evicts with no live member", (t) => {
+  const f = fixture(t);
+  f.states({ 7: PR("OPEN") });
+  const d = prDirectory(f);
+
+  const r = f.run(["--root", f.root, "--after-rotate", "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r.out.evicted), [...d.fixes, d.mutate, ...d.review.trees, d.finish].sort());
+});
+
+test("(12) an OPEN PR's run root idle 8 d is removed whole and never named as evicted, and a fresh one beside it is evicted", (t) => {
+  const f = fixture(t);
+  f.ledger();
+  f.states({ 7: PR("OPEN") });
+  const old = reviewRunRoot(f, 7, "run-oldoldol");
+  f.age(old.run, 8);
+  const fresh = reviewRunRoot(f, 7, "run-freshfre");
+
+  const r = f.run(["--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r.out.removed), [old.run]);
+  assert.deepEqual(paths(r.out.evicted), [...fresh.trees].sort());
+  assert.deepEqual(r.out.failed, []);
+  assert.ok(!existsSync(old.run));
 });

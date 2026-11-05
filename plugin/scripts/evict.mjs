@@ -89,9 +89,9 @@
 // run. Prints
 // `{"applied","worktree","install"}`; exit 0 restored (or would), 2 refused.
 //
-// That install sequence is `installIn()`, exported: finisher-tree.mjs runs the
-// same read, the same checks and the same words in the tree it builds for the
-// acceptance mutation, so there is one copy of it.
+// That install sequence is `installIn()`, exported: finisher-tree.mjs and
+// measure-copy.mjs run the same read, the same checks and the same words in
+// the tree they build, so there is one copy of it.
 
 import { spawnSync } from "node:child_process";
 import { readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
@@ -418,15 +418,22 @@ function sweep({ afterRotate, apply }) {
  * called with `apply` set, after every check ahead of the Install step has
  * passed and just before it starts; it returns null, or the message of a
  * refusal, which then keeps the Install step from running. `install` is null in
- * a refusal that came before the command was read. Nothing here writes a mark
+ * a refusal that came before the command was read. `source` is the tree the
+ * Install step is read from, `tree` itself by default: a copy holds no Recipe
+ * cache of its own, so its caller names the worktree whose cache every
+ * worktree of the repository shares. `untracked`, set, makes an Install step
+ * that leaves the tree changed no refusal: the result is then `{install,
+ * untracked: {count, first}}`, `first` the first 20 lines of `git status
+ * --porcelain -uall` and `count` how many there are, and a status that cannot
+ * be read after the step is still `status-after`. Nothing here writes a mark
  * or a restore time, and it never exits the process.
  */
-export function installIn(tree, apply, { verb = "restore", retry = true, beforeRun = () => null } = {}) {
+export function installIn(tree, apply, { verb = "restore", retry = true, beforeRun = () => null, source = tree, untracked = false } = {}) {
   const refuse = (kind, message, install = null, exit = null) => ({ refusal: { kind, message, install, exit } });
-  const derived = run("sh", [join(SCRIPT_DIR, "derive-testcmd.sh"), tree, "install", "--at", "origin/main"]);
+  const derived = run("sh", [join(SCRIPT_DIR, "derive-testcmd.sh"), source, "install", "--at", "origin/main"]);
   const install = String(derived.stdout ?? "").replace(/\n$/, "");
   if (derived.error || derived.status !== 0 || install === "") {
-    return refuse("derive", String(derived.stderr ?? "").trim() || `derive-testcmd.sh ${tree} install failed (${how(derived)})`);
+    return refuse("derive", String(derived.stderr ?? "").trim() || `derive-testcmd.sh ${source} install failed (${how(derived)})`);
   }
   // Dirty before anything runs is no Install step's doing: said in its own
   // words, so the dirty-after refusal below never blames the Recipe for it.
@@ -450,8 +457,14 @@ export function installIn(tree, apply, { verb = "restore", retry = true, beforeR
   if (r.status !== 0) return refuse("failed", `install failed in ${tree} (exit ${r.status})`, install, r.status);
   const status = git(tree, ["status", "--porcelain", "-uall"]);
   if (status.error || status.status !== 0) return refuse("status-after", `could not verify the tree state in ${tree} after the Install step`, install, 0);
-  if (status.stdout !== "") return refuse("dirtied", `the Install step '${install}' changed the tree in ${tree} (first: ${status.stdout.split("\n")[0]}) — ${REDERIVE}`, install, 0);
-  return { install };
+  if (status.stdout !== "") {
+    if (untracked) {
+      const lines = status.stdout.split("\n").filter((l) => l !== "");
+      return { install, untracked: { count: lines.length, first: lines.slice(0, 20) } };
+    }
+    return refuse("dirtied", `the Install step '${install}' changed the tree in ${tree} (first: ${status.stdout.split("\n")[0]}) — ${REDERIVE}`, install, 0);
+  }
+  return untracked ? { install, untracked: { count: 0, first: [] } } : { install };
 }
 
 function restore(tree, apply) {

@@ -44,16 +44,18 @@
 //            never when. Pruned to the live set on every tick, so a settled
 //            member's stamp does not outlive it. Carried, never written, by
 //            the heartbeat and by ledger.mjs.
-//   applied  fleet-tick only, and only under --apply. {run, reapAfter}: the
-//            merge-bot numbers whose `merge-bot-<n>=done` the tick has already
-//            run reap.sh, reclaim-scratch.mjs and evict.mjs after, and the
-//            controller record's `at` they belong to. Written only under a
-//            record: with none, nothing tells one run from the next. Merge-bot
-//            numbering restarts at 1 in a run that carries no bot forward, and
-//            this file outlives the rotation, so a list whose `run` is not the
-//            current record's `at` is the previous run's and names nothing in
-//            this one. Carried, never written, by the heartbeat and by
-//            ledger.mjs.
+//   applied  fleet-tick only, and only under --apply. {run, reapAfter,
+//            sweptAfter}: the merge-bot numbers whose `merge-bot-<n>=done` the
+//            tick has already run reap.sh, reclaim-scratch.mjs and evict.mjs
+//            after (`reapAfter`), the fix-applier, finisher and failed review
+//            launch names whose settle it has already run reclaim-scratch.mjs
+//            after (`sweptAfter`, left out while empty), and the controller
+//            record's `at` they belong to. Written only under a record: with none, nothing tells
+//            one run from the next. Merge-bot numbering restarts at 1 in a run
+//            that carries no bot forward, and this file outlives the rotation,
+//            so a list whose `run` is not the current record's `at` is the
+//            previous run's and names nothing in this one. Carried, never
+//            written, by the heartbeat and by ledger.mjs.
 //
 // One writer per key. A key two scripts wrote would need locking to be
 // correct, and none of them is in a position to hold one. That holds per key,
@@ -256,7 +258,8 @@ export function readState(path, name, warn = console.error) {
   const done = (v) => {
     if (!isRecord(v) || !Array.isArray(v.reapAfter)) return null;
     if (!(Number.isInteger(v.run) && v.run > 0)) return null;
-    return { run: v.run, reapAfter: v.reapAfter.filter((n) => Number.isInteger(n) && n > 0) };
+    const swept = Array.isArray(v.sweptAfter) ? v.sweptAfter.filter((m) => typeof m === "string" && m !== "") : [];
+    return { run: v.run, reapAfter: v.reapAfter.filter((n) => Number.isInteger(n) && n > 0), ...(swept.length > 0 ? { sweptAfter: swept } : {}) };
   };
   const { quiet, digest, beat, ticked, acted, controller, seen, applied, ...rest } = parsed;
   // A controller key that ctl() rejects is a record someone wrote and nobody

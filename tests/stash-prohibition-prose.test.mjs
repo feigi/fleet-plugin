@@ -215,7 +215,7 @@ test("the fix-applier's stash rule states the stack is repo-global, shared by ev
   assert.match(
     b,
     Pin.phrase(
-      "The stash stack is repo-global too, not per-worktree or per-session — the same `refs/stash` every concurrent member and the main checkout share, not partitioned the way `<scratch>/pr<N>/mutate/` above is.",
+      "The stash stack is repo-global too, not per-worktree or per-session — the same `refs/stash` every concurrent member and the main checkout share, not partitioned the way your round root above is.",
     ),
     "the fix-applier block no longer states the stash stack is repo-global and shared by every worktree/session",
   );

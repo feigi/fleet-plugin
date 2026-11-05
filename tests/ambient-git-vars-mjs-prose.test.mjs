@@ -367,6 +367,15 @@ const COVERED_MJS = {
   // finisher-tree.test.mjs, "an inherited GIT_DIR naming another repository
   // cannot retarget the tree".
   "finisher-tree.mjs": 1,
+  // TWO scrubbed envs, one per spawn site: the `git()` helper behind the
+  // `rev-parse`, `init`, `add`, `commit` and tree reads, and the `git archive |
+  // tar` pipeline's. An ambient GIT_DIR would archive another repository's
+  // commit into the copy, or make the copy's commit in another repository.
+  // The Install step's own git and shell children are evict.mjs's
+  // `installIn()`, counted under evict.mjs. Behavioural fixture:
+  // measure-copy.test.mjs, "an inherited GIT_DIR naming another repository
+  // cannot retarget the archive, the init or the commit".
+  "measure-copy.mjs": 2,
   // ONE scrubbed env, the default of `uniqueIn()`'s `env` option, handed to the
   // single `git()` helper behind the cherry, rev-list, merge-tree and diff-tree
   // reads. An ambient GIT_DIR would answer those reads for another repository,

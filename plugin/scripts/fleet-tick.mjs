@@ -153,7 +153,7 @@
 // the ledger; main() does the I/O. Split so the guard table and the reading are
 // both unit-testable without a network.
 
-import { parseMember, parseToken, premisesOf, rowNums, nextRetry, readRetired, pullEnded, dispositionsToken, REVIEW, REVIEWED } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, premisesOf, rowNums, nextRetry, readRetired, pullEnded, dispositionsToken, failedReviewLaunches, REVIEW, REVIEWED } from "./ledger-grammar.mjs";
 
 // The implementer and reviewer rows' TARGET is the In-flight bound; the merge
 // bot's is 1. Availability of work belongs in the ACTION, not the target: a
@@ -1227,6 +1227,10 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, queued
     // The number of every merge bot settled `done`: each is a merge pass
     // `--apply` reaps, reclaims and evicts after, once (reapDue).
     mergeBotDone: all.filter((m) => m.family === "merge-bot" && m.outcome === "done").map((m) => m.number).sort(asc),
+    // The name of every fix-applier and finisher settled, whatever its outcome,
+    // and of every review launch settled `=failed`: each is a settle
+    // `--apply` runs the root sweep after, once (sweepDue).
+    sweepAfter: [...all.filter((m) => (m.family === "fix-pr" || m.family === "finisher-pr") && m.outcome !== null).map((m) => m.name), ...failedReviewLaunches(rows)],
     reviewsLive: liveReviews.length,
     // The in-flight reviews of PRs the open list does not carry: the ones
     // the probe could retire, so the caller asks gh about these and no others.
@@ -1564,6 +1568,20 @@ export function reapDue(done, applied, controllerAt) {
   return done.filter((n) => !ran.has(n));
 }
 
+// The members `applied.sweptAfter` names for THIS run, on reapedAfter()'s
+// terms: none when its `run` is not the controller record's `at`, since a
+// name such as `fix-pr-7` is reused by the next run's first member of its PR.
+export function sweptAfter(applied, controllerAt) {
+  return applied !== null && controllerAt != null && applied.run === controllerAt ? (applied.sweptAfter ?? []) : [];
+}
+
+// The settles owed the root sweep: every member in `settled` (run.sweepAfter)
+// that sweptAfter() does not name.
+export function sweepDue(settled, applied, controllerAt) {
+  const ran = new Set(sweptAfter(applied, controllerAt));
+  return settled.filter((name) => !ran.has(name));
+}
+
 // The implementers the tick would print `HOLD (tier unchecked …)` for: read
 // off the rows reconcile() computed, so whatever outranks that hold — the
 // drain, a mismatch, phase 0, the main checkout — outranks the check too.
@@ -1594,13 +1612,13 @@ export function reapSummary(stdout) {
     + (warned.length ? `, warnings ${warned.length}${typeof first === "string" ? `: ${first}` : ""}` : "");
 }
 
-// reclaim-scratch.mjs's receipt as `removed <k>, kept <m>, failed <f>`, or
+// reclaim-scratch.mjs's receipt as `removed <k>, [evicted <e>, ]kept <m>, failed <f>`, or
 // null. A removal that failed is in the receipt and exits 0: it is reported
 // here, and the pass still counts as reclaimed after.
 export function reclaimSummary(stdout) {
   const r = receiptOf(stdout);
   if (r === null || ![r.removed, r.kept, r.failed].every(Array.isArray)) return null;
-  return `removed ${r.removed.length}, kept ${r.kept.length}, failed ${r.failed.length}`;
+  return `removed ${r.removed.length}, ${Array.isArray(r.evicted) ? `evicted ${r.evicted.length}, ` : ""}kept ${r.kept.length}, failed ${r.failed.length}`;
 }
 
 // evict.mjs's receipt as `evicted <k>, kept <m>, failed <f>`, or null. A tree
@@ -1697,7 +1715,9 @@ const OPTIONS = {
   "fold-unchanged": { type: "boolean", default: false },
   // `--apply` runs the idempotent follow-ups whose trigger the ledger and the
   // state file show, before the rows: reap.sh, reclaim-scratch.mjs and
-  // evict.mjs after every merge pass settled `done`, and tier-check.mjs on every implementer
+  // evict.mjs after every merge pass settled `done`, reclaim-scratch.mjs
+  // alone after every settle of a fix-applier, a finisher or a review launch
+  // `=failed`, and tier-check.mjs on every implementer
   // the tick would hold as unchecked. It never dispatches, never settles a
   // member and writes no ledger row but through those scripts. Without it the
   // tick is read-only.
@@ -2057,11 +2077,24 @@ function reportDuty(r, { label, duty, what, summarise }) {
 // root or set of claim trees rather than one pass's share. Each runs whether
 // or not the one before it did: none reads another's result. True only when
 // all three applied, the one case `due` is recorded as reaped after; otherwise
-// the next --apply tick runs them again.
+// the next --apply tick runs them again. `{all, reclaimed}`: the second is true
+// when the root sweep applied, which is also the sweep a settled member owes.
 function applyReap(due) {
   const label = `reap after ${due.map((n) => `merge-bot-${n}`).join(" ")}`;
   const reaped = reportDuty(runSibling("reap.sh", ["--apply"]), { label, duty: "reap", what: "reap.sh", summarise: reapSummary });
-  let reclaimed = false;
+  const reclaimed = applySweep("reclaim");
+  const evicted = reportDuty(runSibling("evict.mjs", ["--apply"]),
+    { label: "evict", duty: "evict", what: "evict.mjs", summarise: evictSummary });
+  return { all: reaped && reclaimed && evicted, reclaimed };
+}
+
+// The root sweep, `reclaim-scratch.mjs --root <scratch> --apply`: after a merge
+// pass, and after the settle of a fix-applier, a finisher or a failed review
+// launch, each of which leaves trees nothing of their kind is left to use.
+// True when it applied: a receipt printed, failures listed in it included, the
+// next trigger retrying those. A non-zero exit or no receipt is not, and the
+// next --apply tick runs it again.
+function applySweep(label) {
   let root = null;
   try {
     root = scratchRoot();
@@ -2069,13 +2102,9 @@ function applyReap(due) {
     if (!(e instanceof FleetDirUnresolvable)) throw e;
     console.log(`APPLY FAILED reclaim: ${e.message}`);
   }
-  if (root !== null) {
-    reclaimed = reportDuty(runSibling("reclaim-scratch.mjs", ["--root", root, "--apply"]),
-      { label: "reclaim", duty: "reclaim", what: "reclaim-scratch.mjs", summarise: reclaimSummary });
-  }
-  const evicted = reportDuty(runSibling("evict.mjs", ["--apply"]),
-    { label: "evict", duty: "evict", what: "evict.mjs", summarise: evictSummary });
-  return reaped && reclaimed && evicted;
+  if (root === null) return false;
+  return reportDuty(runSibling("reclaim-scratch.mjs", ["--root", root, "--apply"]),
+    { label, duty: "reclaim", what: "reclaim-scratch.mjs", summarise: reclaimSummary });
 }
 
 // tier-check.mjs's verdict by its exit status, each one a token the check
@@ -2378,10 +2407,17 @@ function main() {
     // record: nothing could tell a list recorded then from the next run's.
     const run0 = controller?.at ?? null;
     const due = reapDue(run.mergeBotDone, priorState.applied, run0);
-    if (due.length && applyReap(due) && run0 !== null) {
+    const owed = sweepDue(run.sweepAfter, priorState.applied, run0);
+    const reap = due.length ? applyReap(due) : null;
+    // The root sweep a merge pass ran is the one a settled member owes too.
+    const swept = owed.length > 0 && (reap?.reclaimed === true || applySweep(`reclaim after ${owed.join(" ")}`));
+    const reaped = reap?.all === true ? due : [];
+    if (run0 !== null && (reaped.length > 0 || swept)) {
       const now = readState(path, NAME);
       if (!now.degraded) {
-        writeState(path, NAME, now, { applied: { run: run0, reapAfter: [...new Set([...reapedAfter(now.applied, run0), ...due])] } });
+        const reapAfter = [...new Set([...reapedAfter(now.applied, run0), ...reaped])];
+        const sweptNames = [...new Set([...sweptAfter(now.applied, run0), ...(swept ? owed : [])])];
+        writeState(path, NAME, now, { applied: { run: run0, reapAfter, ...(sweptNames.length > 0 ? { sweptAfter: sweptNames } : {}) } });
       }
     }
     // The tier check, on exactly the members the implementer row would hold

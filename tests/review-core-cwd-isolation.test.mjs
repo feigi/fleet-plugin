@@ -75,9 +75,9 @@ const refuter = promptRenderer({
   file: FILE,
   start: "`Try to REFUTE this finding from PR #",
   end: "{ label: `verify:",
-  scope: ["pr", "f", "snap", "stats", "d", "i", "fi", "readRules", "usableDiff", "environmentNote", "testCmd", "KILL_RULES", "copyRule", "PATTERN_KILL_RULE"],
+  scope: ["pr", "f", "snap", "worktree", "stats", "d", "i", "fi", "readRules", "usableDiff", "environmentNote", "testCmd", "KILL_RULES", "copyRule", "PATTERN_KILL_RULE"],
   what: "review-core.mjs's refuter prompt (opening `Try to REFUTE this finding from PR #`, labelled `verify:`)",
-})(7, { claim: "the guard fails open", file: "a.js", line: 12, evidence: "line 12 has no else" }, SNAP, null, { key: "correctness" }, 0, 0, () => "READ RULES", () => null, () => "TEST ENVIRONMENT", "node --test", "KILL RULES", () => "COPY RULE", "PATTERN KILL RULE");
+})(7, { claim: "the guard fails open", file: "a.js", line: 12, evidence: "line 12 has no else" }, SNAP, "/repo/.worktrees/7-x", null, { key: "correctness" }, 0, 0, () => "READ RULES", () => null, () => "TEST ENVIRONMENT", "node --test", "KILL RULES", () => "COPY RULE", "PATTERN KILL RULE");
 
 const snapshot = promptRenderer({
   file: FILE,

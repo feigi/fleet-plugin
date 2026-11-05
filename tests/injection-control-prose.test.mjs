@@ -152,7 +152,7 @@ const SEATS = [
 ];
 
 // The free names the template interpolates, in the order `render` binds them.
-const SCOPE = ["pr", "f", "snap", "stats", "d", "i", "fi", "readRules", "usableDiff", "environmentNote", "testCmd", "KILL_RULES", "copyRule", "PATTERN_KILL_RULE"];
+const SCOPE = ["pr", "f", "snap", "worktree", "stats", "d", "i", "fi", "readRules", "usableDiff", "environmentNote", "testCmd", "KILL_RULES", "copyRule", "PATTERN_KILL_RULE"];
 const TEMPLATE_START = "`Try to REFUTE this finding from PR #";
 const TEMPLATE_END = "{ label: `verify:";
 
@@ -173,6 +173,7 @@ function renderTemplate(dir, file) {
     7,
     { claim: "the guard fails open", file: "a.js", line: 12, evidence: "line 12 has no else" },
     { path: "/scr/snapshot-abc1234", head: "abc1234", runRoot: "/scr" },
+    "/repo/.worktrees/7-x",
     null,
     { key: "correctness" },
     0,

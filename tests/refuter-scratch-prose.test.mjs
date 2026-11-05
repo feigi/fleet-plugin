@@ -132,3 +132,56 @@ for (const [name, getLeadIn] of [
     );
   });
 }
+
+// The copy a refuter measures in is built by one script, and the fix-applier
+// writes the whole command into the refuter's prompt. Both copies of the
+// instruction carry the command, the rule that a non-zero exit is no usable
+// run, and the lead-in the fix-applier reads carries the substitution that
+// makes the command absolute. PRESENCE pins, one contiguous span each.
+const COPY_COMMAND =
+  "`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run measure-copy.mjs --worktree <abs-path> --pin <head> --dest <scratch>/pr<N>/<finding>/copy --pr <N> --scratch <scratch>`";
+const NO_USABLE_RUN = "Any non-zero exit is no usable run: inconclusive, never a kill, and `refuted` stays true.";
+const COPY_LEAD_IN =
+  "and write the copy command in it the same way, as one absolute command: `<abs-path>` is your own worktree, `<head>` the review file's `head`, `<scratch>` the scratch directory your brief names and `<N>` the PR number";
+const COPY_LEAD_IN_REVIEW_AND_FIX =
+  "write the copy command in the same way — `<abs-path>` your own worktree, `<head>` the review file's `head`, the rest resolved likewise";
+
+for (const [name, getPrompt] of [
+  ["the fix-applier member prompt", runTeamPrompt],
+  ["review-and-fix.md", reviewAndFixPrompt],
+]) {
+  test(`${name}: the refuter instruction carries the copy command, builds nothing for a refuter that only reads, and calls a non-zero exit no usable run`, () => {
+    const prompt = getPrompt();
+    assert.match(prompt, Pin.phrase(COPY_COMMAND), "the refuter instruction no longer carries the command that builds its own copy");
+    assert.match(prompt, Pin.phrase(NO_USABLE_RUN), "the refuter instruction no longer says a copy that did not build is no usable run");
+    assert.match(prompt, Pin.phrase("Never make a copy by hand, and a refuter that only reads builds none."));
+    assert.match(prompt, Pin.phrase("run it as ONE blocking foreground command with a command deadline of 3600 seconds"), "the Install step's minutes of runtime are no longer allowed for");
+    assert.match(prompt, Pin.phrase("each `--dest` another new directory under `<scratch>/pr<N>/<finding>/`"), "a further copy no longer names its own destination under the finding's directory");
+  });
+}
+
+test("the fix-applier member prompt tells the fix-applier to write the copy command in absolute, with its worktree, the review file's head and the scratch", () => {
+  const lead = stripQuoteGutter(Pin.of(FIX_APPLIER(), "the fix-applier member prompt").between("In scope → dispatch ONE refuter", "Try to REFUTE this finding", "the fix-applier member prompt").text);
+  assert.match(lead, Pin.phrase(COPY_LEAD_IN));
+});
+
+test("review-and-fix.md step 2 tells the fix-applier to write the copy command in absolute, with its worktree, the review file's head and the scratch", () => {
+  const lead = REVIEW_AND_FIX.between("In scope → dispatch one refuter", "Try to REFUTE this finding", "review-and-fix.md").text;
+  assert.match(lead, Pin.phrase(COPY_LEAD_IN_REVIEW_AND_FIX));
+});
+
+test("review-and-fix.md's last numbered step runs the root sweep standalone, and under the fleet runs no eviction step", () => {
+  const step = REVIEW_AND_FIX.between("7. **Standalone, as the last step, run the root sweep:**", "## The review result file", "review-and-fix.md").text;
+  assert.match(step, Pin.phrase("`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run reclaim-scratch.mjs --root <scratch> --apply`"));
+  assert.match(step, Pin.phrase("With no ledger it refuses and evicts nothing"));
+  assert.match(step, Pin.phrase("Under the fleet run no eviction step: the tick runs the sweep."));
+});
+
+test("the fix-applier body builds its own mutation copy with the script, pinned to its own commit and inside its round root, and makes no pr<N>/mutate/", () => {
+  const body = stripQuoteGutter(FIX_APPLIER());
+  assert.match(body, Pin.phrase("**Every kind of dispatch makes its round root before its first copy**: `mktemp -d` once per round for `<scratch>/pr<N>/fix-XXXXXXXX/`"));
+  assert.match(body, Pin.phrase("fleet-run measure-copy.mjs --worktree <abs-path> --pin <your commit> --dest <round root>/mutate --pr <pr> --scratch <scratch>"));
+  assert.match(body, Pin.phrase("never make `<scratch>/pr<N>/mutate/`"));
+  assert.match(body, Pin.phrase("run no eviction step"));
+  assert.doesNotMatch(body, /mutate a copy under\s+`<scratch>\/pr<N>\/mutate\/`/, "the fix-applier is told to mutate in pr<N>/mutate/ again");
+});
