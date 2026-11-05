@@ -561,7 +561,7 @@ Dispatch a finisher only when every test here passes at once — the review retu
   **This bullet and the one above are a pair, and on a clean PR this one carries the
   whole route to a finisher**: a `no-op` report satisfies the gate above by
   itself, so nothing further is owed and no further event is coming.
-- **The PR's closing references match its ruling and exclude its own suggestion-band record and every ticket another claim holds** → `ledger.mjs dispatch` refuses the finisher otherwise, naming the PR and ticket: `gh pr edit <M>` fixes the body; dispatch again.
+- **The PR closes its own tickets, and no closing reference is its own suggestion-band record or a ticket another claim holds** → `ledger.mjs dispatch` refuses the finisher otherwise, naming the PR and ticket: `gh pr edit <M>` fixes the body; dispatch again.
 - **The PR carries exactly one release label, or its repo defines none** → `ledger.mjs dispatch` refuses the finisher otherwise, except a Ticketless PR with none, which `finisher-label.mjs` labels `patch`. Fix them; dispatch again. In full: references/finisher.md.
 - **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`** → the CI edge never
   fires: dispatch the finisher off the reviewer's final verdict the moment it

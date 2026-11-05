@@ -798,6 +798,8 @@ whether it minted a false claim. `tier-outcomes.mjs append` works it out from th
 Charges on the PR's first review, before the finisher runs; only a merged PR's
 Ruling is given by hand. The Router counts a ticket as merged only through its
 Ruling; a decision on an issue, or a reply owed to a member, is not one.
+It judges the work as first submitted, so it does not decide the PR's closing
+reference: an implementer PR closes its own ticket whatever its Ruling.
 _Avoid_: verdict row, tier outcome
 
 **Escalation answer**:

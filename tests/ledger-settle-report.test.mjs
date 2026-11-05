@@ -82,7 +82,7 @@ if [ "$1 $2" = "pr list" ]; then
   exit 0
 fi
 if [ "$1 $2" = "issue view" ]; then
-  [ "$4 $5" = "--json labels" ] || { echo "gh stub: unexpected gh $*" >&2; exit 64; }
+  [ "$4 $5" = "--json labels" ] || [ "$4 $5" = "--json title,labels" ] || { echo "gh stub: unexpected gh $*" >&2; exit 64; }
   f='${ghDir}'/"issue-$3.json"
   [ -r "$f" ] || { echo "gh stub: no issue $3" >&2; exit 1; }
   cat "$f"
@@ -127,7 +127,7 @@ cat "$f"
     assert.equal(bytes(), before, "a refusal must not touch the ledger");
     return r;
   };
-  // Issue `n`'s `gh issue view --json labels` answer: `body`.
+  // Issue `n`'s `gh issue view` answer, to `--json labels` and to `--json title,labels`: `body`.
   const issue = (n, body) => writeFileSync(join(ghDir, `issue-${n}.json`), JSON.stringify(body));
   return { root, work, fleet, file, reports, env, git, head, stray, run, cli, ok, bytes, report, pr, issue, queue, settle, settled, refused };
 }
@@ -153,6 +153,13 @@ const botReport = (f, over = {}) => ({
 const dispatched = (f, member) => f.ok("read").dispatched.find((e) => e.split("=")[0] === member);
 // Every `gh issue view` the stub was asked, one command line each.
 const issueReads = (f) => (existsSync(join(f.root, "gh.log")) ? readFileSync(join(f.root, "gh.log"), "utf8").split("\n").filter((l) => l.startsWith("issue view")) : []);
+
+// PR #6 as a finisher is dispatched for it: closing ticket 5, its own, and
+// carrying a release label. The dispatch gate reads ticket 5 for its title.
+const closingOwnTicket = (f) => {
+  f.pr(6, { closingIssuesReferences: [ref(5)], labels: [{ name: "patch" }] });
+  f.issue(5, { title: "ticket 5", labels: [] });
+};
 
 // -- impl-N=PR#M --------------------------------------------------------------
 
@@ -451,7 +458,7 @@ test("could not look: a gh that answers something other than JSON is exit 2", ()
 test("could not look: a gh answer lacking a field it was asked for is exit 2, not a failed check", () => {
   const f = fixture();
   f.ok("dispatch", "5", "impl-5");
-  f.pr(6, { closingIssuesReferences: [], labels: [{ name: "patch" }] });
+  closingOwnTicket(f);
   f.ok("dispatch", "6", "finisher-pr-6");
   f.ok("dispatch", "merge-bot");
   f.report("impl-5", implReport(f));
@@ -793,7 +800,7 @@ test("fix-pr-M=no-op: an applied: head settled as an upper-case prefix is compar
 
 test("finisher-pr-M=labelled: the label on the PR and in the read-back settles", () => {
   const f = fixture();
-  f.pr(6, { closingIssuesReferences: [], labels: [{ name: "patch" }] });
+  closingOwnTicket(f);
   f.ok("dispatch", "6", "finisher-pr-6");
   f.report("finisher-pr-6", finisherReport(f));
   f.pr(6, { labels: [{ name: "patch" }, { name: "ready-to-merge" }] });
@@ -808,7 +815,7 @@ test("finisher-pr-M=labelled: the label on the PR and in the read-back settles",
 
 test("finisher-pr-M=labelled: a PR without ready-to-merge is exit 3", () => {
   const f = fixture();
-  f.pr(6, { closingIssuesReferences: [], labels: [{ name: "patch" }] });
+  closingOwnTicket(f);
   f.ok("dispatch", "6", "finisher-pr-6");
   f.report("finisher-pr-6", finisherReport(f));
   f.pr(6, { labels: [{ name: "patch" }] });
@@ -817,7 +824,7 @@ test("finisher-pr-M=labelled: a PR without ready-to-merge is exit 3", () => {
 
 test("finisher-pr-M=labelled: a read-back without ready-to-merge is exit 3", () => {
   const f = fixture();
-  f.pr(6, { closingIssuesReferences: [], labels: [{ name: "patch" }] });
+  closingOwnTicket(f);
   f.ok("dispatch", "6", "finisher-pr-6");
   f.report("finisher-pr-6", finisherReport(f, { labelsReadBack: ["patch"] }));
   f.pr(6, { labels: [{ name: "patch" }, { name: "ready-to-merge" }] });
@@ -830,7 +837,7 @@ const QUEUE_OK = { roles: { "ready-to-merge": "queue-ok" } };
 test("finisher-pr-M=labelled: a remapped ready-to-merge is checked as its mapped string, on the PR and in the read-back", () => {
   const f = fixture();
   seedLabelMap(f.work, QUEUE_OK);
-  f.pr(6, { closingIssuesReferences: [], labels: [{ name: "patch" }] });
+  closingOwnTicket(f);
   f.ok("dispatch", "6", "finisher-pr-6");
   f.report("finisher-pr-6", finisherReport(f, { labelsReadBack: ["patch", "queue-ok"] }));
   f.pr(6, { labels: [{ name: "patch" }, { name: "queue-ok" }] });
@@ -843,7 +850,7 @@ test("finisher-pr-M=labelled: a remapped ready-to-merge is checked as its mapped
 test("finisher-pr-M=labelled: with ready-to-merge remapped, the role's own name on the PR and in the read-back is exit 3 naming both", () => {
   const f = fixture();
   seedLabelMap(f.work, QUEUE_OK);
-  f.pr(6, { closingIssuesReferences: [], labels: [{ name: "patch" }] });
+  closingOwnTicket(f);
   f.ok("dispatch", "6", "finisher-pr-6");
   f.report("finisher-pr-6", finisherReport(f));
   f.pr(6, { labels: [{ name: "patch" }, { name: "ready-to-merge" }] });
@@ -854,7 +861,7 @@ test("finisher-pr-M=labelled: with ready-to-merge remapped, the role's own name 
 
 test("finisher-pr-M=halted:<cause>: a cause and its evidence settle, and unrecorded filings reach ## Filed", () => {
   const f = fixture();
-  f.pr(6, { closingIssuesReferences: [], labels: [{ name: "patch" }] });
+  closingOwnTicket(f);
   f.ok("dispatch", "6", "finisher-pr-6");
   f.report("finisher-pr-6", finisherReport(f, {
     outcome: "halted", cause: "rebase", evidence: "+ abc123 a commit main lacks", labelsReadBack: [],
@@ -869,7 +876,7 @@ test("finisher-pr-M=halted:<cause>: a cause and its evidence settle, and unrecor
 
 test("finisher-pr-M=halted:stray: the cause the audit's stray names settles, with the cherry and remote read as its evidence", () => {
   const f = fixture();
-  f.pr(6, { closingIssuesReferences: [], labels: [{ name: "patch" }] });
+  closingOwnTicket(f);
   f.ok("dispatch", "6", "finisher-pr-6");
   f.report("finisher-pr-6", finisherReport(f, {
     outcome: "halted", cause: "stray", evidence: `{"cherry":{"listing":"+ abc123","merges":0},"remote":{"ref":"refs/heads/feat","sha":null,"carries":false}}`, labelsReadBack: [],
@@ -880,7 +887,7 @@ test("finisher-pr-M=halted:stray: the cause the audit's stray names settles, wit
 
 test("finisher-pr-M=halted:<cause>: a null cause is exit 3", () => {
   const f = fixture();
-  f.pr(6, { closingIssuesReferences: [], labels: [{ name: "patch" }] });
+  closingOwnTicket(f);
   f.ok("dispatch", "6", "finisher-pr-6");
   f.report("finisher-pr-6", finisherReport(f, { outcome: "halted", cause: null, evidence: "something", labelsReadBack: [] }));
   f.refused("finisher-pr-6", 3, /failed: cause null is in the halted:<cause> vocabulary/);
@@ -888,7 +895,7 @@ test("finisher-pr-M=halted:<cause>: a null cause is exit 3", () => {
 
 test("finisher-pr-M=halted:<cause>: empty evidence is exit 3", () => {
   const f = fixture();
-  f.pr(6, { closingIssuesReferences: [], labels: [{ name: "patch" }] });
+  closingOwnTicket(f);
   f.ok("dispatch", "6", "finisher-pr-6");
   f.report("finisher-pr-6", finisherReport(f, { outcome: "halted", cause: "other", evidence: "  ", labelsReadBack: [] }));
   f.refused("finisher-pr-6", 3, /failed: evidence is not empty/);
@@ -1041,7 +1048,7 @@ test("merge-bot-n=done: with ready-to-merge remapped, the queue is recorded and 
 test("settle --from-report with no Label map: a label check is exit 2 naming ensure, and a settle making none still settles", () => {
   const f = fixture();
   f.ok("dispatch", "5", "impl-5");
-  f.pr(6, { closingIssuesReferences: [], labels: [{ name: "patch" }] });
+  closingOwnTicket(f);
   f.ok("dispatch", "6", "finisher-pr-6");
   f.ok("dispatch", "merge-bot");
   rmSync(join(f.fleet, "labels.json"));
@@ -1094,7 +1101,7 @@ test("an invalid report is exit 2 naming the violation, one family at a time", (
   const f = fixture();
   f.ok("dispatch", "5", "impl-5");
   f.ok("dispatch", "6", "fix-pr-6");
-  f.pr(6, { closingIssuesReferences: [], labels: [{ name: "patch" }] });
+  closingOwnTicket(f);
   f.ok("dispatch", "6", "finisher-pr-6");
   f.ok("dispatch", "merge-bot");
   const { sizing: _, ...noSizing } = implReport(f);
@@ -1110,7 +1117,7 @@ test("an invalid report is exit 2 naming the violation, one family at a time", (
 
 test("an unrecorded filing with no issue number is exit 2 before anything is looked up", () => {
   const f = fixture();
-  f.pr(6, { closingIssuesReferences: [], labels: [{ name: "patch" }] });
+  closingOwnTicket(f);
   f.ok("dispatch", "6", "finisher-pr-6");
   const ghBefore = readFileSync(join(f.root, "gh.log"), "utf8");
   for (const issue of [-3, 0]) {
@@ -1235,7 +1242,7 @@ test("a refuted deferral with a null dispositionsRecord is an invalid report, ex
 
 test("a failed report settles =failed with no check", () => {
   const f = fixture();
-  f.pr(6, { closingIssuesReferences: [], labels: [{ name: "patch" }] });
+  closingOwnTicket(f);
   f.ok("dispatch", "6", "finisher-pr-6");
   f.report("finisher-pr-6", finisherReport(f, { outcome: "failed", labelsReadBack: [] }));
   assert.deepEqual(f.settled("finisher-pr-6"), { member: "finisher-pr-6", outcome: "failed", checks: [], filed: [], ruled: [] });
