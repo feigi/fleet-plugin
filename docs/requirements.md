@@ -39,7 +39,7 @@ Run the Install line above.
 Settings ([ADR 0011](adr/0011-omp-tier-routes-through-roles.md), [ADR 0014](adr/0014-omp-is-the-only-harness.md), [ADR 0021](adr/0021-omp-native-install-route-replaces-the-marketplace.md)):
 - `modelRoles.slow`, `.task`, `.smol`: set to real models — the only install-time setting the fleet needs
 
-Check: `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run tier-roles.mjs --check`
+Check: the tier check in README's Installation section
 
 ### 1.4 Disk layout — SOFT
 - `<repo>/.worktrees/<issue>-<slug>/` — one worktree per claimed ticket

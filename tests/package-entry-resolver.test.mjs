@@ -21,13 +21,23 @@ function retiredHits(files) {
   return files.flatMap(([file, text]) => RETIRED.filter((name) => text.includes(name)).map((name) => [file, name]));
 }
 
-// README's `## Installation` code block, one command per line.
+// README's `## Installation` commands block, one command per line: the first
+// BARE-fenced block (an opening fence with no info string). Fences are paired
+// line by line, so a closing fence is never taken for a bare opening one and a
+// fenced snippet with an info string (the `yaml` one) is skipped whole.
 function installationCommands(readmeText) {
   const section = /## Installation\n([\s\S]*?)(?=\n## )/.exec(readmeText);
   if (!section) throw new Error("README has no \"## Installation\" section");
-  const block = /```\n([\s\S]*?)\n```/.exec(section[1]);
-  if (!block) throw new Error("README's \"## Installation\" section has no code block");
-  return block[1].split("\n");
+  const lines = section[1].split("\n");
+  for (let open = null, i = 0; i < lines.length; i++) {
+    if (open === null) {
+      if (lines[i].startsWith("```")) open = i;
+    } else if (lines[i] === "```") {
+      if (lines[open] === "```") return lines.slice(open + 1, i);
+      open = null;
+    }
+  }
+  throw new Error("README's \"## Installation\" section has no code block");
 }
 
 const shipped = () =>
@@ -59,6 +69,23 @@ test("the retired-name check refuses each retired name and passes the Package en
 
 test("README's Installation block is the install and the tier check through the Package entry's fleet-run", () => {
   const lines = installationCommands(README);
-  assert.deepEqual(lines, ["omp plugin install @feigi/fleet-ctl", `${RESOLVER} tier-roles.mjs --check`]);
+  assert.deepEqual(lines, ["omp plugin install @feigi/fleet-ctl", `${RESOLVER} tier-roles.mjs --check --in-flight 5`]);
   assert.deepEqual(retiredHits([["README.md Installation block", lines.join("\n")]]), []);
+});
+
+test("installationCommands returns the bare-fenced commands block, not a fenced snippet before it, and refuses a section with none", () => {
+  const fence = "```";
+  const readme = (body) => `## Installation\n\n${body}\n\n## Next\n`;
+  assert.deepEqual(
+    installationCommands(readme(`${fence}yaml\nmodelRoles:\n  slow: a/b\n${fence}\n\n${fence}\none\ntwo\n${fence}`)),
+    ["one", "two"],
+  );
+  assert.deepEqual(installationCommands(readme(`${fence}\none\n${fence}\n\n${fence}yaml\nx: 1\n${fence}`)), ["one"]);
+  assert.throws(() => installationCommands(readme(`${fence}yaml\nx: 1\n${fence}`)), /no code block/);
+});
+
+test("installationCommands closes a block only on a bare fence, so a fence line with an info string inside the block is content", () => {
+  const fence = "```";
+  const readme = (body) => `## Installation\n\n${body}\n\n## Next\n`;
+  assert.deepEqual(installationCommands(readme(`${fence}\none\n${fence}yaml\ntwo\n${fence}`)), ["one", `${fence}yaml`, "two"]);
 });
