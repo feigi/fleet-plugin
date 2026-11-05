@@ -11,14 +11,24 @@ work in flight rather than every run's history.
 
 ## How it works
 
-1. **Two controller edges run the root sweep.**
+1. **Three controller edges run the root sweep.**
    [`reclaim-scratch.mjs`](../../plugin/scripts/reclaim-scratch.mjs)
    `--root <scratch> --apply` runs straight after `reap.sh --apply` on every
-   merge-bot pass report, and `--root <scratch> --after-rotate --apply` runs in
-   phase 0 straight after `ledger.mjs rotate`, so a run that merges nothing
-   still reclaims the previous run's leftovers. In every mode `--root` must be
-   this workspace's own scratch root, the path `scratch-root.mjs` prints from
-   the same cwd. The root sweep refuses any other, dry run included, and
+   merge-bot pass report; the tick's `--apply` runs it, alone, after every
+   settle of a `fix-pr-<N>[-x]`, of a review launch to `=failed` and of a
+   `finisher-pr-<N>[-x]`, whoever wrote the settle — `fix-report`,
+   `member-died`, `review-failed`, `finisher-report` or a hand `ledger.mjs
+   settle` — recording each such member in the `applied` state of
+   `heartbeat.json`, beside `reapAfter`, under the current controller record,
+   so the next tick does not run it again for that member; a sweep that exits
+   non-zero or prints no receipt is not recorded and runs again on the next
+   `--apply` tick, while a failure listed inside a receipt counts as applied
+   and the next trigger retries it; and `--root <scratch> --after-rotate
+   --apply` runs in phase 0 straight after `ledger.mjs rotate`, so a run that
+   merges nothing still reclaims the previous run's leftovers. In every mode
+   `--root` must be this workspace's own scratch root, the path
+   `scratch-root.mjs` prints from the same cwd. The root sweep refuses any
+   other, dry run included, and
    when its own scratch root cannot be resolved: it reads the ledger, the
    claim worktrees and GitHub of the repository the cwd is in, so another
    workspace's key would be judged against this one's numbers.
@@ -72,11 +82,31 @@ work in flight rather than every run's history.
    changing what the review returns. Reading nothing
    the cwd decides, `--pr` does not check that `--root` is this workspace's
    own.
-5. **One removal sequence.** Every removal restores owner rwx, clears darwin's
+5. **The root sweep evicts the trees of every `pr<N>/` it keeps, by the kind
+   of member that made them.** An open PR's directory, a merged or closed
+   one's kept for its review evidence or a live holder, and any one a live
+   `merge-bot-<n>` holds — which the bot's hold keeps from removal but not
+   from this — has evict-tree.mjs's rule applied to its roots: the trees under
+   every `fix-*` round root, and under a `mutate/` left from before, when no
+   `fix-pr-<N>[-x]` is live; the trees under every `run-*` root it keeps, when
+   no review launch of PR `<N>` is open; every `finish-*` tree, when no
+   `finisher-pr-<N>[-x]` is live. The ledger is read after a directory's roots
+   are listed, just before they are evicted, so a member dispatched in between
+   holds its trees; a ledger that cannot be read then is a `failed[]` entry
+   and evicts nothing in that directory. A directory kept because GitHub gave
+   no usable answer for its number, or because the number is an issue, is not
+   evicted. The receipt's `evicted[]` names each evicted tree with the rule
+   that evicted it, and `skipped[]` is as in the `--pr` pass. Every copy a
+   fix-applier, a refuter or a review specialist measures in is built by
+   `measure-copy.mjs`, inside a round root or a run root, so each is a
+   repository of its own and the sweep reaches it; a copy made by hand with no
+   `.git` keeps what was installed in it until its `pr<N>/` is reclaimed. A
+   standalone `/review-and-fix` runs the same sweep as its last step.
+6. **One removal sequence.** Every removal restores owner rwx, clears darwin's
    `uchg`/`uappnd` flags where `chflags` exists, then `rm -rf`, so a fixture
    that dropped its own read bit cannot wedge it. A removal that still fails is
    reported in the receipt's `failed[]`, and the sweep goes on.
-6. **Sibling keys are judged by the checkout they record.** A key's top level
+7. **Sibling keys are judged by the checkout they record.** A key's top level
    holds `checkout-path`, one line naming the absolute, canonical checkout the
    key's hash is taken over. `reclaim-scratch.mjs --siblings --root <scratch>
    --apply` first writes its own key's file when it is missing or says anything

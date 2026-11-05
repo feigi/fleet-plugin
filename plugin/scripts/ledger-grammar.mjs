@@ -761,6 +761,23 @@ function launchedRunners(text) {
 }
 
 /**
+ * The reviewer runner names every row's `review=member:<name>=failed` launch
+ * settled dead, once each, in row order: the launches whose review run root
+ * nothing is left to write to. A workflow launch is named by its runId, which
+ * no runner name matches, and a launch that is open or answered is not here.
+ */
+export function failedReviewLaunches(rows) {
+  const out = [];
+  for (const text of rows) {
+    for (const word of text.split(/\s+/)) {
+      const m = REVIEW.exec(word);
+      if (m !== null && m.groups.failed !== undefined && m.groups.kind === "member" && REVIEWER.test(m.groups.name) && !out.includes(m.groups.name)) out.push(m.groups.name);
+    }
+  }
+  return out;
+}
+
+/**
  * The names an `ancestor` rotate retires: every member the archive settled —
  * in `## Dispatched` or on any row, the same two places `ledger.mjs dispatch`
  * refuses a repeat from within a run — and every reviewer runner a row

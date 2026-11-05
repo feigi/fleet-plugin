@@ -35,9 +35,10 @@
 //            finisher-pr-<M>[-x]. A live merge-bot-<n> token holds every one
 //            of them: a bot's token names no PR, and GitHub reads MERGED
 //            while the bot is still writing under pr<M>/merge-bot-<n>/. An
-//            OPEN PR's pr<M>/ is kept whole except its run-* roots, which
-//            follow the --pr rule below. A MERGED PR's entry that holds
-//            review evidence — a `<run>/review.json` under pr<M>/, or a
+//            OPEN PR's pr<M>/ is kept, but for its run-* roots, which follow
+//            the --pr rule below, and the trees named below. A MERGED PR's
+//            entry that holds review evidence — a `<run>/review.json` under
+//            pr<M>/, or a
 //            Charges file naming its run — is also kept until origin/main
 //            holds every file of it where run-records.mjs's reviewTargets()
 //            puts it, under docs/metrics/reviews/<M>/: the Close-out PR
@@ -46,6 +47,21 @@
 //            or evidence that cannot be read, keeps the entry with that
 //            reason. A CLOSED PR gets no Ruling, and its entries keep the
 //            rule above.
+//            EVERY pr<M>/ the sweep keeps — an OPEN PR's, a live holder's or
+//            review evidence's, and one a live merge bot holds — also has
+//            the trees in it evicted (evict-tree.mjs's rule), by the kind of
+//            member that made them, once none of that kind is live on the
+//            ledger: the trees under its fix-* round roots, and under a
+//            mutate/ left from before, when no fix-pr-<M>[-x] is live; the
+//            trees under its run-* roots, when no review launch of PR #M is
+//            open; every finish-* tree, when no finisher-pr-<M>[-x] is live.
+//            The ledger is read for that after the directory's roots are
+//            listed, just before they are evicted, and a merge bot's hold
+//            keeps the directory but never its trees. A directory kept for
+//            a reason that names no state of the PR — GitHub did not answer,
+//            or the number names an issue — is not evicted. What is left in
+//            it — verdict files, prompts, receipts, logs, review.json, the
+//            mutants — stays.
 //   impl-<N>/
 //            removed when issue #N is CLOSED, or OPEN with no live
 //            impl-<N>[-x] token, no claim worktree standing, and idle past
@@ -120,13 +136,16 @@
 //    "kept":[{"path","reason"}],"failed":[{"path","error"}]}
 // The sibling pass's kept entries also carry "idle": true when nothing under
 // the key was found modified within the retention, false otherwise.
-// `--pr` mode adds `"evicted":[{"path","reason","ignored"}]` after `removed`:
-// each tree that held ignored paths, `ignored` naming them, and
+// `--pr` mode and the root sweep add `"evicted":[{"path","reason","ignored"}]`
+// after `removed`: each tree that held ignored paths, `ignored` naming them and
+// `reason` naming the rule that evicted it, and
 // `"skipped":[{"path","reason"}]` after `failed`: each directory in a kept run
-// root that evict-tree.mjs could not evaluate — one with a `.git` git does not
-// resolve to it, one it cannot look in for a `.git`, or one it cannot list for
-// EACCES or EPERM. A skipped directory is never in `failed`, so the snapshot
-// step's marker, which reads `failed`, does not fire for it.
+// root, round root or finisher tree that evict-tree.mjs could not evaluate —
+// one with a `.git` git does not resolve to it, one it cannot look in for a
+// `.git`, or one it cannot list for EACCES or EPERM. A skipped directory is
+// never in `failed`, so the snapshot step's marker, which reads `failed`, does
+// not fire for it. A kept pr<N>/ whose roots cannot be listed, or whose ledger
+// cannot be read just before its eviction, is in `failed`.
 // `ledger` is the file read, or null when none was (`--pr` mode, or
 // `--after-rotate` with no file) — so "never read" stays distinct from "read
 // and found empty". A dry run prints the same receipt with "applied":false,
@@ -149,7 +168,7 @@ import { fleetFile, FleetDirUnresolvable, SCRATCH_KEY_SHAPE, scratchRoot } from 
 import { gitEnv } from "./git-env.mjs";
 import { ghAliasedRead, how } from "./gh-aliased-read.mjs";
 import { isCLI } from "./is-cli.mjs";
-import { liveOnLedger, parseMember, REVIEWER } from "./ledger-grammar.mjs";
+import { liveOnLedger, parseMember, REVIEW, REVIEWER, rowNums } from "./ledger-grammar.mjs";
 import { REVIEWS_DIR, reviewTargets } from "./run-records.mjs";
 
 const NAME = "reclaim-scratch";
@@ -172,6 +191,8 @@ const REPORTS_DIR = "reports";
 const REPORT_PR_ENTRY = /^(?:fix-pr|finisher-pr|review-pr)-([1-9][0-9]*)(?:-[a-z])?(?:\.check)?\.json$/;
 const REPORT_IMPL_ENTRY = /^impl-([1-9][0-9]*)(?:-[a-z])?(?:\.check)?\.json$/;
 const RUN_ROOT = /^run-/;
+const FIX_ROOT = /^fix-/;
+const FINISH_ROOT = /^finish-/;
 
 /** The path of something under `path` (itself included) modified at or after
  * `cutoff`, or null when everything is older. Symlinks are not followed. A
@@ -227,10 +248,18 @@ export function readLedger(file, die, undone) {
   return { rows: d.rows, dispatched: d.dispatched };
 }
 
-// The live tokens the ledger holds, by name.
-function liveNames(file) {
-  const { rows, dispatched } = readLedger(file, die, "reclaimed");
-  return liveOnLedger(rows, dispatched).tokens.map((t) => t.name);
+// The live tokens the ledger holds, as `{name, launchOf}`: `launchOf` the PR
+// whose rows carry the token when it is an open review launch — a runner's, or
+// a workflow's, whose name is its runId — else null. `fail` and `undone` are
+// readLedger()'s: a read made after removals have started throws, so the one
+// directory's eviction is a failure on the receipt and the sweep goes on.
+function liveTokens(file, fail = die, undone = "reclaimed") {
+  const { rows, dispatched } = readLedger(file, fail, undone);
+  const launchPr = new Map();
+  for (const text of rows) {
+    for (const word of text.split(/\s+/)) if (REVIEW.test(word) && !launchPr.has(word)) launchPr.set(word, rowNums(text).pr);
+  }
+  return liveOnLedger(rows, dispatched).tokens.map((t) => ({ name: t.name, launchOf: launchPr.get(t.token) ?? null }));
 }
 
 // The checkout the fleet dir sits in, and its ledger file — `file` null when it
@@ -345,11 +374,72 @@ function githubStates(numbers) {
   return out;
 }
 
-// The root sweep's verdicts: `{remove: [{path, reason}], kept: [{path, reason}]}`.
+// The roots under a kept `pr<N>/` whose trees the sweep evicts when no member
+// of the kind that made them is live, each as `{path, kind}`: a fix-applier's
+// round root (`fix-*`) or a `mutate/` left from before, a review's run root
+// (`run-*`) and a finisher's tree (`finish-*`). `skip` is the paths already
+// being removed whole. An absent directory holds none; one that cannot be
+// listed throws.
+function treeRoots(pdir, skip) {
+  let entries;
+  try {
+    entries = readdirSync(pdir, { withFileTypes: true });
+  } catch (e) {
+    if (e.code === "ENOENT" || e.code === "ENOTDIR") return [];
+    throw e;
+  }
+  const roots = [];
+  for (const e of entries.sort((a, b) => (a.name < b.name ? -1 : 1))) {
+    if (!e.isDirectory()) continue;
+    const path = join(pdir, e.name);
+    if (skip.has(path)) continue;
+    const kind = e.name === "mutate" || FIX_ROOT.test(e.name) ? "fix" : RUN_ROOT.test(e.name) ? "run" : FINISH_ROOT.test(e.name) ? "finish" : null;
+    if (kind !== null) roots.push({ path, kind });
+  }
+  return roots;
+}
+
+// The live holder of the kind `kind` names on PR `n`, by name, or undefined:
+// a `fix-pr-<n>[-x]`, a `finisher-pr-<n>[-x]`, or an open review launch of PR
+// #n — `review-pr-<n>[-x]`, or a workflow launch on PR #n's rows, named by its
+// runId. `live` is liveTokens()'s list.
+function kindHolder(live, kind, n) {
+  return live.find(({ name, launchOf }) => {
+    if (kind === "run") {
+      const r = REVIEWER.exec(name);
+      return launchOf === n || (r !== null && Number(r[1]) === n);
+    }
+    const m = parseMember(name);
+    return m !== null && m.family === (kind === "fix" ? "fix-pr" : "finisher-pr") && m.number === n;
+  })?.name;
+}
+
+const EVICT_RULE = {
+  fix: (n, name) => (name === "mutate" ? `a tree in pr${n}/mutate/, left from before, with no live fix-pr-${n}[-x] on the ledger` : `a tree in a fix-applier round root, with no live fix-pr-${n}[-x] on the ledger`),
+  run: (n) => `a tree in a review run root, with no open review launch of PR #${n} on the ledger`,
+  finish: (n) => `a finisher tree, with no live finisher-pr-${n}[-x] on the ledger`,
+};
+
+// The root sweep's verdicts: `{remove: [{path, reason}], kept: [{path, reason}],
+// evict: [{n, path, roots}]}`. `evict` is each kept `pr<N>/` directory whose
+// trees the sweep evicts, `roots` the roots it listed in it, or `{n, path,
+// error}` when it could not list them: whether a root's kind of member is live
+// is read later, just before the eviction.
 function judgeRoot(root, names, live, now, listing, checkout) {
   const cutoff = now - RETENTION_MS;
   const remove = [];
   const kept = [];
+  const evict = [];
+  // A kept pr<N>/ keeps its trees only while a member of the kind that made
+  // them is live; a live merge bot's hold on the directory is no such member.
+  const evictIn = (path, n) => {
+    const skip = new Set(remove.map((r) => r.path));
+    try {
+      evict.push({ n, path, roots: treeRoots(path, skip) });
+    } catch (e) {
+      evict.push({ n, path, error: e.message });
+    }
+  };
   const liveMembers = live.map(parseMember).filter((m) => m !== null);
   const bot = liveMembers.find((m) => m.family === "merge-bot");
   const prHolder = (n) => live.find((name) => {
@@ -452,18 +542,21 @@ function judgeRoot(root, names, live, now, listing, checkout) {
       continue;
     }
     if (kind === "pr") {
+      const isDir = name === `pr${n}`;
       if (bot !== undefined) {
         kept.push({ path, reason: `live ${bot.name} holds every pr<N>` });
+        if (isDir) evictIn(path, n);
         continue;
       }
       if (s.state === "OPEN") {
         kept.push({ path, reason: `PR #${n} is OPEN` });
-        if (name === `pr${n}`) {
+        if (isDir) {
           try {
             remove.push(...staleRunRoots(path, cutoff, kept));
           } catch (e) {
             kept.push({ path, reason: `its run-* roots cannot be listed: ${e.message}` });
           }
+          evictIn(path, n);
         }
         continue;
       }
@@ -474,11 +567,14 @@ function judgeRoot(root, names, live, now, listing, checkout) {
       const holder = prHolder(n);
       if (holder !== undefined) {
         kept.push({ path, reason: `PR #${n} is ${s.state}, but live ${holder} names it` });
+        if (isDir) evictIn(path, n);
         continue;
       }
       const held = s.state === "MERGED" ? evidenceHold(path, name, n) : null;
-      if (held !== null) kept.push({ path, reason: held });
-      else remove.push({ path, reason: `PR #${n} is ${s.state}` });
+      if (held !== null) {
+        kept.push({ path, reason: held });
+        if (isDir) evictIn(path, n);
+      } else remove.push({ path, reason: `PR #${n} is ${s.state}` });
       continue;
     }
     if (s.state === "CLOSED") {
@@ -502,7 +598,7 @@ function judgeRoot(root, names, live, now, listing, checkout) {
     if (freshUnder(path, cutoff) === null) remove.push({ path, reason: `issue #${n} is OPEN, no live impl-${n} token, idle past 7 days` });
     else kept.push({ path, reason: `issue #${n} is OPEN; modified within 7 days` });
   }
-  return { remove, kept };
+  return { remove, kept, evict };
 }
 
 // The run-* directories directly under `parent` idle past the retention, as
@@ -691,12 +787,20 @@ function main() {
 
   const now = Date.now();
   let ledger = null;
-  // `--pr` mode's evictions and skipped directories, in its receipt only.
+  // The evictions and skipped directories of `--pr` mode and the root sweep.
   const evicted = [];
   const skipped = [];
   let remove;
   let kept = [];
+  let evict = [];
   const failed = [];
+  // Evicts the trees under `path`, each named on the receipt with `reason`.
+  const evictRoot = (path, reason) => {
+    const done = evictTrees(path, { apply });
+    for (const t of done.evicted) evicted.push({ path: t.path, reason, ignored: t.ignored });
+    failed.push(...done.failed);
+    skipped.push(...done.skipped);
+  };
   if (pr !== null) {
     const parent = join(root, `pr${Number(pr)}`);
     try {
@@ -706,12 +810,7 @@ function main() {
       failed.push({ path: parent, error: e.message });
     }
     // `--pr` mode also evicts the trees in every run root it keeps.
-    for (const run of kept) {
-      const done = evictTrees(run.path, { apply });
-      for (const t of done.evicted) evicted.push({ path: t.path, reason: "a tree in a kept review run root", ignored: t.ignored });
-      failed.push(...done.failed);
-      skipped.push(...done.skipped);
-    }
+    for (const run of kept) evictRoot(run.path, "a tree in a kept review run root");
   } else if (siblings) {
     if (apply) {
       const wrote = writeCheckout(root);
@@ -730,7 +829,7 @@ function main() {
     const found = ledgerFile(die);
     ledger = found.file;
     if (ledger === null && !afterRotate) die("no .fleet/ledger.md — without it no live member can hold its scratch, so nothing is reclaimed; pass --after-rotate only straight after `ledger.mjs rotate`");
-    const live = ledger === null ? [] : liveNames(ledger);
+    const live = ledger === null ? [] : liveTokens(ledger).map((t) => t.name);
     let names;
     try {
       names = readdirSync(root).sort();
@@ -738,7 +837,7 @@ function main() {
       die(`could not list --root ${root}: ${e.message}`);
     }
     const listing = worktreeListing(found.checkout);
-    ({ remove, kept } = judgeRoot(root, names, live, now, listing, found.checkout));
+    ({ remove, kept, evict } = judgeRoot(root, names, live, now, listing, found.checkout));
   }
 
   const removed = [];
@@ -765,7 +864,28 @@ function main() {
     if (error === null) removed.push(entry);
     else failed.push({ path: entry.path, error });
   }
-  const receipt = { applied: apply, ledger, removed, ...(pr === null ? {} : { evicted }), kept, failed, ...(pr === null ? {} : { skipped }) };
+  // The trees of every kept pr<N>/, once the removals are done: a root is
+  // evicted only while no member of the kind that made it is live, and the
+  // ledger is read for that now, after the roots were listed, so a member
+  // dispatched in between holds its trees.
+  for (const dir of evict) {
+    if (dir.error !== undefined) {
+      failed.push({ path: dir.path, error: `its roots cannot be listed: ${dir.error}` });
+      continue;
+    }
+    if (dir.roots.length === 0) continue;
+    let liveNow;
+    try {
+      liveNow = ledger === null ? [] : liveTokens(ledger, (message) => { throw new Error(message); }, "evicted");
+    } catch (e) {
+      failed.push({ path: dir.path, error: e.message });
+      continue;
+    }
+    for (const r of dir.roots) {
+      if (kindHolder(liveNow, r.kind, dir.n) === undefined) evictRoot(r.path, EVICT_RULE[r.kind](dir.n, basename(r.path)));
+    }
+  }
+  const receipt = { applied: apply, ledger, removed, ...(siblings ? {} : { evicted }), kept, failed, ...(siblings ? {} : { skipped }) };
   writeAll(1, `${JSON.stringify(receipt)}\n`);
 }
 

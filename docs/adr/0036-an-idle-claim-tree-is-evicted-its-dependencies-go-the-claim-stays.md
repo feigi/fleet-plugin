@@ -14,7 +14,10 @@ runs, not once the tree is clean (decision 6), so a restore still installing,
 or one refused after the checks ahead of the Install step, holds the tree for
 7 days. Amended by #4076: the review scratch volume this ADR left out of scope
 is evicted too — a review run's snapshot and copies lose their installed
-dependencies when the review ends, and nothing restores them.
+dependencies when the review ends, and nothing restores them. Amended by #4274:
+a fix-applier's round copies, a dead review runner's run root and a dead
+finisher's tree are evicted too, by the root sweep, once no member of their
+kind is live on the PR.
 
 ## Context
 

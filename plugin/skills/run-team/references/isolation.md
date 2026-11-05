@@ -118,6 +118,22 @@ or a fix-applier into one; before you run code in one by hand, restore it with
 `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run evict.mjs --restore <tree> --apply`, which runs the
 Install step there as a claim does.
 
+**One script builds every measuring copy.** A copy an agent mutates or runs a
+suite in — a fix-applier's own, its refuters', a review specialist's and a
+review refuter's — is built by `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run measure-copy.mjs --worktree <abs-path> --pin <sha> --dest <abs> --pr <N> --scratch <scratch>`:
+the tree at the pinned commit, made a repository of its own, with the Install
+step run in it. It reads the Install step from the PR worktree, since a copy
+holds no Recipe cache, and it refuses any `--dest` that is not a new directory
+inside a `fix-*` round root or a `run-*` run root directly under
+`<scratch>/pr<N>/`. A fix-applier makes its round root with `mktemp -d` before
+its first copy, whatever kind of dispatch it is, and no `pr<N>/mutate/` is
+made. Exit 0 means the copy is the pin's tree and the Install step exited 0;
+any other exit is no usable copy. The root sweep evicts the installed
+dependencies of every such tree once no member of the kind that made them is
+live on the ledger, and the tick runs the sweep after each fix-applier,
+failed review launch and finisher settles, so no fix-applier or finisher runs
+an eviction step of its own.
+
 ## Filesystem isolation is not stack isolation
 
 Private copy and test command solve different problems; conflating them is how second gets skipped: compose project name comes from environment, not working directory, so three agents on three snapshots still collide on one postgres. Observed: a probe returned `No test files found / No such container` and would have read as a test failure. Symlinking installed dependencies in does not help. "I'm on my own copy" is exactly the intuition that skips command — say both, every time. Which command depends on audience: member in worktree uses `./agent-test`; specialist on snapshot does not, takes one `review-and-fix.md` hands out. Which runner the worktree holds decides why: the runner a claim writes is untracked, so a `git archive` snapshot never carries it; one the repository tracks does ride along, but no claim exported ports into it — its isolation is whatever that repository built, not one triple per snapshot.

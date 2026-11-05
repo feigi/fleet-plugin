@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { parseMember, parseToken, memberTokens, rowPr, premisesOf, nextMergeBot, nextRetry, liveOnLedger, settledOnLedger, retiredOnLedger, isRetirable, readRetired, escapeText, unescapeText, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell, REVIEW, isReviewToken, parseDispatchedEntry, dispatchedEntry, memberRole, firstReview, prTokens, ledgerSection, ROUTED, ROUTING_REASONS, parseRouting, formatRouting, routedEntry, parseRoutedEntry, dispositionsToken, escalationAnswerToken, escalationAnswers, isDispositionsWord, isGateVerdict, gateVerdictRefusal, gateVerdictWriter } from "../plugin/scripts/ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, rowPr, premisesOf, nextMergeBot, nextRetry, liveOnLedger, settledOnLedger, retiredOnLedger, isRetirable, readRetired, escapeText, unescapeText, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell, REVIEW, isReviewToken, parseDispatchedEntry, dispatchedEntry, memberRole, firstReview, prTokens, ledgerSection, ROUTED, ROUTING_REASONS, parseRouting, formatRouting, routedEntry, parseRoutedEntry, dispositionsToken, escalationAnswerToken, escalationAnswers, isDispositionsWord, isGateVerdict, gateVerdictRefusal, gateVerdictWriter, failedReviewLaunches } from "../plugin/scripts/ledger-grammar.mjs";
 
 // Every outcome word the spec names, per family, verbatim — the must-ACCEPT
 // half. A parser that refused everything would pass every refusal below.
@@ -936,4 +936,13 @@ test("a finding carrying both answers for one run reads as sent back, whichever 
   assert.equal(escalationAnswers([up, back], ANSWER_RUN).get("survived[0]"), "sent-back");
   assert.equal(escalationAnswers([back, up], ANSWER_RUN).get("survived[0]"), "sent-back");
   assert.equal(escalationAnswers([up, up], ANSWER_RUN).get("survived[0]"), "upheld");
+});
+
+test("failedReviewLaunches names each reviewer runner whose launch ended =failed, once, in row order — never a workflow launch, however its runId reads, another name, or an open or answered launch", () => {
+  const rows = [
+    "#5 impl-5=PR#6 → PR#6 · review=member:review-pr-6=failed · review=wf:review-pr-6-c=failed · review=member:some-runner=failed",
+    "#7 impl-7=PR#8 → PR#8 · review=member:review-pr-8 · review=member:review-pr-8-b=failed",
+    "#9 impl-9=PR#6 → PR#6 · review=member:review-pr-6=failed",
+  ];
+  assert.deepEqual(failedReviewLaunches(rows), ["review-pr-6", "review-pr-8-b"]);
 });

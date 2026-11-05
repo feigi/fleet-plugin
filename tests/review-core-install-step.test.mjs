@@ -123,25 +123,43 @@ test("the skipped run's note tells a specialist not to replace the run and not t
 
 // --- your own copy of the snapshot ---------------------------------------
 
-test("copyRule says how to make the copy: tracked files only, a repository, then the Install step — never cp -R, never shared ignored paths", () => {
-  const rule = copyRule(SNAP);
+test("copyRule names measure-copy.mjs with the PR worktree, the reviewed head, a destination in the agent's own directory and the run's scratch — never the snapshot's tracked-files-only recipe", () => {
+  const rule = copyRule(SNAP, "/repo/.worktrees/7-x", "/scr/pr7/run-ab12/correctness", "/scr", 7);
   for (const clause of [
-    "Make your own copy of the snapshot from its tracked files only — `git -C /scr/pr7/run-ab12/snapshot-abc123 archive HEAD | tar -x -C <copy>`, or a `git clone` of the snapshot repository",
-    "then make it a repository with `git init`, `git add -A -f` and a commit (a clone already is one)",
-    "then run the Install step, `sh ./install.sh`, from the copy's root before you measure anything in it.",
-    "Never `cp -R` the snapshot, and never symlink or clone its ignored paths",
+    "Make your own copy of the tree at the reviewed head with the one script that builds every measuring copy, never by hand",
+    "~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run measure-copy.mjs --worktree /repo/.worktrees/7-x --pin abc123 --dest /scr/pr7/run-ab12/correctness/copy --pr 7 --scratch /scr",
+    "For each further copy, give `--dest` another new directory under /scr/pr7/run-ab12/correctness/.",
+    "Any other exit is no usable copy: measure nothing in it, never make one by hand, and name the exit and the receipt's `message` in what you report.",
+    "Never `cp -R` or clone the snapshot, and never symlink its ignored paths",
   ]) {
     assert.match(rule, Pin.phrase(clause), `copyRule lost: ${clause}`);
   }
-  assert.match(copyRule(UNREAD), Pin.phrase("then run the Install step (this review read none,"), "with no Install step read, the rule no longer says the copy has nothing installed");
+  assert.doesNotMatch(rule, /--worktree \/scr\/pr7\/run-ab12\/snapshot/, "the snapshot was named as the worktree");
+  assert.doesNotMatch(rule, /git -C [^\n]* archive/, "the rule still spells the copy out by hand");
+  assert.equal(copyRule(UNREAD, "/repo/.worktrees/7-x", "/scr/pr7/run-ab12/correctness", "/scr", 7), rule, "the rule depends on what the snapshot's Install step read — the script reads the Recipe itself");
 });
 
-test("every dispatched prompt that sends an agent into its own copy of the snapshot carries the rule for making it", async () => {
+test("copyRule names the scratch root and PR it is given, never ones read back off the reported run root", () => {
+  const rule = copyRule({ ...SNAP, runRoot: "/elsewhere/run-ab12" }, "/repo/.worktrees/7-x", "/scr/pr7/run-ab12/correctness", "/scr", 7);
+  assert.match(rule, Pin.phrase("--dest /scr/pr7/run-ab12/correctness/copy --pr 7 --scratch /scr"));
+  assert.doesNotMatch(rule, /undefined/);
+});
+
+test("every dispatched prompt that sends an agent into its own copy of the snapshot carries the rule for making it, with that agent's own directory", async () => {
   const { prompts } = await reviewOf(SNAP);
   const sent = Object.entries(prompts).flatMap(([label, ps]) => ps.map((p) => [label, p]));
   const own = sent.filter(([, p]) => p.includes("own copy of the snapshot"));
   assert.deepEqual([...new Set(own.map(([label]) => label))].sort(), ["review:correctness", "review:tests", "verify:correctness"], "the prompts that send an agent into its own copy are not the ones this pin reads");
-  for (const [label, p] of own) assert.ok(p.includes(copyRule(SNAP)), `${label} sends an agent into its own copy of the snapshot without saying how to make it`);
+  const dirs = {
+    "review:correctness": ["correctness"],
+    "review:tests": ["tests"],
+    "verify:correctness": ["verify-correctness/f1-l1", "verify-correctness/f1-l2"],
+  };
+  for (const [label, p] of own) {
+    const rules = dirs[label].map((d) => copyRule(SNAP, ARGS.worktree, `${SNAP.runRoot}/${d}`, ARGS.scratch, ARGS.pr));
+    assert.ok(rules.some((rule) => p.includes(rule)), `${label} sends an agent into its own copy of the snapshot without saying how to make it`);
+    assert.ok(p.includes(`--worktree ${ARGS.worktree} `), `${label} names a worktree other than the PR's`);
+  }
 });
 
 test("the shipped markdown that sends an agent into its own copy says how to make it", () => {
@@ -154,7 +172,7 @@ test("the shipped markdown that sends an agent into its own copy says how to mak
   );
   assert.match(
     md("agents/fleet-review-tests.agent.md"),
-    Pin.phrase("Make that copy from the snapshot's tracked files only — `git -C <snapshot> archive HEAD | tar -x -C <copy>`, or a `git clone` of the snapshot repository — then `git init`, `git add -A -f` and commit in it, then run the Install step your dispatch prompt names from the copy's root before you measure anything there. Never `cp -R` the snapshot, and never symlink or clone its ignored paths"),
+    Pin.phrase("Make that copy with the command your dispatch prompt gives for it, run exactly as written: any non-zero exit is no usable copy, so measure nothing in it. Where your dispatch prompt gives none, make that copy from the snapshot's tracked files only — `git -C <snapshot> archive HEAD | tar -x -C <copy>`, or a `git clone` of the snapshot repository — then `git init`, `git add -A -f` and commit in it, then run the Install step your dispatch prompt names from the copy's root before you measure anything there. Never `cp -R` the snapshot, and never symlink or clone its ignored paths"),
     "fleet-review-tests.agent.md no longer says how to make its own copy of the snapshot",
   );
   assert.doesNotMatch(md("commands/review-and-fix.md"), /symlink in what it produced/, "review-and-fix.md suggests symlinking installed output into a copy again");

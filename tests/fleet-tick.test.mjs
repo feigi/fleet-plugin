@@ -8,7 +8,7 @@
 // settled member live, has to go red here.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { reconcile, formatLines, actionable, deriveRun, LedgerError, parseShortlist, unclaimed, refreshWhy, currentDispositions, reapDue, reapedAfter, reapSummary, reclaimSummary, evictSummary, parkedToken, bodyDigest, PARKED } from "../plugin/scripts/fleet-tick.mjs";
+import { reconcile, formatLines, actionable, deriveRun, LedgerError, parseShortlist, unclaimed, refreshWhy, currentDispositions, reapDue, reapedAfter, sweepDue, sweptAfter, reapSummary, reclaimSummary, evictSummary, parkedToken, bodyDigest, PARKED } from "../plugin/scripts/fleet-tick.mjs";
 import { dispositionsToken } from "../plugin/scripts/ledger-grammar.mjs";
 import { ref, prUrl } from "./support/queue-gh.mjs";
 
@@ -4185,6 +4185,111 @@ test("CLI --apply: a state file the reap left unreadable is not written over", (
   assert.equal(one.stateText, "{ not json\n", "the tick wrote a list onto a file it could not read");
 });
 
+// A fix-applier, a finisher or a review launch settled: a root sweep is owed
+// once, whoever wrote the settle. `rows` and `dispatched` are the ledger's.
+const SETTLED = (rows, dispatched, extra = {}) => ({ ledger: { rows, dispatched }, shortlist: shortlistText([7, 8]), beforeRun: controllerRecord(), ...extra });
+const RECLAIMS = (t) => t.calls.filter(isReclaim);
+
+test("CLI --apply: a fix-applier settled by report, by member-died or by hand runs the root sweep once and records it", () => {
+  for (const outcome of ["applied:abcdef1", "no-op", "killed", "failed"]) {
+    const name = "fix-pr-7";
+    const { ticks: [one, two] } = applyTicks(SETTLED([`#6 impl-6=PR#7 → PR#7 · ${name}=${outcome}`], ["impl-6=PR#7", `${name}=${outcome}`]), [APPLY, APPLY]);
+    for (const t of [one, two]) assert.equal(t.status, 0, `${outcome}: ${t.stderr}`);
+    assert.equal(one.calls.length, 1, `${outcome}: ${JSON.stringify(one.calls)}`);
+    assert.ok(isReclaim(one.calls[0]), one.calls[0]);
+    assert.match(one.stdout, /^APPLIED reclaim after fix-pr-7: removed 1, kept 0, failed 1$/m);
+    assert.deepEqual(one.applied, { run: CONTROLLER_AT, reapAfter: [], sweptAfter: [name] }, outcome);
+    assert.deepEqual(two.calls, [], `${outcome}: the next tick swept again for a member it had swept after`);
+    assert.doesNotMatch(two.stdout, /APPLIED/);
+  }
+});
+
+test("CLI --apply: a finisher settled, and a review launch settled =failed, each run the sweep once and are recorded by name", () => {
+  const finisher = applyTicks(SETTLED(["#6 impl-6=PR#7 → PR#7 · finisher-pr-7-b=labelled"], ["impl-6=PR#7", "finisher-pr-7-b=labelled"]), [APPLY, APPLY]).ticks;
+  assert.equal(finisher[0].calls.length, 1, JSON.stringify(finisher[0].calls));
+  assert.deepEqual(finisher[0].applied, { run: CONTROLLER_AT, reapAfter: [], sweptAfter: ["finisher-pr-7-b"] });
+  assert.deepEqual(finisher[1].calls, []);
+  const review = applyTicks(SETTLED(["#6 impl-6=PR#7 → PR#7 · review=member:review-pr-7=failed"], ["impl-6=PR#7"]), [APPLY, APPLY]).ticks;
+  assert.equal(review[0].status, 0, review[0].stderr);
+  assert.equal(review[0].calls.length, 1, JSON.stringify(review[0].calls));
+  assert.deepEqual(review[0].applied, { run: CONTROLLER_AT, reapAfter: [], sweptAfter: ["review-pr-7"] });
+  assert.deepEqual(review[1].calls, []);
+});
+
+test("CLI --apply: a live fix-applier, finisher or review launch, and an answered or open launch, owe no sweep", () => {
+  const live = applyTicks(SETTLED(
+    ["#6 impl-6=PR#7 → PR#7 · fix-pr-7 finisher-pr-7", "#8 impl-8=PR#9 → PR#9 · review=member:review-pr-9", "#10 impl-10=PR#11 → PR#11 · review=member:review-pr-11 reviewed=abcdef1:0/0/0:run-AbCdEf12"],
+    ["impl-6=PR#7", "fix-pr-7", "finisher-pr-7", "impl-8=PR#9", "impl-10=PR#11"],
+  ), [APPLY]).ticks[0];
+  assert.equal(live.status, 0, live.stderr);
+  assert.deepEqual(live.calls, []);
+  assert.equal(live.applied, undefined);
+});
+
+test("CLI --apply: a sweep that exits non-zero, or prints no receipt, runs again on the next tick and records nothing until one applies", () => {
+  const { ticks: [one, two, three, four] } = applyTicks(SETTLED(["#6 impl-6=PR#7 → PR#7 · fix-pr-7=applied:abcdef1"], ["impl-6=PR#7", "fix-pr-7=applied:abcdef1"]), [
+    { ...APPLY, env: { RECLAIM_FAIL: "1" } }, { ...APPLY, env: { RECLAIM_FAIL: "1" } }, APPLY, APPLY,
+  ]);
+  for (const t of [one, two, three, four]) assert.equal(t.status, 0, t.stderr);
+  assert.match(one.stdout, /^APPLY FAILED reclaim: reclaim-scratch\.mjs exited 2: reclaim-scratch: simulated refusal$/m);
+  assert.equal(one.applied, undefined, "a failed sweep was recorded");
+  assert.equal(two.calls.length, 1, "the next tick did not retry the sweep");
+  assert.equal(two.applied, undefined);
+  assert.equal(three.calls.length, 1);
+  assert.deepEqual(three.applied, { run: CONTROLLER_AT, reapAfter: [], sweptAfter: ["fix-pr-7"] });
+  assert.deepEqual(four.calls, []);
+});
+
+test("CLI --apply: a member recorded under another controller record names nothing, and a new settle after a recorded one sweeps once more", () => {
+  const rows = ["#6 impl-6=PR#7 → PR#7 · fix-pr-7=applied:abcdef1"];
+  const other = applyTicks(SETTLED(rows, ["impl-6=PR#7", "fix-pr-7=applied:abcdef1"], { beforeRun: withApplied({ run: 1_700_000_000_000, reapAfter: [], sweptAfter: ["fix-pr-7"] }) }), [APPLY]).ticks[0];
+  assert.equal(other.status, 0, other.stderr);
+  assert.equal(other.calls.length, 1, "another run's record stood in for this run's fix-pr-7");
+  assert.deepEqual(other.applied, { run: CONTROLLER_AT, reapAfter: [], sweptAfter: ["fix-pr-7"] });
+  const same = applyTicks(SETTLED(rows, ["impl-6=PR#7", "fix-pr-7=applied:abcdef1"], { beforeRun: withApplied({ run: CONTROLLER_AT, reapAfter: [], sweptAfter: ["fix-pr-7"] }) }), [APPLY]).ticks[0];
+  assert.deepEqual(same.calls, []);
+  const [first, next] = applyTicks(SETTLED(rows, ["impl-6=PR#7", "fix-pr-7=applied:abcdef1"], { beforeRun: withApplied({ run: CONTROLLER_AT, reapAfter: [], sweptAfter: ["fix-pr-7"] }) }), [APPLY, {
+    ...APPLY,
+    before: (repo) => writeFileSync(join(repo, ".fleet", "ledger.md"), ledgerText({ rows: [...rows, "#8 impl-8=PR#9 → PR#9 · fix-pr-9=no-op"], dispatched: ["impl-6=PR#7", "fix-pr-7=applied:abcdef1", "impl-8=PR#9", "fix-pr-9=no-op"] })),
+  }]).ticks;
+  assert.deepEqual(first.calls, []);
+  assert.equal(next.calls.length, 1, "a settle the earlier tick had not seen did not sweep");
+  assert.deepEqual(next.applied, { run: CONTROLLER_AT, reapAfter: [], sweptAfter: ["fix-pr-7", "fix-pr-9"] });
+});
+
+test("CLI --apply: with no controller record nothing is recorded and every tick sweeps again", () => {
+  const { ticks: [one, two] } = applyTicks(SETTLED(["#6 impl-6=PR#7 → PR#7 · fix-pr-7=applied:abcdef1"], ["impl-6=PR#7", "fix-pr-7=applied:abcdef1"], { beforeRun: () => {} }), [APPLY, APPLY]);
+  for (const t of [one, two]) {
+    assert.equal(t.status, 0, t.stderr);
+    assert.equal(RECLAIMS(t).length, 1, JSON.stringify(t.calls));
+    assert.equal(t.applied, undefined, "a member was recorded with no controller record to read it against");
+  }
+});
+
+test("CLI --apply: a merge pass and a settled member in one tick run the sweep once, and both are recorded", () => {
+  const { ticks: [one, two] } = applyTicks(SETTLED(["#6 impl-6=PR#7 → PR#7 · fix-pr-7=applied:abcdef1"], ["impl-6=PR#7", "fix-pr-7=applied:abcdef1", "merge-bot-1=done"]), [APPLY, APPLY]);
+  assert.equal(one.status, 0, one.stderr);
+  assert.equal(RECLAIMS(one).length, 1, JSON.stringify(one.calls));
+  assert.deepEqual(one.applied, { run: CONTROLLER_AT, reapAfter: [1], sweptAfter: ["fix-pr-7"] });
+  assert.deepEqual(two.calls, []);
+});
+
+test("CLI --apply: a merge pass recorded does not forget a swept member, and the reverse", () => {
+  const seed = withApplied({ run: CONTROLLER_AT, reapAfter: [], sweptAfter: ["fix-pr-7"] });
+  const { ticks: [one] } = applyTicks(SETTLED(["#6 impl-6=PR#7 → PR#7 · fix-pr-7=applied:abcdef1"], ["impl-6=PR#7", "fix-pr-7=applied:abcdef1", "merge-bot-1=done"], { beforeRun: seed }), [APPLY]);
+  assert.equal(one.calls.length, 3, JSON.stringify(one.calls));
+  assert.deepEqual(one.applied, { run: CONTROLLER_AT, reapAfter: [1], sweptAfter: ["fix-pr-7"] });
+});
+
+test("sweepDue / sweptAfter: a list counts only against the controller record it was written under", () => {
+  assert.deepEqual(sweepDue(["fix-pr-7", "finisher-pr-7"], { run: 5, reapAfter: [], sweptAfter: ["fix-pr-7"] }, 5), ["finisher-pr-7"]);
+  assert.deepEqual(sweepDue(["fix-pr-7"], { run: 5, reapAfter: [], sweptAfter: ["fix-pr-7"] }, 6), ["fix-pr-7"]);
+  assert.deepEqual(sweepDue(["fix-pr-7"], { run: 5, reapAfter: [], sweptAfter: ["fix-pr-7"] }, null), ["fix-pr-7"]);
+  assert.deepEqual(sweepDue(["fix-pr-7"], { run: 5, reapAfter: [1] }, 5), ["fix-pr-7"], "a record with no sweptAfter named a member");
+  assert.deepEqual(sweepDue(["fix-pr-7"], null, 5), ["fix-pr-7"]);
+  assert.deepEqual(sweptAfter({ run: 5, reapAfter: [] }, 5), []);
+});
+
 test("reapDue: a list counts only against the controller record it was written under", () => {
   assert.deepEqual(reapDue([1, 2], { run: 5, reapAfter: [1] }, 5), [2]);
   assert.deepEqual(reapDue([1, 2], { run: 5, reapAfter: [1] }, 6), [1, 2], "another run's list named this run's merge-bot-1");
@@ -4201,6 +4306,7 @@ test("reapSummary / reclaimSummary / evictSummary: a receipt's counts, null for 
   assert.equal(reapSummary(warned), "reaped 1, kept 0, worktreesRemoved 0, warnings 2: branch config section was left: boom");
   assert.equal(reapSummary(warned.replace(/"warnings":.*\}$/, '"warnings":[{"branch":"b"}]}')), "reaped 1, kept 0, worktreesRemoved 0, warnings 1");
   assert.equal(reclaimSummary('{"applied":true,"ledger":null,"removed":[],"kept":[1],"failed":[1,2,3]}'), "removed 0, kept 1, failed 3");
+  assert.equal(reclaimSummary('{"applied":true,"ledger":null,"removed":[],"evicted":[1,2],"kept":[1],"failed":[],"skipped":[]}'), "removed 0, evicted 2, kept 1, failed 0");
   assert.equal(evictSummary('{"applied":true,"ledger":null,"evicted":[1,2],"kept":[1],"failed":[]}'), "evicted 2, kept 1, failed 0");
   for (const junk of ["", "not json", "null", '{"reaped":[]}', '{"removed":[],"kept":[],"failed":"x"}']) {
     assert.equal(reapSummary(junk), null, junk);

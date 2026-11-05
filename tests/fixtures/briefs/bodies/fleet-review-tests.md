@@ -35,7 +35,10 @@ the run that shows it surviving.
 
 In both modes `<testCmd>` is the `command` your dispatch prompt's
 Tests paragraph names, run only in your own copy of the snapshot. Make that
-copy from the snapshot's tracked files only —
+copy with the command your dispatch prompt gives for it, run exactly as
+written: any non-zero exit is no usable copy, so measure nothing in it. Where
+your dispatch prompt gives none, make that copy from the snapshot's tracked
+files only —
 `git -C <snapshot> archive HEAD | tar -x -C <copy>`, or a `git clone` of the
 snapshot repository — then `git init`, `git add -A -f` and commit in it, then
 run the Install step your dispatch prompt names from the copy's root before

@@ -25,9 +25,17 @@ store.
    no harness supplies it, and a member never builds its own (ADR 0027).
 3. **Read-only vs. mutating stay physically separate.** A specialist's
    own `.agent.md` declares no write tools, so it can never share a
-   copy with a mutating refuter even by accident; a refuter gets its
-   own throwaway `git worktree add --detach` copy, mutated and
-   discarded.
+   copy with a mutating refuter even by accident. Every copy anything
+   measures or mutates in — a fix-applier's own mutation copy, its
+   refuters', a review specialist's and a review refuter's — is built by
+   [`measure-copy.mjs`](../../plugin/scripts/measure-copy.mjs): the tree
+   at a pinned commit, made a repository of its own, with the Install
+   step run in it, inside a `fix-*` round root or a `run-*` run root
+   directly under `<scratch>/pr<N>/`. The script refuses a destination
+   that is not a new directory there, and no `pr<N>/mutate/` is made.
+   The root sweep evicts the installed dependencies of those copies once
+   no member of the kind that made them is live
+   ([scratch reclaim](scratch-reclaim.md)).
 4. **The main checkout is enforced by prompt and by harness.** No
    per-call `cwd` exists in eval's `agent()`, so every
    specialist/refuter prompt names the inherited cwd a no-run zone and

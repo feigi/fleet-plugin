@@ -743,24 +743,35 @@ function countsOf(run) {
 }
 
 // How a specialist or refuter makes "your own copy of the snapshot", in
-// every prompt that sends one to work there. Tracked files only, then the
-// Install step in the copy: what an install writes can record absolute paths
-// back into the tree it ran in, so a copy that shares the snapshot's
-// installed output imports the snapshot's source, and a mutation made in the
-// copy never runs.
-export function copyRule(snap) {
-  const step = snap && snap.installCmd
-    ? `the Install step, \`${snap.installCmd}\`,`
-    : "the Install step (this review read none, so a copy has nothing installed and a suite run in it does not measure the tree)";
-  return `Make your own copy of the snapshot from its tracked files only —
-\`git -C ${snap && snap.path} archive HEAD | tar -x -C <copy>\`, or a \`git clone\`
-of the snapshot repository — then make it a repository with \`git init\`,
-\`git add -A -f\` and a commit (a clone already is one), then run
-${step} from the copy's root before you measure anything in it.
-Never \`cp -R\` the snapshot, and never symlink or clone its ignored paths: an
-install can record absolute paths back into the tree it ran in, so a copy
-sharing the snapshot's installed output runs the snapshot's source, and a
-mutation in the copy never runs.`;
+// every prompt that sends one to work there: by measure-copy.mjs, the one
+// script that builds every measuring copy. It builds the copy from the PR
+// worktree at the reviewed head, makes it a repository of its own and runs the
+// Install step in it, so the copy holds what an install leaves — which one that
+// shares the snapshot's installed output would not, since an install can record
+// absolute paths back into the tree it ran in and a mutation made there would
+// never run. `worktree` is the PR worktree, never the snapshot: the snapshot
+// holds tracked files only, and the Install step is read from the repository's
+// shared Recipe cache, which every worktree reads. `dir` is the agent's own
+// directory of the run root; the copy is built under it. `scratch` and `pr`
+// are runReview's own, the ones the run root was checked against, never read
+// back off the run root the snapshot agent reported.
+export function copyRule(snap, worktree, dir, scratch, pr) {
+  return `Make your own copy of the tree at the reviewed head with the one script that
+builds every measuring copy, never by hand — it builds the copy from the PR
+worktree at that commit, makes it a repository of its own and runs the Install
+step from the copy's root:
+~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run measure-copy.mjs --worktree ${worktree} --pin ${snap.head} --dest ${dir}/copy --pr ${pr} --scratch ${scratch}
+For each further copy, give \`--dest\` another new directory under ${dir}/. The
+Install step can take minutes: run the command as ONE blocking foreground
+command with a command deadline of 3600 seconds, never backgrounded and never
+polled. It prints one JSON line, the receipt, and exits 0 only when the copy is
+the reviewed head's tree and its Install step exited 0; the receipt lists what
+the step left untracked. Any other exit is no usable copy: measure nothing in
+it, never make one by hand, and name the exit and the receipt's \`message\` in
+what you report. \`--worktree\` is the one use of the PR worktree this prompt
+allows, and the script's own: you never read or write it. Never \`cp -R\` or clone
+the snapshot, and never symlink its ignored paths: it holds tracked files only,
+and a copy sharing the snapshot's installed output runs the snapshot's source.`;
 }
 
 // The Tests paragraph of every specialist prompt: the shared run's
@@ -1464,7 +1475,7 @@ READ ONLY FROM THE SNAPSHOT: ${snap.path} (HEAD ${snap.head}) — plus the diff
 file named below, if one is given.
 Never read or write ${worktree} — other agents are using it.
 Run any mutation or probe work inside your own copy of the snapshot.
-${copyRule(snap)}
+${copyRule(snap, worktree, `${snap.runRoot}/${d.key}`, scratch, pr)}
 
 Your shell starts in NEITHER of those directories, and what it does start in is
 a tree you must not write to: this dispatch carries no working directory of its
@@ -1563,7 +1574,7 @@ decide it and nothing else:
 
 ${KILL_RULES}
 
-${copyRule(snap)}
+${copyRule(snap, worktree, `${snap.runRoot}/verify-${d.key}/f${fi + 1}-l${i + 1}`, scratch, pr)}
 
 ${PATTERN_KILL_RULE}
 
