@@ -1,0 +1,65 @@
+{
+  "head": "25c80c6db35c859ee59a037982b22ec05c6099dd",
+  "run": "run-XYUwX0Sw",
+  "entries": [
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4325/fix-gwSsCbM3/f1/verdict.json",
+      "remedyFiles": [
+        "docs/specs/2026-10-27-cockpit-tabs-design.md"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4325/fix-gwSsCbM3/f2/verdict.json",
+      "remedyFiles": [
+        "docs/components/tier-routing.md",
+        "docs/specs/2026-09-28-model-effort-router-design.md"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4325/fix-gwSsCbM3/f3/verdict.json",
+      "remedyFiles": [
+        "docs/specs/2026-09-28-model-effort-router-design.md"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4325/fix-gwSsCbM3/f4/verdict.json",
+      "remedyFiles": [
+        "docs/specs/2026-09-28-model-effort-router-design.md",
+        "docs/components/tier-routing.md"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "refuted: the note's \u00a7 2.12 citation points at the decision, which names assignment probability and that exploration_draw alone does not give it; the identifier exists in ticket-router.mjs; the finding itself says acceptable as is",
+      "issue": 4326,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4325/fix-gwSsCbM3/f5/verdict.json",
+      "remedyFiles": [
+        "docs/specs/2026-09-28-model-effort-router-design.md"
+      ]
+    }
+  ]
+}

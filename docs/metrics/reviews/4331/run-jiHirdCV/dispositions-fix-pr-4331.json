@@ -1,0 +1,230 @@
+{
+  "head": "e6e6daca63d8d9b217ee4b419d511f831b3fe248",
+  "run": "run-jiHirdCV",
+  "entries": [
+    {
+      "bucket": "survived",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "remedyFiles": [
+        "plugin/scripts/ticket-router.mjs",
+        "tests/ticket-router.test.mjs"
+      ],
+      "charge": "both",
+      "reason": "Applied the finding's second remedy: ADOPT_RATIO stays a ratio (a margin read as a share of the base's figure cannot be shift-free), the judge JSDoc and the PR body now say it is the one test a shift moves, and a test pins it. Charged both: the ticket's criterion 'adding the same shift ... leaves every verdict ... unchanged' was unmet as submitted, and the PR body and the judge JSDoc as submitted asserted that every verdict is left unchanged."
+    },
+    {
+      "bucket": "survived",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "remedyFiles": [
+        "plugin/scripts/pull-attribution.mjs",
+        "tests/pull-attribution.test.mjs"
+      ],
+      "charge": "false-claim",
+      "reason": "Applied: $ and minutes per merged PR now weigh stretches by Pulls (Mantel-Haenszel over Pull counts), a side's figure its weighted spend per Pull over its weighted merged PRs per Pull, so a merge-less stretch's spend counts; single-stretch figures are v/d exactly. Charged false-claim: the diff's comments asserted every Pull of a shared stretch is kept while its spend dropped out."
+    },
+    {
+      "bucket": "survived",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "remedyFiles": [
+        "docs/research/cell-grid-derive.mjs",
+        "docs/research/split-looks-derive.mjs",
+        "docs/research/split-gate-derive.mjs",
+        "docs/research/router-inputs-derive.mjs",
+        "docs/research/consumer-burn-in-derive.mjs"
+      ],
+      "charge": "none",
+      "chargeReason": "defect-outside-acceptance",
+      "reason": "Applied: cell-grid-derive.mjs migrated to the new unit shape (its --no-omp output is identical to the merge-base's); the four that import underFloor pin in their headers the commit their note was measured at."
+    },
+    {
+      "bucket": "survived",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "remedyFiles": [
+        "plugin/scripts/pr-cost.mjs",
+        "plugin/scripts/compute-cell-evidence.mjs",
+        "tests/pr-cost.test.mjs",
+        "tests/compute-cell-evidence.test.mjs"
+      ],
+      "charge": "none",
+      "chargeReason": "defect-outside-acceptance",
+      "reason": "Applied: guardFile writes unmatched; compute-cell-evidence's mergedFigure reads a listed Cell as not judged. fleet-tick's OK row prints figures, not a judged mark, so it is unchanged."
+    },
+    {
+      "bucket": "survived",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "remedyFiles": [
+        "plugin/scripts/pull-attribution.mjs",
+        "tests/pr-cost.test.mjs"
+      ],
+      "charge": "none",
+      "chargeReason": "defect-outside-acceptance",
+      "reason": "Applied through survived[1]'s pooling change, ruled with it in the mutual-exclusion scan: a judged comparison has MIN_N merged PRs a side over stretches each side has Pulls in, so both $ figures exist and the $ leg always judges; the finding's disjoint-merge case now trips (100x cost), pinned in tests/pr-cost.test.mjs."
+    },
+    {
+      "bucket": "survived",
+      "index": 5,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "remedyFiles": [
+        "tests/ticket-router.test.mjs"
+      ],
+      "charge": "none",
+      "chargeReason": "defect-outside-acceptance",
+      "reason": "Applied: a ticket-router test where the base has 35 merged PRs overall but 10 in the week it shares with the candidate pins too-few; the base-term mutant reddens it."
+    },
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4331/fix-XNpx0sM3/U0/verdict.json",
+      "reason": "Refuter survived it (mutant restoring the old zero-claim floor survived the suite): kept the new behaviour, stated in the PR body, pinned by a pull-attribution test.",
+      "remedyFiles": [
+        "tests/pull-attribution.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4331/fix-XNpx0sM3/U1/verdict.json",
+      "reason": "Refuted: the guard's unmatched covers both the short-of-MIN_N and no-shared-stretch cases, matching the router's too-few; filed on the suggestion-band record #4338.",
+      "issue": 4338
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4331/fix-XNpx0sM3/U2/verdict.json",
+      "reason": "Refuter confirmed the silent null ranges; applied with survived[2]: cell-grid-derive.mjs builds units in the new shape, output identical to the merge-base's.",
+      "remedyFiles": [
+        "docs/research/cell-grid-derive.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4331/fix-XNpx0sM3/U3/verdict.json",
+      "reason": "Refuted: a missing cell key is a legitimate input (a node no Pull went through); a throwing pullsOf reddened 46 ticket-router tests. Filed on #4338.",
+      "issue": 4338
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4331/fix-XNpx0sM3/U4/verdict.json",
+      "reason": "Refuter confirmed: the JUDGE comment named estimate() where judge reads compareCells sides; reworded.",
+      "remedyFiles": [
+        "plugin/scripts/ticket-router.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 5,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4331/fix-XNpx0sM3/U5/verdict.json",
+      "reason": "Refuted: the JSDoc's unjudged reason already carries no stretch qualifier, contrasting with too-few's; filed on #4338.",
+      "issue": 4338
+    },
+    {
+      "bucket": "unverified",
+      "index": 6,
+      "scope": "out",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4331/fix-XNpx0sM3/U6/verdict.json",
+      "reason": "Out of scope (ADR amendment notes are the spec's final slice) and refuted: ADR 0016:122's 'cumulative from a WINDOW_START' describes the window's lower bound, still true; filed on #4338.",
+      "issue": 4338
+    },
+    {
+      "bucket": "unverified",
+      "index": 7,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4331/fix-XNpx0sM3/U7/verdict.json",
+      "reason": "Refuted: a null finding with no change to make; filed on #4338.",
+      "issue": 4338
+    },
+    {
+      "bucket": "unverified",
+      "index": 8,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4331/fix-XNpx0sM3/U8/verdict.json",
+      "reason": "Refuted: a bad measure name fails loudly and every caller passes a literal; filed on #4338.",
+      "issue": 4338
+    },
+    {
+      "bucket": "unverified",
+      "index": 9,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4331/fix-XNpx0sM3/U9/verdict.json",
+      "reason": "Refuted: the fail_rate ternary is load-bearing (the suggested `?.[which] / 100` turns null into NaN); filed on #4338.",
+      "issue": 4338
+    },
+    {
+      "bucket": "unverified",
+      "index": 10,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4331/fix-XNpx0sM3/U10/verdict.json",
+      "reason": "Refuted: attribute() gives every unit a stretch by construction, and the unstretched grouping is documented and test-used; filed on #4338.",
+      "issue": 4338
+    },
+    {
+      "bucket": "unverified",
+      "index": 11,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4331/fix-XNpx0sM3/U11/verdict.json",
+      "reason": "Refuter confirmed the duplicate compareCells call and that the rewrite is behaviour-equivalent; applied (tripsOn).",
+      "remedyFiles": [
+        "plugin/scripts/pr-cost.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 12,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4331/fix-XNpx0sM3/U12/verdict.json",
+      "reason": "Refuted: the wrappers predate the PR, and the router spec names judgeSpeedRow; filed on #4338.",
+      "issue": 4338
+    }
+  ]
+}

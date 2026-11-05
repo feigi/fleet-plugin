@@ -1,0 +1,338 @@
+{
+  "pr": 4328,
+  "head": "6e70c3c93541a9574590d0509b5c2a31df1d0e58",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv' and ' M docs/metrics/tier-outcomes.tsv'. I did not write to this checkout and cannot account for these two modifications; they most likely come from other agents sharing it."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv' (not touched by me; I only ran read-only commands and wrote nothing there)"
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv' and ' M docs/metrics/tier-outcomes.tsv'. I never wrote to that tree, so these are not mine; they are probably the controller's own metrics files."
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` / ` M docs/metrics/tier-outcomes.tsv` (this pass ran only `pwd` and this `git status` there; these modifications were not made by this review)"
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (not written by me; I wrote only to the scratch dir and made no edits there)."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv` (this pass only read from that tree and never wrote to it)"
+    }
+  ],
+  "counts": {
+    "survived": 3,
+    "refuted": 0,
+    "unverified": 16,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4328/run-wG5mj2Gt/snapshot-6e70c3c9",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "tests/reclaim-scratch.test.mjs",
+      "line": 1440,
+      "claim": "The test 'a sibling key with no checkout-path, one holding a relative path, or one whose path does not hash to the key's suffix is kept' does not discriminate the `!isAbsolute(line)` or the multi-line `line.includes(\"\\n\")` guard in checkoutOf: its relative-path and two-line fixtures are named with suffixes that do not hash their content, so the hash check catches them and the guards are never reached.",
+      "evidence": "red: n/a, both mutants survived. m2 (drop `!isAbsolute(line)`): `./agent-test tests/reclaim-scratch.test.mjs` → exit 0, tests 76 pass 76 fail 0. m3 (drop `line.includes(\"\\n\")`): same command → exit 0, tests 76 pass 76 fail 0. baseline: `./agent-test tests/reclaim-scratch.test.mjs` → exit 0, tests 76 pass 76, the named test passes. Contrast m1 (drop the hash check) → exit 1, fail 1 incl that same test.",
+      "suggested_fix": "Build the relative-path and two-line fixtures so the key name's 8-hex suffix is the sha256 prefix of that exact content, then assert the reason is `holds no single absolute path`. The assertion is currently only /^no checkout file: /, so it also cannot tell the branches apart.",
+      "dimension": "tests",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "I ran both mutants in my own copy of the snapshot. Each replaced line 587 of plugin/scripts/reclaim-scratch.mjs so that only one of the two guards remained. With only `line.includes(\"\\n\")` kept (the `!isAbsolute` guard dropped), `./agent-test tests/reclaim-scratch.test.mjs` exited 0 with tests 76, pass 76, fail 0. With only `!isAbsolute(line)` kept (the multi-line guard dropped), the same command gave tests 76, pass 76, fail 0. I did not run an unmutated baseline or the drop-the-hash-check mutant myself, so the baseline and m1 contrast are as the claim reports them. I did not read the `f.key` fixture helper. Reading the test showed the relative-path fixture uses the arbitrary suffix `relative-22222222`, and the two-line fixture takes the default suffix. The default suffix presumably hashes `checkout` rather than the two-line content (not verified), so the hash check at line 589 rejects both fixtures and the guards are never needed. The test only asserts the reason matches /^no checkout file: /, so it cannot tell which guard fired. The mutation was reverted from a backup copy. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I never wrote to that directory; every command I ran after `pwd` was in my scratch copy. These changes most likely come from a peer agent's work there."
+        },
+        {
+          "refuted": false,
+          "reason": "Both mutants survive in my own snapshot copy. Dropping `!isAbsolute(line)` gave `./agent-test tests/reclaim-scratch.test.mjs` → exit 0, tests 76 pass 76 fail 0. Dropping `line.includes(\"\\n\")` gave the same counts. Both greps matched `tests`, `pass` and `fail`, so the runs completed. The sed applied each time: `git diff --stat` showed 1 file changed in both cases. Unmutated baseline was 76 pass per the claim; I did not rerun it. The code explains this: the hash check runs after the two guards. The relative-path fixture is named `relative-22222222` and the two-line fixture uses the default name, so neither hashes its content and both are caught by the hash check. The claim holds. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I did not write to this checkout (all edits were in the scratch copy), so I attribute those modifications to other agents.",
+          "inconclusive": false
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "docs/adr/0029-scratch-is-reclaimed-on-github-terminal-state-and-age.md",
+      "line": 93,
+      "claim": "ADR 0029 decision 11's body still says siblings are judged 'by age alone' and omits checkout-path; the PR amended only the header note, so the file now contradicts itself.",
+      "evidence": "The diff touches only hunk @@ -7,7 +7,15 @@ of the ADR. Snapshot lines 93-103 still read: 'judges every key-shaped directory ... other than the live key, by age alone: one with nothing modified in 7 days goes whole, one with anything fresh stays whole'. The header at lines 10-15 says 'Amended by #4112: decision 11 judges a sibling key by the checkout it records, not by age alone'. The body has no mention of checkout-path, the --apply write of the live key's file, or the idle flag.",
+      "suggested_fix": "Rewrite decision 11's body to match docs/components/scratch-reclaim.md item 6: checkout-path, removal only when the checkout is gone, its parent is present and the key is idle, and the --apply write of the live key's own file.",
+      "dimension": "comments",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "I read the snapshot ADR directly, with no test run. The header (lines 10-15) says decision 11 judges a sibling by its recorded checkout, not by age alone. The body of decision 11 (lines ~93-103) still says siblings are judged 'by age alone' and has no checkout-path, no --apply write of the live key's file, and no idle flag. The diff's only ADR hunk is @@ -7,7 +7,15 @@, so the body was not touched. The file does contradict itself. CWD-AUDIT: not run (I made no writes). My search covered only decision 11's body in this one ADR file. I did not check whether other docs describe the new behavior."
+        },
+        {
+          "refuted": false,
+          "reason": "Read the snapshot ADR 0029. Lines 10-18 (header) say decision 11 judges a sibling key by its checkout-path, not by age alone. Decision 11's body at lines 93-103 still says siblings are judged 'by age alone', with nothing about checkout-path, the --apply write of the live key's file, or the idle flag. Decision 5 got an inline '(amended by #3403)' marker and updated body text; decision 11 got neither. I found no other place that handles it: grep for 'checkout-path' and 'idle' in the ADR hits only the header and unrelated lines. The only mitigation is that the header explicitly labels the amendment, so the contradiction is stale body text rather than an unflagged conflict; that weakens the claim a little but does not refute it. I ran only read and grep commands, no test run. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv' (pre-existing; I wrote nothing there)."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/board-server.mjs",
+      "line": 197,
+      "claim": "Comments say the `canonicalise` opt-in is taken only by the cockpit/board caller, but reclaim-scratch.mjs's new writeCheckout now calls fleetFile(null, { canonicalise: true }) too.",
+      "evidence": "grep 'canonicalise' in snapshot: board-server.mjs:197 'asked with the `canonicalise` opt-in only this caller takes'; board.mjs:24 'the `canonicalise` opt-in only that caller takes'; fleet-dir.mjs:115-117 'only a caller that keys something on the path (the cockpit's port) takes it'. The diff adds plugin/scripts/reclaim-scratch.mjs:639 `dirname(fleetFile(null, { canonicalise: true }))`. fleet-state.mjs:73 repeats the board-only framing.",
+      "suggested_fix": "Reword the comments in board-server.mjs, board.mjs and fleet-dir.mjs (and fleet-state.mjs) so they no longer say board is the sole caller; for example name reclaim-scratch's checkout-path write as a second caller. fleet-dir.mjs's doc is the one a reader of fleetFile consults.",
+      "dimension": "comments",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Grep of snapshot plugin/scripts: reclaim-scratch.mjs:639 calls fleetFile(null,{canonicalise:true}), while board-server.mjs:197 says 'only this caller takes' and fleet-dir.mjs:115-117 says only the cockpit takes it. The comments are stale, so the claim is true. I ran only grep and sed, no test suite. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/ticket-features.tsv, M docs/metrics/tier-outcomes.tsv (I did not touch these; I only ran read-only commands)."
+        },
+        {
+          "refuted": false,
+          "reason": "Grep of plugin/scripts in the snapshot (pattern 'canonicalise', so it would miss other spellings such as 'canonicalize') found reclaim-scratch.mjs:639 calling fleetFile(null,{canonicalise:true}). The comments at board-server.mjs:197 ('only this caller takes') and fleet-dir.mjs:115-117 ('only a caller that keys something on the path (the cockpit's port) takes it') do say board-only. board.mjs:24 and fleet-state.mjs:73 carry the same board-only wording. These comments are therefore stale. I found no place that already qualifies them. I did not run any tests; this is a grep and read check only. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I ran only reads (grep, sed, git status) and edited nothing, so these modifications were already there."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 330,
+      "claim": "The rule that keeps a key when the directory that held its checkout is also gone (meant for unplugged drives) fails for a checkout at a volume's mount root. If checkout-path names /Volumes/<Drive>, the drive is unplugged and /Volumes exists, the whole key, including its pr<N> partitions, is removed under --apply.",
+      "evidence": "Fake HOME, ws repo, key `UnpluggedDrive-$(printf %s /Volumes/UnpluggedDrive | shasum -a 256 | cut -c1-8)` holding checkout-path `/Volumes/UnpluggedDrive` and pr9/run-1/review.json, everything touched to 2026-10-01. Running `node reclaim-scratch.mjs --siblings --root $ROOT --apply` printed `\"removed\":[{\"path\":\".../UnpluggedDrive-234f3b03\",\"reason\":\"its checkout /Volumes/UnpluggedDrive is gone and nothing under it changed in 7 days\"}]`.",
+      "suggested_fix": "The ruling chose the parent-directory test, so this is a gap in the ruling's own unplugged-drive reasoning. It is not a deviation from the brief. Raise it with the maintainer, for example: also keep a key when dirname(checkout) is a known mount parent (/Volumes, /media/*, /mnt), or when the held directory sits on a different st_dev from its own parent.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 284,
+      "claim": "checkoutOf() calls readFileSync on a sibling key's checkout-path without first checking that it is a regular file. A FIFO there blocks the sibling pass forever, and a symlink to a device such as /dev/zero would read without end. phase0's reclaim step spawns the pass with no timeout, so every phase 0 on the machine would hang.",
+      "evidence": "Ran `mkfifo $PARENT/fifo-aaaaaaaa/checkout-path`, then `perl -e 'alarm 10; exec @ARGV' node reclaim-scratch.mjs --siblings --root $ROOT`, which printed `exit=142` (killed by SIGALRM after 10.27s; it never returned). In phase0.mjs:435-437, `node(\"reclaim-scratch.mjs\", [\"--siblings\", ...], { cwd })` passes no timeoutMs.",
+      "suggested_fix": "Call lstatSync first and treat anything that is not a regular file, or is larger than a few KB, as `{ none }`. Alternatively, open with O_NONBLOCK and run fstat before reading.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 300,
+      "claim": "No test checks that existsAt uses lstat, which the brief requires. Swapping lstatSync for statSync leaves both test files green, so a dangling symlink at a checkout path would silently count as 'gone'.",
+      "evidence": "Mutation M6 (`lstatSync(p);` changed to `statSync(p);` in existsAt), then `node --test tests/reclaim-scratch.test.mjs`: exit 0, no failing tests.",
+      "suggested_fix": "Add a fixture whose checkout path is a dangling symlink and assert the key is kept with the 'still exists' reason.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 275,
+      "claim": "No test checks that an unreadable checkout-path (EACCES/EPERM) counts as 'no checkout file', as the brief rules. Removing EACCES and EPERM from NO_CHECKOUT_FILE leaves the suite green, and only the kept reason changes.",
+      "evidence": "Mutation M7 (NO_CHECKOUT_FILE reduced to ENOENT, ENOTDIR, EISDIR), then `node --test tests/reclaim-scratch.test.mjs`: exit 0, no failing tests.",
+      "suggested_fix": "Add a non-root fixture that chmods a sibling's checkout-path to 000 and asserts a reason matching /^no checkout file: checkout-path cannot be read \\(EACCES\\)/.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/phase0.mjs",
+      "line": 170,
+      "claim": "A failed write of the live key's checkout-path is put in failed[] and surfaced by phase0 as 'sibling keys: could not reclaim <key>/checkout-path (<error>)'. The unreclaimed() helper hardcodes the verb 'reclaim', so this write failure is mislabelled as a reclaim failure. The error text also names the temp file '.checkout-path.<pid>.tmp', not 'checkout-path'.",
+      "evidence": "Probe: chmod 555 on the live root, then `reclaim-scratch.mjs --siblings --root $ROOT --apply` printed exit 0 and failed:[{\"path\":\".../repo-a9fa9a49/checkout-path\",\"error\":\"EACCES: permission denied, open '.../.checkout-path.9371.tmp'\"}]. phase0.mjs:441 passes that receipt to unreclaimed('sibling keys', siblings, {named:true}), whose line 170 maps every failed[] entry to `could not ${verb} ${path} (${error})` with verb='reclaim'. I read that mapping but did not run phase0 itself.",
+      "suggested_fix": "Make the failed[] error for this case self-describing, for example 'could not record checkout-path: <message>', or let writeCheckout's entry carry a verb that phase0 uses. The signal is not lost, only mislabelled.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 335,
+      "claim": "The guard against removing a key whose checkout sits on an unplugged drive only covers the case where the checkout's parent directory is also gone (macOS /Volumes/X). Where the drive's mount point stays behind as an empty directory (for example /mnt/data), the checkout is gone while its parent is present. The key then reads as 'gone, parent present' and is removed whole after 7 idle days.",
+      "evidence": "Probe: key whose checkout-path names $D/w/held/gone1, with $D/w/held an existing empty directory, backdated 2020. The `--siblings --apply` receipt put it in removed[] with reason 'its checkout ... is gone and nothing under it changed in 7 days'. Not run: an actual unmounted drive. That a mount point survives unmounting is inferred.",
+      "suggested_fix": "Accept this as a documented limit, or also keep a key when the held directory is empty or is a mount point. The behaviour is by design for the macOS case, but the docs say 'an unplugged drive reads the same', which overstates the protection.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 324,
+      "claim": "Keys with no valid checkout-path are kept forever and are never aged out. This includes every pre-existing key from before this change, and any key whose workspace never ran a phase 0 with the new code. Their reason string is 'no checkout file: ...' and they are shown with idle:true on every phase 0 pass. Orphaned legacy keys therefore accumulate silently on disk, with a recurring note in phase-0 output but no path to removal.",
+      "evidence": "Probe and diff test: a key with checkout-path missing is kept with reason 'no checkout file: checkout-path is missing' and idle:true. The diff's removed test '(11) a sibling key with nothing modified in 7 days is removed' confirms the old age-only removal is gone. Not run: any long-term accumulation.",
+      "suggested_fix": "Decide explicitly whether legacy keys should age out. If so, add a fallback for a key with no file, such as a longer retention. Otherwise record the intent in the ADR as a known cost.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 583,
+      "claim": "The unreadable-error paths in checkoutOf, existsAt and judgeSibling have no coverage that discriminates: the 'error' (non-NO_CHECKOUT_FILE read failure) branch, the EPERM entry in NO_CHECKOUT_FILE, the ENOTDIR case in existsAt, and the `up instanceof Error` and `at instanceof Error` keep branches can each be deleted with the suite staying green.",
+      "evidence": "All with `./agent-test tests/reclaim-scratch.test.mjs` → exit 0, tests 76 pass 76 fail 0: m17 (drop `found.error` return), m11 (drop EPERM from NO_CHECKOUT_FILE), m13 (drop ENOTDIR from existsAt), m14 (`up instanceof Error` → false), m15 (`at instanceof Error` → false). baseline: the same command on the unmutated tree → exit 0, tests 76 pass 76. These are fail-safe branches whose job is to keep a key when the state is unknown, so a regression there would silently remove a live key. Tests would need a fault-injecting stub or an unreadable parent dir.",
+      "suggested_fix": "Add a test where the checkout's parent is unreadable (chmod 000, skipped under root) and one where checkout-path is a directory or unreadable, asserting the key is kept with the 'cannot be told' / 'cannot be read' reason.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/reclaim-scratch.test.mjs",
+      "line": 1515,
+      "claim": "The writeCheckout failure path does not assert that the temp file is cleaned up: removing the `rmSync(tmp, {force:true})` cleanup leaves every test green.",
+      "evidence": "m16 (replace `rmSync(tmp, { force: true });` with a comment): `./agent-test tests/reclaim-scratch.test.mjs` → exit 0, tests 76 pass 76 fail 0. baseline: same command unmutated → exit 0, tests 76 pass 76. The failing-write test chmods the key read-only, so no temp file is ever created and the cleanup cannot matter there.",
+      "suggested_fix": "Make the failure occur at rename (for example a directory named checkout-path, so renameSync fails) and assert no `.checkout-path.*.tmp` remains.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/research/run-artifacts.md",
+      "line": 96,
+      "claim": "The research table row says `--siblings` 'removes other key-shaped roots idle 7 days', which the PR changed to checkout-gone plus idle.",
+      "evidence": "docs/research/run-artifacts.md:96 reads '(4) `--siblings` (`phase0.mjs:356`) removes other *key-shaped* roots idle 7 days'. The diff makes removal depend on the recorded checkout-path being gone, its parent present and the key idle. The file is a dated research snapshot, so the line is arguably historical.",
+      "suggested_fix": "Update the row or leave it, given the file's dated status.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 596,
+      "claim": "checkoutOf returns an untagged union ({none}|{error}|{checkout}) that callers discriminate by testing which property is !== undefined. Nothing prevents an object with several of these keys. The shape is documented only in a comment.",
+      "evidence": "Read lines 575-632. judgeSibling checks `found.error !== undefined`, then `found.none !== undefined`, then destructures `checkout`. The only consumer today is judgeSibling, and each return site sets exactly one key, so there is no live bug.",
+      "suggested_fix": "Add an explicit discriminant such as `{kind:'checkout'|'none'|'error', ...}`, or a JSDoc @typedef union, so the three cases are exclusive and checkable.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 608,
+      "claim": "existsAt returns boolean | Error, and callers branch on `instanceof Error` before testing truthiness. Swapping those two checks would silently treat an unknown state as 'exists'. Nothing but ordering enforces the ordering.",
+      "evidence": "Lines 606-626: `if (at instanceof Error) ... ; if (at) ...` and the same pattern for `up`. The order is correct today.",
+      "suggested_fix": "Return a tri-state string ('exists'|'absent') or `{error}`, so that truthiness can't conflate the cases.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 566,
+      "claim": "The `idle` field on kept[] entries is optional: only sibling-pass entries carry it, and root-sweep entries omit it. The consumer in phase0.mjs depends on `x?.idle === true`, so the receipt shape is documented in a comment but not enforced. Kept entries from the two passes have different shapes.",
+      "evidence": "Line 566 and the re-judge at ~line 757 push `{path, reason, idle}`. The phase0.mjs `unreclaimed` change filters `kept.filter((x) => x?.idle === true)` and does a runtime Array.isArray check on removed and kept. The comment in reclaim-scratch.mjs says kept carries idle only for the sibling pass.",
+      "suggested_fix": "Give every kept[] entry an explicit boolean `idle` (false for the root sweep) so the shape is uniform, or add a shared typedef for the receipt entry.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 589,
+      "claim": "checkoutOf() repeats the key-hash rule inline (`createHash(\"sha256\").update(line).digest(\"hex\").startsWith(suffix)`), and fleet-dir.mjs:160's scratchRoot() has its own copy (`createHash(\"sha256\").update(dir).digest(\"hex\").slice(0, 8)`), so the rule that names a key and the rule that validates its checkout-path can drift apart.",
+      "evidence": "In the scratch copy I added `export function scratchKeyHex(dir) { return createHash(\"sha256\").update(dir).digest(\"hex\").slice(0, 8); }` to fleet-dir.mjs and used it in scratchRoot() (`const hex = scratchKeyHex(dir)`). In checkoutOf I used `if (scratchKeyHex(line) !== suffix)`, and dropped reclaim-scratch's createHash import. `===` gives the same result as `startsWith` because SCRATCH_KEY_SHAPE (/-[0-9a-f]{8}$/) guarantees `basename(key).slice(-8)` is exactly 8 lowercase hex characters for every judged key and for the live root. Result: `node --test --test-reporter=tap tests/reclaim-scratch.test.mjs tests/fleet-dir.test.mjs tests/fleet-dir-layouts.test.mjs tests/scratch-root.test.mjs`, tests 123, pass 123, fail 0. That run includes the mismatch-suffix test ('a sibling key with no checkout-path, one holding a relative path, or one whose path does not hash…') and the scratch-root hash tests.",
+      "suggested_fix": "Export one `scratchKeyHex(dir)` from fleet-dir.mjs beside SCRATCH_KEY_SHAPE. Use it in scratchRoot() and in checkoutOf (`if (scratchKeyHex(line) !== suffix) return …`), and remove the createHash import from reclaim-scratch.mjs.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 578,
+      "claim": "checkoutOf() returns three result shapes (`{checkout}`, `{none}`, `{error}`), but both callers treat `none` and `error` the same way: judgeSibling keeps the key in both cases and only adds a `no checkout file: ` prefix to `none`, and writeCheckout only tests `.checkout`. So checkoutOf could return the final reason itself and drop one branch and one result field.",
+      "evidence": "In the scratch copy, checkoutOf returns `{ reason: `no checkout file: ${…}` }` for every former `none` case and `{ reason: `its ${CHECKOUT_FILE} cannot be read: ${e.message}` }` for the former `error` case. judgeSibling's two lines (`if (found.error !== undefined) return keep(found.error); if (found.none !== undefined) return keep(`no checkout file: ${found.none}`);`) became `if (found.reason !== undefined) return keep(found.reason);`. Every reason string stays byte-identical. Result: the same targeted TAP run, 123/123 pass, including the tests that check kept reasons against /^no checkout file: / and the exact checkout-path write/rewrite tests.",
+      "suggested_fix": "function checkoutOf(key) → `{ checkout }` | `{ reason }`, where `reason` is the full keep reason: `no checkout file: checkout-path is missing`, `no checkout file: checkout-path cannot be read (EACCES)`, `its checkout-path cannot be read: <msg>`, and so on. In judgeSibling: `if (found.reason !== undefined) return keep(found.reason);`. Update the comment above checkoutOf to describe the two shapes.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 629,
+      "claim": "judgeSibling's final `return { remove: true, …, idle }` passes a variable that can only be `true` there, because the line just before it, `if (!idle) return keep(…)`, has already returned whenever idle is false. Writing `idle: true` says this directly.",
+      "evidence": "Control flow at snapshot lines 627-629: `if (!idle) return keep(\"sibling key modified within 7 days\"); if (unreadable.length > 0) return keep(…); return { remove: true, reason: …, idle };`. In the scratch copy I replaced the last field with `idle: true`. Result: the same targeted TAP run, 123/123 pass. Also, judgeSiblings (line 565) and main's recheck (line 756) never read `idle` from a verdict with remove:true. They push `{path, reason}` to remove[] or `continue` past it, so the field is unread on that path either way.",
+      "suggested_fix": "`return { remove: true, reason: `its checkout ${checkout} is gone and nothing under it changed in 7 days` };`, dropping `idle` because no caller reads it when remove is true. If the verdict should keep one uniform shape, write `idle: true` instead.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

@@ -1,0 +1,92 @@
+{
+  "pr": 4299,
+  "head": "a9fe16b8a6d199b4892288f51f59db84b3ef7898",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I read-only inspected the diff and snapshot and wrote nothing there, so these modifications were not made by me. Neither file appears in pr.diff."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I did not edit anything there, and I read only the snapshot's diff files and the scratch directory. These modifications were present when I ran the audit and are not from my commands."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv' (I wrote nothing there; my only access to that tree was reading .fleet/ archive files. These are the controller's own mid-run metrics writes; the PR 4294 review record shows other dimensions finding the same two files modified on an earlier run.)"
+    }
+  ],
+  "counts": {
+    "survived": 1,
+    "refuted": 0,
+    "unverified": 2,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4299/run-TubTsNFn/snapshot-a9fe16b8",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "tests/reap.test.mjs",
+      "line": 2564,
+      "claim": "Six tests fail only because the harness exports GIT_SEQUENCE_EDITOR=true, not because of anything in PR #4299. The env var overrides each fixture's `-c sequence.editor=sed -i.bak s/^pick/edit/`, so the `rebase -i` never stops and the fixture's own 'must be detached' assertion fails. The failing tests: reap.test.mjs:2576 \"a [gone] branch held by a worktree stopped mid-`rebase -i` is kept (#2219)\"; reap.test.mjs:2596 \"a [gone] branch whose holder check cannot read a worktree's rebase state is kept as unknown (#2219)\"; release-ticket.test.mjs:3133 \"a sibling worktree stopped mid-`rebase -i` on the claim branch halts the delete (#2218)\"; release-ticket.test.mjs:3198 \"a sibling stopped mid-rebase whose admin HEAD is corrupted still halts the delete, resolved as held (#2218)\"; release-ticket.test.mjs:3248 \"a prunable sibling that genuinely holds the claim via a stopped rebase still halts the delete (#2218)\"; release-ticket.test.mjs:3265 \"a sibling's rebase-merge admin subdirectory unsearchable halts the delete as unknown, too (#2218)\".",
+      "evidence": "red: ./agent-test tests/reap.test.mjs tests/release-ticket.test.mjs → exit 1, fail 6 incl all six named tests (tests 421, pass 415; each fails with 'fixture: the worktree/sibling must be detached, or the porcelain `branch` line already answers', the same as the shared run test-run.log:9723-9837); baseline: env -u GIT_SEQUENCE_EDITOR ./agent-test tests/reap.test.mjs tests/release-ticket.test.mjs → exit 0, tests 421 pass 421, all six named tests pass. Root cause probe (git 2.54.0, scratch repo): `env | grep ^GIT_` prints GIT_EDITOR=true and GIT_SEQUENCE_EDITOR=true. With them inherited, `git -c sequence.editor='sed -i.bak s/^pick/edit/' rebase -i HEAD~1` prints 'Successfully rebased and updated refs/heads/feat' and `worktree list --porcelain` shows `branch refs/heads/feat`. Under `env -u GIT_SEQUENCE_EDITOR -u GIT_EDITOR` the same command prints 'Stopped at 7992fbd... # c2' and the listing shows `detached`. The ENV objects at reap.test.mjs:26 and release-ticket.test.mjs:37 spread process.env and clear GIT_DIR/GIT_WORK_TREE/GIT_TEMPLATE_DIR/GIT_INDEX_FILE but not GIT_SEQUENCE_EDITOR or GIT_EDITOR. PR #4299 changes no file under tests/ or plugin/ (all 63 diff paths are docs/metrics/**), so this red belongs to the tree on main and the agent environment, not to the PR. It should not block the PR. Reproduce in the worktree before acting.",
+      "suggested_fix": "In a separate ticket, not this PR: add `GIT_SEQUENCE_EDITOR: undefined, GIT_EDITOR: undefined` to ENV in tests/reap.test.mjs and tests/release-ticket.test.mjs, or pass the edit editor through env the way reap.test.mjs:3199 and worktree-audit.test.mjs:149 already do. That also keeps reap.test.mjs:2648 (\"a worktree mid-rebase of a DIFFERENT branch...\") from passing without its fixture, which happens under this env because its rebase never stops either. I did not run a mutant to show that vacuous pass; it is inferred from the probe.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "red: ./agent-test tests/reap.test.mjs tests/release-ticket.test.mjs → exit non-zero run, tests 421 pass 415 fail 6; baseline: env -u GIT_SEQUENCE_EDITOR ./agent-test tests/reap.test.mjs tests/release-ticket.test.mjs → tests 421 pass 421 fail 0. Ran in my own copy of the snapshot; the environment has GIT_EDITOR=true and GIT_SEQUENCE_EDITOR=true set. Unsetting GIT_SEQUENCE_EDITOR alone fixes all 6, which confirms the env var is the cause. I did not capture the six test names from the failing run, only the counts. All 63 diff paths are under docs/metrics (0 outside). CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv' (modified before my work; I wrote only to scratch)"
+        },
+        {
+          "refuted": false,
+          "reason": "The claim reproduces in my own copy of the snapshot. Test entrypoint `./agent-test`, Install step `true`. red: env -u FORCE_COLOR ./agent-test tests/reap.test.mjs tests/release-ticket.test.mjs → ℹ tests 421, pass 415, fail 6 (I only counted the summary and did not match the six test names; the exit code was not captured). baseline: same command with env -u GIT_SEQUENCE_EDITOR -u GIT_EDITOR → ℹ tests 421, pass 421, fail 0. The ambient env has GIT_EDITOR=true and GIT_SEQUENCE_EDITOR=true, and unsetting them turns the run green, so the injection reached the tests. The weaker part is the claim that the PR changes no tests/ or plugin/ files; I did not check that against pr.diff. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I ran nothing in that directory (all runs were in the scratch dir), so those two modifications were already there."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "docs/metrics/runs/2026-10-18T000116Z/ledger.md",
+      "claim": "Scope: the PR creates two new record trees, docs/metrics/runs/ (61 files) and docs/metrics/reviews/4294/ (2 files). No tracked script produces or reads them, and no tracked ADR or component doc defines them. closeout.mjs commits only the three docs/metrics/*.tsv files (METRICS, closeout.mjs:161), so the shape of these files is not pinned by any code or test in this tree.",
+      "evidence": "grep `docs/metrics/(runs|reviews)` and `metrics/runs|run-records|catch-up|Rows changed` over copy/plugin, copy/tests, copy/docs/adr, copy/docs/components and ~/.fleet/bin/fleet-run: the only hits are inside the added records themselves, plus the closeout.mjs:418 body template, which has the same 'Rows changed:' shape. Before this PR, docs/metrics held only member-outcomes.tsv, pricing.json, ticket-features.tsv and tier-outcomes.tsv (glob of the copy minus the 63 diff paths = 4 files). The content itself is internally consistent: 0 dangling archive stamps, the files match the local .fleet archives one-to-one, and the only difference is the deliberate redaction.",
+      "suggested_fix": "If this record format is meant to last, land its producer and a short doc or ADR (layout: a dir stamp is the rotation time, and its contents describe the run before it) in the same change or one linked to it, so a later reader of docs/metrics/runs/ can find its contract.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/metrics/runs/2026-10-18T000116Z/phase0.json",
+      "line": 3,
+      "claim": "The records publish local absolute paths and session identifiers verbatim: /Users/chris/..., omp session paths with UUIDs, scratch dirs and verdictPath entries in dispositions-fix-pr-4294.json. Only the Recipe command line in phase0.json is redacted; closeout.json, ledger.md and the review records are byte-identical to their local originals.",
+      "evidence": "Script diff of all 16 phase0.json files against /Users/chris/dev/fleet-plugin/.fleet/phase0.<stamp>.json: the one change is `\"output\": \"withheld: the Recipe's command lines can carry environment assignments\"` (16×). Closeout and ledger files compared equal to their archives, and `cmp` reports review.json and dispositions-fix-pr-4294.json identical to the scratch originals. phase0.json:3 holds `\"session\": \"/Users/chris/.omp/agent/sessions/-dev-fleet-plugin/2026-10-17T06-37-13-170Z_01a14894-...\"`. The secret-pattern grep found no credentials.",
+      "suggested_fix": "Confirm that publishing host-local paths in a tracked tree is intended. If not, have the producer relativize or strip $HOME/scratch/session paths the way it already withholds the Recipe line.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

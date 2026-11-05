@@ -1,0 +1,134 @@
+{
+  "head": "8989a3bccc1cce9cdc8674b091eb2bc0256f97f8",
+  "run": "run-1nx9hJQh",
+  "entries": [
+    {
+      "bucket": "survived",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "charge": "unmet",
+      "remedyFiles": [
+        "plugin/scripts/ledger.mjs",
+        "tests/ledger-dispatch.test.mjs",
+        "tests/support/queue-gh.mjs",
+        "tests/dispositions-check.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4330/fix-kckvVDFc/u0/verdict.json",
+      "disposition": "defer",
+      "reason": "refuted: ownClosingIssues already dedupes every caller's numbers through a Set, so no reference repeats (refuter probe)",
+      "issue": 4334
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4330/fix-kckvVDFc/u1/verdict.json",
+      "disposition": "defer",
+      "reason": "refuted: the Label map stores the tracker's own spelling and ensure re-derives a case change; every other label consumer compares exact-case",
+      "issue": 4334
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4330/fix-kckvVDFc/u2/verdict.json",
+      "disposition": "apply",
+      "remedyFiles": [
+        "plugin/scripts/ledger.mjs",
+        "tests/ledger-settle-report.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4330/fix-kckvVDFc/u3/verdict.json",
+      "disposition": "apply",
+      "remedyFiles": []
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4330/fix-kckvVDFc/u4/verdict.json",
+      "disposition": "defer",
+      "reason": "refuted: the refuter found a surviving mutant of issueRead's title-type guard, so the no-gap claim is false; the residual test gap is recorded below the claim bar on #4334",
+      "issue": 4334
+    },
+    {
+      "bucket": "unverified",
+      "index": 5,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4330/fix-kckvVDFc/u5/verdict.json",
+      "disposition": "apply",
+      "remedyFiles": [
+        "tests/dispositions-check.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 6,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4330/fix-kckvVDFc/u6/verdict.json",
+      "disposition": "defer",
+      "reason": "refuted: release-ticket.sh blocks such a claim and reap.sh never selects it (refuter fixture run); the sentence is the ticket's prescribed wording",
+      "issue": 4334
+    },
+    {
+      "bucket": "unverified",
+      "index": 7,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4330/fix-kckvVDFc/u7/verdict.json",
+      "disposition": "defer",
+      "reason": "refuted: not a defect; the finding's own remedy is no change, and the tests the PR body names are present",
+      "issue": 4334
+    },
+    {
+      "bucket": "unverified",
+      "index": 8,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4330/fix-kckvVDFc/u8/verdict.json",
+      "disposition": "defer",
+      "reason": "refuted: undefined is unreachable on both callers, and the finding's own remedy says no change is required",
+      "issue": 4334
+    },
+    {
+      "bucket": "unverified",
+      "index": 9,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4330/fix-kckvVDFc/u9/verdict.json",
+      "disposition": "apply",
+      "remedyFiles": [
+        "plugin/scripts/ledger.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 10,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4330/fix-kckvVDFc/u10/verdict.json",
+      "disposition": "apply",
+      "remedyFiles": [
+        "tests/dispositions-check.test.mjs"
+      ]
+    }
+  ]
+}

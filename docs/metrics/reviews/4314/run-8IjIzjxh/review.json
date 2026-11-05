@@ -1,0 +1,203 @@
+{
+  "pr": 4314,
+  "head": "6f2fdceb4178f6fb7e0b508dfb91e3003ff1c334",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (I did not write these; presumably from the shared pre-dispatch test run, to be accounted for by the controller)"
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I did not write to this checkout; the two modified files were already there."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. I only ran read-only commands there (pwd, git status) and never wrote to it, so I cannot account for these two modifications; they come from another process."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv` (not written by this review: my only commands against that path were `pwd`, `git remote get-url origin` and this `git status`; every write went to the snapshot copy or correctness/)"
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. In that directory this pass ran only `pwd` and this read-only `git status`, and wrote nothing."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I did not write to this checkout, and those two files are metrics tables, probably touched by another agent or process."
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 11,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4314/run-8IjIzjxh/snapshot-6f2fdceb",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 262,
+      "claim": "A digits-only cell long enough to overflow Number() (e.g. '1' followed by 400 zeros, or 309+ nines) passes isDigits(), reads as Infinity and silently routes to `<input>><cut>`, while before the PR the same cell read as null and stayed at the node. The ticket lists 'an overflow like 1e400' among the values that should be refused, so overflow is only refused in exponent form.",
+      "evidence": "correctness/probe.mjs on the copy, table {splits:{'*':{input:'brief_chars',cut:4047}}}: `\"100000000000\" 401 -> brief_chars>4047`, `\"999999999999\" 309 -> brief_chars>4047`. `node -e` comparing old and new logic for '1'+'0'.repeat(400) printed `old: null new: Infinity`. This is only reachable through a hand-edited features TSV (issueMetrics writes String(int)), so it is low-impact.",
+      "suggested_fix": "After the isDigits check, also refuse when `!Number.isSafeInteger(Number(s))` (or `!Number.isFinite`), using the same AttributionError message, and add one overflow digit string to CORRUPT_COUNTS.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 236,
+      "claim": "The rewritten block comment adds text to the end of an existing line instead of reflowing it, so line 236 is much wider than the lines around it, which are wrapped at about 80 columns.",
+      "evidence": "`sed -n 225,275p plugin/scripts/ticket-router.mjs` in the snapshot shows line 236, `// node's own row routes it. A number input's column that is neither blank nor a plain count (digits alone) is bad input: the walk refuses it. Every node, inner nodes and root included, holds a`, between lines of about 80 characters. Style only; no behavior impact.",
+      "suggested_fix": "Re-wrap the paragraph at the surrounding width.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 262,
+      "claim": "`isDigits` accepts a digit string too long for a finite Number, so a corrupt column of 400+ digits becomes `Infinity` and is routed silently to the `>` side of a cut. Before the diff, the same `Number.isFinite` guard sent it to the 'lacks the input' path.",
+      "evidence": "Probe: `stratumOf({splits:{'*':{input:'brief_chars',cut:5000}}}, {brief_chars:'1'+'0'.repeat(400)})` printed `brief_chars>5000`. `Number()` of that string is Infinity and nothing throws. Fullwidth digits ('５０００') and '5000\\n' do throw as intended.",
+      "suggested_fix": "After `isDigits(s)`, also refuse a value where `!Number.isSafeInteger(Number(s))`. Both cases then throw AttributionError.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 264,
+      "claim": "The AttributionError message interpolates the raw bad value inside single quotes. A value containing a newline or other control characters makes the refusal span several lines on stderr.",
+      "evidence": "Probe: `stratumOf(..., {brief_chars:'5000\\n'})` threw a message with a literal newline between `'5000` and `'`, `which a split reads...`. The new test CORRUPT_COUNTS includes '5000\\n' and asserts the message with raw `includes`, so it pins this behaviour.",
+      "suggested_fix": "Use `JSON.stringify(s)` in the message, or escape control characters, and adjust the test's expected substring.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 1034,
+      "claim": "The new throw is surfaced loudly and not swallowed, but it lands in only one of the callers, and `fit --due` does not walk the tree. `joined()` converts the AttributionError to exit 2 for `fit` and `--check`. `fit --due` does not call `stratum`, so it can print DUE=yes while the following `fit` refuses. Separately, metrics-refresh's `fit()` downgrades the same throw to a `fit: failed — …` line and keeps the run's exit unchanged. That downgrade was already the design.",
+      "evidence": "Read of `joined` (catch narrowed to RulingError/AttributionError, rethrows anything else) and of metrics-refresh.mjs `fit()`, which catches and calls `say('fit: failed — …')`. `attribute()` calls `stratum(pull)` only for in-window pulls (pull-attribution.mjs:325 and :401), so a corrupt row dated before window_start is not read. The live `route()` path feeds `issueMetrics` output (digit strings or blank) to `stratumOf`, and I found no way to make it produce a non-digit number column. `route`'s exit-0 contract is therefore not newly at risk.",
+      "suggested_fix": "None required. Optionally note in the --due help or comment that DUE=yes does not imply the fit will pass.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/ticket-router.test.mjs",
+      "claim": "The new tests discriminate: removing the digits guard, loosening it with trim(), changing blank handling, the parsed value, the parent default or the ticket-prefixed message each makes a named test fail, and the equivalent regex rewrite correctly stays green. I found no surviving mutants.",
+      "evidence": "red: ./agent-test tests/ticket-router.test.mjs → exit 1, fail 3 incl 'stratumOf refuses a column a number split reads that is neither blank nor a plain count, naming the column and value' (mutants 1 and 7; mutant 2 fail 2); baseline: ./agent-test tests/ticket-router.test.mjs → exit 0, tests 168 pass 168. Other kills in the same narrowed run: mutant 4 fails 'stratumOf: a ticket that lacks the input a split reads stays at that node'; mutant 5 fails 'stratumOf: a number split sends a ticket past the cut'; mutant 6 fails 'stratumOf: a parent split puts a Slice in parent>0'.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 255,
+      "claim": "The 'number input columns hold a plain count or blank' invariant is enforced only at the walk (inputOf, on the one column a split reads), not at parse time; parseFeatures still yields raw strings, so a corrupt column is representable in the row type and detected lazily.",
+      "evidence": "Read inputOf: it calls isDigits(s) and throws AttributionError; sole caller at line 298 in the walk. The PR's own test 'parseFeatures reads past a corrupt number column' confirms parse accepts such rows by design. Intentional (documented in the header comment and enforced at the single read site), so it is a design note, not a defect. Code is untyped JS, so no compile-time alternative exists here.",
+      "suggested_fix": "None required; the single read site and the doc comment are consistent.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 259,
+      "claim": "Number(s) after isDigits can yield a number beyond safe-integer range for very long digit strings, silently losing precision when compared to the cut.",
+      "evidence": "isDigits is /^[0-9]+$/ (arg.mjs:315) with no length bound; Number('9'.repeat(30)) is inexact. Reasoned, not executed; practically irrelevant for char/count metrics.",
+      "suggested_fix": "Optional: ignore, or bound digit length.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 260,
+      "claim": "In inputOf, the two blank checks in a row, `if (input === \"parent\" && s === \"\") return 0;` and then `if (s === \"\") return null;`, test `s === \"\"` twice and can be one line.",
+      "evidence": "In the copy I replaced lines 260-261 with `if (s === \"\") return input === \"parent\" ? 0 : null;` and ran `node --test --test-reporter=tap tests/ticket-router.test.mjs`. Result: exit=0, `# tests 168`, `# pass 168`, `# fail 0`. Every non-blank `s` still falls through to the isDigits check unchanged, so behaviour is the same by construction.",
+      "suggested_fix": "`if (s === \"\") return input === \"parent\" ? 0 : null;` placed before the `if (!isDigits(s))` refusal.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/ticket-router.test.mjs",
+      "line": 911,
+      "claim": "The two new stratumOf tests each build the same two-level tree as a local `deep` (lines 911 and 922 are byte-identical). The tree also respells the existing module constant SPLITS (line 43) and could be one module-level fixture next to CORRUPT_COUNTS, following the existing DEEP/DEEP_NODES pattern at lines 724-727.",
+      "evidence": "`sed -n 911p | md5` and `sed -n 922p | md5` both print e3b4f2798abd5f150dac9d53e6149870. In the copy I added `const CRITERIA_BELOW = treeOf({ ...SPLITS, [BELOW]: { input: \"criteria\", cut: 2 } }, [\"*\", ABOVE, BELOW, `${BELOW}&criteria>2`, `${BELOW}&criteria<=2`]);` after CORRUPT_COUNTS and pointed both tests at it. The tap run gave exit=0, 168/168 pass. The name `DEEP` is already taken: my first try failed with `SyntaxError: Identifier 'DEEP' has already been declared`, because line 726 declares DEEP.",
+      "suggested_fix": "Hoist it as `const CRITERIA_BELOW = treeOf({ ...SPLITS, [BELOW]: { input: \"criteria\", cut: 2 } }, [...])` (any name other than DEEP) and use it in both tests.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/ticket-router.test.mjs",
+      "line": 919,
+      "claim": "`assert.equal(stratumOf(table, { brief_chars: \"\", criteria: bad }), \"*\", \"an unread issue holds no input\")` sits inside the CORRUPT_COUNTS loop, but its result cannot depend on `bad`: `table` splits only on brief_chars, so criteria is never read. The loop repeats one fixed check 16 times and never exercises the unread-issue guard against a corrupt value.",
+      "evidence": "Mutant: in the copy I changed ticket-router.mjs:257 to `if (false) return null;`, which disables the unread-issue guard. `node --test --test-reporter=tap --test-name-pattern='reads past a corrupt column no split' tests/ticket-router.test.mjs` still gave `ok 1`, pass 1, fail 0. The guard is pinned elsewhere: on the full file the same mutant fails 3 other tests (#48, #49, #53). Probe on the original code with a criteria-root split `{ \"*\": { input: \"criteria\", cut: 2 } }`: stratumOf(t, { brief_chars: \"\", criteria: \"abc\" }) returns \"*\", and with \"5e3\" also \"*\". Under the mutant both throw `a ticket-features row's criteria is 'abc', which a split reads…`. So pointed at a criteria split, this assertion would actually pin the guard.",
+      "suggested_fix": "Move the assertion out of the loop as one plain check, or keep it in the loop but run it against a tree that splits on criteria at the root, e.g. `treeOf({ \"*\": { input: \"criteria\", cut: 2 } }, [\"*\", \"criteria>2\", \"criteria<=2\"])`, so `bad` is actually read when the guard is missing.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

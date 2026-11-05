@@ -1,0 +1,118 @@
+{
+ "head": "fc884db404599b80f547a9dca0060f3675faa963",
+ "run": "run-v3fP81Ns",
+ "entries": [
+  {
+   "bucket": "survived",
+   "index": 0,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "reason": "false-rationale",
+   "issue": 4323
+  },
+  {
+   "bucket": "unverified",
+   "index": 0,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "reason": "refuter refuted: removing --dry-run is the ruled scope and no caller passes it; deferral on closed wontfix #4323 stands, no re-open trigger fired; ruled by fix-pr-4320 in dispositions-fix-pr-4320.json (dispositions-ok=fix-pr-4320:run-v3fP81Ns); re-verified by fix-pr-4320-c on rebased head e7abf4d7",
+   "issue": 4323,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4320/fix-Zf64arFf/U0/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 1,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "defer",
+   "reason": "refuter refuted: alleges no defect, remedy null; deferral on closed wontfix #4323 stands, no re-open trigger fired; ruled by fix-pr-4320 in dispositions-fix-pr-4320.json (dispositions-ok=fix-pr-4320:run-v3fP81Ns); re-verified by fix-pr-4320-c on rebased head e7abf4d7",
+   "issue": 4323,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4320/fix-Zf64arFf/U1/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 2,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "defer",
+   "reason": "alleges no defect (removed modes fail loudly, reproduced); remedy null, nothing to apply; below the claim bar; deferral on closed wontfix #4323 stands, no re-open trigger fired; ruled by fix-pr-4320 in dispositions-fix-pr-4320.json (dispositions-ok=fix-pr-4320:run-v3fP81Ns); re-verified by fix-pr-4320-c on rebased head e7abf4d7",
+   "issue": 4323,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4320/fix-Zf64arFf/U2/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 3,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "reason": "refuter refuted: pre-existing --check test gap, --check deleted by #4321; deferral on closed wontfix #4323 stands, no re-open trigger fired; ruled by fix-pr-4320 in dispositions-fix-pr-4320.json (dispositions-ok=fix-pr-4320:run-v3fP81Ns); re-verified by fix-pr-4320-c on rebased head e7abf4d7",
+   "issue": 4323,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4320/fix-Zf64arFf/U3/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 4,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "reason": "refuter refuted: fitTable still serves an in-process fit, header accurate; deferral on closed wontfix #4323 stands, no re-open trigger fired; ruled by fix-pr-4320 in dispositions-fix-pr-4320.json (dispositions-ok=fix-pr-4320:run-v3fP81Ns); re-verified by fix-pr-4320-c on rebased head e7abf4d7",
+   "issue": 4323,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4320/fix-Zf64arFf/U4/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 5,
+   "scope": "out",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "reason": "out of scope (#4246); refuter refuted; deferral on closed wontfix #4323 stands, no re-open trigger fired; ruled by fix-pr-4320 in dispositions-fix-pr-4320.json (dispositions-ok=fix-pr-4320:run-v3fP81Ns); re-verified by fix-pr-4320-c on rebased head e7abf4d7",
+   "issue": 4323,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4320/fix-Zf64arFf/U5/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 6,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "defer",
+   "reason": "refuter refuted: alleges no defect, remedy null; deferral on closed wontfix #4323 stands, no re-open trigger fired; ruled by fix-pr-4320 in dispositions-fix-pr-4320.json (dispositions-ok=fix-pr-4320:run-v3fP81Ns); re-verified by fix-pr-4320-c on rebased head e7abf4d7",
+   "issue": 4323,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4320/fix-Zf64arFf/U6/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 7,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4320/fix-Zf64arFf/U7/verdict.json",
+   "remedyFiles": [
+    ".omp/skills/run-team-local/hook.mjs"
+   ],
+   "reason": "applied at 93ca6f67, carried unchanged by the rebase to e7abf4d7 (git range-diff 93ca6f67 = e7abf4d7); ruled by fix-pr-4320 in dispositions-fix-pr-4320.json (dispositions-ok=fix-pr-4320:run-v3fP81Ns); re-verified by fix-pr-4320-c on rebased head e7abf4d7"
+  },
+  {
+   "bucket": "unverified",
+   "index": 8,
+   "scope": "out",
+   "claimKind": "shape",
+   "disposition": "defer",
+   "reason": "out of scope (--check tail, removed by #4321), below the claim bar; deferral on closed wontfix #4323 stands, no re-open trigger fired; ruled by fix-pr-4320 in dispositions-fix-pr-4320.json (dispositions-ok=fix-pr-4320:run-v3fP81Ns); re-verified by fix-pr-4320-c on rebased head e7abf4d7",
+   "issue": 4323
+  },
+  {
+   "bucket": "unverified",
+   "index": 9,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4320/fix-Zf64arFf/U9/verdict.json",
+   "remedyFiles": [
+    "tests/ticket-router.test.mjs"
+   ],
+   "reason": "applied at 93ca6f67, carried unchanged by the rebase to e7abf4d7 (git range-diff 93ca6f67 = e7abf4d7); ruled by fix-pr-4320 in dispositions-fix-pr-4320.json (dispositions-ok=fix-pr-4320:run-v3fP81Ns); re-verified by fix-pr-4320-c on rebased head e7abf4d7"
+  }
+ ]
+}

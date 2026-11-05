@@ -1,0 +1,196 @@
+{
+  "head": "7eaf99312d21990ba456d064ad8bef90c21e1c3a",
+  "run": "run-cxijVx4u",
+  "entries": [
+    {
+      "bucket": "survived",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "charge": "none",
+      "chargeReason": "defect-outside-acceptance"
+    },
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4343/fix-RbwyOYhR/u0/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4343/fix-RbwyOYhR/u1/verdict.json",
+      "issue": 4345
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4343/fix-RbwyOYhR/u2/verdict.json",
+      "issue": 4345
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4343/fix-RbwyOYhR/u3/verdict.json",
+      "issue": 4345
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4343/fix-RbwyOYhR/u4/verdict.json",
+      "issue": 4345
+    },
+    {
+      "bucket": "unverified",
+      "index": 5,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4343/fix-RbwyOYhR/u5/verdict.json",
+      "issue": 4345
+    },
+    {
+      "bucket": "unverified",
+      "index": 6,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4343/fix-RbwyOYhR/u6/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 7,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4343/fix-RbwyOYhR/u7/verdict.json",
+      "issue": 4345
+    },
+    {
+      "bucket": "unverified",
+      "index": 8,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4343/fix-RbwyOYhR/u8/verdict.json",
+      "issue": 4344,
+      "reason": "remedy-worse"
+    },
+    {
+      "bucket": "unverified",
+      "index": 9,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4343/fix-RbwyOYhR/u9/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 10,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4343/fix-RbwyOYhR/u10/verdict.json",
+      "issue": 4345
+    },
+    {
+      "bucket": "unverified",
+      "index": 11,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4343/fix-RbwyOYhR/u11/verdict.json",
+      "issue": 4345
+    },
+    {
+      "bucket": "unverified",
+      "index": 12,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4343/fix-RbwyOYhR/u12/verdict.json",
+      "issue": 4345
+    },
+    {
+      "bucket": "unverified",
+      "index": 13,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4343/fix-RbwyOYhR/u13/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 14,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4343/fix-RbwyOYhR/u14/verdict.json",
+      "issue": 4345
+    },
+    {
+      "bucket": "unverified",
+      "index": 15,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4343/fix-RbwyOYhR/u15/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 16,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4343/fix-RbwyOYhR/u16/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 17,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4343/fix-RbwyOYhR/u17/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 18,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4343/fix-RbwyOYhR/u18/verdict.json",
+      "issue": 4345
+    },
+    {
+      "bucket": "unverified",
+      "index": 19,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4343/fix-RbwyOYhR/u19/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 20,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4343/fix-RbwyOYhR/u20/verdict.json"
+    }
+  ]
+}

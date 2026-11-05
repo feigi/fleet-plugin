@@ -1,0 +1,227 @@
+{
+ "head": "e8fb4d1241b9bd8c3ce3c0adcee2e025e8a3718a",
+ "run": "run-lzb9qEys",
+ "entries": [
+  {
+   "bucket": "survived",
+   "index": 0,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "charge": "unmet",
+   "reason": "Applied the finding's second remedy: the heading says 'burn-in ended' only when every listed count reaches 20; a starting table out of burn-in beside short cost-guard counts reads 'no burn-in: the starting table routes without it, though only N of 3 ...'. Not the first remedy (the starting table's own guard.n): the day-one starting table holds `guard.n` {} (tests/support/day-one-router-table.mjs), so it would replace the cost guard's live progress with empty counts.",
+   "remedyFiles": [
+    "plugin/scripts/compute-cell-evidence.mjs",
+    "tests/compute-cell-evidence.test.mjs"
+   ]
+  },
+  {
+   "bucket": "survived",
+   "index": 1,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "charge": "none",
+   "chargeReason": "defect-outside-acceptance",
+   "remedyFiles": [
+    "plugin/scripts/compute-cell-evidence.mjs",
+    "tests/compute-cell-evidence.test.mjs"
+   ]
+  },
+  {
+   "bucket": "survived",
+   "index": 2,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "charge": "false-claim",
+   "reason": "routingTable's comment as submitted said the tab falls back to the starting table 'as route falls back to it when the Fit is missing, unreadable or invalid'; readFitFile refused Fits readFitBeside routes by (probe in unverified[1]'s verdict). Applied the primary remedy: readFitFile reads by validateTable alone, display-only fields null where malformed and worded 'not checked'.",
+   "remedyFiles": [
+    "plugin/scripts/board-gather.mjs",
+    "plugin/scripts/compute-cell-evidence.mjs",
+    "tests/board-cell-evidence-gather.test.mjs",
+    "tests/compute-cell-evidence.test.mjs",
+    "tests/cell-evidence-alerts.test.mjs"
+   ]
+  },
+  {
+   "bucket": "survived",
+   "index": 3,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "charge": "none",
+   "chargeReason": "defect-outside-acceptance",
+   "remedyFiles": [
+    "tests/compute-cell-evidence.test.mjs"
+   ]
+  },
+  {
+   "bucket": "survived",
+   "index": 4,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "charge": "none",
+   "chargeReason": "defect-outside-acceptance",
+   "remedyFiles": [
+    "tests/compute-cell-evidence.test.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 0,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "remedyFiles": [
+    "plugin/scripts/board-gather.mjs",
+    "tests/board-cell-evidence-gather.test.mjs"
+   ],
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4319/fix-vDM3mciD/u0/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 1,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "issue": 4324,
+   "reason": "refuted: refuter confirmed the divergence but refuted the remedy as written (validateTable alone does not cover the fields the tab prints); the same claim landed via survived[2]",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4319/fix-vDM3mciD/u1/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 2,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "remedyFiles": [
+    "plugin/scripts/board.html",
+    "tests/cockpit-tabs.test.mjs"
+   ],
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4319/fix-vDM3mciD/u2/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 3,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "issue": 4324,
+   "reason": "refuted: the exploration Cells need an install read by the slice's spec; the retired inputs the acceptance names are retired; the remedy changes no code",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4319/fix-vDM3mciD/u3/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 4,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "remedyFiles": [
+    "plugin/scripts/board-gather.mjs",
+    "tests/board-cell-evidence-gather.test.mjs"
+   ],
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4319/fix-vDM3mciD/u4/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 5,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "remedyFiles": [
+    "tests/board-cell-evidence-gather.test.mjs"
+   ],
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4319/fix-vDM3mciD/u5/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 6,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "remedyFiles": [
+    "tests/compute-cell-evidence.test.mjs"
+   ],
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4319/fix-vDM3mciD/u6/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 7,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "defer",
+   "issue": 4324,
+   "reason": "refuted: `omp models` is the command, `--json` its output flag, and the same jsdoc names `omp config get modelRoles` flagless too",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4319/fix-vDM3mciD/u7/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 8,
+   "scope": "out",
+   "claimKind": "shape",
+   "disposition": "defer",
+   "issue": 4324,
+   "reason": "out of scope (the card's Cell line is #4237's) and below the claim bar: the claim says the jsdoc is accurate and asks for clearer wording"
+  },
+  {
+   "bucket": "unverified",
+   "index": 9,
+   "scope": "out",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "issue": 4324,
+   "reason": "refuted: the stale spec text is real but amending it is #4247's, open and due once #4245 and #4246 land",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4319/fix-vDM3mciD/u9/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 10,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "remedyFiles": [
+    "plugin/scripts/compute-cell-evidence.mjs"
+   ],
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4319/fix-vDM3mciD/u10/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 11,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "remedyFiles": [
+    "plugin/scripts/compute-cell-evidence.mjs"
+   ],
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4319/fix-vDM3mciD/u11/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 12,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "remedyFiles": [
+    "plugin/scripts/board-gather.mjs"
+   ],
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4319/fix-vDM3mciD/u12/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 13,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "remedyFiles": [
+    "plugin/scripts/compute-cell-evidence.mjs",
+    "plugin/scripts/board-gather.mjs",
+    "plugin/scripts/ticket-router.mjs",
+    "tests/compute-cell-evidence.test.mjs",
+    "tests/board-cell-evidence-gather.test.mjs"
+   ],
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4319/fix-vDM3mciD/u13/verdict.json"
+  }
+ ]
+}

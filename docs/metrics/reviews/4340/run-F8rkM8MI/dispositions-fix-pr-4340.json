@@ -1,0 +1,111 @@
+{
+ "head": "4880fcf2fa9f2a11d0ce1b29d01b28b66123a4ae",
+ "run": "run-F8rkM8MI",
+ "entries": [
+  {
+   "bucket": "unverified",
+   "index": 0,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4340/fix-QzfjUA1r/u0/verdict.json",
+   "remedyFiles": [
+    "plugin/scripts/derive-testcmd.sh"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 1,
+   "scope": "out",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "reason": "out of the ticket's scope (review-eval.mjs is not in #4046's interfaces or the diff); its refuter let the claim survive, so it files open needs-triage",
+   "issue": 4341,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4340/fix-QzfjUA1r/u1/verdict.json",
+   "remedyFiles": [
+    "plugin/scripts/review-eval.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 2,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "reason": "refuted: the missing-origin/main state is unreachable (claim-ticket.sh dies first) and the refusal is surfaced; the comment's operative claim holds",
+   "issue": 4342,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4340/fix-QzfjUA1r/u2/verdict.json",
+   "remedyFiles": [
+    "plugin/scripts/review-core.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 3,
+   "scope": "out",
+   "claimKind": "shape",
+   "disposition": "defer",
+   "reason": "below the claim bar: #4046 rules the ADR body unchanged and the amendment onto the Status line, which carries it",
+   "issue": 4342,
+   "remedyFiles": [
+    "docs/adr/0015-consumer-recipe-by-agent-reasoning-no-technology-table.md"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 4,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "reason": "refuted: the PR body's 'uncovered read unchanged' bullet missed the reworded introducing sentence; residual corrected in the PR body",
+   "issue": 4342,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4340/fix-QzfjUA1r/u4/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 5,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4340/fix-QzfjUA1r/u5/verdict.json",
+   "remedyFiles": [
+    "plugin/scripts/review-core.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 6,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "defer",
+   "reason": "refuted: a dead '|| \"\u2026\"' default behind the guard is caught only by the textual pin",
+   "issue": 4342,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4340/fix-QzfjUA1r/u6/verdict.json",
+   "remedyFiles": [
+    "tests/review-core-testcmd.test.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 7,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4340/fix-QzfjUA1r/u7/verdict.json",
+   "remedyFiles": [
+    "plugin/scripts/review-core.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 8,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4340/fix-QzfjUA1r/u8/verdict.json",
+   "remedyFiles": [
+    "tests/snapshot-repo.test.mjs"
+   ]
+  }
+ ]
+}

@@ -1,0 +1,410 @@
+# Fleet run ledger
+
+## Rows
+
+- #4142 PR#4142 · inherited (closes #4095) · review=member:review-pr-4142 · reviewed=81787de6dcba7069421354c1f2b2c09793826354:0/0/3:run-YQvawY7y · fix-pr-4142-b=no-op · dispositions-ok=fix-pr-4142-b:run-YQvawY7y · finisher-pr-4142=halted:other
+- #4152 PR#4152 · inherited (closes #4028) · review=member:review-pr-4152 · reviewed=c719ff5009b06495439b5b965eb30b2d3055b5bd:0/0/5:run-6b4APuIo · fix-pr-4152-b=no-op · dispositions-ok=fix-pr-4152-b:run-6b4APuIo · finisher-pr-4152-b=halted:other
+- #4188 PR#4188 · inherited (closes #4103) · review=member:review-pr-4188-b · reviewed=65b44b87f13b1af26b766fdbd98a1d086024b5ab:1/0/2:run-ks0Gm17V · fix-pr-4188=no-op · dispositions-ok=fix-pr-4188:run-ks0Gm17V · finisher-pr-4188=halted:other
+- #4036 impl-4036-b=PR#4194 · tier-ok=impl-4036-b:fleet-implementer-slow-high · review=member:review-pr-4194 · reviewed=dcd50d7b1ec7e8db92f2d8ab4c94dfb4eccb8898:0/0/15:run-WzIJe1aT · fix-pr-4194=applied:7c5315673c3700243bb8e612e3d3843d2242fb81 · dispositions-ok=fix-pr-4194:run-WzIJe1aT · ci=41393227517:1:- · ci=41393227517:1:failure · finisher-pr-4194=labelled · held-behind:#4177 · conflict-hold:#4194 · fix-pr-4194-b=applied:232d9bcdc3dd49846519140f3ddf4883820845dd · finisher-pr-4194-b=labelled
+- #4029 impl-4029-c=PR#4193 · tier-ok=impl-4029-c:fleet-implementer-slow-high · review=member:review-pr-4193 · reviewed=152d77204a280124ebbba708764fc03a823c556d:0/1/8:run-ksZRFIdz · fix-pr-4193=applied:fac1f124a7ff86dbfe93c3073f8e6d80910f95bb · dispositions-ok=fix-pr-4193:run-ksZRFIdz · ci=41394540426:1:failure · finisher-pr-4193=labelled · held-behind:#4177
+- #4075 impl-4075=PR#4197 · tier=task-high · tier-ok=impl-4075:fleet-implementer-task-high · review=member:review-pr-4197 · reviewed=37ba249881a624c518a7c786f815776954f889e1:2/0/14:run-0VGhitcl · fix-pr-4197=applied:35ac9ef3a8d75fb1261b5df555e1532e05715635 · dispositions-ok=fix-pr-4197:run-0VGhitcl · ci=41394723517:1:success · finisher-pr-4197=labelled · held-behind:#4177
+- #4110 impl-4110=PR#4203 · tier=slow-high · tier-ok=impl-4110:fleet-implementer-slow-high · review=member:review-pr-4203 · reviewed=c2ec508cef731ee25e9e8fc6d8823f3a279800fb:0/0/11:run-mdonfNTI · fix-pr-4203=applied:362aff7b0e9ba5d7405234f4104d294a8ff9610d · dispositions-ok=fix-pr-4203:run-mdonfNTI · ci=41401366473:1:failure · finisher-pr-4203=labelled
+- #4112 impl-4112=PR#4328 · tier=slow-medium · tier-ok=impl-4112:fleet-implementer-slow-medium · review=member:review-pr-4328 · reviewed=6e70c3c93541a9574590d0509b5c2a31df1d0e58:3/0/16:run-wG5mj2Gt · fix-pr-4328=applied:682bb9fe687815497553f75befe302a4a3ece8a1 · dispositions-ok=fix-pr-4328:run-wG5mj2Gt · ci=41714384592:1:failure · finisher-pr-4328=labelled
+- #4113 impl-4113=PR#4233 · tier=task-high · tier-ok=impl-4113:fleet-implementer-task-high · review=member:review-pr-4233 · reviewed=5927db94af5ca322dc86e5f66dd93d232ed382cc:5/0/16:run-5Ja8HjKr · fix-pr-4233=applied:35e437de9d9a719fed9748730cbf71a407409da9 · dispositions-ok=fix-pr-4233:run-5Ja8HjKr · ci=41471364694:1:failure · finisher-pr-4233=labelled
+- #4117 impl-4117=PR#4235 · tier=slow-medium · tier-ok=impl-4117:fleet-implementer-slow-medium · review=member:review-pr-4235 · reviewed=46ba34fabd810392a96e1b2060d728d7a026888b:0/0/11:run-vXqwdFqt · fix-pr-4235=applied:22f92cb78da9ec639038bd4c0a7aec90b01ea23e · dispositions-ok=fix-pr-4235:run-vXqwdFqt · ci=41470900623:1:failure · finisher-pr-4235=halted:other · finisher-pr-4235-b=labelled
+- #4135 impl-4135=PR#4201 · tier=slow-high · tier-ok=impl-4135:fleet-implementer-slow-high · review=member:review-pr-4201 · reviewed=0579aeb458fac8c6cc5e2e49e96e45d28da9c7a2:0/0/2:run-RzKK7nqF · fix-pr-4201=no-op · dispositions-ok=fix-pr-4201:run-RzKK7nqF · finisher-pr-4201=labelled
+- #4147 impl-4147=PR#4205 · tier=task-max · tier-ok=impl-4147:fleet-implementer-task-max · review=member:review-pr-4205 · reviewed=1d032dcb8b62d7a1c6af4e3bcadd00177457a5e5:1/0/14:run-XELObRXR · fix-pr-4205=applied:413f19bf74107642cf638d1b1245ed375925e06d · dispositions-ok=fix-pr-4205:run-XELObRXR · ci=41412707609:1:success · finisher-pr-4205=labelled
+- #4118 PR#4177 · conflict-hold:#4177 (conflict: CONTEXT.md) · fix-pr-4177=applied:24975b7ea3d9cbf8e4e8526108146c3d93f95f8c
+- #4153 impl-4153=PR#4254 · tier=task-high · tier-ok=impl-4153:fleet-implementer-task-high · review=member:review-pr-4254 · reviewed=813901abe89e7746f9b1399921479e9701005a70:1/0/10:run-BGf1XRnl · fix-pr-4254=applied:5521a4e50feb6c51eb1cad867608480b1a2ed0a4 · dispositions-mismatch=fix-pr-4254:run-BGf1XRnl · fix-pr-4254-b=applied:5521a4e50feb6c51eb1cad867608480b1a2ed0a4 · dispositions-ok=fix-pr-4254-b:run-BGf1XRnl · ci=41505351561:1:failure · finisher-pr-4254=labelled
+- #4159 impl-4159=PR#4209 · tier=slow-high · tier-ok=impl-4159:fleet-implementer-slow-high · review=member:review-pr-4209 · reviewed=b761ceebc7af9c56cb807b6557dca07f9d3f8ac2:0/1/17:run-7jxHhDON · fix-pr-4209=applied:291e09b681a2fc530e377011575f7ee1deae455b · dispositions-ok=fix-pr-4209:run-7jxHhDON · ci=41444987829:1:failure · finisher-pr-4209=labelled
+- #4207 review=member:review-pr-4207 · reviewed=79670ae3c4329f4a91e20bd8141c2fef5571d301:0/0/4:run-EXd7sqX8 · fix-pr-4207=no-op · dispositions-ok=fix-pr-4207:run-EXd7sqX8 · finisher-pr-4207=halted:human
+- #4166 impl-4166=PR#4210 · tier=task-high · tier-ok=impl-4166:fleet-implementer-task-high · review=member:review-pr-4210 · reviewed=dff6e979b270ed5d0fc17192ec571b9519a48eda:1/0/12:run-tUc2XVN0 · fix-pr-4210=applied:ed9271f02d1a14df86a8aef3b6febeedf7ce208e · dispositions-ok=fix-pr-4210:run-tUc2XVN0 · ci=41444875555:1:failure · finisher-pr-4210=labelled
+- #4030 impl-4030=PR#4232 · tier=task-max · tier-ok=impl-4030:fleet-implementer-task-max · review=member:review-pr-4232 · reviewed=3c3a2da107c04c98cda241393d4125569bae3042:0/2/15:run-jYF0YpWz · fix-pr-4232=applied:14f683b409006ad7d9f3875626eaf3b0badbe739 · dispositions-ok=fix-pr-4232:run-jYF0YpWz · ci=41459082395:1:failure · finisher-pr-4232=labelled
+- #4047 impl-4047=PR#4257 · tier=slow-medium · tier-ok=impl-4047:fleet-implementer-slow-medium · review=member:review-pr-4257 · reviewed=b3d76d56f1de30d27617b1b0b770b082aff70e5a:2/0/14:run-H7uPEMn8 · fix-pr-4257=applied:094421069c205750f6564dd95f3d7ce919286521 · dispositions-ok=fix-pr-4257:run-H7uPEMn8 · ci=41524274323:1:failure · finisher-pr-4257=labelled
+- #4053 impl-4053=PR#4253 · tier=slow-high · tier-ok=impl-4053:fleet-implementer-slow-high · review=member:review-pr-4253 · reviewed=afe983acf6658138a561e685ad98412a517230c3:0/0/10:run-OBEwqfZB · fix-pr-4253=applied:07c61375918752715428cef9802ce00b8858c397 · dispositions-ok=fix-pr-4253:run-OBEwqfZB · ci=41503407588:1:failure · finisher-pr-4253=labelled · ci=41507764815:2:success
+- #4054 impl-4054=PR#4252 · tier=slow-high · tier-ok=impl-4054:fleet-implementer-slow-high · review=member:review-pr-4252 · reviewed=cca834ed385ee4ad789ffd641127441f51c787af:0/0/5:run-OyziincH · fix-pr-4252=no-op · dispositions-ok=fix-pr-4252:run-OyziincH · finisher-pr-4252=labelled
+- #4167 impl-4167=PR#4330 · tier=task-high · tier-ok=impl-4167:fleet-implementer-task-high · review=member:review-pr-4330 · reviewed=8989a3bccc1cce9cdc8674b091eb2bc0256f97f8:1/0/11:run-1nx9hJQh · fix-pr-4330=applied:109d91d6a24c25e41c305e7b55e0cb70ee6f050e · dispositions-ok=fix-pr-4330:run-1nx9hJQh · ci=41720754505:1:failure · finisher-pr-4330=labelled · fix-pr-4330-b=no-op
+- #4175 impl-4175=PR#4263 · tier=slow-high · tier-ok=impl-4175:fleet-implementer-slow-high · review=member:review-pr-4263 · reviewed=ce5e90a07301e8ac213ffeaf5b6cd62818a48d00:7/1/18:run-GZ13H80l · fix-pr-4263=applied:eca9ab92e79acdcb92c245f419f4932cd52cc993 · dispositions-ok=fix-pr-4263:run-GZ13H80l · ci=41526952801:1:failure · finisher-pr-4263=labelled
+- #4184 impl-4184=PR#4264 · tier=task-max · tier-ok=impl-4184:fleet-implementer-task-max · review=member:review-pr-4264 · reviewed=6bac354801ddb8499ede1fcba250b688a16c6584:0/0/3:run-zC0On92F · fix-pr-4264=no-op · dispositions-ok=fix-pr-4264:run-zC0On92F · finisher-pr-4264=labelled
+- #4185 impl-4185=PR#4266 · tier=slow-high · tier-ok=impl-4185:fleet-implementer-slow-high · review=member:review-pr-4266 · reviewed=6d05f8bf7ca005bbd2bfacf92e5a2321cb63f2c2:0/0/13:run-WFeD5h7a · fix-pr-4266=applied:cc472410c01ea405cb8afa751a8601ce0c8f1620 · dispositions-ok=fix-pr-4266:run-WFeD5h7a · ci=41536584812:1:failure · finisher-pr-4266=labelled
+- #4186 impl-4186=PR#4269 · tier=task-high · tier-ok=impl-4186:fleet-implementer-task-high · review=member:review-pr-4269 · reviewed=683bf7a2098dee73b47447f7931c2d883b335932:2/0/13:run-eDUlHKB2 · fix-pr-4269=applied:503137d9085a5dda377fb3db7acf1cacf148c28e · dispositions-ok=fix-pr-4269:run-eDUlHKB2 · ci=41550459487:1:failure · finisher-pr-4269=labelled
+- #4189 impl-4189-c=PR#4275 · tier=task-max · tier-ok=impl-4189-c:fleet-implementer-task-max · review=member:review-pr-4275 · reviewed=00849984fea6e6222f07212ec51b61eacb848368:1/0/2:run-MKyCb2Ns · fix-pr-4275=applied:9f3e7f0843db965ca0f717d16c85dc4a8e6649c8 · dispositions-ok=fix-pr-4275:run-MKyCb2Ns · ci=41552250534:1:failure · finisher-pr-4275=labelled
+- #4195 impl-4195=PR#4277 · tier=task-high · tier-ok=impl-4195:fleet-implementer-task-high · review=member:review-pr-4277 · reviewed=1f10921feab6d9fdc49d8e8224455e83fd3ab76e:0/0/4:run-OW79EEfZ · fix-pr-4277=applied:428e00ffec7c1ae558d6fadb56551d7c7ab7da25 · dispositions-ok=fix-pr-4277:run-OW79EEfZ · ci=41552313394:1:failure · finisher-pr-4277=labelled
+- #4228 impl-4228=PR#4276 · tier=task-max · tier-ok=impl-4228:fleet-implementer-task-max · review=member:review-pr-4276 · reviewed=d230f781c3619186df722a5017d54efa01a8d918:0/1/12:run-7e7wNKIo · fix-pr-4276=applied:2fdb2ad940230c7ad0924ec2cd98e1d4d5bad3c5 · dispositions-ok=fix-pr-4276:run-7e7wNKIo · ci=41556488909:1:failure · finisher-pr-4276=labelled
+- #4076 impl-4076=PR#4329 · tier=task-high · tier-ok=impl-4076:fleet-implementer-task-high · review=member:review-pr-4329 · reviewed=5c8a8de145eaf9ad782746feaa1285d5ec100540:6/1/19:run-QfEWdZET · fix-pr-4329=applied:fc47da3436348c5fa547fc8f65788a9aabdba3ae · dispositions-ok=fix-pr-4329:run-QfEWdZET · conflict-hold:#4329 (conflict: mergeable=CONFLICTING) · fix-pr-4329-b=applied:2aecdac699c18d37c5c661dd453f762e2fcc71d1 · ci=41724985777:1:success · finisher-pr-4329=labelled
+- #4237 impl-4237-b=PR#4280 · tier=task-max · tier-ok=impl-4237-b:fleet-implementer-task-max · review=member:review-pr-4280 · reviewed=7d8aed756211f5fe7d2a378f57628093a9207d52:3/0/19:run-uG8nzdFN · fix-pr-4280=applied:5d37398450e872bb2ba53bec21aa0da58068742a · dispositions-ok=fix-pr-4280:run-uG8nzdFN · ci=41570356687:1:failure · finisher-pr-4280=labelled
+- #4085 impl-4085=PR#4281 · tier=slow-medium · tier-ok=impl-4085:fleet-implementer-slow-medium · review=member:review-pr-4281 · reviewed=c2ebdc7a15762f4f0ff319645361f0492f965527:0/0/8:run-RKdD4w6w · fix-pr-4281=applied:cd44b50e4c85a2ce92f3b4f8dd676c8242e3c4db · dispositions-ok=fix-pr-4281:run-RKdD4w6w · ci=41573217304:1:failure · finisher-pr-4281=labelled
+- #4238 impl-4238=PR#4290 · tier=slow-high · tier-ok=impl-4238:fleet-implementer-slow-high · review=member:review-pr-4290 · reviewed=7ea3b01e1fb454f0449360a7c452fe9bad021cc3:2/0/9:run-Poy0cGec · fix-pr-4290=applied:330e752f1fc09ffe3c1fbf6d509be536395e6e37 · dispositions-ok=fix-pr-4290:run-Poy0cGec · ci=41587039958:1:failure · finisher-pr-4290=labelled
+- #4244 impl-4244=PR#4282 · tier=task-max · tier-ok=impl-4244:fleet-implementer-task-max · review=member:review-pr-4282 · reviewed=f721b08ccc93fa5f87c59fb5257749ca342bf824:0/0/10:run-0XhwL8Ge · fix-pr-4282=applied:9c6bed337ba337065b3be3de66b93803c1a4f28f · dispositions-ok=fix-pr-4282:run-0XhwL8Ge · ci=41574933023:1:failure · finisher-pr-4282=labelled
+- #4249 impl-4249=PR#4283 · tier=task-max · tier-ok=impl-4249:fleet-implementer-task-max · review=member:review-pr-4283 · reviewed=cea3120fa08ce8b588fa33b524e98d110b7519d0:1/0/9:run-90hV4ctx · fix-pr-4283=applied:0759c31fcab8b319ecad4cfc824239e4f8e9d02a · dispositions-ok=fix-pr-4283:run-90hV4ctx · ci=41585190745:1:failure · finisher-pr-4283=labelled
+- #4250 impl-4250=PR#4287 · tier=task-max · tier-ok=impl-4250:fleet-implementer-task-max · review=member:review-pr-4287 · reviewed=797193874cb25b84f0fa77981493c6ddcbb4abe2:0/0/5:run-34slTrYI · fix-pr-4287=no-op · dispositions-ok=fix-pr-4287:run-34slTrYI · finisher-pr-4287=labelled
+- #4239 impl-4239=PR#4293 · tier=slow-medium · tier-ok=impl-4239:fleet-implementer-slow-medium · review=member:review-pr-4293 · reviewed=aea457a8e34f42c5b7aa300d9cc1e45c5e2dcac5:4/1/15:run-D1WPDEfp · fix-pr-4293=applied:cb7f895a7c2ac539087a3d046d681d2035710256 · dispositions-ok=fix-pr-4293:run-D1WPDEfp · ci=41591649366:1:success · finisher-pr-4293=labelled
+- #4240 #4240 impl-4240=PR#4294 · tier=task-max · tier-ok=impl-4240:fleet-implementer-task-max · review=member:review-pr-4294 · reviewed=8ad9519f7e6cfb522af529ef2ff45c3d4af4ef2f:0/0/13:run-sgRtnINA · fix-pr-4294=applied:47659819bde3297f2ef02a1197361735cd443ea1 · dispositions-ok=fix-pr-4294:run-sgRtnINA · conflict-hold:#4294 (conflict: mergeable=CONFLICTING) · fix-pr-4294-b=applied:1bb360141590e2b3ffd10e9d03c944979a8c3fc9 · ci=41598224205:1:success · finisher-pr-4294=labelled · parked=1bb360141590e2b3ffd10e9d03c944979a8c3fc9:15a701cfcc1f:main-gain-removed:plugin/scripts/compute-cell-evidence.mjs
+- #4242 impl-4242=PR#4331 · tier=task-max · tier-ok=impl-4242:fleet-implementer-task-max · review=member:review-pr-4331 · reviewed=e6e6daca63d8d9b217ee4b419d511f831b3fe248:6/0/13:run-jiHirdCV · fix-pr-4331=applied:c3aed2b790d4fab3ad3681dfa05f1724c5c30729 · dispositions-ok=fix-pr-4331:run-jiHirdCV · ci=41726879695:1:failure · finisher-pr-4331=labelled
+- #4299 review=member:review-pr-4299 · reviewed=a9fe16b8a6d199b4892288f51f59db84b3ef7898:1/0/2:run-TubTsNFn · fix-pr-4299=no-op · dispositions-ok=fix-pr-4299:run-TubTsNFn · ci=41600014075:1:failure · finisher-pr-4299=labelled
+- #4259 impl-4259=PR#4303 · tier=task-high · tier-ok=impl-4259:fleet-implementer-task-high · review=member:review-pr-4303 · reviewed=3731fbeda4744bc982ad90bc10e3087f8fe4e366:0/0/3:run-EFMRlraL · fix-pr-4303=no-op · dispositions-ok=fix-pr-4303:run-EFMRlraL · finisher-pr-4303=labelled
+- #4267 impl-4267=PR#4304 · tier=slow-high · tier-ok=impl-4267:fleet-implementer-slow-high · review=member:review-pr-4304 · reviewed=9409f4ddb5755a1b69fa5aad1afca136cf18b3f3:1/0/3:run-HXCDbgv3 · fix-pr-4304=applied:dad6ff6f695178441e12f68fda874136b38f5b43 · dispositions-ok=fix-pr-4304:run-HXCDbgv3 · ci=41624177513:1:failure · finisher-pr-4304=labelled
+- #4295 impl-4295=PR#4302 · tier=slow-high · tier-ok=impl-4295:fleet-implementer-slow-high · review=member:review-pr-4302 · reviewed=122efb1e369d3b8910131e4bf9002c5eeea58a2d:0/0/4:run-WABF8PKp · fix-pr-4302=applied:2fcd76cf512b9e5d0d2cb39504320cbc21bf3745 · dispositions-ok=fix-pr-4302:run-WABF8PKp · ci=41622912717:1:failure · finisher-pr-4302=labelled
+- #4284 impl-4284=PR#4314 · tier=slow-medium · tier-ok=impl-4284:fleet-implementer-slow-medium · review=member:review-pr-4314 · reviewed=6f2fdceb4178f6fb7e0b508dfb91e3003ff1c334:0/0/11:run-8IjIzjxh · fix-pr-4314=applied:f54ad2d55a7a555a00f001fcc2a5210a9bacf2b8 · dispositions-ok=fix-pr-4314:run-8IjIzjxh · ci=41641071569:1:failure · finisher-pr-4314=labelled
+- #4098 impl-4098=PR#4305 · tier=task-high · tier-ok=impl-4098:fleet-implementer-task-high · review=member:review-pr-4305 · reviewed=50fcfb824abec4038a4abf320799b83f026401dc:0/1/11:run-td8xha9R · fix-pr-4305=applied:410929f798e712b84be7a20fd1cdc272fe8b189a · dispositions-ok=fix-pr-4305:run-td8xha9R · ci=41624544700:1:failure · finisher-pr-4305=labelled
+- #4241 impl-4241=PR#4306 · tier=slow-medium · tier-ok=impl-4241:fleet-implementer-slow-medium · review=member:review-pr-4306 · reviewed=96e2f219b71294c05c2d27c0c1e3f134336401cf:6/1/11:run-zUjbwfyL · fix-pr-4306=applied:7c1c04bc9ab480053131d43a42dc6a99e99b8c6b · dispositions-ok=fix-pr-4306:run-zUjbwfyL · ci=41630672395:1:failure · finisher-pr-4306=labelled
+- #4114 impl-4114=PR#4316 · tier=task-high · tier-ok=impl-4114:fleet-implementer-task-high · review=member:review-pr-4316 · reviewed=1c627198905f07e15f6fbbe3f35096e4f635d934:2/0/13:run-wvKgfXG7 · fix-pr-4316=applied:8fe1b39a27327f146697892055eb489eba3df045 · dispositions-ok=fix-pr-4316:run-wvKgfXG7 · ci=41647948913:1:failure · finisher-pr-4316=labelled
+- #4171 impl-4171=PR#4315 · tier=slow-medium · tier-ok=impl-4171:fleet-implementer-slow-medium · review=member:review-pr-4315=failed · review=member:review-pr-4315-b · reviewed=37bbba9f334177f659bde436fa7ac61c2e2560b0:0/0/4:run-jTicIYC6 · fix-pr-4315=no-op · dispositions-ok=fix-pr-4315:run-jTicIYC6 · finisher-pr-4315=labelled
+- #4245 impl-4245=PR#4320 · tier=slow-high · tier-ok=impl-4245:fleet-implementer-slow-high · review=member:review-pr-4320 · conflict-hold:#4320 (conflict: mergeable=CONFLICTING) · reviewed=fc884db404599b80f547a9dca0060f3675faa963:1/0/10:run-v3fP81Ns · fix-pr-4320=applied:93ca6f67572ea0c5821ed0ab4c080eb44a9d4195 · dispositions-ok=fix-pr-4320:run-v3fP81Ns · conflict-hold:#4320 (conflict: mergeable=CONFLICTING) · fix-pr-4320-b=applied:e7abf4d73fd583c9d2312d52fc5fd094b6059b9c · fix-pr-4320-c=no-op · dispositions-ok=fix-pr-4320-c:run-v3fP81Ns · ci=41654346342:1:success · finisher-pr-4320=labelled · parked=c6a7d85b9eae7a555afaeb911c804f576ebcbbec:c4f947cd1755:main-gain-removed:plugin/scripts/ticket-router.mjs
+- #4246 impl-4246=PR#4319 · tier=slow-medium · tier-ok=impl-4246:fleet-implementer-slow-medium · review=member:review-pr-4319 · reviewed=e8fb4d1241b9bd8c3ce3c0adcee2e025e8a3718a:5/0/14:run-lzb9qEys · fix-pr-4319=applied:d86c0f75d96c91ae8f1616eac35d0fec64975da9 · dispositions-ok=fix-pr-4319:run-lzb9qEys · ci=41652054415:1:failure · finisher-pr-4319=labelled
+- #4247 impl-4247=PR#4325 · tier=task-max · tier-ok=impl-4247:fleet-implementer-task-max · review=member:review-pr-4325 · reviewed=25c80c6db35c859ee59a037982b22ec05c6099dd:0/0/5:run-XYUwX0Sw · fix-pr-4325=applied:92611afae940a1cd7457f6e4a8e21e3576c277ab · dispositions-ok=fix-pr-4325:run-XYUwX0Sw · ci=41698592962:1:success · finisher-pr-4325=labelled
+- #4046 impl-4046=PR#4340 · tier=slow-medium · tier-ok=impl-4046:fleet-implementer-slow-medium · review=member:review-pr-4340 · reviewed=4880fcf2fa9f2a11d0ce1b29d01b28b66123a4ae:0/0/9:run-F8rkM8MI · fix-pr-4340=applied:fc6174f62373c793430d7f811e6fba1b588c17f1 · dispositions-ok=fix-pr-4340:run-F8rkM8MI · ci=41743264833:1:failure · finisher-pr-4340=labelled
+- #4243 impl-4243=PR#4343 · tier=task-max · tier-ok=impl-4243:fleet-implementer-task-max · review=member:review-pr-4343 · reviewed=7eaf99312d21990ba456d064ad8bef90c21e1c3a:1/1/21:run-cxijVx4u · fix-pr-4343=applied:aa43733979731580e173fe5f0d5459e24a5d3350 · dispositions-ok=fix-pr-4343:run-cxijVx4u · ci=41752167644:1:failure · finisher-pr-4343=labelled
+
+## Dispatched
+
+- impl-4036-b=PR#4194 brief=226e5b6a agent=fleet-implementer-slow-high
+- impl-4029-c=PR#4193 brief=d2a87a32 agent=fleet-implementer-slow-high
+- fix-pr-4152-b=no-op brief=692db144
+- fix-pr-4142-b=no-op brief=eba3cca8
+- finisher-pr-4142=halted:other brief=571fcd2b
+- finisher-pr-4152-b=halted:other brief=f27ea7de
+- fix-pr-4188=no-op brief=11b35e60
+- finisher-pr-4188=halted:other brief=588fee79
+- merge-bot-1=done brief=c62ba17a queued=4142,4188
+- fix-pr-4193=applied:fac1f124a7ff86dbfe93c3073f8e6d80910f95bb brief=a63cc064
+- impl-4075=PR#4197 brief=efd032af agent=fleet-implementer-task-high
+- fix-pr-4194=applied:7c5315673c3700243bb8e612e3d3843d2242fb81 brief=14a34ff2
+- merge-bot-2=done brief=ea7c04e1 queued=4152
+- impl-4110=PR#4203 brief=7883a968 agent=fleet-implementer-slow-high
+- impl-4135=PR#4201 brief=6cf4d4e4 agent=fleet-implementer-slow-high
+- fix-pr-4197=applied:35ac9ef3a8d75fb1261b5df555e1532e05715635 brief=ba5f7b1b
+- finisher-pr-4194=labelled brief=aec3da78
+- merge-bot-3=done brief=32f689ee queued=4194
+- fix-pr-4201=no-op brief=c2d1d349
+- finisher-pr-4193=labelled brief=ba8b1cc6
+- finisher-pr-4197=labelled brief=e1059f03
+- merge-bot-4=done brief=1dc83a62 queued=4193,4194
+- finisher-pr-4201=labelled brief=7264de8b
+- fix-pr-4203=applied:362aff7b0e9ba5d7405234f4104d294a8ff9610d brief=06b3c97f
+- impl-4147=PR#4205 brief=4f54af94 agent=fleet-implementer-task-max
+- finisher-pr-4203=labelled brief=4adaf72d
+- fix-pr-4205=applied:413f19bf74107642cf638d1b1245ed375925e06d brief=9d7a33a1
+- merge-bot-5=done brief=61fb006d queued=4172,4177,4193,4194,4197,4203
+- fix-pr-4177=applied:24975b7ea3d9cbf8e4e8526108146c3d93f95f8c brief=500cd42a
+- finisher-pr-4205=labelled brief=445c7d7a
+- merge-bot-6=done brief=dce78bb7 queued=4172,4177,4193,4194,4197,4205
+- impl-4159=PR#4209 brief=4e022c13 agent=fleet-implementer-slow-high
+- fix-pr-4207=no-op brief=ec2677ac
+- finisher-pr-4207=halted:human brief=dbdc179e
+- fix-pr-4194-b=applied:232d9bcdc3dd49846519140f3ddf4883820845dd brief=a9f886e8
+- impl-4166=PR#4210 brief=9dc2ac6e agent=fleet-implementer-task-high
+- merge-bot-7=done brief=6912e798 queued=4172,4177,4194,4207
+- fix-pr-4209=applied:291e09b681a2fc530e377011575f7ee1deae455b brief=d606e57c
+- fix-pr-4210=applied:ed9271f02d1a14df86a8aef3b6febeedf7ce208e brief=5cdf33de
+- finisher-pr-4194-b=labelled brief=9812ee1b
+- impl-4030=PR#4232 brief=99f7f776 agent=fleet-implementer-task-max
+- merge-bot-8=done brief=ce6ae8df queued=4194
+- impl-4113=PR#4233 brief=a38cc81a agent=fleet-implementer-task-high
+- finisher-pr-4209=labelled brief=831a395d
+- finisher-pr-4210=labelled brief=2ffbcdec
+- impl-4117=PR#4235 brief=8f3d2886 agent=fleet-implementer-slow-medium
+- merge-bot-9=done brief=07794b16 queued=4210
+- fix-pr-4232=applied:14f683b409006ad7d9f3875626eaf3b0badbe739 brief=1cedaccb
+- fix-pr-4233=applied:35e437de9d9a719fed9748730cbf71a407409da9 brief=869c2a31
+- finisher-pr-4232=labelled brief=00ecde03
+- fix-pr-4235=applied:22f92cb78da9ec639038bd4c0a7aec90b01ea23e brief=1ecbb502
+- merge-bot-10=done brief=334a8132 queued=4232
+- merge-bot-11=done brief=ea4f2551 queued=4232
+- finisher-pr-4233=labelled brief=4504c7d3
+- finisher-pr-4235=halted:other brief=3c9995d0
+- finisher-pr-4235-b=labelled brief=d7eda2b8
+- impl-4047=PR#4257 brief=cd8ded16 agent=fleet-implementer-slow-medium
+- impl-4053=PR#4253 brief=06d57328 agent=fleet-implementer-slow-high
+- impl-4054=PR#4252 brief=b46153b9 agent=fleet-implementer-slow-high
+- impl-4153=PR#4254 brief=01c77727 agent=fleet-implementer-task-high
+- impl-4175=PR#4263 brief=91bd66d7 agent=fleet-implementer-slow-high
+- fix-pr-4252=no-op brief=868bf9c6
+- finisher-pr-4252=labelled brief=ed688692
+- merge-bot-12=done brief=80de3411 queued=4252
+- fix-pr-4253=applied:07c61375918752715428cef9802ce00b8858c397 brief=5935d545
+- impl-4184=PR#4264 brief=b07a9f8f agent=fleet-implementer-task-max
+- fix-pr-4254=applied:5521a4e50feb6c51eb1cad867608480b1a2ed0a4 brief=12ec1f3f
+- fix-pr-4254-b=applied:5521a4e50feb6c51eb1cad867608480b1a2ed0a4 brief=8393b426
+- finisher-pr-4253=labelled brief=8a778a50
+- merge-bot-13=done brief=39d0ab6b queued=4253
+- finisher-pr-4254=labelled brief=0f4fb946
+- impl-4185=PR#4266 brief=48fd973c agent=fleet-implementer-slow-high
+- fix-pr-4264=no-op brief=64d4dcec
+- finisher-pr-4264=labelled brief=4e209133
+- fix-pr-4257=applied:094421069c205750f6564dd95f3d7ce919286521 brief=8b281d2e
+- impl-4186=PR#4269 brief=4f002408 agent=fleet-implementer-task-high
+- fix-pr-4263=applied:eca9ab92e79acdcb92c245f419f4932cd52cc993 brief=7924e1c2
+- merge-bot-14=done brief=a8948467 queued=4253
+- impl-4189=tier-mismatch brief=d7fc59cf agent=fleet-implementer-task-max
+- impl-4189-b=killed brief=27271717 agent=fleet-implementer-slow-high
+- impl-4189-c=PR#4275 brief=27271717 agent=fleet-implementer-task-max
+- fix-pr-4269=applied:503137d9085a5dda377fb3db7acf1cacf148c28e brief=43a73699
+- fix-pr-4266=applied:cc472410c01ea405cb8afa751a8601ce0c8f1620 brief=a69de6a8
+- finisher-pr-4257=labelled brief=abac71f3
+- merge-bot-15=done brief=61bc0574 queued=4257
+- finisher-pr-4263=labelled brief=76bf3af8
+- impl-4195=PR#4277 brief=90060738 agent=fleet-implementer-task-high
+- impl-4228=PR#4276 brief=faeaacf5 agent=fleet-implementer-task-max
+- merge-bot-16=done brief=45648d2c queued=4263
+- finisher-pr-4266=labelled brief=8fea01d2
+- merge-bot-17=done brief=c84ef867 queued=4266
+- fix-pr-4275=applied:9f3e7f0843db965ca0f717d16c85dc4a8e6649c8 brief=edce20f6
+- impl-4237=blocked brief=3a43a874 agent=fleet-implementer-task-max
+- fix-pr-4277=applied:428e00ffec7c1ae558d6fadb56551d7c7ab7da25 brief=704c6b38
+- impl-4237-b=PR#4280 brief=d3b54512 agent=fleet-implementer-task-max
+- fix-pr-4276=applied:2fdb2ad940230c7ad0924ec2cd98e1d4d5bad3c5 brief=a3218266
+- finisher-pr-4269=labelled brief=ea601290
+- merge-bot-18=done brief=a651a64f queued=4269
+- finisher-pr-4275=labelled brief=a195b5b7
+- finisher-pr-4277=labelled brief=031a55b5
+- impl-4085=PR#4281 brief=98f3a665 agent=fleet-implementer-slow-medium
+- impl-4244=PR#4282 brief=fd379774 agent=fleet-implementer-task-max
+- impl-4249=PR#4283 brief=5890fa83 agent=fleet-implementer-task-max
+- finisher-pr-4276=labelled brief=fe436d95
+- merge-bot-19=done brief=4ea744a8 queued=4276
+- impl-4250=PR#4287 brief=fd47381f agent=fleet-implementer-task-max
+- fix-pr-4280=applied:5d37398450e872bb2ba53bec21aa0da58068742a brief=311dc5f4
+- fix-pr-4281=applied:cd44b50e4c85a2ce92f3b4f8dd676c8242e3c4db brief=b29d437e
+- finisher-pr-4280=labelled brief=f42dec34
+- fix-pr-4282=applied:9c6bed337ba337065b3be3de66b93803c1a4f28f brief=c1fb0e61
+- merge-bot-20=done brief=d5e09805 queued=4280
+- finisher-pr-4281=labelled brief=fb862e8f
+- impl-4238=PR#4290 brief=3ce41d53 agent=fleet-implementer-slow-high
+- fix-pr-4287=no-op brief=a04a09fc
+- finisher-pr-4282=labelled brief=6a7e71ab
+- finisher-pr-4287=labelled brief=d020cc56
+- impl-4239=PR#4293 brief=b7345cf4 agent=fleet-implementer-slow-medium
+- impl-4240=PR#4294 brief=2a967d55 agent=fleet-implementer-task-max
+- fix-pr-4283=applied:0759c31fcab8b319ecad4cfc824239e4f8e9d02a brief=e61daade
+- fix-pr-4290=applied:330e752f1fc09ffe3c1fbf6d509be536395e6e37 brief=4522be50
+- finisher-pr-4283=labelled brief=356f970e
+- fix-pr-4294=applied:47659819bde3297f2ef02a1197361735cd443ea1 brief=c18b9637
+- fix-pr-4293=applied:cb7f895a7c2ac539087a3d046d681d2035710256 brief=0fb8579c
+- merge-bot-21=done brief=a8fcc827 queued=4283
+- finisher-pr-4290=labelled brief=be9b317b
+- finisher-pr-4293=labelled brief=844727bc
+- fix-pr-4294-b=applied:1bb360141590e2b3ffd10e9d03c944979a8c3fc9 brief=4ca0e902
+- finisher-pr-4294=labelled brief=32a3351c
+- fix-pr-4299=no-op brief=1d5e15c1
+- merge-bot-22=done brief=756b3bb6 queued=4294
+- impl-4259=PR#4303 brief=46af64b0 agent=fleet-implementer-task-high
+- impl-4267=PR#4304 brief=d0519bdd agent=fleet-implementer-slow-high
+- impl-4295=PR#4302 brief=e39ff809 agent=fleet-implementer-slow-high
+- finisher-pr-4299=labelled brief=ee1dc8d4
+- merge-bot-23=done brief=904ee189 queued=4294,4299
+- impl-4098=PR#4305 brief=0c4a906c agent=fleet-implementer-task-high
+- impl-4241=PR#4306 brief=cf686c57 agent=fleet-implementer-slow-medium
+- fix-pr-4302=applied:2fcd76cf512b9e5d0d2cb39504320cbc21bf3745 brief=81114d80
+- fix-pr-4304=applied:dad6ff6f695178441e12f68fda874136b38f5b43 brief=826e1c4c
+- fix-pr-4303=no-op brief=251ad5a6
+- finisher-pr-4303=labelled brief=d8dc29c7
+- merge-bot-24=done brief=1d90fc13 queued=4303
+- fix-pr-4305=applied:410929f798e712b84be7a20fd1cdc272fe8b189a brief=2cb1bc41
+- impl-4114=PR#4316 brief=d73118e5 agent=fleet-implementer-task-high
+- finisher-pr-4302=labelled brief=2c4870cc
+- merge-bot-25=done brief=dbe88186 queued=4302
+- finisher-pr-4304=labelled brief=374b96f9
+- finisher-pr-4305=labelled brief=348db8c1
+- fix-pr-4306=applied:7c1c04bc9ab480053131d43a42dc6a99e99b8c6b brief=1115ac64
+- impl-4284=PR#4314 brief=0325c310 agent=fleet-implementer-slow-medium
+- impl-4171=PR#4315 brief=2c1ea26c agent=fleet-implementer-slow-medium
+- finisher-pr-4306=labelled brief=6eee063e
+- merge-bot-26=done brief=bdb64b6a queued=4306
+- fix-pr-4314=applied:f54ad2d55a7a555a00f001fcc2a5210a9bacf2b8 brief=f0e0b935
+- impl-4245=PR#4320 brief=796d23eb agent=fleet-implementer-slow-high
+- impl-4246=PR#4319 brief=ab61dc92 agent=fleet-implementer-slow-medium
+- fix-pr-4315=no-op brief=047396e5
+- fix-pr-4316=applied:8fe1b39a27327f146697892055eb489eba3df045 brief=f201dfd6
+- finisher-pr-4315=labelled brief=a4440f23
+- finisher-pr-4314=labelled brief=c86785c9
+- merge-bot-27=done brief=e738930b queued=4314,4315
+- fix-pr-4319=applied:d86c0f75d96c91ae8f1616eac35d0fec64975da9 brief=d6ac84df
+- fix-pr-4320=applied:93ca6f67572ea0c5821ed0ab4c080eb44a9d4195 brief=ae9b5826
+- finisher-pr-4316=labelled brief=f478c048
+- fix-pr-4320-b=applied:e7abf4d73fd583c9d2312d52fc5fd094b6059b9c brief=98de6809
+- merge-bot-28=done brief=05dc182d queued=4316
+- fix-pr-4320-c=no-op brief=ae9b5826
+- finisher-pr-4319=labelled brief=ac81f876
+- finisher-pr-4320=labelled brief=2315e08b
+- merge-bot-29=done brief=c8dafbdf queued=4319
+- merge-bot-30=done brief=994696df queued=4320
+- impl-4247=PR#4325 brief=4ed85cfa agent=fleet-implementer-task-max
+- fix-pr-4325=applied:92611afae940a1cd7457f6e4a8e21e3576c277ab brief=6f4f6130
+- impl-4076=PR#4329 brief=3f3f7614 agent=fleet-implementer-task-high
+- impl-4112=PR#4328 brief=7150e1ec agent=fleet-implementer-slow-medium
+- impl-4167=PR#4330 brief=081e2ec9 agent=fleet-implementer-task-high
+- impl-4242=PR#4331 brief=49a39f0f agent=fleet-implementer-task-max
+- finisher-pr-4325=labelled brief=c6c4ed1e
+- merge-bot-31=done brief=c26fcf17 queued=4325
+- fix-pr-4328=applied:682bb9fe687815497553f75befe302a4a3ece8a1 brief=fd32b9ce
+- fix-pr-4329=applied:fc47da3436348c5fa547fc8f65788a9aabdba3ae brief=829d9750
+- fix-pr-4330=applied:109d91d6a24c25e41c305e7b55e0cb70ee6f050e brief=77f8be85
+- finisher-pr-4328=labelled brief=2acae02b
+- merge-bot-32=done brief=98788a92 queued=4328
+- fix-pr-4331=applied:c3aed2b790d4fab3ad3681dfa05f1724c5c30729 brief=e456b18d
+- fix-pr-4329-b=applied:2aecdac699c18d37c5c661dd453f762e2fcc71d1 brief=98ccb79d
+- finisher-pr-4330=labelled brief=ee737a11
+- finisher-pr-4329=labelled brief=35af1cc1
+- merge-bot-33=done brief=0d01317f queued=4330
+- finisher-pr-4331=labelled brief=33d9c174
+- fix-pr-4330-b=no-op brief=fcfabf19
+- merge-bot-34=done brief=a271d4b0 queued=4329,4330
+- impl-4046=PR#4340 brief=516725c0 agent=fleet-implementer-slow-medium
+- impl-4243=PR#4343 brief=5feee0e3 agent=fleet-implementer-task-max
+- merge-bot-35=done brief=379483e0 queued=4330
+- fix-pr-4340=applied:fc6174f62373c793430d7f811e6fba1b588c17f1 brief=2c9b7b62
+- finisher-pr-4340=labelled brief=3952a08b
+- merge-bot-36=done brief=f79d3a6d queued=4340
+- fix-pr-4343=applied:aa43733979731580e173fe5f0d5459e24a5d3350 brief=86a0d0ac
+- finisher-pr-4343=labelled brief=54cd36fe
+- merge-bot-37=done brief=e4073380 queued=4343
+
+## Routed
+
+- impl-4075 POLICY=task-high CELL=task-high DRAW=3/4 BY=burn-in STRATUM=heavy BRIEF=7607 CRITERIA=0 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=guard-tripped
+- impl-4110 POLICY=task-high CELL=slow-high DRAW=1/4 BY=burn-in STRATUM=heavy BRIEF=2266 CRITERIA=6 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=guard-tripped
+- impl-4135 POLICY=task-high CELL=slow-high DRAW=1/4 BY=burn-in STRATUM=light BRIEF=2194 CRITERIA=4 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=guard-tripped
+- impl-4147 POLICY=task-high CELL=task-max DRAW=4/4 BY=burn-in STRATUM=heavy BRIEF=7228 CRITERIA=0 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=guard-tripped
+- impl-4159 POLICY=task-high CELL=slow-high DRAW=1/4 BY=burn-in STRATUM=heavy BRIEF=5241 CRITERIA=9 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=guard-tripped
+- impl-4166 POLICY=task-high CELL=task-high DRAW=3/4 BY=burn-in STRATUM=light BRIEF=2902 CRITERIA=0 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=guard-tripped
+- impl-4030 POLICY=task-high CELL=task-max DRAW=4/4 BY=burn-in STRATUM=heavy BRIEF=13561 CRITERIA=15 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=guard-tripped
+- impl-4113 POLICY=task-high CELL=task-high DRAW=3/4 BY=burn-in STRATUM=heavy BRIEF=3520 CRITERIA=6 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=guard-tripped
+- impl-4117 POLICY=task-high CELL=slow-medium DRAW=2/4 BY=burn-in STRATUM=heavy BRIEF=3498 CRITERIA=8 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=guard-tripped
+- impl-4047 POLICY=task-high CELL=slow-medium DRAW=2/4 BY=burn-in STRATUM=heavy BRIEF=8795 CRITERIA=9 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=guard-tripped
+- impl-4053 POLICY=task-high CELL=slow-high DRAW=1/4 BY=burn-in STRATUM=heavy BRIEF=6092 CRITERIA=6 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=guard-tripped
+- impl-4054 POLICY=task-high CELL=slow-high DRAW=1/4 BY=burn-in STRATUM=heavy BRIEF=4586 CRITERIA=0 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=guard-tripped
+- impl-4153 POLICY=task-high CELL=task-high DRAW=3/4 BY=burn-in STRATUM=heavy BRIEF=3668 CRITERIA=4 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=guard-tripped
+- impl-4175 POLICY=task-high CELL=slow-high DRAW=1/4 BY=burn-in STRATUM=heavy BRIEF=4741 CRITERIA=6 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=guard-tripped
+- impl-4184 POLICY=task-high CELL=task-max DRAW=4/4 BY=burn-in STRATUM=light BRIEF=1810 CRITERIA=5 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=guard-tripped
+- impl-4185 POLICY=task-high CELL=slow-high DRAW=1/4 BY=burn-in STRATUM=heavy BRIEF=3608 CRITERIA=8 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=guard-tripped
+- impl-4186 POLICY=task-high CELL=task-high DRAW=3/4 BY=burn-in STRATUM=heavy BRIEF=3347 CRITERIA=7 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=guard-tripped
+- impl-4189 POLICY=task-high CELL=task-max DRAW=4/4 BY=burn-in STRATUM=heavy BRIEF=4191 CRITERIA=4 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=guard-tripped
+- impl-4195 POLICY=task-high CELL=task-high DRAW=3/4 BY=burn-in STRATUM=light BRIEF=2458 CRITERIA=4 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=guard-tripped
+- impl-4228 POLICY=task-high CELL=task-max DRAW=4/4 BY=burn-in STRATUM=heavy BRIEF=9531 CRITERIA=7 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=guard-tripped
+- impl-4237 POLICY=task-high CELL=task-max DRAW=4/4 BY=burn-in STRATUM=heavy BRIEF=7070 CRITERIA=10 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=guard-tripped
+- impl-4085 POLICY=task-high CELL=slow-medium DRAW=2/4 BY=burn-in STRATUM=heavy BRIEF=5737 CRITERIA=5 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=guard-tripped
+- impl-4244 POLICY=task-high CELL=task-max DRAW=4/4 BY=burn-in STRATUM=heavy BRIEF=5948 CRITERIA=5 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=guard-tripped
+- impl-4249 POLICY=task-high CELL=task-max DRAW=4/4 BY=burn-in STRATUM=heavy BRIEF=2161 CRITERIA=7 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=guard-tripped
+- impl-4250 POLICY=task-high CELL=task-max DRAW=4/4 BY=burn-in STRATUM=light BRIEF=1470 CRITERIA=5 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=guard-tripped
+- impl-4238 POLICY=task-high CELL=slow-high DRAW=1/4 BY=burn-in STRATUM=heavy BRIEF=4248 CRITERIA=7 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=guard-tripped
+- impl-4239 POLICY=task-high CELL=slow-medium DRAW=2/4 BY=burn-in STRATUM=heavy BRIEF=6192 CRITERIA=9 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=guard-tripped
+- impl-4240 POLICY=task-high CELL=task-max DRAW=4/4 BY=burn-in STRATUM=heavy BRIEF=4825 CRITERIA=6 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=guard-tripped
+- impl-4259 POLICY=task-high CELL=task-high DRAW=3/4 BY=burn-in STRATUM=* BRIEF=3366 CRITERIA=5 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=fit-missing
+- impl-4267 POLICY=task-high CELL=slow-high DRAW=1/4 BY=burn-in STRATUM=* BRIEF=3730 CRITERIA=6 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=fit-missing
+- impl-4295 POLICY=task-high CELL=slow-high DRAW=1/4 BY=burn-in STRATUM=* BRIEF=2903 CRITERIA=6 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=fit-missing
+- impl-4098 POLICY=task-high CELL=task-high DRAW=3/4 BY=burn-in STRATUM=* BRIEF=9233 CRITERIA=10 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=fit-missing
+- impl-4241 POLICY=task-high CELL=slow-medium DRAW=2/4 BY=burn-in STRATUM=* BRIEF=6956 CRITERIA=10 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=fit-missing
+- impl-4114 POLICY=task-high CELL=task-high DRAW=3/4 BY=burn-in STRATUM=* BRIEF=8418 CRITERIA=9 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=fit-missing
+- impl-4284 POLICY=task-high CELL=slow-medium DRAW=2/4 BY=burn-in STRATUM=* BRIEF=4135 CRITERIA=6 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=fit-missing
+- impl-4171 POLICY=task-high CELL=slow-medium DRAW=2/4 BY=burn-in STRATUM=* BRIEF=6360 CRITERIA=0 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=fit-missing
+- impl-4245 POLICY=task-high CELL=slow-high DRAW=1/4 BY=burn-in STRATUM=* BRIEF=5689 CRITERIA=8 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=fit-missing
+- impl-4246 POLICY=task-high CELL=slow-medium DRAW=2/4 BY=burn-in STRATUM=* BRIEF=5735 CRITERIA=8 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=fit-missing
+- impl-4247 POLICY=task-high CELL=task-max DRAW=4/4 BY=burn-in STRATUM=* BRIEF=3773 CRITERIA=5 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=fit-missing
+- impl-4076 POLICY=task-high CELL=task-high DRAW=3/4 BY=burn-in STRATUM=* BRIEF=12324 CRITERIA=13 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=fit-missing
+- impl-4112 POLICY=task-high CELL=slow-medium DRAW=2/4 BY=burn-in STRATUM=* BRIEF=8764 CRITERIA=0 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=fit-missing
+- impl-4167 POLICY=task-high CELL=task-high DRAW=3/4 BY=burn-in STRATUM=* BRIEF=8130 CRITERIA=0 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=fit-missing
+- impl-4242 POLICY=task-high CELL=task-max DRAW=4/4 BY=burn-in STRATUM=* BRIEF=7644 CRITERIA=10 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=fit-missing
+- impl-4046 POLICY=task-high CELL=slow-medium DRAW=2/4 BY=burn-in STRATUM=* BRIEF=8193 CRITERIA=9 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=fit-missing
+- impl-4243 POLICY=task-high CELL=task-max DRAW=4/4 BY=burn-in STRATUM=* BRIEF=6594 CRITERIA=9 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=smol-high REASON=fit-missing
+
+## Filed
+
+- #4192 PR #4188 review: the suggestion band, checked
+- #4195 fleet-provenance: no test pins the unrecognized-argument exit 2
+- #4196 PR #4194 review: the suggestion band, checked
+- #4198 PR #4193 review: the suggestion band, checked
+- #4199 Settle's impl-N=PR#M verifies the report's head on the member-reported branch, never on the PR's head
+- #4200 PR #4197 review: the suggestion band, checked
+- #4202 PR #4201 review: the suggestion band, checked
+- #4204 PR #4203 review: the suggestion band, checked
+- #4206 PR #4205 review: the suggestion band, checked
+- #4208 PR #4207 review: the suggestion band, checked
+- #4213 router spec ticket-features column amendment trail omits the #4159 columns named_paths named_lines dirs title plugin_version
+- #4214 PR #4209 review: the suggestion band, checked
+- #4226 closeout.test.mjs 'a failed gh pr merge is asked once' red in PR #4210 review, with and without the PR diff (load flake, #4085)
+- #4229 A merged PR that says Refs #N leaves its ticket open and in-progress with no live member
+- #4230 PR #4210 review: the suggestion band, checked
+- #4234 PR #4232 review: the suggestion band, checked
+- #4248 PR #4233 review: the suggestion band, checked
+- #4250 finisher-label tests leave --kill mutants alive: a greedy red half, the last --kill, a trimmed receipt.kill
+- #4251 PR #4235 review: the suggestion band, checked
+- #4255 label-map ensure/set: a cache written during the gh round-trip is lost (no lock across the read-modify-write)
+- #4256 PR #4252 review: the suggestion band, checked
+- #4258 closeout.test.mjs: 'a failed gh pr merge is asked once' failed in PR #4253's full-suite review run (load flake)
+- #4259 suite-slot.test.mjs: no test pins that FLEET_SUITE_WAIT_S=0 prints no waiting line
+- #4260 suite-slot.test.mjs: no test pins that the waiting line prints once per wait
+- #4261 PR #4253 review: the suggestion band, checked
+- #4262 PR #4254 review: the suggestion band, checked
+- #4265 PR #4264 review: the suggestion band, checked
+- #4267 board-server.test.mjs watchWindow test fails intermittently on CI
+- #4268 PR #4257 review: the suggestion band, checked
+- #4270 PR #4263 review: the suggestion band, checked
+- #4271 PR #4269 review: the suggestion band, checked
+- #4272 reap.sh reaps a claim whose squash-merge main later reverted
+- #4273 PR #4266 review: the suggestion band, checked
+- #4278 PR #4277 review: the suggestion band, checked
+- #4279 PR #4276 review: the suggestion band, checked
+- #4284 router tree: a corrupt numeric ticket-features cell (abc, 5e3, 0x1000) routes silently instead of being refused
+- #4285 PR #4280 review: the suggestion band, checked
+- #4286 PR #4281 review: the suggestion band, checked
+- #4288 PR #4282 review: the suggestion band, checked
+- #4289 PR #4287 review: the suggestion band, checked
+- #4298 fleet-tick fold: a reviewed= that read a pre-push head resets fleetHead below a fix-applier's later push, so the next no-op settle is refused
+- #4291 fleet-tick fold: a reviewed= that read a pre-push head resets fleetHead below a fix-applier's later push, so the next no-op settle is refused
+- #4292 PR #4283 review: the suggestion band, checked
+- #4295 No test pins an implementer definition's description to its Cell
+- #4296 PR #4290 review: the suggestion band, checked
+- #4297 PR #4293 review: the suggestion band, checked
+- #4300 Mid-rebase test fixtures fail under an exported GIT_SEQUENCE_EDITOR on a base older than #4275 (PR #4299 review)
+- #4301 PR #4299 review: the suggestion band, checked
+- #4307 PR #4303 review: the suggestion band, checked
+- #4308 suite-slot.test.mjs: the waiting-line test cannot tell the cap from the remaining time on a 0 ms first pass
+- #4309 PR #4302 review: the suggestion band, checked
+- #4310 watchWindow: no row pins which held candidate blockerBefore() returns when several precede the landing
+- #4311 PR #4305 review: the suggestion band, checked
+- #4312 PR #4304 review: the suggestion band, checked
+- #4313 PR #4306 review: the suggestion band, checked
+- #4317 PR #4314 review: the suggestion band, checked
+- #4318 PR #4315 review: the suggestion band, checked
+- #4321 ticket-router: remove the --check mode and CI Router table check (follow-up to #4245)
+- #4322 PR #4316 review: the suggestion band, checked
+- #4323 PR #4320 review: the suggestion band, checked
+- #4324 PR #4319 review: the suggestion band, checked
+- #4326 PR #4325 review: the suggestion band, checked
+- #4327 Grouping spec and ADR 0037 say the Fit is computed at every phase 0, but metrics-refresh skips the Fit when no cost guard was written
+- #4332 reclaim-scratch.mjs --siblings removes a key whose checkout sat at a volume's mount root once the drive is unplugged
+- #4333 PR #4328 review: the suggestion band, checked
+- #4334 PR #4330 review: the suggestion band, checked
+- #4335 reclaim-scratch --pr evicts the trees of a same-PR review that is still running
+- #4336 evictTrees skips a directory whose .git git cannot answer for, and one it cannot list, and reports neither
+- #4337 PR #4329 review: the suggestion band, checked
+- #4338 PR #4331 review: the suggestion band, checked
+- #4339 recipe-prove.test.mjs: the unreadable-tree test fails when TMPDIR is on another filesystem than its parent
+- #4341 review-eval.mjs: runReviewToFile retries a missing args.testCmd instead of throwing before any run like the pr and scratch refusals
+- #4342 PR #4340 review: the suggestion band, checked
+- #4344 split-gate chance test: its limits do not catch a doubled null false-positive rate
+- #4345 PR #4343 review: the suggestion band, checked
+
+## Ruled
+
+- merge-bot-5 refused #4172: gh pr merge refused: base branch policy prohibits the merge (draft PR; not converted)
+- merge-bot-6 refused #4172: head-moved-after-label-#4172: no ready-to-merge-head record; head was force-pushed after the ready-to-merge label
+- merge-bot-6 refused #4177: head-moved-after-label-#4177: no ready-to-merge-head record; rebase-carry proof not accepted (rebaseCarry null, CONTEXT.md line 670 edited)
+- #4172 ready-to-merge-head posted at maintainer's word in chat, head ff1d462d
+- #4177 ready-to-merge-head posted at maintainer's word in chat, head 24975b7e
+- merge-bot-7 refused #4194: head-moved-after-label
+- merge-bot-10 refused #4232: behind:3
+- merge-bot-13 refused #4253: ci:job check is failure, not success (run 41507764815 on rebased head 6dca06cec8f4d86b0214ea60b6932c21bd7698ff: tests/board-server.test.mjs watchWindow test fails; pre-rebase check was green)
+- #4283 ledger Filed row #4298 is a typo by fix-pr-4283: issue #4298 did not exist when it was recorded; the real filing is #4291. Do not read #4298 as filed when it is created.
+- merge-bot-22 refused #4294: main-gain-removed:plugin/scripts/compute-cell-evidence.mjs
+- merge-bot-22 refused #4299: ci:job rebase-check is failure, not success (behind:109; not rebased, fix-pr-4299 applier is running on the head)
+- #4294 main-gain: deliberate - main-gain-removal: plugin/scripts/compute-cell-evidence.mjs #4293 - the shortWords comment is reworded for the starting-Cells rule; 'the table's order' becomes 'their order'
+- #4294 main-gain: deliberate - main-gain-removal: plugin/scripts/metrics-refresh.mjs #4293 - the Fit's stage output and validation lines go with the retired stage field
+- #4294 main-gain: deliberate - main-gain-removal: tests/compute-cell-evidence.test.mjs #4293 - the stage-2 fixtures and expectations go with the retired stage field
+- #4294 main-gain: deliberate - main-gain-removal: tests/metrics-refresh.test.mjs #4293 - the stage assertions go with the retired stage field
+- merge-bot-29 refused #4320: main-gain-removed:plugin/scripts/ticket-router.mjs
+- #4320 main-gain: deliberate - main-gain-removal: plugin/scripts/ticket-router.mjs #4314 - the walk-refusal comment no longer names the `fit` mode, which this PR retires
+- #4320 main-gain: deliberate - main-gain-removal: tests/ticket-router.test.mjs #4314 - the corrupt-cell refusal test drops its `fit` and `--due` arguments with those modes; the `--check` half stays
+- merge-bot-33 refused #4330: ci:job check is failure, not success on rebased head 7c834c6f646b8fbcad123683f7805a99a6ef8e10 (run 41729008581; test failing: a tree that cannot be read after the Check step names the check output, not the install output); rebased via update-branch from 109d91d6; label untouched
+- merge-bot-34 refused #4330: ci:job check is failure, not success

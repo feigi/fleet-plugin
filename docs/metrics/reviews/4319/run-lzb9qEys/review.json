@@ -1,0 +1,356 @@
+{
+  "pr": 4319,
+  "head": "e8fb4d1241b9bd8c3ce3c0adcee2e025e8a3718a",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "clean",
+      "line": "CWD-AUDIT: clean /Users/chris/dev/fleet-plugin"
+    },
+    {
+      "dimension": "comments",
+      "state": "clean",
+      "line": "CWD-AUDIT: clean /Users/chris/dev/fleet-plugin (not run via git status; the shell only ran pwd and read-only commands against the snapshot, with no writes anywhere)."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. I made no writes there (my only commands in it were `pwd`, `which omp` and a read-only git status), so these two modifications are not from me."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (I never wrote there; presumably from other agents/metrics refresh)."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv` (not written by this review: every command I ran cd'd into correctness/copy or only read)"
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. I made no writes to that directory; all my commands ran in the snapshot or in simplify/copy."
+    }
+  ],
+  "counts": {
+    "survived": 5,
+    "refuted": 0,
+    "unverified": 14,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4319/run-lzb9qEys/snapshot-e8fb4d12",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "plugin/scripts/compute-cell-evidence.mjs",
+      "line": 525,
+      "claim": "While the shipped starting table routes (no Fit yet, as on a consumer's first runs), burnInProgress titles the section \"burn-in ended: every starting Cell has its 20 merged PRs\" but lists the cost guard's counts under it, for example 2, 0 and 1 of 20. The shipped plugin/scripts/router-table.json has burn_in:false, so the title follows the table's flag while the numbers come from a different source, and the view contradicts itself.",
+      "evidence": "In correctness/copy, `node probe1.mjs` called computeCellEvidence with table = validateTable(shipped router-table.json), fit {status:\"missing\"} and a guard with cells n 2, 0 and 1. It printed `source: starting table · no Fit yet: the next phase 0 writes one` and `burnIn: {\"heading\":\"burn-in ended: every starting Cell has its 20 merged PRs\",\"cells\":[{\"cell\":\"slow-high\",\"n\":2,\"of\":20},{\"cell\":\"task-high\",\"n\":0,\"of\":20},{\"cell\":\"smol-high\",\"n\":1,\"of\":20}]}`. `node -e` on router-table.json printed `false {\"tripped\":[\"smol-high\"],\"n\":{\"slow-high\":104,\"smol-high\":32,\"task-high\":104}}`. The tests miss this: the starting-table test (compute-cell-evidence.test.mjs:580) uses DAY_ONE_TABLE with burn_in:true (tests/support/day-one-router-table.mjs:30), and the only `burn-in ended` assertion (test.mjs:606) uses a Fit whose counts are all at least 20.",
+      "suggested_fix": "Take the counts from the source that set the table's burn_in. While the starting table routes, use its own `guard.n`, the same way the Fit's own `guard.n` is used while the Fit routes; or stop titling 'burn-in ended' when the listed counts are short. Add a test that uses a burn_in:false starting table with a guard short of 20.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Not refuted. I did not run the probe. I read the code, and the claim follows from it. In the snapshot, plugin/scripts/compute-cell-evidence.mjs:520-531, burnInProgress takes its counts from `guard?.n` when `p` (the Fit) is null. It picks the heading from `table.burn_in`. The shipped plugin/scripts/router-table.json line 12 has `\"burn_in\": false`. So with no Fit and a starting table, the heading is \"burn-in ended: every starting Cell has its 20 merged PRs\", while the cells list the guard's counts, such as 2, 0 and 1 of 20. The heading and the numbers contradict each other. I also did not confirm that the tests miss this. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/ticket-features.tsv, M docs/metrics/tier-outcomes.tsv. I wrote nothing there, so these changes were already present."
+        },
+        {
+          "refuted": false,
+          "reason": "Read the snapshot source only; I ran nothing. compute-cell-evidence.mjs:520-529 takes counts from `guard?.n` when there is no Fit (p===null), but picks the heading from `table.burn_in`. With a table where burn_in is false and guard counts below 20, it prints \"burn-in ended…\" over those counts, which is the claimed contradiction. Nothing else in that function guards against it. I did not check that the shipped router-table.json has burn_in:false or that the probe output matches; I relied on the finding's evidence for both. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I did not touch these files; they were already modified."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "claim": "The new Cell evidence tab discards the catalog's read failure: when `omp models --json` fails, installFrom reports 'omp's model catalog not read yet' and the failure message appears nowhere in the policy model. A stale catalog whose latest refresh failed is also used silently as current. modelRoles has readLabel for both cases; the catalog has no equivalent.",
+      "evidence": "Probe via the test file's own fixtures (`fitted(...)` from tests/compute-cell-evidence.test.mjs, run as `node --test tests/zz-probe.test.mjs` in my copy). `catalog: {value:null, readAt:null, error:{at:1,message:'omp models --json failed (ENOENT)'}}` gave exploring 'exploring: not checked: omp's model catalog not read yet', and `JSON.stringify(policy).includes('ENOENT')` was false. `catalog: {...CATALOG, error:{at:2,message:'omp models --json failed (ETIMEDOUT)'}}` gave 'exploring task-xhigh, task-medium, slow-medium and smol-xhigh' with no mention of the failure, and includes('ETIMEDOUT') was false. In compute-cell-evidence.mjs, `catalog` is referenced only at lines 556-560 and 663-676, and `.error` is never read. A hung or broken `omp` therefore looks like 'not read yet' forever, and stale ladders look current.",
+      "file": "plugin/scripts/compute-cell-evidence.mjs",
+      "line": 574,
+      "suggested_fix": "Make installFrom word the catalog's failure the way readLabel does for modelRoles. Never-read plus error: 'omp's model catalog not read yet; reading fails: <message>'. Stale value plus error: carry an 'as read at …; reading fails: …' note on the exploring line. Pin both with tests.",
+      "dimension": "silent-failure",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Read the snapshot source and ran nothing, so there is no red or green evidence. In plugin/scripts/compute-cell-evidence.mjs, installFrom (lines 556-561) tests only `isRecord(catalog?.value)`. A failed read has a null value, so it returns the hardcoded \"omp's model catalog not read yet\". `catalog.error` is never read: `catalog` appears only at lines 556-560 and 663-676, plus the doc comments at 656, 866 and 875, and the call at 878/885. A stale catalog with a non-null value and a newer `error` is passed to installOf with no error check. This matches the claim's description of both cases. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I did not write to this checkout, so these changes were already there.",
+          "inconclusive": false
+        },
+        {
+          "refuted": false,
+          "reason": "Confirmed by reading the snapshot source, not by running a probe. installFrom (compute-cell-evidence.mjs:556-560) tests only `catalog.value` and never reads `catalog.error`. A failed read therefore gives 'omp's model catalog not read yet', and a stale value is used silently. readLabel (lines 90-98) does handle `modelRoles.error` in both cases, so the asymmetry is real. Lens 2: I found no handling elsewhere in the file (grep for catalog showed only lines 556-560 and 663-676). CWD-AUDIT: clean /Users/chris/dev/fleet-plugin (no files written; the git status audit was not run)."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "claim": "When gather's readFitFile rejects a Fit that `route` accepts, the tab says 'the Fit is not read … starting table routes' and lays out the starting table, but `route` is routing by that Fit. The new view states which table routes; the old 'evidence favours' side only said 'no Fit read'.",
+      "evidence": "Probe `node --test tests/zz-probe2.test.mjs` wrote a router-fit.json with a valid table, then compared ticket-router's readFitBeside with board-gather's readFitFile. Missing `n_rows`: route uses Fit = true; tab read unreadable ('router table: `n_rows` is not a count'); tab source 'starting table · the Fit is not read: router table: `n_rows` is not a count'. Missing `computed_at`: route uses Fit = true; tab source says '`computed_at` is not a string'. Missing `tsv_blobs`: route uses Fit = true; tab source says '`tsv_blobs` is not an object'. readFitBeside (ticket-router.mjs:514-525) checks only validateTable(fit.table). The extra display-only checks in readFitFile are now treated as 'route falls back', and failedFitFlag says 'no Fit is read, so the starting table routes' on the same basis.",
+      "file": "plugin/scripts/compute-cell-evidence.mjs",
+      "line": 473,
+      "suggested_fix": "Do not let display-only fields (`computed_at`, `guard_computed_at`, `tsv_blobs`, `n_rows`) decide which table the tab says routes. Have the tab take the routing table from readFitBeside's accept/reject rule, and render the display fields as 'not checked' when they are malformed. Alternatively, reword the unreadable case so it does not claim the starting table routes.",
+      "dimension": "silent-failure",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Read the snapshot's code. readFitBeside (ticket-router.mjs:514-525) checks only validateTable(fit.table). readFitFile (board-gather.mjs:851-869) also requires computed_at and guard_computed_at to be strings, tsv_blobs to be an object, and table.n_rows to be a non-negative integer. validateTable never references n_rows. So a Fit missing any of those is routed by `route` but reported unreadable by gather, and the tab then says 'starting table · the Fit is not read: …'. I did not run the probe or the test suite. CWD-AUDIT: not run, I made no edits in /Users/chris/dev/fleet-plugin."
+        },
+        {
+          "refuted": false,
+          "reason": "Read the snapshot source. readFitBeside (ticket-router.mjs) checks only JSON parse and validateTable(fit.table). readFitFile (board-gather.mjs:851-869) also requires computed_at, guard_computed_at, tsv_blobs and an integer n_rows. A Fit that lacks any of those therefore reads as 'unreadable' in the tab while route accepts it, and the tab text 'the Fit is not read … starting table' then misstates what route does. The divergence is real. I did not run the probe or any tests; this is from reading the code, and I did not check whether validateTable itself requires n_rows. CWD-AUDIT: not run; I only read files and wrote nothing in /Users/chris/dev/fleet-plugin."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "tests/compute-cell-evidence.test.mjs",
+      "line": 692,
+      "claim": "The MIN_N boundary in modelChanges (`k >= MIN_N`) is not discriminated: the only 'no notice at 20' case also sets burn_in:false, so changing it to `k > MIN_N` (and dropping the `!p.table.burn_in` guard entirely) survives every test touching cell evidence.",
+      "evidence": "mutant `k >= MIN_N` -> `k > MIN_N` in plugin/scripts/compute-cell-evidence.mjs; ran ./agent-test tests/compute-board-cell-line.test.mjs tests/metrics-refresh.test.mjs tests/compute-cell-evidence.test.mjs tests/cell-evidence-alerts.test.mjs tests/cockpit-tabs.test.mjs tests/board-cell-evidence-gather.test.mjs → exit 0, fail 0 (survived). Same for removing `|| !p.table.burn_in` from the guard → exit 0, fail 0. Test at line ~697 uses `{ ...CHANGED(20), burn_in: false }` so it passes either way. No kill; green baseline exists (same set exit 0 unmutated).",
+      "suggested_fix": "Add a case with burn_in:true, an older generation and the new generation at exactly 20 merged PRs (expect no notice), plus 19 (expect a notice); and a burn_in:false case with k<20 and an older generation.",
+      "dimension": "tests",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Mutant `k >= MIN_N` -> `k > MIN_N` (line 548) applied in my own copy: `env -u FORCE_COLOR ./agent-test tests/compute-cell-evidence.test.mjs` → exit 0, tests 74, fail 0 (survived); git diff confirmed the 1-line change. The only test with k=20 (line 699) sets burn_in:false, and line 542's guard returns early, so the boundary is never reached; CHANGED( is only used at lines 693 and 699. Claim holds. I ran only the single test file, not the full 6-file set, and did not run the second mutation (dropping the burn_in guard). CWD-AUDIT: not run; I never wrote in the cwd /Users/chris/dev/fleet-plugin, which I only printed with pwd.",
+          "counter_evidence": ""
+        },
+        {
+          "refuted": false,
+          "reason": "Reproduced in my own snapshot copy: mutant `k >= MIN_N`->`k > MIN_N` in compute-cell-evidence.mjs line 548 ran `env -u FORCE_COLOR ./agent-test tests/compute-cell-evidence.test.mjs` -> exit 0, tests 74, fail 0 (survived). The only n=20 case (line 699) uses burn_in:false, so the `!p.table.burn_in` guard at line 542 returns early either way. Not handled elsewhere in that file's tests. Caveat: ran only that file, not the full six-file set; no positive control of a failing mutant. CWD-AUDIT: clean /Users/chris/dev/fleet-plugin"
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "tests/compute-cell-evidence.test.mjs",
+      "claim": "burnInProgress's 'done' count boundary (`c.n >= MIN_N`) is untested at exactly 20 merged PRs: `c.n > MIN_N` survives all cell-evidence tests.",
+      "evidence": "mutant `c.n >= MIN_N` -> `c.n > MIN_N`; same six-file narrowed run → exit 0, fail 0 (survived). Fixtures use n values like 3, 32, 69, never exactly 20 in a burn-in heading.",
+      "suggested_fix": "Add a burn-in fixture with one starting Cell at exactly 20 and one at 19 and assert the 'N of 3 ... have/has' heading.",
+      "dimension": "tests",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Mutant `c.n >= MIN_N` -> `c.n > MIN_N` applied in my own copy of the snapshot. I ran `node --test tests/compute-cell-evidence.test.mjs` only, not the six-file run or `./agent-test`: exit not captured, tests 74, pass 74, fail 0. The mutant survived. The burn-in fixtures use n of 69, 12, 0, 32 and 3, never exactly 20, so the boundary is untested. The mutated file differed from the committed copy, as the diff stat showed, but I did not run an unmutated baseline or a case at n=20. Because I used the narrower file-only run, this is not a formal kill-rule result, but the claim is a survival, not a red. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I did not write to this directory, so those modifications predate my run."
+        },
+        {
+          "refuted": false,
+          "reason": "I applied the mutant `c.n >= MIN_N` -> `c.n > MIN_N` at plugin/scripts/compute-cell-evidence.mjs:524 in my own copy of the snapshot. I ran the tests that mention burn-in. All stayed green, so no test fails at exactly 20 merged PRs. The two suites I ran first: `env -u FORCE_COLOR ./agent-test tests/compute-cell-evidence.test.mjs tests/ticket-router.test.mjs` -> tests 251, pass 251, fail 0. The other three burn-in test files: `./agent-test tests/board-cell-evidence-gather.test.mjs tests/cockpit-tabs.test.mjs tests/pull-attribution.test.mjs` -> tests 186, pass 186, fail 0. That covers every test file that mentions burn-in. Not handled elsewhere. I did not run an unmutated baseline, because there is no red to qualify. The sed edit did apply, since `git status` in the copy shows the file modified. I did not run the full suite, so I can't rule out some other test covering the boundary. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/ticket-features.tsv, M docs/metrics/tier-outcomes.tsv. I wrote nothing there, so these changes were already present.",
+          "inconclusive": false
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/board-gather.mjs",
+      "line": 1023,
+      "claim": "readCatalog drops every catalog entry whose `thinking` is not an array. route's catalogEntry sees the unfiltered catalog. So for a modelRoles value written without its provider, the cockpit's installOf can match a different entry than route does, and the 'exploring …' Cells shown can differ from what route draws, against the PR's claim that they use 'the same functions route calls'.",
+      "evidence": "`node -e` in correctness/copy, with catalog [{selector:\"anthropic/claude-haiku-4-5\",thinking:null},{selector:\"bedrock/claude-haiku-4-5\",thinking:[\"low\",\"medium\",\"high\"]}] and modelRoles {smol:\"claude-haiku-4-5\"}, printed `route {\"smol\":[],\"task\":[],\"slow\":[]}` and `cockpit {\"smol\":[\"low\",\"medium\",\"high\"],\"task\":[],\"slow\":[]}`. With a provider-qualified role the two agree (probe1: both all-empty).",
+      "suggested_fix": "Keep entries whose thinking is null and store them as `thinking: null`, so catalogEntry's first match is the same entry in both places. Only the `selector` and `thinking` fields need trimming to keep board.json small.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/board-gather.mjs",
+      "line": 864,
+      "claim": "The view now says it shows 'the table route routes by', but readFitFile is stricter than route's readFitBeside. A Fit file whose table validates but which lacks tsv_blobs (or string computed_at / guard_computed_at, or an integer n_rows) is shown as 'starting table · the Fit is not read', and the failed-Fit flag would say 'the starting table routes', while route actually routes by that Fit.",
+      "evidence": "`node probe2.mjs` in correctness/copy, on a router-fit.json holding a valid table and no tsv_blobs, printed `cockpit readFitFile: {\"status\":\"unreadable\",\"why\":\"`tsv_blobs` is not an object\"}` and `route readFitBeside: routes by the Fit's table`. metrics-refresh.mjs:315-318 always writes these fields, so this only happens with a hand-edited or partial file.",
+      "suggested_fix": "Decide which table routes the same way readFitBeside does (validateTable on `table` alone). Treat missing metadata fields as 'not checked' labels instead of falling back to the starting table.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/board.html",
+      "line": 468,
+      "claim": "The failed-Fit flag is rendered as one element with classes `ce-alert ce-verdict`. The only amber text rule is the descendant selector `.ce-alert .ce-verdict` (line 90), so the flag text stays the default colour. The failed-refit line it replaces was rendered `ce-note ce-amber`.",
+      "evidence": "Not run in a browser. From reading the code: board.html:89-94 defines `.ce-alert {…border amber…}` and `.ce-alert .ce-verdict { color:var(--amber); }`, and line 468 is `box.append(el(\"div\", \"ce-alert ce-verdict\", p.flag))`. A descendant selector does not match the element itself.",
+      "suggested_fix": "Wrap the flag in an inner `ce-verdict` element (the pattern the alerts use at line 537), or use `ce-alert ce-amber`.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/board-gather.mjs",
+      "line": 1012,
+      "claim": "Possible conflict with the ticket: its acceptance criterion says 'The tab reads `.fleet/router-fit.json` and the guard only', but the PR adds an `omp models --json` spawn every minute in the cockpit's own environment and still reads the installed starting table as the fallback. CONTEXT.md:694-695 also says 'Every figure is read from a record, never recomputed by the cockpit', yet the exploring Cells are recomputed from the cockpit's own modelRoles and catalog, which gather's own comment says 'can differ from the controller's'.",
+      "evidence": "Not executed. pr-messages.md, ticket acceptance criteria: 'The tab reads `.fleet/router-fit.json` and the guard only.' The PR body, 'New input' section, says gather() now reads omp's model catalog. board-gather.mjs:960-961 says the read is 'in the cockpit's own environment, which can differ from the controller's'. CONTEXT.md:694-695 as quoted.",
+      "suggested_fix": "Confirm with the ticket owner that the catalog read fits the acceptance criterion. Alternatively, show the draw the Fit or Routing recorded, or label the exploring line as computed from the cockpit's environment.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "readCatalog silently drops every model whose `thinking` is not an array, and an empty result is still `{ok:true}`. If omp renames or reshapes `thinking`, the tab shows 'exploring nothing: no exploration Cell this install runs is left untripped', which mislabels a read-shape fault as an untripped-Cell fact.",
+      "evidence": "Probe: `catalog: {value:{models:[]}, readAt:1, error:null}` renders exactly 'exploring nothing: no exploration Cell this install runs is left untripped'. The real `omp models --json` (run here, 93 KB) lists non-reasoning models with `thinking: null`, so some drops are legitimate. readCatalog (board-gather.mjs:1012-1025) cannot tell those from a shape change. I did not run a probe against a reshaped catalog.",
+      "file": "plugin/scripts/board-gather.mjs",
+      "line": 1022,
+      "suggested_fix": "Return `{ok:false, why:'… printed no model with a thinking list'}` when `models` is non-empty but no entry survives the filter. At minimum, word the zero-ladder case as 'the catalog lists no efforts for the roles' models'.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/board-cell-evidence-gather.test.mjs",
+      "line": 976,
+      "claim": "readCatalog's filtering of non-string entries inside a model's `thinking` array is not pinned by any test.",
+      "evidence": "mutant `m.thinking.filter((t) => typeof t === \"string\")` -> `m.thinking` in plugin/scripts/board-gather.mjs; ran ./agent-test tests/board-cell-evidence-gather.test.mjs → exit 0, tests 47, pass 47, fail 0 (survived). (By contrast dropping the Array.isArray(thinking) filter was killed: fail 13, and carryCatalog interval mutants 1/120_000 were killed by `carryCatalog: read at most once a minute...`.)",
+      "suggested_fix": "Give the readCatalog fixture a model with `thinking: [\"low\", 3, null]` and assert only \"low\" survives.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/compute-cell-evidence.test.mjs",
+      "claim": "The `typeof e.generation !== \"string\"` guard in modelChanges is untested (a record with older generations but no string generation).",
+      "evidence": "mutant removing `|| typeof e.generation !== \"string\"`; six-file narrowed run → exit 0, fail 0 (survived).",
+      "suggested_fix": "Add a Fit whose root estimate has `older` but a non-string/missing `generation` and assert no notice (and no 'undefined' text).",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/compute-cell-evidence.mjs",
+      "line": 867,
+      "claim": "The jsdoc says the catalog is the carried read of `omp models`, but the code runs `omp models --json` (board-gather.mjs:1013), so the comment names a different command than the one spawned.",
+      "evidence": "grep -n 'omp models' plugin/scripts/*.mjs: compute-cell-evidence.mjs:867 says `omp models`; board-gather.mjs:1007 and 1013 use `omp models --json` (argv [\"models\",\"--json\"]). compute-board.mjs:888 also says `omp models`.",
+      "suggested_fix": "Write `omp models --json` in both comments, as board-gather.mjs does.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/compute-board.mjs",
+      "line": 408,
+      "claim": "The cellLine jsdoc calls `table` 'the installed router table'. Under the new design the Cell evidence tab routes by the Fit or the starting table. This usage is accurate, because the Routing column still reads the installed table, but a reader may confuse it with the removed installed-versus-checkout comparison.",
+      "evidence": "sed -n 400,415p plugin/scripts/compute-board.mjs shows 'and `table` the installed router table, or null.' The diff does not touch it. board-gather.mjs:793 still reads the installed table.",
+      "suggested_fix": "Optional: say 'the installed router table (the one the Routing line is judged on, not the Fit)'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/specs/2026-10-27-cockpit-tabs-design.md",
+      "line": 22,
+      "claim": "The untouched spec still describes the 'routes now' / 'evidence favours' sides, the Fit-prior label and the consumer footnote that this PR removes. The PR body says specs are out of scope, so this is stale docs rather than a defect in the diff.",
+      "evidence": "grep in the snapshot: docs/specs/2026-10-27-cockpit-tabs-design.md:22-23 'the Cell routes now gives … beside the Cell the evidence favours' and :150 'In a consumer, routes now's source carries a footnote'. Also matches in docs/adr/0037 and three other specs.",
+      "suggested_fix": "Follow up on the specs, or add an 'amended by' note.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/compute-cell-evidence.mjs",
+      "line": 681,
+      "claim": "fitView calls exploringWords(table, routed, s, inst) separately for each Objective, but the function takes no objective (it always dispatches the `cost` row), so the same stratum's string is computed again for every Objective. In addition, the `lines(o)` closure is followed by a second `.map` over each Objective's lines that only adds anchor/href, and the two passes can be one.",
+      "evidence": "In my copy I replaced `lines(o)` plus the second `.map` with one `line(o, s, rest)` builder that sets stratum, groupOf, anchor and href, and memoized exploring in a Map keyed by stratum. `./agent-test` on 31 affected files: exit=0, tests 1642, pass 1642, fail 0. That run includes compute-cell-evidence.test.mjs, which asserts `lineOf(..., \"cost\", \"*\").exploring` and the anchors/hrefs, and cockpit-tabs.test.mjs.",
+      "suggested_fix": "const exploring = new Map(); const exploringOf = (s) => { if (!exploring.has(s)) exploring.set(s, exploringWords(table, routed, s, inst)); return exploring.get(s); }; const line = (o, s, rest) => ({ stratum: s, ...groupOf(s), ...rest, anchor: `cells-row-${o}-${s}`, href: `#cells/row/${o}/${s}` }); then build each Objective's `lines` directly: table === null ? [line(o, \"*\", { entry: null, exploring: null, unread: … })] : Object.keys(table.rows[o]).map((s) => line(o, s, { entry: entry(o, s), exploring: exploringOf(s), unread: null })).",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/compute-cell-evidence.mjs",
+      "line": 568,
+      "claim": "exploringWords always runs rowDispatch, even when it then returns `exploring: not checked: …` (no burn-in and inst.install === null) and never reads rd. That check can come before the rowDispatch call.",
+      "evidence": "In my copy I moved `if (!table.burn_in && inst.install === null) return `exploring: not checked: ${inst.why}`;` above `const rd = rowDispatch(...)`. The guard === null case already returns earlier, and the burn-in case is unchanged. 31-file `./agent-test` run: 1642/1642 pass. compute-cell-evidence.test.mjs:653-655 covers all three not-checked reasons (catalog null, modelRoles null, agents error).",
+      "suggested_fix": "if (guard === null) return null; if (!table.burn_in && inst.install === null) return `exploring: not checked: ${inst.why}`; const rd = rowDispatch({ … }); if (table.burn_in) return …; return rd.draw === null ? … : …;",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/board-gather.mjs",
+      "line": 1009,
+      "claim": "The new readCatalog copies about eight lines of readModelRoles: the execRead spawn, the code/signal/exit `how` formatting, the `failed (…)` message, the JSON.parse with its `printed non-JSON` fallback, and `omp ${argv.join(\" \")}` written out in three messages. A shared helper would leave each reader with only its shape check.",
+      "evidence": "In my copy I added `async function readOmpJson(argv, timeout)` returning `{ ok: true, cmd, json }` or `{ ok: false, why }` with the same `why` strings, and rewrote readModelRoles (`r.json?.value`) and readCatalog (`r.json`) on top of it. board-cell-evidence-gather.test.mjs:126,130,165,169 assert the exact `printed non-JSON`, `printed no modelRoles record` and `printed no model list` strings. The 31-file run passed 1642/1642.",
+      "suggested_fix": "async function readOmpJson(argv, timeout) { const cmd = `omp ${argv.join(\" \")}`; const r = await execRead(\"omp\", argv, { timeout }); if (r.error) { const how = r.code ?? (r.signal ? `killed by ${r.signal}` : `exit ${r.status}`); return { ok: false, why: `${cmd} failed (${how})` }; } try { return { ok: true, cmd, json: JSON.parse(r.stdout) }; } catch { return { ok: false, why: `${cmd} printed non-JSON` }; } } — then readCatalog becomes `const r = await readOmpJson([\"models\",\"--json\"], timeout); if (!r.ok) return r; …shape check…`, and readModelRoles is rewritten the same way.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/compute-cell-evidence.mjs",
+      "line": 447,
+      "claim": "Removing routesSource/readInstall left nothing in compute-cell-evidence.mjs that calls repoIdentity. Its only production caller is board-gather.mjs:1042 (carryMainMetrics), which imports it across modules from the tab-model file. In addition, ticket-router.mjs:101 `export const shortStartingCells` lost its only outside importer and is now used only inside ticket-router.mjs:903, so the export can go.",
+      "evidence": "Grep of the snapshot's plugin/, docs/ and tests/ for -w repoIdentity: definition at compute-cell-evidence.mjs:447; uses at board-gather.mjs:39 (import) and :1042, plus tests/compute-cell-evidence.test.mjs:509 and :798-:810. No call inside compute-cell-evidence.mjs. Grep for -w shortStartingCells: only ticket-router.mjs:101 (definition) and :903. In my copy I moved repoIdentity with its comment into board-gather.mjs, dropped the import, pointed the test import at board-gather.mjs, and removed `export` from shortStartingCells. The 31-file run, which includes ticket-router.test.mjs and compute-cell-evidence.test.mjs, passed 1642/1642.",
+      "suggested_fix": "Move repoIdentity (and its tests) into board-gather.mjs beside carryMainMetrics, delete the 'A repository's identity' section and the cross-module import, and reword its comment, since its input is now `gh repo view`'s url and no longer a package.json `repository` field. Change `export const shortStartingCells` to `const shortStartingCells`.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

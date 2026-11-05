@@ -1,0 +1,455 @@
+{
+  "pr": 4329,
+  "head": "5c8a8de145eaf9ad782746feaa1285d5ec100540",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/ticket-features.tsv, M docs/metrics/tier-outcomes.tsv. I made no writes there, so these were already modified before I started."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (not written by me; I never wrote in that tree)."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I did not write to that checkout, so these changes are not mine; they are probably another agent's metrics writes."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin —  M docs/metrics/ticket-features.tsv,  M docs/metrics/tier-outcomes.tsv (I wrote nothing to this path; my only writes were under correctness/)"
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` / ` M docs/metrics/tier-outcomes.tsv` (this dispatch never wrote there: every command after `pwd` ran with cd into the scratch dir or snapshot copy, or used git -C read-only)"
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/ticket-features.tsv, M docs/metrics/tier-outcomes.tsv (not touched by me; I only ran git status there, wrote nothing)"
+    }
+  ],
+  "counts": {
+    "survived": 6,
+    "refuted": 1,
+    "unverified": 19,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4329/run-QfEWdZET/snapshot-5c8a8de1",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 628,
+      "claim": "The `--pr` pass now evicts the trees in every kept `pr<N>/run-*` root, however young, so a second review of the same PR starting while another is still running strips that live review's snapshot and copies of their installed dependencies mid-measurement.",
+      "evidence": "Probe in my copy: makeTree(<scratch>/pr7/run-LIVEaaaa/snapshot-abc), created seconds earlier, then `node plugin/scripts/reclaim-scratch.mjs --pr 7 --root <scratch> --apply`. Output: exit 0, receipt {\"removed\":[],\"evicted\":[{\"path\":\".../pr7/run-LIVEaaaa/snapshot-abc\",\"reason\":\"a tree in a kept review run root\",\"ignored\":[\"node_modules/\"]}],\"kept\":[{...\"reason\":\"run root modified within 7 days\"}],\"failed\":[]}. After it, `live sibling node_modules present after: false`. The only justification in the docs and comments is that \"a live review's own run root is seconds old and holds no tree yet\", which covers the caller's own root and not a sibling. Same-PR runs do overlap: run-team retries under review-pr-<pr#>-b, a standalone /review-and-fix can run beside a fleet review, and the ticket itself counts three run roots at one head.",
+      "suggested_fix": "Evict only kept run roots that are demonstrably finished, for example ones holding review.json, or ones whose newest mtime is older than a short grace period. Or leave kept run roots to their own review's end-of-run eviction and evict only roots that review never reached.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Read reclaim-scratch.mjs:628-636 in the snapshot: in --pr mode every entry in `kept` is passed to evictTrees(run.path,{apply}) with no age or ownership check. Kept entries include young runs, since the reason is 'run root modified within 7 days'. evict-tree.mjs evictTrees has no age check either. It removes the ignored paths (node_modules) of every tree under the run root. So a concurrent sibling run's snapshot is stripped. I did not run the probe myself, so this rests on reading the code and the reporter's output. CWD-AUDIT: clean /Users/chris/dev/fleet-plugin (not run; I made no writes there)"
+        },
+        {
+          "refuted": false,
+          "reason": "Reproduced in my own copy of the snapshot. I built a young sibling run root with a tree whose node_modules/ is ignored, then ran `node plugin/scripts/reclaim-scratch.mjs --pr 7 --root <scr> --apply`. It exited 0 and evicted the tree (reason \"a tree in a kept review run root\", ignored [\"node_modules/\"]) while the run root was kept as \"modified within 7 days\". Afterwards the tree held only the .git entry and tracked files, and node_modules was gone. The eviction loop at reclaim-scratch.mjs:~628 covers every kept run root with no age or ownership check. The header comment's \"seconds old, holds no tree yet\" justification covers only the caller's own root. Nothing else guards sibling runs. The eviction is new in this PR (the evictTrees calls appear only as additions in pr.diff). I did not check whether a same-PR review really overlaps in practice. No test was run, so there is no red/green evidence line. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I did not touch these files and did not write inside this directory; they were already modified there.",
+          "counter_evidence": ""
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/review-core.mjs",
+      "line": 1032,
+      "claim": "evictableRunRoot compares the reported run root against `posix.join(scratch, \"pr<N>\")`, while the snapshot step builds the run root from the raw `${scratch}/pr${pr}/run-`. A scratch with a trailing slash or a `./` segment, which every scratch check accepts, therefore makes the end-of-review eviction skip with nothing logged while the review itself succeeds.",
+      "evidence": "Probe through runReview with the scripted host (as in review-core-run-end-eviction.test.mjs), scratch passed as `<abs>/scratch/` and the reported runRoot `<abs>/scratch//pr7/run-abcd1234`, the shape mktemp prints. Result: `result.head abc123`, so the review succeeded, then `node_modules still present: true logs: []`. I confirmed the shape with `mktemp -d \"$D/mk//pr7/run-XXXXXXXX\"`, which printed `.../mk//pr7/run-D1523rLB`, and `.../mk/./pr7/...`, which kept `./`. runnerScratchRefusal and scratchRootRefusal (fleet-dir.mjs:198-219) reject neither form.",
+      "suggested_fix": "Use one prefix for both: compare runRoot against the same `runRootPrefix` string snapshotMissing uses, or posix.normalize both sides. Log when a run root was reported but judged not evictable, so the skip is no longer silent.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Confirmed by reading and a node run. evictableRunRoot uses posix.join(scratch,`pr${pr}`), which normalizes: join('/a/s/','pr7') and join('/a/./s','pr7') both give '/a/s/pr7'. The run root is built raw as `${scratch}/pr${pr}/run-` (review-core.mjs:1094-1095), so mktemp prints '/a/s//pr7/run-X'. startsWith('/a/s/pr7/') is then false and eviction returns silently with no log. runnerScratchRefusal (review-core.mjs:950-957) rejects only '..' segments and a pr<N> ending, so a trailing slash and './' pass. I did not run the full runReview probe or any test suite. CWD-AUDIT: not run; I only read files and ran node -e, and wrote nothing in /Users/chris/dev/fleet-plugin."
+        },
+        {
+          "refuted": false,
+          "reason": "Not handled elsewhere: reviewRun uses A.scratch raw (`${scratch}/pr${pr}/run-`, review-core.mjs:1093-1095) with no normalization, and evictableRunRoot (1031) compares against posix.join(scratch,'pr7'). Ran node: scratch '/a/scratch/' gives partition '/a/scratch/pr7' and runRoot '/a/scratch//pr7/run-abcd1234', startsWith(partition+'/') = false, so evictRunRoot returns silently with no log. fleet-dir.mjs scratchRootRefusal does not reject trailing slash. I did not run the full runReview probe; the claim's impact (silent skipped cleanup, review still succeeds) follows from the code. CWD-AUDIT: not run, no writes made in /Users/chris/dev/fleet-plugin (read-only commands only)."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/evict-tree.mjs",
+      "line": 184,
+      "claim": "isTree() turns every git failure (unreadable .git, broken .git, timeout, ENOBUFS, dubious ownership) into 'not a tree', and evictTrees() neither evicts nor reports it, so the tree keeps its installed deps with failed[] empty and no SNAPSHOT_PRUNE_FAILED or review-end log.",
+      "evidence": "probe1.mjs against copy/plugin/scripts/evict-tree.mjs with apply:true. A: tree with `chmod 000 .git` returned {\"evicted\":[],\"failed\":[]} and node_modules still existed. B: tree with .git/HEAD renamed returned the same, node_modules still existed. In both, the tree's own ls-files path (which does report) never ran, because rev-parse failure returns false. The docs (scratch-reclaim.md) say a tree that failed is 'tried again by the next review's pass'. These trees are not marked failed, so the only signal is the disk staying full.",
+      "suggested_fix": "In isTree, report a rev-parse that errors or exits non-zero when `.git` exists. Treat only a successful answer naming a different toplevel as 'enclosing repository', and push {path, error} to failed for the other cases. Or have evictTrees return a third `skipped` list that reclaim-scratch prints.",
+      "dimension": "silent-failure",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Ran evictTrees(apply:true) from my copy of the snapshot on a tree whose .git/HEAD was renamed and which held an ignored node_modules. It returned {\"evicted\":[],\"failed\":[]} and node_modules was still there. In the snapshot source, isTree() (evict-tree.mjs:92-103) returns false when `git rev-parse` fails, so evictTrees skips the tree without adding it to failed. I did not run the chmod 000 case, the timeout or ENOBUFS cases, or the dubious-ownership case. I did not check whether the documented SNAPSHOT_PRUNE_FAILED log would fire elsewhere. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I did not touch these; I only wrote under my scratch dir, so they were probably changed by other agents.",
+          "inconclusive": false
+        },
+        {
+          "refuted": false,
+          "reason": "Reproduced on the snapshot's evict-tree.mjs. I made a git repo with node_modules gitignored and `chmod 000 .git`, then ran evictTrees(apply:true). It returned {\"evicted\":[],\"failed\":[]} and node_modules still existed. The code agrees: isTree() returns false on any rev-parse error or non-zero status (lines 92-104), so the tree is skipped without entering failed[]. The reported line 184 is wrong; the file has 154 lines and the logic is at ~line 99. I found nothing elsewhere that handles or reports this case, and no test or doc comment that deliberately treats an unreadable .git as a non-tree. Not run: a positive control showing the same fixture is evicted when .git is readable. I also did not run the broken-HEAD variant. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/ticket-features.tsv, M docs/metrics/tier-outcomes.tsv (not from my runs; I only wrote under the scratch dir)"
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/evict-tree.mjs",
+      "line": 234,
+      "claim": "evictTrees() skips a directory it cannot list (EACCES/EPERM/ENOENT/ENOTDIR) with no failed entry, so a tree below a mode-000 or otherwise unreadable directory is never evicted and nothing says so.",
+      "evidence": "probe1.mjs case C: root/C/sub chmod 000, containing tree/ with ignored node_modules/. evictTrees(root,{apply:true}) returned {\"evicted\":[],\"failed\":[]} and `C tree nm exists true`. A review run root is built by agents, so a specialist copy under a directory that dropped its read bit stays installed without an error. The comment says this mirrors freshUnder(). But freshUnder's caller keeps the whole key as unknown, while this path discards it.",
+      "suggested_fix": "Put EACCES/EPERM into failed (as `cannot list it`) rather than skipping it, or at least count them in a `skipped` field of the receipt. Keep ENOENT/ENOTDIR as benign races.",
+      "dimension": "silent-failure",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Reproduced. I built root/C/sub (chmod 000) containing a git tree with an ignored node_modules/. evictTrees(root,{apply:true}) returned {\"evicted\":[],\"failed\":[]}, and node_modules still existed afterward. The catch at evict-tree.mjs:139-144 explicitly skips EACCES/EPERM/ENOENT/ENOTDIR without recording a failure. The function's own docstring says `failed` includes 'a directory that cannot be read', which contradicts the code. I ran only this direct probe, not ./agent-test. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I did not touch these files; they were modified by other agents."
+        },
+        {
+          "refuted": false,
+          "reason": "Code check only, nothing executed. evict-tree.mjs lines 138-144 read as follows. `readdirSync` is wrapped in a catch. For ENOENT, ENOTDIR, EACCES and EPERM the catch does `continue` without pushing to `failed`. Only other error codes are recorded. So an unreadable directory is skipped silently and any tree below it is never evicted, as claimed. The finding's probe run (case C) was not re-run. Lens 2: I found no other handling. A grep of tests/evict-tree.test.mjs for `000` and `EACCES` found nothing. The skip is deliberate, per the code comment, but it does not surface the skipped directory to callers. The finding's contrast with freshUnder is not checked. CWD-AUDIT: not run; I made no writes and ran only reads in /Users/chris/dev/fleet-plugin."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 631,
+      "claim": "Each `--pr <N>` pass now evicts the installed deps of every kept (young) run root under pr<N>, including another review's still-running run root, and the receipt only labels it 'a tree in a kept review run root'. The code comment's assumption that a live run root 'holds no tree yet' is true only for the caller's own root.",
+      "evidence": "Built rs/pr7/run-LIVE0001/snapshot-x via tests/support/run-tree.mjs (node_modules present), ran `node plugin/scripts/reclaim-scratch.mjs --root rs --pr 7 --apply`. Receipt: evicted:[{path:.../run-LIVE0001/snapshot-x,reason:'a tree in a kept review run root',ignored:['node_modules/']}], kept reason 'run root modified within 7 days', failed:[]; node_modules was gone afterwards. A second review of the same PR starting while the first runs strips the first one's installed dependencies mid-run. The first review then sees test or build failures that look like its own and are reported as a PR defect.",
+      "suggested_fix": "Evict only run roots idle past a short grace period, or exclude the caller's own run-root family and any run root with a recent write. Or have `--pr` take a lease/idle threshold shorter than 7 days but longer than a review's life.",
+      "dimension": "silent-failure",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Reproduced: a young run root rs/pr7/run-LIVE0001 with a tree had node_modules evicted by `--pr 7 --apply`; receipt reason 'a tree in a kept review run root', kept reason 'run root modified within 7 days'. Code at line ~631 evicts trees in every kept run root with no exclusion of other live roots. CWD-AUDIT: not run (no writes in cwd /Users/chris/dev/fleet-plugin; all work in scratch)",
+          "counter_evidence": "node plugin/scripts/reclaim-scratch.mjs --root rs --pr 7 --apply → evicted:[snapshot-x ignored node_modules/], failed:[]"
+        },
+        {
+          "refuted": false,
+          "reason": "Read-only confirmation of the code path. In plugin/scripts/reclaim-scratch.mjs, `--pr` mode loops over every entry in `kept` (any run root under pr<N> modified within 7 days) and calls evictTrees on it, with no check on whether another review owns that run root. The comment at lines 95-106 says a live review's run root 'holds no tree yet', which is true only for the caller's own root. A second review of the same PR running while the first is mid-run would therefore strip the first one's installed dependencies. I did not re-run the reproduction myself, and found no handling elsewhere that prevents this. CWD-AUDIT: not run; I only read files and wrote nothing in /Users/chris/dev/fleet-plugin."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "claim": "docs/research/external-assumptions/harness-node.md row 108 cites `plugin/scripts/reclaim-scratch.mjs` `REMOVE` as the removal sequence's location. The PR moved REMOVE to evict-tree.mjs, so the cited symbol no longer exists in that file.",
+      "evidence": "grep -rn 'REMOVE' in the snapshot shows REMOVE defined only in plugin/scripts/evict-tree.mjs. reclaim-scratch.mjs only mentions it in a comment at line 107, 'evict-tree.mjs's REMOVE', and imports removeEntry. Row 108 (line 155) still names `plugin/scripts/reclaim-scratch.mjs` `REMOVE`. The diff does not touch this file.",
+      "file": "docs/research/external-assumptions/harness-node.md",
+      "line": 155,
+      "suggested_fix": "Change the reference to `plugin/scripts/evict-tree.mjs` `REMOVE`. Row 108 also opens with 'Every scratch removal (`reclaim-scratch.mjs` …', which could name evict-tree.mjs too.",
+      "dimension": "comments",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Row 108 (line 155) does cite `plugin/scripts/reclaim-scratch.mjs` `REMOVE`. I grepped REMOVE in reclaim-scratch.mjs and evict-tree.mjs only, so a definition elsewhere in the snapshot would not show up. REMOVE is defined only in evict-tree.mjs:46. reclaim-scratch.mjs has just a comment mentioning it at line 107, so the cited symbol is not in that file. I did not check whether the diff touches this file. CWD-AUDIT: clean /Users/chris/dev/fleet-plugin (nothing was written there, but I did not run the git status audit)"
+        },
+        {
+          "refuted": false,
+          "reason": "Ran grep on the snapshot. REMOVE is defined only at plugin/scripts/evict-tree.mjs:46. Row 108 (line 155) cites `plugin/scripts/reclaim-scratch.mjs` `REMOVE` as a location, and reclaim-scratch.mjs has REMOVE only in the comment at line 107, so the citation is stale. Scope: grep of REMOVE in plugin/scripts, plus the row's cited locations. I did not check whether the diff touches this doc. CWD-AUDIT: not run; I made no writes and ran only read-only commands in /Users/chris/dev/fleet-plugin."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [
+    {
+      "severity": "important",
+      "claim": "ADR 0036's Consequences still say review scratch volume stays out of scope for eviction, which the PR's own Status amendment contradicts: 'the review scratch volume this ADR left out of scope is evicted too'.",
+      "evidence": "sed -n 84,104p docs/adr/0036*.md shows the untouched lines 'Removing a claim tree or its branch while the claim stands, review scratch volume, any free-space floor and other checkouts on the host stay out of scope.' The diff to this ADR changes only the Status paragraph (lines 12-16).",
+      "file": "docs/adr/0036-an-idle-claim-tree-is-evicted-its-dependencies-go-the-claim-stays.md",
+      "line": 102,
+      "suggested_fix": "Drop 'review scratch volume' from that Consequences bullet, or add '(amended by #4076)' to it.",
+      "dimension": "comments",
+      "verdict": "refuted",
+      "votes": [
+        {
+          "refuted": true,
+          "reason": "The text is as quoted: line 102 still says review scratch volume is out of scope, and the Status paragraph says it is now evicted. But that paragraph is an explicit 'Amended by #4076' note, and the Consequences describe the original decision. Leaving the original body untouched and recording the change as an amendment is the ADR convention. The same Status paragraph already carries 'Amended by #4098' notes without rewriting the body they change. So this is a style nit rather than a defect. I only read the files, so no tests were run and no red/kill evidence applies. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I did not modify these; they were already dirty."
+        },
+        {
+          "refuted": false,
+          "reason": "Read the snapshot's ADR 0036. Lines 15-16 in Status say 'Amended by #4076: the review scratch volume this ADR left out of scope is evicted too'. Consequences lines 102-104 still say 'review scratch volume ... stay out of scope'. The contradiction is real and nothing else in the file reconciles it. Only one other 'Amended by' in this ADR (#4098), and I did not check whether its amendment left stale body text. The Status wording 'this ADR left out of scope' could be read as the amendment overriding the original body, which weakens the finding to a minor doc inconsistency. I ran no tests, since this is a docs-only claim. CWD-AUDIT: not run; I wrote nothing in /Users/chris/dev/fleet-plugin."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 628,
+      "claim": "An eviction by the `--pr` pass bumps the evicted tree's directory mtime, so a run root idle for about 6 days (for example one whose review died before its finally block ran) becomes fresh again and gets another full 7 days before the age rule removes it.",
+      "evidence": "Probe tests/zz-probe2.mjs in my copy: makeTree under pr7/run-oldaaaaa, every mtime set 6 days back, then freshUnder(run, now-1d) returned null (idle). After `reclaim-scratch.mjs --pr 7 --root <scratch> --apply` evicted it, freshUnder(run, now-1d) returned `.../run-oldaaaaa/snapshot-abc` (fresh).",
+      "suggested_fix": "Restore the parent directories' mtimes after removal, or document that an eviction restarts the retention clock (the evicted root is small, so the cost is low).",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/review-core.mjs",
+      "line": 1308,
+      "claim": "[INFERENCE, not executed] run.runRoot takes snap.runRoot before snapshotMissing validates it, and evictableRunRoot checks only its shape. A misreported runRoot naming another existing run-* root of the same PR would therefore have that root's trees evicted in the finally block, even though the review then refuses the report.",
+      "evidence": "Code read only: line 1308 assigns run.runRoot from the raw report, and snapshotMissing runs afterwards at line 1316. evictableRunRoot (1031-1041) checks the partition prefix, the run-[A-Za-z0-9]{8} shape and lstat isDirectory, and nothing ties the root to the one this run's mktemp created. No probe run.",
+      "suggested_fix": "Record the run root only once snapshotMissing(snap, runRootPrefix) returns null and SNAPSHOT_RUN_ROOT matches the report, or have the eviction require the snapshot path that this run verified.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/review-core.mjs",
+      "line": 482,
+      "claim": "The documented guarantee that a failed eviction 'never changes what the review returns or throws' is false when host.log itself throws: the log call inside evictRunRoot's catch (and the loop above it) throws out of the `finally`, replacing the review's return value or original error.",
+      "evidence": "Throwaway runReview test with host.log = m => { if (/eviction/.test(m)) throw new Error('log sink closed') }, snapshot tree chmod 0555 so removal fails. Output: `P2 THREW log sink closed`, where the review had completed with head abc123 (P3, same setup with a normal log, returned abc123 and logged `eviction at the end of the review failed in ...snapshot-abc123: could not remove node_modules/: ... Permission denied`).",
+      "suggested_fix": "Wrap the log calls in evictRunRoot in their own try/catch, or make the finally `try { evictRunRoot(...) } catch {}`.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/review-core.mjs",
+      "line": 490,
+      "claim": "evictableRunRoot() rejects a snapshot-reported runRoot of the wrong shape (wrong length, symlinked partition, or lstat error) silently: no eviction and no log, so a run root that the shape check misjudges keeps its deps with nothing recorded.",
+      "evidence": "Throwaway runReview test with the snapshot agent reporting runRoot `.../pr7/run-abcd123` (7 chars) with a real tree under it. runReview returned head abc123; `nm exists true`, eviction log lines: []. The existing test 'evicts nothing when the snapshot agent reported nothing, and says nothing about it' pins the null-report case. The wrong-shape case is also silent, though the agent did name a root.",
+      "suggested_fix": "Log one line when a reported string runRoot is refused by evictableRunRoot (including the lstat catch), so a refusal is visible; keep the silence for no report.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "Changed evict-tree.mjs behaviour 'a directory the walk cannot read (EACCES/EPERM/ENOTDIR) is skipped, never a failure' is not killed by evict-tree.test.mjs, reclaim-scratch.test.mjs or evict.test.mjs; narrowing the errno list to ENOENT leaves all green.",
+      "evidence": "mutant: s/[\"ENOENT\",\"ENOTDIR\",\"EACCES\",\"EPERM\"]/[\"ENOENT\"]/ in evict-tree.mjs; run: ./agent-test tests/reclaim-scratch.test.mjs tests/evict.test.mjs → exit 0, tests 118 pass 118 fail 0; same on tests/evict-tree.test.mjs tests/review-core-run-end-eviction.test.mjs → exit 0, tests 12 pass 12. Survivor (no red); full suite not run against it, so only suggestion.",
+      "file": "tests/evict-tree.test.mjs",
+      "suggested_fix": "Add an evict-tree case with a chmod-000 subdirectory and assert failed is [] and the sibling tree is still evicted.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The nested-path dedupe in ignoredPaths (drop a path that lies under an already listed ignored directory) has no test that fails when it is removed.",
+      "evidence": "mutant: delete `if (out.some((q) => q.endsWith(\"/\") && p.startsWith(q))) continue;`; run: ./agent-test tests/evict-tree.test.mjs → exit 0, tests 4 pass 4; ./agent-test tests/reclaim-scratch.test.mjs tests/evict.test.mjs → exit 0, tests 118 pass 118 fail 0. May be an equivalent mutant since --directory already lists dirs whole.",
+      "file": "plugin/scripts/evict-tree.mjs",
+      "suggested_fix": "Either drop the guard as dead, or add a test where it fires.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The new direct evict-tree.test.mjs does not itself kill removal of the RUNNER guard, the skip-set, or the realpath toplevel check; those kills come only from reclaim-scratch.test.mjs, so evict-tree.test.mjs alone is a weaker guard than its header implies.",
+      "evidence": "M1 (remove bare===RUNNER), M4 (remove skip.add), M5 (realpath compare → always true): ./agent-test tests/evict-tree.test.mjs tests/review-core-run-end-eviction.test.mjs → exit 0, 12 pass 0 fail for each; M1 red: ./agent-test tests/reclaim-scratch.test.mjs tests/evict.test.mjs → exit 1, fail 4 incl '(8) --pr <N>: the runner a tree tracks or ignores is never listed as an ignored path'; M4 → exit 1, fail 1 incl '(8) --pr <N>: a repository inside an ignored directory goes with that directory, and is no tree of its own'; M5 → exit 1, fail 1 incl '(8) --pr <N> strips no directory that resolves to an enclosing repository'; baseline: ./agent-test tests/evict-tree.test.mjs tests/reclaim-scratch.test.mjs → exit 0, tests 85 pass 85 (the three reds were not re-run on exactly the 118-test combination unmutated; full suite 8882 pass).",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The ambient-GIT_DIR test in evict-tree.test.mjs discriminates: dropping gitEnv() from the git spawn turns it red while the other three tests stay green.",
+      "evidence": "red: ./agent-test tests/evict-tree.test.mjs → exit 1, fail 1 incl 'an ambient GIT_DIR and GIT_WORK_TREE naming another repository change nothing about which paths are listed or removed'; baseline: ./agent-test tests/evict-tree.test.mjs → exit 0, tests 4 pass 4 (all four pass, including that test).",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The evictTrees JSDoc says `failed` includes 'a directory that cannot be read', but the code skips unreadable directories (ENOENT, ENOTDIR, EACCES, EPERM) and the inline comment says 'never a failure'. Only other readdir errors reach `failed`.",
+      "evidence": "evict-tree.mjs in the diff: the JSDoc reads 'failed is [{path, error}]: a tree whose ignored paths cannot be listed or all removed, or a directory that cannot be read'. The catch block reads 'skipped, as freshUnder() skips one it cannot read, and never a failure', with `if (![\"ENOENT\",\"ENOTDIR\",\"EACCES\",\"EPERM\"].includes(e.code)) failed.push(...)`.",
+      "file": "plugin/scripts/evict-tree.mjs",
+      "line": 1,
+      "suggested_fix": "Reword the JSDoc to 'or a directory whose listing fails for a reason other than absent or unreadable'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The reclaim-scratch.mjs header says nothing else is looked at because 'a live review's own run root is seconds old and holds no tree yet'. That holds only for the calling review's own root. The new eviction also strips the trees of a concurrently live review of the same PR, because its run root is 'kept' (modified within 7 days), and the comment does not say so.",
+      "evidence": "The snapshot step in review-core.mjs (lines 1129-1132) runs mktemp for its own RUN and then `reclaim-scratch.mjs --pr`. staleRunRoots (reclaim-scratch.mjs 490-507) pushes every young run-* directory onto `kept`. The new loop `for (const run of kept) evictTrees(run.path, {apply})` then evicts all of them. No ledger or liveness check is made.",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 104,
+      "suggested_fix": "Say that a concurrent review of the same PR also has its trees evicted, or drop the parenthetical.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "ADR 0029 decision 7 still says the removal sequence 'lives in the script as its single copy', but it now lives in evict-tree.mjs, a different script from the one decision 7 is about (reclaim-scratch.mjs). Decision 7 also still says 'Age-only on `<root>/pr<N>/run-*`'. The #4076 amendment is in the Status line, not in decision 7.",
+      "evidence": "docs/adr/0029…md lines 67-72 are unchanged. The diff adds only 'Amended by #4076: decision 7's --pr <N> also evicts…' to the Status paragraph.",
+      "file": "docs/adr/0029-scratch-is-reclaimed-on-github-terminal-state-and-age.md",
+      "line": 67,
+      "suggested_fix": "In decision 7, name evict-tree.mjs as the home of the removal sequence and note the eviction of kept run roots.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "docs/research/run-artifacts.md row 96 gives the reclaim-scratch.mjs removal sequence as `reclaim-scratch.mjs:132-141` (REMOVE), and the `--pr` prune as `review-core.mjs:1075`. After this PR REMOVE is gone from that file, and the `--pr` prune is described as removal only, not eviction.",
+      "evidence": "sed -n 96p docs/research/run-artifacts.md. REMOVE is no longer defined in reclaim-scratch.mjs. The file already has stale line numbers elsewhere, so this is a research snapshot, hence only a suggestion.",
+      "file": "docs/research/run-artifacts.md",
+      "line": 96,
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body: 'four test files' understates the change. The diff touches six test files (ambient-git-vars-mjs-prose, evict-tree [new], member-report-file-prose, reclaim-scratch, review-core-run-end-eviction [new], snapshot-repo) plus two tests/support helpers. The other counts hold: three scripts changed (evict.mjs, reclaim-scratch.mjs, review-core.mjs), four docs changed (CONTEXT.md, ADRs 0029 and 0036, scratch-reclaim.md).",
+      "evidence": "grep '^diff --git' on pr.diff lists the files above.",
+      "suggested_fix": "Say 'six test files and two support modules', or 'four test suites' if only the substantive ones are meant.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/review-core.mjs",
+      "claim": "In runReview, the `run` object `{scratch:null, pr:null, runRoot:null}` is mutated in place, and the rule that `runRoot` is set only after `scratch` and `pr` are set lives in a comment and in the runtime guard `evictableRunRoot`, not in the shape.",
+      "evidence": "Read in pr.diff (image-rendered, so partial). `run` starts as `{scratch:null,pr:null,runRoot:null}`, is assigned later in reviewRun, and `evictRunRoot` bails when `scratch === null`. `evictableRunRoot` checks the run-root path (the `pr<N>/run-XXXXXXXX` partition format, a real directory, not a symlink) at runtime. This is a defensible choice for untyped JS; I ran nothing.",
+      "suggested_fix": "Optional: build the run record once, after the snapshot step reports, instead of mutating a nullable triple. Then `runRoot` cannot exist without `scratch` and `pr`.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "claim": "The reclaim receipt's `evicted` key is present only under `--pr` mode, through a conditional spread, so the receipt has two shapes that consumers must tell apart by key presence. The `null`-versus-`[]` distinction is documented in comments only.",
+      "evidence": "Seen in the diff: `let evicted = null` in main, and the receipt is built with `...(evicted === null ? {} : {evicted})`. No consumer was checked for how it reads the key.",
+      "suggested_fix": "Emit `evicted` as an array in both modes (empty when not applicable), or document the two shapes next to the receipt schema.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/review-core.mjs",
+      "line": 1031,
+      "claim": "evictableRunRoot builds the PR partition a second time, as posix.join(scratch, `pr${pr}`), even though reviewRun already has it as runRootParent = `${scratch}/pr${pr}` (line 1094). The two copies are written differently, so when args.scratch ends in a slash the review runs normally but eviction at the end is skipped without any log line.",
+      "evidence": "In the copy, I added a probe tests/zz-probe-trailing.test.mjs that drives runReview with the scripted host from review-core-run-end-eviction.test.mjs, and with the snapshot agent's tree built at `${scratch}${slash}/pr7/run-abcd1234`. Output: {\"slash\":\"\",\"head\":\"abc123\",\"nodeModulesLeft\":false,\"logs\":[]} and {\"slash\":\"/\",\"head\":\"abc123\",\"nodeModulesLeft\":true,\"logs\":[]}. The review succeeded and node_modules stayed, with no log. Separately, `mktemp -d \"$PWD/tsl//pr7/run-XXXXXXXX\"` printed a path with `//pr7`, and node's posix.join(s,'pr7') gave `.../tsl/pr7`, so startsWith gave false. runnerScratchRefusal (lines 950-957) and scratchRootRefusal (fleet-dir.mjs:198-219) both accept a trailing slash. Mutant: store run.partition = runRootParent in place of run.scratch/run.pr, and give evictableRunRoot(runRoot, partition) the stored value. The probe then printed nodeModulesLeft:false for both cases, and review-core-run-end-eviction plus the probe passed 10/10. NOTE: this change alters behavior in the trailing-slash case, because it fixes the missed eviction, so the correctness dimension should own it as a defect.",
+      "suggested_fix": "Delete run.scratch and run.pr. Set `run.partition = runRootParent` where run.scratch/run.pr are set now (line 1118), and change the helper to `function evictableRunRoot(runRoot, partition) { if (!runRoot.startsWith(`${partition}/`)) return false; ... }`. One value is then derived once, and both the mktemp template and the eviction guard read it.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/review-core.mjs",
+      "line": 1044,
+      "claim": "Two guards in evictRunRoot/evictableRunRoot repeat checks that the code already guarantees. run.runRoot is only assigned at line 1308, behind `typeof snap.runRoot === \"string\"`, so evictableRunRoot's `typeof runRoot !== \"string\"` test (line 1033) is repeated work. `scratch === null` is just a stand-in for 'no run root yet': run.scratch is set at line 1118, before line 1308 can run, so a non-null runRoot means scratch is non-null.",
+      "evidence": "grep -n 'run\\.\\(scratch\\|pr\\|runRoot\\)' review-core.mjs printed only 1118 (run.scratch), 1119 (run.pr) and 1308 (`if (snap && typeof snap.runRoot === \"string\") run.runRoot = snap.runRoot;`). Mutant in the copy: line 1044 changed to `if (runRoot === null || !evictableRunRoot(...)) return;` and the typeof clause at line 1033 dropped. Results: reclaim-scratch + review-core-run-end-eviction 91/91 pass; review-core-snapshot-path, unrun, scratch-refusal, install-step, reads 123/123 pass.",
+      "suggested_fix": "`if (runRoot === null || !evictableRunRoot(runRoot, scratch, pr)) return;`, and in evictableRunRoot keep only `if (!runRoot.startsWith(`${partition}/`)) return false;`. If you take the previous finding, scratch/pr are gone and the guard is `runRoot === null || !evictableRunRoot(runRoot, partition)`.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 629,
+      "claim": "`if (pr !== null)` is tested a second time right after the if/else-if/else chain whose first branch already tests it (line 595). The eviction loop only uses `kept` and `failed`, which that first branch has just filled, so the loop belongs inside that branch.",
+      "evidence": "sed -n 590-665p showed the chain `if (pr !== null) {...staleRunRoots(parent, ..., kept)} else if (siblings) {...} else {...}` followed by `let evicted = null; if (pr !== null) { evicted = []; for (const run of kept) {...} }`. Mutant in the copy: `let evicted = null` declared with `ledger`, the loop moved to the end of the first branch, and the second `if` deleted. Result: tests/reclaim-scratch.test.mjs + review-core-run-end-eviction.test.mjs 91/91 pass. The order of pushes to failed[] is unchanged, because the other branches never run when pr !== null.",
+      "suggested_fix": "Declare `let evicted = null;` beside `let ledger = null;`. At the end of the `if (pr !== null) { ... }` branch add `evicted = []; for (const run of kept) { const done = evictTrees(run.path, { apply }); ... failed.push(...done.failed); }`, and delete the standalone `if (pr !== null)` block.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/evict-tree.mjs",
+      "line": 145,
+      "claim": "Sorting the readdir entries in descending order in evictTrees has no effect on the result. evictTrees re-sorts both evicted and failed by full path before returning (line 152-153), and the skip set for a directory is always filled before any of its descendants is pushed, so the walk order changes neither the result nor which paths are skipped.",
+      "evidence": "Mutant in the copy deleted line 145 (`grep -c 'entries.sort'` → 0). Result: node --test --test-reporter=tap tests/evict-tree.test.mjs tests/reclaim-scratch.test.mjs tests/review-core-run-end-eviction.test.mjs tests/evict.test.mjs: # tests 130, # pass 130, # fail 0. The final byPath sort is still needed: a pre-order walk by name visits `a/b` before `a-c`, but string order puts `a-c` first ('-' 0x2d < '/' 0x2f).",
+      "suggested_fix": "Delete `entries.sort((a, b) => (a.name < b.name ? 1 : a.name > b.name ? -1 : 0));` and keep the final `evicted.sort(byPath)` / `failed.sort(byPath)`, which is what makes the result deterministic.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

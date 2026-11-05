@@ -1,0 +1,378 @@
+{
+  "pr": 4343,
+  "head": "7eaf99312d21990ba456d064ad8bef90c21e1c3a",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv' and ' M docs/metrics/tier-outcomes.tsv'. I made no writes there (my only commands there were pwd and git status), so I did not cause these modifications."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. My probes ran only in the scratch copy and wrote nothing there, so I did not make these changes. They are not part of this diff."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I ran only reads there and wrote nothing, so these two modifications were already in the checkout."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I made no edits there; my shell only read it via git status, and every other command ran in the scratch copy. Those two files were probably changed by another member's metrics-refresh run, which I cannot confirm."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin —  M docs/metrics/ticket-features.tsv,  M docs/metrics/tier-outcomes.tsv (not written by this review: my only command there was `pwd`; every other command cd'd into the scratch copy or read the snapshot/diff by absolute path)"
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin —  M docs/metrics/ticket-features.tsv,  M docs/metrics/tier-outcomes.tsv (none of my commands ran there: every command chained a cd into the scratch copy or the snapshot, and the only command that touched this path was this read-only status)"
+    }
+  ],
+  "counts": {
+    "survived": 1,
+    "refuted": 1,
+    "unverified": 21,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4343/run-cxijVx4u/snapshot-7eaf9931",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 1013,
+      "claim": "A second Fit over the identical records counts as a second consecutive pass, so a split that passed once stands with no new evidence, because the gate is deterministic in its records (seed = seedOf(scored Pull ids)) and nothing marks a Fit over unchanged TSVs as no look.",
+      "evidence": "probe-refit.mjs in my copy: fitTree({prior: DAY_ONE_TABLE, ...parsed(corpus(flip())), guard: guardAt(), previous}) run twice on the same records → `look1 {} [ 'criteria' ] 160` / `look2 same records {\"*\":{\"input\":\"criteria\",\"cut\":0}} [ 'criteria' ] 160` / `gate identical: true`. Why it matters under no effect: probe-looks.mjs over 100 delta=0 histories (split-histories.mjs, 118 runs) → `{ everPassed: 21, everStood: 14, passedNotStood: 7 }`, so one repeated Fit per history would raise the chance-split rate from 14% to as much as 21%, above the ticket's 15% and the test's 19% bound. The repeat happens in production: phase0-receipt.mjs STEP_NAMES puts `metrics` before `rotate`, and phase0.mjs:148-163 says every step before `rotate` re-runs on every invocation until rotation runs. A phase 0 in a new session with no new Pulls also refits the same TSVs. tests/metrics-refresh.test.mjs itself makes a split stand from two phase0(f) calls over unchanged rows.",
+      "suggested_fix": "Count a look only when the records changed. For example, record the scored set's seed/hash or the tsv_blobs in `gate`. When it equals the previous Fit's, carry `passed` forward unchanged and let nothing new stand from that Fit, so it is treated like a failed Fit. Add a test where two Fits over identical records do not make a first pass stand.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "In the snapshot, metrics-refresh.mjs:329-340 reads previousGate and calls fitTree with no check for unchanged TSVs or blob ids. ticket-router.mjs:1013 takes seedOf(pulls ids), so the gate depends only on its records. The docs at metrics-refresh.mjs:80-90 count only a failed Fit as no look. tests/metrics-refresh.test.mjs:519-532 has a split standing after two phase0(f) calls over the same fixture rows. I read this code and test and did not run them. I did not re-run the 21% vs 14% chance-split probes, and the 15% and 19% bounds are not checked. CWD-AUDIT: not run (no files written; /Users/chris/dev/fleet-plugin)."
+        },
+        {
+          "refuted": false,
+          "reason": "Read-only code and test inspection; I ran nothing and wrote nothing. The code supports the claim: growTree (ticket-router.mjs:1016-1017) counts every Fit as a look via previous.passed, and writeFit (metrics-refresh.mjs:~329-340) refits the TSVs on every call. It records tsv_blobs but never compares them to the previous Fit's, so no dedupe exists. The only other tsv_blobs readers (board-gather.mjs, compute-cell-evidence.mjs) use it for display and staleness checks, not to skip a Fit. tests/metrics-refresh.test.mjs:517-530 makes a split stand from two phase0 calls over unchanged rows, so the repeat-over-unchanged-rows path is the tested behaviour. I did not reproduce the claim's 21% versus 14% rate figures; they come from the reporter's own probe scripts, which are not in the snapshot. CWD-AUDIT: not run — I made no writes anywhere, and /Users/chris/dev/fleet-plugin is the cwd `pwd` printed."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [
+    {
+      "severity": "important",
+      "claim": "previousGate() turns an unparseable `.fleet/router-fit.json` into 'no previous Fit' with no log and no stdout line. The Fit then succeeds with `gate.passed` reset, so a split that already stands is dropped from the table and the run reports a normal `fit: fitted …`.",
+      "evidence": "Probe in the copy. After two phase-0 runs on KIND_FLIP rows the table held splits={\"*\":{\"input\":\"kind\",\"cut\":\"bug\"}}. I then overwrote router-fit.json with the truncated text '{\"table\": {\"x\":' and ran phase 0 again. Output: status 0, stderr \"\", stdout ended \"metrics-refresh: fit: fitted 160 Pulls, in burn-in; .fleet/router-fit.json computed …\". The probe then printed `PROBE after: {} [\"kind\"]`: the standing split was gone, and the pass count restarted at one. The `catch { return null; }` at metrics-refresh.mjs previousGate and the test at tests/metrics-refresh.test.mjs L559 make this deliberate. It still contradicts the header comment's claim that a failed Fit 'neither advances nor resets' the count. Unlike the EISDIR case, which fails loudly, a corrupt file or a non-array `gate.passed` (the test's `{passed:\"kind\"}` case) resets the count and routing with no signal anywhere.",
+      "file": "plugin/scripts/metrics-refresh.mjs",
+      "suggested_fix": "Separate 'no file' and 'file written before the gate' (a parseable object with no `gate` key), which stay null, from 'file exists but is not JSON' or 'gate present but malformed'. Throw the latter, so it surfaces as `fit: failed — …` and the old file is kept. Alternatively, print a `fit: previous gate unreadable — counting from zero` note on stdout.",
+      "dimension": "silent-failure",
+      "verdict": "refuted",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Not refuted, but I did not run anything. The check is a source read of the snapshot only, so there is no red/baseline evidence line. previousGate (metrics-refresh.mjs L298-311) rethrows non-ENOENT read errors, such as EISDIR. For a read that succeeds, `catch { return null; }` covers unparseable JSON, and `?.gate ?? null` covers a missing gate. There is no log or stdout line on that path. The test at tests/metrics-refresh.test.mjs L559 pins this: for 'not json' and `gate:{passed:\"kind\"}` it expects splits `{}` and passed `[\"kind\"]`, which is a reset. The header comment at L90-92 says a failed Fit's count 'neither advances nor resets'. A corrupt-file Fit is not reported as failed, so it does reset, and the claimed tension with the comment exists. The behaviour is deliberate, as the claim says. The silent reset is real, but whether it counts as a defect is a judgment call. I did not check that the `PROBE after: {} [\"kind\"]` output from the claim's own probe reproduces. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I made no edits there and ran only read-only commands; the changes were already in the controller checkout."
+        },
+        {
+          "refuted": true,
+          "reason": "I ran nothing; this verdict rests on reading the snapshot's source and test. previousGate's comment (metrics-refresh.mjs ~L295) says outright that a file that will not parse is 'no such Fit to read', and the test at tests/metrics-refresh.test.mjs ~L553 asserts exactly this reset for 'not json', '[]', 'null', a missing gate and a non-array passed. That makes the behaviour specified and pinned, not a silent failure. The header's 'a Fit that failed neither advances nor resets' (~L91) covers a Fit that errors and leaves the old file in place, and that case is covered by the test at ~L545. A corrupt file that the next Fit then overwrites with a successful result is a different case. Unreadable files such as EISDIR do throw, loudly. The claim's observation that no log line is printed is true, but it is a design preference rather than a defect, and the evidence is weaker than the claim's 'contradicts' framing. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I wrote nothing there, so these changes were already present.",
+          "inconclusive": false
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/split-gate.mjs",
+      "line": 12,
+      "claim": "The gate scores a depth-2 partition differently from how the tree routes it. A Pull that holds the first cut's input but lacks the second is scored as outside the partition, on the group's one-Cell choice, while stratumOf routes it to the first cut's child node and that node's row.",
+      "evidence": "probe-route.mjs: stratumOf({splits:{\"*\":{input:\"criteria\",cut:0},\"criteria>0\":{input:\"kind\",cut:\"bug\"},\"criteria<=0\":{input:\"kind\",cut:\"bug\"}}}, {brief_chars:\"100\", criteria:\"5\", kind:\"\"}) printed `criteria>0`. In partitionsOf (split-gate.mjs ~102-113) gid[r] = -1 when either side is -1, and the header (lines 12-13) says such a Pull 'routes by the group's own row'. So the gain and the bound for 2-cut splits leave out Pulls that the shipped tree routes by a depth-1 row.",
+      "suggested_fix": "For a 2-cut partition, give a Pull that lacks only the second input its first-cut side as its own leaf, matching the tree. Otherwise, correct the header comment so it states the difference.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/support/split-histories.mjs",
+      "line": 66,
+      "claim": "The flip and chance acceptance tests call searchSplits/standing directly, with a synthetic `coin` input, no `dirs`, every Pull merged, and a fresh per-run seed mix(seed,99,1,delta,h,run). They never go through fitTree/growTree/seedOf, so production seeding and the same-records refit case above are outside the measured 37-run / 15% / 1% figures.",
+      "evidence": "Read tests/support/split-histories.mjs 1-143: `const look = { pulls, cells: CELLS, inputs: INPUTS, minN: MIN_N, seed: mix(seed, 99, 1, delta, h, run) }`; INPUTS adds `{ name: \"coin\", cuts: \"presence\" }`; pulls carry `merged: 1`. Test log line 8830: `14 of 100 histories held a chance split at some run (95% range 9-22%), 0 at the last`; line 8833: `80% of 160 histories held the split on the coin by run 40`.",
+      "suggested_fix": "Keep the simulator, and add at least one multi-Fit test through fitTree with growing corpora. That test would pin how growTree, the seeding and the standing count work together.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/split-gate.mjs",
+      "line": 340,
+      "claim": "Only the single best-by-gain partition is judged at each Fit. A standing split that still passes both tests merges back whenever another partition has higher in-sample gain, for example its own depth-2 refinement A+B. The brief says 'Every Fit re-judges every split'.",
+      "evidence": "Not executed. Read from the code: searchSplits keeps `top` as the max-gain partition and runs the null and bound only for it. standing() returns `passed = [best.key]`, so a previously passing key that is not the new best leaves both `passed` and `stands`.",
+      "suggested_fix": "If the spec means re-judging the standing split, also run both tests on the previously passed key's partition. Otherwise, document that the gate judges only the best partition.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 985,
+      "claim": "growTree searches only Pulls whose Cell is in prior.cells (slow-high, task-high, smol-high). Counted Pulls on any other exploration Cell are dropped silently: they are neither scored nor counted in `left_out`, so `scored + left_out` under-reports the Pulls the gate set aside.",
+      "evidence": "router-table.json printed `['slow-high', 'task-high', 'smol-high'] {}`. In growTree, `tally(units, order).filter((t) => cells.includes(t.cell))` drops other Cells before the left_out count. Not executed against a corpus with an off-table Cell.",
+      "suggested_fix": "Count off-table Cells' Pulls in `left_out`, or in a separate field, so the gate record accounts for every counted Pull.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 1041,
+      "claim": "fitTree replaces prior.splits with the gate's tree ('the starting table's own tree is not read'), while `--check` still refits with fitTable over prior.splits. A starting table that ever ships splits would route differently through the Fit than its own check verifies.",
+      "evidence": "The starting table's splits are `{}` today (python read of plugin/scripts/router-table.json), so this is latent. fitTree passes `prior: { ...prior, splits }` with splits from growTree; ticket-router.mjs:1257 `--check` calls fitTable({ prior: table, ... }). Not executed with a non-empty starting tree.",
+      "suggested_fix": "Either assert in validateTable/--check that the starting table's splits are empty, or make the two paths agree.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "growTree now reads every SEARCHED input (all number columns plus kind and parent) on every counted Pull, and parses `assignment_prob`, whether or not any split exists. One malformed count cell or bad `assignment_prob` in any ticket-features row now throws AttributionError and fails the entire Fit on every phase 0 until the TSV is fixed. The failure is reported only as a `metrics-refresh: fit: failed — …` stdout line with exit 0.",
+      "evidence": "Read, not executed. growTree (ticket-router.mjs ~L1000-1017) calls `inputOf(name, u.pull)` for each name in SEARCHED and `probabilityOf(u.pull)`, both of which throw AttributionError. writeFit's caller catches that and returns `say(`fit: failed — ${e.message}`)`, and the run exits as the other duties set it. The failure is not silent, since it is named and ticket-numbered, but the table silently stops refreshing and the stale one keeps routing.",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "suggested_fix": "Keep the stale-table fallback as designed. Consider whether a failed Fit should exit non-zero or be surfaced in the cockpit, because a single bad TSV cell now blocks all re-fitting.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/split-gate.mjs",
+      "line": 229,
+      "claim": "The five-fold structure of the bound (FOLDS) is documented but no test pins it: changing FOLDS to 4 or 10 leaves every split-gate, split-gate-chance, split-gate-flip and split-fit test green.",
+      "evidence": "red: none (mutant survived). tests/split-gate.test.mjs with `const FOLDS = 5`→`4` → exit 0, fail 0, 21 pass; with →`10` → exit 0, fail 0, 21 pass; tests/split-gate-chance.test.mjs tests/split-gate-flip.test.mjs tests/split-fit.test.mjs with →`10` → fail 0, 18 pass; baseline: same commands on the unmutated tree → exit 0, all pass. A mutant that survives is a gap, not a kill.",
+      "suggested_fix": "Add a hand-worked case where the 5-fold bound differs from a 4- or 10-fold bound, or assert the fold assignment (`k % FOLDS`) directly.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/split-gate.mjs",
+      "line": 273,
+      "claim": "Two bound details have no discriminating test: the `(n - 1)` sample-variance denominator (mutant `n` survives) and the strict `bound > 0` in `passesBound` (mutant `>= 0` survives).",
+      "evidence": "red: none (mutants survived). `s/\\(n - 1\\)\\)/n)/` and `s/bound > 0,/bound >= 0,/` each ran against split-gate.test.mjs → fail 0, 21 pass, and against chance+flip+split-fit → fail 0, 18 pass; baseline: same commands on the unmutated tree → exit 0, all pass.",
+      "suggested_fix": "Add a case with a bound of exactly 0 and a small-n case where the variance denominator moves the verdict.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/split-gate-chance.test.mjs",
+      "line": 13,
+      "claim": "The chance test's 19%/3% limits are loose enough that doubling the null's false-positive rate (ALPHA 0.05→0.1) does not fail it. Only tests/split-gate.test.mjs catches that mutant, and the gate's headline false-positive rate is pinned only by that hand-worked test.",
+      "evidence": "red: none for chance. `./agent-test tests/split-gate-chance.test.mjs tests/split-gate-flip.test.mjs` with ALPHA=0.1 → exit 0, fail 0, 3 pass; the same narrowed run with Z95→0 → fail 1 incl 'with no input mattering, no more than 19% of histories hold a chance split…' (that red is accidental to the bound, not to ALPHA). baseline: same command unmutated → exit 0, 3 pass. MOST_LEAVES 4→3 likewise survives chance+flip (3 pass).",
+      "suggested_fix": "Tighten the chance limits or use more histories so the 15% and 1% figures from docs/research/split-looks.md discriminate a 2x change in ALPHA.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/metrics-refresh.mjs",
+      "line": 332,
+      "claim": "The guard `if (valid instanceof Error) throw valid;` in writeFit, which refuses to write a grown tree that fails validateTable, is not covered: deleting it leaves the metrics-refresh and board-cell-evidence-gather tests green.",
+      "evidence": "red: none (mutant survived). `s/if \\(valid instanceof Error\\) throw valid;//` ran against tests/metrics-refresh.test.mjs tests/board-cell-evidence-gather.test.mjs → exit 0, fail 0, 78 pass; baseline: same command unmutated → 78 pass. The neighbouring mutants (ENOENT branch, parse-fail catch, gate dropped from the record) were all killed.",
+      "suggested_fix": "Add a test where fitTree returns a table validateTable rejects, asserting writeFit throws and leaves the old router-fit.json in place.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/metrics-refresh.mjs",
+      "line": 88,
+      "claim": "The new FIT header comment and phase-0.md say a failed Fit 'neither advances nor resets' the split's count, but `previousGate` returns null for a previous Fit file that will not parse, which does reset it.",
+      "evidence": "The diff's `previousGate` returns null on a JSON.parse failure, and its comment says 'no such Fit to read: no file, one that will not parse...'. The new test titled 'a previous Fit that will not parse, or holds no gate, is no previous pass' confirms this. Only a Fit that throws before the rename leaves the old file intact. A Fit that succeeds over a corrupt file starts the count again.",
+      "suggested_fix": "Say the count is kept only while the old file stays readable. A file that will not parse counts as no previous Fit.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 992,
+      "claim": "The `growTree` docstring says the searched group is every counted Pull of the table's Cells 'the guard has not tripped', but the code never excludes the default Cell (POLICY_CELL), whatever the guard says.",
+      "evidence": "`cells = prior.cells.includes(POLICY_CELL) ? [POLICY_CELL, ...prior.cells.filter((c) => c !== POLICY_CELL && !tripped.has(c))] : []`. pr-cost.mjs's retire logic filters out BASELINE_CELL. I did not confirm the guard can never list the default Cell in `tripped`, so the mismatch is probably not reachable in practice.",
+      "suggested_fix": "Word it as 'the default Cell and every other Cell the guard has not tripped'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/split-gate-flip.test.mjs",
+      "line": 16,
+      "claim": "The comment says the flip is 'about 6.5%' of the one-Cell choice's $ per merged PR. Computed from the fixture pool it is 6.7%.",
+      "evidence": "A node one-liner over split-gate-pool.json gave slow mean 14.506 and task mean 10.278. 0.5*(6-(s-t))/(t+3) = 0.0667. Rounding is close enough that this is not a defect.",
+      "suggested_fix": "Write 'about 6.7%', or leave it as it is.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/split-gate.mjs",
+      "claim": "searchSplits stores each Pull's Cell index in a Uint8Array, so with more than 256 Cells the index wraps and a Pull is silently attributed to the wrong Cell. Nothing in the types or at runtime enforces the bound, and the RangeError guard only covers unknown Cells.",
+      "evidence": "Probe: searchSplits with 257 cells and a Pull whose cell is 'c256' ran without error and returned base 'c0'. The Pull was treated as Cell 0 instead of failing. I did not check whether real tables can reach 256 Cells (the table's Cell count was not inspected), so this is not shown to be reachable.",
+      "suggested_fix": "Use Uint16Array or Int32Array for `o.cell` and `shuf.cell`, or throw RangeError when `cells.length > 255`.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/metrics-refresh.mjs",
+      "claim": "previousGate returns whatever `gate` value the old .fleet/router-fit.json holds, with no shape check, and growTree defends only by `Array.isArray(previous?.passed)`. The 'previous gate record' invariant is documented in JSDoc and not enforced at the boundary. A malformed `passed` is read as an empty array, so the split's two-Fit confirmation count restarts without any error.",
+      "evidence": "Read in the diff: previousGate does `return JSON.parse(text)?.gate ?? null`, and growTree does `const kept = Array.isArray(previous?.passed) ? previous.passed : []`. Elements of `kept` are not checked to be strings. I did not run a malformed-file case.",
+      "suggested_fix": "Validate `gate.passed` as string[] in previousGate (or in a shared parser) and treat a malformed record as null.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/pull-attribution.mjs",
+      "line": 468,
+      "claim": "This PR leaves `attribute()`'s `stratum` option dead: its only caller, ticket-router's fitPulls, no longer passes it, so every unit's `stratum` is always null. `book()` overwrites that null before anything reads `u.stratum` (ticket-router.mjs:704).",
+      "evidence": "`git grep -n 'attribute('` over plugin and tests found callers only at pr-cost.mjs:188, ticket-router.mjs:681 and tests/pull-attribution.test.mjs (63, 329, 342, 397, 1175, 1398), and none passes `stratum`. The diff hunk shows `-function fitPulls({ ..., stratum })` replaced by `book()`. `git grep -w stratum` in pull-attribution.mjs and pr-cost.mjs finds only the option, its doc and the `stratum: stratum(pull)` field. I removed the option, the field and the doc lines in the copy, then ran all 27 test files that reference these modules: 1865/1865 pass, exit 0.",
+      "suggested_fix": "Drop `stratum = () => null` from attribute's parameters, drop `stratum: stratum(pull),` from the unit literal (line 573), and drop `stratum` from the doc comment (the unit shape at line 454 and the \"`stratum` maps a features row to its stratum\" sentence at lines 462-463). `book()` stays the one place a unit gets its stratum.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/split-gate.mjs",
+      "line": 327,
+      "claim": "Both `top < 0` tests in searchSplits' best-partition loop are redundant. `top` stays -1 only when `parts` is empty, and then `gain` is still 0 and `gain <= EPS` already returns. Starting the comparison from `gain = 0` picks the same first maximum whenever the maximum exceeds EPS.",
+      "evidence": "In the copy I changed line 325 to `if (g > gain) [top, gain] = [q, g];` and line 327 to `if (gain <= EPS) return out;`. simplify/equiv.mjs compared the snapshot module with the mutant on 600 seeded groups (240 with no cuts, i.e. no partitions; 185 with a best split): every output byte-identical. Affected tests: 1865/1865 pass.",
+      "suggested_fix": "let top = -1; let gain = 0; for (...) { ...; if (g > gain) [top, gain] = [q, g]; } if (gain <= EPS) return out;",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/split-gate.mjs",
+      "line": 340,
+      "claim": "searchSplits tallies the whole group twice: once to pick `base` (line 315) and again at line 340 only to recompute `ratio` from that same whole-group tally after the partition loop overwrote `s`. Computing `ratio` right after `base` removes the second `tallyInto` pass over all n Pulls.",
+      "evidence": "In the copy I moved `const ratio = s[base * STRIDE + 1] > 0 ? s[base * STRIDE + 2] / s[base * STRIDE + 1] : 0;` to directly after `const base = pick(s, 0, C, minN, 0);` and deleted line 340's `tallyInto(s, whole, 1, C, o);`. equiv.mjs: 600/600 outputs identical to the snapshot's. Affected tests: 1865/1865 pass.",
+      "suggested_fix": "const base = pick(s, 0, C, minN, 0); const ratio = s[base * STRIDE + 1] > 0 ? s[base * STRIDE + 2] / s[base * STRIDE + 1] : 0; ... then drop the second `tallyInto(s, whole, 1, C, o)` and the later `ratio` line.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/split-gate.mjs",
+      "line": 355,
+      "claim": "`best.key` is `best.inputs` joined, but it is built by mapping `used` a second time. Building it from `inputs` makes the link visible and removes the duplicate map.",
+      "evidence": "In the copy: `const names = used.map((c) => c.input);` with `inputs: names, key: names.join(\"+\")`. equiv.mjs: 600/600 identical JSON. tests/split-gate.test.mjs:297 (`best.key.split(\"+\").length === best.cuts.length`) and all 1865 affected tests pass.",
+      "suggested_fix": "const inputs = used.map((c) => c.input); out.best = { inputs, cuts: ..., key: inputs.join(\"+\"), ... }",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/split-gate.mjs",
+      "line": 81,
+      "claim": "In cutsOf, `how === \"percentiles\"` is tested twice across two ternaries, one of them nested, and `sorted = null` is a placeholder only so the second ternary can see it. A single if/else chain says the same thing.",
+      "evidence": "In the copy I replaced lines 81-82 with `let thresholds = values; if (how === \"presence\") thresholds = [0]; else if (how === \"percentiles\") { const sorted = Float64Array.from(present).sort(); thresholds = PERCENTILES.map((q) => Math.floor(quantile(sorted, q))); }`. equiv.mjs (covering percentiles, values and presence inputs, some held null): 600/600 identical. split-gate*, split-fit and metrics-refresh tests: 66/66 pass.",
+      "suggested_fix": "let thresholds = values; if (how === \"presence\") thresholds = [0]; else if (how === \"percentiles\") { const sorted = Float64Array.from(present).sort(); thresholds = PERCENTILES.map((q) => Math.floor(quantile(sorted, q))); }",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/support/split-histories.mjs",
+      "line": 94,
+      "claim": "The test for whether a key is the real split on the coin, `key.split(\"+\").includes(\"coin\")`, is written out twice: in history()'s `stop === \"real\"` break (line 87) and in firstReal (line 94). If one copy is edited and the other is not, the early stop and the summary would disagree about what the real split is.",
+      "evidence": "`grep -n 'includes(\"coin\")' tests/support/split-histories.mjs` found exactly lines 87 and 94. Not mutated: this was found by reading the code, not by running a probe.",
+      "suggested_fix": "const onCoin = (key) => key !== null && key.split(\"+\").includes(\"coin\"); then use `stands.some(onCoin)` at line 87 and `looks.findIndex((l) => onCoin(l.stands))` at line 94.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

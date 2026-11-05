@@ -1,0 +1,39 @@
+{
+  "head": "a9fe16b8a6d199b4892288f51f59db84b3ef7898",
+  "run": "run-TubTsNFn",
+  "entries": [
+    {
+      "bucket": "survived",
+      "index": 0,
+      "scope": "out",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "out of scope: the finding is in tests/reap.test.mjs and tests/release-ticket.test.mjs, which PR #4299 (docs/metrics only) does not touch. #4189, its earlier home, is closed, so it is filed open as #4300. Measured that origin/main already fixes it (cfe3fe8c, #4275): env -u FORCE_COLOR GIT_SEQUENCE_EDITOR=true GIT_EDITOR=true ~/.fleet/bin/fleet-run suite-slot.mjs './agent-test' --test-name-pattern='#2219|#2218' tests/reap.test.mjs tests/release-ticket.test.mjs → PR head a9fe16b8: exit 1, tests 18, fail 6 incl the six named tests; origin/main aaa17b9f: exit 0, tests 18, pass 18, cancelled 0",
+      "issue": 4300,
+      "remedyFiles": ["tests/reap.test.mjs", "tests/release-ticket.test.mjs"],
+      "charge": "none",
+      "chargeReason": "claim-about-untouched-code"
+    },
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted: the producer (plugin/scripts/run-records.mjs, closeout.mjs, phase0.mjs), its layout doc (close-out.md, phase-0.md) and its test (tests/run-records.test.mjs, exit 0, tests 8 pass 8 on origin/main) are on origin/main and landed after the PR's stale base; every PR path passes main's isRunRecord()",
+      "issue": 4301,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4299/fix-8pHG783Y/u0/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted: the records are byte-for-byte what main's run-records.mjs writes (only the Recipe step output withheld), and #4165's maintainer ruling commits the receipts and ledger and keeps only transcripts out; publishing host paths is specified, so no change belongs in the data (any change would go in the producer)",
+      "issue": 4301,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4299/fix-8pHG783Y/u1/verdict.json",
+      "remedyFiles": ["plugin/scripts/run-records.mjs"]
+    }
+  ]
+}

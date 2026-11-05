@@ -1,0 +1,50 @@
+{
+  "head": "37bbba9f334177f659bde436fa7ac61c2e2560b0",
+  "run": "run-jTicIYC6",
+  "entries": [
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4315/fix-9x5mSg6T/u0/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted: the header lists [-x] as a shape matched on disk and never says a fleet path writes it, so it does not contradict the new comment",
+      "issue": 4318,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4315/fix-9x5mSg6T/u1/verdict.json",
+      "remedyFiles": [
+        "plugin/scripts/stranded.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "out",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "out of scope per the #4171 ruling (evict's kept reason and ADR 0036 excluded); a wording qualifier, below the claim bar",
+      "issue": 4318,
+      "remedyFiles": [
+        "plugin/scripts/evict.mjs",
+        "docs/adr/0036-an-idle-claim-tree-is-evicted-its-dependencies-go-the-claim-stays.md"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted: a full run at 37bbba9 gave tests 8848, pass 8848, skipped 0, and 37bbba9^{tree} is 2b7baeb",
+      "issue": 4318,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4315/fix-9x5mSg6T/u3/verdict.json"
+    }
+  ]
+}

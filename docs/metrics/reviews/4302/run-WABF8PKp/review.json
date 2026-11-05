@@ -1,0 +1,95 @@
+{
+  "pr": 4302,
+  "head": "122efb1e369d3b8910131e4bf9002c5eeea58a2d",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "tests",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv' (I ran only read-only commands there, so these were already modified, probably by another agent)."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv' and ' M docs/metrics/tier-outcomes.tsv'. I did not touch these; they are most likely other agents' or the controller's writes."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv` (not written by this review: every command here ran with an explicit cd into the scratch copy or scratch dir, and none of them writes docs/metrics)."
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 4,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4302/run-WABF8PKp/snapshot-122efb1e",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "tests/implementer-model-tier.test.mjs",
+      "line": 232,
+      "claim": "The new test reads only the FIRST `description:` line of the frontmatter, so a definition that carries a second, wrong `description:` key after the correct one passes both the new test and frontmatter-check.test.mjs, even though a last-key-wins YAML reader would surface the wrong description.",
+      "evidence": "mutants2.sh `dup_desc_key_after`: perl inserted `description: A wrong one at cell smol-max.` after the correct line in fleet-implementer-task-high.agent.md; `node --test tests/implementer-model-tier.test.mjs tests/frontmatter-check.test.mjs` → ℹ tests 46, pass 46, fail 0. The same mutant run against the tier file alone in mutants.sh also gave pass 8 / fail 0. The existing name/model pins use `^…$`/m matches too, so this is the file's established pattern, and whether the harness takes the first or the last key was not measured.",
+      "suggested_fix": "Gather every match with matchAll(/^description: (.*)$/gm), assert there is exactly one, then compare it to template(cell). Or leave duplicate-key detection to frontmatter-check, but the ticket rules that checker out of scope.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/implementer-model-tier.test.mjs",
+      "line": 233,
+      "claim": "The assertion sits inside the loop and stops at the first definition that fails, so when several descriptions are wrong the message names only the first one in sort order. In the ticket's m_df mutant, the wrong cell in smol-low goes unreported.",
+      "evidence": "mutants.sh `m_df` (smol-low cell changed to smol-max AND slow-max clause changed to `the body is whatever`): the only AssertionError was `fleet-implementer-slow-max.agent.md's description is not the shared template at cell slow-max`, and smol-low was not mentioned. With m_d alone, the message correctly named smol-low. Every mutant the ticket requires turned the test red: m_d, m_f and m_df failed; a body-only edit was caught only by the body test (#1801); new_valid_cell_correct (slow-minimal) passed 8/8 with no test edit; new_valid_cell_stale failed and named slow-minimal; template_lost_cell failed on the uniqueness assertion.",
+      "suggested_fix": "Optional: collect the mismatching names and make one deepEqual(mismatches, []) assertion, so every bad definition is listed in one run.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/implementer-model-tier.test.mjs",
+      "claim": "The trailing `descriptions.size === names.length` uniqueness assertion is redundant. The per-name exact-equality assertion already fails first for any description that lost its cell, so the uniqueness assertion cannot be the sole failure.",
+      "evidence": "red: ./agent-test tests/implementer-model-tier.test.mjs → exit 1, fail 1 incl 'every implementer definition's description is the shared template with its own cell substituted (#4295)' (M4, all descriptions set to 'cell X.'); baseline: ./agent-test tests/implementer-model-tier.test.mjs → exit 0, named test pass. The red in M4 was produced by the equality assertion; I did not isolate the uniqueness assertion with a mutant of its own.",
+      "suggested_fix": "Optional: drop the uniqueness assertion, or keep it as documentation.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/implementer-model-tier.test.mjs",
+      "line": 224,
+      "claim": "The new test's comment says the byte-identical clause is the description's statement of 'the body pin above', but the body-identity test ('every implementer definition's body is byte-identical (#1801)') is at line 263, below the new test at line 221.",
+      "evidence": "grep -n '^test(' on the snapshot: the name/route test is at 200, the new test at 221, the tools test at 241, the three-keys test at 254, the body-identity test at 263.",
+      "suggested_fix": "Change 'the body pin above' to 'the body-identity pin below', or name the test: 'the body-identity test (#1801)'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

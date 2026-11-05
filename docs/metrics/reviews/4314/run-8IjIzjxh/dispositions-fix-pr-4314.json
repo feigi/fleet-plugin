@@ -1,0 +1,111 @@
+{
+  "head": "6f2fdceb4178f6fb7e0b508dfb91e3003ff1c334",
+  "run": "run-8IjIzjxh",
+  "entries": [
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4314/fix-qqvJFPVd/u0/verdict.json",
+      "disposition": "apply",
+      "reason": "refuter survived; applied with Number.isFinite (the refuter's measured correction of the isSafeInteger remedy) and a 309-nines entry in CORRUPT_COUNTS"
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4314/fix-qqvJFPVd/u1/verdict.json",
+      "disposition": "apply",
+      "reason": "refuter survived; comment reflowed at the surrounding width, and the join comment in main() the refuter named as the same case"
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4314/fix-qqvJFPVd/u2/verdict.json",
+      "disposition": "defer",
+      "reason": "refuted by its refuter; filed on the suggestion-band record",
+      "issue": 4317
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4314/fix-qqvJFPVd/u3/verdict.json",
+      "disposition": "defer",
+      "reason": "refuted by its refuter; filed on the suggestion-band record",
+      "issue": 4317
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4314/fix-qqvJFPVd/u4/verdict.json",
+      "disposition": "defer",
+      "reason": "refuted by its refuter; filed on the suggestion-band record",
+      "issue": 4317
+    },
+    {
+      "bucket": "unverified",
+      "index": 5,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4314/fix-qqvJFPVd/u5/verdict.json",
+      "disposition": "defer",
+      "reason": "refuted by its refuter; filed on the suggestion-band record",
+      "issue": 4317
+    },
+    {
+      "bucket": "unverified",
+      "index": 6,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4314/fix-qqvJFPVd/u6/verdict.json",
+      "disposition": "defer",
+      "reason": "refuted by its refuter; filed on the suggestion-band record",
+      "issue": 4317
+    },
+    {
+      "bucket": "unverified",
+      "index": 7,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4314/fix-qqvJFPVd/u7/verdict.json",
+      "disposition": "defer",
+      "reason": "refuted by its refuter; filed on the suggestion-band record",
+      "issue": 4317
+    },
+    {
+      "bucket": "unverified",
+      "index": 8,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4314/fix-qqvJFPVd/u8/verdict.json",
+      "disposition": "apply",
+      "reason": "refuter survived; the two blank checks merged as suggested"
+    },
+    {
+      "bucket": "unverified",
+      "index": 9,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4314/fix-qqvJFPVd/u9/verdict.json",
+      "disposition": "apply",
+      "reason": "refuter survived; the duplicated tree hoisted as CRITERIA_BELOW"
+    },
+    {
+      "bucket": "unverified",
+      "index": 10,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4314/fix-qqvJFPVd/u10/verdict.json",
+      "disposition": "apply",
+      "reason": "refuter survived; the unread-issue assertion now runs against a criteria split"
+    }
+  ]
+}

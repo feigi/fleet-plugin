@@ -1,0 +1,82 @@
+{
+  "pr": 4303,
+  "head": "3731fbeda4744bc982ad90bc10e3087f8fe4e366",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "tests",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv' (not produced by this review; I wrote nothing there)."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. I did not change these files: every command I ran after `pwd` either cd'd into the scratch correctness/ dir first or used absolute scratch paths."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I never wrote to that checkout; both paths were already modified there."
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 3,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4303/run-EFMRlraL/snapshot-3731fbed",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "tests/suite-slot.test.mjs",
+      "line": 145,
+      "claim": "Mutant (a) is killed only if the wrapper wakes from its first 2 s sleep with time left on the 3 s cap. The test does not assert that the loop went round twice, so a scheduler stall of more than about 1 s during that first sleep lets mutant (a) survive while the test still passes.",
+      "evidence": "Mutant a: deleted line 180 `announced = true;` in plugin/scripts/suite-slot.mjs in my copy, with both slots held under a scratch HOME and FLEET_SUITE_WAIT_S=3. Normal run → exit 75, stderr prints 'suite-slot: waiting up to 3s for a slot' twice and then 'no slot after 3s', so the test catches it. Same mutant with `kill -STOP` at 0.6 s for 3 s, then `kill -CONT` → exit 75, stderr prints the waiting line ONCE and then 'no slot after 3s', so the new test would pass and the mutant would survive that run. On this host the normal case kills it (see the next finding).",
+      "suggested_fix": "Optional. Accept this as an inherent timing limit. Or show that a second cycle happened, e.g. assert the elapsed time came in under one 2 s cycle past the cap, so a stalled run fails loudly instead of passing silently. Do not add a readiness signal: the ticket puts that out of scope.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/suite-slot.test.mjs",
+      "line": 145,
+      "claim": "No defect found: both new tests pass on the unmutated tree, and each of the ticket's two mutants is killed by its intended test and by no other.",
+      "evidence": "In my copy: `./agent-test tests/suite-slot.test.mjs` unmutated → exit 0, tests 21, pass 21, fail 0, cancelled 0. Mutant a (deleted `announced = true;`) → exit 1, tests 21, pass 20, fail 1; the only failure is '✖ a wait that goes round its loop more than once prints its waiting line once, before it gives up (3345ms)'. Mutant b (announce block moved above `const left = …`, so it runs before the `left <= 0` check) → exit 1, tests 21, pass 20, fail 1; the only failure is '✖ a cap of 0 gives up at once without announcing a wait (423ms)'. Both mutants were reverted with git checkout, and `git status --porcelain -uall` in the copy printed nothing. The reviewed test-run.log shows both new tests passing (lines 8878-8879, 3348ms and 360ms), which matches the ticket's expected wall-time cost. Its single skip (line 448, port 8123 held) is unrelated. Grep of tests/docs/plugin finds FLEET_SUITE_WAIT_S \"0\" only at the new test (tests/suite-slot.test.mjs:162).",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/suite-slot.test.mjs",
+      "line": 142,
+      "claim": "The new 'prints its waiting line once' test kills the single-announce regressions (no `announced = true`, and `announced` reset each cycle), and the 'cap of 0' test kills announcing before the expiry check. Neither pins the printed number, so printing the remaining time instead of the cap would pass if the first loop pass reads 0 ms elapsed.",
+      "evidence": "red: node --test tests/suite-slot.test.mjs → exit 1, fail 1 incl a wait that goes round its loop more than once prints its waiting line once, before it gives up (mutant M1, drop announced=true); baseline: node --test tests/suite-slot.test.mjs → exit 0, a wait that goes round its loop more than once prints its waiting line once, before it gives up pass. red: node --test tests/suite-slot.test.mjs → fail 1 incl a cap of 0 gives up at once without announcing a wait (mutant M6, announce moved above the left<=0 check); baseline: same command → exit 0 (21/21 pass), that test passed. The same 'once' test also failed under M3 (reset announced each cycle). The fail counts are from the filtered run output; I did not read the exit codes of the mutant runs. Survivors: M4 (`left` printed instead of `waitMs`) and M2 (`left<0`) stayed green, 21/21.",
+      "suggested_fix": "Optional: make the survivors deterministic, e.g. use a cap the elapsed time can never match. Current coverage of the changed behaviour is otherwise adequate.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

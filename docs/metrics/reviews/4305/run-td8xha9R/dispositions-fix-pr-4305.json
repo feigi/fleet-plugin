@@ -1,0 +1,136 @@
+{
+  "head": "50fcfb824abec4038a4abf320799b83f026401dc",
+  "run": "run-td8xha9R",
+  "entries": [
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4305/fix-NdZc2o7b/u0/verdict.json",
+      "remedyFiles": [
+        "tests/evict.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted: the proposed typeof hardening turns the before-run gate fail-open (measured); the claim itself reports no defect",
+      "issue": 4311,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4305/fix-NdZc2o7b/u1/verdict.json",
+      "remedyFiles": [
+        "plugin/scripts/evict.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4305/fix-NdZc2o7b/u2/verdict.json",
+      "remedyFiles": [
+        "tests/evict.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4305/fix-NdZc2o7b/u3/verdict.json",
+      "remedyFiles": [
+        "docs/adr/0036-an-idle-claim-tree-is-evicted-its-dependencies-go-the-claim-stays.md"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "out",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "out of scope (finisher-tree.mjs outside the diff; finisher's tree out of #4098 scope); shape claim, below the claim bar",
+      "issue": 4311,
+      "remedyFiles": [
+        "plugin/scripts/finisher-tree.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 5,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "refuted: the sentence is true of installIn's body; the remedy is a wording preference",
+      "issue": 4311,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4305/fix-NdZc2o7b/u5/verdict.json",
+      "remedyFiles": [
+        "plugin/scripts/evict.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 6,
+      "scope": "out",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "out of scope (finisher-tree.mjs outside the diff; finisher's tree out of #4098 scope); shape claim, below the claim bar",
+      "issue": 4311,
+      "remedyFiles": [
+        "plugin/scripts/finisher-tree.mjs",
+        "plugin/scripts/evict.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 7,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted: an undefined hook return fails closed (Install step does not run); the typeof remedy fails open (measured)",
+      "issue": 4311,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4305/fix-NdZc2o7b/u7/verdict.json",
+      "remedyFiles": [
+        "plugin/scripts/evict.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 8,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4305/fix-NdZc2o7b/u8/verdict.json",
+      "remedyFiles": [
+        "plugin/scripts/evict.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 9,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4305/fix-NdZc2o7b/u9/verdict.json",
+      "remedyFiles": [
+        "plugin/scripts/evict.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 10,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4305/fix-NdZc2o7b/u10/verdict.json",
+      "remedyFiles": [
+        "plugin/scripts/evict.mjs"
+      ]
+    }
+  ]
+}
