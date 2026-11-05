@@ -970,7 +970,7 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
         }
         if (!m && REVIEWED_RUNLESS.test(tok)) {
           throw new LedgerError(`${where}: '${tok}' names no review run — reviewed= is now <head>:<survived>/<refuted>/<unverified>:<run>, `
-            + "<run> the run-XXXXXXXX directory holding that review's review.json; drop the token with `ledger.mjs row` and record it again with `ledger.mjs review <pr>`");
+            + "<run> the run-XXXXXXXX directory holding that review's review.json; drop the token with `ledger.mjs row` and record it again with `ledger.mjs review <pr> --result <path>`");
         }
         if (!m) throw new LedgerError(`${where}: '${tok}' is not reviewed=<head>:<survived>/<refuted>/<unverified>:<run>`);
         latestFinisher = null;

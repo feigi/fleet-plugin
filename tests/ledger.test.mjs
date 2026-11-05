@@ -3761,9 +3761,11 @@ test("token refuses a member token of any family, a review token, a word the gra
     refused(["token", "5", tok], member);
   }
   const review = /is a review token — review tokens are written only with `ledger\.mjs review/;
-  for (const tok of ["review=wf:abc123", "review=member:review-pr-9", "reviewed=73b356de:3/1/0:run-73b356dr", "review=nonsense"]) {
+  for (const tok of ["review=wf:abc123", "review=member:review-pr-9", "review=nonsense"]) {
     refused(["token", "5", tok], review);
   }
+  // A result is a Gate verdict: the refusal names the flag that derives it.
+  refused(["token", "5", "reviewed=73b356de:3/1/0:run-73b356dr"], /is a review token — a reviewed= is written only with `ledger\.mjs review <pr> --result <path>`/);
   for (const tok of ["impl-5=nonsense", "impl-0412", "fix-pr-", "finisher-pr-x=labelled"]) {
     refused(["token", "5", tok], /member token|cannot parse|outcome/);
   }

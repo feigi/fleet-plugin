@@ -22,6 +22,7 @@ import { ref, prUrl } from "./support/queue-gh.mjs";
 import { scratchRoot } from "../plugin/scripts/fleet-dir.mjs";
 import { computeBoard } from "../plugin/scripts/compute-board.mjs";
 import { identityRoles } from "./support/label-map-seed.mjs";
+import { viaResult } from "./support/review-result.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
 
@@ -95,7 +96,7 @@ cat "$f"
 `);
   env.PATH = `${bin}:${process.env.PATH}`;
 
-  const run = (...args) => spawnSync(process.execPath, [SCRIPT, "--file", file, ...args], { cwd: work, env, encoding: "utf8" });
+  const run = (...args) => spawnSync(process.execPath, [SCRIPT, "--file", file, ...viaResult(join(work, "review-scratch"), args)], { cwd: work, env, encoding: "utf8" });
   const cli = rendering(fleet, run);
   const ok = (...args) => {
     const r = cli(...args);

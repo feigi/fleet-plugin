@@ -22,6 +22,7 @@ import {
 } from "../plugin/scripts/dispositions-check.mjs";
 import { rendering } from "./support/rendered-brief.mjs";
 import { seedLabelMap } from "./support/label-map-seed.mjs";
+import { viaResult } from "./support/review-result.mjs";
 import {
   LEDGER, IDENTITY, REMAP, cleanEnv, git, fixture, mismatch, okVerdict, H40, coreRun, core, applied, escalated, deferOutside, withSeverity,
 } from "./support/dispositions-fixture.mjs";
@@ -117,7 +118,7 @@ test("--ledger, --uphold and --send-back are the verb's: refused at exit 2 namin
 function seedOwnLedger(f) {
   const ledger = join(f.repo, ".fleet", "ledger.md");
   const run = rendering(dirname(ledger), (...args) => {
-    const r = spawnSync(process.execPath, [LEDGER, "--file", ledger, ...args], { encoding: "utf8", env: cleanEnv() });
+    const r = spawnSync(process.execPath, [LEDGER, "--file", ledger, ...viaResult(f.scratch, args)], { encoding: "utf8", env: cleanEnv() });
     assert.equal(r.status, 0, r.stderr);
   });
   run("row", "10", "impl-10=PR#40 → PR#40");

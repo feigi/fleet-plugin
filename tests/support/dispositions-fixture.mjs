@@ -17,6 +17,7 @@ import { checkDispositions, formatViolation } from "../../plugin/scripts/disposi
 import { rendering } from "./rendered-brief.mjs";
 import { ref, prUrl } from "./queue-gh.mjs";
 import { seedLabelMap } from "./label-map-seed.mjs";
+import { viaResult } from "./review-result.mjs";
 import { LABEL_ROLES } from "../../plugin/scripts/label-map.mjs";
 
 export const LEDGER = fileURLToPath(new URL("../../plugin/scripts/ledger.mjs", import.meta.url));
@@ -132,7 +133,7 @@ export function fixture(t, { labelMap = {} } = {}) {
   const prsFile = join(dir, "prs.json");
   // The `gh` stub first on PATH, and the tracker files it answers from.
   const stubEnv = (base) => ({ ...base, PATH: `${bin}:${base.PATH ?? ""}`, FAKE_GH_ISSUES: issuesFile, FAKE_GH_PRS: prsFile });
-  const ledgerCli = rendering(dir, (...args) => spawnSync(process.execPath, [LEDGER, "--file", ledger, ...args], { encoding: "utf8", env: stubEnv(cleanEnv()) }));
+  const ledgerCli = rendering(dir, (...args) => spawnSync(process.execPath, [LEDGER, "--file", ledger, ...viaResult(scratch, args)], { encoding: "utf8", env: stubEnv(cleanEnv()) }));
   const okLedger = (...args) => {
     const r = ledgerCli(...args);
     assert.equal(r.status, 0, `ledger ${args.join(" ")}: exit ${r.status}\n${r.stderr}`);
@@ -141,10 +142,6 @@ export function fixture(t, { labelMap = {} } = {}) {
   // The review's own run root, as review-core.mjs's snapshot step makes it
   // and the latest `reviewed=` names it.
   const run = "run-Rv40Aa01";
-  okLedger("row", "10", "impl-10=PR#40 → PR#40");
-  okLedger("review", "40", "review=member:review-pr-40", `reviewed=${head}:2/1/1:${run}`);
-  okLedger("dispatch", "40", "fix-pr-40");
-  okLedger("settle", "fix-pr-40", `applied:${head.slice(0, 7)}`);
 
   const finding = (file, line, severity = "important") => ({ severity, file, line, claim: "c", evidence: "e" });
   const review = {
@@ -159,6 +156,10 @@ export function fixture(t, { labelMap = {} } = {}) {
   mkdirSync(join(scratch, "pr40", run), { recursive: true });
   const writeReview = (r = review) => writeFileSync(reviewPath, JSON.stringify(r));
   writeReview();
+  okLedger("row", "10", "impl-10=PR#40 → PR#40");
+  okLedger("review", "40", "review=member:review-pr-40", `reviewed=${head}:2/1/1:${run}`);
+  okLedger("dispatch", "40", "fix-pr-40");
+  okLedger("settle", "fix-pr-40", `applied:${head.slice(0, 7)}`);
   // The review above is PR 40's first review, so its record carries a Charge
   // on every standing entry: a survived or refuted one is charged none, for a
   // reason, unless a case says otherwise. An unverified one carries none.

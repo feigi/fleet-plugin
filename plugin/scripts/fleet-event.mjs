@@ -97,12 +97,14 @@
 //       The reap and the reclaim run once for every merge bot settled `done`, always, even when the pass merged nothing, and again on the next tick after an `APPLY FAILED` line, and on every tick while this run has no controller record to remember the pass by.
 //       The bot may also have written `conflict-hold:#<pr>` onto a held PR's own row earlier in the same pass, before reporting: a token the bot wrote in that pass, never one `reap.sh` writes.
 //   review-result <pr> <path>
-//       The review result file at `<path>`, which must be
+//       `ledger.mjs review <pr> --result <path> --scratch <scratch>`: the
+//       ledger derives `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>`
+//       from the review result file at `<path>`, which must be
 //       `<scratch>/pr<pr>/<run>/<file>`, `<run>` a review run root
-//       (`run-` and eight characters) and no `..` segment: its `head` and
-//       `counts` make `ledger.mjs review <pr>
-//       reviewed=<head>:<survived>/<refuted>/<unverified>:<run>`, skipped when
-//       the PR's rows already carry that token.
+//       (`run-` and eight characters) and no `..` segment, a `pr` it carries
+//       this PR and its `head` and `counts` naming a token. A token the PR's
+//       rows already carry is not written again. A refusal is the ledger's,
+//       passed through, nothing written.
 //       The result file is `<scratch>/pr<pr>/<run>/review.json`, `<run>` the review's own `run-XXXXXXXX` run root.
 //   review-failed <pr> <launch>
 //       `ledger.mjs review <pr> review=<launch>=failed`, `<launch>` as the
@@ -219,8 +221,8 @@
 // Zero deps: node builtins and sibling scripts only.
 
 import { spawnSync } from "node:child_process";
-import { readdirSync, readFileSync, realpathSync } from "node:fs";
-import { basename, dirname, join, normalize, resolve } from "node:path";
+import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeDie, defineFlags, isDigits, writeAll } from "./arg.mjs";
 import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
@@ -868,47 +870,23 @@ function park(ev, member, pr, reason) {
   ev.token(pr, tok);
 }
 
-// `p` with its symlinks resolved, or as written when it does not exist yet.
-function real(p) {
-  try {
-    return realpathSync(p);
-  } catch {
-    return p;
-  }
-}
-
-// The run name of a review result file at `path` in PR `pr`'s partition of
-// `scratch`, or die naming why it is not one.
-function reviewRun(scratch, pr, path) {
-  if (path.split("/").includes("..")) die(`review-result: ${path} has a ".." segment — pass the result file's path without one`);
-  const file = resolve(path);
-  const runRoot = dirname(file);
-  const partition = join(normalize(scratch), `pr${pr}`);
-  if (real(dirname(runRoot)) !== real(partition)) die(`review-result: ${file} is not under PR #${pr}'s partition ${partition}/ — nothing written`);
-  const run = basename(runRoot);
-  if (!/^run-[A-Za-z0-9]{8}$/.test(run)) die(`review-result: ${runRoot} is not a review run root (run- and eight characters) — nothing written`);
-  return { file, run };
-}
-
+// The review result file at `path` goes to `ledger.mjs review <pr> --result`,
+// which owns every check of the path and the file and derives the `reviewed=`
+// token from it; a token the PR's rows already carry comes back unwritten.
 function reviewResult(ev, pr, path) {
-  const { file, run } = reviewRun(ev.scratch, pr, path);
-  let result;
-  try {
-    result = JSON.parse(readFileSync(file, "utf8"));
-  } catch (e) {
-    die(`review-result: cannot read ${file}: ${e.code ?? e.message} — nothing written`);
-  }
-  if (result?.pr !== undefined && Number(result.pr) !== pr) die(`review-result: ${file} is PR #${result.pr}'s review, not #${pr}'s — nothing written`);
-  const { survived, refuted, unverified } = result?.counts ?? {};
-  const token = `reviewed=${result?.head}:${survived}/${refuted}/${unverified}:${run}`;
-  if (!REVIEWED.test(token)) die(`review-result: ${file} carries no head and counts a reviewed= token can name (${token}) — nothing written`);
-  if (prWords(ev.ledger, pr).includes(token)) {
-    ev.note(`PR #${pr} already ${token}`);
+  const r = node("ledger.mjs", ["review", String(pr), "--result", path, "--scratch", ev.scratch]);
+  if (r.status !== 0) {
+    ev.refuse(`review #${pr} --result ${path}`, r);
     return;
   }
-  const r = node("ledger.mjs", ["review", String(pr), token]);
-  if (r.status === 0) ev.note(`PR #${pr} ${token}`);
-  else ev.refuse(`review #${pr} ${token}`, r);
+  let receipt = {};
+  try {
+    receipt = JSON.parse(r.stdout);
+  } catch {
+    // The ledger answered 0, so the write is settled; only its token is unread.
+  }
+  const token = typeof receipt.reviewed === "string" ? receipt.reviewed : `the result at ${path}`;
+  ev.note(receipt.written === false ? `PR #${pr} already ${token}` : `PR #${pr} ${token}`);
 }
 
 function reviewFailed(ev, pr, launch) {

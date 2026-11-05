@@ -104,7 +104,7 @@ PR stays queued, label untouched, and no member is dispatched to restore the lin
 
 ## The review pair on a PR's row
 
-A PR's review is not a member, so it carries its own pair of row tokens, written with `review` onto the PR's row (**The reviewer**): `review=wf:<runId>` | `review=member:<name>` at launch, `<name>` being `review-pr-<n>` for the PR's first runner and the next letter its rows do not carry yet (`review-pr-<n>-b`, `-c`, …) for every later one, settled dead as `…=failed`, then `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>` when the result lands, `<run>` the review's `run-XXXXXXXX` run root under `<scratch>/pr<n>/`, which holds its `review.json`.
+A PR's review is not a member, so it carries its own pair of row tokens, written with `review` onto the PR's row (**The reviewer**): `review=wf:<runId>` | `review=member:<name>` at launch, `<name>` being `review-pr-<n>` for the PR's first runner and the next letter its rows do not carry yet (`review-pr-<n>-b`, `-c`, …) for every later one, settled dead as `…=failed`, then `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>` when the result lands, `<run>` the review's `run-XXXXXXXX` run root under `<scratch>/pr<n>/`, which holds its `review.json`. A `reviewed=` is a Gate verdict: `ledger.mjs review <pr> --result <path>` derives it from that file, and the `fleet-event.mjs review-result <pr> <path>` wake runs it. No `review` argument carries one, and one typed there is refused.
 
 ## The ledger's readability field: `ledger.ok`
 

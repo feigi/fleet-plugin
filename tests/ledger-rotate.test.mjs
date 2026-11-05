@@ -23,6 +23,7 @@ import { stallsAt } from "../plugin/scripts/fleet-state.mjs";
 import { rendering, renderBrief } from "./support/rendered-brief.mjs";
 import { writeQueueGh } from "./support/queue-gh.mjs";
 import { seedLabelMap } from "./support/label-map-seed.mjs";
+import { viaResult } from "./support/review-result.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
 
@@ -70,7 +71,7 @@ function fixture(t, { ledger = LEDGER, mark = null, controller = null, table = O
   delete env.GIT_DIR;
   delete env.GIT_WORK_TREE;
   const cli = rendering(dir, (args, extraEnv = {}) =>
-    spawnSync(process.execPath, [SCRIPT, "--file", file, ...args], { encoding: "utf8", env: { ...env, ...extraEnv }, cwd: dir }), (call) => call[0]);
+    spawnSync(process.execPath, [SCRIPT, "--file", file, ...viaResult(join(dir, "scratch"), args)], { encoding: "utf8", env: { ...env, ...extraEnv }, cwd: dir }), (call) => call[0]);
   const archives = () => readdirSync(dir).filter((n) => STAMPED.test(n)).sort();
   const state = () => JSON.parse(readFileSync(beatFile, "utf8"));
   const raw = () => (existsSync(beatFile) ? readFileSync(beatFile, "utf8") : null);

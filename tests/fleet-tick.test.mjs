@@ -1884,7 +1884,7 @@ test("deriveRun: a token it cannot read refuses by naming it, never counts it li
     ["an outcome outside the vocabulary", { rows: ["#9 impl-9=merged"] }, /impl-9.*'merged' is not an outcome/],
     ["a malformed ## Dispatched entry", { dispatched: ["impl-9 oops"] }, /## Dispatched entry 'impl-9 oops'/],
     ["a reviewed= with no counts", { rows: ["#9 review=wf:a reviewed=abc1234"] }, /reviewed=abc1234/],
-    ["a reviewed= in the format before it named a run", { rows: ["#9 review=wf:a reviewed=abc1234:1/0/0"] }, /'reviewed=abc1234:1\/0\/0' names no review run/],
+    ["a reviewed= in the format before it named a run", { rows: ["#9 review=wf:a reviewed=abc1234:1/0/0"] }, /'reviewed=abc1234:1\/0\/0' names no review run.*record it again with `ledger\.mjs review <pr> --result <path>`/],
     ["a reviewed= whose run is not a run-XXXXXXXX name", { rows: ["#9 review=wf:a reviewed=abc1234:1/0/0:/tmp/pr9/run-abc1234r"] }, /is not reviewed=<head>:<survived>\/<refuted>\/<unverified>:<run>/],
     ["a reviewed= whose run is longer than the eight characters mktemp chose", { rows: ["#9 review=wf:a reviewed=abc1234:1/0/0:run-abc1234rs"] }, /is not reviewed=<head>:<survived>\/<refuted>\/<unverified>:<run>/],
     ["a reviewed= whose run is shorter than the eight characters mktemp chose", { rows: ["#9 review=wf:a reviewed=abc1234:1/0/0:run-abc1234"] }, /is not reviewed=<head>:<survived>\/<refuted>\/<unverified>:<run>/],
