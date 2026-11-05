@@ -692,7 +692,7 @@ test("settle: a head whose tree holds a green record passes, and runs neither co
   const receipt = f.settled("impl-5");
   assert.equal(receipt.outcome, "PR#6");
   const tree = f.git(f.work, "rev-parse", `${f.head}^{tree}`);
-  assert.deepEqual(receipt.checks.slice(1, -4), [
+  assert.deepEqual(receipt.checks.slice(-4), [
     { name: `Check-step record ${f.recordFile("impl-5")} exists and parses`, ok: true },
     { name: "the recorded Check step exited 0 (recorded: exit 0)", ok: true },
     { name: "the recorded Test entrypoint exited 0 (recorded: exit 0)", ok: true },
@@ -809,7 +809,7 @@ test("settle: a repository with no usable Recipe applies no gate", () => {
   settledImpl(f);
   const receipt = f.settled("impl-5");
   assert.equal(receipt.outcome, "PR#6");
-  assert.deepEqual(receipt.checks.map((c) => c.name), [`verify-sha.sh ${CLAIM} ${f.head} exits 0`, "PR #6 reads OPEN", "PR #6 closes #5", "PR #6 closes no ticket another claim holds (in-progress: none)", `PR #6's head is ${CLAIM} (GitHub: ${CLAIM})`]);
+  assert.deepEqual(receipt.checks.map((c) => c.name), [`the report's branch is ${CLAIM} (report: ${CLAIM})`, "PR #6 reads OPEN", "PR #6 closes #5", "PR #6 closes no ticket another claim holds (in-progress: none)", `PR #6's head is ${CLAIM} (GitHub: ${CLAIM})`, `verify-sha.sh ${CLAIM} ${f.head} exits 0`]);
 });
 
 // The gate reads the cache against origin/main, the tree members' worktrees
@@ -827,7 +827,7 @@ test("settle: a Recipe whose Check step names a path origin/main does not hold a
   settledImpl(f);
   const receipt = f.settled("impl-5");
   assert.equal(receipt.outcome, "PR#6");
-  assert.deepEqual(receipt.checks.map((c) => c.name), [`verify-sha.sh ${CLAIM} ${f.head} exits 0`, "PR #6 reads OPEN", "PR #6 closes #5", "PR #6 closes no ticket another claim holds (in-progress: none)", `PR #6's head is ${CLAIM} (GitHub: ${CLAIM})`]);
+  assert.deepEqual(receipt.checks.map((c) => c.name), [`the report's branch is ${CLAIM} (report: ${CLAIM})`, "PR #6 reads OPEN", "PR #6 closes #5", "PR #6 closes no ticket another claim holds (in-progress: none)", `PR #6's head is ${CLAIM} (GitHub: ${CLAIM})`, `verify-sha.sh ${CLAIM} ${f.head} exits 0`]);
 });
 
 // derive-testcmd.sh refuses an `--at` that does not resolve with the same exit
