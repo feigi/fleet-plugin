@@ -12,6 +12,8 @@ const SNAPSHOT_ONLY = { snapshot: [SNAP], "review:correctness": [review([])] };
 test("runnerWorktreeRefusal accepts a non-blank path string", () => {
   assert.equal(runnerWorktreeRefusal("/wt"), null);
   assert.equal(runnerWorktreeRefusal(ARGS.worktree), null);
+  // Padding around non-whitespace content is acceptable too: the rule never trims.
+  assert.equal(runnerWorktreeRefusal(" /wt "), null);
 });
 
 test("runnerWorktreeRefusal refuses every value that is not a non-blank string, naming args.worktree and the value", () => {
