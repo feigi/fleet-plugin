@@ -1739,6 +1739,21 @@ test("a ticket that both a settled token and the PR's claim branch name is one o
   assert.deepEqual(f.read().dispatched, []);
 });
 
+// The own tickets are a union: a settled token's ticket stays the PR's own when
+// its head is another ticket's claim branch, so the claim's ticket is added to
+// the token's, never put in its place.
+test("a settled token's ticket stays the PR's own when its head is another ticket's claim branch: refused naming it while the body closes only the claim's ticket, dispatched once it closes both", (t) => {
+  const f = fixture(t);
+  f.put("3546", `impl-3546=PR#3606 · tier-ok=impl-3546:fleet-implementer-slow-high · reviewed=${GATE_HEAD}:0/0/0:${GATE_RUN}`);
+  f.rule(3606, "3546");
+  closes(f.bin, 3606, [3545], "implementer/3545-impl-3545");
+  f.refused(["dispatch", "3606", "finisher-pr-3606"], /finisher-pr-3606: PR #3606 does not close #3546, its own ticket — add "Closes #3546" to its body \(gh pr edit 3606 --body-file …\) — not dispatching finisher-pr-3606/);
+  assert.deepEqual(f.read().dispatched, []);
+  closes(f.bin, 3606, [3545, 3546], "implementer/3545-impl-3545");
+  assert.equal(f.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher");
+  assert.deepEqual(f.read().dispatched, ["finisher-pr-3606"]);
+});
+
 test("an inherited PR headed by a claim branch is still refused for another claim's ticket, and only for that one", (t) => {
   const f = fixture(t);
   f.put("3606", INHERITED_ROW);
