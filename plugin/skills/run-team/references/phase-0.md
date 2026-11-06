@@ -659,8 +659,12 @@ files under `<scratch>/impl-<N>/`). Record it the ordinary way —
 "impl-<N>-b"`, then `dispatch-prompt.mjs render implementer --member
 impl-<N>-b …`, then `ledger.mjs dispatch <N> impl-<N>-b`, then the `task`
 call naming the `agent` it printed, then the tier check — and never
-`claim-ticket.sh`: the claim already stands. A re-run finds the need met
-once its row is written. A `report` goes to the
+`claim-ticket.sh`: the claim already stands. A `replace #N` writes onto a
+row that already stands, holding the closed PR's settled `impl-<N>=PR#<M>`,
+which `row` refuses to drop, so its row write carries the row whole, the
+way `release #N`'s does: `ledger.mjs row <N> "<text> · impl-<N>-b"`,
+`<text>` the row as `ledger.mjs read` prints it, past its leading `#<N>`.
+A re-run finds the need met once its row is written. A `report` goes to the
 maintainer as `#<N> — <why>` and nothing else: no dispatch, no label change,
 no release. One whose `why` reads `PR #<M> closed unmerged` waits on the
 maintainer's `replace #<N>` or `release #<N>`, the two words the tick's

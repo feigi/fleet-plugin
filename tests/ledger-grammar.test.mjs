@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { parseMember, parseToken, memberTokens, rowPr, premisesOf, nextMergeBot, nextRetry, liveOnLedger, settledOnLedger, retiredOnLedger, isRetirable, readRetired, escapeText, unescapeText, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell, REVIEW, isReviewToken, parseDispatchedEntry, dispatchedEntry, memberRole, firstReview, prTokens, ledgerSection, ROUTED, ROUTING_REASONS, parseRouting, formatRouting, routedEntry, parseRoutedEntry, dispositionsToken, escalationAnswerToken, escalationAnswers, isDispositionsWord, isGateVerdict, gateVerdictRefusal, gateVerdictWriter, failedReviewLaunches } from "../plugin/scripts/ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, rowPr, premisesOf, nextMergeBot, nextRetry, liveOnLedger, settledOnLedger, retiredOnLedger, isRetirable, readRetired, escapeText, unescapeText, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell, REVIEW, isReviewToken, parseDispatchedEntry, dispatchedEntry, memberRole, firstReview, prTokens, ledgerSection, ROUTED, ROUTING_REASONS, parseRouting, formatRouting, routedEntry, parseRoutedEntry, dispositionsToken, escalationAnswerToken, escalationAnswers, isDispositionsWord, isGateVerdict, gateVerdictRefusal, settledMemberRefusal, gateVerdictWriter, failedReviewLaunches } from "../plugin/scripts/ledger-grammar.mjs";
 
 // Every outcome word the spec names, per family, verbatim — the must-ACCEPT
 // half. A parser that refused everything would pass every refusal below.
@@ -548,6 +548,20 @@ test("gateVerdictRefusal: the Gate verdicts of the row, in order, must equal the
   // A PR# in an impl row's prose never decides its PR, and a row with no verdict may be remapped.
   assert.equal(gateVerdictRefusal(row, `${row} · note → PR#9`), null);
   assert.equal(gateVerdictRefusal("#1 impl-1=PR#2 · class=routine", "#1 impl-1=PR#3 · class=routine"), null);
+});
+
+test("settledMemberRefusal: every settled member token the row holds must be on the rewrite as written, duplicates counted; live, malformed and non-member tokens are free", () => {
+  const row = "#1 impl-1=PR#2 · fix-pr-2=applied:abcdef1 · fix-pr-2-b=applied:abcdef1 · merge-bot-1 · fix-pr-3=bogus · ports=16301 → PR#2";
+  // What must be ACCEPTED: a new row, every settled token in any order, live and malformed ones dropped, other tokens changed.
+  assert.equal(settledMemberRefusal(null, "#1 impl-1=PR#2"), null);
+  assert.equal(settledMemberRefusal(row, "#1 note fix-pr-2-b=applied:abcdef1 fix-pr-2=applied:abcdef1 impl-1=PR#2"), null);
+  assert.equal(settledMemberRefusal("#1 impl-1 · ports=1", "#1 note"), null);
+  assert.equal(settledMemberRefusal("#1 a · b", "#1"), null);
+  // What must be REFUSED, naming the first dropped token in the row's order.
+  assert.match(settledMemberRefusal(row, "#1 2"), /drops settled member token 'impl-1=PR#2' — a rewrite must carry every settled member token as the row holds it/);
+  assert.match(settledMemberRefusal(row, "#1 impl-1=PR#2 · fix-pr-2-b=applied:abcdef1"), /'fix-pr-2=applied:abcdef1'/);
+  assert.match(settledMemberRefusal(row, "#1 impl-1=PR#2 · fix-pr-2=applied:abcdef1 · fix-pr-2-b=no-op"), /'fix-pr-2-b=applied:abcdef1'/, "a changed outcome is a dropped token");
+  assert.match(settledMemberRefusal("#1 impl-1=bailed · impl-1=bailed", "#1 impl-1=bailed"), /'impl-1=bailed'/, "a duplicate counts once per copy");
 });
 
 test("token refuses every dispositions verdict and Escalation answer, parseable or not, in any case of the prefix, naming the verb, and writes nothing", (t) => {
