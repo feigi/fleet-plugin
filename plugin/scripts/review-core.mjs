@@ -959,6 +959,16 @@ export function runnerTestCmdRefusal(testCmd) {
   return `args.testCmd is required — the Test entrypoint the shared run executes, got ${JSON.stringify(testCmd)}`;
 }
 
+// The worktree refusal the two share, for the reason the rules above are: the
+// snapshot agent interpolates `worktree` into its shell, so a value that is
+// not a string with non-whitespace content snapshots nothing, and only the
+// runner's refusal, before its first attempt, keeps that from being retried.
+// Refused, never trimmed or coerced. Null when `worktree` is acceptable.
+export function runnerWorktreeRefusal(worktree) {
+  if (typeof worktree === "string" && worktree.trim() !== "") return null;
+  return `args.worktree is required — the checkout the review snapshots, got ${JSON.stringify(worktree)}`;
+}
+
 // --- Orchestration ----------------------------------------------------
 // `host` supplies `agent(prompt, opts)` (must resolve to PARSED DATA — a
 // rejection or an unresolvable dispatch must resolve to `null`, the
@@ -1086,6 +1096,8 @@ async function reviewRun(host, args, run) {
   const verifiersForRun = verifiersFor(A);
 
   if (!pr || !worktree) throw new Error("review-pr: args.pr and args.worktree are required");
+  const worktreeRefusal = runnerWorktreeRefusal(worktree);
+  if (worktreeRefusal) throw new Error(`review-pr: ${worktreeRefusal}`);
 
   // The truthiness check above is what made the CLI fail-open REACHABLE:
   // `pr` is interpolated into `gh pr diff ${pr}`, `gh pr view ${pr}` and
@@ -1094,7 +1106,9 @@ async function reviewRun(host, args, run) {
   // snapshot is a real diff belonging to whatever PR that branch heads while
   // every return value here still reports the string that was passed. It is
   // also a PATH component by then (`scratch`, `runRootParent` below), so a
-  // value like `../x` names a run root outside the scratch tree.
+  // value like `../x` names a run root outside the scratch tree. A truthy
+  // `worktree` that is blank or not a string is refused by the shared rule
+  // just below the truthiness check, not by the check itself.
   //
   // REFUSED, never coerced. `Number(pr)` would make a bad value the string
   // "NaN" at every one of those interpolation sites — a plausible-looking
