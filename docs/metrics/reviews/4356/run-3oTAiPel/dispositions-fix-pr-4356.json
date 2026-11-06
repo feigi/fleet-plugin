@@ -1,0 +1,124 @@
+{
+  "head": "b891dfeb72069708bea12f6b614681f85a1ca651",
+  "run": "run-3oTAiPel",
+  "entries": [
+    {
+      "bucket": "survived",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "remedyFiles": [
+        "plugin/scripts/evict-tree.mjs",
+        "tests/evict-tree.test.mjs"
+      ],
+      "charge": "false-claim"
+    },
+    {
+      "bucket": "survived",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "remedyFiles": [
+        "tests/evict-tree.test.mjs"
+      ],
+      "charge": "none",
+      "chargeReason": "defect-outside-acceptance"
+    },
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4356/fix-BxALaWDj/u0/verdict.json",
+      "remedyFiles": [
+        "plugin/scripts/evict-tree.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "refuted by its refuter: the skip names the exact tree and skipped is defined as left as it is",
+      "issue": 4365,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4356/fix-BxALaWDj/u1/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted by its refuter: the ticket requires the snapshot step to stay quiet for a skip and puts showing skipped there out of scope",
+      "issue": 4365,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4356/fix-BxALaWDj/u2/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4356/fix-BxALaWDj/u3/verdict.json",
+      "remedyFiles": [
+        "tests/evict-tree.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4356/fix-BxALaWDj/u4/verdict.json",
+      "remedyFiles": [
+        "tests/evict-tree.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 5,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "refuted by its refuter: no present path returns both shapes; the hazard is speculative",
+      "issue": 4365,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4356/fix-BxALaWDj/u5/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 6,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4356/fix-BxALaWDj/u6/verdict.json",
+      "remedyFiles": [
+        "plugin/scripts/reclaim-scratch.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 7,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "refuted by its refuter: two mutants are killed only by the test the finding would delete",
+      "issue": 4365,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4356/fix-BxALaWDj/u7/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 8,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "refuted by its refuter: the test kills a nested-plain-directory mutant the other test does not",
+      "issue": 4365,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4356/fix-BxALaWDj/u8/verdict.json"
+    }
+  ]
+}

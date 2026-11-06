@@ -1,0 +1,111 @@
+{
+  "pr": 4347,
+  "head": "84472c9070f5032b6b2690b8c0f8fe1dc2cbc7fb",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (I ran no write commands there; only read-only git status. These look like the controller's own metrics-refresh output, not mine.)"
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/ticket-features.tsv, M docs/metrics/tier-outcomes.tsv (I wrote nothing there; these look like the controller's own pre-existing edits)"
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. Every command I ran there was read-only (`pwd`, then `git status`); all others chained a cd into the scratch dir or the copy, so these modifications come from elsewhere (likely the controller's metrics refresh) [INFERENCE]."
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 6,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4347/run-IpQ9JTDW/snapshot-84472c90",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "claim": "I found no logic error, missed case or scope creep: all 39 added paths are allowlisted run records or review evidence of mode 100644, and finisher-scope.mjs classifies the diff as inert data.",
+      "evidence": "`node probe.mjs` → `files 39 new-file-modes 39 [ '100644' ]`, `non-new hunks: 0`. Every path passed isRunRecord and isPlainFile and parsed as valid JSON. No dispositions run/dir or pr/dir mismatch. `finisher-scope.mjs --worktree $PWD --pin $PIN` against the synthetic base → `inert 0 null 39 [\"data:A\"]`.",
+      "file": "docs/metrics/runs/2026-11-04T072031Z/phase0.json",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The committed phase0.json withholds the recipe output, and it correctly has no plugin-version sibling: the receipt's pluginVersion is null, and runArchives() writes that file only for a non-blank string.",
+      "evidence": "probe.mjs reported no `RECIPE NOT WITHHELD` for phase0.json and printed `pluginVersion=null`. `readReceipt(...)` → `ok run,session,scratch,inFlight,objective,pluginVersion,steps`. run-records.mjs:108 writes plugin-version only when `typeof version === \"string\"`. No earlier docs/metrics/runs/* dir holds a plugin-version file either (`ls` of the last 6 run dirs).",
+      "file": "docs/metrics/runs/2026-11-04T072031Z/phase0.json",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The run dir has no closeout.json, which matches phase0.mjs catchUp(): it opens a chore/run-records-* PR only when unclosedRecords() finds a run that never closed out.",
+      "evidence": "`ls docs/metrics/runs/2026-11-04T072031Z` → ledger.md, phase0.json only. phase0.mjs:417-421 calls commitAndPr with stem `chore/run-records-` only when `unclosedRecords(fleetDir, records.allowed).length > 0`.",
+      "file": "docs/metrics/runs/2026-11-04T072031Z/ledger.md",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The PR adds two dispositions files for PR 4320 (base and -c retry) on the same review head. They are not duplicates: the -c file differs only in per-entry reasons that record re-verification on rebased head e7abf4d7.",
+      "evidence": "The head cross-check printed `4320 4320-c.json headMatch true entries 11` and `4320 4320.json headMatch true entries 11`. `diff` of the two pretty-printed files shows only `reason` lines differing (\"...re-verified by fix-pr-4320-c on rebased head e7abf4d7\"), plus one added reason on an applied entry.",
+      "file": "docs/metrics/reviews/4320/run-v3fP81Ns/dispositions-fix-pr-4320-c.json",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The records contain no credential-shaped strings, though 371 added lines carry absolute /Users/chris paths, as 68 of the 102 records already on main do.",
+      "evidence": "A grep -Eio for ghp_/github_pat_/sk-/AKIA/key|token|secret|password=/Bearer patterns over pr.diff returned no matches. `grep -cE '^\\+.*/Users/chris' pr.diff` → 371. `grep -rlE '/Users/chris' docs/metrics/reviews docs/metrics/runs | wc -l` → 68, against `git ls-files` → 102 in the snapshot.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/metrics/runs/2026-11-04T072031Z/phase0.json",
+      "line": 1,
+      "claim": "phase0.json records `status: \"ok\"` for steps whose output text says they did not actually run (preflight 'PREFLIGHT SKIPPED', recipe 'withheld'), so a status-only reader sees them as passed.",
+      "evidence": "Ran node over phase0.json: `preflight ok \"preflight.mjs passed (PREFLIGHT SKIPPED: this check set already passed ...)\"`, `recipe ok \"withheld: the Recipe's command lines can carry environment assignments\"`. The recipe redaction is intended: tests/run-records.test.mjs line 81 asserts the RECIPE_WITHHELD output. This is a property of the existing producer, not of this PR's data, and I did not run the producer to check whether it has a way to distinguish them.",
+      "suggested_fix": "No change needed for this PR. If consumers ever gate on `status`, have the producer record a distinct status (e.g. 'skipped'/'withheld') for these two steps.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

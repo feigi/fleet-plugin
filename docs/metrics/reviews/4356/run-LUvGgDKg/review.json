@@ -1,0 +1,165 @@
+{
+  "pr": 4356,
+  "head": "b891dfeb72069708bea12f6b614681f85a1ca651",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": false,
+    "reason": "no suite slot within 1800 s — the host is at its suite bound; not a test failure"
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [
+    {
+      "dimension": "tests",
+      "reason": "the reviewer returned nothing — spend limit, timeout, or terminal error"
+    }
+  ],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (I did not touch these; I ran only pwd, read-only git status and greps)"
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I did not write either file; I only ran read-only commands there, plus `git status`. They look like another agent's metrics output."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv' and ' M docs/metrics/tier-outcomes.tsv'. I did not write to that checkout (every command ran under the scratch dir or the snapshot). The two files were already modified there and are not mine."
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv` (I wrote nothing to this tree; every write went to simplify/copy and simplify/copy2, so these changes come from another agent or the controller)."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin —  M docs/metrics/ticket-features.tsv,  M docs/metrics/tier-outcomes.tsv (not written by this review; no command here targeted that tree)"
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 8,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4356/run-LUvGgDKg/snapshot-b891dfeb",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/evict-tree.mjs",
+      "line": 143,
+      "claim": "A directory that is searchable but not readable (e.g. mode 0311) and holds a `.git` git cannot answer for is pushed into `skipped` twice — once by treeVerdict and once by the readdir EACCES catch — so the review-end eviction logs two skip lines for one directory, against the brief's 'one line per skipped directory'.",
+      "evidence": "cd correctness && node probe.mjs (case A: makeTree, rename .git/HEAD, chmod 0311, evictTrees(run,{apply:false})) → skipped: [{path:'<fx>/a/run/wo-read', reason:'git rev-parse --show-toplevel did not answer for it (exit 128: fatal: not a git repository …)'}, {path:'<fx>/a/run/wo-read', reason:'cannot list it (EACCES)'}], failed: [].",
+      "suggested_fix": "After a treeVerdict skip, either `continue` past the readdir only when the listing also fails (merge the two reasons into one entry), or skip the readdir-EACCES push when the same dir was already skipped this iteration.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/evict-tree.mjs",
+      "line": 108,
+      "claim": "Git itself failing to run (spawn ENOENT because git is missing, or ETIMEDOUT) is classed as a per-directory skip with `failed: []`, so a systemic fault never prints SNAPSHOT_PRUNE_FAILED. Before the PR it also vanished silently as 'not a tree', so this is not a regression, but the PR now codifies it as 'never a failure'.",
+      "evidence": "probe2.mjs, with PATH=/nonexistent: {\"evicted\":[],\"failed\":[],\"skipped\":[{\"path\":\".../run/t\",\"reason\":\"git rev-parse --show-toplevel did not answer for it (ENOENT)\"}]}. With a fake git that sleeps 100: failed [] and skipped reason '(ETIMEDOUT)' after 30021 ms. A broken-.git (exit 128) tree and a missing git binary land in the same bucket.",
+      "suggested_fix": "Treat r.error (spawn failure or timeout) as `failed`, and keep `skipped` for git answering non-zero or naming another top-level. Alternatively, leave it and document that a missing git is invisible to the marker.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/review-core.mjs",
+      "line": 1139,
+      "claim": "In the snapshot prune step the new `skipped[]` is read by nothing: the receipt goes into `grep -qF '\"failed\":[]'`, so a kept run root holding a tree that is never stripped (disk not reclaimed) prints no marker and no line. The skip is visible only in `runReview`'s end-of-review log and in a direct run of reclaim-scratch. The skip also repeats on every pass, because nothing marks it.",
+      "evidence": "probe.mjs: a kept run root with a tree whose .git is mode 000 and a mode-000 directory. The receipt had \"failed\":[] and 2 skipped entries; the exact step pipeline `reclaim-scratch.mjs --pr 7 --root R --apply | grep -qF '\"failed\":[]' || echo SNAPSHOT_PRUNE_FAILED` printed stdout \"\" and stderr \"\", and the broken tree's node_modules was still on disk (`broken node_modules kept: true`).",
+      "suggested_fix": "This matches the documented design in docs/components/scratch-reclaim.md. If skips are meant to be noticed from the step, add a distinct marker such as SNAPSHOT_PRUNE_SKIPPED when `skipped` is non-empty, or accept that the end-of-review log line is the only signal.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/evict-tree.mjs",
+      "claim": "The PR has no TypeScript or JSDoc types, so no cast can erase a conformance. The new `skipped` entries `{path, reason}` and the `treeVerdict` result `{tree}|{skip}` are untyped object shapes, and nothing in the type system enforces that exactly one of them is set.",
+      "evidence": "grep for TS files in the diff: 0. grep for type annotations and casts in evict-tree.mjs: no matches. The invariant is carried only by the caller's `verdict.skip !== undefined` check, which I did not run or test.",
+      "suggested_fix": "None needed. Optionally add a JSDoc @typedef for the discriminated verdict.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 696,
+      "claim": "The new `let skipped = null` in main() duplicates state that `evicted` already carries: both are null outside `--pr` mode, both are set to `[]` on the same two adjacent lines in the `--pr` branch, and nothing else assigns either one. So `skipped === null` is always the same test as `evicted === null`, and the two can drift apart if someone edits only one of them.",
+      "evidence": "grep of `\\b(evicted|skipped)\\b` in snapshot reclaim-scratch.mjs:680-774 shows the only assignments are 695/696 (null), 709/710 (`[]`), 715 (push) and 770 (receipt). In copy2 I changed this to `const skipped = [];`, deleted line 710, and made the receipt spread `...(evicted === null ? {} : { skipped })`. Result: `node --test --test-name-pattern='\\(8\\) --pr' tests/reclaim-scratch.test.mjs` → tests 14, pass 14, fail 0, same as the baseline copy. This set includes the PR's key-order test (`Object.keys` = applied,ledger,removed,evicted,kept,failed,skipped for --pr, and no `skipped` key for the sweep and --siblings modes); `--test-name-pattern='skipped'` → pass 2, fail 0.",
+      "suggested_fix": "Make it `const skipped = [];` (pushed only in the --pr branch), drop the `skipped = [];` line, and gate the key on the single mode signal: `...(evicted === null ? {} : { skipped })`. Or keep one `prMode` boolean and use it for both spreads.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/evict-tree.mjs",
+      "line": 144,
+      "claim": "`if (verdict.skip !== undefined) skipped.push(...)` followed by a separate `if (verdict.tree) {...}` makes the reader check that the two cases exclude each other. treeVerdict never returns both `skip` and `tree: true`, so this is really a three-way choice, and an `else if` would say so directly.",
+      "evidence": "treeVerdict (snapshot evict-tree.mjs, diff lines 71-91) returns exactly one of `{tree:false}`, `{tree:true}` or `{skip}`. In copy2 I changed line 145 to `else if (verdict.tree) {`. Result: `node --test tests/evict-tree.test.mjs tests/review-core-run-end-eviction.test.mjs` → tests 25, pass 25, fail 0 (baseline copy: 25/25), and the reclaim-scratch `(8) --pr` subset → 14/14.",
+      "suggested_fix": "`if (verdict.skip !== undefined) skipped.push({ path: dir, reason: verdict.skip }); else if (verdict.tree) { … }`",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/evict-tree.mjs",
+      "line": 121,
+      "claim": "The new verdict field `skip` (a reason string, which ends up in `skipped`) sits in the same loop as the older `skip` Set (paths under removed ignored directories, which the walk does NOT skip into `skipped`). The comment says such paths are 'never skipped', so the same word means two opposite things a few lines apart.",
+      "evidence": "Snapshot evict-tree.mjs:139 `const skip = new Set();` (paths the walk never enters) and :144 `verdict.skip` (the reason pushed to `skipped`). The diff's own comment says a repository inside an ignored directory is 'not a tree of its own, nor skipped'. grep shows treeVerdict is module-private (it is not exported, and the only call site is line 143), so renaming the field changes nothing observable. I did not run a separate test for the rename; it touches only one private function and its one caller.",
+      "suggested_fix": "Rename the verdict field to `reason` (`return { reason: ... }` / `if (verdict.reason !== undefined) skipped.push({ path: dir, reason: verdict.reason })`), or rename the Set to something like `removed`.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/evict-tree.test.mjs",
+      "line": 100,
+      "claim": "Every row of the new parameterized table has the same third column: the identical regex `/^git rev-parse --show-toplevel did not answer for it \\(exit 128: /`. A per-row value that never varies reads as if the rows were meant to differ.",
+      "evidence": "Diff lines 318-319: both rows end with the same regex literal. In copy2 I moved it to `const unanswered = /…/;`, cut the table to `[shape, break_]`, and matched against `unanswered`. Result: `node --test tests/evict-tree.test.mjs tests/review-core-run-end-eviction.test.mjs` → 25 pass, 0 fail (both table cases ran, skipped 0).",
+      "suggested_fix": "Move the regex to a single const above the loop and drop the `reason` column from the table.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

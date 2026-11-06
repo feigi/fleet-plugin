@@ -1,0 +1,36 @@
+{
+  "head": "cbc0de89f23358b66777d36384216acaeaaf39d0",
+  "run": "run-xLFdAu6a",
+  "entries": [
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "reason": "Suggestion; its refuter let it survive (refuted=false): the `s` flag is what makes the test pass on a separate-filesystem TMPDIR, and recipe-prove.mjs mutants naming install output or dropping check.log are killed under both TMPDIRs. Its suggested_fix is 'None required', so applying it changes nothing in the tree.",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4352/fix-8BOY2Zw6/u0/verdict.json",
+      "remedyFiles": []
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "reason": "Suggestion; its refuter let it survive (refuted=false): no fixture produced git's two-line reason, so dropping the `s` flag stayed green on a same-filesystem host. Applied: the unreadable-tree assertions move into refusesUnreadableAfterCheck(env), and a new test runs them with a git stub that prints the two-line 'Stopping at filesystem boundary' reason once the Check step removed .git. red: fleet-run suite-slot.mjs './agent-test' --test-name-pattern='after the Check step' tests/recipe-prove.test.mjs (s flag dropped) → exit 1, fail 1 incl 'a two-line git reason after the Check step still names the check output, not the install output'; baseline: same command, unmutated → exit 0, that test pass (tests 2, cancelled 0). Non-catch control (stub's first line reworded, mount point kept) → exit 0, pass 2.",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4352/fix-8BOY2Zw6/u1/verdict.json",
+      "remedyFiles": ["tests/recipe-prove.test.mjs"]
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "Suggestion; its refuter refuted it: the whole file reports 139 tests passing at the reviewed head under the default TMPDIR and a RAM-disk TMPDIR; 79 counts top-level test( calls, not node's reported tests. Filed on the suggestion-band record.",
+      "issue": 4357,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4352/fix-8BOY2Zw6/u2/verdict.json"
+    }
+  ]
+}

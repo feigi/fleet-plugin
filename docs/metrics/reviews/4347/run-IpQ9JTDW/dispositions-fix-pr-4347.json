@@ -1,0 +1,62 @@
+{
+  "head": "84472c9070f5032b6b2690b8c0f8fe1dc2cbc7fb",
+  "run": "run-IpQ9JTDW",
+  "entries": [
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "reason": "refuter let it survive; a confirmation finding that alleges no defect, so its remedy is no change and nothing was committed (39 run-record/review-evidence paths, mode 100644, finisher-scope inert, re-verified)",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4347/fix-RKDHMRYW/u0/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "reason": "refuter let it survive; a confirmation finding that alleges no defect, so its remedy is no change and nothing was committed (recipe withheld, pluginVersion null so no plugin-version sibling; null because the archived receipt's pin predates pluginVersion, added 2026-11-02 in 84826782)",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4347/fix-RKDHMRYW/u1/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "reason": "refuter let it survive; a confirmation finding that alleges no defect, so its remedy is no change and nothing was committed (no closeout.json; unclosedRecords() positive control reproduced)",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4347/fix-RKDHMRYW/u2/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "reason": "refuter let it survive; a confirmation finding that alleges no defect, so its remedy is no change and nothing was committed (the two 4320 dispositions files differ only in reason text; the evidence's 'one added reason' is two)",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4347/fix-RKDHMRYW/u3/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted: main holds 29 of 63 records with /Users/chris paths, not 68 of 102 (that count includes the PR's own 39); filed on the suggestion-band record #4354",
+      "issue": 4354,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4347/fix-RKDHMRYW/u4/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 5,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted: preflight SKIPPED means the identical check set already passed, so ok is correct; the recipe withholding is intended and tested; filed on the suggestion-band record #4354",
+      "issue": 4354,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4347/fix-RKDHMRYW/u5/verdict.json"
+    }
+  ]
+}

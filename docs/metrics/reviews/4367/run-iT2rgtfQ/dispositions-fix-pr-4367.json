@@ -1,0 +1,109 @@
+{
+  "head": "4f81c927a7630bcadbc6245d0831ac1f9a7e12d8",
+  "run": "run-iT2rgtfQ",
+  "entries": [
+    {
+      "bucket": "survived",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "charge": "none",
+      "chargeReason": "defect-outside-acceptance",
+      "reason": "Added a ledger-dispatch test pinning one failure line for a ticket a settled token and the claim branch both name. red: fleet-run suite-slot.mjs './agent-test' tests/ledger-dispatch.test.mjs (Set dedupe dropped) \u2192 exit 1, fail 1 incl the new test; baseline: same cmd \u2192 exit 0, tests 144, the new test pass."
+    },
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "reason": "refuter let it survive; re-wrapped the runDispatch finisher-pr comment",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4367/fix-YtQ6OyT9/unverified-0/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuter refuted it (two further check-1 mutants survive); filed on the suggestion-band record, its residual on #4372",
+      "issue": 4371,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4367/fix-YtQ6OyT9/unverified-1/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuter refuted it: the refusal already names the missing row; filed on the suggestion-band record",
+      "issue": 4371,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4367/fix-YtQ6OyT9/unverified-2/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuter refuted it: an observation with no remedy; filed on the suggestion-band record",
+      "issue": 4371,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4367/fix-YtQ6OyT9/unverified-3/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "reason": "refuter let it survive; rulingOf()'s comment now says a malformed verdict cell still refuses",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4367/fix-YtQ6OyT9/unverified-4/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 5,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "reason": "refuter let it survive; same re-wrap as unverified 0",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4367/fix-YtQ6OyT9/unverified-5/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 6,
+      "scope": "out",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "out of scope: renaming rulingOf(), which the ticket keeps by name; below the claim bar, on the suggestion-band record",
+      "issue": 4371
+    },
+    {
+      "bucket": "unverified",
+      "index": 7,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "reason": "refuter let it survive; the finding confirms the cast is safe and needs no change, so nothing was edited",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4367/fix-YtQ6OyT9/unverified-7/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 8,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "reason": "refuter let it survive; closingRefusals(member, tickets) takes ruled.tickets",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4367/fix-YtQ6OyT9/unverified-8/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 9,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "reason": "refuter let it survive; deleted the ruled-yes refuse-then-dispatch test the observed-case loop already runs",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4367/fix-YtQ6OyT9/unverified-9/verdict.json"
+    }
+  ]
+}

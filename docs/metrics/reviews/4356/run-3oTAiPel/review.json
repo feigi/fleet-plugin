@@ -1,0 +1,223 @@
+{
+  "pr": 4356,
+  "head": "b891dfeb72069708bea12f6b614681f85a1ca651",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I did not write to this checkout and did not touch these files."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I ran no write commands in that checkout, so these changes were already there when I started and are not mine."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (my commands never wrote there; those are other agents' or the controller's changes)."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin —  M docs/metrics/ticket-features.tsv,  M docs/metrics/tier-outcomes.tsv (not written by this review: my only commands in that directory were `pwd` and this `git status`; every other command chained a cd into the scratch dir or copy)"
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. I made no writes there; every command I ran used absolute snapshot or scratch paths, so these two files were already modified by someone else."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (not written by me; I only read/ran in scratch; likely another agent)."
+    }
+  ],
+  "counts": {
+    "survived": 2,
+    "refuted": 0,
+    "unverified": 9,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4356/run-3oTAiPel/snapshot-b891dfeb",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "plugin/scripts/evict-tree.mjs",
+      "line": 72,
+      "claim": "treeVerdict's bare `catch { return { tree: false } }` around `lstatSync(join(dir, \".git\"))` swallows EACCES and EPERM too, so a directory that holds a `.git` but sits in a parent with no search permission (mode r-- on the tree directory) is neither skipped, failed nor evicted. The PR's contract says a directory that holds a `.git` git will not answer for is skipped and named, and this case breaks it silently.",
+      "evidence": "I built a flat tree (.git, tracked a.txt, ignored big.log) and chmod'd it 0o444, then ran evictTrees(run,{apply:true}). Output: {\"evicted\":[],\"failed\":[],\"skipped\":[]}. The control at 0o755 gives evicted:[{path:copy,ignored:[\"big.log\"]}]. For a tree with subdirectories at 0o444 (makeTree), the tree itself is never named. Only its children are, as `skipped: .../copyA/node_modules` and `.../copyA/sub` with 'cannot list it (EACCES)', which mislabels what could not be evaluated. A tree at 0o111 is named only because its own readdir fails.",
+      "suggested_fix": "In treeVerdict, catch the lstat error as `e` and return `{ tree: false }` only for ENOENT or ENOTDIR. For EACCES or EPERM return `{ skip: \"cannot look for its .git (EACCES)\" }`. Any other code should surface, as `failed` or a skip with the code, and not read as 'no .git'. Add a test with a mode-444 flat tree.",
+      "dimension": "silent-failure",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "I ran the snapshot's evictTrees on a flat git tree (tracked a.txt, ignored big.log). At mode 755 it returned evicted:[{t, ignored:[big.log]}]. After chmod 444 on the tree directory it returned {evicted:[],failed:[],skipped:[]}, so the tree is silently dropped, as claimed. treeVerdict's bare catch around lstatSync(.git) (evict-tree.mjs:~102) returns {tree:false} on EACCES. I did not test the subdirectory or 0o111 variants. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I did not touch those files; they were modified before I started, and I wrote only under the scratch dir."
+        },
+        {
+          "refuted": false,
+          "reason": "I reproduced the claim on the snapshot. A flat tree (.git, tracked a.txt, ignored big.log) at mode 0o444 gave evictTrees(apply:true) = {evicted:[],failed:[],skipped:[]}. The same tree at 0o755 gave evicted:[{path:t,ignored:[big.log]}]. Nothing elsewhere handles it. treeVerdict's bare catch at evict-tree.mjs:72 turns the lstat EACCES into {tree:false}. The readdir EACCES/EPERM skip never fires, because readdir succeeds on an r-- directory. So a directory that holds a .git is neither evicted, failed nor skipped. I did not run the subdirectory and 0o111 variants from the evidence. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I did not write to that directory, so these changes were already there; I ran no git writes and wrote only under my scratch dir."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/evict-tree.mjs",
+      "line": 169,
+      "claim": "No test kills a mutant that makes an ENOTDIR listing failure be reported in `failed`: the diff's rewritten readdir catch branch (`else if (e.code !== \"ENOENT\" && e.code !== \"ENOTDIR\") failed.push`) loses its ENOTDIR exemption with every test staying green; the file.txt-root test asserts only `.skipped` is [], not `.failed`.",
+      "evidence": "Mutation: `e.code !== \"ENOENT\" && e.code !== \"ENOTDIR\"` → `e.code !== \"ENOENT\"`. ./agent-test tests/evict-tree.test.mjs tests/reclaim-scratch.test.mjs tests/review-core-run-end-eviction.test.mjs tests/snapshot-repo.test.mjs → tests 165, fail 0 (mutant SURVIVED); baseline unmutated tree green (full suite 9006 pass, exit 0). Test 'a directory with no .git of its own, and a listing that fails with ENOENT or ENOTDIR, are not skipped' only asserts `.skipped` equals [] for the 'gone' and 'file.txt' roots.",
+      "suggested_fix": "In that test also assert `evictTrees(join(run,'file.txt'),{apply:true})` deepEquals {evicted:[],failed:[],skipped:[]}.",
+      "dimension": "tests",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Mutant applied in my own copy (`e.code !== \"ENOENT\" && e.code !== \"ENOTDIR\"` → `e.code !== \"ENOENT\"`; git diff showed 1 line changed). `env -u FORCE_COLOR ./agent-test tests/evict-tree.test.mjs` → exit 0, tests 14, pass 14, fail 0, including 'a directory with no .git of its own, and a listing that fails with ENOENT or ENOTDIR, are not skipped'. The mutant survived. That test asserts only `.skipped` equals [] for the 'gone' and 'file.txt' roots and never checks `.failed`. I did not run the other three files in the claim (reclaim-scratch, review-core-run-end-eviction, snapshot-repo), and I did not run the unmutated baseline myself. I did not prove that the file.txt-root case actually reaches the readdir catch. The claim's baseline (9006 pass) is the reviewer's own figure, which I did not reproduce. The survival result itself is a direct observation. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I did not touch these; I only wrote to the scratch dir."
+        },
+        {
+          "refuted": false,
+          "reason": "Mutant survives. I applied the mutation in my own copy (git diff showed the change). `env -u FORCE_COLOR ./agent-test tests/evict-tree.test.mjs` then reported tests 14, pass 14, fail 0. The ENOTDIR case is only asserted via `.skipped` (evict-tree.test.mjs:203). The `failed: []` full-result assertion at line 79 covers only the ENOENT root ('gone'). I found no other test that checks `.failed` for a file root. I did not run an unmutated baseline, because this verdict doesn't need one. Not run: the other three test files named in the claim; the claim's 165-test total is unchecked. CWD-AUDIT: not run, so no clean status is claimed. I made no writes under /Users/chris/dev/fleet-plugin."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/evict-tree.mjs",
+      "line": 144,
+      "claim": "A directory that both holds a `.git` git cannot answer for and cannot be listed (e.g. mode 0100) is pushed into `skipped` twice with the same path, so the --pr receipt holds two entries and the review-end eviction logs two skip lines for one directory.",
+      "evidence": "node probe.mjs (fixture A: git init t, mv .git/HEAD .git/HEAD.moved, chmod 0100 t; evictTrees(run,{apply:true})) → {\"evicted\":[],\"failed\":[],\"skipped\":[{\"path\":\"…/A/t\",\"reason\":\"git rev-parse --show-toplevel did not answer for it (exit 128: fatal: not a git repository …)\"},{\"path\":\"…/A/t\",\"reason\":\"cannot list it (EACCES)\"}]}. No acceptance criterion covers this combination and `failed` stays [], so SNAPSHOT_PRUNE_FAILED is unaffected; it is a cosmetic duplicate only.",
+      "suggested_fix": "When readdir fails with EACCES/EPERM for a dir already pushed by treeVerdict, append the listing reason to that entry (or skip the second push) so each path appears once in `skipped`.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/evict-tree.mjs",
+      "line": 167,
+      "claim": "A healthy tree inside a directory whose read bit is dropped (mode 0300 or 0100) gets `tree: true`, but `git ls-files` returns no ignored paths and nothing is evicted. The only entry is a skip reading `cannot list it (EACCES)`, so the reason doesn't say that the tree's ignored paths (node_modules) were left in place.",
+      "evidence": "node probe.mjs fixtures B (chmod 0300) and C (chmod 0100) on a git tree with ignored node_modules/ → {\"evicted\":[],\"failed\":[],\"skipped\":[{\"path\":\"…/B/t\",\"reason\":\"cannot list it (EACCES)\"}]}, then `B node_modules still present: true` (same for C). The directory is still named, so the ticket is met. Making it evictable is explicitly out of scope; this is wording only.",
+      "suggested_fix": "None required. Optionally note in the module comment that a tree git can resolve but the walk cannot list is reported by its listing skip.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 770,
+      "claim": "A skipped tree is never signalled in the snapshot step. The marker greps only `\"failed\":[]`, and `skipped` is discarded by `grep -q`. So an unevicted tree that keeps its node_modules in a kept run root prints nothing at that step. It is logged only by runReview's end-of-review eviction (the review-core.mjs:1043 call site).",
+      "evidence": "review-core.mjs:1139 pipes `reclaim-scratch.mjs --pr … --apply | grep -qF '\"failed\":[]' || echo SNAPSHOT_PRUNE_FAILED`. The tests `a kept run root holding a tree git will not answer for … prints nothing` and the docs both state this on purpose. I did not run the shell step.",
+      "suggested_fix": "If the intent is only 'not a failure', this is acceptable. If a skipped tree should be visible at the snapshot step, add a separate `SNAPSHOT_PRUNE_SKIPPED` marker that checks `\"skipped\":[]`.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/evict-tree.mjs",
+      "line": 112,
+      "claim": "The `catch` branch where realpathSync throws in treeVerdict (skip reason `comparing git's top-level ... failed`) is untested: replacing it with `return { tree: false }` leaves all tests green.",
+      "evidence": "Mutation: `return { skip: `comparing git's top-level ...` }` → `return { tree: false }`. ./agent-test tests/evict-tree.test.mjs → tests 14, fail 0; also on the four-file set → tests 165, fail 0. Inference: the branch needs git to report a top-level that vanishes or is unreadable, hard to build deterministically.",
+      "suggested_fix": "Stub or race a top-level that realpath rejects, or accept the gap.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The comment above `inner` in the walk-continues test says \"Beside the skipped tree's own subdirectories, a healthy tree under it is still reached.\" The wording is garbled. It means that a healthy tree nested under a skipped tree is still evicted.",
+      "evidence": "Read tests/evict-tree.test.mjs in the diff (lines 368-369). The assertion at line 374 expects `inner`, nested under `brokenTree`, in `evicted`. That matches the intent, not the \"Beside\" wording.",
+      "file": "tests/evict-tree.test.mjs",
+      "suggested_fix": "Reword to: \"A healthy tree nested under the skipped tree is still reached.\"",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/evict-tree.mjs",
+      "line": 96,
+      "claim": "treeVerdict returns `{tree:false}`, `{tree:true}` or `{skip:string}`. Its shape is a convention, not enforced: the walk tests `verdict.skip !== undefined` and `verdict.tree` separately, so a future branch that returned both would be accepted silently.",
+      "evidence": "Read the diff at lines 67-91 and 121-123. Today every path returns exactly one shape and `skip` is always a non-empty string. The two-field-check pattern comes from the code itself. I did not execute anything.",
+      "suggested_fix": "Optional: return a discriminated value such as `{kind:'tree'|'plain'|'skip', reason?}` and switch on `kind`. The current code is correct, so this is not needed.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 695,
+      "claim": "`evicted` and `skipped` are two `let … = null` sentinels that both say the same thing: they are non-null exactly when `pr !== null`. That copies information `pr` already holds, and the PR adds the second copy (`skipped`) next to the existing one, so there are now two flags that could drift from `pr`.",
+      "evidence": "In my copy I changed lines 694-696 to `const evicted = []; const skipped = [];`, deleted the `evicted = []; skipped = [];` reassignments at 709-710, and changed the receipt at 768 to `...(pr === null ? {} : { evicted }), kept, failed, ...(pr === null ? {} : { skipped })`. A grep over main() (lines 650-770) shows `pr` is assigned once (`const pr = arg(\"pr\")`, line 657) and that `evicted` and `skipped` are only written in the `pr !== null` branch and read at the receipt. Running `node --test --test-reporter=tap tests/reclaim-scratch.test.mjs` on that copy gave `# tests 94 # pass 94 # fail 0`. That includes the new key-order checks: `Object.keys` must be [applied, ledger, removed, evicted, kept, failed, skipped] for --pr and must exclude both keys for the sweep and --siblings receipts.",
+      "suggested_fix": "`const evicted = []; const skipped = [];` (comment: `--pr` mode's evictions and skipped directories, in its receipt only). Drop the two reassignments inside the `pr !== null` branch, and key the receipt spreads on `pr === null` rather than `evicted === null` / `skipped === null`.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/evict-tree.test.mjs",
+      "line": 219,
+      "claim": "The new test \"a healthy tree is not skipped\" adds no coverage. Three other tests in the same file already check that a healthy tree's `skipped` is `[]`, and they fail on every mutant this one fails on.",
+      "evidence": "In my copy I mutated evict-tree.mjs:111 to `return { tree: true, skip: \"MUTANT\" }`, so every healthy tree is also pushed to `skipped`. Running `node --test --test-reporter=tap tests/evict-tree.test.mjs` gave `# tests 14 # pass 10 # fail 4`, with `not ok` on 5 (\"a directory git lists as ignored is named once…\", full deepEqual with `skipped: []`), 11 (\"a skipped directory does not stop the walk…\"), 13 (\"a repository inside an ignored directory…\") and 14 (\"a healthy tree is not skipped\"). Tests 5, 11 and 13 already catch this mutant.",
+      "suggested_fix": "Delete test 14 (\"a healthy tree is not skipped\", lines 219-224). Healthy-tree coverage stays in the deepEqual assertions at lines 90 and 211 and in the skip-ordering test.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/evict-tree.test.mjs",
+      "line": 203,
+      "claim": "In the new test \"a directory with no .git of its own, and a listing that fails with ENOENT or ENOTDIR, are not skipped\", two of its three assertions repeat the PR's own updated test 4: the no-`.git` directory case and the ENOENT (`gone`) case. Only the ENOTDIR (`file.txt`) assertion is new.",
+      "evidence": "In my copy I mutated evict-tree.mjs:167 to add `|| e.code === \"ENOENT\"` to the skip condition. Running `node --test --test-reporter=tap tests/evict-tree.test.mjs` gave `# tests 14 # pass 12 # fail 2`: `not ok 4 - a directory with nothing under it, and one that does not exist, evict nothing, fail nothing and skip nothing` and `not ok 12`. Test 4 (lines 78-79) already asserts `skipped: []` for an empty no-`.git` directory and for `gone`.",
+      "suggested_fix": "Fold the ENOTDIR case into test 4: add `assert.deepEqual(evictTrees(<file path>, { apply: true }), { evicted: [], failed: [], skipped: [] })` and extend that test's title to cover \"or is a file\". Then delete test 12 (lines 195-204).",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

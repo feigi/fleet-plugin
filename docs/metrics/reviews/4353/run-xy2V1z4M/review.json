@@ -1,0 +1,111 @@
+{
+  "pr": 4353,
+  "head": "1b5ce5909791a547036cd0853c778c42e5b5de23",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": false,
+    "reason": "no suite slot within 1800 s — the host is at its suite bound; not a test failure"
+  },
+  "dimensionsRun": [
+    "correctness",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I only read and ran greps, so I did not write these files; they probably come from other agents."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv` (not written by this review: all my commands cd'd into the scratch copy, and I issued no write to that path)"
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 1,
+    "unverified": 4,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4353/run-xy2V1z4M/snapshot-1b5ce590",
+  "survived": [],
+  "refuted": [
+    {
+      "severity": "important",
+      "file": "docs/adr/0037-each-repository-routes-by-its-own-fit-tickets-group-by-evidence.md",
+      "line": 15,
+      "claim": "Decision 1 of ADR 0037 still says the Fit 'is computed at every phase 0', which this PR's own Amended-by-#4327 clause in the Status line (line 3) contradicts; the diff leaves line 15 unchanged.",
+      "evidence": "grep on the snapshot shows line 15: 'It is computed at every phase 0, kept in `.fleet/` beside the cost guard…'. Added line 3 says 'decision 1's Fit is computed at each phase 0 whose cost guard duty writes a guard'. metrics-refresh.mjs:373 `fit()` returns 'fit: skipped, no guard written' when written===null, and costGuard returns null at :282-285 when a CORPUS file is missing.",
+      "suggested_fix": "Reword ADR 0037 decision 1 to 'computed at each phase 0 whose cost guard duty writes a guard', or point to the Status-line amendment.",
+      "dimension": "comments",
+      "verdict": "refuted",
+      "votes": [
+        {
+          "refuted": true,
+          "reason": "Line 15 is unchanged and still says 'every phase 0', but the PR deliberately amends decision 1 via the Status line, which names decision 1 explicitly, plus an inline Amended note in the design spec. That is the ADR-amendment convention, so the stale body wording is not a contradiction. The code behaviour (`fit: skipped, no guard written`, tests/metrics-refresh.test.mjs:413-418) matches the amendment. I ran no code (docs-only claim), so no red or green run applies. Scope: PR diff plus the snapshot ADR and test files; the pattern 'computed at every phase 0' would miss other ADR passages that say the same thing in different words. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv' (not touched by me)."
+        },
+        {
+          "refuted": true,
+          "reason": "The snapshot shows line 15 still says 'computed at every phase 0'. But the added Status-line clause is an explicit 'Amended by #4327' note that names decision 1 and narrows it. That is the ADR amendment pattern: the Status line carries the amendment and the original decision text stays as ruled. ADR 0037's own Status line already uses this pattern for ADR 0016. So the amendment already handles the wording, and the evidence shows only an unedited line plus a pointer to it, not a real contradiction. I ran only reads (sed/grep of the diff and snapshot), no test or mutation, and did not re-check the metrics-refresh.mjs code behaviour. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/ticket-features.tsv, M docs/metrics/tier-outcomes.tsv. I made no edits there, so these were already dirty before my run."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "docs/specs/2026-11-01-self-refining-router-design.md",
+      "line": 88,
+      "claim": "The new note's last sentence, 'Only a phase 0 with a corpus but no counted records writes a guard and a Fit, and that Fit is the starting table's fit', puts 'Only' on 'writes a guard and a Fit'. Read literally, it says only a no-records phase 0 writes a guard and a Fit, which is false: every phase 0 with a full corpus writes both, records or not. The brief's wording put 'Only' on the starting-table outcome instead ('Only a phase 0 with a corpus but no counted records writes a Fit that is the starting table's fit').",
+      "evidence": "Ran `node --test --test-name-pattern='a phase 0 over fixture records writes router-fit.json' tests/metrics-refresh.test.mjs` in my copy → ✔ pass. That test's phase 0 over 2 ruled records writes both .fleet/cost-guard.json and router-fit.json (n_rows 2, stdout 'fit: fitted 2 Pulls, in burn-in'), so a phase 0 with counted records also writes a guard and a Fit. `sed -n 88p` of the spec prints the sentence as quoted. The contrast with the no-corpus first run just before it makes the intended reading recoverable, so this is wording, not a behavioural defect.",
+      "suggested_fix": "Scope 'Only' to the outcome, e.g. 'A phase 0 with a corpus but no counted records writes a guard and a Fit, and only then is that Fit the starting table's fit', or use the brief's sentence verbatim.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/specs/2026-11-01-self-refining-router-design.md",
+      "line": 32,
+      "claim": "The spec's decisions table row for #4126 still says 'The Fit computed at each phase 0 routes that run', with no amendment, although the Fit is no longer computed at every phase 0 (guard-less phase 0s skip it).",
+      "evidence": "Line 32 of the snapshot reads 'The Fit computed at each phase 0 routes that run; it lives in `.fleet/`…'. 'Each phase 0' is ambiguous next to the new qualifier 'whose cost guard duty writes a guard'. The row is a historical ruling, so it may be left as is.",
+      "suggested_fix": "Leave it, or add the qualifier.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/specs/2026-11-01-self-refining-router-design.md",
+      "line": 88,
+      "claim": "The added note claims a no-guard 'route' 'routes `slow-high` with no draw whatever the table', and the pre-existing 'A missing guard still means `slow-high`' text is now partly redundant. The two are not contradictory.",
+      "evidence": "rowDispatch at ticket-router.mjs:459 returns {policy: POLICY_CELL, reason:'guard-missing', draw:null}, and ledger-grammar.mjs:855 sets POLICY_CELL='slow-high'. So the claim is accurate. The note's 'Only a phase 0 with a corpus but no counted records writes a guard and a Fit' was not exercised and is inferred from costGuard/writeFit: a present corpus makes costGuard write the guard and fit() then calls writeFit.",
+      "suggested_fix": "None required.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body: it says 'three own-line `*Amended (#4327)*` notes', but the notes are italic lines of the form `*Amended (#4327): …*`, so the quoted form `*Amended (#4327)*` is not literal. The count of three is correct (spec lines 17, 83 and 88). The body's statements that no file under plugin/ changes, and that metrics-refresh.mjs `fit: skipped, no guard written` and ticket-router.mjs `rowDispatch` `guard-missing` exist, were all verified (metrics-refresh.mjs:373, ticket-router.mjs:459). The body also does not mention that ADR decision 1 (line 15) and the table row at spec line 32 keep the old wording.",
+      "evidence": "pr.diff added lines 41, 49 and 54; grep for 'guard-missing' and 'skipped, no guard written' in the snapshot.",
+      "suggested_fix": "Optional wording tweak only.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

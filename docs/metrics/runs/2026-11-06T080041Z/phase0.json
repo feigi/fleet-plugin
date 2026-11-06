@@ -1,0 +1,105 @@
+{
+  "run": 1793776831823,
+  "session": "/Users/chris/.omp/agent/sessions/-dev-fleet-plugin/2026-11-04T07-06-34-587Z_01a1a561-86db-7630-b2dc-8ce7ca87a80e",
+  "scratch": "/Users/chris/.fleet/scratch/fleet-plugin-28971265",
+  "inFlight": 5,
+  "objective": "cost",
+  "pluginVersion": "3.154.0",
+  "steps": {
+    "alarm": {
+      "status": "ok",
+      "at": "2026-11-04T07:20:17.787Z",
+      "output": "controller alarm armed: pid 87817, /Users/chris/dev/fleet-plugin/.fleet"
+    },
+    "branch": {
+      "status": "ok",
+      "at": "2026-11-04T07:20:17.796Z",
+      "output": "HEAD is refs/heads/main"
+    },
+    "fast-forward": {
+      "status": "ok",
+      "at": "2026-11-04T07:20:19.801Z",
+      "output": "fast-forwarded 165 commits to origin/main"
+    },
+    "pin": {
+      "status": "ok",
+      "at": "2026-11-04T07:20:19.903Z",
+      "output": "instruments pinned: npm-install /Users/chris/.omp/plugins/node_modules/@feigi/fleet-ctl (version 3.154.0)"
+    },
+    "baseline": {
+      "status": "ok",
+      "at": "2026-11-04T07:20:20.084Z",
+      "output": "main-checkout baseline recorded"
+    },
+    "labels": {
+      "status": "ok",
+      "at": "2026-11-04T07:20:20.808Z",
+      "output": "label-map.mjs ensure: {\"needs-triage\":\"needs-triage\",\"needs-info\":\"needs-info\",\"ready-for-agent\":\"ready-for-agent\",\"ready-for-human\":\"ready-for-human\",\"wontfix\":\"wontfix\",\"in-progress\":\"in-progress\",\"onhold\":\"onhold\",\"ready-to-merge\":\"ready-to-merge\"}"
+    },
+    "preflight": {
+      "status": "ok",
+      "at": "2026-11-04T07:20:23.054Z",
+      "output": "preflight.mjs passed (PREFLIGHT OK (/Users/chris/dev/fleet-plugin/.fleet/preflight.json))"
+    },
+    "ruleset": {
+      "status": "ok",
+      "at": "2026-11-04T07:20:24.258Z",
+      "output": "the live gate matches the ruleset spec"
+    },
+    "tier-roles": {
+      "status": "ok",
+      "at": "2026-11-04T07:20:26.317Z",
+      "output": "every tier route resolves (in-flight bound 5)\ntier-roles: every definition routes to a resolvable model at a level it runs, no shadowing override"
+    },
+    "metrics": {
+      "status": "ok",
+      "at": "2026-11-04T07:20:31.678Z",
+      "output": "metrics-refresh.mjs ran\nmetrics-refresh: drain: 45 rows from .fleet/ticket-features.pending.tsv into docs/metrics/ticket-features.tsv (0 already there)\nmetrics-refresh: member-outcomes: already 23 columns\nmetrics-refresh: cost guard: verdict tripped (tripped: smol-high), pr-cost.mjs exit 3; .fleet/cost-guard.json computed 2026-11-04T07:20:31.513Z\nmetrics-refresh: fit: fitted 331 Pulls; .fleet/router-fit.json computed 2026-11-04T07:20:31.521Z"
+    },
+    "cockpit": {
+      "status": "ok",
+      "at": "2026-11-04T07:20:31.679Z",
+      "output": "launched board.mjs serve, pid 95559"
+    },
+    "rotate": {
+      "status": "ok",
+      "at": "2026-11-04T07:20:31.826Z",
+      "output": "ledger rotated, run 1793776831823\narchived /Users/chris/dev/fleet-plugin/.fleet/phase0.json -> /Users/chris/dev/fleet-plugin/.fleet/phase0.2026-11-04T072031Z.json\narchived /Users/chris/dev/fleet-plugin/.fleet/briefs -> /Users/chris/dev/fleet-plugin/.fleet/briefs.2026-11-04T072031Z\nrotated /Users/chris/dev/fleet-plugin/.fleet/ledger.md -> /Users/chris/dev/fleet-plugin/.fleet/ledger.2026-11-04T072031Z.md"
+    },
+    "catch-up": {
+      "status": "ok",
+      "at": "2026-11-04T07:20:40.375Z",
+      "output": "63 run record file(s) from /Users/chris/dev/fleet-plugin/.fleet\n37 review evidence file(s) from /Users/chris/.fleet/scratch/fleet-plugin-28971265\npushed 84472c9070f5032b6b2690b8c0f8fe1dc2cbc7fb\nPR https://github.com/feigi/fleet-plugin/pull/4347 opened on chore/run-records-20261104"
+    },
+    "reclaim": {
+      "status": "ok",
+      "at": "2026-11-04T07:20:41.143Z",
+      "output": "scratch reclaimed"
+    },
+    "evict": {
+      "status": "ok",
+      "at": "2026-11-04T07:20:41.630Z",
+      "output": "idle claim trees evicted"
+    },
+    "recipe": {
+      "status": "ok",
+      "at": "2026-11-04T07:20:42.307Z",
+      "output": "withheld: the Recipe's command lines can carry environment assignments"
+    },
+    "fold-in": {
+      "status": "ok",
+      "at": "2026-11-04T07:20:43.594Z",
+      "output": "2 PR(s) queued, 0 already on a carried row\nqueued PR#4346 for review (closes no issue)\nqueued PR#4347 for review (closes no issue)"
+    },
+    "stranded": {
+      "status": "ok",
+      "at": "2026-11-04T07:20:47.798Z",
+      "output": "prior dead: 0 claim(s), 0 live token(s) carried"
+    },
+    "shortlist": {
+      "status": "ok",
+      "at": "2026-11-04T07:20:54.153Z",
+      "output": "shortlist built"
+    }
+  }
+}

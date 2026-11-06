@@ -1,0 +1,216 @@
+{
+  "pr": 4378,
+  "head": "06cce7607c2ef5849b25ce6398b1e988378e8d04",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/ticket-features.tsv, M docs/metrics/tier-outcomes.tsv (I wrote nothing there; I only ran pwd, read, and grep/git status)."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I only ran git status and read nothing else there, so I did not modify these files and they were already modified before I started."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (I never wrote there, so these were modified by something else in the controller's checkout)."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (not written by me; I only ran git status there, and all my writes were in scratch)."
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` / ` M docs/metrics/tier-outcomes.tsv` (this agent never wrote to that tree. Every command here either `cd`'d into the snapshot or scratch path or was this read-only status call, so these changes came from someone else)"
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. This review wrote nothing there: every command was cd-chained into the snapshot copy or the correctness/ scratch dir, and the only command that ran in that path was the `pwd` at the start. These two files are another agent's or the controller's."
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 12,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4378/run-4NrgJ494/snapshot-06cce760",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "tests/board-server.test.mjs",
+      "line": 1066,
+      "claim": "The shared run's one failure — `CLI: a launch whose post-bind scan finds this workspace's cockpit further along opens nothing` — did not reproduce in a narrowed run. It is a 20 s harness timeout in a file and area this PR does not touch, not a defect of the PR.",
+      "evidence": "red: ./agent-test (shared review run) → exit 1, fail 1 incl `CLI: a launch whose post-bind scan finds this workspace's cockpit further along opens nothing` (20044ms, `Error: timed out waiting for the launch to exit` at tests/support/board-rig.mjs:65:48). Narrowed rerun in my copy: `cd correctness/copy && ./agent-test tests/board-server.test.mjs` → exit 0, tests 69, pass 69, fail 0. Its output names the test: `✔ CLI: a launch whose post-bind scan finds this workspace's cockpit further along opens nothing (154.370667ms)`. The PR diff touches only review-core.mjs, review-eval.mjs and review-runner.test.mjs (`grep '^diff --git' pr.diff`). This looks like a timeout under full-suite load that I cannot separate from the environment, so it should be reproduced in the worktree before anyone acts on it.",
+      "suggested_fix": "Do not block the PR on this. If it recurs under full-suite load, track the timing sensitivity of the board-rig launch wait as its own ticket.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/review-eval.mjs",
+      "line": 177,
+      "claim": "The new worktree refusal is a second, inline copy of runReview's `!worktree` truthiness rule, not a shared helper the way testCmd/pr/scratch are, so the two can drift. Today they agree: a whitespace-only worktree passes both checks and is still run and retried twice.",
+      "evidence": "Probe in correctness/copy: `runReviewToFile({pr:7,branch:'b',worktree:'   ',scratch:'/tmp/x',testCmd:'t'}, x=>{calls++;return runReview(host,x)})` → RETURNED failed, calls 2, errors `attempt 1: review-pr: the snapshot agent returned nothing…` / `attempt 2: …`. Sources: review-core.mjs:1077 `if (!pr || !worktree) throw new Error(\"review-pr: args.pr and args.worktree are required\")` and review-eval.mjs:177 `if (!args?.worktree) {`. This is in scope as written: the ticket asks only for 'absent or empty' and requires sharing only the testCmd rule.",
+      "suggested_fix": "Optional: extract a `runnerWorktreeRefusal` in review-core.mjs that both call sites use, so the two rules stay identical by construction. Leave a blank worktree out unless runReview also starts refusing it (that would change runReview, which is out of this ticket's scope).",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/review-eval.mjs",
+      "line": 176,
+      "claim": "The new worktree refusal is a bare truthiness test (`!args?.worktree`), so a whitespace-only or non-string worktree (\" \", \"\\n\", 7, {}, [], true) passes the 'refused before any review runs, not retried' guard and the full review is run and retried a second time, which is the swallow-and-retry the PR set out to stop for testCmd.",
+      "evidence": "Probe: runReviewToFile({pr:7, scratch:'/tmp/zz', worktree: W, testCmd:'x'}, run) with run = runReview over an agent returning null. For each W in [' ', 7, {}, [], true, '\\n'] it returned status:'failed' with two 'snapshot agent returned nothing' errors and the run counter at 2, not a throw with 0 runs. `runnerTestCmdRefusal` rejects the same blank strings with a throw. The reviewRun check on the other side is also `!worktree`, so core accepts the same values.",
+      "suggested_fix": "Add a shared `runnerWorktreeRefusal(worktree)` in review-core.mjs: require a non-empty, trimmed string. Use it in both reviewRun and runReviewToFile, as was done for pr, scratch and testCmd. That also stops the worktree message being written twice in two forms.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/review-runner.test.mjs",
+      "line": 230,
+      "claim": "The new worktree refusal is a truthiness check, so a whitespace-only worktree such as \"  \" passes it. No test pins this either way, and the refusal is not consistent with testCmd, which rejects blank strings.",
+      "evidence": "Reasoned from diff line 64 (`if (!args?.worktree)`) and the test at diff lines 230-238, which covers only undefined, \"\" and null. No mutant was run for this.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/review-runner.test.mjs",
+      "line": 216,
+      "claim": "Every mutation I tried against the new testCmd and worktree refusals was killed by the tests this PR adds or touches. The padded-testCmd test rejects an over-strict trim mutant.",
+      "evidence": "red: ./agent-test tests/review-runner.test.mjs → exit 1, fail 2 incl a testCmd that is missing, empty or blank is refused before any review runs, not retried (mutant: dropped .trim()); baseline: ./agent-test tests/review-runner.test.mjs → exit 0, tests 22 pass 22. Also red: worktree === undefined mutant → fail 1 incl a worktree that is missing or empty is refused before any review runs, not retried; padded-testCmd mutant → fail 1 incl a missing branch and a padded testCmd still run the review; baseline exit 0 in each case.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/review-eval.mjs",
+      "line": 159,
+      "claim": "The runReviewToFile header comment says the new refusal covers 'a testCmd that is not a non-empty string'. The refusal also rejects whitespace-only strings, and the comment is silent on that.",
+      "evidence": "review-core.mjs:946-948 `runnerTestCmdRefusal` refuses when `testCmd.trim() === \"\"`. The comment at review-core.mjs:942-944 says 'blank or whitespace-only counts as empty'. The review-eval.mjs:159 comment omits this, though the new test uses blank values `\" \"` and `\"\\t\\n\"`. The comment is not wrong and only slightly less precise than the code.",
+      "suggested_fix": "Optionally write 'a testCmd that is not a non-blank string' or point to runnerTestCmdRefusal.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/review-eval.mjs",
+      "line": 176,
+      "claim": "The new runner worktree guard `!args?.worktree` only rejects falsy values, so a non-string worktree (7, {}, true) passes the runner guard and is interpolated into shell prompts. runReview's own check at review-core.mjs:1077 is equally truthiness-only, so the PR matches the existing weak check. It does not enforce the 'string' invariant that runnerTestCmdRefusal does for testCmd.",
+      "evidence": "Read the diff (`if (!args?.worktree) throw ...`) and `grep -n worktree review-core.mjs`, which shows line 1077 `if (!pr || !worktree) throw`. Not executed. The test list covers only undefined, \"\" and null.",
+      "suggested_fix": "Add a shared `runnerWorktreeRefusal` alongside the other refusals that requires a non-empty string, and use it in both runReview and runReviewToFile.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/review-eval.mjs",
+      "line": 175,
+      "claim": "The runner's `args?.testCmd` and `args?.worktree` checks are repeated rules, not types. The worktree check is inline while the other three are shared refusal functions, so the two entry points can drift. No cast erases a type conformance in this diff.",
+      "evidence": "Read the diff. The change is plain JS (.mjs) with no casts or type definitions, and runnerTestCmdRefusal is exported and used in both places.",
+      "suggested_fix": "Extract the worktree refusal like the other three.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/review-runner.test.mjs",
+      "line": 339,
+      "claim": "The new test \"a genuine thrown or empty review result is still retried once with valid args\" repeats the existing test at line 261, \"a second failure reports failed with BOTH errors and writes no file\". Both script [Error, empty] with valid args and both assert calls.length 2, status \"failed\" and errors.length 2; the only difference is `undefined` versus `null`, and `!result` treats those the same way. The test can be deleted.",
+      "evidence": "In my copy: `node --test --test-reporter=tap --test-name-pattern='second failure reports failed|genuine thrown or empty' tests/review-runner.test.mjs` → ok 1, ok 2. I then mutated review-eval.mjs `attempt <= 2` → `attempt <= 1` and reran: `not ok 1 - a second failure reports failed with BOTH errors and writes no file`, `not ok 2 - a genuine thrown or empty review result is still retried once with valid args`. Both tests fail on the same mutant, so the new test catches nothing the existing one misses. The tests at 213 and 224 also already retry with valid args, because the PR added testCmd/worktree to them.",
+      "suggested_fix": "Delete the test at line 339. The test at line 261, and the tests at 213/224, already cover a retry with valid args.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/review-runner.test.mjs",
+      "line": 315,
+      "claim": "\"a testCmd refusal names the value it received\" is a separate test only because the loop test at line 305 uses the regex `.*got ` and never checks the value. If the loop test checks `got ${JSON.stringify(bad)}`, it covers every bad value, \"   \" included, and the one-off test can go.",
+      "evidence": "In my copy I wrote a scratch test (deleted afterwards) that loops over [undefined, \"\", \"   \", \"  \", \"\\t\\n\", null, 7]. For each value it asserts `runReviewToFile(args, run)` rejects with `new RegExp(`^Error: review-runner: args\\.testCmd is required.*got ${escape(String(JSON.stringify(bad)))}$`)` and that run was called 0 times. Result: `ok 1 - folded: refusal names the value for every bad testCmd`.",
+      "suggested_fix": "In the line-305 loop, end the regex with `got ${escapeRegExp(String(JSON.stringify(bad)))}$` (or assert `e.message.endsWith(`got ${JSON.stringify(bad)}`)`), then delete the test at line 315.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/review-eval.mjs",
+      "line": 175,
+      "claim": "The new `args?.testCmd` and `args?.worktree` reads (three of them) come after `runnerPrRefusal(args?.pr)` has already thrown for a null or undefined `args`, so `args` can never be nullish there and `?.` guards nothing.",
+      "evidence": "In my copy, a scratch test running `runReviewToFile(a, …)` for a in [undefined, null] rejected with /args\\.pr must be a PR number/ (`ok 2 - args?. after pr refusal is unreachable-null`). I then replaced the three new `args?.` reads with `args.` via sed and ran `node --test --test-reporter=tap tests/review-runner.test.mjs`: `# tests 22 # pass 22 # fail 0`.",
+      "suggested_fix": "`runnerTestCmdRefusal(args.testCmd)`, `if (!args.worktree)` and `JSON.stringify(args.worktree)`. Or, at the top, read `const { pr, scratch, testCmd, worktree } = args ?? {};` once, like `pr`/`scratch` are read today, and use the locals.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/review-runner.test.mjs",
+      "line": 86,
+      "claim": "The PR edits about 17 call sites only to append the same `worktree: \"/wt\", testCmd: \"node --test\"` pair, and the file has 18 copies of that literal. One shared constant spread into each call would make the next required argument a one-line change.",
+      "evidence": "`grep -c 'worktree: \"/wt\", testCmd: \"node --test\"' tests/review-runner.test.mjs` → 18. In my copy I added `const VALID = { worktree: \"/wt\", testCmd: \"node --test\" };` and sed-replaced the literal with `...VALID` outside lines 139-154. That range is the subprocess `script` template string, which cannot see module bindings: a first attempt that replaced it too made `not ok 6 - a write that fails partway…` fail. 16 sites were replaced, and `node --test --test-reporter=tap tests/review-runner.test.mjs` gave `# tests 22 # pass 22 # fail 0`.",
+      "suggested_fix": "Define `const VALID = { worktree: \"/wt\", testCmd: \"node --test\" };` once. Write calls as `runReviewToFile({ pr: 7, scratch: dir, ...VALID }, run)`. Keep the inline literal inside the line-150 subprocess script.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

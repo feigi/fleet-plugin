@@ -1,0 +1,368 @@
+{
+  "pr": 4366,
+  "head": "f18d8e2eb09b0cc1cb8d5722449c721481198371",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I did not write to that tree, and these two files are modified from before my run."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv' (I did not write these; both are metrics files and I made no writes in that tree)."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — git status --porcelain -uall printed ' M docs/metrics/ticket-features.tsv' and ' M docs/metrics/tier-outcomes.tsv'. I wrote nothing under that path (all probes ran in my scratch copy), so these two modifications are not mine; they probably come from a sibling's or the controller's run."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. Not written by this reviewer: every command I ran chained an absolute cd into the scratch dir or the copy, and its output paths were absolute."
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv` (this pass never wrote there: every command after the first `pwd` changed into the copy or the scratch dir, or only read)"
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv' and ' M docs/metrics/tier-outcomes.tsv'. I did not touch either (I only read the checkout), so I assume other fleet runs modified them."
+    }
+  ],
+  "counts": {
+    "survived": 4,
+    "refuted": 0,
+    "unverified": 17,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4366/run-CEj5Q9zi/snapshot-f18d8e2e",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "plugin/scripts/ledger-grammar.mjs",
+      "line": 482,
+      "claim": "gateVerdictRefusal() compares only the Gate-verdict words of a row's old and new text, so a `ledger.mjs row` rewrite that keeps every verdict word but changes the row's PR mapping (impl-10=PR#40 → PR#41) moves the verdicts off PR 40, and finisher-pr-40 then dispatches past its dispositions-mismatch. This defeats mechanism 4's 'row refuses to drop a Gate verdict'.",
+      "evidence": "Ran `node --test --test-name-pattern='mismatch row away' tests/zz-probe-race.test.mjs` in my copy (ledger-dispositions fixture). The verb wrote `dispositions-mismatch=fix-pr-40:run-Rv40Aa01` (exit 1). The control `dispatch 40 finisher-pr-40` exited 2: 'dispositions mismatch — … not dispatching finisher-pr-40'. Then `row 10 \"impl-10=PR#41 → PR#41 · review=member:review-pr-40 · reviewed=…:2/1/1:run-Rv40Aa01 · fix-pr-40=applied:… · dispositions-mismatch=fix-pr-40:run-Rv40Aa01\"` exited 0 with only 'dropped: impl-10=PR#40 PR#40'. After that, `dispatch 40 finisher-pr-40` exited 0 with 'dispatched finisher-pr-40', and the rows became ['#10 impl-10=PR#41 → PR#41 · … · dispositions-mismatch=fix-pr-40:…', '#40 finisher-pr-40']. A second probe (correctness/p1/relocate.mjs) shows the same move for a reviewed= token on a plain `#50 PR#40 note` row: deriveRun then reports reviewed for pr 41, not 40.",
+      "suggested_fix": "In gateVerdictRefusal (or in the row command next to it), when the old row holds any Gate verdict, refuse a rewrite where rowNums(oldRow).pr !== rowNums(line).pr: moving a verdict to another PR's stream drops it from its own. Add a ledger-row-review test that changes the impl-<N>=PR#<M> outcome, or the first PR# mention, on a row carrying a verdict.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "I called gateVerdictRefusal directly in my own copy of the snapshot. The old row was `impl-10=PR#40 → PR#40 · … · dispositions-mismatch=fix-pr-40:run-Rv40Aa01`. The new row differed only in the impl mapping, `impl-10=PR#41 → PR#41`, with every verdict word unchanged. It returned null, meaning `ledger.mjs row` would allow the rewrite. That matches the claim: the function compares only verdict words, so a PR-mapping change that moves the verdicts off PR 40 isn't caught. I did not rerun the end-to-end `ledger.mjs row` and `dispatch 40 finisher-pr-40` sequence. I only confirmed the refusal check lets the rewrite through. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I didn't write there: all my files are under the scratch dir, and I only ran `pwd` and `git status` in that checkout. I did not run the test suite, so there is no `red:` evidence line."
+        },
+        {
+          "refuted": false,
+          "reason": "I ran gateVerdictRefusal in my own snapshot copy. For the old row `#10 impl-10=PR#40 → PR#40 · review=member:review-pr-40 · reviewed=x:2/1/1:run-Rv40Aa01` and the same row with every `#40` changed to `#41`, it returned null, so the guard allows a PR remap that keeps the verdict words. A control that changed the reviewed= token itself was refused, so the guard does work for verdict-word changes. In ledger.mjs row (lines 787-826) I found no other guard that would catch the remap. newSplitRow fires only when a PR gains a second row, and PR 41 had no row. rowWriteRefusal covers open launches, and those are kept. I did not re-run the full row then dispatch sequence. That part rests on the claimant's own run, which showed row exit 0 and then dispatch exit 0. The claim holds at the function level and the guard is not covered elsewhere. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I did not write to that checkout, so those changes were already there."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 3215,
+      "claim": "runDispositions checks the escalate-answer preconditions (the current verdict is an escalate from this member, and no fix-applier is live) only against the ledger it read before taking the lock. After acquireLock() and load() it appends the answer tokens and replaces the member's verdict without checking again, so two answer runs that both read the same escalate both write. The row then holds contradictory answers and an ok verdict, and the finisher dispatches.",
+      "evidence": "In my copy I ran a probe test built on the ledger-dispositions fixture: `escalated(f.check())`, then run B `dispositions fix-pr-40 --uphold 'survived[0]'`, with the stub's existing FAKE_GH_HOOK running run A `--send-back 'survived[0]'` once while B read the tracker. A exited 1 and recorded 'survived[0] sent back'. B exited 0 with verdict ok. Final row: '… · escalation-answer=run-Rv40Aa01:survived[0]:sent-back · escalation-answer=run-Rv40Aa01:survived[0]:upheld · dispositions-ok=fix-pr-40:run-Rv40Aa01'. Then `dispatch 40 finisher-pr-40` exited 0 ('dispatched finisher-pr-40'), and re-running the verb with no answers gave exit 1, verdict mismatch: escalationAnswers() reads the pair as sent-back, but the gate already let the finisher through. Before this PR, the check's whole-row `row` rewrite would have replaced A's tokens with B's (warning 'dropped:'), leaving a consistent upheld+ok row.",
+      "suggested_fix": "After `await acquireLock(); data = load();` and before writing answers (result.recorded.length > 0), run the recording preconditions again on the reloaded data: deriveRun(...).reviewed for the PR must still have run === result.run, dispositions an escalate from result.member, and fixLive empty. If not, die exit 2 with nothing written and say to run the verb again. Better still, judge again under the lock when the reloaded rows of that PR differ from the snapshot. The ADR's claim that a stale verdict 'does nothing' covers only a superseded review, not a second writer on the same review.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Reproduced in a copy of the snapshot. I added a probe test to tests/ledger-dispositions.test.mjs. It makes the PR escalated, then runs B (--uphold survived[0]) while a one-shot FAKE_GH_HOOK runs A (--send-back survived[0]) during B's tracker read. B exited 0. The final row held escalation-answer=...:survived[0]:sent-back, escalation-answer=...:survived[0]:upheld and dispositions-ok=fix-pr-40:run-Rv40Aa01. `dispatch 40 finisher-pr-40` then exited 0, so the finisher dispatched. Code check: runDispositions (ledger.mjs ~3215) re-loads after acquireLock() but does not recheck the escalate precondition. An earlier probe run was unreliable, because the hook recursed into itself (the run took 126s). It did show contradictory answer tokens on the row. CWD-AUDIT: not run; I only wrote under the scratch dir and ran read-only commands in /Users/chris/dev/fleet-plugin."
+        },
+        {
+          "refuted": false,
+          "reason": "I did not run the probe. I read the snapshot instead. In runDispositions (ledger.mjs ~3198-3235), the escalate-answer preconditions are only checked inside judgeMember, against the ledger read before the lock. After acquireLock() and load() it appends the answer tokens and writes the verdict with withVerdict. withVerdict (dispositions-check.mjs:702) drops the earlier verdict only for the same member and run, so a concurrent writer's verdict is replaced. I found no re-check of the escalate or the fix-applier after the lock. The tokenRefusal code I read (ledger.mjs ~3350) is for the `token` verb and does not reject two contradictory escalation-answer tokens. I did not read rowWriteRefusal itself, so I cannot say whether it rejects contradictory answer pairs. The reported interleaving fits this code, so I found nothing that handles it elsewhere. CWD-AUDIT: not run; I only read files and wrote nothing, in /Users/chris/dev/fleet-plugin."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "tests/ambient-git-vars-mjs-prose.test.mjs",
+      "line": 226,
+      "claim": "Comments at lines 226-232 say the ambient-GIT_DIR and gh-cwd cases were 'Measured in dispositions-check.test.mjs', but this PR moved both tests to ledger-dispositions.test.mjs, so the cited file no longer holds them.",
+      "evidence": "grep over tests/*.mjs in the snapshot: 'an ambient GIT_DIR naming another repository does not change the answer' and 'gh is run from the repository with no ambient GIT_DIR' appear only at tests/ledger-dispositions.test.mjs:532 and :1244. dispositions-check.test.mjs has only 'does not change which ledger is found' (line 470). ambient-git-vars-mjs-prose.test.mjs is not in the diff.",
+      "suggested_fix": "Change both references to ledger-dispositions.test.mjs.",
+      "dimension": "comments",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Grep over tests/*.mjs in the snapshot, with a pattern for the two test names. 'an ambient GIT_DIR naming another repository does not change the answer' is at ledger-dispositions.test.mjs:532. 'gh is run from the repository with no ambient GIT_DIR' is at ledger-dispositions.test.mjs:1244. dispositions-check.test.mjs has only 'does not change which ledger is found' (line 470). The comments at ambient-git-vars-mjs-prose.test.mjs:226-232 still cite dispositions-check.test.mjs for both tests, and the PR diff doesn't touch that file. So the claim is true. The grep reads the snapshot as it stands and does not show history, so it doesn't prove which commit moved the tests. The diff touches both test files. I did not run the test suite, because this is a comment-only issue. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I made no edits there, so the controller's own run left those changes."
+        },
+        {
+          "refuted": false,
+          "reason": "Checked by grep over the snapshot's tests/*.mjs and by reading pr.diff. I ran no test suite, since this is a comment-accuracy claim. ambient-git-vars-mjs-prose.test.mjs:226 and :232 cite dispositions-check.test.mjs for 'an ambient GIT_DIR naming another repository does not change the answer' and 'gh is run from the repository with no ambient GIT_DIR'. pr.diff removes both tests from dispositions-check.test.mjs (lines 1913 and 2763). It re-adds the gh test in ledger-dispositions.test.mjs (line 4643). In the snapshot the two names appear only in ledger-dispositions.test.mjs, at :532 and :1244. dispositions-check.test.mjs now has only 'does not change which ledger is found' (:470). The ambient-git-vars-mjs-prose.test.mjs file is not in the diff, so the stale citations remain. The pattern would miss a differently worded copy of these tests in another file. CWD-AUDIT: not run. I made no changes or mutations in any checkout."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 42,
+      "claim": "The new Writer policy comment says a `reviewed=` is 'written only by the verb that derives it from its evidence … `review` for the third', but `ledger.mjs review` still takes the `reviewed=` token as an argument. The PR body and ADR 0038 mechanism 5 both record this as open (#4359).",
+      "evidence": "snapshot ledger.mjs:42-46 against ADR 0038 item 5 ('Open … `ledger.mjs review` still takes a `reviewed=` token as an argument') and the PR body's 'Left as ruled'. The same overstatement is in CONTEXT.md **Gate verdict** and .out-of-scope/gate-verdict-provenance.md ('a Gate verdict is written only by the `ledger.mjs` verb that derives it').",
+      "suggested_fix": "Say the rule holds today for dispositions verdicts and answers only, and that `reviewed=` is still caller-supplied until #4359. Or name that open item in the comment.",
+      "dimension": "comments",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Snapshot ledger.mjs:42-45 says a `reviewed=` is written only by the verb that derives it from its evidence, `review` for the third. Line 3127 usage is `ledger.mjs review <pr> <review=…|reviewed=…>…`, so `review` still takes the `reviewed=` token as caller input rather than deriving it. ADR 0038 item 5 records this as Open (#4359). The comment therefore overstates the current behaviour. This check was done by reading the code, not by running a test. CWD-AUDIT: not run (no files written in cwd /Users/chris/dev/fleet-plugin)."
+        },
+        {
+          "refuted": false,
+          "reason": "Snapshot ledger.mjs:42-46 says `reviewed=` is written only by the verb that derives it from its evidence, `review` for the third. ledger.mjs:3127 shows the usage `review <pr> <review=…|reviewed=…>…`, so `review` takes the token as an argument and derives nothing. The PR body (pr-messages.md:43) admits this: `ledger.mjs review` still takes `reviewed=` as an argument until #4359 lands. So the comment overstates the code, and the open item is documented elsewhere but not in the comment itself. I read the code and PR body and did not run tests, because the finding is about comment text. CWD-AUDIT: not run, no files were written in /Users/chris/dev/fleet-plugin."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger-grammar.mjs",
+      "line": 455,
+      "claim": "isDispositionsWord matches the dispositions prefixes in any case but matches `escalation-answer=` case-sensitively, so `ledger.mjs token` accepts `Escalation-Answer=…` as a freeform token. This is harmless today because ESCALATION_ANSWER and every reader are case-sensitive too. It is an asymmetry to keep in mind if a reader ever parses that prefix case-insensitively.",
+      "evidence": "Read only, not executed: ledger-grammar.mjs:455 `/^dispositions-(?:ok|mismatch|escalate|unchecked)=/i.test(word) || word.startsWith(\"escalation-answer=\")`, and :300 ESCALATION_ANSWER has no /i flag.",
+      "suggested_fix": "No change needed now. If one is wanted, add a comment saying the case-sensitive match is deliberate because the answer regex is case-sensitive.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 3212,
+      "claim": "`ledger.mjs dispositions` judges against the pre-lock ledger and, after taking the lock, does not re-check that the review is still the latest. A review superseded in between still gets its verdict written, exits 0 and prints `ok`, and nothing on stderr or stdout says it was superseded.",
+      "evidence": "Probe: the gh stub ran `ledger.mjs review 40 review=… reviewed=<head>:1/0/0:run-NewRun01` during the first `gh issue view`. The verb then exited 0 with stdout `{\"verdict\":\"ok\",\"token\":\"dispositions-ok=fix-pr-40:run-Rv40Aa01\",...}`. stderr held only `wrote …/ledger.md`. The row ended `… reviewed=…:run-Rv40Aa01 · … · reviewed=…:run-NewRun01 · dispositions-ok=fix-pr-40:run-Rv40Aa01`. The new review's gate reads only verdicts naming run-NewRun01, so the finisher stays blocked as 'dispositions unchecked'. fleet-event.mjs reports `dispositions checked (exit 0)`. The header comment documents this ('does nothing'), so it is by design, but the no-op is silent and reports success.",
+      "suggested_fix": "After `data = load()`, recompute the latest reviewed run for the PR. If it differs from `result.run`, print a stderr note (or refuse with exit 2) saying the verdict was written for a superseded review, so fleet-event can NEED a re-run rather than note 'checked (exit 0)'.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/fleet-event.mjs",
+      "line": 674,
+      "claim": "The new contract text says 'its exit 1 is a verdict, any other nonzero exit a NEED'. An uncaught exception in the verb exits 1 under node, so a crash inside the in-process judgement would be noted as `dispositions checked (exit 1)`, with empty stdout and no token written. `ledger.mjs dispositions` installs no uncaught-exception handler that maps a crash to exit 2.",
+      "evidence": "`grep -n 'uncaught\\|unhandledRejection\\|process.on(' plugin/scripts/ledger.mjs` shows only the `exit` and signal handlers (SIGTERM/SIGINT/SIGHUP → exit(2)). fleet-event.mjs treats `r.status === 0 || r.status === 1` as checked. I found no input that triggers an uncaught throw: the 330-case fuzz and the environment-fault probes all ended in exit 0/1/2 with a message. The old standalone script had the same exit-1-on-crash behaviour, and in-process judgement widens the code that can reach it. Unexercised hazard, so only a suggestion.",
+      "suggested_fix": "In runDispositions, wrap `refusing`/the post-lock write so a non-CheckRefusal throw calls die() with exit 2. Alternatively, have fleet-event treat exit 1 with empty stdout as a NEED.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/dispositions-check.mjs",
+      "line": 938,
+      "claim": "A nonexistent `--repo` surfaces as `could not resolve --git-common-dir: spawnSync git ENOENT`, which reads as 'git is not installed' when the cause is a missing cwd. The diff's new in-process path (`readLabelMap({cwd: repo})` → refuse(e.message)) passes the misleading text straight through. The message itself comes from fleet-dir, outside the diff.",
+      "evidence": "Probe `ledger.mjs … dispositions fix-pr-40 --scratch S --repo /nonexistent/x` exited 2 with stderr `ledger: could not resolve --git-common-dir: spawnSync git ENOENT`. Standalone with `--repo /nonexistent/x` printed the same cause. It exits 2 (a refusal, not swallowed), but names the wrong cause.",
+      "suggested_fix": "Check that `repo` exists and is a directory in judgeMember or main before the first git or fleet-dir call, and refuse with 'no such repository path'.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger-grammar.mjs",
+      "line": 462,
+      "claim": "The `reviewed=` half of malformedGateWord is not discriminated by any test: deleting it leaves the whole narrowed suite green. gateVerdictRefusal(row, row+' · reviewed=zzz') should refuse as an unparseable Gate-verdict-shaped word, and no test asserts that.",
+      "evidence": "Mutation: `(isDispositionsWord(word) || word.startsWith(\"reviewed=\")) && !isGateVerdict` → `(isDispositionsWord(word)) && !isGateVerdict`. Result: ./agent-test tests/ledger-grammar.test.mjs → exit 0, tests 63, pass 63, fail 0 (mutant survives). Baseline on the unmutated tree: same command → exit 0, 63 pass. The unmutated function does return \"adds 'reviewed=zzz', a word shaped like a Gate verdict…\". In `row`, addedReviewToken refuses the same word first, so the branch is reachable only by calling gateVerdictRefusal directly. The `row` and `token` tests do not reach it either, so only a direct gateVerdictRefusal assertion would pin it.",
+      "suggested_fix": "Add `assert.match(gateVerdictRefusal(row, `${row} · reviewed=zzz`), /adds 'reviewed=zzz'/)` to the gateVerdictRefusal test, or drop the redundant branch.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 3352,
+      "claim": "tokenRefusal's wording for an Escalation answer (as opposed to a dispositions verdict) is not pinned. Routing escalation-answer= words to the dispositions-verdict message passes every test, so the maintainer-only-takes-an-escalate explanation can regress silently.",
+      "evidence": "Mutation: in tokenRefusal, `tok.startsWith(\"escalation-answer=\")\\n ? 'is an Escalation answer …'` with the condition replaced by `false`. Result: ./agent-test tests/ledger-grammar.test.mjs → exit 0, tests 63, pass 63, fail 0; ./agent-test tests/ledger-row-review.test.mjs tests/ledger-dispositions.test.mjs tests/ledger-dispatch.test.mjs → exit 0, tests 260, fail 0 (survives). Baseline: grammar run exit 0, 63 pass. The sibling mutant `if (isDispositionsWord(tok)) {`→`if (false) {` is killed by 'token refuses every dispositions verdict and Escalation answer…', so the refusal itself is covered. Only the message split is not.",
+      "suggested_fix": "In the token-refusal test, assert the Escalation-answer refusal matches /Escalation answer/ and the verdict refusal matches /dispositions verdict/.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/specs/2026-10-13-one-command-per-wake.md",
+      "line": 68,
+      "claim": "The wake-kind table still says `fix-report` runs `dispositions-check.mjs --member`, but this PR moved fix-report to `ledger.mjs dispositions`.",
+      "evidence": "snapshot line 68: '`settle --from-report`; for a review fix-applier `dispositions-check.mjs --member`; …'. fleet-event.mjs fixReport now runs node('ledger.mjs', ['dispositions', member, '--scratch', …]). The same file's line 14 also says a fix-applier report runs `dispositions-check.mjs`.",
+      "suggested_fix": "Replace both with `ledger.mjs dispositions`.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/skills/run-team/references/ledger.md",
+      "line": 9,
+      "claim": "The Writer policy line 'the controller owns run state (row/token/settle/dispatch/review/drain/ruled)' omits the new `dispositions` verb. Fix-appliers run that verb, so the line is now wrong, and the diff left it unedited.",
+      "evidence": "snapshot references/ledger.md:9. ledger.mjs:42-49 got an updated Writer policy in this PR. The PR body says the ledger.md sentence is 'outside the ticket's list and is unchanged'.",
+      "suggested_fix": "Add `dispositions` to the verb list and state that it writes only Gate verdicts. Or keep the deferral, since the PR body discloses it.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body: it says the CLI 'no longer tests `ledgerFile === null` at any site', but the standalone CLI still tests the sentinel once, as `ledgerFile !== null`.",
+      "evidence": "snapshot plugin/scripts/dispositions-check.mjs:1123-1124: `const ledgerFile = defaultLedger(repo); if (ledgerFile !== null) { die(...) }`. The deleted .out-of-scope note was about the two-site test, so the deletion is defensible, but the body's wording is too strong.",
+      "suggested_fix": "Reword to 'tests it at one site, not two', or 'no longer carries the two-site sentinel the note describes'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body: it counts 'seven prose files', but the diff changes six prose files outside scripts and tests.",
+      "evidence": "The diff's non-test paths under plugin/agents, plugin/commands and plugin/skills are fleet-finisher.agent.md, review-and-fix.md, run-team/SKILL.md, briefs/fix-applier.md, references/dispositions-escalation.md and references/finisher.md. That is six. Docs match 'five': ADR 0038, ADR 0022, spec D2, CONTEXT.md and .out-of-scope/gate-verdict-provenance.md. The 'five callers' count is not enumerable from the body, which names only three: fix-report, dispositionsRefusal and nextStep.",
+      "suggested_fix": "Correct the count to six, or name the seventh file. Name the five callers.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/dispositions-check.mjs",
+      "line": 925,
+      "claim": "judgeMember's contract is documented but not enforced by its signature. `ledger` and `reviewPath` are two independent optional parameters, and exactly one is meant to be set: reviewPath names the review when there is no ledger, and with a ledger the review comes off the ledger. The check for this lives only in the CLI main() (`arg(\"review\") === null` → die). The `--review and a ledger contradict` guard was removed.",
+      "evidence": "Read lines 925-1000 and 1105-1130. With a ledger, line 989 overwrites reviewPath with the path derived from the ledger, so a caller's reviewPath is silently ignored. With ledger=null and reviewPath=null, readJson(null) throws a TypeError. line 995 catches it and refuses with 'could not read the review file null: …', so it fails safe but with a misleading message. I ran judgeMember({name:'fix-pr-5',scratch:'/nonexistent',repo:'/tmp'}) from a non-git directory. It threw CheckRefusal at the git-common-dir step, before reaching that path. I did not reproduce the null-path message in a git repo.",
+      "suggested_fix": "Take a discriminated input, e.g. `{ledger}` or `{reviewPath}` as one `source` argument. At minimum, refuse at the top of judgeMember when ledger === null && reviewPath === null, and when both are set.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/dispositions-check.mjs",
+      "line": 1074,
+      "claim": "The verdict result's `run` and `token` are nullable together, exactly when ledger === null. That coupling is implicit, and ledger.mjs runDispositions destructures `{pr, run, token}` and writes `token` without a null check. It depends on having passed a non-null ledger.",
+      "evidence": "Line 1074: `const token = ledger === null ? null : ...`. ledger.mjs runDispositions always passes `ledger: data`, so the path is safe today. Nothing in the result type ties token's non-nullness to that.",
+      "suggested_fix": "Have runDispositions assert result.token !== null, or split the ledger-bound judgement from the standalone one so the two return shapes are distinct.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/dispositions-check.mjs",
+      "line": 734,
+      "claim": "CheckRefusal is a bare `class CheckRefusal extends Error {}` with no `name`. The two callers that distinguish it, main() and ledger.mjs's `refusing`, rely on `instanceof`. That works only while the module is loaded once, which is true for a dynamic import of the same file URL.",
+      "evidence": "Lines 734 and 1119 (`if (e instanceof CheckRefusal) die(e.message)`), and the `await import(\"./dispositions-check.mjs\")` in ledger.mjs runDispositions. A single module instance, so `instanceof` holds. Not exercised across duplicate module instances.",
+      "suggested_fix": "Optional: set this.name = 'CheckRefusal'. This is low risk.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/dispositions-check.mjs",
+      "line": 929,
+      "claim": "judgeMember's `if (recording && ledger === null) refuse(\"--uphold and --send-back record … no ledger is in use\")` cannot be reached from either caller. The standalone CLI never passes `listed`, so `recording` is false. The verb passes `ledger: data`, which is load()'s non-null object for every cmd except `rotate`. Nothing tests it either.",
+      "evidence": "1. grep `judgeMember(` in plugin and tests found exactly 2 calls: dispositions-check.mjs:1129 `judgeMember({ name, scratch, repo, reviewPath: arg(\"review\") })`, with no `listed`, so it defaults to `new Map()`; and ledger.mjs:3208 `judgeMember({ … ledger: data, listed })`. ledger.mjs:722 is `let data = cmd === \"rotate\" ? null : load();`, and load() (ledger.mjs:504-) returns an object on every path.\n2. grep 'no ledger is in use' in tests: 0 hits.\n3. Mutation in the scratch copy: deleted lines 929-931, then ran `./agent-test tests/dispositions-check.test.mjs tests/ledger-dispositions.test.mjs tests/ledger-grammar.test.mjs tests/fleet-event.test.mjs tests/ledger-row-review.test.mjs tests/ledger-dispatch.test.mjs`. Result: exit=0, tests 556, pass 556, fail 0.",
+      "suggested_fix": "Delete the three-line guard. Every remaining `recording` use (the `if (recording)` at ~968, inside `if (ledger !== null)`, and the one at ~1041) is unchanged. To keep the precondition documented, state it in judgeMember's JSDoc (`listed` non-empty only with a `ledger`) rather than as a runtime branch no caller can take.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/ledger-dispositions.test.mjs",
+      "line": 27,
+      "claim": "The new tests/ledger-dispositions.test.mjs copies about 224 lines of fixture scaffolding verbatim from tests/dispositions-check.test.mjs instead of sharing it through tests/support/, the repo's established home for shared test helpers. The copied helpers are LEDGER, GH_STUB, openIssue, IDENTITY, REMAP, cleanEnv, git, lines, the ~100-line fixture() body, mismatch, okVerdict, coreRun and core, escalated, deferOutside and withSeverity. Any change to the fixture now has to be made twice and can drift.",
+      "evidence": "Python difflib.SequenceMatcher over the two files, matching blocks of 8 or more lines: A30-58/B27-55 (29), A59-70/B61-72 (12), A71-97/B74-100 (27), A106-202/B110-206 (97), A205-217/B218-230 (13), A540-564/B624-648 (25), A650-660/B649-659 (11), plus a 10-line header. Total 224 identical lines. unified_diff of the two fixture() bodies differs only in two comments, and in B adding `check` (spawning `ledger.mjs … dispositions`) and `row` to the returned object. No test name appears in both files (59 vs 66 tests, empty intersection), so the copy is scaffolding only. `ls tests/support` lists 26 helper modules (e.g. label-map-seed.mjs, queue-gh.mjs, which this very file imports), and 245 test files import from ./support/.",
+      "suggested_fix": "Move the shared block into tests/support/dispositions-fixture.mjs: GH_STUB, cleanEnv, git, lines, IDENTITY, REMAP, openIssue, the shared fixture() body, mismatch, okVerdict, coreRun/core, escalated, deferOutside and withSeverity. Have fixture() return the common object. Each test file then adds its own runner: `standalone` in dispositions-check.test.mjs, and `check`/`row` in ledger-dispositions.test.mjs (e.g. `const f = fixture(t); const check = (...) => spawnSync(LEDGER, [..., 'dispositions', ...])`).",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/dispositions-check.mjs",
+      "line": 878,
+      "claim": "addressList(flag, raw) and answerMap(uphold, sendBack) are two new exports whose only caller always composes them: `answerMap(addressList(\"uphold\", …), addressList(\"send-back\", …))` at ledger.mjs:3207. Neither is called anywhere else or tested on its own, so the two-step export only spreads one parse across two calls.",
+      "evidence": "grep `addressList\\|answerMap` over plugin and tests, excluding dispositions-check.mjs itself, matched only ledger.mjs:3198 (the dynamic-import destructure) and ledger.mjs:3207 `const listed = refusing(() => answerMap(addressList(\"uphold\", flags.get(\"uphold\") ?? null), addressList(\"send-back\", flags.get(\"send-back\") ?? null)));`. No test file matches. Inside dispositions-check.mjs, addressList's only other use is in answerMap's argument position via that caller.",
+      "suggested_fix": "Export one function, e.g. `export function answerMap(upholdRaw, sendBackRaw)`, which runs the private addressList on each raw list (uphold first, then send-back, so the refusal order stays the same) and builds the Map. The verb then calls `refusing(() => answerMap(flags.get(\"uphold\") ?? null, flags.get(\"send-back\") ?? null))`. Behaviour is the same: the same refusals, in the same order, all CheckRefusals.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/dispositions-check.mjs",
+      "line": 740,
+      "claim": "parseFixApplier is exported, but no module or test imports it. Its two calls are both inside dispositions-check.mjs (judgeMember at :926 and the CLI main at :1121), so the `export` widens the module surface for nothing.",
+      "evidence": "grep `parseFixApplier` over plugin and tests, excluding dispositions-check.mjs, found 0 matches (the cross-file grep returned only withVerdict/addressList/answerMap/judgeMember/printVerdict/CheckRefusal hits in ledger.mjs and tests). In-file grep: :740 (definition), :926 `const member = parseFixApplier(name);` in judgeMember, :1121 `const member = parseFixApplier(name);` in main.",
+      "suggested_fix": "Drop `export` from `export function parseFixApplier`. No caller or test changes are needed.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

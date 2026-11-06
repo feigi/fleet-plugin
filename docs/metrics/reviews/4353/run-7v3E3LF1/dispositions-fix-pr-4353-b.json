@@ -1,0 +1,100 @@
+{
+  "head": "1b5ce5909791a547036cd0853c778c42e5b5de23",
+  "run": "run-7v3E3LF1",
+  "entries": [
+    {
+      "bucket": "survived",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "false-rationale",
+      "issue": 4363,
+      "remedyFiles": [
+        "docs/adr/0037-each-repository-routes-by-its-own-fit-tickets-group-by-evidence.md"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "refuted: cosmetic reflow the finding itself says may be left as is; no wrap rule in AGENTS.md; ticket #4327 keeps the rest of the Fit entry as it is",
+      "issue": 4363,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4353/fix-qKp8wnTs/u0/verdict.json",
+      "remedyFiles": [
+        "CONTEXT.md"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "reason": "in-scope suggestion its refuter let survive (refuted=false); its remedy is no change (suggested_fix: None / Nothing to fix), and the tree already matches: re-measured at 551519f5, metrics-refresh.mjs on a corpus-less scratch repo printed the guard skip then fit: skipped, no guard written — .fleet/router-fit.json left as it is, exit 0, planted router-fit.json unchanged; plugin/ and tests/ unchanged since the reviewed head",
+      "issue": 4363,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4353/fix-qKp8wnTs/u1/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "out",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "out of scope (ticket #4327 lists this comment as out of scope) and refuted: every run the test support simulates has a corpus, so the comment is accurate for what it models",
+      "issue": 4363,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4353/fix-qKp8wnTs/u2/verdict.json",
+      "remedyFiles": [
+        "tests/support/split-histories.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "reason": "in-scope suggestion its refuter let survive (refuted=false); its remedy is no change (suggested_fix: None / Nothing to fix), and the tree already matches: re-measured at 551519f5, metrics-refresh.mjs on a corpus-less scratch repo printed the guard skip then fit: skipped, no guard written — .fleet/router-fit.json left as it is, exit 0, planted router-fit.json unchanged; plugin/ and tests/ unchanged since the reviewed head",
+      "issue": 4363,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4353/fix-qKp8wnTs/u3/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "refuted: ticket #4327's acceptance criteria require each new note to use the phrase 'at each phase 0 whose cost guard duty writes a guard'; the suggested rewrite drops it from this note",
+      "issue": 4363,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4353/fix-qKp8wnTs/u4/verdict.json",
+      "remedyFiles": [
+        "docs/specs/2026-11-01-self-refining-router-design.md"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 5,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4353/fix-qKp8wnTs/u5/verdict.json",
+      "remedyFiles": [
+        "docs/specs/2026-11-01-self-refining-router-design.md"
+      ]
+    },
+    {
+      "bucket": "refuted",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "reason": "Reversed on measurement: the note's 'Only a phase 0 with a corpus but no counted records writes a guard and a Fit' is false. metrics-refresh.mjs main() passes whatever guard costGuard() wrote to fit(), and fit() writes the Fit for any guard that was written, so a corpus with counted records writes both too. Measured at 1b5ce590 in a scratch copy: writeFit with the repository's own guard over the full corpus fitted 268 Pulls and wrote .fleet/router-fit.json (exit 0). With the TSVs cut to their headers it fitted 0 Pulls, and the rows equalled the starting table's rows. Both refuters scoped 'Only' to first runs and ran nothing. Fixed by dropping the false universal: 'A phase 0 with a corpus but no counted records writes a Fit that is the starting table's fit.'",
+      "remedyFiles": [
+        "docs/specs/2026-11-01-self-refining-router-design.md"
+      ],
+      "charge": "false-claim"
+    }
+  ]
+}

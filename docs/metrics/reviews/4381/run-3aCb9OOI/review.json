@@ -1,0 +1,511 @@
+{
+  "pr": 4381,
+  "head": "a4ef4b28033111ac4c05ee53e5a88c13316535e4",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I did not write these. They are probably another agent's or the controller's metrics output."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. My probe commands never wrote to that checkout, so those two files were modified by something else."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I did not touch these files and cannot say who did."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv` (not written by this review: every command here chained a cd into the snapshot copy or the scratch dir)"
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. These were already there; this pass wrote nothing in that tree. Every command it ran chained a cd into the scratch copy or the snapshot."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (I never wrote there; not mine)."
+    }
+  ],
+  "counts": {
+    "survived": 7,
+    "refuted": 0,
+    "unverified": 23,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4381/run-3aCb9OOI/snapshot-a4ef4b28",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 402,
+      "claim": "kindHolder(live, \"run\", n) matches only REVIEWER-shaped runner names, so an open `review=wf:<runId>` launch of PR N, which liveOnLedger does report as live under its runId, does not protect it: the root sweep evicts the installed paths of every tree in that live review's run-* root. The receipt reason then says \"with no open review launch of PR #N on the ledger\", which is false.",
+      "evidence": "PROBE in copy/tests/reclaim-scratch.test.mjs: f.ledger([\"#6 impl-6=PR#7 → PR#7 · review=wf:abc123\"], …); f.states({7: OPEN}); prDirectory(f); run --root --apply → `PROBE-EVICTED [... \"/pr7/run-ddddddd1/correctness/copy\",\"/pr7/run-ddddddd1/snapshot-abc1234\",\"/pr7/run-ddddddd1/verify-correctness/finding-1/copy\"]`, `PROBE-INSTALLED /pr7/run-ddddddd1/snapshot-abc1234 false` (all three run trees lost node_modules). `node -e` liveOnLedger(same row).tokens → `[{\"name\":\"abc123\",\"token\":\"review=wf:abc123\",\"row\":\"#6\"}]`, kindHolder([\"impl-6\",\"abc123\"],\"run\",7) → `undefined`. wf launches are still accepted grammar and documented as live (fleet-event.mjs:107-110 `review-failed` takes `wf:<runId>`; phase-0.md:611,628; SKILL.md:808 retries a failed `review-pr` workflow).",
+      "suggested_fix": "Decide 'run' liveness from the open launches themselves rather than from the name: for each live token whose `token` matches REVIEW, bind it to the PR of the row it sits on (`row`/streamId), so a wf:<runId> launch on PR N's row holds PR N's run-* trees. Add the wf case to the '(12) an open review launch of PR <N> keeps the run-* trees' test.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Ran kindHolder from the snapshot: kindHolder([\"impl-6\",\"abc123\"],\"run\",7) returned undefined, and kindHolder([\"review-pr-7\"],\"run\",7) returned review-pr-7. The live-name list comes from liveOnLedger(...).tokens.map(t=>t.name), which gives the bare runId \"abc123\" for a wf launch. The REVIEWER regex (/^review-pr-N(-[b-z])?$/) cannot match that name. ledger-grammar.mjs:234 and :584 still accept `review=wf:<runId>` as grammar, and fleet-event.mjs:917 accepts wf:<runId> for review-failed. So the run-* root sweep at reclaim-scratch.mjs:881 would not see a holder for a wf-launched review, and the receipt reason at line 411 would be false. I did not re-run the full root-sweep probe or ./agent-test. This rests on the kindHolder run and code reading. CWD-AUDIT: not run; I wrote nothing to the cwd /Users/chris/dev/fleet-plugin."
+        },
+        {
+          "refuted": false,
+          "reason": "I couldn't refute it. In the snapshot, kindHolder(['impl-6','abc123'],'run',7) returns undefined (I ran it). The 'run' branch matches only REVIEWER (/^review-pr-N(-x)?$/), and the eviction loop at reclaim-scratch.mjs:881 depends on that result. liveOnLedger tokens carry the wf runId as the name, and nothing in reclaim-scratch.mjs handles wf. The wf launch is still accepted grammar (ledger-grammar.mjs REVIEW regex). So an open review=wf launch doesn't protect the run roots, and the receipt text at line 402 is false for that case. I did not re-run the full --root --apply probe or the test suite. The code path and the kindHolder result are consistent with the claim. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv' (head -3 of the output). I made no writes there, so these changes were already present."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/measure-copy.mjs",
+      "line": 214,
+      "claim": "An Install step that modifies or deletes a tracked file still exits 0 with kind `built`: installIn's `untracked: true` path accepts every `git status --porcelain` line, not only untracked ones, so the script's documented exit-0 contract ('the copy is the pin's tree') and the copyRule prose ('exits 0 only when the copy is the reviewed head's tree') are false for such a copy, and refuters/specialists measure a tree that is not the pin's.",
+      "evidence": "PROBE in copy/tests/measure-copy.test.mjs: install.sh appends `echo rewritten > tracked.txt`, committed as the pin → `PROBE-STATUS 0 {…\"kind\":\"built\",\"exit\":0,\"untracked\":[\" M tracked.txt\",\"?? leftover.txt\"],\"untrackedCount\":2,…}` and `PROBE-TRACKED rewritten`. installIn (evict.mjs:455-459) returns `{install, untracked:{count, first}}` for any non-empty status when `untracked` is set.",
+      "suggested_fix": "In installIn's `untracked` mode, refuse (kind `dirtied`) when any status line is not `?? ` (or compare `git diff --quiet HEAD`/`ls-files -m -d` after the step), and report only the `??` lines as untracked; add a measure-copy test for a tracked-file rewrite.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Read evict.mjs installIn in the snapshot. With `untracked` set, any non-empty `git status --porcelain -uall` after a successful install returns `{install, untracked:{count, first}}` and does not refuse. That includes ` M` and ` D` lines, so a modified tracked file is accepted. This matches the claim's mechanism. I did not run the probe test or any mutation; this verdict rests on reading the code only. CWD-AUDIT: not run (only read-only commands, nothing written in /Users/chris/dev/fleet-plugin)."
+        },
+        {
+          "refuted": false,
+          "reason": "Read evict.mjs:455-463 in the snapshot: with untracked set, any non-empty `git status --porcelain -uall` returns {untracked:{count,first}} with no filter for `??` lines. measure-copy.mjs:214-221 then finishes exit 0 'built'. A modified tracked file therefore passes (it is listed in the receipt's `untracked` field as ' M ...', which only partly mitigates). I did not re-run the probe, because the code path is unambiguous. CWD-AUDIT: not run, since I made no writes in /Users/chris/dev/fleet-plugin."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/measure-copy.mjs",
+      "line": 195,
+      "claim": "Any repository whose pinned tree holds a submodule gitlink or an `export-ignore` attribute can never get a measuring copy: `git archive` drops those entries, the copy's tree differs from the pin's, and the script exits 1 `tree-mismatch` every time — while every prompt this PR changes forbids making a copy by hand, so every refuter run in such a repo is inconclusive and every in-scope suggestion defers.",
+      "evidence": "PROBE (copy/tests/measure-copy.test.mjs): `.gitattributes` = `tracked.txt export-ignore` → `PROBE-EI 1 tree-mismatch the copy's tree b59dbd… is not the tree 7c2a70… of 4c33e9…`; a 160000 gitlink `vendor/sub` + .gitmodules → `PROBE-SUB 1 tree-mismatch the copy's tree 578faa… is not the tree 93ecb8… of 649ed3…`.",
+      "suggested_fix": "Materialise the pin without archive attributes, e.g. `git -C <worktree> --work-tree=<dest> checkout <pin> -- .` into the new repo or `git read-tree`+`checkout-index` against a temporary index, and decide explicitly how gitlinks are recorded (e.g. `git update-index --cacheinfo 160000,…`) so the tree check compares like with like; at minimum name the cause in the tree-mismatch message.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "I reproduced the mismatch on the snapshot's measure-copy.mjs. The fixture was a repo with `.gitattributes` = `t.txt export-ignore`, pinned at a committed SHA. Run: `node measure-copy.mjs --worktree r --pin 6fa8ac… --dest pr1/run-x/d --pr 1 --scratch B` → exit 1, kind `tree-mismatch` ('the copy's tree 7d1456… is not the tree ef3d0d… of 6fa8ac…'). The code path at line ~195 confirms this: the copy is built with `git archive | tar -x`, then `git add -A -f`, and its tree is compared with the pin's tree. `export-ignore` entries (and gitlinks) are dropped by `git archive`, so the trees differ every time. I did not read the prompt text for the 'no hand-made copy' part, so the downstream consequence of every refuter run being inconclusive is taken from the claim. I did not run a gitlink fixture; the export-ignore case alone shows the script's behavior. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. I wrote nothing there, so these changes are not mine."
+        },
+        {
+          "refuted": false,
+          "reason": "I ran the snapshot's measure-copy.mjs against a fixture repo whose pin has `.gitattributes` with `tracked.txt export-ignore`. It exited with kind `tree-mismatch`: the copy's tree 07cadd… differs from the pin's tree b16cb6…. The `git archive | tar` step at line 191 is the only copy path in the script. The tree comparison at line 195 has no handling for export-ignore or gitlinks. I did not run the gitlink case, but it takes the same path. I did not check the prompts' ban on hand-made copies, so the downstream 'refuter runs inconclusive, suggestions defer' part is unverified. The core claim reproduces. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. These files were already modified before I touched anything. I only ran read-only git commands there, and all my writes went to the scratch dir."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 892,
+      "claim": "kindHolder(live, \"run\", n) matches only runner names of the form review-pr-<n>[-x]. An open `review=wf:<runId>` launch is live under its runId, so it holds no run-* root. The root sweep therefore evicts the installed trees of a PR whose review is still running, and the receipt reason says \"no open review launch of PR #7 on the ledger\", which is false.",
+      "evidence": "liveOnLedger([\"7 PR#7 review=wf:wfrun123\",\"8 PR#8 review=member:review-pr-8\"],[]) gives names [\"wfrun123\",\"review-pr-8\"], and kindHolder(names,\"run\",7) is undefined while kindHolder(names,\"run\",8) is review-pr-8. End to end, I appended a case to a copy of tests/reclaim-scratch.test.mjs with ledger row `#6 impl-6=PR#7 → PR#7 · review=wf:wfrun123` and PR 7 OPEN, then ran `reclaim-scratch.mjs --root <root> --apply`. It exited 0 and all three run-root trees printed EVICTED (node_modules gone). The receipt reasons were \"a tree in a review run root, with no open review launch of PR #7 on the ledger\". The existing test with `review=member:review-pr-7` keeps the trees.",
+      "suggested_fix": "Resolve which PR an open wf launch belongs to, for example from the launch's token stream or row (liveOnLedger already knows the row key), and treat it as a run-root holder for that PR. At minimum, treat any open `review=wf:` launch on that PR's stream as holding its run-* roots. The existing prHolder() has the same gap and could share the fix.",
+      "dimension": "silent-failure",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Ran `liveOnLedger([\"7 PR#7 review=wf:wfrun123\"],[])` and `kindHolder` from the snapshot. The names were ['wfrun123'] and `kindHolder(names,'run',7)` was undefined. The `run` branch only matches REVIEWER names (review-pr-<n>), so a wf launch holds no run-* root. The sweep at line 881 would evict, and EVICT_RULE.run gives the 'no open review launch' reason. I did not repeat the end-to-end `--apply` run. No ./agent-test red/baseline pair was run. CWD-AUDIT: not run; I made no writes in /Users/chris/dev/fleet-plugin."
+        },
+        {
+          "refuted": false,
+          "reason": "Ran the claim's unit evidence against the snapshot: liveOnLedger(['7 PR#7 review=wf:wfrun123','8 PR#8 review=member:review-pr-8'],[]) gave names ['wfrun123','review-pr-8']. kindHolder(names,'run',7) was undefined and kindHolder(names,'run',8) was review-pr-8. That matches the claim. The sweep at line 881 only skips eviction when kindHolder returns something. Names carry no PR number, so no other path protects a wf launch. I did not rerun the end-to-end --apply eviction, and ran no mutant or ./agent-test. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/ticket-features.tsv, M docs/metrics/tier-outcomes.tsv. I did not write to either file, and I only ran read-only node and git status there."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/review-core.mjs",
+      "line": 759,
+      "claim": "copyRule derives --pr and --scratch from snap.runRoot with `regex.exec(...) ?? []`. A runRoot that passes snapshotMissing() but does not match the regex gets the literal text `--pr undefined --scratch undefined` in every specialist and refuter prompt. Nothing throws and nothing is logged at dispatch time.",
+      "evidence": "copyRule({runRoot:\"/scr/pr7/run-ab12cd34/\",head:\"abc\"},\"/wt\",\"/d/x\") prints `--dest /d/x/copy --pr undefined --scratch undefined`. Through runReview with scratch=/scr, runRoot=/scr/pr7/run-ab12/x (which starts with the required prefix) all three dispatched prompts contain `--pr undefined --scratch undefined`. pr=\"007\" with runRoot /scr/pr007/run-ab12 does the same, because the regex's [1-9] rejects a number isDigits accepts. copyRule(null, …) throws a TypeError, where the old `snap && …` guard tolerated a falsy snap.",
+      "suggested_fix": "Throw in copyRule when the regex does not match. Better, pass the already-validated `scratch` and `pr` from runReview instead of re-parsing them from the agent-reported runRoot. snapshotMissing() could also require runRoot to match /^<scratch>\\/pr<pr>\\/run-[A-Za-z0-9]{8}$/.",
+      "dimension": "silent-failure",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Ran copyRule in the snapshot with runRoot /scr/pr7/run-ab12cd34/ (trailing slash). The output contained `--pr undefined --scratch undefined`, as claimed. The source at review-core.mjs:759 uses `exec(...) ?? []` with no check or log. I did not run the runReview path or the pr=007 and null-snap cases. The claim's other points match the code. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I didn't write these; I only read files and ran node with -e."
+        },
+        {
+          "refuted": false,
+          "reason": "Reproduced by running copyRule from the snapshot. With runRoot /scr/pr7/run-ab12cd34/ it printed `--dest /d/x/copy --pr undefined --scratch undefined`. The `?? []` fallback is at line 759. snapshotMissing (lines 519-536) only checks the prefix `${scratch}/pr${pr}/run-`, so it does not stop a runRoot that fails the regex. It is also not caught elsewhere: the check at line 1100 uses isDigits, which accepts \"007\", while the regex's [1-9] rejects it. The trigger is an edge case, since a normal runRoot matches. The finding itself holds. I did not run the runReview or copyRule(null) variants. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I only ran read-only commands there and wrote nothing, so these changes were not mine."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/measure-copy.mjs",
+      "line": 746,
+      "claim": "`sh -c 'git archive … | tar -x …'` has no pipefail, so a failing `git archive` exits 0 through tar. The `archive-failed` kind and git's stderr never surface for that failure. It is reported as `tree-mismatch` against an empty-tree copy, which mislabels the cause.",
+      "evidence": "`sh -c 'git -C \"$1\" archive \"$2\" | tar -x -C \"$3\"' sh wt deadbeef… out` printed `fatal: not a tree object` and then status=0. With a PATH shim whose git exits 128 on `archive`, measure-copy.mjs exited 1 with kind \"tree-mismatch\" and message \"the copy's tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904 is not the tree 0d8a47… of d16fb13e…\" (4b825dc… is the empty tree). The git error text is dropped. The script still refuses, so this is a mislabel, not a false success.",
+      "suggested_fix": "Run `git archive` as its own spawnSync, check its status and stderr, then feed its stdout to `tar -x` through `input`. Or use `set -o pipefail` where the shell supports it, or write the archive to a temp file and extract from that.",
+      "dimension": "silent-failure",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "The claim holds. measure-copy.mjs:191 runs `sh -c 'git -C \"$1\" archive \"$2\" | tar -x -C \"$3\"'` with no pipefail. I ran the same pipeline against the snapshot with a bogus pin. It printed `fatal: not a tree object: deadbeef…` and then `status=0`. So a failing `git archive` exits 0 through tar. Line 196 only reports `archive-failed` when sh's status is non-zero, so that kind never fires for a git failure. The empty extraction falls through to init/commit and then to the `tree-mismatch` check at line ~216. I did not run the PATH-shim end-to-end case. The code path is clear from reading it. The pin is checked first by `rev-parse` (the `pin-unreadable` check), so this only matters when `archive` fails after that check passes. The script still refuses, so this is a mislabel, not a false success. One error in the claim: the snapshot file has 230 lines, so the cited line 746 does not exist. The pipeline is at line 191. The claim is otherwise accurate.\n\nCWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I only ran read-only commands there, so these changes were already present."
+        },
+        {
+          "refuted": false,
+          "reason": "Confirmed by running the code. The snapshot's measure-copy.mjs line 191 runs `sh -c 'git -C \"$1\" archive \"$2\" | tar -x -C \"$3\"'` with no pipefail. I ran `sh -c 'git archive deadbeef | tar -x -C /tmp'`. It printed git's fatal error and then status=0, so a failing git archive is masked by tar. After that the code falls through to init and the tree comparison. That is where an empty copy is reported as tree-mismatch, not archive-failed. I did not re-run the PATH-shim scenario. The only handling elsewhere is the earlier pin-unreadable rev-parse check. It catches a bad pin, but not an archive that fails after rev-parse succeeds. The script still refuses, so this is a mislabel with a dropped git stderr, not a false success. Two other points: the finding says line 746 but the snapshot has 230 lines (the code is at 191), and the failure needs an unusual fault, so it is low severity. Neither point weakens the core claim. No ./agent-test red was run, so there is no red/baseline evidence line. CWD-AUDIT: not run; I wrote no files in /Users/chris/dev/fleet-plugin (tar extracted into /tmp from a git archive that failed, so nothing was written)."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "claim": "PR body: it says the new refusals are pinned by accepting cases including 'a trailing-slash destination', but tests/measure-copy.test.mjs has no test that passes a destination with a trailing slash. The script has the trailing-slash strip, so the claim of a pin is false.",
+      "evidence": "Listed all `^test(` lines in the snapshot's tests/measure-copy.test.mjs (14 tests). `grep -n 'trailing\\|/\\`\\|/\"'` over that file found only a comment on line 3. `grep -rn 'trailing.slash' tests/*.mjs` filtered to copy/dest found nothing. The other named cases do have tests: symlinked scratch root (l.269), run-* root and two copies (l.256), untracked leftovers (l.80), nested dest (default dest f1/tree).",
+      "suggested_fix": "Add an accepting test that runs with `dest + \"/\"`, or drop 'trailing-slash destination' from the PR body.",
+      "dimension": "comments",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "PR body line 22 does claim a trailing-slash destination is pinned by an accepting case. In tests/measure-copy.test.mjs every destination comes from join(), which strips trailing slashes. The 'outside' cases at l.122-150 are refusals. Greps for slash-ending strings ('}/`', '/\"') found nothing. The only 'trailing' hit is a comment on line 3, which is about something else. So no test passes a trailing-slash destination, and the claim is true. I did not run the suite or any mutation, so this rests on reading the tests. A grep for slash-ending strings could miss a destination built some other way, but the cases I read all use join(). CWD-AUDIT: not run, I only read files and made no writes."
+        },
+        {
+          "refuted": false,
+          "reason": "Claim holds. PR body line 22 lists 'a trailing-slash destination' as a pinned accepting case. A static grep of tests/measure-copy.test.mjs for trailing/slash, and for \"/\", /\" and /` literals, found only a comment on line 3. All accepting destinations are built with join() (no trailing slash): the symlinked-root test at l.269-277, the two copies at l.261-262, the default dest at l.70. The refusal cases don't count as accepting. Other suites' 'trailing' hits are unrelated. Not covered: a slash added inside the f.run helper, which I didn't read; the test calls pass plain join() results, so this is unlikely. I ran no ./agent-test or mutant, so there is no red/baseline evidence line. scripts/measure-copy.mjs is absent from the snapshot, so I couldn't check the script's strip. CWD-AUDIT: not run; I made no writes, so /Users/chris/dev/fleet-plugin should be clean."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/agents/fleet-fix-applier.agent.md",
+      "line": 292,
+      "claim": "The fix-applier's own mutation copy is given a fixed `--dest <round root>/mutate`, with no 'each further copy, another new directory' rule as the refuter instruction has, so a second mutation copy in the same round (e.g. after a further commit) is refused `occupied` with exit 1 and the prose gives no way forward but 'never make a copy by hand'.",
+      "evidence": "PROBE (copy/tests/measure-copy.test.mjs): two runs with dest `<round>/mutate` → `PROBE-MUT 0 built | 1 occupied …/fix-ab12cd34/mutate already exists — a copy built over it would not be the pin's`.",
+      "suggested_fix": "Say `--dest <round root>/mutate-<n>` (or 'a new directory under the round root for each copy'), mirroring the refuter instruction.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/skills/run-team/references/reviewers.md",
+      "line": 240,
+      "claim": "Scope creep forced by the byte budget: three unrelated review-and-fix.md paragraphs (Brace a ref held in a variable, MUTUAL EXCLUSION scan, Comments are findings) were cut down and their evidence moved into reviewers.md, outside #4274's scope, apparently to fit review-and-fix.md under its 66,332-byte ceiling after step 7 was added.",
+      "evidence": "pr.diff hunks review-and-fix.md lines 261-262, 270-271, 279-280 and reviewers.md @@ -237,3 +237,15; `wc -c plugin/commands/review-and-fix.md` → 66303; tests/skill-budget.test.mjs:57 `[\"plugin/commands/review-and-fix.md\", 66_332, false]`. Not verified that the shortened paragraphs keep every rule they had.",
+      "suggested_fix": "Call the move out in the PR body as a budget-driven relocation and confirm each trimmed paragraph's rule text is unchanged apart from the moved evidence.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/fleet-tick.mjs",
+      "line": 2410,
+      "claim": "[INFERENCE, from code reading] A root sweep whose receipt lists `failed` entries counts as applied, and its owed members are recorded in applied.sweptAfter. A failed eviction or an unreadable ledger is not retried when the next tick sees the same settled members. It is retried only on a later merge pass or a newly settled member.",
+      "evidence": "Code read, not executed. reportDuty returns true whenever reclaimSummary parses a receipt, and exit 0 is returned with failures in `failed`. applySweep's comment says this is intended. The tick prints \"failed N\" but does not name the paths, and evict-tree `skipped` entries are not summarized by reclaimSummary at all.",
+      "suggested_fix": "Record sweptAfter only when the receipt's `failed` is empty, or print the first failed path in reclaimSummary.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/fleet-state.mjs",
+      "line": 261,
+      "claim": "The new sweptAfter parsing in fleet-state.mjs (string/non-empty filtering, omit-when-empty) has no test: three mutants survive.",
+      "evidence": "red: none (survived). Mutants: m !== \"\" filter→true; typeof m === \"string\" check→true; `swept.length > 0 ? {sweptAfter} : {}`→always emit sweptAfter. Each run: ./agent-test --test-name-pattern=<11 new tick tests> tests/fleet-tick.test.mjs → exit 0, tests 11, fail 0 (baseline same: exit 0, 11 pass). grep -l 'sweptAfter' tests/*.mjs → only fleet-tick.test.mjs, none on readState parsing.",
+      "suggested_fix": "Add a fleet-state test feeding applied:{run,reapAfter,sweptAfter:[\"a\",\"\",3,null]} and asserting readState yields sweptAfter:[\"a\"], and that an empty/junk list omits the key.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/fleet-tick.mjs",
+      "line": 1575,
+      "claim": "sweptAfter's `controllerAt != null` guard and the writer's `(swept ? owed : [])` (record owed only when the sweep applied, when a merge pass reaped) are not killed by any test.",
+      "evidence": "red: none (survived). Mutants `applied !== null && applied.run === controllerAt` (guard dropped) and `(swept ? owed : [])`→`owed`: ./agent-test --test-name-pattern=<11 new tick tests> tests/fleet-tick.test.mjs → exit 0, tests 11, fail 0; baseline exit 0, 11 pass.",
+      "suggested_fix": "Add a case where a merge pass reaps while the root sweep fails for a settled member and assert that member is NOT in recorded sweptAfter; add a sweptAfter(applied, null) unit assertion with an applied.run of null/undefined.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger-grammar.mjs",
+      "line": 767,
+      "claim": "failedReviewLaunches' `kind === \"member\"` check, REVIEWER name check and dedupe have no killing test (only the `failed` check is killed, indirectly via the CLI test).",
+      "evidence": "red: none (survived). Mutants removing `m.groups.kind === \"member\" &&`, `REVIEWER.test(m.groups.name) &&`, and `!out.includes(...)`→true each: ./agent-test --test-name-pattern=<11 new tick tests> tests/fleet-tick.test.mjs → exit 0, tests 11, fail 0; baseline exit 0, 11 pass. grep shows no direct test of failedReviewLaunches.",
+      "suggested_fix": "Add unit tests: a workflow-launch `review=run:...=failed` word and a non-reviewer member name are excluded; a name repeated across rows appears once.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/measure-copy.mjs",
+      "line": 197,
+      "claim": "measure-copy.test.mjs does not discriminate several behaviours: install retry:false, `git add -A -f`, `--allow-empty`, trailing-slash stripping of --dest, and the empty-segment refusal.",
+      "evidence": "red: none (survived). Mutants `retry: false`→true, `\"add\",\"-A\",\"-f\"`→`\"-A\"`, drop `\"--allow-empty\"`, `destArg.replace(/\\/+$/, \"\")`→`destArg`, empty-segment guard→`if (false)`: ./agent-test tests/measure-copy.test.mjs → exit 0, tests 15, fail 0 each; baseline exit 0, 15 pass. (Symlink/isDirectory guards also survive but are mutually redundant via lstat, so probably equivalent.)",
+      "suggested_fix": "Add cases: failing Install leaves a single run (counter file); a tracked file matching .gitignore is still in the copy's tree; an empty-tree pin; --dest with trailing slash and with `//`.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/fleet-tick.test.mjs",
+      "line": 1,
+      "claim": "Narrowing the fleet-tick suite with ./agent-test only works with the flag placed before the file; flag after the file silently runs all 441 tests (~5-9 min).",
+      "evidence": "./agent-test tests/fleet-tick.test.mjs --test-name-pattern=<pat> → tests 441 (not narrowed); ./agent-test --test-name-pattern=<pat> tests/fleet-tick.test.mjs → tests 11, exit 0 in ~15s.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The comment above the export-subst test says the file is 'a tracked file whose mode git cannot carry through the archive'. The mechanism is content rewriting by `export-subst` (`$Format:%H$`), not a file mode.",
+      "evidence": "tests/measure-copy.test.mjs:182-187 sets `.gitattributes` to `tracked.txt export-subst` and the file content to `id: $Format:%H$`. The test then asserts kind `tree-mismatch`.",
+      "file": "tests/measure-copy.test.mjs",
+      "line": 182,
+      "suggested_fix": "Reword to 'a tracked file whose content an export attribute rewrites in the archive'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The copyRule comment says the Recipe cache 'sits in the worktree's ignored .fleet directory'. The cache is at `<workspace>/.fleet/recipe.json`, where the workspace is the main checkout. A linked worktree reads that one cache and has no `.fleet` of its own.",
+      "evidence": "plugin/scripts/derive-testcmd.sh:20-29 says the cache is `<workspace>/.fleet/recipe.json`, and that a linked worktree never re-keys it and reads the one the main checkout holds. measure-copy.mjs's own header says it correctly: 'every worktree of that repository shares its refs and Recipe cache'.",
+      "file": "plugin/scripts/review-core.mjs",
+      "line": 754,
+      "suggested_fix": "Say 'the repository's shared Recipe cache, which every worktree reads' instead of 'the worktree's ignored .fleet directory'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The block comment at the top of the `--apply` branch of fleet-tick main() was not updated. It still says the step is 'Reap, reclaim and evict after every merge pass', 'recorded only once all three applied'. The block now also runs the settle sweep (`owed`/`swept`) and records `sweptAfter`, which has no 'all three' condition.",
+      "evidence": "plugin/scripts/fleet-tick.mjs:2403-2407 (comment) against 2409-2420 (code). The code computes `owed = sweepDue(...)`, runs `applySweep(...)`, and writes `sweptAfter` alongside `reapAfter`. The comment at fleet-state.mjs:336-337 says only 'reap again after every merge pass it already reaped after'.",
+      "file": "plugin/scripts/fleet-tick.mjs",
+      "line": 2403,
+      "suggested_fix": "Extend the comment to name the settle sweep and `sweptAfter`, and say that only the reap part needs all three duties applied.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "reclaim-scratch.mjs header (untouched line) still says an OPEN PR's pr<M>/ 'is kept whole except its run-* roots'. With this diff the sweep also evicts the trees under that directory's fix-*, mutate/ and finish-* roots. The next paragraph, added by this diff, qualifies it, but the earlier sentence is left as written. ADR 0029 decision 3, 'Trigger: two controller edges', is also unchanged, while docs/components/scratch-reclaim.md now says 'Three'.",
+      "evidence": "plugin/scripts/reclaim-scratch.mjs:38-39 against the added lines 49-63. docs/adr/0029-...md:62 reads 'Trigger: two controller edges'. The diff only amends the ADR's Status line.",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 38,
+      "suggested_fix": "Change 'kept whole except its run-* roots' to 'kept except its run-* roots and the trees named below'. Point ADR 0029 decision 3 at the #4274 amendment.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body: it says the three moved evidence passages left 'the rules in place' in review-and-fix.md. The brace-a-ref passage was cut down so that the rule 'quote regardless' (and why) is now only in reviewers.md, not in the command file. The remaining line keeps the quoted example `\"${SHA}:<path>\"` but no longer states the rule.",
+      "evidence": "Diff lines 270 (removed, contains 'A literal ref is unaffected either way; quote regardless — not for zsh's sake …') and 271 (kept: ends with 'Evidence: run-team's references/reviewers.md'). Diff line 1155 (added to reviewers.md) holds the 'quote regardless' sentence.",
+      "suggested_fix": "Keep the one-sentence 'quote regardless' rule in review-and-fix.md, or reword the PR body to say one rule sentence also moved.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/measure-copy.mjs",
+      "line": 92,
+      "claim": "The mapping from installIn refusal kinds to exit codes is stringly-typed. `EXIT[kind] ?? 1` silently turns any new or renamed kind into exit 1, so the documented exit vocabulary (3/4/5) is held in a comment and not enforced.",
+      "evidence": "Read measure-copy.mjs: `const EXIT = {\"not-run\":3, failed:4, \"status-after\":5}` and `finish(EXIT[kind] ?? 1, ...)`. In evict.mjs, `refuse(kind, message, install, exit)` already carries a numeric `exit` field in the refusal. measure-copy destructures `{kind, message, install, exit}` but then looks the code up by kind. The two sources differ: `status-after` carries exit 0 in the refusal, and `failed` by signal carries null. Nothing ties the table to evict.mjs's kind set.",
+      "suggested_fix": "Export a frozen kind list or kind→exit map from evict.mjs and use it in measure-copy. Alternatively, fail loudly on an unknown kind, or add a test that every kind `installIn` can emit has an entry in EXIT or is deliberately exit 1.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/evict.mjs",
+      "line": 431,
+      "claim": "The `untracked` option makes `installIn`'s return a different variant: `{install}` or `{install, untracked:{count, first}}`, plus `{refusal}`. The dirtied refusal and the `untracked` result are chosen at runtime by a boolean flag, so callers cannot tell from the type which shape they will get. In `untracked` mode the `dirtied` kind and the `before-run` kind (beforeRun defaults to null) are unreachable for measure-copy, but its EXIT table and docs still imply a general vocabulary.",
+      "evidence": "Read evict.mjs 431-467. The return statements are `refuse(...)`, `{install}`, `{install, untracked:{...}}` and `untracked ? {install, untracked:{count:0, first:[]}} : {install}`. The measure-copy call is `installIn(dest, true, {…untracked:true})` and reads `done.untracked.first` and `.count` unguarded. This works only because `untracked:true` guarantees the field.",
+      "suggested_fix": "Optionally split into two functions, or document the discriminant in a JSDoc @typedef. Low priority, since the code is internally consistent.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/fleet-state.mjs",
+      "line": 258,
+      "claim": "The `sweptAfter` state field is validated only on read, by filtering non-empty strings. The writer in fleet-tick unions `sweptNames` and spreads `sweptAfter` conditionally, so an empty list is omitted. The 'absent means empty' invariant is enforced by convention in two places (reader and writer), not by a single constructor.",
+      "evidence": "Diff hunks in fleet-state.mjs (`const swept = Array.isArray(v.sweptAfter) ? v.sweptAfter.filter(m => typeof m === \"string\" && m !== \"\") : []`) and fleet-tick.mjs (`...(sweptNames.length > 0 ? { sweptAfter: sweptNames } : {})`). The diff was read as an image and may have been misread in places.",
+      "suggested_fix": "Keep a single normalizer used by both readState and the writer, or accept the current runtime filtering. This matches the existing `reapAfter` pattern.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/evict.mjs",
+      "line": 460,
+      "claim": "installIn()'s new `untracked` handling has two branches where one does the job: the `status.stdout !== \"\"` block with an `untracked` branch inside it, then a second `untracked ? {…count: 0, first: []} : …` ternary for the clean case. Splitting an empty stdout already gives count 0 and first [], so the clean-tree branch is redundant.",
+      "evidence": "In simplify/copy I replaced lines 460-467 with the simpler form below, then ran the targeted suite (measure-copy.test.mjs, finisher-tree.test.mjs, evict.test.mjs and others; 2847 tests): 2847 pass, 0 fail. measure-copy.test.mjs:105 asserts `[untracked, untrackedCount]` deep-equals `[[], 0]` for a clean copy, and lines 95/119 assert counts of 1 and 26. Those cases still pass with the merged branch.",
+      "suggested_fix": "if (untracked) {\n  const lines = status.stdout.split(\"\\n\").filter((l) => l !== \"\");\n  return { install, untracked: { count: lines.length, first: lines.slice(0, 20) } };\n}\nif (status.stdout !== \"\") return refuse(\"dirtied\", …, install, 0);\nreturn { install };",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 889,
+      "claim": "`const withTrees = pr !== null || !siblings` simplifies to `!siblings`. main() already dies when --siblings and --pr are both given (`if (pr !== null) die(\"--siblings and --pr are separate passes\")`), so `pr !== null` implies `!siblings` and the first disjunct is dead.",
+      "evidence": "In simplify/copy I deleted `withTrees` and wrote the receipt as `...(siblings ? {} : { evicted })` / `...(siblings ? {} : { skipped })`. Targeted suite: 2847 pass, 0 fail. reclaim-scratch.test.mjs:1108-1110 pins the receipt keys for --pr, the root sweep and --siblings (no evicted or skipped in the --siblings receipt), and all three still pass.",
+      "suggested_fix": "const receipt = { applied: apply, ledger, removed, ...(siblings ? {} : { evicted }), kept, failed, ...(siblings ? {} : { skipped }) };",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 259,
+      "claim": "liveNamesOrThrow() is a copy of liveNames() that differs only in the two arguments it passes to readLedger (the fail callback and the `undone` word). Two functions with the same body can drift apart; one function with parameters does the same work.",
+      "evidence": "In simplify/copy I deleted liveNamesOrThrow, gave liveNames the signature `(file, fail = die, undone = \"reclaimed\")`, and changed the one call site (line 875) to `liveNames(ledger, (message) => { throw new Error(message); }, \"evicted\")`. Targeted suite: 2847 pass, 0 fail.",
+      "suggested_fix": "function liveNames(file, fail = die, undone = \"reclaimed\") {\n  const { rows, dispatched } = readLedger(file, fail, undone);\n  return liveOnLedger(rows, dispatched).tokens.map((t) => t.name);\n}\n// call site: liveNames(ledger, (message) => { throw new Error(message); }, \"evicted\")",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 880,
+      "claim": "The new root-sweep eviction loop in main() repeats the --pr branch's evict body line for line: evictTrees(path, {apply}), push each evicted tree with a reason, then spread done.failed and done.skipped. A local evictRoot(path, reason) helper used by both loops removes the duplicate.",
+      "evidence": "In simplify/copy I added `const evictRoot = (path, reason) => { const done = evictTrees(path, { apply }); for (const t of done.evicted) evicted.push({ path: t.path, reason, ignored: t.ignored }); failed.push(...done.failed); skipped.push(...done.skipped); };` before the mode branches. The --pr loop became `for (const run of kept) evictRoot(run.path, \"a tree in a kept review run root\");` and the root-sweep loop body became `evictRoot(r.path, EVICT_RULE[r.kind](dir.n, basename(r.path)));`. EVICT_RULE is pure, so building the reason before the evictTrees call does not change behaviour. Targeted suite: 2847 pass, 0 fail.",
+      "suggested_fix": "const evictRoot = (path, reason) => {\n  const done = evictTrees(path, { apply });\n  for (const t of done.evicted) evicted.push({ path: t.path, reason, ignored: t.ignored });\n  failed.push(...done.failed);\n  skipped.push(...done.skipped);\n};",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 404,
+      "claim": "kindHolder is exported but has no importer: its only use is inside reclaim-scratch.mjs (line 881), so the `export` widens the module surface for nothing.",
+      "evidence": "`git grep -n \"kindHolder\"` over the whole copy returns only reclaim-scratch.mjs:404 (definition) and :881 (use). In simplify/copy I dropped `export` from the declaration and ran the targeted suite, including reclaim-scratch.test.mjs: 2847 pass, 0 fail.",
+      "suggested_fix": "function kindHolder(live, kind, n) { … }",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/fleet-tick.mjs",
+      "line": 1574,
+      "claim": "sweptAfter()/sweepDue() copy reapedAfter()/reapDue(): the same `applied !== null && controllerAt != null && applied.run === controllerAt` guard and the same Set-filter body. The run guard should live in one place, so sharing it between the merge-bot list and the settled-member list keeps them from drifting.",
+      "evidence": "In simplify/copy I added `const ofThisRun = (applied, controllerAt) => (applied !== null && controllerAt != null && applied.run === controllerAt ? applied : null);` and `const notIn = (list, ran) => { const s = new Set(ran); return list.filter((x) => !s.has(x)); };`. I rewrote reapedAfter as `ofThisRun(...)?.reapAfter ?? []`, sweptAfter as `ofThisRun(...)?.sweptAfter ?? []`, and reapDue/sweepDue as `notIn(list, …After(applied, controllerAt))`. Targeted suite, including fleet-tick.test.mjs:4284-4290 (mismatched run, null controllerAt, null applied, a record without sweptAfter): 2847 pass, 0 fail.",
+      "suggested_fix": "const ofThisRun = (applied, at) => (applied !== null && at != null && applied.run === at ? applied : null);\nexport const reapedAfter = (applied, at) => ofThisRun(applied, at)?.reapAfter ?? [];\nexport const sweptAfter = (applied, at) => ofThisRun(applied, at)?.sweptAfter ?? [];\nexport const reapDue = (done, applied, at) => { const ran = new Set(reapedAfter(applied, at)); return done.filter((n) => !ran.has(n)); };\n// sweepDue likewise over sweptAfter",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/fleet-tick.mjs",
+      "line": 2413,
+      "claim": "`reap?.reclaimed === true` and `reap?.all === true` compare against true for no reason: applyReap returns both fields as booleans (reportDuty and applySweep both return `summary !== null` or `false`), and a null `reap` makes optional chaining yield undefined, which is falsy anyway.",
+      "evidence": "In simplify/copy I changed the two lines to `const swept = owed.length > 0 && (reap?.reclaimed || applySweep(...));` and `const reaped = reap?.all ? due : [];`. reportDuty (fleet-tick.mjs ~2063) returns `summary !== null`, and applySweep returns `false` or reportDuty's result, so both fields are always booleans. Targeted suite: 2847 pass, 0 fail.",
+      "suggested_fix": "const swept = owed.length > 0 && (reap?.reclaimed || applySweep(`reclaim after ${owed.join(\" \")}`));\nconst reaped = reap?.all ? due : [];",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

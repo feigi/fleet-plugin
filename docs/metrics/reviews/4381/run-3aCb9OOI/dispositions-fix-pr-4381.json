@@ -1,0 +1,264 @@
+{
+ "head": "a4ef4b28033111ac4c05ee53e5a88c13316535e4",
+ "run": "run-3aCb9OOI",
+ "entries": [
+  {
+   "bucket": "survived",
+   "index": 0,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "charge": "unmet"
+  },
+  {
+   "bucket": "survived",
+   "index": 1,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "charge": "false-claim"
+  },
+  {
+   "bucket": "survived",
+   "index": 2,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "charge": "none",
+   "chargeReason": "defect-outside-acceptance"
+  },
+  {
+   "bucket": "survived",
+   "index": 3,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "charge": "unmet"
+  },
+  {
+   "bucket": "survived",
+   "index": 4,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "charge": "none",
+   "chargeReason": "defect-outside-acceptance"
+  },
+  {
+   "bucket": "survived",
+   "index": 5,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "charge": "false-claim"
+  },
+  {
+   "bucket": "survived",
+   "index": 6,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "charge": "false-claim"
+  },
+  {
+   "bucket": "unverified",
+   "index": 0,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4381/fix-LdK1iWQ1/finding-u0/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 1,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "defer",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4381/fix-LdK1iWQ1/finding-u1/verdict.json",
+   "issue": 4385,
+   "reason": "refuted by its refuter: Not a defect: the budget test itself prescribes this move. red (positive control, mutant = the three original paragraphs restored in the copy's plugin/commands/review-and-fix.md, step 7 kept): env -u FORCE_COLOR ./agent-test tests/skill-budget.test.mjs → exit nonzero, tests 10 fail 1 incl 'plugin/commands/review-and-fix.md is at most 66332 bytes' (1043 bytes over, 'move text to references/, do not raise the ceiling'); baseline: same command on the unmutated tree → exit 0, tests 10 pass 10, that test pass. So without the trim the PR cannot land under the ceiling (base 66308 B, PR 66303 B). Rule"
+  },
+  {
+   "bucket": "unverified",
+   "index": 2,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4381/fix-LdK1iWQ1/finding-u2/verdict.json",
+   "issue": 4385,
+   "reason": "refuted by its refuter: Behavior is deliberate and test-pinned: applySweep's comment says a receipt with failures counts as applied, and tests/fleet-tick.test.mjs:4193 (root sweep once and records it) asserts the tick prints 'removed 1, kept 0, failed 1' and records sweptAfter:[name] for that receipt. Mutant (applySweep returns false when receipt.failed is non-empty, i.e. the suggested fix, sweptAfter recorded only when failed is empty) turns 10 fleet-tick tests red, including the named one; mutant reached (baseline pass vs mutant fail). red: env -u FORCE_COLOR ./agent-test tests/fleet-tick.test.mjs --test-name-patte"
+  },
+  {
+   "bucket": "unverified",
+   "index": 3,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4381/fix-LdK1iWQ1/finding-u3/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 4,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4381/fix-LdK1iWQ1/finding-u4/verdict.json",
+   "issue": 4385,
+   "reason": "refuted by its refuter: Both survivors reproduce but neither is a testable gap. (1) `(swept ? owed : [])`→`owed` is unreachable: the write is gated on `reaped.length>0 || swept`; with swept false and owed nonempty, reaped must be >0, but reaped>0 requires reap.all===true which requires reap.reclaimed===true, which makes `swept` true (owed.length>0 && reap.reclaimed). So the 'merge pass reaps while the root sweep fails for a settled member' case the fix asks for cannot occur; a probe throwing on `!swept && owed.length>0` at the write site was never reached across the CLI --apply tests (22 pass; no positive control for"
+  },
+  {
+   "bucket": "unverified",
+   "index": 5,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4381/fix-LdK1iWQ1/finding-u5/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 6,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4381/fix-LdK1iWQ1/finding-u6/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 7,
+   "scope": "out",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4381/fix-LdK1iWQ1/finding-u7/verdict.json",
+   "issue": 4385,
+   "reason": "refuted by its refuter: Claim's observation reproduces but is node's own option parsing, not a defect in the PR or in tests/fleet-tick.test.mjs. Controlled differential on tests/split-gate-flip.test.mjs (2 tests; small file to avoid 5-9 min): `env -u FORCE_COLOR ./agent-test --test-name-pattern=ZZZnomatch tests/split-gate-flip.test.mjs` → tests 1 (narrowed); `./agent-test tests/split-gate-flip.test.mjs --test-name-pattern=ZZZnomatch` → tests 2 pass 2 (not narrowed); plain `node --test tests/split-gate-flip.test.mjs --test-name-pattern=ZZZnomatch` (no shim) → tests 2 pass 2, same. So flags after the file are passed to"
+  },
+  {
+   "bucket": "unverified",
+   "index": 8,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4381/fix-LdK1iWQ1/finding-u8/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 9,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4381/fix-LdK1iWQ1/finding-u9/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 10,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4381/fix-LdK1iWQ1/finding-u10/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 11,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4381/fix-LdK1iWQ1/finding-u11/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 12,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4381/fix-LdK1iWQ1/finding-u12/verdict.json",
+   "issue": 4385,
+   "reason": "refuted by its refuter: Nothing run falsified or confirmed a defect; this is a prose-wording nit. Observed: review-and-fix.md:103 in the tree still states the load-bearing rule (brace a ref held in a variable, because quoting is not what fixes it) and shows the quoted example \"${SHA}:<path>\"; only the secondary 'quote regardless' sentence and its why now live in reviewers.md:243 (which line 103 cites as Evidence). The sentence is genuinely absent from the command file, so the PR-body phrase 'the rules in place' is slightly loose for that one sentence, but the behavioural rule the command needs (brace) is intact and t"
+  },
+  {
+   "bucket": "unverified",
+   "index": 13,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "defer",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4381/fix-LdK1iWQ1/finding-u13/verdict.json",
+   "issue": 4385,
+   "reason": "refuted by its refuter: The claim that a renamed kind silently becomes exit 1 is false: tests/measure-copy.test.mjs 'an Install step that cannot run is exit 3, one that fails is exit 4, one that hides the copy's state is exit 5' pins all three mapped kinds (not-run, failed, status-after) to their exit codes and receipt.kind. Mutant: rename refuse(\"failed\") to refuse(\"failedX\") in evict.mjs. red: env -u FORCE_COLOR ./agent-test tests/measure-copy.test.mjs → exit 1, fail 1 incl 'an Install step that cannot run is exit 3, one that fails is exit 4, ...'; baseline: same command, mutant reverted → exit 0, tests 15 pass 15 "
+  },
+  {
+   "bucket": "unverified",
+   "index": 14,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "defer",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4381/fix-LdK1iWQ1/finding-u14/verdict.json",
+   "issue": 4385,
+   "reason": "refuted by its refuter: Pure type/style suggestion in untyped JS; the finding itself says 'low priority, internally consistent'. installIn's doc comment (evict.mjs ~l.400-430) already documents the discriminant: 'untracked, set, makes an Install step that leaves the tree changed no refusal: the result is then {install, untracked:{count, first}}'. The only caller that sets untracked (measure-copy.mjs:214) passes it literally, so the shape is statically known; other callers (finisher-tree.mjs:152, evict.mjs:492) never read .untracked. Splitting the function would duplicate the derive/status-before/run/status-after sequ"
+  },
+  {
+   "bucket": "unverified",
+   "index": 15,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "defer",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4381/fix-LdK1iWQ1/finding-u15/verdict.json",
+   "issue": 4385,
+   "reason": "refuted by its refuter: No defect: the writer's union is built from sweptAfter(now.applied, run0), which reads state already normalized by readState's filter, plus names the tick itself produced; the omit-when-empty spread is documented in the fleet-state.mjs header and mirrors the existing reapAfter pattern. The finding's own fix says 'or accept the current runtime filtering'. Observed: sweptAfter() on {sweptAfter:[\"x\"]} returns ['x'], on a record without the field or null returns []. Green baseline run on the unmutated tree: env -u FORCE_COLOR ./agent-test tests/fleet-tick.test.mjs → exit 0, tests 441, pass 441, fa"
+  },
+  {
+   "bucket": "unverified",
+   "index": 16,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4381/fix-LdK1iWQ1/finding-u16/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 17,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4381/fix-LdK1iWQ1/finding-u17/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 18,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4381/fix-LdK1iWQ1/finding-u18/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 19,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4381/fix-LdK1iWQ1/finding-u19/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 20,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4381/fix-LdK1iWQ1/finding-u20/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 21,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4381/fix-LdK1iWQ1/finding-u21/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 22,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4381/fix-LdK1iWQ1/finding-u22/verdict.json"
+  }
+ ]
+}

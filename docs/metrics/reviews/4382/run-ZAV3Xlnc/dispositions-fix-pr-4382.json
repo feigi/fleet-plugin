@@ -1,0 +1,249 @@
+{
+  "head": "da305b174ca5e2725803e4226c327184d8854013",
+  "run": "run-ZAV3Xlnc",
+  "entries": [
+    {
+      "bucket": "survived",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "charge": "none",
+      "chargeReason": "defect-outside-acceptance",
+      "remedyFiles": [
+        "tests/ledger-row-review.test.mjs"
+      ]
+    },
+    {
+      "bucket": "survived",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "charge": "none",
+      "chargeReason": "defect-outside-acceptance",
+      "remedyFiles": [
+        "tests/ledger-row-review.test.mjs"
+      ]
+    },
+    {
+      "bucket": "survived",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "charge": "none",
+      "chargeReason": "not-the-implementers-text",
+      "remedyFiles": [
+        ".out-of-scope/gate-verdict-provenance.md"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "claimKind": "behavior",
+      "scope": "in",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4382/fix-bBP1NI7h/u0/verdict.json",
+      "remedyFiles": [
+        "plugin/scripts/ledger.mjs",
+        "tests/ledger-row-review.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "claimKind": "behavior",
+      "scope": "out",
+      "disposition": "defer",
+      "issue": 4383,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4382/fix-bBP1NI7h/u1/verdict.json",
+      "reason": "out of the ticket's scope; refuter let it survive, filed open needs-triage",
+      "remedyFiles": [
+        "docs/specs/2026-10-13-one-command-per-wake.md"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "claimKind": "behavior",
+      "scope": "in",
+      "disposition": "defer",
+      "issue": 4384,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4382/fix-bBP1NI7h/u2/verdict.json",
+      "reason": "refuted by its refuter: recorded on the suggestion-band record",
+      "remedyFiles": [
+        "plugin/scripts/ledger-grammar.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "claimKind": "behavior",
+      "scope": "in",
+      "disposition": "defer",
+      "issue": 4384,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4382/fix-bBP1NI7h/u3/verdict.json",
+      "reason": "refuted by its refuter: recorded on the suggestion-band record",
+      "remedyFiles": [
+        "plugin/scripts/fleet-event.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "claimKind": "behavior",
+      "scope": "in",
+      "disposition": "defer",
+      "issue": 4384,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4382/fix-bBP1NI7h/u4/verdict.json",
+      "reason": "refuted by its refuter: recorded on the suggestion-band record",
+      "remedyFiles": [
+        "plugin/scripts/ledger.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 5,
+      "claimKind": "behavior",
+      "scope": "in",
+      "disposition": "defer",
+      "issue": 4384,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4382/fix-bBP1NI7h/u5/verdict.json",
+      "reason": "refuted by its refuter: recorded on the suggestion-band record",
+      "remedyFiles": [
+        "plugin/scripts/ledger.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 6,
+      "claimKind": "behavior",
+      "scope": "in",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4382/fix-bBP1NI7h/u6/verdict.json",
+      "remedyFiles": [
+        "tests/ledger-row-review.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 7,
+      "claimKind": "behavior",
+      "scope": "in",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4382/fix-bBP1NI7h/u7/verdict.json",
+      "remedyFiles": [
+        "tests/ledger-row-review.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 8,
+      "claimKind": "behavior",
+      "scope": "in",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4382/fix-bBP1NI7h/u8/verdict.json",
+      "remedyFiles": [
+        "plugin/scripts/ledger.mjs",
+        "plugin/scripts/fleet-event.mjs",
+        "docs/adr/0038-a-gate-verdict-is-written-only-by-the-verb-that-derives-it.md"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 9,
+      "claimKind": "shape",
+      "scope": "out",
+      "disposition": "defer",
+      "issue": 4384,
+      "reason": "out of the ticket's scope, a wording claim below the claim bar: recorded on the suggestion-band record",
+      "remedyFiles": [
+        "CONTEXT.md"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 10,
+      "claimKind": "shape",
+      "scope": "in",
+      "disposition": "defer",
+      "issue": 4384,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4382/fix-bBP1NI7h/u10/verdict.json",
+      "reason": "refuted by its refuter: recorded on the suggestion-band record"
+    },
+    {
+      "bucket": "unverified",
+      "index": 11,
+      "claimKind": "behavior",
+      "scope": "in",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4382/fix-bBP1NI7h/u11/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 12,
+      "claimKind": "shape",
+      "scope": "in",
+      "disposition": "defer",
+      "issue": 4384,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4382/fix-bBP1NI7h/u12/verdict.json",
+      "reason": "refuted by its refuter: recorded on the suggestion-band record"
+    },
+    {
+      "bucket": "unverified",
+      "index": 13,
+      "claimKind": "shape",
+      "scope": "in",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4382/fix-bBP1NI7h/u13/verdict.json",
+      "remedyFiles": [
+        "plugin/scripts/ledger.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 14,
+      "claimKind": "shape",
+      "scope": "in",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4382/fix-bBP1NI7h/u14/verdict.json",
+      "remedyFiles": [
+        "tests/support/review-result.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 15,
+      "claimKind": "shape",
+      "scope": "in",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4382/fix-bBP1NI7h/u15/verdict.json",
+      "remedyFiles": [
+        "tests/support/review-result.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 16,
+      "claimKind": "shape",
+      "scope": "in",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4382/fix-bBP1NI7h/u16/verdict.json",
+      "remedyFiles": [
+        "tests/fleet-event.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 17,
+      "claimKind": "behavior",
+      "scope": "in",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4382/fix-bBP1NI7h/u17/verdict.json",
+      "remedyFiles": [
+        "plugin/scripts/review-eval.mjs"
+      ]
+    }
+  ]
+}

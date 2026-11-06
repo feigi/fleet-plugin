@@ -1,0 +1,200 @@
+{
+  "pr": 4375,
+  "head": "71bf828050cf1355342d7ed576923bcf3f814499",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — printed ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. I made no writes there, so these come from another agent or the user. They match the two metrics files the diff lists, so they are probably a peer's or the controller's metrics updates."
+    },
+    {
+      "dimension": "tests",
+      "state": "clean",
+      "line": "CWD-AUDIT: clean /Users/chris/dev/fleet-plugin"
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I wrote nothing there, so these come from another process."
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv` (this pass wrote nothing there. Every command after the first `pwd` ran with absolute paths under the scratch dir or the private copy.)"
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I wrote only under the scratch dir and /tmp, so these two files are not mine and I cannot attribute them; they are not in the PR diff."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv` (not written by this review; every command here chained a cd into the scratch dir)"
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 11,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4375/run-mPpJa4hO/snapshot-71bf8280",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": ".github/workflows/ci.yml",
+      "line": 333,
+      "claim": "The install-and-smoke job's comment in ci.yml still lists only the four old steps (install, fleet-provenance, resolve callsites, exec arg.mjs) and does not mention the two steps this PR adds, so it no longer matches the script header it points to.",
+      "evidence": "read ci.yml:329-341: comment says it 'installs on omp, runs `fleet-provenance`, resolves every `fleet-run <script>` prose callsite, execs `fleet-run arg.mjs` once' and nothing about the README tier line or npm pack; the script header (install-and-smoke.sh:44-49) now has steps 5 and 6.",
+      "suggested_fix": "Add the README tier line run and the npm-pack file-list check to that comment, or cut it down to just a pointer to the script header.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": ".github/scripts/install-and-smoke.sh",
+      "line": 250,
+      "claim": "For a tracked file that npm leaves out no matter what `files` says (e.g. plugin/package-lock.json), the npm-pack step tells you to 'add it to plugin/package.json's `files`', which cannot fix it.",
+      "evidence": "Ran the script's lines 233-256 in my copy with tracked plugin/package-lock.json, plugin/hooks/x.mjs, plugin/scripts/.hidden.mjs and 'plugin/scripts/a b.mjs': output was `::error::install-and-smoke: plugin/package-lock.json is tracked but npm pack leaves it out — add it to plugin/package.json's `files`` (and the same for hooks/x.mjs). The dotfile and the filename with a space were packed. No such file is tracked today (165 tracked = 165 packed, baseline pass).",
+      "suggested_fix": "Change the wording to say npm pack leaves the file out (via `files` or npm's own always-excluded list), without prescribing the fix.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/package-entry-resolver.test.mjs",
+      "line": 148,
+      "claim": "installationCommands only accepts a closing fence written exactly as \"```\". If the yaml snippet's closing fence has trailing whitespace or CRLF, the function throws 'no code block' even though the commands block follows, because the bare opener is used up as the snippet's close.",
+      "evidence": "node probe.mjs (copy of the PR's installationCommands) on `## Installation` sections with '```yaml\\nx: 1\\n``` \\n\\n```\\none\\ntwo\\n```' and '```yaml\\nx: 1\\n```\\r\\n\\n```\\none\\n```' → both printed `throws none`. The failure is loud (the test goes red), so this cannot ship a wrong answer silently.",
+      "suggested_fix": "Compare `lines[i].trimEnd() === \"```\"` for the close and `lines[open].trimEnd() === \"```\"` for the bare-opener test.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": ".github/scripts/install-and-smoke.sh",
+      "line": 61,
+      "claim": "When `jq` fails to parse the pack output, the error line says `npm pack --dry-run --json ... gave no file list` and reads npm's stderr file, which is empty because npm succeeded. The real cause appears only as a raw `jq: error` line above it. The failure is not swallowed (rc=1), but the ::error:: annotation mislabels it and ends in an empty `: `.",
+      "evidence": "npm shim printing `[]` or `[{}]` gave: `jq: error (at <stdin>:1): Cannot iterate over null (null)` then `::error::install-and-smoke: npm pack --dry-run --json in plugin/ gave no file list (exit 5): ` (empty tail), rc=1. With `[{\"files\":[]}]` it gave `(exit 0): ` with an empty tail.",
+      "suggested_fix": "Capture jq's stderr into the same err file, or give the jq failure its own ::error:: line (e.g. `npm pack output was not the expected JSON (jq exit $pack_rc)`).",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": ".github/scripts/install-and-smoke.sh",
+      "line": 28,
+      "claim": "`TIER_LINES=\"$(sed ... | grep ...)\" || true` swallows every failure of the sed|grep pipeline, including a sed read error. Any such failure is reported only as `README.md's Installation section has no single tier-check line`. It is not silent, because the script still fails loudly. In practice an earlier `plugin/package.json` read already fails if the cwd is wrong, so this is unlikely to trigger.",
+      "evidence": "Read of the script; the empty-result branch was exercised only through the rc=0 happy path and the shim runs, not with a missing README.md. The no-match case is the one the `|| true` is there for.",
+      "suggested_fix": "Optional: use the `grep_rc=0; ... || grep_rc=$?` pattern already used for the other greps in this script (rc 1 = no match, rc>1 = grep failure).",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/tier-roles.mjs",
+      "line": 466,
+      "claim": "The new smoke step passes on exit 0 only. Notices such as `task.maxConcurrency unreadable` or the `level max is not one ...` clamp warnings go to stdout and never fail the step. This is the documented design of the tier check. The new step's header and the PR's \"requires exit 0\" claim do not say that an unreadable `task.maxConcurrency` would go unflagged in CI.",
+      "evidence": "The real run printed two `tier-roles: notice: ...level max...` lines and still reported `README's tier line exited 0`. tier-roles.mjs lines 361-362 and 466 show notices never change the exit code.",
+      "suggested_fix": "Accept as is, or assert on stdout that no `unreadable` notice appears if CI should catch a broken `omp config get`.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/package-entry-resolver.test.mjs",
+      "line": 148,
+      "claim": "`installationCommands` only treats a fence as the commands block when the opening line is exactly three backticks. A bare opening fence with trailing whitespace is treated as an info-string fence and skipped silently. The helper then returns a later bare block or throws `no code block`. A reformatted README would therefore make the test check a different block, or fail with a misleading message, rather than flag the odd fence.",
+      "evidence": "Reading the new loop: the opening condition is `startsWith(\"```\")` and the commands-block condition is `lines[open] === \"```\"`. Not mutated or executed.",
+      "suggested_fix": "Compare `lines[open].trim() === \"```\"`, or fail if an opening fence's info string is whitespace-only.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/package-entry-resolver.test.mjs",
+      "line": 35,
+      "claim": "Closing-fence handling is not discriminated: changing the closer check from `lines[i] === \"```\"` to `lines[i].startsWith(\"```\")` leaves all 4 tests green, so no test has a fence-with-info-string line inside an open block.",
+      "evidence": "red: n/a (mutant survived); mutant C `./agent-test tests/package-entry-resolver.test.mjs` → exit 0, tests 4 pass 4 fail 0; baseline: same cmd → exit 0, tests 4 pass 4. Mutants A/B/D: same cmd → fail 2 incl 'installationCommands returns the bare-fenced commands block…', baseline pass.",
+      "suggested_fix": "Optionally add a case where an open bare block contains a line like ```yaml before its closer, or accept the gap as low-value (such input is not valid markdown closing).",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body: the 'Measured locally on omp 18.4.4' claims (exit codes, the two `max`-level notices, mutation results) could not be reproduced here. The installed omp is 18.16.0, so those runs are unverified.",
+      "evidence": "`omp --version` printed `omp/18.16.0`. Under a scratch HOME with a dummy key, `omp models --json` lists claude-haiku-4-5, claude-sonnet-4-5 and claude-opus-4-7, so the model-list claim holds on 18.16.0. The mutation runs were not repeated.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/package-entry-resolver.test.mjs",
+      "claim": "The new `installationCommands` helper is a hand-rolled fence parser with no type or schema. The caller relies on the invariant that it returns bare-fenced commands only, and the tests alone enforce that.",
+      "evidence": "Read in the diff only: the helper returns `lines.slice(open+1, i)` and throws when there is no bare block. The diff adds tests for a yaml-before-bare case and a no-block case. I did not execute it. This is not a type-design defect in a typed language, only a note.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": ".github/scripts/install-and-smoke.sh",
+      "line": 235,
+      "claim": "`PACKED=\"\"` is redundant state: PACKED is read only when pack_rc is 0, and in that case line 237 has always assigned it. The assignment happens even when jq fails, and `[ \"$pack_rc\" -ne 0 ] || [ -z \"$PACKED\" ]` short-circuits before it reads PACKED, so `set -u` can never trip on it.",
+      "evidence": "Ran simplify/probe.sh under `set -euo pipefail` for both forms (with and without `PACKED=\"\"`) across five cases: npm fails (rc 3), JSON is not valid (jq rc 5), files array is empty, two files, top-level `[]`. Every case printed identical output: `SAME` ×5 (ERR rc=3 / ERR rc=5 / ERR rc=0 / OK a b / ERR rc=5).",
+      "suggested_fix": "Delete line 235 (`PACKED=\"\"`). The `if [ \"$pack_rc\" -eq 0 ]` block and the `-ne 0 || -z` check stay as they are. If you keep the line as a guard against future reordering, add a short comment saying that, so readers don't take it for live state.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

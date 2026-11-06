@@ -1,0 +1,360 @@
+{
+  "pr": 4382,
+  "head": "da305b174ca5e2725803e4226c327184d8854013",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I did not touch these. I only ran read-only commands (pwd, grep, sed, git status) there, so they came from another agent or the controller."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (I wrote nothing there, so these are not mine)."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. I did not touch these. I only ran `pwd`, and every other command ran in the scratch dir."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin —  M docs/metrics/ticket-features.tsv,  M docs/metrics/tier-outcomes.tsv (not written by this pass: every command here cd'd into the copy, the probe dir or a /tmp ledger root, with an explicit --file)"
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (not written by this pass: in that directory I ran only `pwd` and this status command; every other command used an explicit cd into the snapshot or simplify/)."
+    },
+    {
+      "dimension": "tests",
+      "state": "clean",
+      "line": "CWD-AUDIT: clean /Users/chris/dev/fleet-plugin (not run via git status; my commands wrote only under the scratch dir, never the cwd — treat as unverified)"
+    }
+  ],
+  "counts": {
+    "survived": 3,
+    "refuted": 0,
+    "unverified": 18,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4382/run-ZAV3Xlnc/snapshot-da305b17",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 3158,
+      "claim": "The run-root name check in reviewResultToken (`/^run-[A-Za-z0-9]{8}$/`) is not discriminated on the ledger side: loosening it to `/^run-/` passes every test, because the only bad-run fixture is `not-a-run` (fails any prefix check); too-long/too-short/non-alnum run names are tested only for the tick-side REVIEWED_RUNLESS in fleet-tick.test.mjs.",
+      "evidence": "red: none — mutant `/^run-[A-Za-z0-9]{8}$/` → `/^run-/` : `./agent-test tests/ledger-row-review.test.mjs` → exit 0, fail 0 (52 tests); also 8-file set (fleet-event, fleet-tick, ledger-row-review, ledger, review-runner, settle-report, dispatch, rotate) → exit 0, tests 1146, fail 0; baseline: same cmd → exit 0, all pass (surviving mutant)",
+      "suggested_fix": "Add run-abc1234r(9 chars), run-abc1234(7) and run-abc123!4 cases to the 'refuses a path or file that is not PR <pr>'s review result' test.",
+      "dimension": "tests",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Applied mutant /^run-[A-Za-z0-9]{8}$/ -> /^run-/ in my copy (git diff shows 1 line changed). `env -u FORCE_COLOR ./agent-test tests/ledger-row-review.test.mjs` -> tests 52, pass 52, fail 0, so the mutant survives. The only bad-run fixture in that file is `not-a-run` (line 615), which fails any prefix check. I did not run the baseline or the 8-file set myself; surviving is shown by the mutated run alone. CWD-AUDIT: not run, so this line is not a clean report. /Users/chris/dev/fleet-plugin was only used for `pwd`, and I did not run `git status` there."
+        },
+        {
+          "refuted": false,
+          "reason": "Mutant reproduced: changed ledger.mjs:3157 check to /^run-/ in my own copy. `./agent-test tests/ledger-row-review.test.mjs` gave exit 0, tests 52, pass 52, fail 0 (surviving mutant). I did not run a separate unmutated baseline; the claim's own baseline reports all passing. The only bad-run fixtures on the ledger side are `not-a-run` (ledger-row-review.test.mjs:615 and fleet-event.test.mjs:1455), and a prefix-only check also rejects it. No test uses a too-short, too-long or non-alphanumeric run name against this check. I did not run the other files; the claim reports 1146 tests passing for the 8-file set. The lines I read outside those two fixtures were happy-path run names. Not covered elsewhere in the tests I read. CWD-AUDIT: not run; I made no edits in /Users/chris/dev/fleet-plugin, and the mutation was only in my scratch copy."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 3166,
+      "claim": "The `result?.pr !== undefined &&` clause is untested for removal: dropping it (so a result file lacking `pr` is refused, `Number(undefined)!==pr`) passes every test, so the intended acceptance of pr-less results is not pinned (and no test pins refusal either).",
+      "evidence": "red: none — mutant removing `result?.pr !== undefined && ` : 8-file set → exit 0, tests 1146, fail 0; baseline exit 0 (surviving mutant)",
+      "suggested_fix": "Add a test writing a result body without `pr` and asserting the chosen behaviour.",
+      "dimension": "tests",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Mutant removing `result?.pr !== undefined && ` (ledger.mjs:3166, confirmed applied via git diff --stat in my own copy) survives. The five test files that use --result (fleet-event, fleet-tick, ledger-row-review, ledger, review-runner) ran with 853 tests, 0 failures, exit 0. No test pins accepting or refusing pr-less results. I did not run the unmutated tree, because a survivor needs no kill baseline. The claim is not refuted. red: ./agent-test tests/fleet-event.test.mjs tests/fleet-tick.test.mjs tests/ledger-row-review.test.mjs tests/ledger.test.mjs tests/review-runner.test.mjs → exit 0, fail 0 (mutant survives). CWD-AUDIT: not run; I wrote nothing in /Users/chris/dev/fleet-plugin, and all work stayed in the scratch copy."
+        },
+        {
+          "refuted": false,
+          "reason": "The mutant survives, so the finding stands. I removed `result?.pr !== undefined && ` at ledger.mjs:3166 in my own snapshot copy. `git diff --stat` showed 1 file changed, 1 insertion, 1 deletion, which confirms the mutation was applied. I ran `env -u FORCE_COLOR node --test tests/ledger-row-review.test.mjs tests/fleet-event.test.mjs tests/review-runner.test.mjs tests/ledger.test.mjs tests/fleet-tick.test.mjs`. It exited 0 with tests 853, pass 853, fail 0. No test in those files uses a result file without `pr`. The helpers `reviewFile` and `resultFile` always set `pr`, and the only refusal test uses `pr: 89`. I found no other test covering it. The grep only covered `tests/*.mjs` and `tests/support`, and would miss a pr-less body built inline under another name. I did not run the full `./agent-test` suite or an unmutated baseline in this copy. The claim's own 8-file run (exit 0, 1146 tests) is consistent with mine. No red exists, so no kill is claimed. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I did not touch these files, since all my work was in the scratch copy. They are probably the controller's own metrics edits."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": ".out-of-scope/gate-verdict-provenance.md",
+      "line": 7,
+      "claim": "Untouched file now false: it says the rule holds 'for a `reviewed=` once #4359 lands, since `ledger.mjs review` still takes one as an argument', but this PR is #4359's fix and `review` now refuses a `reviewed=` argument.",
+      "evidence": "Read snapshot .out-of-scope/gate-verdict-provenance.md:7, which carries that sentence. The diff's ledger.mjs hunk (diff lines 330-333) dies on any `reviewed=` word among the arguments. ADR 0038 mechanism 5 is rewritten from **Open** to closed in the same diff, and this file is not in the diff's file list.",
+      "suggested_fix": "Reword so the rule holds for a `reviewed=` as well, since `ledger.mjs review <pr> --result <path>` derives it. Drop 'once #4359 lands' and 'still takes one as an argument'.",
+      "dimension": "comments",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Read the snapshot. Line 7 of .out-of-scope/gate-verdict-provenance.md says 'for a `reviewed=` once #4359 lands, since `ledger.mjs review` still takes one as an argument'. The diff has no file entry for .out-of-scope (0 matches). The ledger.mjs hunk (diff ~lines 330-333) now dies when any argument starts with `reviewed=`, so the sentence is stale. No test run; this is a prose-versus-code check. CWD-AUDIT: clean /Users/chris/dev/fleet-plugin (I wrote nothing and did not run git status)."
+        },
+        {
+          "refuted": false,
+          "reason": "Snapshot line 7 of .out-of-scope/gate-verdict-provenance.md still says 'for a `reviewed=` once #4359 lands, since `ledger.mjs review` still takes one as an argument'. The diff's ledger.mjs hunk (diff lines 330-333) dies on any `reviewed=` argument. The diff's file list has no .out-of-scope file. A grep of pr.diff for 'gate-verdict-provenance' matched only the ADR/diff headers, not that file, so nothing elsewhere in the PR updates it. The sentence is stale. I only read the files; I ran no tests. Search scope: pr.diff and that one snapshot file. The grep would have missed the file being edited under a different path. CWD-AUDIT: clean /Users/chris/dev/fleet-plugin (I only read files and wrote nothing; git status was not run)."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 3258,
+      "claim": "When `review <pr> --result <path>` replays a result the PR's rows already carry and also gets a new launch token in the same call, the receipt still names that result as `reviewed` and has no `written: false`. A reader therefore cannot tell from the receipt that the reviewed= was skipped and only the launch was written.",
+      "evidence": "probe/t4.sh: I seeded `#99 review=member:review-pr-99`, then ran `review 99 --result …/pr99/run-abcdefgh/review.json --scratch $S` (writes the token). I then ran `review 99 review=member:review-pr-99-b --result …/run-abcdefgh/review.json --scratch $S`. It printed `review on row #99` and the receipt `{\"pr\":99,…,\"line\":\"#99 review=member:review-pr-99 · reviewed=aaaaaaa:1/0/0:run-abcdefgh · review=member:review-pr-99-b\",\"created\":false,\"reviewed\":\"reviewed=aaaaaaa:1/0/0:run-abcdefgh\",\"next\":\"review-pr-99-c\"}`, exit 0. The reviewed= was not appended again, but the receipt reads as if it was. Impact is low: the only code caller (fleet-event.mjs:877) never passes launch tokens alongside --result.",
+      "suggested_fix": "Add `reviewed` to the receipt only when it was actually appended, or always add a `written` boolean for the reviewed= (true or false) next to `reviewed`.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/specs/2026-10-13-one-command-per-wake.md",
+      "line": 66,
+      "claim": "The spec table still says the `review-result` wake 'reads the digest, `ledger.mjs review <pr> reviewed=<head>:<s>/<r>/<u>:<run>`'. After this PR, that exact call is refused at exit 2.",
+      "evidence": "grep across plugin/docs/tests for `review \\S+ reviewed=` found only this line among docs that are not fixtures. probe/t2.sh: `ledger.mjs review 99 \"review=member:review-pr-99-b reviewed=aaaaaaa:1/0/0:run-abcdefgh\"` → `ledger: review #99: 'reviewed=…' is a reviewed= token — a reviewed= is a Gate verdict, written only with `ledger.mjs review 99 --result <path>`…`, exit=2.",
+      "suggested_fix": "If dated specs are kept current in this repo, change the row to `ledger.mjs review <pr> --result <path> --scratch <scratch>`. Otherwise leave it as a historical record.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger-grammar.mjs",
+      "line": 458,
+      "claim": "Two refusals name different writers for the same token: gateVerdictWriter() names `fleet-event.mjs review-result <pr> <path>` for a malformed reviewed=, while reviewTokenWriter() in ledger.mjs names `ledger.mjs review <pr> --result <path>`. Both commands work, but the operator sees two different 'only writer' answers.",
+      "evidence": "Read ledger-grammar.mjs:456-462 (gateVerdictWriter) and ledger.mjs:3121-3125 (reviewTokenWriter). probe/t2.sh `row 99 \"#99 … reviewed=…\"` printed the ledger.mjs form: `adds review token 'reviewed=…' — a reviewed= is written only with `ledger.mjs review <pr> --result <path>`…`. I did not execute the gateVerdictWriter path (it needs a malformed reviewed= word that passes the review-token check first).",
+      "suggested_fix": "Make both messages name one writer, for example `ledger.mjs review <pr> --result <path>` (via `fleet-event.mjs review-result`).",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/fleet-event.mjs",
+      "line": 119,
+      "claim": "reviewResult swallows a JSON.parse failure on the ledger's stdout with an empty catch. When the receipt is unreadable it reports `PR #n the result at <path>` as if the token had been written, with no stderr signal and exit 0. It also cannot tell a fresh write from `written:false`.",
+      "evidence": "In the copy I made `ledger.mjs review` print `junk` instead of its JSON receipt, then ran `node --test --test-name-pattern='review-result hands' tests/fleet-event.test.mjs`. The run exited 0 with the event line `event: review-result: PR #88 the result at /…/pr88/run-abcdefgh/review.json`. The expected `PR #88 reviewed=…` did not appear, so the summary line asserts a write the code never confirmed.",
+      "suggested_fix": "Treat an unparseable receipt after exit 0 as a refusal: call ev.refuse, or at least print a stderr line. Do not fall back to `written !== false` meaning \"written\".",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 274,
+      "claim": "The pr cross-check `result?.pr !== undefined && Number(result.pr) !== pr` is the only content check on the file's PR, and it silently passes when `pr` is missing. It also passes a `pr` that Number() coerces to the PR number, such as `[482]` or `\"0x1e2\"`. `ledger.mjs review --result` is now the sole writer of the `reviewed=` Gate verdict, so this guard is the thing standing between a mislabelled file and a verdict.",
+      "evidence": "In a scratch ledger with `#1 impl-1=PR#482 → PR#482 · review=member:review-pr-482`, I wrote review.json under `<scratch>/pr482/run-Aa11Bb22/` with each of these `pr` values: absent, `[482]`, `\"0x1e2\"`. All three exited 0 and wrote `reviewed=aaaaaaa:1/2/3:run-Aa11Bb22`. A file with `counts.survived:\"x\"` and a file containing `null` were refused with the \"carries no head and counts\" message, so those paths do fail loudly. The path partition still binds the PR, so this is a weakened check, not a bypass.",
+      "suggested_fix": "Require `result.pr` to be present and `Number.isInteger(result.pr) && result.pr === pr` (or a strict string compare), and die otherwise.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 255,
+      "claim": "The `real()` helper returns the lexical path on any realpathSync error, not only ENOENT. EACCES and ELOOP on the partition or run root silently weaken the partition check to a string comparison. The PR moved this helper from fleet-event.mjs into ledger.mjs, where it now guards the Gate verdict.",
+      "evidence": "Read from the diff only; I did not exercise the EACCES or ELOOP path. The `catch {}` has no error-code filter.",
+      "suggested_fix": "Fall back only when `e.code === \"ENOENT\"`; otherwise die with the error.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 3206,
+      "claim": "Duplicate-flag refusal (`--result x --result y`, `--scratch` twice) is untested: replacing `if (flags.has(word)) die(` with `if (false) die(` passes all tests.",
+      "evidence": "red: none — mutant: 8-file set → exit 0, tests 1146, fail 0; baseline exit 0 (surviving mutant)",
+      "suggested_fix": "Add refusedCall(['review','482','--result',p,'--result',p2,...], /given twice/).",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 3203,
+      "claim": "The `--scratch=<dir>` equals-form refusal is untested (only `--result=` form is, at ledger-row-review.test.mjs:632); removing `|| word.startsWith(\"--scratch=\")` survives, and removing the FleetDirUnresolvable instanceof rethrow guard also survives. Narrow-file runs only.",
+      "evidence": "red: none — `./agent-test tests/ledger-row-review.test.mjs` → exit 0, tests 52, fail 0 for both mutants; baseline exit 0 (surviving mutants)",
+      "suggested_fix": "Add `--scratch=${dir}` refusedCall case.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 3134,
+      "claim": "The new comment and the ADR say the result file's `pr` must be this PR's (ledger.mjs 'the file's `pr` must be `pr`'; the fleet-event.mjs comment 'its `pr` this PR'; ADR 0038 item 5 'whose `pr` is the PR's'), but the check passes a file with no `pr` field.",
+      "evidence": "Read the diff's ledger.mjs code: `if (result?.pr !== undefined && Number(result.pr) !== pr) die(...)`. A result with `pr` undefined is accepted. The PR body words it as refused when 'its `pr` is another PR's', which is accurate. I did not run a probe.",
+      "suggested_fix": "Say 'a `pr` it carries must be this PR's' in the comments and the ADR, or require `pr`.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "CONTEXT.md",
+      "line": 556,
+      "claim": "The glossary says a PR's `review=`/`reviewed=` record is 'written only by `ledger.mjs review`'. This is still true as a verb name, but it now hides that a `reviewed=` comes only from `review --result` and a launch from arguments.",
+      "evidence": "Read CONTEXT.md:552-557. It is not in the diff. The diff splits the verb's two writers in the ledger-grammar.mjs and ledger.mjs comments.",
+      "suggested_fix": "Optional: add '(a `reviewed=` only via `--result`)'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger-grammar.mjs",
+      "line": 430,
+      "claim": "The `isReviewToken` doc says `ledger.mjs review` writes 'a `reviewed=` only from a result file', and the `addedReviewToken` doc (about line 437) says `ledger.mjs review` 'puts each on the PR's row'. Both are accurate, and the second is unchanged.",
+      "evidence": "Read ledger-grammar.mjs:427-440 in the snapshot. No contradiction with ledger.mjs behaviour.",
+      "suggested_fix": "None needed.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body: 'a head under seven digits' is loose, since REVIEWED needs 7 to 40 hex characters rather than digits. The other body claims I checked match the code: the `--result`/`--scratch` flags, the refusal messages, the `written: false` receipt, review-eval dropping `ledger`, the runner body edit, and fleet-event's own path checks being removed.",
+      "evidence": "ledger-grammar.mjs:246 holds `REVIEWED = /^reviewed=([0-9a-fA-F]{7,40}):(\\d+)\\/(\\d+)\\/(\\d+):(run-[A-Za-z0-9]{8})$/`. The body's acceptance message matches the diff's `reviewed= token` die text.",
+      "suggested_fix": "Say 'seven hex characters'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "claim": "The writer policy for review tokens (`reviewed=` only from `review --result`, `review=` launches by argument) is enforced by runtime string-prefix checks (`startsWith`, `isReviewToken`, `reviewTokenWriter`), not by distinct types. The token is a bare string, so a caller can pass any string.",
+      "evidence": "Read the diff: runReview rejects typed `reviewed=` arguments with die(), and tokenRefusal uses reviewTokenWriter(tok) to name the writer. This is consistent with the repo's untyped-JS style. I ran no probe, so I did not test it for bypass.",
+      "suggested_fix": "None needed in plain JS. Keep the refusals centralized in the grammar module, as they are.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 3200,
+      "claim": "runReview's flag loop checks the token twice: once against the bare flags (`word !== \"--result\" && word !== \"--scratch\"`) and then against the `=` forms with startsWith, and it computes `word.split(\"=\")[0]` twice inside the error message. Splitting the word once gives one check with the same behavior.",
+      "evidence": "Probe simplify/probe.mjs compared the current classifier with the simplified one on 19 inputs (--result, --scratch, --result=, --result=x, --scratch=a=b, --resultx, --results=1, --scratchy, review=…, review=…=failed, reviewed=…, '', '=', '--', '-result', '--RESULT=x', 'review=--result=x', …): `classifier equivalent over 19 inputs: true`. With the edit applied in my copy, the six affected test files passed 578/578, including ledger-row-review.test.mjs:632 `refusedCall([\"review\",\"482\",`--result=${path}`],[/space-separated value/])`.",
+      "suggested_fix": "const word = parts[k];\nconst flag = word.split(\"=\")[0];\nif (flag !== \"--result\" && flag !== \"--scratch\") { words.push(word); continue; }\nif (flag !== word) die(`review #${prNum}: ${flag} needs a space-separated value, not ${flag}= — ${usage}`);\nif (flags.has(word)) die(…given twice…); …",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/support/review-result.mjs",
+      "line": 14,
+      "claim": "REVIEWED_WORD is a byte-for-byte copy of ledger-grammar.mjs's exported REVIEWED regex. If the grammar changes, the test helper's copy can drift from it; importing REVIEWED removes the copy.",
+      "evidence": "Probe: `REVIEWED_WORD identical to REVIEWED: true` (same .source and .flags; ledger-grammar.mjs:246). In my copy, swapping in `import { REVIEWED as REVIEWED_WORD } from \"../../plugin/scripts/ledger-grammar.mjs\"` kept all 578 targeted tests passing (tap: # pass 578, # fail 0).",
+      "suggested_fix": "Delete the local regex and `import { REVIEWED } from \"../../plugin/scripts/ledger-grammar.mjs\";`. Other support files already import from plugin/scripts; for example, dispositions-fixture.mjs imports label-map.mjs.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/support/review-result.mjs",
+      "line": 17,
+      "claim": "writeReviewResult's `extra = {}` parameter and its `...extra` spread are never used, and the function's `export` has no importer: viaResult is the only caller, and it passes three arguments.",
+      "evidence": "grep -rn 'writeReviewResult\\|viaResult' tests (excluding the helper itself) found only `viaResult` imports and calls: ledger-row-review:30/63, ledger-dispatch:25/66, ledger-settle-report:25/99, dispositions-fixture:20/136, dispositions-check:25/121, ledger-rotate:26/74. Nothing outside the helper imports writeReviewResult. With `extra` and the export removed in my copy, the 578 targeted tests passed.",
+      "suggested_fix": "`function writeReviewResult(scratch, pr, token) {` with no export, and drop `...extra,` from the JSON object.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/fleet-event.test.mjs",
+      "line": 1442,
+      "claim": "The review-result test sets `const call = `ledger review 88 --result ${path} --scratch ${f.scratch}`` at line 1432, then types out the same template literal again for the second run's expected order instead of reusing `call`.",
+      "evidence": "grep in the snapshot: line 1432 `const call = `ledger review 88 --result ${path} --scratch ${f.scratch}`;` and line 1442 `assert.deepEqual(second.order, [`ledger review 88 --result ${path} --scratch ${f.scratch}`, TICK]);`. The two strings are identical, and `path` and `f.scratch` do not change in between.",
+      "suggested_fix": "assert.deepEqual(second.order, [call, TICK]);",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/review-eval.mjs",
+      "line": 190,
+      "claim": "After this PR deleted the `const { survived, refuted, unverified } = result.counts` destructure, the counts-guard comment's reason is out of date. It says a result with no counts 'would otherwise throw on the destructure below', but no destructure is left: digestOf only reads `result[k]`. The guard should stay because removing it would change behavior, but its comment should give the reason it still has.",
+      "evidence": "`grep -n 'const {[^}]*} = result\\|result.counts' plugin/scripts/review-eval.mjs` → only line 190 (the comment) and line 199 (the guard). review-core.mjs:900-901 `digestOf(result) { return Object.fromEntries(DIGEST_KEYS.map((k) => [k, result[k]])); }` does not destructure counts. pr.diff shows the destructure removed at the old line 234. Mainly a comment-accuracy issue, filed here because the PR's simplification caused it.",
+      "suggested_fix": "Reword the comment's reason, for example: a result with no object `counts` has no counts for the digest and nothing `ledger.mjs review --result` could derive a reviewed= from, so it is treated as an empty return. Keep the guard.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

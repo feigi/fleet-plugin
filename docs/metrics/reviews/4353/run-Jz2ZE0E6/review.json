@@ -1,0 +1,87 @@
+{
+  "pr": 4353,
+  "head": "1b5ce5909791a547036cd0853c778c42e5b5de23",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "comments"
+  ],
+  "dimensionsUnrun": [
+    {
+      "dimension": "correctness",
+      "reason": "the reviewer returned nothing — spend limit, timeout, or terminal error"
+    }
+  ],
+  "cwdAudit": [
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/ticket-features.tsv, M docs/metrics/tier-outcomes.tsv (I did not write these; another agent or the controller did)"
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 4,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4353/run-Jz2ZE0E6/snapshot-1b5ce590",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "docs/adr/0037-each-repository-routes-by-its-own-fit-tickets-group-by-evidence.md",
+      "line": 15,
+      "claim": "ADR 0037 decision 1 still says the Fit 'is computed at every phase 0' and that a run with no Fit routes 'else by the starting table'. The amended Status line says otherwise, and so does metrics-refresh.mjs.",
+      "evidence": "sed -n 15p of the ADR prints 'It is computed at every phase 0 ... else by the starting table'. metrics-refresh.mjs:373 prints 'fit: skipped, no guard written' and ticket-router.mjs:459 returns guard-missing with no draw. The Status line carries the amendment, so the contradiction is bounded but a reader of decision 1 alone is misled.",
+      "suggested_fix": "Reword decision 1 in place, or add an *Amended (#4327)* note beside it.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/specs/2026-11-01-self-refining-router-design.md",
+      "line": 82,
+      "claim": "Spec § 2.3 **When.** still reads 'Computed at every phase 0'. Spec § 2.3 line 87 ('if no Fit has ever computed, by the starting table'), line 33 and acceptance line 286 keep the unamended 'starting table' fallback. All of these sit beside new notes that contradict them.",
+      "evidence": "sed on lines 82, 87 and 286 shows the original text unchanged. The diff adds notes only on lines 17, 83 and 88. The line-83 note retracts the 'every phase 0' wording explicitly. The line-88 note overrides the 'starting table' fallback for the no-guard case only.",
+      "suggested_fix": "Accept as an amendment-note style. Optionally also amend the line 33 table row and the line 286 acceptance.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/specs/2026-11-01-self-refining-router-design.md",
+      "line": 88,
+      "claim": "The note claims 'Only a phase 0 with a corpus but no counted records writes a guard and a Fit, and that Fit is the starting table's fit.' I did not verify this.",
+      "evidence": "costGuard (metrics-refresh.mjs:280-285) skips only when a corpus TSV is missing, which supports the 'no corpus → no guard → fit skipped' half. I did not run the zero-records path through writeFit.",
+      "suggested_fix": "Confirm with a fixture of empty TSVs, or soften the sentence.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body and commit 1b5ce59: no false claims found. Three notes, ADR Status clause and CONTEXT.md Fit entry all match the diff. The diff touches no file under plugin/. The cited strings 'fit: skipped, no guard written' (metrics-refresh.mjs:373) and rowDispatch 'guard-missing' (ticket-router.mjs:459) exist.",
+      "evidence": "grep -n on both scripts in the snapshot.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

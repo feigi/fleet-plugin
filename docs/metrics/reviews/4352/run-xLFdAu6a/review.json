@@ -1,0 +1,79 @@
+{
+  "pr": 4352,
+  "head": "cbc0de89f23358b66777d36384216acaeaaf39d0",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "tests",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — printed ' M docs/metrics/ticket-features.tsv' and ' M docs/metrics/tier-outcomes.tsv'; I did not touch them (read-only review, no writes there)."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I did not write to that checkout, so these changes are not mine."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv` (this review did not write them: the only command run in that directory was the first `pwd`, and every later command first changed into the scratch dir or the snapshot, or named an absolute scratch path)"
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 3,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4352/run-xLFdAu6a/snapshot-cbc0de89",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "tests/recipe-prove.test.mjs",
+      "line": 1686,
+      "claim": "No correctness defect or scope creep found: the `s` flag lets `.*` cross git's two-line 'Stopping at filesystem boundary' message, the test still fails if the refusal names install output or leaves out check.log, and the PR changes only the one line the ticket targets.",
+      "evidence": "On the separate APFS volume, a raw `git status` prints 'fatal: not a git repository (or any parent up to mount point …)' followed by 'Stopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).' (rc=128).\n\nTarget test with the PR's regex: default TMPDIR '# pass 1 # fail 0'; volume TMPDIR '# pass 1 # fail 0'.\n\nWith the `s` flag reverted (sed back to `check\\.log/);`): volume TMPDIR '# pass 0 # fail 1', and stderr shows '…Stopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).; check output: …/check.log'. This reproduces the ticket's failure and shows the fix is what makes the test pass.\n\nMutants of plugin/scripts/recipe-prove.mjs, each killed under both TMPDIRs (pass 0, fail 1):\n- M1: the post-Check treeChanges names `install output: ${installLog}`.\n- M2: `; ${where}` is dropped from the treeChanges error.\n- M3: `${logs}` replaces `${checkLog}`.\n- M4: the message names both check output and install output.\n\nWhole file under the volume TMPDIR: `node --test tests/recipe-prove.test.mjs` gives tests 139, pass 139, fail 0, cancelled 0, skipped 0 (acceptance criterion 4).\n\ntest-run.log:7366 shows '✔ a tree that cannot be read after the Check step names the check output…' passing in the review run.\n\nThe diff touches 1 file and changes 1 line, with no product-code change; the ticket marks product changes out of scope.",
+      "suggested_fix": "None required.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/recipe-prove.test.mjs",
+      "line": 1686,
+      "claim": "The `s` flag is only exercised if git's stderr spans multiple lines, and no fixture in the test produces that. On this host the test passes with or without the flag, so the fix cannot be confirmed against its original trigger here.",
+      "evidence": "red: node --test --test-name-pattern=\"cannot be read after the Check step\" tests/recipe-prove.test.mjs (old regex, source message mutated to insert a newline) → exit 1, fail 1 incl 'a tree that cannot be read after the Check step names the check output, not the install output'; baseline: same command, new regex, same mutant → pass 1. On the unmutated tree both regexes pass (tests 1, pass 1, fail 0).",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body: the 'pass 139, fail 0' count for the whole file cannot be matched to the file by static inspection, since the file has only 79 top-level test( calls; generated or looped cases may account for the difference. The RAM-disk run itself was not reproduced.",
+      "evidence": "grep -c '^test(' tests/recipe-prove.test.mjs in the snapshot printed 79. The diff touches no counts, comments or docs. The other body claims match the diff: only line 1686 changed, the `s` flag was added, and `check output: \\S*check\\.log` and `assert.doesNotMatch(r.err, /install output/)` (line 1687) are unchanged.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

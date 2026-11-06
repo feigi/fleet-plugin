@@ -1,0 +1,93 @@
+{
+  "pr": 4351,
+  "head": "d403eb2f6c790284bb0b7ceaad97ace0c26532c7",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": false,
+    "reason": "no suite slot within 1800 s — the host is at its suite bound; not a test failure"
+  },
+  "dimensionsRun": [
+    "correctness",
+    "tests",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (not written by me; I wrote nothing there)."
+    },
+    {
+      "dimension": "tests",
+      "state": "clean",
+      "line": "CWD-AUDIT: clean /Users/chris/dev/fleet-plugin (pwd printed it; I wrote nothing there, and git status was not run separately)."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin —  M docs/metrics/ticket-features.tsv,  M docs/metrics/tier-outcomes.tsv (this pass never wrote to that tree. Every command either chained a cd into the scratch dir or used absolute scratch paths. The only command aimed at it was this read-only status. These modifications were already there and are not from this review.)"
+    }
+  ],
+  "counts": {
+    "survived": 1,
+    "refuted": 0,
+    "unverified": 2,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4351/run-P1RIsmQw/snapshot-d403eb2f",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "tests/suite-slot.test.mjs",
+      "line": 64,
+      "claim": "The lateClock offset of 40 ms is too small to separate the cap from the time left once the time left is rounded: printing `Math.round(left/1000)` or `Math.ceil(left/1000)` instead of `waitMs/1000` still prints '3s' and the test stays green. Only an unrounded or floored time left is killed.",
+      "evidence": "baseline: node --test --test-name-pattern='more than once' tests/suite-slot.test.mjs → exit 0, test pass. Mutants of line 179 that survive: Math.round(left/1000) → exit 0, test pass; Math.ceil(left/1000) → exit 0, test pass. Mutants killed: Math.floor(left/1000) → exit 1, fail 1 incl the test; `if (true)` announce guard → exit 1, fail 1 incl the test. Benign `Math.min(CYCLE_MS, left+0)` stays green, as it should. red: node --test --test-name-pattern='more than once' tests/suite-slot.test.mjs → exit 1, fail 1 incl 'a wait that goes round its loop more than once prints its waiting line once, naming the cap, before it gives up' (floor mutant); baseline: same cmd → exit 0, test pass.",
+      "suggested_fix": "Make the clock offset large enough to move the rounded value, for example about 1500 ms, so the time left rounds to a different value than the 3 s cap. The cap must still not expire before the second pass.",
+      "dimension": "tests",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "In my own copy of the snapshot, the baseline narrowed run `env -u FORCE_COLOR node --test --test-name-pattern=more.than.once tests/suite-slot.test.mjs` gave tests 1, pass 1, fail 0. I changed line 179 of plugin/scripts/suite-slot.mjs to print `${Math.round(left/1000)}` and `sed -n 179p` confirmed the edit landed. The same command then gave tests 1, pass 1, fail 0, so the round mutant survives. lateClock is called with offset 40 at tests/suite-slot.test.mjs:160, as claimed. I did not rerun the ceil or floor mutants. I did not run a positive control that the test fails on a visible change. CWD-AUDIT: not run (pwd was /Users/chris/dev/fleet-plugin; I did not modify it)."
+        },
+        {
+          "refuted": false,
+          "reason": "Ran in my own copy of the snapshot. Baseline `env -u FORCE_COLOR ./agent-test --test-name-pattern='more than once' tests/suite-slot.test.mjs` gave exit 0, tests 1, pass 1. With line 179 mutated to print Math.round(left/1000), the same command gave exit 0, pass 1. With Math.ceil(left/1000), it gave exit 0, pass 1. With Math.floor(left/1000), it gave exit 1, fail 1. The claim holds: the 40 ms lateClock offset (line 160 of the test) leaves left≈2960 ms, which rounds or ceils to 3, so those mutants stay green. I did not find the weakness handled elsewhere. The evidence also does not prove less than claimed. Only the round and ceil mutants and the floor mutant were measured here. The `if (true)` and `left+0` mutants were not re-run. red: ./agent-test --test-name-pattern='more than once' tests/suite-slot.test.mjs → exit 1, fail 1 incl the 'more than once' test (floor mutant); baseline: same cmd → exit 0, test pass. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I never wrote to that directory; all my work was in the scratch copy, so those modifications come from another agent or the controller."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "tests/suite-slot.test.mjs",
+      "line": 65,
+      "claim": "The PR meets the ticket's main acceptance criterion: with the announce mutated to `left / 1000`, the renamed waiting-line test fails in 3 of 3 runs. With the wrapper unchanged, it and the cap-of-0 and outlasts-the-cap tests pass in 3 of 3. Without the PR's clock, the same mutant passed the test in 2 of 3 runs, so the lateClock preload is what makes the kill deterministic.",
+      "evidence": "cd copy && for i in 1 2 3; do env -u FORCE_COLOR -u NODE_TEST_CONTEXT node --test --test-reporter=tap --test-name-pattern=\"waiting line|cap of 0|outlasts the cap\" tests/suite-slot.test.mjs; done\n- Baseline: exit=0 three times, each run `# pass 3 # fail 0`.\n- Mutant with the PR test: exit=1 three times, each run `not ok 2 - a wait that goes round its loop more than once prints its waiting line once, naming the cap, before it gives up`, with `ok 1` and `ok 3`. The lines it printed were `waiting up to 2.96s` / `2.96s` / `2.959s`.\n- Mutant with the pre-PR test (NODE_OPTIONS removed from line 160): exit=0, exit=1, exit=0. The test passed in runs 1 and 3.",
+      "suggested_fix": "None required.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/suite-slot.test.mjs",
+      "line": 58,
+      "claim": "The stub's guarantee depends on `started` being the first Date.now() call in the wrapper process. That holds today, but if a later wrapper change, or a module it imports, read Date.now() before line 167, both `started` and the loop's reading would carry the +40 ms offset. The test would then go back to surviving the mutant on a 0 ms first pass and would still be green, so nothing would flag that the pin had been lost.",
+      "evidence": "[INFERENCE from code, not exercised as a mutant] grep `Date|^import` over plugin/scripts/proc.mjs, pid-lock.mjs and arg.mjs returned only import lines, with no Date use. suite-slot.mjs has Date.now() only at lines 167, 172 and 186.",
+      "suggested_fix": "Optional: assert something that fails if the offset was not applied. For example, have the preload write its call count to a file in the fixture dir at exit and check it is at least 2. Or say in the lateClock comment that it depends on `started` being the process's first clock read.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

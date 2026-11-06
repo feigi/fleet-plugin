@@ -1,0 +1,37 @@
+{
+  "head": "cbc0de89f23358b66777d36384216acaeaaf39d0",
+  "run": "run-xLFdAu6a",
+  "entries": [
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4352/fix-8BOY2Zw6/u0/verdict.json",
+      "reason": "Refuter confirmed the claim (refuted=false): no correctness defect. Its remedy is 'None required', so applying it changes nothing."
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4352/fix-8BOY2Zw6/u1/verdict.json",
+      "remedyFiles": [
+        "tests/recipe-prove.test.mjs"
+      ],
+      "reason": "Refuter confirmed it (refuted=false): dropping the `s` flag went undetected on a default TMPDIR. Applied as a shared assertion helper plus a sibling test that stubs git status to print the two-line filesystem-boundary reason. The real-git test is kept."
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "issue": 4357,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4352/fix-8BOY2Zw6/u2/verdict.json",
+      "reason": "Refuted: the whole file reports tests 139, pass 139 under both the default and a RAM-disk TMPDIR at the reviewed head, so the PR body's count was accurate."
+    }
+  ]
+}
