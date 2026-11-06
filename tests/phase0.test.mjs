@@ -12,7 +12,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
@@ -545,6 +545,38 @@ test("alarm: a matching file passes, the step is first and ok, and the run goes 
   assert.match(r.stdout, /^phase0: alarm: ok/m);
   assert.equal(f.receipt().steps.alarm.status, "ok");
   assert.equal(f.receipt().steps.alarm.output, `controller alarm armed: pid ${OMP}, ${join(f.repo, ".fleet")}`);
+});
+
+test("alarm: a file naming this .fleet/ through a symlinked spelling passes, before .fleet/ exists and after, and the output keeps phase 0's own spelling", () => {
+  const f = fixture();
+  const link = join(f.dir, "link");
+  symlinkSync(f.repo, link);
+  const spelled = join(link, ".fleet");
+  assert.equal(existsSync(join(f.repo, ".fleet")), false);
+  f.alarm({ pid: OMP, lstart: "omp-start", fleet: spelled });
+  const r = f.run();
+  assert.equal(r.status, 0, r.stdout + r.err);
+  assert.equal(r.stdout.includes("alarm threw"), false);
+  assert.deepEqual(stepLines(r.out).slice(0, 2).map((l) => l.split(": ")[1]), ["alarm", "branch"]);
+  assert.equal(f.receipt().steps.alarm.status, "ok");
+  assert.equal(f.receipt().steps.alarm.output, `controller alarm armed: pid ${OMP}, ${join(f.repo, ".fleet")}`);
+  // `.fleet/` exists now: the same spelling still passes.
+  assert.equal(f.run().status, 0);
+});
+
+test("alarm: a file naming another checkout's .fleet/ is refused, through a symlink or not, and so is a relative one", () => {
+  const f = fixture();
+  const other = join(f.dir, "other-checkout");
+  mkdirSync(other);
+  const link = join(f.dir, "link-to-other");
+  symlinkSync(other, link);
+  for (const fleet of [join(link, ".fleet"), join(other, ".fleet"), join(f.dir, "no-such", ".fleet"), ".fleet"]) {
+    f.alarm({ pid: OMP, lstart: "omp-start", fleet });
+    const r = f.run();
+    assert.equal(r.status, 3, `${fleet}: ${r.stdout}${r.err}`);
+    assert.match(r.stdout, /^phase0: alarm: failed — controller alarm file .* names fleet .* — restart omp$/m, fleet);
+    assert.equal(f.receipt().steps.alarm.status, "failed");
+  }
 });
 
 test("alarm: a refusal the file's appearance clears is re-run by the next run, not skipped as ok", () => {

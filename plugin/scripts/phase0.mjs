@@ -194,7 +194,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeDie, defineFlags, isDigits } from "./arg.mjs";
 import { alarmFile } from "./controller-alarm.mjs";
@@ -599,10 +599,24 @@ function shortlist({ cwd }) {
   return ok("shortlist built");
 }
 
+// The same `.fleet/` by the directory it names: the checkout holding it is
+// resolved through symlinks and the `.fleet` name kept, so it works before
+// `.fleet/` exists. A path that is not absolute, or whose checkout does not
+// resolve, stays as given.
+function fleetIdentity(path) {
+  if (typeof path !== "string" || !isAbsolute(path)) return path;
+  try {
+    return join(realpathSync(dirname(path)), basename(path));
+  } catch {
+    return path;
+  }
+}
+
 // The controller alarm: this omp's own record that its timer is armed against
 // this checkout's `.fleet/` (controller-alarm.mjs writes it at session_start).
 // The record is read, not trusted: it must name this omp's pid and start time
-// and this `.fleet/`.
+// and this `.fleet/` — the same directory, whichever way omp and this process
+// each spell the path to it. Messages print both as spelled.
 function alarm({ fleetDir }) {
   const tail = " — restart omp";
   let controller;
@@ -633,7 +647,7 @@ function alarm({ fleetDir }) {
   if (missing.length > 0) return failed(`controller alarm file ${path} lacks ${missing.join(", ")}${tail}`);
   if (rec.pid !== controller.pid) return failed(`controller alarm file ${path} names pid ${rec.pid}, but this omp is pid ${controller.pid}${tail}`);
   if (rec.lstart !== controller.lstart) return failed(`controller alarm file ${path} was written by a process started at "${rec.lstart}", but this omp started at "${controller.lstart}"${tail}`);
-  if (rec.fleet !== fleetDir) return failed(`controller alarm file ${path} names fleet "${rec.fleet}", not ${fleetDir}${tail}`);
+  if (fleetIdentity(rec.fleet) !== fleetIdentity(fleetDir)) return failed(`controller alarm file ${path} names fleet "${rec.fleet}", not ${fleetDir}${tail}`);
   return ok(`controller alarm armed: pid ${controller.pid}, ${fleetDir}`);
 }
 
