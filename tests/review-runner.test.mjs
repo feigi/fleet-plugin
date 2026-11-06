@@ -337,3 +337,29 @@ test("a missing branch and a padded testCmd still run the review", async () => {
   assert.equal(calls.length, 1);
   assert.equal(out.status, "completed");
 });
+
+// JSON.stringify throws for a BigInt and a circular object and answers
+// `undefined` for a Symbol: each is still a dispatch mistake the runner owes
+// its own `review-runner:` message for, before any review runs.
+test("a value JSON.stringify cannot serialise is refused with a review-runner: Error before any review runs", async () => {
+  const circular = {};
+  circular.self = circular;
+  const cases = [
+    [{ scratch: 1n }, /^review-runner: args\.scratch must be an absolute path, got 1n$/],
+    [{ scratch: circular }, /^review-runner: args\.scratch must be an absolute path, got .*\[Circular/],
+    [{ scratch: Symbol("s") }, /^review-runner: args\.scratch must be an absolute path, got Symbol\(s\)$/],
+    [{ pr: circular }, /^review-runner: args\.pr must be a PR number, got .*\[Circular/],
+    [{ pr: Symbol("s") }, /^review-runner: args\.pr must be a PR number, got Symbol\(s\)$/],
+    [{ testCmd: 1n }, /^review-runner: args\.testCmd is required.*got 1n$/],
+    [{ worktree: 1n }, /^review-runner: args\.worktree is required.*got 1n$/],
+  ];
+  for (const [override, message] of cases) {
+    const { run, calls } = scriptedRun([RESULT]);
+    await assert.rejects(
+      runReviewToFile({ pr: 7, scratch: scratch(), ...VALID, ...override }, run),
+      (e) => e instanceof Error && message.test(e.message),
+      Object.keys(override)[0],
+    );
+    assert.equal(calls.length, 0, `${Object.keys(override)[0]}: a review ran for a dispatch the runner refuses`);
+  }
+});
