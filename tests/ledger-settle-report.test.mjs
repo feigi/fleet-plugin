@@ -157,8 +157,10 @@ const botReport = (f, over = {}) => ({
 });
 
 const dispatched = (f, member) => f.ok("read").dispatched.find((e) => e.split("=")[0] === member);
+// Every command line the gh stub was asked, "" when it was asked none.
+const ghLog = (f) => (existsSync(join(f.root, "gh.log")) ? readFileSync(join(f.root, "gh.log"), "utf8") : "");
 // Every `gh issue view` the stub was asked, one command line each.
-const issueReads = (f) => (existsSync(join(f.root, "gh.log")) ? readFileSync(join(f.root, "gh.log"), "utf8").split("\n").filter((l) => l.startsWith("issue view")) : []);
+const issueReads = (f) => ghLog(f).split("\n").filter((l) => l.startsWith("issue view"));
 
 // PR #6 as a finisher is dispatched for it: closing ticket 5, its own, and
 // carrying a release label. The dispatch gate reads ticket 5 for its title.
@@ -611,27 +613,18 @@ test("could not look: a git ls-remote that fails is exit 2", () => {
 // An `applied` or `no-op` report's branch is checked against the head branch
 // GitHub names for PR M before git is read; `failed` claims no state.
 
-const ghLog = (f) => (existsSync(join(f.root, "gh.log")) ? readFileSync(join(f.root, "gh.log"), "utf8") : "");
-
-test("fix-pr-M: an applied report naming another pushed branch that holds the head is exit 3, naming both branches, and writes nothing", () => {
-  const f = fixture();
-  f.ok("dispatch", "6", "fix-pr-6");
-  onFeat(f);
-  // CLAIM is on origin at the head the report names, and is not PR 6's branch.
-  f.report("fix-pr-6", fixReport(f, { branch: CLAIM }));
-  const r = f.refused("fix-pr-6", 3, /failed: the report's branch is PR #6's head branch \(report: implementer\/5-impl-5, GitHub: feat\)/);
-  assert.doesNotMatch(r.stderr, /origin refs\/heads/);
-  assert.equal(dispatched(f, "fix-pr-6"), "fix-pr-6", "the member stays dispatched, unsettled");
-});
-
-test("fix-pr-M: a no-op report naming another pushed branch that holds the head is exit 3, naming both branches, and writes nothing", () => {
-  const f = fixture();
-  f.ok("review", "6", "review=member:review-pr-6", `reviewed=${f.head.slice(0, 12)}:0/0/0:run-abcd1234`);
-  f.ok("dispatch", "6", "fix-pr-6");
-  onFeat(f);
-  f.report("fix-pr-6", fixReport(f, { outcome: "no-op", branch: CLAIM }));
-  const r = f.refused("fix-pr-6", 3, /failed: the report's branch is PR #6's head branch \(report: implementer\/5-impl-5, GitHub: feat\)/);
-  assert.doesNotMatch(r.stderr, /origin refs\/heads/);
+test("fix-pr-M: an applied or no-op report naming another pushed branch that holds the head is exit 3, naming both branches, and writes nothing", () => {
+  for (const outcome of ["applied", "no-op"]) {
+    const f = fixture();
+    f.ok("review", "6", "review=member:review-pr-6", `reviewed=${f.head.slice(0, 12)}:0/0/0:run-abcd1234`);
+    f.ok("dispatch", "6", "fix-pr-6");
+    onFeat(f);
+    // CLAIM is on origin at the head the report names, and is not PR 6's branch.
+    f.report("fix-pr-6", fixReport(f, { outcome, branch: CLAIM }));
+    const r = f.refused("fix-pr-6", 3, /failed: the report's branch is PR #6's head branch \(report: implementer\/5-impl-5, GitHub: feat\)/);
+    assert.doesNotMatch(r.stderr, /origin refs\/heads/, outcome);
+    assert.equal(dispatched(f, "fix-pr-6"), "fix-pr-6", `${outcome}: the member stays dispatched, unsettled`);
+  }
 });
 
 test("fix-pr-M: a report naming a branch origin lacks, with the PR headed elsewhere, is exit 3 for the branch check, not exit 2 and not the origin check", () => {

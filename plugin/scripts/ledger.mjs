@@ -3052,8 +3052,7 @@ async function runSettleFromReport() {
     if (claimsBranch && checks.every((c) => c.ok)) {
       const head = remoteHead(report.branch);
       if (report.outcome === "applied") {
-        check(`origin refs/heads/${report.branch} is ${report.head}`, head === report.head);
-        if (head === report.head) {
+        if (check(`origin refs/heads/${report.branch} is ${report.head}`, head === report.head)) {
           // verify-sha.sh is the fetch that puts the head's commit object here,
           // which the tree read needs; its exit 2 is a fetch that failed or an
           // object that is not there, so it could not look.
