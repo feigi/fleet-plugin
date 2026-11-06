@@ -134,7 +134,7 @@ exec '${realGit}' "$@"
     applied: [], deferred: [], filed: [], unrecorded: [], dispositionsRecord: join(root, "dispositions-fix-pr-6.json"),
     testRun: { cmd: "./agent-test", exit: 0, tests: 3, cancelled: 0 }, confirmation: [], ...over,
   }));
-  const prHead = (branch) => writeFileSync(join(ghDir, "6.json"), JSON.stringify({ state: "OPEN", closingIssuesReferences: [ref(5)], url: prUrl(6), headRefName: branch }));
+  const prHead = (branch) => writeFileSync(join(ghDir, "6.json"), JSON.stringify({ state: "OPEN", closingIssuesReferences: [ref(5)], url: prUrl(6), headRefName: branch, commits: [] }));
   prHead(CLAIM);
 
   // The member's own steps: a branch with a staged change, ready to record.

@@ -182,7 +182,7 @@ above is the correct one.
 
 `Closes #N` closes issue on merge — as does any closing keyword (`close`, `fixes`, `resolved`, …) sitting directly before an issue reference, wherever it appears in the body. Write one `Closes #M` per issue you mean to close, so `Closes #A, closes #B` closes both; give every other issue mention a word in front of it — `closed issue #M`, or the issue named without the `#`. A keyword before a list links only the first reference in that list, never the rest: `Closes #A, #B` closes only issue A.
 
-Close no ticket another claim holds — its issue carries the in-progress label — even when the ticket asks for one PR with it; write `Refs #M`. A ticket closed by another claim's PR strands that claim: neither release nor reap removes it.
+Close no ticket another claim holds — its issue carries the in-progress label — even when the ticket asks for one PR with it, in the PR body or in a commit message; write `Refs #M`. A ticket closed by another claim's PR strands that claim: neither release nor reap removes it.
 
 Repo gating on release label → exactly one of `patch`/`minor`/`major`; `validate-release-label` fails without it.
 
