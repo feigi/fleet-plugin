@@ -45,9 +45,12 @@
 // and `review --result` for the third, which it derives from the review's
 // result file and refuses as an argument. `token`
 // refuses all three, and `row` carries every Gate verdict exactly as the row
-// holds it, so no other verb adds, changes or drops one. `filed` appends
-// filings, and all writes are serialized by `<file>.lock`; the other tokens
-// of a row are freeform to the writers that have them (`row`/`token`/
+// holds it, so no other verb adds, changes or drops one. `row` likewise
+// carries every settled member token — a member token with an outcome — as
+// the row holds it, so a `row` call made as a lookup cannot erase the row's
+// PR mapping; a live or malformed member token it may still drop. `filed`
+// appends filings, and all writes are serialized by `<file>.lock`; the other
+// tokens of a row are freeform to the writers that have them (`row`/`token`/
 // `settle`/`dispatch`/`drain`/`ruled`/`rotate`). Every write subcommand
 // except `rotate` — which moves the file whole and never loads it, see
 // runRotate() — rewrites the WHOLE file
@@ -71,7 +74,7 @@ import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits, writeAll } from "./arg.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { readReceipt } from "./phase0-receipt.mjs";
-import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, settledOnLedger, retiredOnLedger, retiredName, readRetired, agentDefinition, expectedDefinition, CELL, POLICY_CELL, tierValues, cellValues, decidingCell, rowPr, rowNums, rowWriteRefusal, isReviewToken, addedReviewToken, isDispositionsWord, gateVerdictWriter, gateVerdictRefusal, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, HALT_CAUSES, ROWS, DISPATCHED, ROUTED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, CLOSEOUT_RECEIPT, closeoutArchiveName, BRIEFS, briefsArchiveName, memberRole, parseDispatchedEntry, dispatchedEntry, parseRouting, parseRoutedEntry, routedEntry, headerRe, escapeText, ledgerSection, nextReviewerName, isOmpSessionDirName } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, settledOnLedger, retiredOnLedger, retiredName, readRetired, agentDefinition, expectedDefinition, CELL, POLICY_CELL, tierValues, cellValues, decidingCell, rowPr, rowNums, rowWriteRefusal, isReviewToken, addedReviewToken, isDispositionsWord, gateVerdictWriter, gateVerdictRefusal, settledMemberRefusal, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, HALT_CAUSES, ROWS, DISPATCHED, ROUTED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, CLOSEOUT_RECEIPT, closeoutArchiveName, BRIEFS, briefsArchiveName, memberRole, parseDispatchedEntry, dispatchedEntry, parseRouting, parseRoutedEntry, routedEntry, headerRe, escapeText, ledgerSection, nextReviewerName, isOmpSessionDirName } from "./ledger-grammar.mjs";
 import { deriveRun, LedgerError, labelOffMember, CONFLICT_HOLD, PARKED } from "./fleet-tick.mjs";
 import { stateFileIn, readState, writeState, assessBeat, stallsAt } from "./fleet-state.mjs";
 import { processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "./proc.mjs";
@@ -812,6 +815,11 @@ if (cmd === "read") {
   // also refuses a whole-row wipe of a row that holds one.
   const gateWhy = gateVerdictRefusal(oldRow, line);
   if (gateWhy !== null) die(`row ${key}: ${gateWhy}`);
+  // Every settled member token is the PR's mapping and the member's record, so
+  // a rewrite carries each as the row holds it — a `row` call made as a lookup
+  // would otherwise sever the PR from its ticket.
+  const settledWhy = settledMemberRefusal(oldRow, line);
+  if (settledWhy !== null) die(`row ${key}: ${settledWhy}`);
   // Every token about a PR lives on the PR's row, so a write that makes a PR
   // map to a second row splits its history across two rows the tick reads in
   // row order, not write order. Added only: a split already on disk is

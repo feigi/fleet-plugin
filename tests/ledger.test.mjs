@@ -3941,9 +3941,9 @@ test("a new row at the Pull's row step and a re-Pull over a settled implementer 
   const { run, rows } = tokenFixture(t, ["#3551 impl-3551=bailed · tier=smol-high"], { dispatched: ["impl-3551=bailed"] });
   const fresh = run("row", "3550", "impl-3550 · tier=smol-high · route=explore");
   assert.deepEqual(fresh.payload, { ticket: "#3550", line: "#3550 impl-3550 · tier=smol-high · route=explore", created: true });
-  run("row", "3551", "impl-3551-b · tier=slow-high");
+  run("row", "3551", "impl-3551=bailed · impl-3551-b · tier=slow-high");
   assert.equal(run("token", "3552", "tier=task-high").payload.line, "#3552 tier=task-high", "a token call that creates the row is unchanged");
-  assert.deepEqual(rows(), ["#3551 impl-3551-b · tier=slow-high", "#3550 impl-3550 · tier=smol-high · route=explore", "#3552 tier=task-high"]);
+  assert.deepEqual(rows(), ["#3551 impl-3551=bailed · impl-3551-b · tier=slow-high", "#3550 impl-3550 · tier=smol-high · route=explore", "#3552 tier=task-high"]);
 });
 
 // The Pull's row step writes the row and its Routing in one `row --routing`
@@ -4105,17 +4105,64 @@ test("row names every token a rewrite dropped on stderr, and nothing when it dro
   const { run } = tokenFixture(t, [SETTLED_ROW]);
   const dropped = run("row", "5", "impl-5=PR#9 → PR#9 · ports=16324");
   assert.match(dropped.stderr, /rewrote row #5; dropped: ci=1:1:success\n$/);
-  const several = run("row", "5", "ports=16324");
-  assert.match(several.stderr, /rewrote row #5; dropped: impl-5=PR#9 → PR#9\n$/, "member tokens and the arrow are named too, the separators are not");
-  const none = run("row", "5", "ports=16324 · extra");
+  const several = run("row", "5", "impl-5=PR#9");
+  assert.match(several.stderr, /rewrote row #5; dropped: → PR#9 ports=16324\n$/, "the arrow and freeform tokens are named too, the separators are not");
+  const none = run("row", "5", "impl-5=PR#9 · ports=16324 · extra");
   assert.match(none.stderr, /    rewrote row #5\n$/);
   assert.doesNotMatch(none.stderr, /dropped/, "a rewrite that lost nothing says no `dropped`");
-  const reordered = run("row", "5", "extra ports=16324");
+  const reordered = run("row", "5", "extra impl-5=PR#9 ports=16324");
   assert.match(reordered.stderr, /    rewrote row #5\n$/);
   assert.doesNotMatch(reordered.stderr, /dropped/, "moving tokens drops none");
+  const live = tokenFixture(t, ["#6 impl-6 · ports=16326"]);
+  assert.match(live.run("row", "6", "ports=16326").stderr, /rewrote row #6; dropped: impl-6\n$/, "a live member token is named when dropped, and the write lands");
   const dup = tokenFixture(t, ["#7 a · b · b"]);
   assert.match(dup.run("row", "7", "a · b").stderr, /rewrote row #7; dropped: b\n$/, "a duplicate counts once per copy lost");
   const fresh = dup.run("row", "9", "fresh").stderr;
   assert.match(fresh, /    new row #9\n$/);
   assert.doesNotMatch(fresh, /dropped/, "a new row drops nothing");
+});
+
+const SETTLED_DROP = /a rewrite must carry every settled member token as the row holds it/;
+
+test("row refuses a rewrite that drops a settled member token, naming the first one, and writes nothing", (t) => {
+  const { refused } = tokenFixture(t, [SETTLED_ROW, "#6 impl-6=PR#12 · fix-pr-12=applied:abcdef1 · finisher-pr-12=labelled · ports=16326"]);
+  const named = (token) => new RegExp(`drops settled member token '${token.replace(/[#=:]/g, "\\$&")}' — ${SETTLED_DROP.source}`);
+  // The reported lookup: a bare PR number, an omitted token and a changed outcome.
+  refused(["row", "5", "9"], named("impl-5=PR#9"));
+  refused(["row", "5", "ports=16324 · ci=1:1:success"], named("impl-5=PR#9"));
+  refused(["row", "5", "impl-5=PR#8 → PR#9 · ports=16324 · ci=1:1:success"], named("impl-5=PR#9"));
+  refused(["row", "5", "impl-5=bailed · ports=16324"], named("impl-5=PR#9"));
+  // The same for a fix-applier's and a finisher's settled token, and with one
+  // of two settled tokens dropped.
+  refused(["row", "6", "impl-6=PR#12 · finisher-pr-12=labelled"], named("fix-pr-12=applied:abcdef1"));
+  refused(["row", "6", "impl-6=PR#12 · fix-pr-12=applied:abcdef1"], named("finisher-pr-12=labelled"));
+  refused(["row", "6", "impl-6=PR#12 · fix-pr-12=no-op · finisher-pr-12=labelled"], named("fix-pr-12=applied:abcdef1"));
+  refused(["row", "6", "impl-6=PR#12 · fix-pr-12=applied:abcdef1 · finisher-pr-12=halted:rebase"], named("finisher-pr-12=labelled"));
+  refused(["row", "6", "12"], named("impl-6=PR#12"));
+});
+
+test("row accepts a rewrite that carries every settled member token, whatever else it adds, drops or reorders", (t) => {
+  const { run, rows } = tokenFixture(t, [SETTLED_ROW, "#6 impl-6=PR#12 · fix-pr-12=applied:abcdef1 · finisher-pr-12=labelled · ports=16326"]);
+  const r = run("row", "6", "note · finisher-pr-12=labelled · impl-6=PR#12 · fix-pr-12=applied:abcdef1");
+  assert.match(r.stderr, /rewrote row #6; dropped: ports=16326\n$/, "dropped non-member tokens are still listed on stderr");
+  assert.deepEqual(rows()[1], "#6 note · finisher-pr-12=labelled · impl-6=PR#12 · fix-pr-12=applied:abcdef1");
+  run("row", "5", "impl-5=PR#9 → PR#9 · ci=2:1:success · ports=1");
+});
+
+test("row lets a rewrite add, drop or change a live member token, and drop a malformed one but never add one", (t) => {
+  const { run, refused, rows } = tokenFixture(t, ["#5 impl-5=PR#9 · fix-pr-9 · finisher-pr-9", "#7 impl-7 · fix-pr-7=bogus"]);
+  run("row", "5", "impl-5=PR#9 · fix-pr-9 · merge-bot-2 · ports=1");
+  assert.deepEqual(rows()[0], "#5 impl-5=PR#9 · fix-pr-9 · merge-bot-2 · ports=1");
+  run("row", "5", "impl-5=PR#9");
+  assert.deepEqual(rows()[0], "#5 impl-5=PR#9");
+  run("row", "7", "impl-7");
+  assert.deepEqual(rows()[1], "#7 impl-7");
+  refused(["row", "7", "impl-7 · fix-pr-7=bogus"], /malformed member token 'fix-pr-7=bogus'/);
+  refused(["row", "5", "impl-5=PR#9 · fix-pr-9=bogus"], /malformed member token 'fix-pr-9=bogus'/);
+});
+
+test("row refuses nothing new for a row that does not exist yet", (t) => {
+  const { run, rows } = tokenFixture(t, ["#5 impl-5"]);
+  run("row", "8", "impl-8=PR#20 · fix-pr-20=applied:abcdef1");
+  assert.deepEqual(rows()[1], "#8 impl-8=PR#20 · fix-pr-20=applied:abcdef1");
 });

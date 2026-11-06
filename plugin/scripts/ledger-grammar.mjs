@@ -511,6 +511,27 @@ export function gateVerdictRefusal(oldLine, line) {
   return `reorders its Gate verdicts — ${carried}`;
 }
 
+/**
+ * Why `ledger.mjs row` must not write `line` over `oldLine` (null for a new
+ * row), or null when it may: every settled member token the row holds — a
+ * token parseToken() reads with no error and an outcome — must be on the
+ * rewrite as the row holds it, duplicates counted. A token whose outcome
+ * changed is a dropped one, since its old text is gone. The reason names the
+ * first dropped token, in the row's order. A live member token may come or go,
+ * and a malformed one may be dropped (adding one is refused by the caller's
+ * own malformed-token check), so a row can still be repaired.
+ */
+export function settledMemberRefusal(oldLine, line) {
+  const settled = (text) => (text === null ? [] : text.split(/\s+/).filter((w) => {
+    const t = parseToken(w);
+    return t !== null && t.error === null && t.outcome !== null;
+  }));
+  const lost = added(settled(line), settled(oldLine))[0];
+  if (lost === undefined) return null;
+  return `drops settled member token '${lost}' — a rewrite must carry every settled member token as the row holds it; `
+    + "pass the complete reconstructed line, use `ledger.mjs token` to add a non-member token, and `ledger.mjs read` to look a row up";
+}
+
 // Every row key a ledger's rows map to each PR number under rowNums(), in
 // ledger order.
 function prRowKeys(rows) {

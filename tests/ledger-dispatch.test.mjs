@@ -705,18 +705,19 @@ test("row accepts a label-off naming a finisher in ## Dispatched or on any row, 
   ok("dispatch", "10", "impl-10");
   ok("settle", "impl-10", "PR#40");
   ok("dispatch", "40", "finisher-pr-40");
-  ok("settle", "finisher-pr-40", "labelled");
-  // Only in `## Dispatched`: a whole-line rewrite dropped the settled token
-  // from the row first, so no row names the attempt any more.
+  // Only in `## Dispatched`: a whole-line rewrite drops the live token from
+  // the row, so no row names the attempt any more.
   ok("row", "10", "impl-10=PR#40 → PR#40");
   ok("row", "10", "impl-10=PR#40 → PR#40 label-off=finisher-pr-40");
+  // Settled in `## Dispatched` and on the row, which a rewrite must carry.
+  ok("settle", "finisher-pr-40", "labelled");
+  const held = read().rows[0];
+  assert.match(held, /finisher-pr-40=labelled/);
+  ok("row", "10", held.slice("#10 ".length));
   // Only on a row — a token `row` wrote never enters `## Dispatched`.
   ok("row", "50", "finisher-pr-50");
   ok("row", "50", "finisher-pr-50 label-off=finisher-pr-50");
-  assert.deepEqual(read().rows, [
-    "#10 impl-10=PR#40 → PR#40 label-off=finisher-pr-40",
-    "#50 finisher-pr-50 label-off=finisher-pr-50",
-  ]);
+  assert.deepEqual(read().rows, [held, "#50 finisher-pr-50 label-off=finisher-pr-50"]);
   assert.deepEqual(read().dispatched, ["impl-10=PR#40", "finisher-pr-40=labelled"]);
 });
 
