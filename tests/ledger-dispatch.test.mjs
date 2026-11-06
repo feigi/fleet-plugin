@@ -360,11 +360,12 @@ test("every verb but dispatch merge-bot and settle --from-report runs with no La
   ok("ruled", "70", "kept");
   ok("dispatch", "8", "impl-8");
   ok("dispatch", "70", "fix-pr-70");
+  ok("settle", "fix-pr-70", "killed");
   ok("settle", "impl-8", "PR#70");
   ok("review", "70", "review=member:review-pr-70");
   ok("drain", "stop for the test");
   ok("undrain", "resume");
-  assert.deepEqual(read().rows, ["#8 impl-8=PR#70 · class=routine · tier=slow-high · fix-pr-70 · review=member:review-pr-70"]);
+  assert.deepEqual(read().rows, ["#8 impl-8=PR#70 · class=routine · tier=slow-high · fix-pr-70=killed · review=member:review-pr-70"]);
   assert.equal(existsSync(join(root, ".fleet", "labels.json")), false);
 });
 
@@ -728,11 +729,12 @@ test("row accepts a label-off naming a finisher in ## Dispatched or on any row, 
 // the cockpit drew two REVIEW cards and the tick's `byPr`, first-row-wins until
 // #2283, lost the live review. The settle folds the PR-keyed row into the ticket row.
 test("settle impl-N=PR#M folds the PR-keyed row a pre-settle dispatch created into the ticket row", (t) => {
-  const { ok, read, rule } = fixture(t);
+  const { ok, read, rule, put } = fixture(t);
   rule(1301, "1", "yes", [1300]);
   ok("dispatch", "1300", "impl-1300");
   assert.equal(ok("dispatch", "1301", "fix-pr-1301").line, "#1301 fix-pr-1301");
-  assert.equal(ok("review", "1301", "review=member:review-pr-1301").row, "#1301");
+  // A ledger from before `review` refused a launch beside a live fix-applier.
+  put("1301", "fix-pr-1301 · review=member:review-pr-1301");
   assert.deepEqual(read().rows, ["#1300 impl-1300", "#1301 fix-pr-1301 · review=member:review-pr-1301"]);
 
   const folded = "#1300 impl-1300=PR#1301 · fix-pr-1301 · review=member:review-pr-1301";
@@ -882,6 +884,66 @@ test("dispatch refuses a third fix-applier after two failed since the latest rev
   assert.ok(read().rows[0].endsWith(" · fix-pr-21-c"), read().rows[0]);
 });
 
+// A review comes before any fix and never overlaps one: the tick holds a fix
+// back while its PR has a review running, and `dispatch` refuses it off the
+// same fold, naming the open launch and the two ways out.
+test("dispatch refuses a fix-applier of any suffix while a review of its PR is in flight, and writes it once the review returns or fails", (t) => {
+  const { ok, put, refused, read } = fixture(t);
+  put("20", "impl-20=PR#21 · review=member:review-pr-21");
+  for (const name of ["fix-pr-21", "fix-pr-21-b"]) {
+    refused(["dispatch", "21", name],
+      /fix-pr-21(-b)?: a review of PR #21 is in flight \(review=member:review-pr-21\).*`ledger\.mjs review 21 --result <path>`.*`ledger\.mjs review 21 review=member:review-pr-21=failed`/);
+  }
+  refused(["dispatch", "20", "fix-pr-21"], /a review of PR #21 is in flight/);
+  ok("review", "21", "reviewed=abc1234:1/0/0:run-abc1234r");
+  assert.equal(ok("dispatch", "21", "fix-pr-21").agent, "fleet-fix-applier");
+  ok("settle", "fix-pr-21", "failed");
+  ok("review", "21", "review=member:review-pr-21-b");
+  refused(["dispatch", "21", "fix-pr-21-b"], /in flight \(review=member:review-pr-21-b\)/);
+  ok("review", "21", "review=member:review-pr-21-b=failed");
+  assert.equal(ok("dispatch", "21", "fix-pr-21-b").agent, "fleet-fix-applier");
+  assert.ok(read().rows[0].endsWith(" · fix-pr-21-b"), read().rows[0]);
+});
+
+test("dispatch refuses a fix-applier on no PR but the one with a review in flight", (t) => {
+  const { ok, put } = fixture(t);
+  put("20", "impl-20=PR#21 · review=member:review-pr-21");
+  put("30", "impl-30=PR#31 · review=member:review-pr-31 reviewed=abc1234:1/0/0:run-abc1234r");
+  assert.equal(ok("dispatch", "31", "fix-pr-31").agent, "fleet-fix-applier", "another PR's open launch refuses nothing");
+});
+
+// The tick prints no line the ledger refuses: `DISPATCH review PR#<M>` is a
+// launch `ledger.mjs review` writes, `DISPATCH fix-pr PR#<M>` a dispatch
+// `ledger.mjs dispatch` writes — through a never-reviewed PR under a conflict
+// hold, and a PR whose finisher halted past-pin under one.
+test("the tick's DISPATCH review and DISPATCH fix-pr are each a write the ledger accepts, review first on a held PR", (t) => {
+  const { ok, read, put, refused } = fixture(t);
+  const HEAD = `def5678${"0".repeat(33)}`;
+  const tick = () => {
+    const l = read();
+    const prs = [21, 31].map((number) => ({
+      number, labels: [], closingIssuesReferences: [{ number: number - 1 }], headRefOid: HEAD, mergeable: "MERGEABLE", body: "", owned: true,
+    }));
+    const r = deriveRun({ rows: l.rows, dispatched: l.dispatched, drain: null }, prs, "ready-to-merge");
+    return { review: r.reviewDue, fix: r.fixDue };
+  };
+  put("20", "impl-20=PR#21 · conflict-hold:#21");
+  put("30", "impl-30=PR#31 · review=member:review-pr-31 reviewed=abc1234:0/0/0:run-abc1234r · finisher-pr-31=halted:past-pin · conflict-hold:#31");
+  assert.deepEqual(tick(), { review: [21, 31], fix: [] });
+  ok("review", "21", "review=member:review-pr-21");
+  ok("review", "31", "review=member:review-pr-31-b");
+  assert.deepEqual(tick(), { review: [], fix: [] });
+  refused(["dispatch", "21", "fix-pr-21"], /a review of PR #21 is in flight/);
+  refused(["dispatch", "31", "fix-pr-31"], /a review of PR #31 is in flight/);
+  ok("review", "21", "reviewed=abc1234:0/0/0:run-abc1234r");
+  ok("review", "31", "reviewed=def5678:0/0/0:run-def5678r");
+  assert.deepEqual(tick(), { review: [], fix: [21, 31] });
+  ok("dispatch", "21", "fix-pr-21");
+  ok("dispatch", "31", "fix-pr-31");
+  assert.deepEqual(tick(), { review: [], fix: [] });
+  refused(["review", "21", "review=member:review-pr-21-b"], /fix-pr-21 is still live on PR #21/);
+});
+
 test("the fold takes the PR row's settled tokens in order, under the two-argument spelling, wherever the PR row sits", (t) => {
   const { ok, read, put } = fixture(t);
   // The PR's row comes first here, and a third row follows the ticket's.
@@ -955,11 +1017,12 @@ test("settle does not fold when its own row already names a PR", (t) => {
   ok("settle", "impl-100", "PR#150");
   ok("dispatch", "100", "impl-100-b");
   ok("dispatch", "160", "fix-pr-160");
+  ok("settle", "fix-pr-160", "killed");
   ok("review", "160", "review=member:review-pr-160");
   assert.equal(ok("settle", "impl-100-b", "PR#160").line, "#100 impl-100=PR#150 · impl-100-b=PR#160");
   assert.deepEqual(read().rows, [
     "#100 impl-100=PR#150 · impl-100-b=PR#160",
-    "#160 fix-pr-160 · review=member:review-pr-160",
+    "#160 fix-pr-160=killed · review=member:review-pr-160",
   ]);
 });
 

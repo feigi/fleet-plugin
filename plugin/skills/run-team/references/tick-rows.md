@@ -28,8 +28,11 @@ The full text of each row `fleet-tick.mjs` prints and what it asks of the contro
 - `DISPATCH fix-pr PR#<M> …` — a fix-applier per PR, for a review's survived or unverified findings,
   a dispositions mismatch no retry has answered, or a `conflict-hold:#<M>` — the merge bot's, or one you recorded off a `CONFLICT` line (**The fix-applier**). Printed
   ahead of reviews on purpose: finishing what is started beats starting more.
+  It never names a PR that is owed a review or has one running, and
+  `ledger.mjs dispatch` refuses one while a review is in flight.
 - `DISPATCH review PR#<M> …` — a review per PR, oldest first, off your turn
-  (**The reviewer**).
+  (**The reviewer**). It never names a PR with a live fix-applier or
+  finisher, and `ledger.mjs review` refuses a launch while one is live.
 - `DISPATCH merge-bot` — the next `merge-bot-<n>` (**The merge bot**). The `<scratch>` its brief takes is the absolute `scratch-root.mjs` output, and the bot writes only under `<scratch>/pr<N>/merge-bot-<n>/`.
 - `DISPATCH finisher PR#<M> …` — a finisher settled `labelled`, yet the open
   list shows PR M without `ready-to-merge`, and no `label-off=` (references/ledger.md)
@@ -59,7 +62,7 @@ The full text of each row `fleet-tick.mjs` prints and what it asks of the contro
   every hold. A review in flight does not stop the
   line: `fix-due` waits for the review to return. It prints under a
   main-checkout hold and a drain too, since it writes a record and dispatches
-  nothing.
+  nothing. `fix-due` waits the same for a review the PR is owed.
 - `ESCALATE conflict PR#<M> …` — PR M reads CONFLICTING again after two
   conflict fix-appliers landed on it: a rebase treadmill. Comment on the PR
   and flag it for a human; write no hold and dispatch no fix-applier. Not

@@ -34,7 +34,7 @@
 // argv[1].
 import { assessBeat, isStalled, isReported, stallReport, NO_OWNER } from "./fleet-state.mjs";
 import { parseToken, rowPr, premisesOf, HALT_CAUSES, REVIEW, CELL, POLICY_CELL, parseRoutedEntry, tierValues, cellValues, isRulePath } from "./ledger-grammar.mjs";
-import { latestFinisherAttempts, foldLedger, pastPinDue } from "./fleet-tick.mjs";
+import { latestFinisherAttempts, foldLedger, pastPinDue, reviewHeld } from "./fleet-tick.mjs";
 import { computeCellEvidence } from "./compute-cell-evidence.mjs";
 import { admissibleRow, lastSegment } from "./pull-attribution.mjs";
 import { dispatchModel } from "./member-outcomes.mjs";
@@ -708,11 +708,10 @@ export function computeBoard(inputs) {
   const latestFinishers = new Map(latestFinisherAttempts({ rows, dispatched: ledger.dispatched || [] }, unqueued).map((u) => [u.pr, u.outcome]));
   // Review state is the PR's, read off the tick's own fold — a card's
   // PR is its row's latest attempt, whichever row carries that PR's tokens.
-  const liveMember = (names) => [...names].some((n) => fold.members.get(n).outcome === null);
   const reviewOwed = (prNum) => {
     const st = fold.byPr.get(prNum);
     if (st === undefined) return true;
-    if (st.inFlight || liveMember(st.fixMembers) || liveMember(st.finishers)) return false;
+    if (reviewHeld(st, fold.members)) return false;
     return !st.reviewedAny || pastPinDue(st, prByNum.get(prNum)?.headRefOid);
   };
   const rowIssues = new Set();

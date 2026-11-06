@@ -68,8 +68,9 @@ for (const { row, own, keyed, board } of FIXTURES) {
     assert.equal(parseRow(row).pr, board, "compute-board parseRow");
     // `ledger.mjs dispatch <pr> fix-pr-<pr>` lands on the row the tick folds
     // that PR's state from: this row when it is the PR's, else a row keyed
-    // by the PR's own number.
-    const cli = ledger(t, [row]);
+    // by the PR's own number. A fix-applier waits for a review in flight, so
+    // the launches the row carries are settled failed for the dispatch.
+    const cli = ledger(t, [row.replace(/\breview=(?:wf|member):\S+/g, "$&=failed")]);
     const key = row.split(" ")[0];
     assert.equal(cli("dispatch", String(keyed), `fix-pr-${keyed}`).ticket, key, "ledger.mjs memberRowIndex");
     for (const other of [481, 471].filter((n) => n !== own && row.includes(`PR#${n}`))) {

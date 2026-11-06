@@ -63,6 +63,10 @@
     [
       "A rule without that line carries its reasoning inline — nothing is missing.",
       "A rule ending `See references/<file>` keeps its war story there, read only for the *why*; a rule without that line carries its reasoning inline."
+    ],
+    [
+      "Never enqueue the PR as reviewed — the workflow is not a member, so no other row here covers it |",
+      "Never enqueue the PR as reviewed |"
     ]
   ],
   "deleted": [

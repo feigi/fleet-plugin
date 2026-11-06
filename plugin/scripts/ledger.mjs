@@ -75,7 +75,7 @@ import { makeDie, isFlagLike, hasEqualsForm, isDigits, writeAll } from "./arg.mj
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { readReceipt } from "./phase0-receipt.mjs";
 import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, settledOnLedger, retiredOnLedger, retiredName, readRetired, agentDefinition, expectedDefinition, CELL, POLICY_CELL, tierValues, cellValues, decidingCell, rowPr, rowNums, rowWriteRefusal, isReviewToken, addedReviewToken, isDispositionsWord, gateVerdictWriter, gateVerdictRefusal, settledMemberRefusal, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, HALT_CAUSES, ROWS, DISPATCHED, ROUTED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, CLOSEOUT_RECEIPT, closeoutArchiveName, BRIEFS, briefsArchiveName, memberRole, parseDispatchedEntry, dispatchedEntry, parseRouting, parseRoutedEntry, routedEntry, headerRe, escapeText, ledgerSection, nextReviewerName, isOmpSessionDirName } from "./ledger-grammar.mjs";
-import { deriveRun, LedgerError, labelOffMember, CONFLICT_HOLD, PARKED } from "./fleet-tick.mjs";
+import { deriveRun, foldLedger, liveFixers, LedgerError, labelOffMember, CONFLICT_HOLD, PARKED } from "./fleet-tick.mjs";
 import { stateFileIn, readState, writeState, assessBeat, stallsAt } from "./fleet-state.mjs";
 import { processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "./proc.mjs";
 import { attemptLock, releaseLockFile, reapPathOf } from "./pid-lock.mjs";
@@ -2387,6 +2387,19 @@ function queueSnapshot() {
   return [...new Set(prs)].sort((a, b) => a - b);
 }
 
+// The tick's per-PR fold of `rows` and this ledger's `## Dispatched` — `byPr`
+// states and the merged `members` — the one reading the tick's review gate
+// (`reviewHeld`) and its fix gate read. A ledger the fold refuses dies as
+// `refusal(message)` says, exit 2.
+function prFold(rows, refusal) {
+  try {
+    return foldLedger({ rows, dispatched: data.dispatched }, new Set());
+  } catch (e) {
+    if (!(e instanceof LedgerError)) throw e;
+    die(refusal(e.message));
+  }
+}
+
 async function runDispatch() {
   const usage = "usage: ledger.mjs dispatch <ticket|pr> <member>, or dispatch merge-bot";
   if (rest.length === 0 || rest.length > 2) die(usage);
@@ -2507,8 +2520,17 @@ async function runDispatch() {
   // `failed` since its latest review with none landed after them — read off
   // the tick's own fold, the one its `ESCALATE fix-failed` row reads, so a
   // hand-dispatched one is refused like the tick's. A new review restarts the
-  // count.
+  // count. Before that, no fix-applier on a PR a review of which is in
+  // flight, read off the same fold (`openLaunch`): a review comes before any
+  // fix, and the tick holds `fixDue` back the same way.
   if (member.family === "fix-pr") {
+    const st = prFold(data.rows, (why) => `${why} — fleet-tick.mjs refuses this ledger, so ${member.name}'s review state cannot be read off it; fix it with \`ledger.mjs row\` before dispatching`)
+      .byPr.get(member.number);
+    if (st !== undefined && st.inFlight) {
+      die(`${member.name}: a review of PR #${member.number} is in flight (${st.openLaunch}) — a fix-applier never overlaps a review of its PR; `
+        + `wait for its result (\`ledger.mjs review ${member.number} --result <path>\`), or settle its launch failed: `
+        + `\`ledger.mjs review ${member.number} ${st.openLaunch}=failed\` — not dispatching ${member.name}`);
+    }
     const failed = tickFold("fix-applier failure count").fixFailed.find((f) => f.pr === member.number);
     if (failed !== undefined) {
       die(`${member.name}: ${failed.members.join(", ")} settled failed on PR #${member.number} since its latest review — the fleet dispatches no third fix-applier; `
@@ -3279,7 +3301,9 @@ function reviewResultToken(pr, path, scratchArg) {
 // A result token the PR's rows already carry is not written again: with no
 // launch in the call, exit 0 with nothing written. The whole ledger before
 // and after is judged by rowWriteRefusal() under the lock, and a refusal
-// writes nothing. The receipt names the derived token as `reviewed`, with
+// writes nothing. A write that leaves a new launch open is refused while a
+// fix-applier or finisher on the PR is live, read off the tick's fold:
+// a review never overlaps either. The receipt names the derived token as `reviewed`, with
 // `written` saying whether this call put it on the row, and its `next` is the
 // runner name the PR's next launch takes as the ledger stands after the
 // write, null with every letter taken.
@@ -3342,6 +3366,20 @@ function runReview() {
   const after = created ? [...data.rows, line] : data.rows.with(i, line);
   const refusal = rowWriteRefusal(data.rows, after, oldLine, line, retired);
   if (refusal !== null) die(`review #${prNum}: ${refusal}`);
+  // A launch this write leaves open starts a review that reads the head
+  // before a live fix-applier or finisher on the PR pushes, and its
+  // `reviewed=` would then sit after that push's token. Settling a launch
+  // `=failed`, recording a result, or a launch with its own result in the same
+  // call leave none open, so none is refused.
+  if (tokens.some((tok) => tok.startsWith("review=") && !tok.endsWith("=failed"))) {
+    const fold = prFold(after, (why) => `review #${prNum}: ${why} — fleet-tick.mjs refuses this ledger, so the members live on PR #${prNum} cannot be read off it; fix it with \`ledger.mjs row\`; nothing written`);
+    const st = fold.byPr.get(prNum);
+    const live = st === undefined || !st.inFlight ? [] : liveFixers(st, fold.members);
+    if (live.length > 0) {
+      die(`review #${prNum}: ${live.join(", ")} is still live on PR #${prNum} — a review never overlaps a fix-applier or finisher on its PR; `
+        + `\`ledger.mjs settle ${live[0]} <outcome>\` or wait for its report before launching the review; nothing written`);
+    }
+  }
   data.rows = after;
   save(data);
   const key = rowKey(line);
