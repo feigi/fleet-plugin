@@ -564,6 +564,41 @@ test("alarm: a file naming this .fleet/ through a symlinked spelling passes, bef
   assert.equal(f.run().status, 0);
 });
 
+test("alarm: phase 0's own .fleet/ spelled through a symlink is the same .fleet/ as the file's real spelling, and the output keeps phase 0's spelling", () => {
+  const f = fixture();
+  const link = join(f.dir, "link");
+  symlinkSync(f.repo, link);
+  // An absolute GIT_COMMON_DIR is the way git answers `--git-common-dir` as spelled, so phase 0 derives its own `.fleet/` through the link.
+  const env = { GIT_COMMON_DIR: join(link, ".git") };
+  const real = join(f.repo, ".fleet");
+  f.alarm({ pid: OMP, lstart: "omp-start", fleet: real });
+  const r = f.run(null, { env });
+  assert.equal(r.status, 0, r.stdout + r.err);
+  assert.equal(f.receipt().steps.alarm.status, "ok");
+  assert.equal(f.receipt().steps.alarm.output, `controller alarm armed: pid ${OMP}, ${join(link, ".fleet")}`);
+  // Another checkout's `.fleet/` is still refused from the same spelling.
+  const other = join(f.dir, "other-checkout");
+  mkdirSync(other);
+  f.alarm({ pid: OMP, lstart: "omp-start", fleet: join(other, ".fleet") });
+  const refused = f.run(null, { env });
+  assert.equal(refused.status, 3, refused.stdout + refused.err);
+  assert.match(refused.stdout, /^phase0: alarm: failed — controller alarm file .* names fleet .* — restart omp$/m);
+});
+
+test("alarm: a file naming another directory of this checkout is refused, through a symlink or not", () => {
+  const f = fixture();
+  const link = join(f.dir, "link");
+  symlinkSync(f.repo, link);
+  mkdirSync(join(f.repo, "other"));
+  for (const fleet of [join(f.repo, "other"), join(link, "other"), join(f.repo, "fleet"), join(link, ".fleet-other")]) {
+    f.alarm({ pid: OMP, lstart: "omp-start", fleet });
+    const r = f.run();
+    assert.equal(r.status, 3, `${fleet}: ${r.stdout}${r.err}`);
+    assert.match(r.stdout, /^phase0: alarm: failed — controller alarm file .* names fleet .* — restart omp$/m, fleet);
+    assert.equal(f.receipt().steps.alarm.status, "failed");
+  }
+});
+
 test("alarm: a file naming another checkout's .fleet/ is refused, through a symlink or not, and so is a relative one", () => {
   const f = fixture();
   const other = join(f.dir, "other-checkout");
