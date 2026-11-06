@@ -579,6 +579,17 @@ test("alarm: a file naming another checkout's .fleet/ is refused, through a syml
   }
 });
 
+test("alarm: a file whose path climbs out of a directory that does not exist is refused, though it lexically names this .fleet/", () => {
+  const f = fixture();
+  for (const fleet of [`${f.repo}/nope/../.fleet`, `${f.repo}/nope/../nope2/../.fleet`]) {
+    f.alarm({ pid: OMP, lstart: "omp-start", fleet });
+    const r = f.run();
+    assert.equal(r.status, 3, `${fleet}: ${r.stdout}${r.err}`);
+    assert.match(r.stdout, /^phase0: alarm: failed — controller alarm file .* names fleet .* — restart omp$/m, fleet);
+    assert.equal(f.receipt().steps.alarm.status, "failed");
+  }
+});
+
 test("alarm: a refusal the file's appearance clears is re-run by the next run, not skipped as ok", () => {
   const f = fixture();
   f.disarm();

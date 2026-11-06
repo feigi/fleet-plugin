@@ -600,13 +600,14 @@ function shortlist({ cwd }) {
 }
 
 // The same `.fleet/` by the directory it names: the checkout holding it is
-// resolved through symlinks and the `.fleet` name kept, so it works before
+// resolved through symlinks by the OS, so a `..` after a directory that does
+// not exist is not folded away, and the `.fleet` name kept, so it works before
 // `.fleet/` exists. A path that is not absolute, or whose checkout does not
 // resolve, stays as given.
 function fleetIdentity(path) {
   if (typeof path !== "string" || !isAbsolute(path)) return path;
   try {
-    return join(realpathSync(dirname(path)), basename(path));
+    return join(realpathSync.native(dirname(path)), basename(path));
   } catch {
     return path;
   }
