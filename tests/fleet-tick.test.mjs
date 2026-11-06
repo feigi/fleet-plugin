@@ -1298,6 +1298,12 @@ test("deriveRun: a live fix-applier or finisher on a PR holds it out of review, 
   }
   assert.deepEqual(dueAt("fix-pr-40", undefined, ["fix-pr-40=failed"]), [40], "settled in ## Dispatched alone");
   assert.deepEqual(dueAt(`${halted} · fix-pr-40=no-op`), [40], "past-pin, its fix-applier settled");
+  // Live in `## Dispatched` with its row token gone, it is still on the PR.
+  for (const live of ["fix-pr-40", "fix-pr-40-b", "finisher-pr-40"]) {
+    assert.deepEqual(dueAt("conflict-hold:#40", undefined, [live]), [], `${live} live in ## Dispatched alone`);
+  }
+  assert.deepEqual(dueAt("conflict-hold:#40", undefined, ["fix-pr-40=failed"]), [40], "settled in ## Dispatched, no row token");
+  assert.deepEqual(dueAt("conflict-hold:#40", undefined, ["fix-pr-41"]), [40], "live in ## Dispatched on another PR");
 });
 
 test("deriveRun: a live member on another PR holds no PR out of review, and a live implementer holds none on its own", () => {

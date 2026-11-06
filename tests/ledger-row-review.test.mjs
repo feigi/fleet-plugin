@@ -670,6 +670,15 @@ test("review refuses a launch that settles an open one failed in the same call w
   reviewRefused("482", [`${A}=failed`, B], /fix-pr-482 is still live/);
 });
 
+test("review refuses a launch while a fix-applier live in ## Dispatched alone is on the PR, its row token rewritten away", (t) => {
+  const { run, ok, reviewRefused, review } = fixture(t, [`#1 ${IMPL}`]);
+  run("dispatch", "482", "fix-pr-482");
+  ok("1", IMPL);
+  reviewRefused("482", [A], /fix-pr-482 is still live on PR #482/);
+  run("settle", "fix-pr-482", "killed");
+  assert.equal(review("482", A).row, "#1");
+});
+
 test("review writes with a fix-applier live when it opens no launch: a launch settled failed, a result, or a launch with its result", (t) => {
   const { review, rows } = fixture(t, [`#1 ${IMPL} · ${A} · fix-pr-482`]);
   review("482", `${A}=failed`);

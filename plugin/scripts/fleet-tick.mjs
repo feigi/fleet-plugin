@@ -860,15 +860,17 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
     // still live, never lands: none of them moves it.
     // `ledger.mjs settle --from-report` checks a fix-applier's `no-op`
     // against it. A review never overlaps a fix-applier or finisher on its PR
-    // (`reviewHeld` below, which the tick's reviewDue and fixDue and the
-    // ledger's `review` and `dispatch` all read), so a `reviewed=` never lands
+    // (`reviewHeld` below: the tick's reviewDue reads it through `reviewOwed`
+    // and fixDue waits on reviewDue, and the ledger's `review` and `dispatch`
+    // refuse its two halves), so a `reviewed=` never lands
     // after a fix-applier's push it did not read; the position rule above
     // assumes that, and assumes no row rewrite moves a settled fix-pr token
     // across a `reviewed=`. A push that no fleet member is recorded as making
     // and that no review read — a hand push, or an implementer pushing after
     // its PR opened — still leaves `fleetHead` below the branch, so the next
     // `no-op` settle exits 3.
-    // `openLaunch`: the open launch's `review=…` token, null when none.
+    // `openLaunch`: the open launch's `review=…` token — a review of the PR is
+    // in flight while it is non-null — null when none.
     // `pastPinHalt`: the latest
     // finisher since that review settled `halted:past-pin` — any
     // later finisher attempt, live or settled, replaces it, and a later
@@ -880,7 +882,7 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
     // implementer on a row resolving to it — one still unsettled holds the
     // CONFLICT line off, since it may be pushing to the branch right now.
     const st = (pr !== null && byPr.get(pr)) || {
-      inFlight: false, openLaunch: null, reviewedAny: false, survived: 0, unverified: 0, reviewFixed: false,
+      openLaunch: null, reviewedAny: false, survived: 0, unverified: 0, reviewFixed: false,
       fixMembers: new Set(), fixLanded: new Set(), conflictLanded: new Set(), fixFailed: new Set(),
       conflictOpen: false, reviewedHead: null, reviewedRun: null, fleetHead: null, fleetRetry: null, pastPinHalt: false, dispositions: [], workers: new Set(),
       finishers: new Set(), parked: [],
@@ -962,13 +964,11 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
         const m = REVIEW.exec(tok);
         if (!m && lenient) {
           malformed.add(i);
-          st.inFlight = true;
           st.openLaunch = tok;
           st.reviewedAny = true;
           continue;
         }
         if (!m) throw new LedgerError(`${where}: '${tok}' is not review=wf:<runId> | member:review-pr-<n>, optionally =failed`);
-        st.inFlight = !m.groups.failed;
         st.openLaunch = m.groups.failed ? null : tok;
         if (!m.groups.failed) st.reviewedAny = true;
       } else if (tok.startsWith("reviewed=")) {
@@ -976,7 +976,7 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
         if (!m && lenient) {
           malformed.add(i);
           latestFinisher = null;
-          Object.assign(st, { inFlight: false, openLaunch: null, reviewedAny: true, reviewFixed: false, pastPinHalt: false, fixFailed: new Set() });
+          Object.assign(st, { openLaunch: null, reviewedAny: true, reviewFixed: false, pastPinHalt: false, fixFailed: new Set() });
           continue;
         }
         if (!m && REVIEWED_RUNLESS.test(tok)) {
@@ -987,7 +987,7 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
         latestFinisher = null;
         const head = m[1].toLowerCase();
         Object.assign(st, {
-          inFlight: false, openLaunch: null, reviewedAny: true, survived: Number(m[2]), unverified: Number(m[4]), reviewFixed: false,
+          openLaunch: null, reviewedAny: true, survived: Number(m[2]), unverified: Number(m[4]), reviewFixed: false,
           reviewedHead: head, reviewedRun: m[5], fleetHead: head, fleetRetry: null, pastPinHalt: false, fixFailed: new Set(),
         });
       } else if (labelOffMember(tok) === null) {
@@ -1038,15 +1038,25 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
     }
     if (pr !== null) byPr.set(pr, st);
   }
+  // A PR-bound fix-applier or finisher is on its PR off `## Dispatched` as
+  // well as off its own PR's row: one whose row token a whole-line `row`
+  // rewrite dropped is still on the PR, live until something settles it.
+  for (const e of dispatched) {
+    const t = parseToken(e);
+    const st = t && !t.error && (t.family === "fix-pr" || t.family === "finisher-pr") ? byPr.get(t.number) : undefined;
+    if (st === undefined) continue;
+    (t.family === "fix-pr" ? st.fixMembers : st.finishers).add(t.name);
+  }
   return { members, byPr, verdicts, claimed, excluded, malformed };
 }
 
 // A PR whose latest finisher halted `past-pin` against a returned review owes
 // a fresh one while its head is still past what that review read: a
 // `reviewed=` head (7-40 hex) prefix-matching gh's full headRefOid is the head
-// that review read, and there is nothing more to review. `st` is a `byPr`
-// state, `undefined` for a PR no row names.
-export const pastPinDue = (st, head) => st !== undefined && st.pastPinHalt && !st.inFlight && st.reviewedHead !== null
+// that review read, and there is nothing more to review. `st` is a defined
+// `byPr` state with no review in flight: `reviewOwed` asks only once
+// `reviewHeld` has ruled one out.
+const pastPinDue = (st, head) => st.pastPinHalt && st.reviewedHead !== null
   && !String(head).toLowerCase().startsWith(st.reviewedHead);
 
 // The fix-appliers and finishers on a PR still live, as names: every one
@@ -1058,9 +1068,17 @@ export const liveFixers = (st, members) => [...st.fixMembers, ...st.finishers].f
 // Whether a PR is held out of review: a review of it is in flight, or a
 // fix-applier or finisher on it is live. `st` is a `byPr` state, `undefined`
 // for a PR no row names, which nothing holds. The tick's `reviewDue` and the
-// board's backlog read this one gate, and `ledger.mjs review` and `dispatch`
-// refuse the two halves of it.
-export const reviewHeld = (st, members) => st !== undefined && (st.inFlight || liveFixers(st, members).length > 0);
+// board's backlog read this one gate through `reviewOwed`, and `ledger.mjs
+// review` and `dispatch` refuse the two halves of it.
+export const reviewHeld = (st, members) => st !== undefined && (st.openLaunch !== null || liveFixers(st, members).length > 0);
+
+// Whether a PR is owed a review: not held out of review (`reviewHeld`), and
+// with no review on record, or a returned one its finisher halted `past-pin`
+// against while `head` is still past what it read (`pastPinDue`). `st` is a
+// `byPr` state, `undefined` for a PR no row names, which is owed one. The
+// tick's `reviewDue` and the board's backlog read this one rule.
+export const reviewOwed = (st, members, head) => st === undefined
+  || (!reviewHeld(st, members) && (!st.reviewedAny || pastPinDue(st, head)));
 
 // The states a PR-state probe answers: anything else is no answer.
 const PR_STATES = ["OPEN", "MERGED", "CLOSED"];
@@ -1214,16 +1232,17 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, queued
   // hold and leaves findings it never read due for a review one.
   const fixOwed = ([n, st]) => open.has(n)
     && (((st.survived > 0 || st.unverified > 0) && !st.reviewFixed) || conflictHeld(st) || mismatchDue(st))
-    && !fixRunning(st) && !st.inFlight;
+    && !fixRunning(st) && st.openLaunch === null;
   // The PRs owed a fix-applier, split below by `fixEscalated` into `fixDue`
   // and `fixEscalate`, as `conflicting` is into `conflicts` and
   // `conflictEscalate`.
   const owed = [...byPr.entries()].filter(fixOwed);
   // Open, not signed off, owned (openPrs() reads that off the PR's author
   // and draft flag; a PR closing no issue is as due as one closing one),
-  // and not held out of review (`reviewHeld`: a review in flight, or a
-  // fix-applier or finisher on it live), with no returned review on
-  // record — or a returned review its finisher halted `past-pin` against: the
+  // and owed a review (`reviewOwed`): not held out of review (`reviewHeld`:
+  // a review in flight, or a fix-applier or finisher on it live), with no
+  // returned review on record — or a returned review its finisher halted
+  // `past-pin` against: the
   // head carries commits no reviewer read, so it is owed a review again
   // until one is running or has returned. A head that moved past
   // `reviewed=` with no such halt — a fix-applier's push — stays not due:
@@ -1231,8 +1250,7 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, queued
   // fix-applier until it returns: the review reads the head before any fix
   // lands, and a fix-applier's push is never re-reviewed.
   const reviewDue = prs
-    .filter((p) => !isQueued(p) && p.owned && !reviewHeld(state(p.number), members)
-      && (!state(p.number)?.reviewedAny || pastPinDue(state(p.number), p.headRefOid)))
+    .filter((p) => !isQueued(p) && p.owned && reviewOwed(state(p.number), members, p.headRefOid))
     .map((p) => p.number).sort(asc);
   const owedReview = new Set(reviewDue);
   // A `review=` token with no `reviewed=` after it reads as in flight, and the
@@ -1242,7 +1260,7 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, queued
   // finished, and a finished PR has no review running against it. A PR on the
   // open list is open whatever the probe says, and none is the default, so a
   // PR nobody has asked about keeps its review live.
-  const reviewing = [...byPr.entries()].filter(([, st]) => st.inFlight);
+  const reviewing = [...byPr.entries()].filter(([, st]) => st.openLaunch !== null);
   const finished = (n) => prStates.get(n) === "MERGED" || prStates.get(n) === "CLOSED";
   const liveReviews = reviewing.filter(([n]) => open.has(n) || !finished(n));
   const unsettled = all.filter((m) => m.outcome === null).map((m) => m.name);

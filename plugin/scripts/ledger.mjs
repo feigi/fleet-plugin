@@ -2526,7 +2526,7 @@ async function runDispatch() {
   if (member.family === "fix-pr") {
     const st = prFold(data.rows, (why) => `${why} — fleet-tick.mjs refuses this ledger, so ${member.name}'s review state cannot be read off it; fix it with \`ledger.mjs row\` before dispatching`)
       .byPr.get(member.number);
-    if (st !== undefined && st.inFlight) {
+    if (st !== undefined && st.openLaunch !== null) {
       die(`${member.name}: a review of PR #${member.number} is in flight (${st.openLaunch}) — a fix-applier never overlaps a review of its PR; `
         + `wait for its result (\`ledger.mjs review ${member.number} --result <path>\`), or settle its launch failed: `
         + `\`ledger.mjs review ${member.number} ${st.openLaunch}=failed\` — not dispatching ${member.name}`);
@@ -3374,7 +3374,7 @@ function runReview() {
   if (tokens.some((tok) => tok.startsWith("review=") && !tok.endsWith("=failed"))) {
     const fold = prFold(after, (why) => `review #${prNum}: ${why} — fleet-tick.mjs refuses this ledger, so the members live on PR #${prNum} cannot be read off it; fix it with \`ledger.mjs row\`; nothing written`);
     const st = fold.byPr.get(prNum);
-    const live = st === undefined || !st.inFlight ? [] : liveFixers(st, fold.members);
+    const live = st?.openLaunch ? liveFixers(st, fold.members) : [];
     if (live.length > 0) {
       die(`review #${prNum}: ${live.join(", ")} is still live on PR #${prNum} — a review never overlaps a fix-applier or finisher on its PR; `
         + `\`ledger.mjs settle ${live[0]} <outcome>\` or wait for its report before launching the review; nothing written`);
