@@ -75,6 +75,12 @@ second run finds its writes already made and re-ticks.
 | `drain` | `--reason` | `closeout.mjs begin` (spec 3) |
 | `member-died` | `<member>` | the session's markers name the outcome: a `.jsonl.tombstone` is `killed`; a `.md` is `failed` for `fix-pr` and `finisher-pr`, `killed` for `merge-bot`, and refused for `impl`; a transcript with no marker, a report on disk or a review runner refuses; no transcript is `killed` once the first-seen stamp is over five minutes old, and refused before that. Then `ledger.mjs settle <member>=<outcome>` |
 
+*Amended (#4211, implemented by #4359): the `review-result` row no longer
+holds. The wake does not read the digest and passes no `reviewed=` word: it
+runs `ledger.mjs review <pr> --result <path> --scratch <scratch>`, which
+derives `reviewed=` from the review result file at `<path>`, and `review`
+refuses a `reviewed=` among its arguments, parseable or not. See ADR 0038.*
+
 `member-died` takes no outcome argument: its outcome is read from the
 session directory's listing, never passed.
 
