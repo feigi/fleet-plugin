@@ -1,0 +1,70 @@
+{
+  "pr": 4351,
+  "head": "d403eb2f6c790284bb0b7ceaad97ace0c26532c7",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": false,
+    "reason": "no suite slot within 1800 s — the host is at its suite bound; not a test failure"
+  },
+  "dimensionsRun": [
+    "correctness",
+    "tests",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv' (I wrote nothing there; these changes were already in the checkout)"
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I made no writes there; I ran only pwd and git status in it, so these edits predate this review or come from another agent."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin —  M docs/metrics/ticket-features.tsv,  M docs/metrics/tier-outcomes.tsv (not written by this review; no command of mine targeted that tree beyond `pwd` and this status)"
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 2,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4351/run-9Q0NHFUF/snapshot-d403eb2f",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "tests/suite-slot.test.mjs",
+      "line": 160,
+      "claim": "A wrapper that prints the time left rounded to whole seconds (`Math.ceil(left / 1000)` or `Math.round(left / 1000)`) still passes the renamed waiting-line test, because a 40 ms offset under a 3 s cap gives left≈2.96 s, which rounds back to 3.",
+      "evidence": "In correctness/copy, replaced `${waitMs / 1000}s` in plugin/scripts/suite-slot.mjs:179 and ran `node --test --test-reporter=tap --test-name-pattern='round its loop' tests/suite-slot.test.mjs`: Math.ceil mutant → run1/2/3 exit=0, 'ok 1 - a wait that goes round its loop more than once prints its waiting line once, naming the cap, before it gives up'; Math.round mutant → run1 exit=0, same ok. Control: `left / 1000` mutant → exit=1 in 3/3 ('waiting up to 2.959s' etc.). So the PR meets the ticket's named acceptance mutant exactly, but not the brief's wider 'goes red when the announce prints the time left'.",
+      "suggested_fix": "Optional, and it conflicts with the brief's 'tens of milliseconds' wording, so triage should decide. Killing the integer-rounded mutants needs an offset of at least 1000 ms with a cap that still loops more than once, for example FLEET_SUITE_WAIT_S '4' and offset 1000: left=3000 prints 3, not 4, and after the 2 s sleep 1000 ms remain, so it still goes round twice. The alternative is to record this as a known survivor in a follow-up ticket.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/suite-slot.test.mjs",
+      "line": 64,
+      "claim": "The 40 ms late-clock offset is too small to catch a waiting line that prints round() or ceil() of the time left. Only floor, or the raw unrounded value, fails the test.",
+      "evidence": "red (floor): node --test --test-name-pattern='goes round its loop' tests/suite-slot.test.mjs → exit 1, fail 1 incl 'a wait that goes round its loop more than once prints its waiting line once, naming the cap, before it gives up' (actual 'waiting up to 2s', expected '3s'); baseline: same command on the unmutated tree → exit 0, tests 1, pass 1, cancelled 0, that test passes. Survivors: Math.round(left/1000) and Math.ceil(left/1000) at suite-slot.mjs:179 both stayed green (exit 0, pass 1). With left ≈ 2960 ms both print 3, so the test passes by accident of rounding.",
+      "suggested_fix": "Raise the offset to something like 600 ms. left is then about 2.4 s, so round gives 2 and ceil gives 3. The test needs a case that excludes ceil as well, for example a cap of 3 s with an offset that leaves left strictly between 2 s and 3 s, or one that asserts the line against a different cap.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

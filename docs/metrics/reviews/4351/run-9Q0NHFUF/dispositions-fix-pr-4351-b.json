@@ -1,0 +1,24 @@
+{
+  "head": "d403eb2f6c790284bb0b7ceaad97ace0c26532c7",
+  "run": "run-9Q0NHFUF",
+  "entries": [
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4351/fix-n1zX83nA/u0/verdict.json",
+      "remedyFiles": ["tests/suite-slot.test.mjs"]
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4351/fix-n1zX83nA/u1/verdict.json",
+      "remedyFiles": ["tests/suite-slot.test.mjs"]
+    }
+  ]
+}

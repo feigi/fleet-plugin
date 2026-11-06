@@ -1,0 +1,141 @@
+{
+ "head": "71bf828050cf1355342d7ed576923bcf3f814499",
+ "run": "run-mPpJa4hO",
+ "entries": [
+  {
+   "bucket": "unverified",
+   "index": 0,
+   "scope": "out",
+   "claimKind": "shape",
+   "disposition": "defer",
+   "issue": 4377,
+   "reason": "out of scope, claimKind shape: below the claim bar, no refuter; recorded on the suggestion-band record",
+   "remedyFiles": [
+    ".github/workflows/ci.yml"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 1,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "reason": "refuter did not refute it; applied in e89bb51b",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4375/fix-YUTt5qJa/u1/verdict.json",
+   "remedyFiles": [
+    ".github/scripts/install-and-smoke.sh"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 2,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "issue": 4377,
+   "reason": "refuter refuted it",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4375/fix-YUTt5qJa/u2/verdict.json",
+   "remedyFiles": [
+    "tests/package-entry-resolver.test.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 3,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "reason": "refuter did not refute it; applied in e89bb51b",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4375/fix-YUTt5qJa/u3/verdict.json",
+   "remedyFiles": [
+    ".github/scripts/install-and-smoke.sh"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 4,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "issue": 4377,
+   "reason": "refuter refuted it",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4375/fix-YUTt5qJa/u4/verdict.json",
+   "remedyFiles": [
+    ".github/scripts/install-and-smoke.sh"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 5,
+   "scope": "out",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "issue": 4377,
+   "reason": "out of scope; refuter refuted it",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4375/fix-YUTt5qJa/u5/verdict.json",
+   "remedyFiles": [
+    ".github/scripts/install-and-smoke.sh"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 6,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "issue": 4377,
+   "reason": "refuter refuted it",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4375/fix-YUTt5qJa/u6/verdict.json",
+   "remedyFiles": [
+    "tests/package-entry-resolver.test.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 7,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "reason": "refuter did not refute it; applied in e89bb51b",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4375/fix-YUTt5qJa/u7/verdict.json",
+   "remedyFiles": [
+    "tests/package-entry-resolver.test.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 8,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "issue": 4377,
+   "reason": "refuter refuted it",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4375/fix-YUTt5qJa/u8/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 9,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "defer",
+   "issue": 4377,
+   "reason": "refuter refuted it",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4375/fix-YUTt5qJa/u9/verdict.json",
+   "remedyFiles": [
+    "tests/package-entry-resolver.test.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 10,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "reason": "refuter did not refute it; applied in e89bb51b",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4375/fix-YUTt5qJa/u10/verdict.json",
+   "remedyFiles": [
+    ".github/scripts/install-and-smoke.sh"
+   ]
+  }
+ ]
+}

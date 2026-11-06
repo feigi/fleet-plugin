@@ -1,0 +1,162 @@
+{
+  "pr": 4361,
+  "head": "8a20501a7d6b01d405670bbc804b418f00340015",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I did not write these; my commands were read-only (pwd, sed, grep, git grep, git status). Another agent or the controller probably modified them."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv' and ' M docs/metrics/tier-outcomes.tsv'. I did not touch these files (my commands were read-only), so I cannot account for them; they are most likely another agent's or the controller's metrics edits."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I wrote nothing in that checkout, so these changes predate or come from another agent."
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv` (this agent wrote nothing there: every command after the first `pwd` changed into the snapshot or the simplify/ scratch dir, and the only edit was to simplify/copy/plugin/scripts/ledger.mjs)."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. Both were already present when audited, and no command in this pass ran in or wrote to that tree."
+    },
+    {
+      "dimension": "tests",
+      "state": "clean",
+      "line": "CWD-AUDIT: clean /Users/chris/dev/fleet-plugin (not run; no writes were made there, all work was in the scratch copy)."
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 8,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4361/run-YkRs0E2i/snapshot-8a20501a",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "docs/specs/2026-10-13-structured-member-reports.md",
+      "line": 102,
+      "claim": "The historical spec's settle table still describes impl-N=PR#M as `verify-sha.sh <branch> <head>` first plus `gh pr view M --json headRefOid,state`, which no longer matches the settle's order or fields. This predates the PR and is outside the ruling's docs list, so it is not a blocker.",
+      "evidence": "grep `verify-sha\\.sh <branch> <head>` over correctness/copy returned docs/specs/2026-10-13-structured-member-reports.md:102 `| impl-N=PR#M | verify-sha.sh <branch> <head> exit 0; gh pr view M --json headRefOid,state reads OPEN; ...` beside the updated ledger.mjs:2758 comment.",
+      "suggested_fix": "Leave the spec as a dated historical record, or add a note that the settle's live check list is in the ledger.mjs comment. The ruling did not ask for this, so changing the spec in this PR would be scope creep.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 2971,
+      "claim": "The new `if (checks.every(c => c.ok))` guard skips verify-sha.sh and recipeGate whenever any earlier check fails. A refusal therefore omits the Check-step record and tree checks, so those faults only show up on the next settle attempt. No error is swallowed, since the settle still exits 3 naming the failing check.",
+      "evidence": "Probe in my copy: the Recipe fixture has no Check-step record and the PR reads CLOSED. `node --test --test-name-pattern=PROBE tests/recipe-check.test.mjs` printed `ledger: settle impl-5 --from-report: the report's claim and the world disagree — failed: PR #6 reads OPEN; nothing written`. The missing record `a Check-step record exists at ...` is not listed. Before the diff, recipeGate ran after verify-sha and would also have listed it.",
+      "suggested_fix": "Optional: run recipeGate's record-only checks (the state read and the exit codes, no git read) even when earlier checks failed. That way one refusal lists every fault. Otherwise document that the refusal lists only the first failing tier.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 2972,
+      "claim": "The reordering does not change what happens when verify-sha.sh answers exit 1 (head not on the branch). recipeGate still runs after the failed check, as before. A recipeGate git read that cannot resolve the head, with a Recipe in place, can still die with exit 2 (`could not look`) and mask the exit 3 refusal. This predates the diff and is not a regression.",
+      "evidence": "Read of ledger.mjs 2921-2940 and 2969-2974: recipeGate's `look(git rev-parse --verify ${head}^{tree})` is unguarded by the verify-sha result, and only `look` dies on non-0 exit. I did not trigger this path, because the existing 'head verify-sha.sh does not find' test passes with exit 3 in the suite (9001 tests, 0 fail).",
+      "suggested_fix": "Guard `recipeGate(report.head)` with `if (sha.status === 0)` so a head that is not on origin is exit 3 and not exit 2.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/ledger-settle-report.test.mjs",
+      "claim": "No test pins the branch check to the exact claim branch. A report naming a sibling claim branch such as implementer/6-impl-6, in place of implementer/5-impl-5, is not tested, so a loosened check (`=== claimBranch || startsWith('implementer/')`) survives. The only mismatch fixtures are 'feat' and 'no-such-branch'.",
+      "evidence": "Mutant M5 `report.branch === claimBranch || report.branch.startsWith(\"implementer/\")` → `./agent-test tests/ledger-settle-report.test.mjs tests/recipe-check.test.mjs` exit 0 (suite green, mutant survived); baseline exit 0.",
+      "suggested_fix": "Add a test in which the report names `implementer/6-impl-6`, or `implementer/5-impl-7`, and the settle is refused with exit 3.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/ledger-settle-report.test.mjs",
+      "claim": "The new tests discriminate the three behaviours they target: the branch-equality check, the 'git read only after all other checks pass' guard, and the guard's use of every rather than some.",
+      "evidence": "red: ./agent-test tests/ledger-settle-report.test.mjs → exit 1, fail 2 incl 'impl-N=PR#M: a report naming a branch other than the claim's is exit 3 naming the check…' (M1, branch check removed); baseline: ./agent-test tests/ledger-settle-report.test.mjs → exit 0, tests 85 pass 85, that test pass. | red: same cmd → exit 1, fail incl 'impl-N=PR#M: a report naming a branch origin does not have is exit 3 for the same check, not exit 2' (M2, guard made unconditional; also fails 'the claim branch absent on origin…' and 'a PR that reads CLOSED, whose branch origin no longer has…'); baseline: same exit 0, pass. | red: same cmd → exit 1, fail incl 'a report naming a branch origin does not have…' (M6, every→some); baseline: same exit 0, pass.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "CONTEXT.md and the implementer brief say the settle refuses 'a report naming any other' branch without qualification. The check runs only for outcome `pr`. A bailed or blocked report naming another branch settles (the PR adds tests that assert this). The PR body states the `pr`-only scope but the two docs do not.",
+      "evidence": "plugin/scripts/ledger.mjs:2942-2981: the claimBranch check sits inside `if (report.outcome === \"pr\")`. The PR's new tests 'a bail's branch is not checked' and 'a block's branch is not checked' assert the other outcomes settle. CONTEXT.md line 10 of the diff: 'a PR from any other, and a report naming any other.' Brief: 'refuses a PR from any other branch, and a report that names one.'",
+      "file": "CONTEXT.md",
+      "line": 44,
+      "suggested_fix": "Say 'a report with outcome pr naming any other', or leave it as is, since a bail or block asserts no PR.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "claim": "The PR adds no new or changed types and no casts. The only invariant it adds is that a report's branch must equal the claim branch, `implementer/N-impl-N`. That invariant is enforced at runtime by a string-equality `check()` in runSettleFromReport. report-schema.mjs types `branch` only as a plain string.",
+      "evidence": "grep over pr.diff for type constructs returned nothing. The diff lines `const claimBranch = \\`implementer/${live.number}-impl-${live.number}\\`` and `report.branch === claimBranch` are the only enforcement. This is JS with no static types, so a compile-time guarantee is not available. I did not verify whether the claim-branch string is built in more than one place.",
+      "suggested_fix": "Optional: derive the claim-branch string from one shared helper, so the literal is not repeated across ledger.mjs and the other code that builds it.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 2972,
+      "claim": "Inside the new `if (checks.every((c) => c.ok))` block, `report.branch` is known to equal `claimBranch`, because the check at 2951 has passed. So `verifyShaOf(report.branch, …)` and its label `verify-sha.sh ${report.branch} …` use a second name for one value; the reader has to work out the equality from the check eleven lines above.",
+      "evidence": "Read snapshot ledger.mjs 2939-2975: line 2951 is `check(\\`the report's branch is ${claimBranch} …\\`, report.branch === claimBranch)`, and the guarded block at 2971-2975 runs only when every pushed check is ok. In a scratch copy (simplify/copy) I replaced `report.branch` with `claimBranch` on lines 2972-2973. `node --check plugin/scripts/ledger.mjs` passed, and `node --test --test-reporter=tap tests/ledger-settle-report.test.mjs tests/recipe-check.test.mjs` gave `# tests 142 # pass 142 # fail 0`. That includes the receipts asserting the exact name `verify-sha.sh ${CLAIM} ${f.head} exits 0`, so the output is byte-identical.",
+      "suggested_fix": "`const sha = verifyShaOf(claimBranch, report.head); check(\\`verify-sha.sh ${claimBranch} ${report.head} exits 0\\`, sha.status === 0);`: the git read then names the ticket-derived branch directly, which is what the new comment at 2946-2952 says it verifies.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

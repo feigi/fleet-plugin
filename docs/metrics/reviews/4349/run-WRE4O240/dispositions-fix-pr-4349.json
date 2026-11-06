@@ -1,0 +1,15 @@
+{
+  "head": "92a40a56d5180d509f99614a4f994d0a263c5998",
+  "run": "run-WRE4O240",
+  "entries": [
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "reason": "The claim says the PR's own test discriminates and offers no remedy. The refuter let it survive: an ahead[0] -> ahead[ahead.length - 1] mutant reddens only the new row, and the reverted tree is green. Applying it needs no tree change because the PR head already embodies it.",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4349/fix-hj7DG8g2/1/verdict.json"
+    }
+  ]
+}

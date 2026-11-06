@@ -1,0 +1,212 @@
+{
+  "pr": 4367,
+  "head": "4f81c927a7630bcadbc6245d0831ac1f9a7e12d8",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I ran only read-only commands (pwd, wc, sed, grep, git status), so I did not cause these modifications."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — printed ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. I made no writes there; both are tracked metrics files that were modified before my review ran."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. My only command in that directory was `pwd`; every other command chained a cd into the scratch dir or used `git -C` on the snapshot, so these modifications are not mine."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I did not touch these. I only ran `pwd` and `git status` there, and my own work was in the scratch directory."
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (this pass ran no command in that tree other than `pwd` and this status, so these predate or are external to this dimension)"
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I did not write there; both are tracked metrics files, probably modified by another agent or the controller."
+    }
+  ],
+  "counts": {
+    "survived": 1,
+    "refuted": 0,
+    "unverified": 10,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4367/run-iT2rgtfQ/snapshot-4f81c927",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 2152,
+      "claim": "The new `[...new Set(...)]` dedupe in closingRefusals' ownTickets is not covered by any test. Removing it leaves all 143 dispatch tests green. The case it guards is a PR whose settled `impl-N=PR#` token and claim-branch ticket name the same ticket and whose body does not close it. Without the dedupe, that case emits two identical 'does not close #N' failure lines.",
+      "evidence": "Mutant B replaced `const ownTickets = [...new Set(claim === null ? tickets : [...tickets, Number(claim[1])])];` with `const ownTickets = claim === null ? tickets : [...tickets, Number(claim[1])];`. red: n/a (mutant survived). Mutant run: ./agent-test tests/ledger-dispatch.test.mjs → exit 0, tests 143, pass 143, fail 0. Baseline: same command → exit 0, tests 143, pass 143. Mutants A, C and D under the same command went red with 3, 2 and 1 failures respectively, so the harness does discriminate.",
+      "suggested_fix": "Add a test with a settled token `impl-3545=PR#3606` (a row with the token), head `implementer/3545-impl-3545` and a body closing nothing. Assert the refusal names `does not close #3545` exactly once, for example by counting matches in the refusal text.",
+      "dimension": "tests",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Mutant removing the Set dedupe (at line 2190 in the snapshot, not 2152) survived the FULL suite in my own copy: ./agent-test → exit 0, tests 8992, pass 8992, fail 0, cancelled 0. The sed output showed the mutated line, so the mutation was applied. The claim is true: no test covers the dedupe. I did not separately confirm the duplicate-line behaviour. CWD-AUDIT: not run; I never wrote in /Users/chris/dev/fleet-plugin and worked only under the scratch dir."
+        },
+        {
+          "refuted": false,
+          "reason": "Reproduced in my own copy of the snapshot: I removed the Set dedupe from ownTickets (at ledger.mjs:2190 in the snapshot, not 2152). I ran `env -u FORCE_COLOR ./agent-test tests/ledger-dispatch.test.mjs` on the mutant. It exited 0 with tests 143, pass 143, fail 0, cancelled 0, so the mutant survives. The existing 'does not close' assertions (e.g. ledger-dispatch.test.mjs:1579, 1596) are unanchored regexes, so a duplicated failure line still matches. No test pins the token-plus-claim-branch same-ticket case. I did not run the unmutated baseline, but the claim's own baseline was also 143/143 green. I found no other handling of the case in the code I read. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I did not touch these. My mutation was only in the scratch copy."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 2451,
+      "claim": "The rewritten comment above the finisher-pr block in runDispatch has a stray line break ('no closing / reference may be its own / suggestion-band record ...'), which leaves one short line in a paragraph whose other lines are filled to width; this is cosmetic only and changes no behaviour.",
+      "evidence": "`sed -n 2449,2457p` on the copy's plugin/scripts/ledger.mjs (via the grep context output) shows line 2452 as '  // reference may be its own' between full-width lines 2451 and 2453.",
+      "suggested_fix": "Re-wrap lines 2451-2455 into evenly filled lines.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "No logic error, missed case or scope creep was found. Every behaviour change matches the #4229 brief, and both mutants of the new check-1 logic are caught by the PR's tests.",
+      "evidence": "Baseline in the copy, `env -u FORCE_COLOR node --test tests/ledger-dispatch.test.mjs tests/ledger-settle-report.test.mjs`: tests 221, pass 221, fail 0. M1 (m1/ledger.mjs:2192 `for (const n of tickets)`, which drops the claim-branch ticket from check 1) gave 'fail 2 / pass 141' on ledger-dispatch. It was caught by 'an inherited PR headed by a claim branch is refused while its body does not close that claim's ticket...' and by '...closes that claim's in-progress ticket and is dispatched...'. M2 (m2/ledger.mjs:2192 `for (const n of [])`, which removes check 1) gave 'fail 14 / pass 129'. That includes the observed-case test 'an implementer PR must close its own ticket whatever its ruling' (rule no and yes), the blank-verdict 'any row for the PR passes the ruling...' test and the two-token test. The brief's test list (cases 1 to 5, the two tests that gain a check-1 line, and the deleted blank-verdict and re-ruling tests) corresponds one-to-one to the diff's test hunks. The CLAIM_BRANCH back-reference makes 'implementer/3545-impl-3546' a non-claim head, so its own ticket is null, as that test expects.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 2012,
+      "claim": "The diff introduces no swallowed errors, no new try/catch, and no dereference moved inside an existing try. One semantic widening is by design: the \"ruling\" gate is now satisfied by any row naming the PR, including a row whose two verdict columns are both blank, which tier-outcomes.mjs treats as never ruled. The refusal text still says the PR \"has no ruling\", although a row that was never ruled now passes.",
+      "evidence": "rulingOf's only try/catch still wraps just readFileSync and parseTierOutcomes, and still dies loudly with the file name. `rows.some(...)` sits outside the try, as `rows.findLast(...)` did before. parseTierOutcomes (tier-outcomes.mjs 180-201) still throws on a malformed width or verdict, so a corrupt row is refused, not passed. The new test \"any row for the PR passes the ruling, whatever its date, width or verdicts…\" dispatches on a both-blank row. The row-existence check was already how the old gate worked; the diff only stops reading its verdicts. closingRefusals' new `CLAIM_BRANCH.exec(view.headRefName)` is safe, because prView already dies unless headRefName is a string. The new own-ticket check fails loudly: it pushes a failure line, and the dispatch dies naming PR and ticket.",
+      "suggested_fix": "Optional: reword the \"has no ruling\" refusal to \"has no tier-outcomes row\", since the gate checks row existence only.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/ledger-settle-report.test.mjs",
+      "line": 85,
+      "claim": "The gh stub now accepts `issue view N --json title,labels` through an extra `||` alternative. The settle-report suite was only adjusted so finisher dispatches pass the new own-ticket gate, and nothing there asserts a missing-ticket refusal.",
+      "evidence": "Diff lines 453-454 and the `closingOwnTicket` helper (diff 471-476). The edit only widens the stub's accepted argument list. All 221 tests in the two touched suites pass in my copy.",
+      "suggested_fix": "None required; the refusal paths are covered in ledger-dispatch.test.mjs.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The rulingOf() header comment this diff adds says 'the row's verdicts are read by nothing here', but parseTierOutcomes(), which rulingOf() calls, reads every verdict cell. It throws on a non-yes/no value, or on exactly one blank verdict, and rulingOf() turns that throw into a refusal. Not every row passes: a malformed-verdict row still blocks the finisher.",
+      "evidence": "ledger.mjs:1999-2006 is the new comment ('Any row passes, whatever its date or verdicts ... the row's verdicts are read by nothing here'). tier-outcomes.mjs:180-198 is parseTierOutcomes, which throws 'malformed row: closed_own_ticket is ... expected yes, no or blank' and 'expected both blank or both yes or no'. The rulingOf() catch returns the refusal 'cannot read the PR's ruling off ...'.",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 2005,
+      "suggested_fix": "Say that no verdict decides the gate, but a row with a malformed verdict cell still fails parseTierOutcomes() and refuses. Or drop the added clause.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The diff re-wrapped the runDispatch comment badly. It now breaks mid-clause, with 'no closing reference may be its own' alone on one line and 'suggestion-band record ...' starting the next. The text is accurate but ragged, which is cosmetic.",
+      "evidence": "ledger.mjs:2449-2457: lines read '// PR must close its own tickets, whatever its ruling, and no closing', '// reference may be its own', '// suggestion-band record or a ticket another claim holds, and the PR must'.",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 2452,
+      "suggested_fix": "Re-wrap the paragraph.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 2012,
+      "claim": "rulingOf() no longer returns or reads a ruling. It now returns only {tickets, refusal}, but the name and its callers still call it a ruling (`const ruled = await rulingOf(...)`). The shape is an untyped object literal built in four return sites. Nothing stops a caller from reading the removed `ruling` or `tsv` fields, and that would give `undefined` silently.",
+      "evidence": "The grep found one caller (ledger.mjs:2467 `ruled = await rulingOf(member.number)`). It uses only ruled.refusal, ruled.tickets, and passes `ruled` to closingRefusals({tickets}). The diff removes `ruling` and `tsv` from every return. No other readers of those fields turned up in plugin/scripts.",
+      "suggested_fix": "Rename it to something like rulingGate(), or return a frozen object whose shape is documented once. The `refusal: string|null` and `tickets` fields are already documented in the comment, so a rename is enough.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 2182,
+      "claim": "The invariant that a PR closes its own tickets is now enforced by a runtime loop over ownTickets. The ownTickets set is built once and reused by check 3, so the two checks cannot drift apart. The cast `Number(claim[1])` is safe: CLAIM_BRANCH's capture group is `[1-9][0-9]*`, so it always yields a positive integer, and it matches the numeric `refs` entries compared with includes. No conformance-erasing cast is introduced.",
+      "evidence": "stranded.mjs:209 `CLAIM_BRANCH = /^implementer\\/([1-9][0-9]*)-(impl-\\1(?:-[a-z])?)$/`. The diff builds `ownTickets = [...new Set(claim === null ? tickets : [...tickets, Number(claim[1])])]` and uses it in both check 1 and claimedElsewhere().",
+      "suggested_fix": "None needed.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 2182,
+      "claim": "closingRefusals destructures a one-field object `{ tickets }` from rulingOf()'s whole answer now that `ruling` and `tsv` are gone; passing `ruled.tickets` directly removes the object indirection and matches labelRefusal(member, tickets, refs), the sibling call two lines below.",
+      "evidence": "Single caller found by grep `closingRefusals` in plugin/scripts/*.mjs: ledger.mjs:2469 `closingRefusals(member, ruled)`. In a scratch copy I changed line 2182 to `async function closingRefusals(member, tickets) {` and line 2469 to `const closing = await closingRefusals(member, ruled.tickets);`; `node --check plugin/scripts/ledger.mjs` passed and `node --test tests/ledger-dispatch.test.mjs tests/ledger-settle-report.test.mjs` → exit=0, ℹ tests 221, ℹ pass 221, ℹ fail 0.",
+      "suggested_fix": "async function closingRefusals(member, tickets) { … } and at the call site: const closing = await closingRefusals(member, ruled.tickets);",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/ledger-dispatch.test.mjs",
+      "line": 1575,
+      "claim": "The test 'a PR is refused while its body does not close its ticket, and recorded once it does' (3606/3545, default ruling yes, closes nothing → refused 'does not close #3545, its own ticket', then closes [3545] → dispatched) duplicates the new 'an implementer PR must close its own ticket whatever its ruling' test's `closed = \"yes\"` iteration, which runs the same sequence with a stricter anchored regex plus a dispatched-list assertion.",
+      "evidence": "Read snapshot tests/ledger-dispatch.test.mjs 1575-1583 and 1598-1609 side by side: same steps (put row, rule with verdict yes, refused with 'does not close #N, its own ticket — add \"Closes #N\" to its body', dispatched == [], closes(bin, pr, [N]), ok → fleet-finisher); the 4072 test additionally asserts no 'closed_own_ticket' in the message and dispatched == ['finisher-pr-4072']. The 'any row for the PR passes the ruling…' test at 1488 covers the same refuse-then-close path a third time. Not executed as a mutation-kill comparison — subsumption is from reading.",
+      "suggested_fix": "Delete the 1575 test (or the 'yes' iteration's overlap) and keep the 4072 loop as the single owner of the 'must close its own ticket' refuse-then-dispatch behavior.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

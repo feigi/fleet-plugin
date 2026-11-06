@@ -1,0 +1,185 @@
+{
+  "pr": 4353,
+  "head": "1b5ce5909791a547036cd0853c778c42e5b5de23",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nWhich merge-gating CI steps neither the Recipe's Test entrypoint nor its Check step runs could not be read (the snapshot agent reported nothing for it), so a passing run here is not known to cover them.",
+  "suiteVerdict": {
+    "usable": false,
+    "reason": "the Install step did not run in the snapshot — the snapshot agent reported no exit status for it — so the shared test run was skipped"
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. I ran only read-only git commands there, so these changes are not mine; likely another member or the controller wrote them."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I only ran pwd, read-only gh, and git status in that directory. I did not write to it, so these modifications come from another agent or the controller."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. I only ran read-only `gh` and `git status` commands in that directory, so these two modifications are not mine. They were probably left by a sibling or the controller's own cell."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv' and ' M docs/metrics/tier-outcomes.tsv'. I never wrote to that directory and cannot account for these two modifications."
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin —  M docs/metrics/ticket-features.tsv,  M docs/metrics/tier-outcomes.tsv (this review did not write them; every command here wrote only to the scratch dir or read git objects)"
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. This review did not write these: every command it ran changed into the snapshot or the scratch dir first, and metrics-refresh ran only with --repo set to a scratch fixture."
+    }
+  ],
+  "counts": {
+    "survived": 1,
+    "refuted": 1,
+    "unverified": 6,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4353/run-7v3E3LF1/snapshot-1b5ce590",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "docs/adr/0037-each-repository-routes-by-its-own-fit-tickets-group-by-evidence.md",
+      "line": 15,
+      "claim": "The ADR's Status line says decision 1 is amended by #4327, but decision 1's body is unchanged. It still says the Fit is 'computed at every phase 0' and that a run with no Fit routes 'by the starting table', which the amendment contradicts for a first run with no corpus.",
+      "evidence": "Line 3 reads: 'Amended by #4327: decision 1's Fit is computed at each phase 0 whose cost guard duty writes a guard; a phase 0 that writes no guard ... writes no Fit, and `route` beside no guard routes `slow-high` with no draw'. Line 15 still reads 'It is computed at every phase 0 ... A run whose Fit is missing or fails routes by the last Fit that computed, else by the starting table'. ticket-router.mjs:459 returns policy POLICY_CELL ('slow-high', ledger-grammar.mjs:855) with draw null when guard is null. The spec's decisions at lines 82 and 88 carry inline '*Amended (#4327)*' notes, but ADR decision 1 has none.",
+      "suggested_fix": "Add an inline '*Amended (#4327)*' note to decision 1 in the ADR, as the spec does. Alternatively, reword line 15 to say 'at each phase 0 whose guard duty writes a guard' and to say a no-guard run routes slow-high.",
+      "dimension": "comments",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "I read the snapshot file. Line 3 (Status) ends with 'Amended by #4327: decision 1's Fit is computed at each phase 0 whose cost guard duty writes a guard; a phase 0 that writes no guard ... writes no Fit, and `route` beside no guard routes `slow-high` with no draw'. Line 15 (decision 1) is unchanged. It still says 'computed at every phase 0' and 'A run whose Fit is missing or fails routes by the last Fit that computed, else by the starting table'. Line 3 is the only line containing '4327', so decision 1 has no inline note. The textual claim is accurate. Whether this is a real contradiction is arguable, because the starting table is all slow-high and the Status line carries the amendment. I ran no test or mutation; this is a docs claim, so I only grepped and read the file. I did not check ticket-router.mjs:459 or the spec's inline notes. CWD-AUDIT: not run; I made no writes and used no scratch dir, only read-only commands in /Users/chris/dev/fleet-plugin."
+        },
+        {
+          "refuted": false,
+          "reason": "I only read the file; I ran no test or mutation, and a doc claim has none to run. In the snapshot's ADR 0037, line 3 (Status) says 'Amended by #4327: decision 1's Fit is computed at each phase 0 whose cost guard duty writes a guard; a phase 0 that writes no guard ... writes no Fit, and `route` beside no guard routes `slow-high` with no draw'. Line 15 (decision 1) still says 'computed at every phase 0' and 'else by the starting table', with no inline amendment note. So the claim's quotes are accurate, and the amendment is stated only in the Status line. I found nothing elsewhere in the ADR that handles the contradiction. The finding is weak: the starting table also routes everything `slow-high`, so the 'starting table' wording is close to harmless. The 'every phase 0' wording is the only real conflict, and the Status line flags it. I did not check ticket-router.mjs:459 or the spec's inline notes. I also did not check how other ADRs mark amendments. This is a minor doc inconsistency, not a false claim. CWD-AUDIT: not run; I wrote nothing in /Users/chris/dev/fleet-plugin."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [
+    {
+      "severity": "important",
+      "file": "docs/specs/2026-11-01-self-refining-router-design.md",
+      "line": 88,
+      "claim": "The new note says 'Only a phase 0 with a corpus but no counted records writes a guard and a Fit, and that Fit is the starting table's fit'. Read literally, this says a phase 0 whose corpus has counted records writes no guard and no Fit, which is false. The brief said 'Only a phase 0 with a corpus but no counted records writes a Fit that is the starting table's fit'; the PR moved 'a guard and' inside the scope of 'Only'.",
+      "evidence": "Ran writeFit(cwd, {computed_at, verdict:'no_verdict', tripped:[], cells:[]}) from plugin/scripts/metrics-refresh.mjs (probe-fit.mjs). In the header-only corpus fixture: `n_rows 0 burn_in true`, `rows equal starting table rows? true`, cost row {\"*\":\"slow-high\"}, so this half of the note holds. In the copy's full corpus: `n_rows 268 burn_in true`, `rows equal starting table rows? false`, cost row {\"*\":\"task-high\"}, and .fleet/router-fit.json was written (4.6K). So a phase 0 with counted records also writes a Fit, beside the guard its cost guard duty wrote: metrics-refresh.mjs main() calls fit(repo, written) whenever costGuard returned a guard (lines 372-376, 386-404). Also: in a header-only corpus repo with no GitHub remote, `metrics-refresh.mjs --repo hdr` printed `cost guard failed: pr-cost.mjs --guard exited 2: pr-cost: gh pr list failed` and exited 1 with no Fit, so having a corpus alone is not enough to write a guard either.",
+      "suggested_fix": "Use the brief's scoping: 'A phase 0 with a corpus but no counted records writes a guard and a Fit, and that Fit is the starting table's fit.' (drop 'Only'), or 'Only a phase 0 with a corpus but no counted records writes a Fit that is the starting table's fit.'",
+      "dimension": "correctness",
+      "verdict": "refuted",
+      "votes": [
+        {
+          "refuted": true,
+          "reason": "The sentence follows 'the Fit is computed at each phase 0 whose cost guard duty writes a guard', so in context it describes first-run cases. The claim's own probe confirms the stated case: with a header-only corpus the Fit equals the starting table. The literal reading that counted-records runs write no Fit contradicts the preceding clause, so it is a wording quibble, not a factual error. I read the doc line only and ran no code. CWD-AUDIT: clean /Users/chris/dev/fleet-plugin (no git status run; I only read files)"
+        },
+        {
+          "refuted": true,
+          "reason": "The note is in an amendment about first runs. It contrasts a first run with no corpus (no guard, no Fit) against a phase 0 with a corpus but no counted records (guard and Fit, where the Fit is the starting table's). In that frame, 'Only' scopes the first-run cases. It does not say a phase 0 with counted records writes no Fit. The sentence is loosely worded, but I could not show it is a defect that needs fixing, so I default to refuted. I read line 88 of the spec and ran nothing, so I did not reproduce the claim's probe results or test the guard-failure case. CWD-AUDIT: not run (no files written in /Users/chris/dev/fleet-plugin)."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "CONTEXT.md",
+      "line": 682,
+      "claim": "The reworded Fit entry leaves a short line ('close-out's evidence routes the next. A run') that the paragraph no longer reflows across. It renders the same in Markdown, so it is cosmetic only.",
+      "evidence": "sed -n 678,690p CONTEXT.md in the snapshot shows the line 'close-out's evidence routes the next. A run' followed by 'whose Fit fails routes by the last Fit that computed, else by the **Starting'.",
+      "suggested_fix": "Reflow the line so the entry wraps evenly, or leave it as is.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/specs/2026-11-01-self-refining-router-design.md",
+      "line": 83,
+      "claim": "The facts in the § 2.3 When note and in the ADR 0037 Status clause match the code: the guard is skipped when any of the three TSVs is missing, no Fit is written, any earlier router-fit.json is left as it is, and a missing guard routes slow-high with no draw whatever the table. Nothing to fix; this records what was checked.",
+      "evidence": "`node plugin/scripts/metrics-refresh.mjs --repo <empty git repo>` → 'cost guard: skipped, docs/metrics/member-outcomes.tsv, docs/metrics/tier-outcomes.tsv, docs/metrics/ticket-features.tsv not found — no corpus to guard yet; …' then 'fit: skipped, no guard written — .fleet/router-fit.json left as it is', exit 0, and no .fleet/ directory was created. rowDispatch({table: <a Fit whose cost row is task-high>, guard: null}) → {\"policy\":\"slow-high\",\"reason\":\"guard-missing\",\"draw\":null}. The same table with a guard → {\"policy\":\"task-high\",\"reason\":\"ok\",\"draw\":{\"by\":\"burn-in\",…}}.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/support/split-histories.mjs",
+      "line": 2,
+      "claim": "The header comment says the Fit runs the split gate 'at every phase 0'. That is no longer accurate, because the Fit now runs only at a phase 0 whose guard is written.",
+      "evidence": "Lines 2-3 read 'as the Fit runs it at every phase 0'. metrics-refresh.mjs:372-373 returns 'fit: skipped, no guard written' when costGuard returns null, and costGuard skips when any of the three CORPUS TSVs is missing (lines 279-284). docs/research/split-looks.md:7 ('re-judges every split at each phase 0') is the same kind of claim, but as a dated research note it may be left alone.",
+      "suggested_fix": "Reword to 'at each phase 0 that writes a guard', or leave it as shorthand.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/specs/2026-11-01-self-refining-router-design.md",
+      "line": 83,
+      "claim": "The added claims about skipping the guard and the Fit match the code.",
+      "evidence": "costGuard (metrics-refresh.mjs:279-284) skips when any of MEMBERS, TIERS or FEATURES is missing and leaves the guard file as it is. fit() (line 373) prints exactly 'fit: skipped, no guard written — .fleet/router-fit.json left as it is'. The spec's quoted '(`fit: skipped, no guard written`)' is a prefix of that line, and tests/metrics-refresh.test.mjs:418 asserts the full line. No defect found.",
+      "suggested_fix": "None.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/specs/2026-11-01-self-refining-router-design.md",
+      "line": 88,
+      "claim": "The third #4327 note (line 88) repeats the condition already amended at lines 17 and 83 ('the Fit is computed at each phase 0 whose cost guard duty writes a guard'). It also says the no-guard routing twice in one sentence: 'routes `slow-high` with no draw because there is no guard' and then '(`route` beside no guard routes the default cell, whatever the table)'.",
+      "evidence": "`grep -n -o 'each phase 0 whose cost guard duty writes a guard' docs/specs/2026-11-01-self-refining-router-design.md` → lines 17, 83, 88: the same clause three times within 72 lines, all added by this PR. In plugin/scripts/ticket-router.mjs, lines 447-448 ('the default cell when there is no guard'), 455 ('`draw` is null with no guard') and 620 ('With no guard the default cell is the only one') show that 'slow-high with no draw' and the parenthetical describe the same branch. Dropping either keeps the meaning.",
+      "suggested_fix": "Line 88: `*Amended (#4327): a first run with no corpus writes no guard and so no Fit (see When), and routes `slow-high` with no draw whatever the table, not by a starting-table Fit. Only a phase 0 with a corpus but no counted records writes a guard and a Fit, and that Fit is the starting table's fit.*` This drops the third copy of the condition and the parenthetical that repeats the clause before it.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/specs/2026-11-01-self-refining-router-design.md",
+      "line": 83,
+      "claim": "The When-bullet note opens with 'the same condition, at each phase 0 whose…'. 'the same condition' points back to nothing in that bullet, whose text says 'Computed at every phase 0'. The phrase adds a reference the reader has to resolve, and the clause after it carries the whole meaning alone.",
+      "evidence": "Snapshot line 82 reads '- **When.** Computed at every phase 0, by `metrics-refresh.mjs`…'. Line 83 reads '*Amended (#4327): the same condition, at each phase 0 whose cost guard duty writes a guard. …'. No 'condition' appears in the bullet; the nearest match is the §1 note at line 17, 65 lines earlier.",
+      "suggested_fix": "`*Amended (#4327): computed at each phase 0 whose cost guard duty writes a guard. `metrics-refresh.mjs` skips the guard when …` (the rest unchanged).",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

@@ -1,0 +1,106 @@
+{
+  "head": "8a20501a7d6b01d405670bbc804b418f00340015",
+  "run": "run-YkRs0E2i",
+  "entries": [
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "out",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted: dated spec row already stale before the PR; ticket's Docs list excludes it; remedy is to leave it \u2014 filed on the suggestion-band record",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4361/fix-guBXKgI9/u0/verdict.json",
+      "issue": 4364,
+      "remedyFiles": [
+        "docs/specs/2026-10-13-structured-member-reports.md"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted: the skip is the maintainer's ruling for #4199 (git read last, only when every other check passed); settle still exits 3 naming the failing check",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4361/fix-guBXKgI9/u1/verdict.json",
+      "issue": 4364,
+      "remedyFiles": [
+        "plugin/scripts/ledger.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted: verify-sha.sh answers exit 1 only after git cat-file resolved the head in the same cwd, so the Recipe gate's rev-parse resolves; probe settled exit 3, not 2",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4361/fix-guBXKgI9/u2/verdict.json",
+      "issue": 4364,
+      "remedyFiles": [
+        "plugin/scripts/ledger.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "reason": "survived: mutant `|| report.branch.startsWith(\"implementer/\")` passed the file; added test 'a report naming another ticket's claim branch is exit 3 for the same check' kills it",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4361/fix-guBXKgI9/u3/verdict.json",
+      "remedyFiles": [
+        "tests/ledger-settle-report.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "below the claim bar: the finding alleges no wrong behavior, only that the new tests discriminate; its refuter let that survive (mutants M1/M2/M6 each went red), so nothing needs changing \u2014 filed on the suggestion-band record",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4361/fix-guBXKgI9/u4/verdict.json",
+      "issue": 4364
+    },
+    {
+      "bucket": "unverified",
+      "index": 5,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted: both sentences are the maintainer's ruled wording verbatim; the finding's own fallback is to leave them",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4361/fix-guBXKgI9/u5/verdict.json",
+      "issue": 4364,
+      "remedyFiles": [
+        "CONTEXT.md",
+        "plugin/skills/run-team/briefs/implementer.md"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 6,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "refuted: the ticket-derived claim branch is built once in ledger.mjs; other implementer/ strings follow different rules; the ruling keeps the derivation inline",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4361/fix-guBXKgI9/u6/verdict.json",
+      "issue": 4364,
+      "remedyFiles": [
+        "plugin/scripts/ledger.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 7,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "reason": "survived: inside the every-check-passed block report.branch equals claimBranch; verifyShaOf and its label now name claimBranch, receipts byte-identical",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4361/fix-guBXKgI9/u7/verdict.json",
+      "remedyFiles": [
+        "plugin/scripts/ledger.mjs"
+      ]
+    }
+  ]
+}

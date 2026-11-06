@@ -1,0 +1,49 @@
+{
+  "head": "feef671fb1c132771a23daeb5bc954b8fda79cfa",
+  "run": "run-73wUUul6",
+  "entries": [
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "out",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "out of ticket #4368's scope (it leaves --check in place; removal is #4321); refuter refuted it",
+      "issue": 4376,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4374/fix-MU1P2LP8/u0/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "refuter refuted it: every cited spec line already marks the check retired, and ticket #4368 puts spec text out of scope",
+      "issue": 4376,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4374/fix-MU1P2LP8/u1/verdict.json",
+      "remedyFiles": [
+        "docs/specs/2026-11-01-self-refining-router-design.md",
+        "docs/specs/2026-09-28-model-effort-router-design.md"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuter refuted it: the cached Recipe's Check step runs ticket-router.mjs --check and prints the quoted string",
+      "issue": 4376,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4374/fix-MU1P2LP8/u2/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "reason": "refuter confirmed the PR body's claims hold; the finding asks for no change, so applying it changes nothing in the tree",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4374/fix-MU1P2LP8/u3/verdict.json"
+    }
+  ]
+}

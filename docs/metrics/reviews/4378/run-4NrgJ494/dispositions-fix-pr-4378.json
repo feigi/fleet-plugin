@@ -1,0 +1,114 @@
+{
+  "head": "06cce7607c2ef5849b25ce6398b1e988378e8d04",
+  "run": "run-4NrgJ494",
+  "entries": [
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "out",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4378/fix-u6BCBivP/u0/verdict.json",
+      "issue": 4380,
+      "reason": "refuted by its refuter; recorded on the suggestion-band record"
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4378/fix-u6BCBivP/u1/verdict.json",
+      "issue": 4380,
+      "reason": "refuted by its refuter; recorded on the suggestion-band record"
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4378/fix-u6BCBivP/u2/verdict.json",
+      "issue": 4380,
+      "reason": "refuted by its refuter; recorded on the suggestion-band record; the confirmed behavior is filed open as #4379"
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4378/fix-u6BCBivP/u3/verdict.json",
+      "issue": 4380,
+      "reason": "refuted by its refuter; recorded on the suggestion-band record; the confirmed behavior is filed open as #4379"
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4378/fix-u6BCBivP/u4/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 5,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4378/fix-u6BCBivP/u5/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 6,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4378/fix-u6BCBivP/u6/verdict.json",
+      "issue": 4380,
+      "reason": "refuted by its refuter; recorded on the suggestion-band record; the confirmed behavior is filed open as #4379"
+    },
+    {
+      "bucket": "unverified",
+      "index": 7,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4378/fix-u6BCBivP/u7/verdict.json",
+      "issue": 4380,
+      "reason": "refuted by its refuter; recorded on the suggestion-band record"
+    },
+    {
+      "bucket": "unverified",
+      "index": 8,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4378/fix-u6BCBivP/u8/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 9,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4378/fix-u6BCBivP/u9/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 10,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4378/fix-u6BCBivP/u10/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 11,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4378/fix-u6BCBivP/u11/verdict.json"
+    }
+  ]
+}

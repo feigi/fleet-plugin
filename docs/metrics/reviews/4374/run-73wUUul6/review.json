@@ -1,0 +1,95 @@
+{
+  "pr": 4374,
+  "head": "feef671fb1c132771a23daeb5bc954b8fda79cfa",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv' and ' M docs/metrics/tier-outcomes.tsv'. I never wrote to that directory, and the only commands I ran there were `pwd` and `git status`. I did not open or change those files."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv' and ' M docs/metrics/tier-outcomes.tsv'. I did not touch these; they are most likely from other agents or the controller."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I wrote nothing there: my shell started in that directory and I only ran commands chained into the snapshot or my scratch dir. These are likely another run's edits."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. This review did not write them: every command chained a cd into the scratch copy or ran a read-only git -C."
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 4,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4374/run-73wUUul6/snapshot-feef671f",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 44,
+      "claim": "The `--check` mode (and its `git fetch` exit-2 path) remains documented and implemented, but after this PR nothing in CI runs it. The only remaining check on the shipped table is the unit test comparing it to the day-one literal, which does not exercise `--check`'s re-fit or its fetch-failure handling.",
+      "evidence": "Ran `grep -i router .github/workflows/ci.yml` in the snapshot: no output. In the copy I mutated router-table.json (n_rows 0→5). The 'shipped table is the starting table' test failed with the expected diff, so the table guard is intact. `--check` itself is still exercised only by its own unit tests (ticket-router.test.mjs:1652+). The ledger and spec docs list its removal as follow-up #4321, so this is a known pending cleanup, not a silent loss.",
+      "suggested_fix": "Remove `--check` and the code only it uses (resolveCommit, showAt) in #4321, or state in the header comment that CI no longer runs it.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "docs/specs/2026-11-01-self-refining-router-design.md (lines 169, 221, 315) and docs/specs/2026-09-28-model-effort-router-design.md (line 785) still describe CI's 'Router table check' and cite ci.yml:175-189 and tests/ticket-router.test.mjs:1152-1214. After this PR the step and those tests no longer exist, so the line references point at nothing.",
+      "evidence": "grep -rnE 'Router table check|ciRouterCheck|router check' over the snapshot returned only docs/metrics ledger and review records plus these two spec files. All are dated design or history documents, with no live code or test references, so this is low risk. Line 169 and the row at line 221 ('retired | S9') already describe the check as retired or to be retired. This is only possible staleness, not a defect.",
+      "suggested_fix": "None required. Optionally mark the line references as historical.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body and commit feef671: the claim that the cached Recipe's Check step still runs `--check` (output 'matches a re-fit of 0 Pulls at no commit') could not be confirmed from the tree. The Recipe is not tracked in the snapshot.",
+      "evidence": "grep for 'ticket-router.mjs --check' outside docs found only plugin/scripts/ticket-router.mjs, where `--check` mode still exists (lines 43, 1108, 1116). No tracked Recipe file was found that invokes it. Nothing in the tree contradicts the claim, and the removed CI step's own test asserted the same 'matches a re-fit of 0 Pulls at no commit' string, so the message is consistent with the tool's output.",
+      "suggested_fix": "None.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body: the claims that only three files change and that every import ciRouterCheck used is still used elsewhere hold.",
+      "evidence": "pr.diff touches exactly ci.yml, tests/ticket-router.test.mjs and tests/support/day-one-router-table.mjs. Import line 4 and line 18 of tests/ticket-router.test.mjs are intact. Per-name counts of writeExecStub (2), readdirSync (2), symlinkSync (7), fileURLToPath (5) and existsSync (7) each include one import line plus at least one remaining use. No unused-import fallout.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

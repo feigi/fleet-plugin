@@ -1,0 +1,103 @@
+{
+  "pr": 4346,
+  "head": "be3ab7fe05c7e059b66298f59522097729446523",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I did not edit those files; the controller's own cell most likely changed them."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin —  M docs/metrics/ticket-features.tsv,  M docs/metrics/tier-outcomes.tsv (this review did not cause them: the only commands run there were `pwd` and this `git status`)"
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 5,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4346/run-0iIv3gKm/snapshot-be3ab7fe",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": ".out-of-scope/review-run-root-liveness-guard.md",
+      "line": 12,
+      "claim": "The record says a launch is settled `=failed` \"in the same call that launches the next review\", but the ledger also accepts a `review=<launch>=failed` settle on its own with no new launch (phase 0's reconcile and `fleet-event.mjs review-failed`), so that clause describes only one of the settle paths.",
+      "evidence": "Ran `node --test --test-name-pattern 'review-failed settles the launch =failed in place|carried reviewer is recorded dead with review settling' tests/fleet-event.test.mjs tests/ledger-rotate.test.mjs` in the copy → `tests 2, pass 2, fail 0`. Those tests run `ledger.mjs review 5 review=member:review-pr-5=failed` alone, exit 0, asserted \"settled where it stands\" (tests/ledger-rotate.test.mjs:655-665). They also run `fleet-event review-failed 88 member:review-pr-88`, whose only ledger write is `ledger review 88 review=member:review-pr-88=failed` (tests/fleet-event.test.mjs:1486-1492). phase-0.md:625 says the same: \"its launch is settled `=failed` where it stands\". The record's conclusion still holds, because settling still needs a confirmed death and the PR has one open launch. Only the mechanism is misstated.",
+      "suggested_fix": "Change it to: \"A launch is settled `=failed` only after its runner is confirmed dead (the Member-killed row or phase 0's prior-run reconcile); only then can the next review launch.\"",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": ".out-of-scope/review-run-root-liveness-guard.md",
+      "line": 21,
+      "claim": "The text \"in place until the 7-day retention\" understates how a dead runner's installed root gets freed. The tick's root sweep also removes the whole `pr<N>/` once the PR is MERGED or CLOSED and no live token names it, so the real bound is whichever comes first: merge/close or 7 days.",
+      "evidence": "Read reclaim-scratch.mjs:449-472: an OPEN PR runs only `staleRunRoots` (7-day). A MERGED or CLOSED PR goes on to `prHolder` and removal, and the header lines 32-37 say \"removed when PR #M is MERGED or CLOSED on GitHub and no live ledger token names it\". `git grep reclaim-scratch` shows the tick calls the root sweep with `--apply` (fleet-tick.mjs:2073). I did not run this path; it is read from code only.",
+      "suggested_fix": "Change it to \"until the PR closes or the 7-day retention, whichever comes first\".",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": ".out-of-scope/review-run-root-liveness-guard.md",
+      "line": 13,
+      "claim": "The text \"Scratch roots are keyed per checkout, like the ledger\" uses the wrong unit. Both the scratch root and the ledger are keyed per workspace: every linked worktree of one repository shares them, and a second clone gets its own.",
+      "evidence": "Read scratch-root.mjs:6-9: \"the same path from the main checkout and from any linked worktree, a different one for each workspace — a second clone, a bare repository, a submodule\". Read fleet-dir.mjs:1-13: the ledger lives in the main checkout, resolved through `rev-parse --git-common-dir` and resolveWorkspace(). This is read from code only, not executed.",
+      "suggested_fix": "Change it to \"Scratch roots are keyed per workspace, like the ledger\".",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": ".out-of-scope/review-run-root-liveness-guard.md",
+      "line": 21,
+      "claim": "The note's figure 'about 1.2 GB per agent-brain tree' names agent-brain as the repository, but the tree names no repository for that figure.",
+      "evidence": "grep for '1.2 GB' across docs, plugin and .out-of-scope finds the figure only in docs/adr/0036 line 26, where it is 'about 1.2 GB of node_modules per tree' on 'a consumer repository' (#3994). No file ties the figure to agent-brain. docs/adr/0003, 0020 and 0036 mention agent-brain only as a '.agent-brain/' directory or the memory-proxy.",
+      "suggested_fix": "Cite ADR 0036 / #3994 and say 'a consumer repository's tree', or drop the agent-brain attribution.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": ".out-of-scope/review-run-root-liveness-guard.md",
+      "line": 28,
+      "claim": "The claim that a pid marker fails because 'the omp process outlives a killed runner' has no source in the tree.",
+      "evidence": "Greps of plugin/skills/run-team/SKILL.md and plugin/scripts/ledger.mjs for the settle-after-confirmed-dead flow turned up no statement that an omp process survives its runner being killed. SKILL.md:816 says only to confirm a killed member dead before settling.",
+      "suggested_fix": "Cite where this behaviour was observed, or soften it to 'may outlive'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

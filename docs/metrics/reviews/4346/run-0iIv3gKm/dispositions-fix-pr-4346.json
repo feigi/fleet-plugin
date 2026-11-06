@@ -1,0 +1,65 @@
+{
+  "head": "be3ab7fe05c7e059b66298f59522097729446523",
+  "run": "run-0iIv3gKm",
+  "entries": [
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4346/fix-tk6m4jzp/u0/verdict.json",
+      "remedyFiles": [
+        ".out-of-scope/review-run-root-liveness-guard.md"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4346/fix-tk6m4jzp/u1/verdict.json",
+      "remedyFiles": [
+        ".out-of-scope/review-run-root-liveness-guard.md"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4346/fix-tk6m4jzp/u2/verdict.json",
+      "remedyFiles": [
+        ".out-of-scope/review-run-root-liveness-guard.md"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4346/fix-tk6m4jzp/u3/verdict.json",
+      "remedyFiles": [
+        ".out-of-scope/review-run-root-liveness-guard.md"
+      ],
+      "reason": "refuted: the agent-brain attribution is accurate per comments on #3994 and #4076; only a citation is missing",
+      "issue": 4350
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4346/fix-tk6m4jzp/u4/verdict.json",
+      "remedyFiles": [
+        ".out-of-scope/review-run-root-liveness-guard.md"
+      ],
+      "reason": "refuted: docs/adr/0025 records member processes as children of the controller's omp process, and #4335's triage states the same",
+      "issue": 4350
+    }
+  ]
+}
