@@ -2094,10 +2094,19 @@ function checkReaders(where) {
     return r;
   };
   const verifyShaOf = (branch, sha) => look(`verify-sha.sh ${branch} ${sha}`, "sh", [verifySha, branch, sha], [0, 1]);
+  // gh's answer, at exit 1, for a number no issue or PR in the repository has.
+  const NO_ISSUE = /Could not resolve to an issue or pull request with the number of /;
   // A gh answer, parsed: `v` the JSON it printed, or null when it printed
-  // none, beside the answer `r` itself for the caller's refusal.
-  const lookJson = (what, args, lead = "could not look") => {
-    const r = look(what, "gh", args, [0], lead);
+  // none, beside the answer `r` itself for the caller's refusal. With
+  // `orNone`, gh answering that no issue or PR has the number asked for is
+  // null in place of an answer; any other exit 1 still could not look.
+  const lookJson = (what, args, lead = "could not look", orNone = false) => {
+    const r = look(what, "gh", args, orNone ? [0, 1] : [0], lead);
+    if (r.status === 1) {
+      if (NO_ISSUE.test(r.stderr)) return null;
+      const why = cause(r.stderr);
+      die(`${where}: ${lead} — ${what} exited 1${why ? `: ${why}` : ""}; nothing written`);
+    }
     try {
       return { r, v: JSON.parse(r.stdout) };
     } catch {
@@ -2141,7 +2150,7 @@ function checkReaders(where) {
   const prCommitClosing = (pr) => {
     const what = `gh pr view ${pr} --json commits`;
     const { r, v } = lookJson(what, ["pr", "view", String(pr), "--json", "commits"]);
-    if (v === null || typeof v !== "object" || !Array.isArray(v.commits)) {
+    if (!Array.isArray(v?.commits)) {
       die(`${where}: could not look — ${what} printed no list of commits: ${cause(r.stdout)}; nothing written`);
     }
     if (v.commits.length >= COMMITS_LIMIT) {
@@ -2161,10 +2170,13 @@ function checkReaders(where) {
   };
   // Issue `n`'s title and label names, as `gh issue view <n> --json
   // title,labels` answers them. An answer without a string title, or without a
-  // list of named labels, could not look.
-  const issueRead = (n) => {
+  // list of named labels, could not look. With `orNone`, null when no issue or
+  // PR has the number (lookJson()).
+  const issueRead = (n, orNone = false) => {
     const what = `gh issue view ${n} --json title,labels`;
-    const { r, v } = lookJson(what, ["issue", "view", String(n), "--json", "title,labels"]);
+    const read = lookJson(what, ["issue", "view", String(n), "--json", "title,labels"], "could not look", orNone);
+    if (read === null) return null;
+    const { r, v } = read;
     if (v === null || typeof v !== "object" || typeof v.title !== "string") {
       die(`${where}: could not look — ${what} printed no title: ${cause(r.stdout)}; nothing written`);
     }
@@ -2176,11 +2188,14 @@ function checkReaders(where) {
   };
   // The label names gh answers `args` with, `list` taking the label list off
   // the parsed answer. A read that fails, or answers anything but a list of
-  // named labels, could not read `whose` labels.
-  const labelNames = (whose, args, list) => {
+  // named labels, could not read `whose` labels. With `orNone`, null when no
+  // issue or PR has the number asked for (lookJson()).
+  const labelNames = (whose, args, list, orNone = false) => {
     const what = `gh ${args.join(" ")}`;
     const lead = `could not read ${whose} labels`;
-    const { r, v } = lookJson(what, args, lead);
+    const read = lookJson(what, args, lead, orNone);
+    if (read === null) return null;
+    const { r, v } = read;
     const labels = namedLabels(list(v));
     if (labels === null) {
       die(`${where}: ${lead} — ${what} printed no list of named labels: ${cause(r.stdout)}; nothing written`);
@@ -2190,8 +2205,9 @@ function checkReaders(where) {
   // PR `pr`'s label names, and the names of the labels its repository defines.
   const prLabels = (pr) => labelNames(`PR #${pr}'s`, ["pr", "view", String(pr), "--json", "labels"], (v) => v?.labels);
   const repoLabels = () => labelNames("the repository's", LABEL_LIST_ARGS, (v) => v);
-  // Issue `n`'s label names, as `gh issue view <n> --json labels` answers them.
-  const issueLabels = (n) => labelNames(`issue #${n}'s`, ["issue", "view", String(n), "--json", "labels"], (v) => v?.labels);
+  // Issue `n`'s label names, as `gh issue view <n> --json labels` answers
+  // them; with `orNone`, null when no issue or PR has number `n`.
+  const issueLabels = (n, orNone = false) => labelNames(`issue #${n}'s`, ["issue", "view", String(n), "--json", "labels"], (v) => v?.labels, orNone);
   // Of `numbers`, a PR's closing references in its own repository, those not
   // in `own` — the PR's own tickets — whose issue carries the in-progress Label
   // role's string: tickets another claim holds. `labelsOf(n)` is issue n's
@@ -2262,9 +2278,11 @@ async function closingRefusals(member, tickets) {
   // A closing keyword in a commit message closes its issue at merge too,
   // though closingIssuesReferences leaves it out. Check 3 only: it neither
   // makes the PR close a ticket nor takes one from it. A number the body
-  // already closes was judged above.
+  // already closes was judged above. A number no issue or PR has — a typo, or
+  // another repository's number a cherry-pick carried — closes nothing, so no
+  // claim holds it.
   const byCommit = prCommitClosing(pr).filter((c) => !refs.includes(c.number));
-  const held = claimedElsewhere(byCommit.map((c) => c.number), ownTickets, (m) => issueRead(m).labels);
+  const held = claimedElsewhere(byCommit.map((c) => c.number), ownTickets, (m) => issueRead(m, true)?.labels ?? []);
   for (const c of byCommit.filter((c) => held.includes(c.number))) {
     failures.push(`PR #${pr}'s commit ${c.oid.slice(0, 7)} closes #${c.number}, which another claim holds — that commit must be reworded to "Refs #${c.number}"`);
   }
@@ -2808,7 +2826,11 @@ function recordFiled(id, subject) {
 //                             reads OPEN and its closingIssuesReferences in its
 //                             own repository name N; no other closing
 //                             reference there is a ticket another claim holds,
-//                             its issue carrying in-progress; its head branch
+//                             its issue carrying in-progress, and no issue a
+//                             commit message of PR M closes by a closing
+//                             keyword is one either — commits read by gh pr
+//                             view --json commits, a list that fills gh's cap
+//                             on it could not look (exit 2); its head branch
 //                             is implementer/N-impl-N. Last, and only when
 //                             every other check passed: verify-sha.sh <branch>
 //                             <head> exits 0, and the Check-step record
@@ -3020,10 +3042,11 @@ async function runSettleFromReport() {
         check(`PR #${report.pr} closes no ticket another claim holds (in-progress: ${held.length === 0 ? "none" : held.map((n) => `#${n}`).join(", ")})`, held.length === 0);
         // A closing keyword in a commit message closes its issue at merge as
         // well, though closingIssuesReferences leaves it out. Only a refusal
-        // is a check: a number the body already closes was judged above, and
-        // a PR whose commits close nothing else has no line to add.
+        // is a check: a number the body already closes was judged above, a
+        // number no issue or PR has closes nothing, and a PR whose commits
+        // close nothing else has no line to add.
         const byCommit = prCommitClosing(report.pr).filter((c) => !numbers.includes(c.number));
-        const heldByCommit = claimedElsewhere(byCommit.map((c) => c.number), [live.number], issueLabels);
+        const heldByCommit = claimedElsewhere(byCommit.map((c) => c.number), [live.number], (n) => issueLabels(n, true) ?? []);
         for (const c of byCommit.filter((c) => heldByCommit.includes(c.number))) {
           check(`PR #${report.pr}'s commit ${c.oid.slice(0, 7)} closes #${c.number}, which another claim holds (in-progress) — reword that commit to "Refs #${c.number}"`, false);
         }

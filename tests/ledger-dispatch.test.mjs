@@ -19,7 +19,7 @@ import { computeBoard } from "../plugin/scripts/compute-board.mjs";
 import { deriveRun, LedgerError } from "../plugin/scripts/fleet-tick.mjs";
 import { rowPr } from "../plugin/scripts/ledger-grammar.mjs";
 import { rendering, renderBrief } from "./support/rendered-brief.mjs";
-import { writeQueueGh, closes, titled, failsOn, ghCalls, ref, prUrl, labelled, defines, issueLabelled, committed, commit } from "./support/queue-gh.mjs";
+import { writeQueueGh, closes, titled, failsOn, noIssue, ghCalls, ref, prUrl, labelled, defines, issueLabelled, committed, commit } from "./support/queue-gh.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { identityRoles } from "./support/label-map-seed.mjs";
 import { viaResult } from "./support/review-result.mjs";
@@ -1716,6 +1716,23 @@ test("a commit closing a ticket another claim holds refuses the finisher, naming
   issueLabelled(g.bin, 3637, ["bug"]);
   committed(g.bin, 3606, [commit(COMMIT_SHA, "the work", "Closes #3637")]);
   assert.equal(g.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher");
+});
+
+test("a commit closing a number no issue or PR has closes nothing, so it is no refusal; any other failed read of the number is exit 2, naming the read", (t) => {
+  const f = fixture(t);
+  f.put("3545", RULED_ROW);
+  f.rule(3606, "3545", "yes", [3545]);
+  noIssue(f.bin, 99999);
+  committed(f.bin, 3606, [commit(COMMIT_SHA, "the work", "fixes #99999 upstream")]);
+  assert.equal(f.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher");
+  assert.ok(ghCalls(f.bin).includes("issue view 99999 --json title,labels"), "the number is read");
+  const g = fixture(t);
+  g.put("3545", RULED_ROW);
+  g.rule(3606, "3545", "yes", [3545]);
+  failsOn(g.bin, "issue", 99999);
+  committed(g.bin, 3606, [commit(COMMIT_SHA, "the work", "fixes #99999 upstream")]);
+  g.refused(["dispatch", "3606", "finisher-pr-3606"], /dispatch finisher-pr-3606: could not look — gh issue view 99999 --json title,labels exited 1: gh stub: issue view 99999 failed; nothing written/);
+  assert.deepEqual(g.read().dispatched, []);
 });
 
 test("a commit-borne and a body-borne ticket another claim holds are each a line of their own, the body's text unchanged, and a number both name is judged once", (t) => {

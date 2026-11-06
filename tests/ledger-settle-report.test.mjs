@@ -85,6 +85,7 @@ fi
 if [ "$1 $2" = "issue view" ]; then
   [ "$4 $5" = "--json labels" ] || [ "$4 $5" = "--json title,labels" ] || { echo "gh stub: unexpected gh $*" >&2; exit 64; }
   f='${ghDir}'/"issue-$3.json"
+  [ -e '${ghDir}'/"issue-$3.none" ] && { echo "GraphQL: Could not resolve to an issue or pull request with the number of $3. (repository.issue)" >&2; exit 1; }
   [ -r "$f" ] || { echo "gh stub: no issue $3" >&2; exit 1; }
   cat "$f"
   exit 0
@@ -131,7 +132,9 @@ cat "$f"
   };
   // Issue `n`'s `gh issue view` answer, to `--json labels` and to `--json title,labels`: `body`.
   const issue = (n, body) => writeFileSync(join(ghDir, `issue-${n}.json`), JSON.stringify(body));
-  return { root, work, fleet, file, reports, env, git, head, stray, run, cli, ok, bytes, report, pr, issue, queue, settle, settled, refused };
+  // gh's answer that no issue or PR has number `n`, as it gives for a number with none.
+  const noIssue = (n) => writeFileSync(join(ghDir, `issue-${n}.none`), "");
+  return { root, work, fleet, file, reports, env, git, head, stray, run, cli, ok, bytes, report, pr, issue, noIssue, queue, settle, settled, refused };
 }
 
 const implReport = (f, over = {}) => ({
@@ -458,6 +461,23 @@ test("impl-N=PR#M: a body-borne ticket another claim holds keeps its refusal tex
   f.issue(9, { labels: [{ name: "in-progress" }] });
   f.refused("impl-5", 3, /failed: PR #6 closes no ticket another claim holds \(in-progress: #7\); failed: PR #6's commit abc1234 closes #9, which another claim holds \(in-progress\) — reword that commit to "Refs #9"; nothing written/);
   assert.deepEqual(issueReads(f), ["issue view 7 --json labels", "issue view 9 --json labels"]);
+});
+
+test("impl-N=PR#M: a commit closing a number no issue or PR has closes nothing, so it settles; any other failed read of the number is exit 2 and writes nothing", () => {
+  const view = { state: "OPEN", closingIssuesReferences: [ref(5)], commits: [commit("abc1234def5678", "the work", "fixes #99999 upstream")] };
+  const f = fixture();
+  f.ok("dispatch", "5", "impl-5");
+  f.report("impl-5", implReport(f));
+  f.pr(6, view);
+  f.noIssue(99999);
+  assert.equal(f.settled("impl-5").outcome, "PR#6");
+  assert.deepEqual(issueReads(f), ["issue view 99999 --json labels"]);
+  const g = fixture();
+  g.ok("dispatch", "5", "impl-5");
+  g.report("impl-5", implReport(g));
+  g.pr(6, view);
+  g.refused("impl-5", 2, /could not read issue #99999's labels — gh issue view 99999 --json labels exited 1: gh stub: no issue 99999; nothing written/);
+  assert.equal(dispatched(g, "impl-5"), "impl-5", "the member stays dispatched, unsettled");
 });
 
 test("impl-N=PR#M: a PR that is not OPEN, or does not close #N, reads no commits and no issue", () => {

@@ -8,8 +8,9 @@
 // by a branch that is no claim's, has no commit and carries `patch`, an issue
 // titled `issue <n>` carrying no label, and a repository defining all three
 // release labels; `closes`, `committed`, `titled`, `issueLabelled`,
-// `labelled` and `defines` set them per test, and `failsOn` makes any of them
-// fail. Any other
+// `labelled` and `defines` set them per test, `failsOn` makes any of them
+// fail, and `noIssue` makes gh answer that an issue number has no issue or PR.
+// Any other
 // gh call fails loudly. Every call is appended to `<bin>/calls`, so a test can
 // assert that a refusal made none.
 //
@@ -76,6 +77,7 @@ case "$1 $2" in
   [ "$4 $5" = "--json title,labels" ] || { printf 'gh stub: unexpected gh %s\\n' "$*" >&2; exit 64; }
   f='${bin}/issue-'"$3"
   [ -f "$f.fail" ] && { printf 'gh stub: issue view %s failed\\n' "$3" >&2; exit 1; }
+  [ -f "$f.none" ] && { printf 'GraphQL: Could not resolve to an issue or pull request with the number of %s. (repository.issue)\\n' "$3" >&2; exit 1; }
   if [ -f "$f.json" ]; then /bin/cat "$f.json"; else printf '{"title":"issue %s","labels":[]}\\n' "$3"; fi ;;
 "label list")
   [ "$*" = "${LABEL_LIST_ARGS.join(" ")}" ] || { printf 'gh stub: unexpected gh %s\\n' "$*" >&2; exit 64; }
@@ -156,6 +158,11 @@ export function commit(oid, messageHeadline, messageBody = "") {
  */
 export function failsOn(bin, kind, n) {
   writeFileSync(join(bin, `${kind}-${n}.fail`), "");
+}
+
+/** Makes gh answer, as it does for a number with none, that no issue or PR has number `n`. */
+export function noIssue(bin, n) {
+  writeFileSync(join(bin, `issue-${n}.none`), "");
 }
 
 /** Every gh call the stub has answered, one command line each. */

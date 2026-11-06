@@ -42,16 +42,26 @@ export function ownClosingIssues(pr, prUrl, refs) {
 // `commits` entries `gh pr view --json commits` lists, each with `oid`,
 // `messageHeadline` and `messageBody` — close, in the order their first
 // mention comes in, as `{number, oid}` with `oid` the first commit that names
-// the number. It counts what drop-merged-label.sh's commit scan counts: per
-// line of headline + body, a `close`, `closes`, `closed`, `fix`, `fixes`,
-// `fixed`, `resolve`, `resolves` or `resolved` keyword, in any case, with no
-// letter, digit or `_` before it — so `bugfix #N` and `prefix #N` are not
-// keywords — and then optional whitespace and `#N`. A bare `#N`, `Refs #N`, a
-// keyword before `owner/repo#N` or a URL is not a match. Throws an Error whose
-// message names what could not be read, phrased to follow the read's own
-// "answered": `no list of commits`, `a commit with no oid`, `a commit with no
-// message`.
-const COMMIT_CLOSE = /(?:^|[^\p{L}\p{N}_])(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)[ \t\r\v\f]*#([0-9]+)/giu;
+// the number. It counts what drop-merged-label.sh's commit scan counts, and a
+// colon after the keyword besides, which GitHub's docs name as closing
+// (`Closes: #N`) and that scan leaves out: per line of the message, a
+// `close`, `closes`, `closed`, `fix`, `fixes`, `fixed`, `resolve`, `resolves`
+// or `resolved` keyword, in any case, with no letter, digit or `_` before it —
+// so `bugfix #N` and `prefix #N` are not keywords — and then an optional `:`,
+// optional whitespace and `#N`. A match never crosses a line: whitespace
+// before `#N` excludes a newline, and a newline is itself a character the
+// keyword may follow, so the message is scanned whole. A letter or digit is
+// one in Unicode's sense; the scan's `[:alnum:]` agrees under a UTF-8 locale,
+// but under `C` a non-ASCII letter is none, so there the scan finds #5 in
+// `éfix #5` and this one does not. A bare `#N`, `Refs #N`, a keyword before
+// `owner/repo#N` or a URL is not a match.
+// The message is the headline, a newline and the body, but gh cuts a long
+// headline short with `…` and opens the body with `…` and the headline's rest,
+// so a headline ending in `…` and a body starting with one are joined back
+// into the one line they were. Throws an Error whose message names what could
+// not be read, phrased to follow the read's own "answered": `no list of
+// commits`, `a commit with no oid`, `commit <oid> with no message`.
+const COMMIT_CLOSE = /(?:^|[^\p{L}\p{N}_])(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?[ \t\r\v\f]*#([0-9]+)/giu;
 
 export function commitClosingIssues(commits) {
   if (!Array.isArray(commits)) throw new Error("no list of commits");
@@ -60,11 +70,11 @@ export function commitClosingIssues(commits) {
     if (typeof c?.oid !== "string" || c.oid === "") throw new Error("a commit with no oid");
     const body = c.messageBody ?? "";
     if (typeof c.messageHeadline !== "string" || typeof body !== "string") throw new Error(`commit ${c.oid} with no message`);
-    for (const line of `${c.messageHeadline}\n${body}`.split("\n")) {
-      for (const m of line.matchAll(COMMIT_CLOSE)) {
-        const number = Number(m[1]);
-        if (Number.isSafeInteger(number) && !first.has(number)) first.set(number, c.oid);
-      }
+    const cut = c.messageHeadline.endsWith("…") && body.startsWith("…");
+    const message = cut ? `${c.messageHeadline.slice(0, -1)}${body.slice(1)}` : `${c.messageHeadline}\n${body}`;
+    for (const m of message.matchAll(COMMIT_CLOSE)) {
+      const number = Number(m[1]);
+      if (Number.isSafeInteger(number) && !first.has(number)) first.set(number, c.oid);
     }
   }
   return [...first].map(([number, oid]) => ({ number, oid }));
