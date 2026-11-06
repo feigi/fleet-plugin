@@ -77,7 +77,7 @@ second run finds its writes already made and re-ticks.
 
 *Amended (#4211, implemented by #4359): the `review-result` row no longer
 holds. The wake does not read the digest and passes no `reviewed=` word: it
-runs `ledger.mjs review <pr> --result <path> --scratch ‹scratch›`, which
+runs `ledger.mjs review <pr> --result <path> --scratch <scratch>`, which
 derives `reviewed=` from the review result file at `<path>`, and `review`
 refuses a `reviewed=` among its arguments, parseable or not. See ADR 0038.*
 
