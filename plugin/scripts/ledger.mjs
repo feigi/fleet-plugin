@@ -2777,13 +2777,19 @@ function recordFiled(id, subject) {
 //   impl-N=blocked            nothing to check: report-schema.mjs already
 //                             refuses a block that names a bailCause, a pr or
 //                             a head, or gives no reason in bailDetail
-//   fix-pr-M=applied:<head>   origin's refs/heads/<branch> is <head>, fetched
-//                             by verify-sha.sh; the Check-step record (below)
-//                             holds for <head>
-//   fix-pr-M=no-op            origin's refs/heads/<branch> is PR M's fleet
-//                             head, as the tick folds it: the head of the
-//                             applied:<head> the fix-applier with the
-//                             greatest retry suffix landed since PR M's
+//   fix-pr-M=applied:<head>   the report's branch is PR M's head branch, as
+//                             GitHub names it (PR M need not read OPEN, and
+//                             its head SHA is not compared: a rebase moves
+//                             it); then, only once that and every other check
+//                             passed: origin's refs/heads/<branch> is <head>,
+//                             fetched by verify-sha.sh; the Check-step record
+//                             (below) holds for <head>
+//   fix-pr-M=no-op            the report's branch is PR M's head branch, as
+//                             above; then, only once that and every other
+//                             check passed: origin's refs/heads/<branch> is
+//                             PR M's fleet head, as the tick folds it: the
+//                             head of the applied:<head> the fix-applier with
+//                             the greatest retry suffix landed since PR M's
 //                             latest reviewed=, else the head that reviewed=
 //                             names
 //   finisher-pr-M=labelled    PR M's labels carry ready-to-merge, and so does
@@ -2987,18 +2993,22 @@ async function runSettleFromReport() {
       check(`bailCause: ${report.bailCause}`, report.bailCause !== null);
     }
   } else if (live.family === "fix-pr") {
-    if (report.outcome === "applied") {
-      outcome = `applied:${report.head}`;
-      const head = remoteHead(report.branch);
-      check(`origin refs/heads/${report.branch} is ${report.head}`, head === report.head);
-      if (head === report.head) {
-        // verify-sha.sh is the fetch that puts the head's commit object here,
-        // which the tree read needs; its exit 2 is a fetch that failed or an
-        // object that is not there, so it could not look.
-        recipeGate(report.head, () => verifyShaOf(report.branch, report.head));
-      }
-    } else if (report.outcome === "no-op") {
-      outcome = "no-op";
+    // `applied` and `no-op` claim the state of a pushed branch; `failed`
+    // claims none and is settled unchecked.
+    const claimsBranch = report.outcome === "applied" || report.outcome === "no-op";
+    if (claimsBranch) {
+      // The branch the report names must be the one PR M is headed on, so the
+      // head read from origin below is the PR's own. GitHub is asked first and
+      // nothing is read from git: a report naming another branch is refused
+      // whatever origin holds. A replacement fix-pr-M-x checks against the same
+      // PR M, and PR M need not read OPEN: only its head branch is asked.
+      const { headRefName } = prView(live.number, "headRefName");
+      check(`the report's branch is PR #${live.number}'s head branch (report: ${report.branch}, GitHub: ${headRefName})`, report.branch === headRefName);
+    }
+    outcome = report.outcome === "applied" ? `applied:${report.head}` : report.outcome;
+    // The head origin must hold for a `no-op`, with the reason it is that one.
+    let required = null;
+    if (report.outcome === "no-op") {
       let fold;
       try {
         fold = deriveRun({ rows: data.rows, dispatched: data.dispatched, drain: data.drain }, []);
@@ -3014,16 +3024,11 @@ async function runSettleFromReport() {
       if (review === undefined) {
         check(`PR #${live.number}'s row names a reviewed= head`, false);
       } else {
-        const head = remoteHead(report.branch);
-        const required = review.fleetHead;
-        const why = required === review.head
+        const why = review.fleetHead === review.head
           ? `the head PR #${live.number}'s latest reviewed= names`
           : `the head PR #${live.number}'s latest applied: names, landed since its latest reviewed= ${review.head}`;
-        check(`origin refs/heads/${report.branch} is ${required}, ${why}`,
-          head !== null && head.toLowerCase().startsWith(required));
+        required = { head: review.fleetHead, why };
       }
-    } else {
-      outcome = "failed";
     }
     const refuted = report.deferred.filter((d) => d.bucket === "refuted");
     if (refuted.length > 0) {
@@ -3041,6 +3046,22 @@ async function runSettleFromReport() {
         if (check(`${path} gives refuted[${d.index}] a reason`, reason !== "")) {
           ruledLines.push(`#${live.number} reversed refutation ${d.index}: ${reason}`);
         }
+      }
+    }
+    // git is read last, and only once every check above has passed.
+    if (claimsBranch && checks.every((c) => c.ok)) {
+      const head = remoteHead(report.branch);
+      if (report.outcome === "applied") {
+        check(`origin refs/heads/${report.branch} is ${report.head}`, head === report.head);
+        if (head === report.head) {
+          // verify-sha.sh is the fetch that puts the head's commit object here,
+          // which the tree read needs; its exit 2 is a fetch that failed or an
+          // object that is not there, so it could not look.
+          recipeGate(report.head, () => verifyShaOf(report.branch, report.head));
+        }
+      } else {
+        check(`origin refs/heads/${report.branch} is ${required.head}, ${required.why}`,
+          head !== null && head.toLowerCase().startsWith(required.head));
       }
     }
   } else if (live.family === "finisher-pr") {

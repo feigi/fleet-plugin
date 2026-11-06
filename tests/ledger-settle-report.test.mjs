@@ -147,6 +147,11 @@ const finisherReport = (f, over = {}) => ({
   member: "finisher-pr-6", outcome: "labelled", cause: null, evidence: null, pin: f.head,
   labelsReadBack: ["patch", "ready-to-merge"], kill: null, filed: [], unrecorded: [], confirmation: [], ...over,
 });
+// PR 6 headed on the branch fix-pr-6's report names, `feat`: what the fix-pr
+// settle asks GitHub before it reads origin.
+const onFeat = (f) => f.pr(6, { headRefName: "feat" });
+// The first check of an `applied` or `no-op` settle on PR 6 headed on `feat`.
+const BRANCH_CHECK = { name: "the report's branch is PR #6's head branch (report: feat, GitHub: feat)", ok: true };
 const botReport = (f, over = {}) => ({
   member: "merge-bot-1", merged: [{ pr: 6, sha: f.head }, { pr: 7, sha: f.head }], conflictHold: [], refused: [], branchKept: [], ...over,
 });
@@ -568,16 +573,18 @@ test("impl-N=blocked: a block that names a PR or a head is not a report — exit
 test("fix-pr-M=applied:<head>: origin's branch at the reported head settles", () => {
   const f = fixture();
   f.ok("dispatch", "6", "fix-pr-6");
+  onFeat(f);
   f.report("fix-pr-6", fixReport(f));
   const receipt = f.settled("fix-pr-6");
   assert.equal(receipt.outcome, `applied:${f.head}`);
-  assert.deepEqual(receipt.checks, [{ name: `origin refs/heads/feat is ${f.head}`, ok: true }]);
+  assert.deepEqual(receipt.checks, [BRANCH_CHECK, { name: `origin refs/heads/feat is ${f.head}`, ok: true }]);
   assert.equal(dispatched(f, "fix-pr-6"), `fix-pr-6=applied:${f.head}`);
 });
 
 test("fix-pr-M=applied:<head>: origin's branch elsewhere is exit 3", () => {
   const f = fixture();
   f.ok("dispatch", "6", "fix-pr-6");
+  onFeat(f);
   f.report("fix-pr-6", fixReport(f, { head: f.stray }));
   f.refused("fix-pr-6", 3, new RegExp(`failed: origin refs/heads/feat is ${f.stray}`));
 });
@@ -585,6 +592,7 @@ test("fix-pr-M=applied:<head>: origin's branch elsewhere is exit 3", () => {
 test("fix-pr-M=applied:<head>: a branch origin does not have is exit 3", () => {
   const f = fixture();
   f.ok("dispatch", "6", "fix-pr-6");
+  f.pr(6, { headRefName: "gone" });
   f.report("fix-pr-6", fixReport(f, { branch: "gone" }));
   f.refused("fix-pr-6", 3, new RegExp(`failed: origin refs/heads/gone is ${f.head}`));
 });
@@ -592,9 +600,130 @@ test("fix-pr-M=applied:<head>: a branch origin does not have is exit 3", () => {
 test("could not look: a git ls-remote that fails is exit 2", () => {
   const f = fixture();
   f.ok("dispatch", "6", "fix-pr-6");
+  onFeat(f);
   f.report("fix-pr-6", fixReport(f));
   f.git(f.work, "remote", "set-url", "origin", join(f.root, "no-such-origin.git"));
   f.refused("fix-pr-6", 2, /could not look — git ls-remote origin refs\/heads\/feat exited 128/);
+});
+
+// -- fix-pr-M: the report's branch is PR M's head branch ----------------------
+//
+// An `applied` or `no-op` report's branch is checked against the head branch
+// GitHub names for PR M before git is read; `failed` claims no state.
+
+const ghLog = (f) => (existsSync(join(f.root, "gh.log")) ? readFileSync(join(f.root, "gh.log"), "utf8") : "");
+
+test("fix-pr-M: an applied report naming another pushed branch that holds the head is exit 3, naming both branches, and writes nothing", () => {
+  const f = fixture();
+  f.ok("dispatch", "6", "fix-pr-6");
+  onFeat(f);
+  // CLAIM is on origin at the head the report names, and is not PR 6's branch.
+  f.report("fix-pr-6", fixReport(f, { branch: CLAIM }));
+  const r = f.refused("fix-pr-6", 3, /failed: the report's branch is PR #6's head branch \(report: implementer\/5-impl-5, GitHub: feat\)/);
+  assert.doesNotMatch(r.stderr, /origin refs\/heads/);
+  assert.equal(dispatched(f, "fix-pr-6"), "fix-pr-6", "the member stays dispatched, unsettled");
+});
+
+test("fix-pr-M: a no-op report naming another pushed branch that holds the head is exit 3, naming both branches, and writes nothing", () => {
+  const f = fixture();
+  f.ok("review", "6", "review=member:review-pr-6", `reviewed=${f.head.slice(0, 12)}:0/0/0:run-abcd1234`);
+  f.ok("dispatch", "6", "fix-pr-6");
+  onFeat(f);
+  f.report("fix-pr-6", fixReport(f, { outcome: "no-op", branch: CLAIM }));
+  const r = f.refused("fix-pr-6", 3, /failed: the report's branch is PR #6's head branch \(report: implementer\/5-impl-5, GitHub: feat\)/);
+  assert.doesNotMatch(r.stderr, /origin refs\/heads/);
+});
+
+test("fix-pr-M: a report naming a branch origin lacks, with the PR headed elsewhere, is exit 3 for the branch check, not exit 2 and not the origin check", () => {
+  for (const outcome of ["applied", "no-op"]) {
+    const f = fixture();
+    f.ok("review", "6", "review=member:review-pr-6", `reviewed=${f.head.slice(0, 12)}:0/0/0:run-abcd1234`);
+    f.ok("dispatch", "6", "fix-pr-6");
+    onFeat(f);
+    f.report("fix-pr-6", fixReport(f, { outcome, branch: "gone" }));
+    const r = f.refused("fix-pr-6", 3, /failed: the report's branch is PR #6's head branch \(report: gone, GitHub: feat\)/);
+    assert.doesNotMatch(r.stderr, /origin refs\/heads/, outcome);
+  }
+});
+
+test("fix-pr-M: a refused branch check reads nothing from git, so an origin that cannot be reached does not turn it into exit 2", () => {
+  for (const outcome of ["applied", "no-op"]) {
+    const f = fixture();
+    f.ok("review", "6", "review=member:review-pr-6", `reviewed=${f.head.slice(0, 12)}:0/0/0:run-abcd1234`);
+    f.ok("dispatch", "6", "fix-pr-6");
+    onFeat(f);
+    f.report("fix-pr-6", fixReport(f, { outcome, branch: CLAIM }));
+    f.git(f.work, "remote", "set-url", "origin", join(f.root, "no-such-origin.git"));
+    f.refused("fix-pr-6", 3, /failed: the report's branch is PR #6's head branch/);
+  }
+});
+
+test("fix-pr-M: the branch check is the first of the receipt's checks and every git read follows it", () => {
+  const f = fixture();
+  f.ok("dispatch", "6", "fix-pr-6");
+  onFeat(f);
+  f.report("fix-pr-6", fixReport(f));
+  const receipt = f.settled("fix-pr-6");
+  assert.deepEqual(receipt.checks.map((c) => c.name), [BRANCH_CHECK.name, `origin refs/heads/feat is ${f.head}`]);
+  assert.match(ghLog(f), /^pr view 6 --json headRefName$/m);
+});
+
+test("fix-pr-M: a refused check other than the branch check keeps git unread, so an origin that cannot be reached is still exit 3", () => {
+  const f = fixture();
+  f.ok("dispatch", "6", "fix-pr-6");
+  onFeat(f);
+  const record = join(f.root, "dispositions-fix-pr-6.json");
+  writeFileSync(record, JSON.stringify({ head: f.head, run: "run-abcd1234", entries: [{ bucket: "refuted", index: 2, reason: "" }] }));
+  f.report("fix-pr-6", fixReport(f, { deferred: [{ bucket: "refuted", index: 2, issue: 43 }] }));
+  f.git(f.work, "remote", "set-url", "origin", join(f.root, "no-such-origin.git"));
+  f.refused("fix-pr-6", 3, new RegExp(`failed: ${record} gives refuted\\[2\\] a reason`));
+});
+
+test("could not look: a gh pr view that fails, or answers without a string headRefName, is exit 2 for an applied and a no-op report", () => {
+  for (const outcome of ["applied", "no-op"]) {
+    const f = fixture();
+    f.ok("review", "6", "review=member:review-pr-6", `reviewed=${f.head.slice(0, 12)}:0/0/0:run-abcd1234`);
+    f.ok("dispatch", "6", "fix-pr-6");
+    f.report("fix-pr-6", fixReport(f, { outcome }));
+    // No answer file for PR 6: the stub exits 1, as gh does when it cannot reach GitHub.
+    f.refused("fix-pr-6", 2, /could not look — gh pr view 6 --json headRefName exited 1/);
+    writeFileSync(join(f.root, "gh", "6.json"), "<html>rate limited</html>");
+    f.refused("fix-pr-6", 2, /could not look — gh pr view 6 --json headRefName printed no JSON object/);
+    for (const headRefName of [undefined, null, 5, ["feat"]]) {
+      f.pr(6, { headRefName });
+      f.refused("fix-pr-6", 2, /could not look — gh pr view 6 --json headRefName answered without a usable headRefName/);
+    }
+  }
+});
+
+test("fix-pr-M: a replacement fix-pr-M-x whose report names PR M's head branch settles", () => {
+  const f = fixture();
+  f.ok("dispatch", "6", "fix-pr-6");
+  f.ok("settle", "fix-pr-6", "failed");
+  f.ok("dispatch", "6", "fix-pr-6-b");
+  onFeat(f);
+  f.report("fix-pr-6-b", fixReport(f, { member: "fix-pr-6-b" }));
+  assert.deepEqual(f.settled("fix-pr-6-b").checks, [BRANCH_CHECK, { name: `origin refs/heads/feat is ${f.head}`, ok: true }]);
+  f.ok("dispatch", "6", "fix-pr-6-c");
+  f.report("fix-pr-6-c", fixReport(f, { member: "fix-pr-6-c", branch: CLAIM }));
+  f.refused("fix-pr-6-c", 3, /failed: the report's branch is PR #6's head branch \(report: implementer\/5-impl-5, GitHub: feat\)/);
+});
+
+test("fix-pr-M: PR M need not read OPEN and its head SHA is not compared, so a settle after a rebase or a merge still settles", () => {
+  const f = fixture();
+  f.ok("dispatch", "6", "fix-pr-6");
+  f.pr(6, { state: "MERGED", headRefName: "feat", headRefOid: f.stray });
+  f.report("fix-pr-6", fixReport(f));
+  assert.equal(f.settled("fix-pr-6").outcome, `applied:${f.head}`);
+  assert.doesNotMatch(ghLog(f), /headRefOid/);
+});
+
+test("fix-pr-M: a failed report settles with no gh pr view call", () => {
+  const f = fixture();
+  f.ok("dispatch", "6", "fix-pr-6");
+  f.report("fix-pr-6", fixReport(f, { outcome: "failed" }));
+  assert.deepEqual(f.settled("fix-pr-6"), { member: "fix-pr-6", outcome: "failed", checks: [], filed: [], ruled: [] });
+  assert.doesNotMatch(ghLog(f), /pr view/);
 });
 
 // -- fix-pr-M=no-op -----------------------------------------------------------
@@ -603,10 +732,12 @@ test("fix-pr-M=no-op: origin's branch at the latest reviewed= head settles", () 
   const f = fixture();
   f.ok("review", "6", "review=member:review-pr-6", `reviewed=${f.head.slice(0, 12)}:0/0/0:run-abcd1234`);
   f.ok("dispatch", "6", "fix-pr-6");
+  onFeat(f);
   f.report("fix-pr-6", fixReport(f, { outcome: "no-op" }));
   const receipt = f.settled("fix-pr-6");
   assert.equal(receipt.outcome, "no-op");
   assert.deepEqual(receipt.checks, [
+    BRANCH_CHECK,
     { name: `origin refs/heads/feat is ${f.head.slice(0, 12)}, the head PR #6's latest reviewed= names`, ok: true },
   ]);
   assert.equal(dispatched(f, "fix-pr-6"), "fix-pr-6=no-op");
@@ -616,6 +747,7 @@ test("fix-pr-M=no-op: a report with no dispositions record and no test run settl
   const f = fixture();
   f.ok("review", "6", "review=member:review-pr-6", `reviewed=${f.head.slice(0, 12)}:0/0/0:run-abcd1234`);
   f.ok("dispatch", "6", "fix-pr-6");
+  onFeat(f);
   f.report("fix-pr-6", fixReport(f, { outcome: "no-op", dispositionsRecord: null, testRun: null }));
   assert.equal(f.settled("fix-pr-6").outcome, "no-op");
   assert.equal(dispatched(f, "fix-pr-6"), "fix-pr-6=no-op");
@@ -625,6 +757,7 @@ test("fix-pr-M=no-op: origin's branch moved past the reviewed= head is exit 3", 
   const f = fixture();
   f.ok("review", "6", "review=member:review-pr-6", `reviewed=${f.stray}:0/0/0:run-abcd1234`);
   f.ok("dispatch", "6", "fix-pr-6");
+  onFeat(f);
   f.report("fix-pr-6", fixReport(f, { outcome: "no-op" }));
   f.refused("fix-pr-6", 3, new RegExp(`failed: origin refs/heads/feat is ${f.stray}, the head PR #6's latest reviewed= names`));
 });
@@ -633,6 +766,7 @@ test("fix-pr-M=no-op: a branch origin does not have is exit 3", () => {
   const f = fixture();
   f.ok("review", "6", "review=member:review-pr-6", `reviewed=${f.head.slice(0, 12)}:0/0/0:run-abcd1234`);
   f.ok("dispatch", "6", "fix-pr-6");
+  f.pr(6, { headRefName: "gone" });
   f.report("fix-pr-6", fixReport(f, { outcome: "no-op", branch: "gone" }));
   f.refused("fix-pr-6", 3, /failed: origin refs\/heads\/gone is /);
 });
@@ -640,6 +774,7 @@ test("fix-pr-M=no-op: a branch origin does not have is exit 3", () => {
 test("fix-pr-M=no-op: a PR with no reviewed= is exit 3", () => {
   const f = fixture();
   f.ok("dispatch", "6", "fix-pr-6");
+  onFeat(f);
   f.report("fix-pr-6", fixReport(f, { outcome: "no-op" }));
   f.refused("fix-pr-6", 3, /failed: PR #6's row names a reviewed= head/);
 });
@@ -672,6 +807,7 @@ const returnReview = (f, head, runner = "review-pr-6", run = "run-abcd1234") => 
 const landApplied = (f, member) => {
   f.ok("dispatch", "6", member);
   const head = pushOnFeat(f, `${member}'s fix`);
+  onFeat(f);
   f.report(member, fixReport(f, { member, head }));
   assert.equal(f.settled(member).outcome, `applied:${head}`);
   return head;
@@ -679,6 +815,7 @@ const landApplied = (f, member) => {
 // `member` dispatched, its no-op report written and not settled.
 const reportNoOp = (f, member) => {
   f.ok("dispatch", "6", member);
+  onFeat(f);
   f.report(member, fixReport(f, { member, outcome: "no-op" }));
 };
 // The check's name when the head required is a review's, and when it is an
@@ -693,7 +830,7 @@ test("fix-pr-M=no-op: after an earlier fix-applier's applied: push, origin's bra
   reportNoOp(f, "fix-pr-6-b");
   const receipt = f.settled("fix-pr-6-b");
   assert.equal(receipt.outcome, "no-op");
-  assert.deepEqual(receipt.checks, [{ name: appliedCheck(pushed, f.head.slice(0, 12)), ok: true }]);
+  assert.deepEqual(receipt.checks, [BRANCH_CHECK, { name: appliedCheck(pushed, f.head.slice(0, 12)), ok: true }]);
   assert.equal(dispatched(f, "fix-pr-6-b"), "fix-pr-6-b=no-op");
 });
 
@@ -719,7 +856,7 @@ test("fix-pr-M=no-op: after two applied: pushes, the later fix-applier's head is
   putFeatOn(f, first);
   f.refused("fix-pr-6-c", 3, new RegExp(`failed: ${appliedCheck(second, f.head.slice(0, 12))}`));
   putFeatOn(f, second);
-  assert.deepEqual(f.settled("fix-pr-6-c").checks, [{ name: appliedCheck(second, f.head.slice(0, 12)), ok: true }]);
+  assert.deepEqual(f.settled("fix-pr-6-c").checks, [BRANCH_CHECK, { name: appliedCheck(second, f.head.slice(0, 12)), ok: true }]);
 });
 
 test("fix-pr-M=no-op: after a row rewrite puts the later fix-applier's applied: token before the earlier one's, the later head is still the one required", () => {
@@ -738,7 +875,7 @@ test("fix-pr-M=no-op: after a row rewrite puts the later fix-applier's applied: 
   putFeatOn(f, first);
   f.refused("fix-pr-6-c", 3, new RegExp(`failed: ${appliedCheck(second, f.head.slice(0, 12))}`));
   putFeatOn(f, second);
-  assert.deepEqual(f.settled("fix-pr-6-c").checks, [{ name: appliedCheck(second, f.head.slice(0, 12)), ok: true }]);
+  assert.deepEqual(f.settled("fix-pr-6-c").checks, [BRANCH_CHECK, { name: appliedCheck(second, f.head.slice(0, 12)), ok: true }]);
 });
 
 test("fix-pr-M=no-op: an applied: push followed by a newer reviewed= — the newer review's head is the one required", () => {
@@ -751,7 +888,7 @@ test("fix-pr-M=no-op: an applied: push followed by a newer reviewed= — the new
   putFeatOn(f, pushed);
   f.refused("fix-pr-6-b", 3, new RegExp(`failed: ${reviewedCheck(reread.slice(0, 12))}`));
   putFeatOn(f, reread);
-  assert.deepEqual(f.settled("fix-pr-6-b").checks, [{ name: reviewedCheck(reread.slice(0, 12)), ok: true }]);
+  assert.deepEqual(f.settled("fix-pr-6-b").checks, [BRANCH_CHECK, { name: reviewedCheck(reread.slice(0, 12)), ok: true }]);
 });
 
 test("fix-pr-M=no-op: a failed, no-op or killed predecessor leaves the head required where it was", () => {
@@ -766,7 +903,7 @@ test("fix-pr-M=no-op: a failed, no-op or killed predecessor leaves the head requ
     pushOnFeat(before, "a push no fix-applier landed");
     before.refused("fix-pr-6-b", 3, new RegExp(`failed: ${reviewedCheck(reviewedBefore)}`));
     putFeatOn(before, before.head);
-    assert.deepEqual(before.settled("fix-pr-6-b").checks, [{ name: reviewedCheck(reviewedBefore), ok: true }], `fix-pr-6=${predecessor}`);
+    assert.deepEqual(before.settled("fix-pr-6-b").checks, [BRANCH_CHECK, { name: reviewedCheck(reviewedBefore), ok: true }], `fix-pr-6=${predecessor}`);
 
     // A push before it: the head that push landed stays the one required.
     const after = fixture();
@@ -779,7 +916,7 @@ test("fix-pr-M=no-op: a failed, no-op or killed predecessor leaves the head requ
     putFeatOn(after, after.head);
     after.refused("fix-pr-6-c", 3, new RegExp(`failed: ${appliedCheck(pushed, reviewedAfter)}`));
     putFeatOn(after, pushed);
-    assert.deepEqual(after.settled("fix-pr-6-c").checks, [{ name: appliedCheck(pushed, reviewedAfter), ok: true }], `fix-pr-6=applied, fix-pr-6-b=${predecessor}`);
+    assert.deepEqual(after.settled("fix-pr-6-c").checks, [BRANCH_CHECK, { name: appliedCheck(pushed, reviewedAfter), ok: true }], `fix-pr-6=applied, fix-pr-6-b=${predecessor}`);
   }
 });
 
@@ -794,7 +931,7 @@ test("fix-pr-M=no-op: an applied: head settled as an upper-case prefix is compar
   } while (!/[a-f]/.test(pushed.slice(0, 9)));
   f.ok("settle", "fix-pr-6", `applied:${pushed.slice(0, 9).toUpperCase()}`);
   reportNoOp(f, "fix-pr-6-b");
-  assert.deepEqual(f.settled("fix-pr-6-b").checks, [{ name: appliedCheck(pushed.slice(0, 9), f.head.slice(0, 12)), ok: true }]);
+  assert.deepEqual(f.settled("fix-pr-6-b").checks, [BRANCH_CHECK, { name: appliedCheck(pushed.slice(0, 9), f.head.slice(0, 12)), ok: true }]);
 });
 
 // -- finisher-pr-M=labelled ---------------------------------------------------
@@ -1154,6 +1291,7 @@ test("unrecorded filings reach ## Filed and refuted deferrals reach ## Ruled, on
       { bucket: "refuted", index: 2, scope: "in", claimKind: "behavior", disposition: "defer", reason: "the red run reproduces it", issue: 43 },
     ],
   }));
+  onFeat(f);
   f.report("fix-pr-6", fixReport(f, {
     deferred: [{ bucket: "survived", index: 0, issue: 42 }, { bucket: "refuted", index: 2, issue: 43 }],
     filed: [{ issue: 41, subject: "filed by the member itself" }],
@@ -1162,7 +1300,11 @@ test("unrecorded filings reach ## Filed and refuted deferrals reach ## Ruled, on
   const receipt = f.settled("fix-pr-6");
   assert.deepEqual(receipt.filed, ["#40 a deferral whose filed failed twice"]);
   assert.deepEqual(receipt.ruled, ["#6 reversed refutation 2: the red run reproduces it"]);
-  assert.deepEqual(receipt.checks.at(-1), { name: `${record} gives refuted[2] a reason`, ok: true });
+  assert.deepEqual(receipt.checks, [
+    BRANCH_CHECK,
+    { name: `${record} gives refuted[2] a reason`, ok: true },
+    { name: `origin refs/heads/feat is ${f.head}`, ok: true },
+  ]);
   const ledger = f.ok("read");
   assert.deepEqual(ledger.filed, ["#41 filed by the member itself", "#40 a deferral whose filed failed twice"]);
   assert.deepEqual(ledger.ruled, ["#6 reversed refutation 2: the red run reproduces it"]);
@@ -1177,6 +1319,7 @@ test("a refuted deferral the disposition record gives no reason, or only whitesp
   const f = fixture();
   f.ok("dispatch", "6", "fix-pr-6");
   const record = join(f.root, "dispositions-fix-pr-6.json");
+  onFeat(f);
   f.report("fix-pr-6", fixReport(f, { deferred: [{ bucket: "refuted", index: 2, issue: 43 }] }));
   for (const reason of ["", "  "]) {
     writeFileSync(record, JSON.stringify({ head: f.head, run: "run-abcd1234", entries: [{ bucket: "refuted", index: 2, reason }] }));
@@ -1193,6 +1336,7 @@ test("a member already settled by hand still has its report's new filings and ru
   writeFileSync(record, JSON.stringify({
     head: f.head, run: "run-abcd1234", entries: [{ bucket: "refuted", index: 2, reason: "the red run reproduces it" }],
   }));
+  onFeat(f);
   f.report("fix-pr-6", fixReport(f, {
     deferred: [{ bucket: "refuted", index: 2, issue: 43 }],
     unrecorded: [{ issue: 40, subject: "a late filing" }],
@@ -1228,6 +1372,7 @@ cat '${join(f.root, "gh")}'/"$3.json"
 test("a refuted deferral whose disposition record cannot be read is exit 2", () => {
   const f = fixture();
   f.ok("dispatch", "6", "fix-pr-6");
+  onFeat(f);
   f.report("fix-pr-6", fixReport(f, { deferred: [{ bucket: "refuted", index: 2, issue: 43 }] }));
   f.refused("fix-pr-6", 2, /could not look — the disposition record .* could not be read as JSON: ENOENT/);
 });

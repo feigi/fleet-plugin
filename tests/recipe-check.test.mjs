@@ -134,7 +134,8 @@ exec '${realGit}' "$@"
     applied: [], deferred: [], filed: [], unrecorded: [], dispositionsRecord: join(root, "dispositions-fix-pr-6.json"),
     testRun: { cmd: "./agent-test", exit: 0, tests: 3, cancelled: 0 }, confirmation: [], ...over,
   }));
-  writeFileSync(join(ghDir, "6.json"), JSON.stringify({ state: "OPEN", closingIssuesReferences: [ref(5)], url: prUrl(6), headRefName: CLAIM }));
+  const prHead = (branch) => writeFileSync(join(ghDir, "6.json"), JSON.stringify({ state: "OPEN", closingIssuesReferences: [ref(5)], url: prUrl(6), headRefName: branch }));
+  prHead(CLAIM);
 
   // The member's own steps: a branch with a staged change, ready to record.
   git(work, "checkout", "-q", "-b", "feat");
@@ -149,7 +150,7 @@ exec '${realGit}' "$@"
   };
   return {
     root, env, work, origin, main, reports, git, writeRecipe, cli, ledger, settle, settled, refused, record, recordFile,
-    readRecord, ran, implReport, fixReport, stage, commitAndPush, bin, file,
+    readRecord, ran, implReport, fixReport, prHead, stage, commitAndPush, bin, file,
     clone: (name) => {
       const dir = join(root, name);
       git(root, "clone", "-q", origin, dir);
@@ -870,6 +871,7 @@ function pushedElsewhere(f, { green = true } = {}) {
   const head = f.git(other, "rev-parse", "HEAD");
   assert.throws(() => f.git(f.work, "cat-file", "-e", `${head}^{commit}`), "the ledger's checkout lacks the head's object");
   f.dispatch("6", "fix-pr-6");
+  f.prHead("feat");
   f.fixReport(head);
   return head;
 }
@@ -881,7 +883,7 @@ test("settle: a fix-applier head the checkout lacks is fetched, and its green re
   assert.equal(receipt.outcome, `applied:${head}`);
   const tree = f.git(f.work, "rev-parse", `${head}^{tree}`);
   assert.deepEqual(receipt.checks.at(-1), { name: `the recorded tree ${tree} is ${head}'s tree ${tree}`, ok: true });
-  assert.equal(receipt.checks.length, 5);
+  assert.equal(receipt.checks.length, 6);
 });
 
 test("settle: a fix-applier's red Test entrypoint is refused the same way", () => {
@@ -935,5 +937,26 @@ test("settle: a fix-applier report in a repository with no usable Recipe makes n
   rmSync(join(f.work, ".fleet", "recipe.json"));
   writeFileSync(join(f.root, "fetch-fails"), "");
   const receipt = f.settled("fix-pr-6");
-  assert.equal(receipt.checks.length, 1);
+  assert.equal(receipt.checks.length, 2);
+});
+
+test("settle: a fix-applier report whose branch is not PR M's head is refused before verify-sha.sh or the tree read, the fetch that would fail never running", () => {
+  const f = fixture();
+  pushedElsewhere(f);
+  f.prHead("another-branch");
+  writeFileSync(join(f.root, "fetch-fails"), "");
+  writeFileSync(join(f.root, "tree-fails"), "");
+  const r = f.refused("fix-pr-6", 3, /failed: the report's branch is PR #6's head branch \(report: feat, GitHub: another-branch\)/);
+  assert.doesNotMatch(r.stderr, /could not look/);
+});
+
+test("settle: a fix-applier report with a refuted deferral that has no reason is refused before verify-sha.sh runs", () => {
+  const f = fixture();
+  const head = pushedElsewhere(f);
+  const record = join(f.root, "dispositions-fix-pr-6.json");
+  writeFileSync(record, JSON.stringify({ head: "x", run: "run-abcd1234", entries: [{ bucket: "refuted", index: 2, reason: " " }] }));
+  f.fixReport(head, { deferred: [{ bucket: "refuted", index: 2, issue: 43 }] });
+  writeFileSync(join(f.root, "fetch-fails"), "");
+  const r = f.refused("fix-pr-6", 3, new RegExp(`failed: ${record} gives refuted\\[2\\] a reason`));
+  assert.doesNotMatch(r.stderr, /could not look/);
 });
