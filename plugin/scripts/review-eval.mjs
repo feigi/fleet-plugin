@@ -32,7 +32,7 @@
 // strings are.
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, normalize } from "node:path";
-import { describeValue, digestOf, runReview, runnerPrRefusal, runnerScratchRefusal, runnerTestCmdRefusal, runnerWorktreeRefusal } from "./review-core.mjs";
+import { digestOf, runReview, runnerPrRefusal, runnerScratchAbsoluteRefusal, runnerScratchRefusal, runnerTestCmdRefusal, runnerWorktreeRefusal } from "./review-core.mjs";
 
 // eval's `agent()` returns a HANDLE, not data: `agent(prompt,
 // opts)` resolves near-instantly to an `AgentHandle` with `.wait()`, and only
@@ -168,9 +168,8 @@ export async function runReviewToFile(args, run = runReviewOnOmp) {
   const scratch = args?.scratch;
   const prRefusal = runnerPrRefusal(pr);
   if (prRefusal) throw new Error(`review-runner: ${prRefusal}`);
-  if (typeof scratch !== "string" || !isAbsolute(scratch)) {
-    throw new Error(`review-runner: args.scratch must be an absolute path, got ${describeValue(scratch)}`);
-  }
+  const absoluteRefusal = runnerScratchAbsoluteRefusal(scratch);
+  if (absoluteRefusal) throw new Error(`review-runner: ${absoluteRefusal}`);
   const scratchRefusal = runnerScratchRefusal(scratch);
   if (scratchRefusal) throw new Error(`review-runner: ${scratchRefusal}`);
   const testCmdRefusal = runnerTestCmdRefusal(args.testCmd);

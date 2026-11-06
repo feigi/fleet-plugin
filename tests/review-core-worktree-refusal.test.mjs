@@ -81,6 +81,27 @@ test("every runner refusal returns its message for a value JSON.stringify cannot
   }
 });
 
+// The `inspect` fallback must not run the value's own `[inspect.custom]`: one
+// that throws would replace the refusal with the value's error.
+test("every runner refusal returns its message for a value whose own inspector throws, naming the value", () => {
+  const value = {
+    big: 1n,
+    [Symbol.for("nodejs.util.inspect.custom")]() {
+      throw new Error("the value's own inspector ran");
+    },
+  };
+  const refusals = [
+    [() => runnerWorktreeRefusal(value), /^args\.worktree is required — the checkout the review snapshots, got /],
+    [() => runnerTestCmdRefusal(value), /^args\.testCmd is required — the Test entrypoint the shared run executes, got /],
+    [() => runnerPrRefusal(value), /^args\.pr must be a PR number, got /],
+  ];
+  for (const [refuse, shape] of refusals) {
+    const refusal = refuse();
+    assert.match(refusal, shape);
+    assert.ok(refusal.includes("big: 1n"), `${refusal} does not name the value`);
+  }
+});
+
 test("runnerPrRefusal refuses a value the digits test cannot coerce instead of throwing, and still accepts a BigInt", () => {
   assert.match(runnerPrRefusal(Object.create(null)), /^args\.pr must be a PR number, got /);
   assert.equal(runnerPrRefusal(1n), null);

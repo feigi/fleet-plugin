@@ -927,15 +927,16 @@ export function runnerPrRefusal(pr) {
 // A value as the refusals below print it: `JSON.stringify`'s text wherever it
 // has one, `inspect`'s where it throws (a BigInt, a circular object) or answers
 // `undefined` (a Symbol, a function). `String(value)` would print `1n` as `1`.
+// `inspect` skips the value's own `[inspect.custom]`, which could throw.
 // Never throws, so a refusal is always the message and never a bare TypeError.
-export function describeValue(value) {
+function describeValue(value) {
   try {
     const text = JSON.stringify(value);
     if (typeof text === "string") return text;
   } catch {
     // fall through to inspect
   }
-  return inspect(value);
+  return inspect(value, { customInspect: false });
 }
 
 // `isDigits` coerces its argument, and a Symbol or a null-prototype object
@@ -993,6 +994,17 @@ export function runnerTestCmdRefusal(testCmd) {
 export function runnerWorktreeRefusal(worktree) {
   if (typeof worktree === "string" && worktree.trim() !== "") return null;
   return `args.worktree is required — the checkout the review snapshots, got ${describeValue(worktree)}`;
+}
+
+// The absolute-path refusal the two share, for the reason the rules above
+// are: `scratch` is interpolated into the snapshot prompt's paths and the
+// result file's path, so a value that is not an absolute path names the
+// wrong directory or none, and only the runner's refusal, before its first
+// attempt, keeps that from being retried. Refused, never coerced. Null when
+// `scratch` is an absolute path.
+export function runnerScratchAbsoluteRefusal(scratch) {
+  if (typeof scratch === "string" && isAbsolute(scratch)) return null;
+  return `args.scratch must be an absolute path, got ${describeValue(scratch)}`;
 }
 
 // --- Orchestration ----------------------------------------------------
@@ -1167,9 +1179,8 @@ async function reviewRun(host, args, run) {
   // takes the default above, so a falsy one (`0`, `false`, `""`, `null`) is
   // refused here like any other value that is not an absolute path. Below the
   // suffix check so a relative `pr<N>` still hears that it is partitioned.
-  if (typeof scratch !== "string" || !isAbsolute(scratch)) {
-    throw new Error(`review-pr: args.scratch must be an absolute path, got ${describeValue(scratch)}`);
-  }
+  const absoluteRefusal = runnerScratchAbsoluteRefusal(scratch);
+  if (absoluteRefusal) throw new Error(`review-pr: ${absoluteRefusal}`);
 
   // Built only now, below every refusal of `pr` and `scratch`: a Symbol cannot
   // be interpolated, and the refusals above are owed their message.
