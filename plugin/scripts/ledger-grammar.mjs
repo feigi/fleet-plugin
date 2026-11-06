@@ -113,6 +113,13 @@ export function memberTokens(text) {
   return text.split(/\s+/).filter(Boolean).map(parseToken).filter(Boolean);
 }
 
+/** Whether `word` is a settled member token: one parseToken() reads with no
+ * error and an outcome. */
+function isSettledToken(word) {
+  const t = parseToken(word);
+  return t !== null && t.error === null && t.outcome !== null;
+}
+
 /** The dispatch-prompt.mjs role a member of `family` is rendered as. */
 export function memberRole(family) {
   return FAMILIES[family].role;
@@ -522,10 +529,7 @@ export function gateVerdictRefusal(oldLine, line) {
  * own malformed-token check), so a row can still be repaired.
  */
 export function settledMemberRefusal(oldLine, line) {
-  const settled = (text) => (text === null ? [] : text.split(/\s+/).filter((w) => {
-    const t = parseToken(w);
-    return t !== null && t.error === null && t.outcome !== null;
-  }));
+  const settled = (text) => (text === null ? [] : text.split(/\s+/).filter(isSettledToken));
   const lost = added(settled(line), settled(oldLine))[0];
   if (lost === undefined) return null;
   return `drops settled member token '${lost}' — a rewrite must carry every settled member token as the row holds it; `
@@ -655,8 +659,7 @@ export function rowWriteRefusal(before, after, oldLine, line, retired = []) {
 export function settledOnLedger(rows, dispatched) {
   const settled = new Set();
   for (const e of dispatched) {
-    const t = parseToken(e);
-    if (t !== null && t.error === null && t.outcome !== null) settled.add(t.name);
+    if (isSettledToken(e)) settled.add(parseToken(e).name);
   }
   for (const text of rows) {
     const { pr } = rowNums(text);

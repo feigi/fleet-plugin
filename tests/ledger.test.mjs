@@ -4122,11 +4122,9 @@ test("row names every token a rewrite dropped on stderr, and nothing when it dro
   assert.doesNotMatch(fresh, /dropped/, "a new row drops nothing");
 });
 
-const SETTLED_DROP = /a rewrite must carry every settled member token as the row holds it/;
-
 test("row refuses a rewrite that drops a settled member token, naming the first one, and writes nothing", (t) => {
   const { refused } = tokenFixture(t, [SETTLED_ROW, "#6 impl-6=PR#12 · fix-pr-12=applied:abcdef1 · finisher-pr-12=labelled · ports=16326"]);
-  const named = (token) => new RegExp(`drops settled member token '${token.replace(/[#=:]/g, "\\$&")}' — ${SETTLED_DROP.source}`);
+  const named = (token) => new RegExp(`drops settled member token '${token}' — a rewrite must carry every settled member token as the row holds it`);
   // The reported lookup: a bare PR number, an omitted token and a changed outcome.
   refused(["row", "5", "9"], named("impl-5=PR#9"));
   refused(["row", "5", "ports=16324 · ci=1:1:success"], named("impl-5=PR#9"));
