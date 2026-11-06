@@ -34,7 +34,7 @@
 // argv[1].
 import { assessBeat, isStalled, isReported, stallReport, NO_OWNER } from "./fleet-state.mjs";
 import { parseToken, rowPr, premisesOf, HALT_CAUSES, REVIEW, CELL, POLICY_CELL, parseRoutedEntry, tierValues, cellValues, isRulePath } from "./ledger-grammar.mjs";
-import { latestFinisherAttempts, foldLedger, pastPinDue } from "./fleet-tick.mjs";
+import { latestFinisherAttempts, foldLedger, reviewOwed as reviewOwedState } from "./fleet-tick.mjs";
 import { computeCellEvidence } from "./compute-cell-evidence.mjs";
 import { admissibleRow, lastSegment } from "./pull-attribution.mjs";
 import { dispatchModel } from "./member-outcomes.mjs";
@@ -101,7 +101,9 @@ import { implementerCell, modelsEqual } from "./tier-roles.mjs";
 // `review=…=failed` is a dead review and the PR is owed one again, as run-team
 // SKILL.md defines review-due and as fleet-tick.mjs's `reviewedAny` reads the
 // token: the PR is owed none while any row naming it carries ANY live
-// `review=` — wherever it sits, not only as the last one — or any `reviewed=`.
+// `review=` — wherever it sits, not only as the last one — or any `reviewed=`;
+// nor is it owed one while a fix-applier or finisher on it is live
+// (fleet-tick.mjs's `reviewHeld`, which the board reads through `reviewOwed`).
 // A `review=` token outside the grammar is read as live by foldLedger's
 // lenient mode, which the board reads the PR's state through; the strict tick
 // refuses that ledger outright instead, and the board flags the row.
@@ -708,13 +710,7 @@ export function computeBoard(inputs) {
   const latestFinishers = new Map(latestFinisherAttempts({ rows, dispatched: ledger.dispatched || [] }, unqueued).map((u) => [u.pr, u.outcome]));
   // Review state is the PR's, read off the tick's own fold — a card's
   // PR is its row's latest attempt, whichever row carries that PR's tokens.
-  const liveMember = (names) => [...names].some((n) => fold.members.get(n).outcome === null);
-  const reviewOwed = (prNum) => {
-    const st = fold.byPr.get(prNum);
-    if (st === undefined) return true;
-    if (st.inFlight || liveMember(st.fixMembers) || liveMember(st.finishers)) return false;
-    return !st.reviewedAny || pastPinDue(st, prByNum.get(prNum)?.headRefOid);
-  };
+  const reviewOwed = (prNum) => reviewOwedState(fold.byPr.get(prNum), fold.members, prByNum.get(prNum)?.headRefOid);
   const rowIssues = new Set();
   const tickets = [];
 
@@ -775,7 +771,7 @@ export function computeBoard(inputs) {
   // a returned review whose finisher halted `past-pin` against a head it
   // never read: owed again until the head catches up to what `reviewed=`
   // recorded, the same rule fleet-tick.mjs's reviewDue reads off headRefOid
-  // (pastPinDue). A PR absent from the open list (closed, not yet MERGED)
+  // (`reviewOwed`). A PR absent from the open list (closed, not yet MERGED)
   // reads as an unmatched head, never as answered — silence is not review.
   // Counted once per PR, off the per-PR fold, however many cards name it.
   const reviewBacklog = new Set(tickets.filter((t) => t.column === "REVIEW" && reviewOwed(t.pr)).map((t) => t.pr)).size;

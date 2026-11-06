@@ -1238,6 +1238,82 @@ test("deriveRun: a queued PR under a conflict hold is merge-held until its fix-a
   assert.deepEqual([landed.fixDue, landed.mergeHeld], [[], 0]);
 });
 
+// A review never overlaps a fix-applier or finisher on its PR, and a review
+// comes before any fix: the tick holds a PR out of review while either is
+// live, and holds a fix back while the PR is owed a review.
+const UNREVIEWED = (n, tail) => `#${n - 30} impl-${n - 30}=PR#${n} → PR#${n} · ${tail}`;
+const REVIEWED_A = "review=wf:a reviewed=abc1234:0/0/0:run-abc1234r";
+const dispatchLines = (r) => rowsOf(state({ fixDue: r.fixDue, reviewDue: r.reviewDue }), "reviewers")
+  .map((x) => x.action).filter((a) => a.startsWith("DISPATCH"));
+
+test("deriveRun: a never-reviewed PR with a conflict hold is review-due first, and fix-due once its review returns", () => {
+  const held = run({ rows: [UNREVIEWED(40, "conflict-hold:#40")] }, [pr(40, [], [10], HEAD_B)]);
+  assert.deepEqual([held.reviewDue, held.fixDue], [[40], []]);
+  assert.deepEqual(dispatchLines(held), ["DISPATCH review PR#40"]);
+  // Running, the review holds the fix back as it always has.
+  const running = run({ rows: [UNREVIEWED(40, "conflict-hold:#40 · review=wf:a")] }, [pr(40, [], [10], HEAD_B)]);
+  assert.deepEqual([running.reviewDue, running.fixDue], [[], []]);
+  const returned = run({ rows: [UNREVIEWED(40, `conflict-hold:#40 · ${REVIEWED_A}`)] }, [pr(40, [], [10], HEAD_B)]);
+  assert.deepEqual([returned.reviewDue, returned.fixDue], [[], [40]]);
+  assert.deepEqual(dispatchLines(returned), ["DISPATCH fix-pr PR#40"]);
+  // A review that died before returning leaves it owed first.
+  const dead = run({ rows: [UNREVIEWED(40, "conflict-hold:#40 · review=wf:a=failed")] }, [pr(40, [], [10], HEAD_B)]);
+  assert.deepEqual([dead.reviewDue, dead.fixDue], [[40], []]);
+});
+
+test("deriveRun: a PR whose finisher halted past-pin, under a conflict hold, is re-reviewed first and fix-due once that review returns", () => {
+  const halted = `${REVIEWED_A} · finisher-pr-40=halted:past-pin · conflict-hold:#40`;
+  const owed = run({ rows: [UNREVIEWED(40, halted)] }, [pr(40, [], [10], HEAD_B)]);
+  assert.deepEqual([owed.reviewDue, owed.fixDue], [[40], []]);
+  assert.deepEqual(dispatchLines(owed), ["DISPATCH review PR#40"]);
+  const returned = run({ rows: [UNREVIEWED(40, `${halted} review=wf:b reviewed=def5678:0/0/0:run-def5678r`)] }, [pr(40, [], [10], HEAD_B)]);
+  assert.deepEqual([returned.reviewDue, returned.fixDue], [[], [40]]);
+  // The hold alone, with the head the review read, was never review-due.
+  const current = run({ rows: [UNREVIEWED(40, `${REVIEWED_A} · conflict-hold:#40`)] }, [pr(40, [], [10], HEAD_A)]);
+  assert.deepEqual([current.reviewDue, current.fixDue], [[], [40]]);
+});
+
+test("deriveRun: a queued PR under a conflict hold is fix-due whether or not it was ever reviewed", () => {
+  const r = run({ rows: [UNREVIEWED(40, "conflict-hold:#40")] }, [pr(40, ["ready-to-merge"], [10], HEAD_B)]);
+  assert.deepEqual([r.reviewDue, r.fixDue], [[], [40]]);
+});
+
+test("deriveRun: a PR owed no review is still fix-due — an unowned one is nobody's review", () => {
+  const r = run({ rows: [UNREVIEWED(40, "conflict-hold:#40")] }, [pr(40, [], [10], HEAD_B, "MERGEABLE", "", { owned: false })]);
+  assert.deepEqual([r.reviewDue, r.fixDue], [[], [40]]);
+});
+
+test("deriveRun: a live fix-applier or finisher on a PR holds it out of review, never-reviewed or past-pin; settled, it is review-due again", () => {
+  const halted = `${REVIEWED_A} · finisher-pr-40=halted:past-pin`;
+  const dueAt = (tail, prs = [pr(40, [], [10], HEAD_B)], dispatched = []) => run({ rows: [UNREVIEWED(40, tail)], dispatched }, prs).reviewDue;
+  for (const live of ["fix-pr-40", "fix-pr-40-b", "finisher-pr-40-b"]) {
+    assert.deepEqual(dueAt(live), [], `never reviewed, ${live} live`);
+    assert.deepEqual(dueAt(`${halted} · ${live}`), [], `past-pin, ${live} live`);
+  }
+  assert.deepEqual(dueAt("finisher-pr-40"), [], "never reviewed, a finisher live");
+  assert.deepEqual(dueAt("fix-pr-40=failed · fix-pr-40-b"), [], "a retry live after a failed one");
+  // Settled anywhere is settled: on the row, or in `## Dispatched` alone.
+  for (const settled of ["fix-pr-40=killed", "fix-pr-40=failed", "fix-pr-40=no-op", "fix-pr-40=applied:def5678"]) {
+    assert.deepEqual(dueAt(settled), [40], settled);
+  }
+  assert.deepEqual(dueAt("fix-pr-40", undefined, ["fix-pr-40=failed"]), [40], "settled in ## Dispatched alone");
+  assert.deepEqual(dueAt(`${halted} · fix-pr-40=no-op`), [40], "past-pin, its fix-applier settled");
+  // Live in `## Dispatched` with its row token gone, it is still on the PR.
+  for (const live of ["fix-pr-40", "fix-pr-40-b", "finisher-pr-40"]) {
+    assert.deepEqual(dueAt("conflict-hold:#40", undefined, [live]), [], `${live} live in ## Dispatched alone`);
+  }
+  assert.deepEqual(dueAt("conflict-hold:#40", undefined, ["fix-pr-40=failed"]), [40], "settled in ## Dispatched, no row token");
+  assert.deepEqual(dueAt("conflict-hold:#40", undefined, ["fix-pr-41"]), [40], "live in ## Dispatched on another PR");
+});
+
+test("deriveRun: a live member on another PR holds no PR out of review, and a live implementer holds none on its own", () => {
+  const r = run({
+    rows: ["#10 impl-10=PR#40 → PR#40", UNREVIEWED(41, "fix-pr-41"), "#42 impl-12"],
+    dispatched: ["fix-pr-41", "impl-12"],
+  }, [pr(40, [], [10]), pr(41, [], [11]), pr(42, [], [12])]);
+  assert.deepEqual(r.reviewDue, [40, 42]);
+});
+
 // #3608: the park `fleet-event.mjs merge-bot-report` writes off a main-gain
 // refusal, bound to the head and body digest the gate refused.
 const EMPTY_BODY = bodyDigest("");
@@ -1566,7 +1642,7 @@ test("deriveRun: duplicate copies of one fix-applier's token land it once — a 
 // row, so a foreign one there is a hand-written stray — it must read as if
 // absent, never clear that PR's hold, answer its survivors or hold it off.
 test("deriveRun: a fix-pr token for another PR leaves this PR's hold and survivors exactly as if it were absent", () => {
-  const H = "#20 impl-20=PR#21 · conflict-hold:#21";
+  const H = "#20 impl-20=PR#21 · reviewed=abc1234:0/0/0:run-abc1234r · conflict-hold:#21";
   const due = (rows, dispatched = [], prs = [pr(21)]) => {
     const r = run({ rows, dispatched }, prs);
     return [r.fixDue, r.conflictHeld];
@@ -1596,7 +1672,7 @@ test("deriveRun: a fix-pr token for another PR leaves this PR's hold and survivo
   // A row's PR is its `PR#` mention even where its key names the token's
   // number: `fix-pr-21` on `#21 …=PR#22` is a stray on PR #22's row, neither
   // clearing #22's hold nor standing in for PR #21's own copies.
-  const K = "#21 impl-21=PR#22 · conflict-hold:#22";
+  const K = "#21 impl-21=PR#22 · reviewed=abc1234:0/0/0:run-abc1234r · conflict-hold:#22";
   assert.deepEqual(due([`${K} · fix-pr-21=applied:def5678`], [], [pr(22)]), [[22], [22]], "the key does not make it #22's own");
   assert.deepEqual(due([`${K} · fix-pr-21=applied:def5678`, `${H} · fix-pr-21`], ["fix-pr-21=applied:def5678"], [pr(21), pr(22)]),
     [[22], [22]], "…nor keep PR #21's bare copy from landing");
@@ -1637,7 +1713,7 @@ test("deriveRun: a settled stray of a PR-bound member on another PR's row does n
   // Must accept: the member's real settle — in `## Dispatched` or on its own
   // PR's row — still settles it, and a stray's own PR is unaffected.
   assert.deepEqual(seen([own], ["fix-pr-21=applied:abc1234"]).slice(0, 2), [[], 0], "settled in ## Dispatched");
-  assert.deepEqual(seen(["#20 impl-20=PR#21 · conflict-hold:#21 · fix-pr-21=failed"]).slice(0, 2), [[21], 0], "settled on its own row");
+  assert.deepEqual(seen(["#20 impl-20=PR#21 · reviewed=abc1234:0/0/0:run-abc1234r · conflict-hold:#21 · fix-pr-21=failed"]).slice(0, 2), [[21], 0], "settled on its own row");
   // A stray's token still counts as a live member when nothing settles it.
   assert.equal(seen(["#98 impl-98=PR#99 · fix-pr-21"])[1], 1);
 

@@ -148,10 +148,10 @@ test("token refuses a PR# mention that moves a launched row onto a PR whose runn
 });
 
 test("review finds the PR's row by its PR before by its key: a ticket row settled to the PR wins over a later #M row", (t) => {
-  const { review, rows } = fixture(t, ["#1 impl-1", "#482 fix-pr-482", `#2 impl-2=PR#483`]);
+  const { review, rows } = fixture(t, ["#1 impl-1", "#482 fix-pr-482=killed", `#2 impl-2=PR#483`]);
   assert.equal(review("482", A).row, "#482", "an implementer that has not settled to the PR does not map it");
   assert.equal(review("483", "review=member:review-pr-483").row, "#2");
-  assert.deepEqual(rows(), ["#1 impl-1", `#482 fix-pr-482 · ${A}`, "#2 impl-2=PR#483 · review=member:review-pr-483"]);
+  assert.deepEqual(rows(), ["#1 impl-1", `#482 fix-pr-482=killed · ${A}`, "#2 impl-2=PR#483 · review=member:review-pr-483"]);
 });
 
 test("review refuses any token that is not a review token, and a key that is not a PR number, writing nothing", (t) => {
@@ -650,4 +650,52 @@ test("review --result refuses a result that answers no open launch, and flags it
   refusedCall(["review", "482", `--result=${path}`], [/--result needs a space-separated value/]);
   refusedCall(["review", "482", "--result", path, `--scratch=${scratch}`], [/--scratch needs a space-separated value/]);
   refusedCall(["review", "482", "--scratch", scratch, A], [/--scratch is read only with --result/]);
+});
+
+// ---- review: never alongside a live fix-applier or finisher on the PR ----
+
+test("review refuses a launch while a fix-applier or finisher on the PR is live, naming the member and the way out, and writes nothing", (t) => {
+  for (const live of ["fix-pr-482", "fix-pr-482-b", "finisher-pr-482"]) {
+    const { reviewRefused } = fixture(t, [`#1 ${IMPL} · ${live}`]);
+    const stderr = reviewRefused("482", [A], new RegExp(`${live} is still live on PR #482`), new RegExp(`settle ${live} <outcome>`), /wait for its report/);
+    assert.match(stderr, /nothing written/);
+  }
+  // A past-pin re-review is a new launch like any other.
+  const { reviewRefused } = fixture(t, [`#1 ${IMPL} · ${A} · ${r1} · ${HALT} · fix-pr-482`]);
+  reviewRefused("482", [B], /fix-pr-482 is still live/);
+});
+
+test("review refuses a launch that settles an open one failed in the same call while a fix-applier is live", (t) => {
+  const { reviewRefused } = fixture(t, [`#1 ${IMPL} · ${A} · fix-pr-482`]);
+  reviewRefused("482", [`${A}=failed`, B], /fix-pr-482 is still live/);
+});
+
+test("review refuses a launch while a fix-applier live in ## Dispatched alone is on the PR, its row token rewritten away", (t) => {
+  const { run, ok, reviewRefused, review } = fixture(t, [`#1 ${IMPL}`]);
+  run("dispatch", "482", "fix-pr-482");
+  ok("1", IMPL);
+  reviewRefused("482", [A], /fix-pr-482 is still live on PR #482/);
+  run("settle", "fix-pr-482", "killed");
+  assert.equal(review("482", A).row, "#1");
+});
+
+test("review writes with a fix-applier live when it opens no launch: a launch settled failed, a result, or a launch with its result", (t) => {
+  const { review, rows } = fixture(t, [`#1 ${IMPL} · ${A} · fix-pr-482`]);
+  review("482", `${A}=failed`);
+  assert.deepEqual(rows(), [`#1 ${IMPL} · ${A}=failed · fix-pr-482`]);
+  const again = fixture(t, [`#1 ${IMPL} · ${A} · fix-pr-482`]);
+  assert.equal(again.review("482", r1).written, true, "a result answers the open launch");
+  const together = fixture(t, [`#1 ${IMPL} · fix-pr-482`]);
+  assert.equal(together.review("482", A, r1).written, true, "a launch with its own result leaves none open");
+  assert.deepEqual(together.rows(), [`#1 ${IMPL} · fix-pr-482 · ${A} · ${r1}`]);
+});
+
+test("review launches once the fix-applier or finisher on the PR is settled, and while one is live on another PR", (t) => {
+  for (const settled of ["fix-pr-482=killed", "fix-pr-482=failed", "fix-pr-482=no-op", "fix-pr-482=applied:def5678", "finisher-pr-482=labelled"]) {
+    const { review } = fixture(t, [`#1 ${IMPL} · ${settled}`]);
+    assert.equal(review("482", A).row, "#1", settled);
+  }
+  const other = fixture(t, [`#1 ${IMPL} · fix-pr-482`, "#2 impl-2=PR#483 → PR#483 · fix-pr-483=applied:def5678"]);
+  assert.equal(other.review("483", A.replace("482", "483")).row, "#2", "a live member on PR 482 does not hold PR 483");
+  assert.equal(other.review("484", A.replace("482", "484")).created, true);
 });
