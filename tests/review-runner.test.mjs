@@ -318,8 +318,8 @@ test("a testCmd that is missing, empty or blank is refused before any review run
   }
 });
 
-test("a worktree that is missing or empty is refused before any review runs, not retried", async () => {
-  for (const bad of [undefined, "", null]) {
+test("a worktree that is not a non-blank string is refused before any review runs, not retried", async () => {
+  for (const bad of [undefined, "", null, " ", "\n", 7, {}, [], true]) {
     const { run, calls } = scriptedRun([RESULT]);
     const args = { pr: 7, scratch: scratch(), testCmd: "node --test" };
     if (bad !== undefined) args.worktree = bad;
