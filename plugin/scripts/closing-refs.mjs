@@ -35,3 +35,42 @@ export function ownClosingIssues(pr, prUrl, refs) {
   }
   return [...numbers];
 }
+
+// A PR's closingIssuesReferences leaves out an issue only a commit message's
+// closing keyword names, yet GitHub closes that issue when the PR merges with
+// a merge commit. This reads those: the issues the messages of `commits` — the
+// `commits` entries `gh pr view --json commits` lists, each with `oid`,
+// `messageHeadline` and `messageBody` — close, in the order their first
+// mention comes in, as `{number, oid}` with `oid` the first commit that names
+// the number. It counts what drop-merged-label.sh's commit scan counts: per
+// line of headline + body, a `close`, `closes`, `closed`, `fix`, `fixes`,
+// `fixed`, `resolve`, `resolves` or `resolved` keyword, in any case, with no
+// letter, digit or `_` before it — so `bugfix #N` and `prefix #N` are not
+// keywords — and then optional whitespace and `#N`. A bare `#N`, `Refs #N`, a
+// keyword before `owner/repo#N` or a URL is not a match. Throws an Error whose
+// message names what could not be read, phrased to follow the read's own
+// "answered": `no list of commits`, `a commit with no oid`, `a commit with no
+// message`.
+const COMMIT_CLOSE = /(?:^|[^\p{L}\p{N}_])(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)[ \t\r\v\f]*#([0-9]+)/giu;
+
+export function commitClosingIssues(commits) {
+  if (!Array.isArray(commits)) throw new Error("no list of commits");
+  const first = new Map();
+  for (const c of commits) {
+    if (typeof c?.oid !== "string" || c.oid === "") throw new Error("a commit with no oid");
+    const body = c.messageBody ?? "";
+    if (typeof c.messageHeadline !== "string" || typeof body !== "string") throw new Error(`commit ${c.oid} with no message`);
+    for (const line of `${c.messageHeadline}\n${body}`.split("\n")) {
+      for (const m of line.matchAll(COMMIT_CLOSE)) {
+        const number = Number(m[1]);
+        if (Number.isSafeInteger(number) && !first.has(number)) first.set(number, c.oid);
+      }
+    }
+  }
+  return [...first].map(([number, oid]) => ({ number, oid }));
+}
+
+// The most commits `gh pr view --json commits` lists: it answers the first
+// COMMITS_LIMIT of a PR's commits and no count of the rest, so an answer of
+// that many may be cut off, and a commit it does not hold was not read.
+export const COMMITS_LIMIT = 100;

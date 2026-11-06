@@ -1,14 +1,15 @@
 // A `gh` stub for `ledger.mjs dispatch`. `gh pr list` answers `prs` as the
 // open `ready-to-merge` queue `dispatch merge-bot` records. A finisher dispatch
-// reads four more answers: `gh pr view <n> --json
+// reads five more answers: `gh pr view <n> --json
 // closingIssuesReferences,url,headRefName`, `gh issue view <n> --json
-// title,labels`, `gh pr view <n> --json labels` and the repository's label
-// list, `gh label list --json name --limit <limit>`. They default to a PR in
-// `OWN_REPO` that closes nothing, is headed by a branch that is no claim's
-// and carries `patch`, an issue titled `issue <n>` carrying no label, and a
-// repository defining all three release labels; `closes`, `titled`,
-// `issueLabelled`, `labelled` and `defines` set them per test, and `failsOn`
-// makes any of them fail. Any other
+// title,labels`, `gh pr view <n> --json commits`, `gh pr view <n> --json
+// labels` and the repository's label list, `gh label list --json name --limit
+// <limit>`. They default to a PR in `OWN_REPO` that closes nothing, is headed
+// by a branch that is no claim's, has no commit and carries `patch`, an issue
+// titled `issue <n>` carrying no label, and a repository defining all three
+// release labels; `closes`, `committed`, `titled`, `issueLabelled`,
+// `labelled` and `defines` set them per test, and `failsOn` makes any of them
+// fail. Any other
 // gh call fails loudly. Every call is appended to `<bin>/calls`, so a test can
 // assert that a refusal made none.
 //
@@ -65,6 +66,10 @@ case "$1 $2" in
     f='${bin}/labels-'"$3"
     [ -f "$f.fail" ] && { printf 'gh stub: pr view %s labels failed\\n' "$3" >&2; exit 1; }
     if [ -f "$f.json" ]; then /bin/cat "$f.json"; else printf '{"labels":[{"name":"patch"}]}\\n'; fi ;;
+  "--json commits")
+    f='${bin}/commits-'"$3"
+    [ -f "$f.fail" ] && { printf 'gh stub: pr view %s commits failed\\n' "$3" >&2; exit 1; }
+    if [ -f "$f.json" ]; then /bin/cat "$f.json"; else printf '{"commits":[]}\\n'; fi ;;
   *) printf 'gh stub: unexpected gh %s\\n' "$*" >&2; exit 64 ;;
   esac ;;
 "issue view")
@@ -130,8 +135,24 @@ export function defines(bin, names) {
 }
 
 /**
+ * Answers `gh pr view <pr> --json commits` with `commits` — commit objects as
+ * `commit()` builds them — or with `commits` itself when it is a string, an
+ * answer gh never gives. Without a call, a PR has no commit.
+ */
+export function committed(bin, pr, commits) {
+  const answer = typeof commits === "string" ? commits : JSON.stringify({ commits });
+  writeFileSync(join(bin, `commits-${pr}.json`), answer);
+}
+
+/** One element of `gh pr view --json commits`: its `oid`, headline and body. */
+export function commit(oid, messageHeadline, messageBody = "") {
+  return { oid, messageHeadline, messageBody, authors: [], authoredDate: "2026-11-06T00:00:00Z", committedDate: "2026-11-06T00:00:00Z" };
+}
+
+/**
  * Makes gh's answer for `<kind>` `<n>` fail: `pr` or `issue` `<n>`, `labels`
- * for PR `<n>`'s labels, or `label` `list` for the repository's label list.
+ * or `commits` for PR `<n>`'s labels or commits, or `label` `list` for the
+ * repository's label list.
  */
 export function failsOn(bin, kind, n) {
   writeFileSync(join(bin, `${kind}-${n}.fail`), "");

@@ -28,8 +28,9 @@ export const LEDGER = fileURLToPath(new URL("../../plugin/scripts/ledger.mjs", i
 // answers one that does not exist. `pr view <n> --json
 // closingIssuesReferences,url,headRefName` answered from FAKE_GH_PRS, a PR it
 // does not hold with no references, in queue-gh.mjs's own repository, headed
-// by a branch that is no claim's; `pr view <n> --json labels` answered from
-// FAKE_GH_PRS too, a PR it does not hold carrying `patch`.
+// by a branch that is no claim's; `pr view <n> --json commits` answered from
+// FAKE_GH_PRS too, a PR it does not hold with no commit; `pr view <n> --json
+// labels` the same, a PR it does not hold carrying `patch`.
 // FAKE_GH_DOWN answers every call as an unreachable API. FAKE_GH_LOG, when set,
 // gets one line per call: its argv, cwd and GIT_DIR.
 const GH_STUB = `#!${process.execPath}
@@ -42,6 +43,11 @@ const [cmd, sub, n, flag, fields] = argv;
 if (argv.length === 5 && cmd === "pr" && sub === "view" && flag === "--json" && fields === "closingIssuesReferences,url,headRefName") {
   const prs = JSON.parse(fs.readFileSync(FAKE_GH_PRS, "utf8"));
   process.stdout.write(JSON.stringify({ closingIssuesReferences: prs[n]?.closingIssuesReferences ?? [], url: ${JSON.stringify(prUrl(""))} + n, headRefName: "feature/topic" }));
+  process.exit(0);
+}
+if (argv.length === 5 && cmd === "pr" && sub === "view" && flag === "--json" && fields === "commits") {
+  const prs = JSON.parse(fs.readFileSync(FAKE_GH_PRS, "utf8"));
+  process.stdout.write(JSON.stringify({ commits: prs[n]?.commits ?? [] }));
   process.exit(0);
 }
 if (argv.length === 5 && cmd === "pr" && sub === "view" && flag === "--json" && fields === "labels") {

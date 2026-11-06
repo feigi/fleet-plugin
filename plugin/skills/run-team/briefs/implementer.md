@@ -18,8 +18,8 @@ one. If the ticket names one, say in the PR body that you used `<branch>`. Label
 in this file are roles; the Label map gives the string to type; a member never derives
 the map. Close no ticket
 another claim holds — one whose issue carries the in-progress label — even when the
-ticket below asks for one PR with it: write `Refs #M` instead; the settle refuses a PR
-that closes one. Your scratch directory is `<scratch>/impl-<N>/`; outside the worktree,
+ticket below asks for one PR with it, in the PR body or in a commit message: write
+`Refs #M` instead; the settle refuses a PR that closes one. Your scratch directory is `<scratch>/impl-<N>/`; outside the worktree,
 write nowhere else but your report file below.
 
 The ticket, pasted verbatim from the controller's own read — its title, the

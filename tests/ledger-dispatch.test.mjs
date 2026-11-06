@@ -19,7 +19,7 @@ import { computeBoard } from "../plugin/scripts/compute-board.mjs";
 import { deriveRun, LedgerError } from "../plugin/scripts/fleet-tick.mjs";
 import { rowPr } from "../plugin/scripts/ledger-grammar.mjs";
 import { rendering, renderBrief } from "./support/rendered-brief.mjs";
-import { writeQueueGh, closes, titled, failsOn, ghCalls, ref, prUrl, labelled, defines, issueLabelled } from "./support/queue-gh.mjs";
+import { writeQueueGh, closes, titled, failsOn, ghCalls, ref, prUrl, labelled, defines, issueLabelled, committed, commit } from "./support/queue-gh.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { identityRoles } from "./support/label-map-seed.mjs";
 import { viaResult } from "./support/review-result.mjs";
@@ -1688,6 +1688,135 @@ test("the in-progress string is the Label map's: a map spelling the role wip ref
   g.rule(3606, "3545", "yes", [3545, 3637]);
   issueLabelled(g.bin, 3637, ["wip"]);
   g.refused(["dispatch", "3606", "finisher-pr-3606"], /PR #3606 closes #3637, which another claim holds/);
+});
+
+// A closing keyword in a commit message closes its issue when the PR merges,
+// though closingIssuesReferences leaves it out, so the same check reads the
+// PR's commits too. Check 3 only: what a commit names is no closing reference
+// of the PR, so check 1, check 2 and the Ticketless test never see it.
+
+const COMMIT_SHA = "abc1234def5678901234567890abcdef12345678";
+
+test("a commit closing a ticket another claim holds refuses the finisher, naming the ticket and the commit and not the body, and it is dispatched once the ticket is unclaimed or the commit rewords it", (t) => {
+  const f = fixture(t);
+  f.put("3545", RULED_ROW);
+  f.rule(3606, "3545", "yes", [3545]);
+  issueLabelled(f.bin, 3637, ["in-progress"]);
+  committed(f.bin, 3606, [commit(COMMIT_SHA, "the work", "Closes #3637")]);
+  const r = f.cli("dispatch", "3606", "finisher-pr-3606");
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /finisher-pr-3606: PR #3606's commit abc1234 closes #3637, which another claim holds — that commit must be reworded to "Refs #3637" — not dispatching finisher-pr-3606/);
+  assert.doesNotMatch(r.stderr, /gh pr edit|rephrase|body/);
+  assert.deepEqual(f.read().dispatched, []);
+  committed(f.bin, 3606, [commit(COMMIT_SHA, "the work", "Refs #3637")]);
+  assert.equal(f.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher");
+  const g = fixture(t);
+  g.put("3545", RULED_ROW);
+  g.rule(3606, "3545", "yes", [3545]);
+  issueLabelled(g.bin, 3637, ["bug"]);
+  committed(g.bin, 3606, [commit(COMMIT_SHA, "the work", "Closes #3637")]);
+  assert.equal(g.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher");
+});
+
+test("a commit-borne and a body-borne ticket another claim holds are each a line of their own, the body's text unchanged, and a number both name is judged once", (t) => {
+  const f = fixture(t);
+  f.put("3545", RULED_ROW);
+  f.rule(3606, "3545", "yes", [3545, 3637]);
+  issueLabelled(f.bin, 3637, ["in-progress"]);
+  issueLabelled(f.bin, 3639, ["in-progress"]);
+  committed(f.bin, 3606, [commit(COMMIT_SHA, "the work", "fixes #3637, resolves #3639")]);
+  f.refused(["dispatch", "3606", "finisher-pr-3606"],
+    /finisher-pr-3606: PR #3606 closes #3637, which another claim holds — rephrase it as "Refs #3637"; PR #3606's commit abc1234 closes #3639, which another claim holds — that commit must be reworded to "Refs #3639" — not dispatching finisher-pr-3606$/m);
+});
+
+test("a refusal names the first commit of the PR that names the number", (t) => {
+  const f = fixture(t);
+  f.put("3545", RULED_ROW);
+  f.rule(3606, "3545", "yes", [3545]);
+  issueLabelled(f.bin, 3637, ["in-progress"]);
+  committed(f.bin, 3606, [commit("1111111aaa", "first"), commit("2222222bbb", "second", "closes #3637"), commit("3333333ccc", "third", "closes #3637")]);
+  f.refused(["dispatch", "3606", "finisher-pr-3606"], /PR #3606's commit 2222222 closes #3637, which another claim holds/);
+});
+
+test("a commit that closes the PR's own ticket, a bare or Refs number, a larger word, or another repository's issue is no refusal, and reads no issue", (t) => {
+  for (const message of ["Closes #3545", "bugfix #3637", "prefix #3637", "see #3637", "Refs #3637", "closes owner/repo#3637", "closes https://github.com/o/r/issues/3637"]) {
+    const f = fixture(t);
+    f.put("3545", RULED_ROW);
+    f.rule(3606, "3545", "yes", [3545]);
+    issueLabelled(f.bin, 3545, ["in-progress"]);
+    issueLabelled(f.bin, 3637, ["in-progress"]);
+    committed(f.bin, 3606, [commit(COMMIT_SHA, message, message)]);
+    assert.equal(f.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher", message);
+    assert.deepEqual(ghCalls(f.bin).filter((c) => c.startsWith("issue view")), ["issue view 3545 --json title,labels"], message);
+  }
+});
+
+test("a commit closing a PR's own ticket does not stand in for the body's reference, and one closing a ticket does not make a Ticketless PR close it", (t) => {
+  const f = fixture(t);
+  f.put("3545", RULED_ROW);
+  f.rule(3606, "3545", "yes", []);
+  // The claim holds its own ticket through in-progress: the commit naming it is not "another claim's".
+  issueLabelled(f.bin, 3545, ["in-progress"]);
+  committed(f.bin, 3606, [commit(COMMIT_SHA, "the work", "Closes #3545")]);
+  const r = f.cli("dispatch", "3606", "finisher-pr-3606");
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /PR #3606 does not close #3545, its own ticket/);
+  assert.doesNotMatch(r.stderr, /commit/);
+  // A Ticketless PR with no release label is dispatched, `patch` to be added:
+  // were the commit's #3637 one of the PR's closing references, it would be
+  // refused for closing a ticket and carrying no label.
+  const g = fixture(t);
+  g.put("3631", UNTICKETED_ROW);
+  labelled(g.bin, 3631, []);
+  committed(g.bin, 3631, [commit(COMMIT_SHA, "the work", "Closes #3637")]);
+  assert.equal(g.ok("dispatch", "3631", "finisher-pr-3631").agent, "fleet-finisher");
+});
+
+test("a commit closing the PR's own suggestion-band record is not check 2's: it is a refusal only when another claim holds the issue", (t) => {
+  const f = fixture(t);
+  f.put("3545", RULED_ROW);
+  f.rule(3606, "3545", "yes", [3545]);
+  titled(f.bin, 3637, "PR #3606 review: the suggestion band, checked");
+  committed(f.bin, 3606, [commit(COMMIT_SHA, "the work", "Closes #3637")]);
+  assert.equal(f.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher");
+});
+
+test("a Ticketless PR's commit closing a ticket another claim holds is refused, naming it and the commit", (t) => {
+  const f = fixture(t);
+  f.put("3631", UNTICKETED_ROW);
+  labelled(f.bin, 3631, ["patch"]);
+  issueLabelled(f.bin, 3637, ["in-progress"]);
+  committed(f.bin, 3631, [commit(COMMIT_SHA, "Fixes #3637")]);
+  f.refused(["dispatch", "3631", "finisher-pr-3631"], /finisher-pr-3631: PR #3631's commit abc1234 closes #3637, which another claim holds — that commit must be reworded to "Refs #3637" — not dispatching finisher-pr-3631/);
+  assert.deepEqual(f.read().dispatched, []);
+});
+
+test("a commits read that fails or cannot be trusted whole is exit 2, naming the read, and writes nothing", (t) => {
+  const manyCommits = (n) => Array.from({ length: n }, (_, i) => commit(`${String(i).padStart(7, "0")}aaa`, `commit ${i}`));
+  const read = "dispatch finisher-pr-3606: could not look — gh pr view 3606 --json commits";
+  const cases = [
+    [(f) => failsOn(f.bin, "commits", 3606), new RegExp(`${read} exited 1`)],
+    [(f) => committed(f.bin, 3606, "not json"), new RegExp(`${read} printed no list of commits`)],
+    [(f) => committed(f.bin, 3606, "[]"), new RegExp(`${read} printed no list of commits`)],
+    [(f) => committed(f.bin, 3606, '{"commits":"none"}'), new RegExp(`${read} printed no list of commits`)],
+    [(f) => committed(f.bin, 3606, [{ messageHeadline: "x" }]), new RegExp(`${read} answered a commit with no oid; nothing written`)],
+    [(f) => committed(f.bin, 3606, [{ oid: "abc1234", messageBody: "" }]), new RegExp(`${read} answered commit abc1234 with no message; nothing written`)],
+    [(f) => committed(f.bin, 3606, manyCommits(100)), new RegExp(`${read} answered 100 or more commits, so the list may be cut off; nothing written`)],
+  ];
+  for (const [setup, why] of cases) {
+    const f = fixture(t);
+    f.put("3545", RULED_ROW);
+    f.rule(3606, "3545", "yes", [3545]);
+    setup(f);
+    f.refused(["dispatch", "3606", "finisher-pr-3606"], why);
+    assert.deepEqual(f.read().dispatched, []);
+  }
+  // One commit fewer than the cap is a whole list.
+  const g = fixture(t);
+  g.put("3545", RULED_ROW);
+  g.rule(3606, "3545", "yes", [3545]);
+  committed(g.bin, 3606, manyCommits(99));
+  assert.equal(g.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher");
 });
 
 // A PR a run inherited carries no settled token, so its own tickets come off
