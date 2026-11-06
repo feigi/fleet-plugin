@@ -127,7 +127,8 @@ test("every refusal that shares arg.mjs's rules calls a predicate instead of res
 
   const reviewCore = src("review-core.mjs");
   assert.match(reviewCore, /^import \{[^}]*\bisDigits\b[^}]*\} from "\.\/arg\.mjs";/m, "review-core.mjs no longer imports isDigits from arg.mjs");
-  assert.match(reviewCore, /if \(!isDigits\(pr\)\) throw new Error\(/, "review-core.mjs's numeric-pr guard drifted from arg.mjs's rule");
+  assert.match(reviewCore, /try \{\s*return isDigits\(pr\);\s*\} catch/, "review-core.mjs's numeric-pr guard drifted from arg.mjs's rule");
+  assert.match(reviewCore, /const prRefusal = runnerPrRefusal\(pr\);\s*if \(prRefusal\) throw new Error\(/, "runReview's numeric-pr guard no longer asks the shared refusal");
 });
 
 // The three readers, run for real over the same values. `arg()` is exercised

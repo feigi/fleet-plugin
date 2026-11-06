@@ -45,6 +45,7 @@
 
 import { lstatSync } from "node:fs";
 import { isAbsolute, posix } from "node:path";
+import { inspect } from "node:util";
 import { isDigits } from "./arg.mjs";
 import { evictTrees } from "./evict-tree.mjs";
 import { FleetDirUnresolvable, scratchRoot, scratchRootRefusal } from "./fleet-dir.mjs";
@@ -920,7 +921,33 @@ export function digestOf(result) {
 // module already consumes the digits rule on the review path. Null when `pr`
 // is a PR number.
 export function runnerPrRefusal(pr) {
-  return isDigits(pr) ? null : `args.pr must be a PR number, got ${JSON.stringify(pr)}`;
+  return isPrNumber(pr) ? null : `args.pr must be a PR number, got ${describeValue(pr)}`;
+}
+
+// A value as the refusals below print it: `JSON.stringify`'s text wherever it
+// has one, `inspect`'s where it throws (a BigInt, a circular object) or answers
+// `undefined` (a Symbol, a function). `String(value)` would print `1n` as `1`.
+// `inspect` skips the value's own `[inspect.custom]`, which could throw.
+// Never throws, so a refusal is always the message and never a bare TypeError.
+function describeValue(value) {
+  try {
+    const text = JSON.stringify(value);
+    if (typeof text === "string") return text;
+  } catch {
+    // fall through to inspect
+  }
+  return inspect(value, { customInspect: false });
+}
+
+// `isDigits` coerces its argument, and a Symbol or a null-prototype object
+// cannot be coerced: it throws where a refusal is owed. Such a value is not a
+// PR number.
+function isPrNumber(pr) {
+  try {
+    return isDigits(pr);
+  } catch {
+    return false;
+  }
 }
 
 // `runReview` owns the review side's `pr<N>/` partition — it appends
@@ -942,10 +969,10 @@ export function runnerPrRefusal(pr) {
 export function runnerScratchRefusal(scratch) {
   if (typeof scratch !== "string") return null;
   if (scratch.split("/").includes("..")) {
-    return `args.scratch ${JSON.stringify(scratch)} has a ".." segment — pass the scratch root as a path without one`;
+    return `args.scratch ${describeValue(scratch)} has a ".." segment — pass the scratch root as a path without one`;
   }
   if (!/(?:^|\/)pr\d+\/*$/.test(posix.normalize(scratch))) return null;
-  return `args.scratch ${JSON.stringify(scratch)} already ends in a pr<N> directory — pass the scratch root; the review creates <root>/pr<N>/ itself`;
+  return `args.scratch ${describeValue(scratch)} already ends in a pr<N> directory — pass the scratch root; the review creates <root>/pr<N>/ itself`;
 }
 
 // The Test entrypoint refusal `runReview` and review-eval.mjs's
@@ -956,7 +983,7 @@ export function runnerScratchRefusal(scratch) {
 // command.
 export function runnerTestCmdRefusal(testCmd) {
   if (typeof testCmd === "string" && testCmd.trim() !== "") return null;
-  return `args.testCmd is required — the Test entrypoint the shared run executes, got ${JSON.stringify(testCmd)}`;
+  return `args.testCmd is required — the Test entrypoint the shared run executes, got ${describeValue(testCmd)}`;
 }
 
 // The worktree refusal the two share, for the reason the rules above are: the
@@ -966,7 +993,18 @@ export function runnerTestCmdRefusal(testCmd) {
 // Refused, never trimmed or coerced. Null when `worktree` is acceptable.
 export function runnerWorktreeRefusal(worktree) {
   if (typeof worktree === "string" && worktree.trim() !== "") return null;
-  return `args.worktree is required — the checkout the review snapshots, got ${JSON.stringify(worktree)}`;
+  return `args.worktree is required — the checkout the review snapshots, got ${describeValue(worktree)}`;
+}
+
+// The absolute-path refusal the two share, for the reason the rules above
+// are: `scratch` is interpolated into the snapshot prompt's paths and the
+// result file's path, so a value that is not an absolute path names the
+// wrong directory or none, and only the runner's refusal, before its first
+// attempt, keeps that from being retried. Refused, never coerced. Null when
+// `scratch` is an absolute path.
+export function runnerScratchAbsoluteRefusal(scratch) {
+  if (typeof scratch === "string" && isAbsolute(scratch)) return null;
+  return `args.scratch must be an absolute path, got ${describeValue(scratch)}`;
 }
 
 // --- Orchestration ----------------------------------------------------
@@ -1089,10 +1127,6 @@ async function reviewRun(host, args, run) {
   const pr = A.pr;
   const branch = A.branch;
   const worktree = A.worktree;
-  // Every dispatch label ends in `:pr${pr}`: the member id the harness derives
-  // from a label is all a transcript keeps of it, and member-record.mjs's
-  // parseMemberName reads the PR back out of that id to book its cost.
-  const forPr = `:pr${pr}`;
   const verifiersForRun = verifiersFor(A);
 
   if (!pr || !worktree) throw new Error("review-pr: args.pr and args.worktree are required");
@@ -1121,7 +1155,8 @@ async function reviewRun(host, args, run) {
   // shape) and one passing "42" both pass, and `null`/`undefined` answer false
   // — which is why this sits BELOW the required-args throw and never merged
   // into it: an absent `pr` is owed "required", not a complaint about digits.
-  if (!isDigits(pr)) throw new Error(`review-pr: args.pr must be a PR number, got ${JSON.stringify(pr)}`);
+  const prRefusal = runnerPrRefusal(pr);
+  if (prRefusal) throw new Error(`review-pr: ${prRefusal}`);
 
   // Nothing in the review derives a test command: every caller reads the Test
   // entrypoint off the Recipe cache and passes it. Refused here, beside the
@@ -1134,8 +1169,6 @@ async function reviewRun(host, args, run) {
   // Resolved only now: the default spawns git, so a missing or malformed `pr`
   // is refused on its own terms before anything is resolved or spawned.
   const scratch = A.scratch === undefined ? standaloneScratchRoot() : A.scratch;
-  const runRootParent = `${scratch}/pr${pr}`;
-  const runRootPrefix = `${runRootParent}/run-`;
 
   const scratchRefusal = runnerScratchRefusal(scratch);
   if (scratchRefusal) throw new Error(`review-pr: ${scratchRefusal}`);
@@ -1146,9 +1179,17 @@ async function reviewRun(host, args, run) {
   // takes the default above, so a falsy one (`0`, `false`, `""`, `null`) is
   // refused here like any other value that is not an absolute path. Below the
   // suffix check so a relative `pr<N>` still hears that it is partitioned.
-  if (typeof scratch !== "string" || !isAbsolute(scratch)) {
-    throw new Error(`review-pr: args.scratch must be an absolute path, got ${JSON.stringify(scratch)}`);
-  }
+  const absoluteRefusal = runnerScratchAbsoluteRefusal(scratch);
+  if (absoluteRefusal) throw new Error(`review-pr: ${absoluteRefusal}`);
+
+  // Built only now, below every refusal of `pr` and `scratch`: a Symbol cannot
+  // be interpolated, and the refusals above are owed their message.
+  const runRootParent = `${scratch}/pr${pr}`;
+  const runRootPrefix = `${runRootParent}/run-`;
+  // Every dispatch label ends in `:pr${pr}`: the member id the harness derives
+  // from a label is all a transcript keeps of it, and member-record.mjs's
+  // parseMemberName reads the PR back out of that id to book its cost.
+  const forPr = `:pr${pr}`;
 
   // A given scratch is held to the same rule as the default: the controller
   // hands over the path scratch-root.mjs vetted, but nothing on this side can
