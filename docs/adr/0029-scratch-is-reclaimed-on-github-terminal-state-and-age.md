@@ -24,7 +24,10 @@ by #4274: the root sweep also evicts the trees in every `pr<N>` directory it
 keeps whose kind of member is not live on the ledger (fix-applier round roots,
 review run roots, finisher trees), and the tick runs it after every
 fix-applier, failed review launch and finisher settle. That tick is a third
-trigger beside decision 3's two controller edges.
+trigger beside decision 3's two controller edges. Amended by #4332: decision 11's
+file also records the checkout's device, on a second line; a key whose checkout is
+gone is removed only while the directory that held it is on that device, and a
+file without one counts as no checkout file.
 
 ## Context
 
