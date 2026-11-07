@@ -107,22 +107,37 @@ work in flight rather than every run's history.
    that dropped its own read bit cannot wedge it. A removal that still fails is
    reported in the receipt's `failed[]`, and the sweep goes on.
 7. **Sibling keys are judged by the checkout they record.** A key's top level
-   holds `checkout-path`, one line naming the absolute, canonical checkout the
-   key's hash is taken over. `reclaim-scratch.mjs --siblings --root <scratch>
-   --apply` first writes its own key's file when it is missing or says anything
-   else, a temp file renamed over it, and writes no other key's; a dry run
-   writes nothing, and a failed write lands in `failed[]`. It then judges each
-   key-shaped directory directly under the scratch parent, other than the live
-   key. A key whose file is missing, unreadable, not a regular file, not one
-   absolute path, or a path that does not hash to the key's suffix is kept,
-   having no checkout file; one whose checkout still exists is kept, its own
-   phase 0 reclaims it; one whose
-   checkout and the directory that held it are both gone is kept, since an
-   unplugged drive reads the same. Only a key whose checkout is gone while that
-   directory is present goes, whole, and only when nothing under it changed in
-   7 days and every part of it could be read. `--apply` takes the whole verdict
-   again just before removing a key. The pass asks GitHub nothing. `--root` must
-   be this workspace's own scratch root. Entries that are not key-shaped, and
+   holds `checkout-path`, two lines: the absolute, canonical checkout the key's
+   hash is taken over, then the device that checkout is on, `lstat`'s `dev` in
+   decimal. `reclaim-scratch.mjs --siblings --root <scratch> --apply` first
+   writes its own key's file when it is missing or differs from the checkout's
+   path or its current device, a temp file renamed over it, and writes no other
+   key's; a dry run writes nothing, and a failed write, one that cannot read the
+   device included, lands in `failed[]`. It then judges each key-shaped
+   directory directly under the scratch parent, other than the live key. A key
+   whose file is missing, unreadable, not a regular file, a path alone with no
+   device, anything but an absolute path then a decimal number on two lines, or
+   a path that does not hash to the key's suffix is kept, having no checkout
+   file; a path-only file, which is what the pass wrote before it recorded the
+   device, stays that way until its own repository's next phase 0 rewrites it.
+   One whose checkout still exists is kept, its own phase 0 reclaims it; one
+   whose checkout and the directory that held it are both gone is kept, since
+   an unplugged drive reads the same; one whose checkout is gone while that
+   directory is present but on another device than the recorded one is kept,
+   since its drive may not be mounted: a checkout at a drive's mount root, or
+   under a mount point left behind as an empty folder, reads this way. Only a
+   key whose checkout is gone while that directory is present on the recorded
+   device goes, whole, and only when nothing under it changed in 7 days and
+   every part of it could be read. `--apply` takes the whole verdict again just
+   before removing a key, the device test included. On macOS a volume's device
+   number belongs to the disk slot it is attached in, not to the volume: a
+   different volume attached alone in the same slot reads as the recorded one,
+   so a repository deleted from it is removed after 7 idle days, and a
+   repository deleted after its volume was renumbered, with no phase 0 in
+   between, reads as being on an unmounted drive and its key is kept. Device
+   numbers across a reboot, and on Linux, were not measured. The pass asks
+   GitHub nothing. `--root` must be this workspace's own scratch root. Entries
+   that are not key-shaped, and
    links, are never judged. Its receipt carries `ledger: null`, and each kept
    entry says, as `idle`, whether nothing under the key was found modified in 7
    days. The root sweep never judges `checkout-path`. Phase 0 runs the pass on

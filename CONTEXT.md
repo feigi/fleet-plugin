@@ -67,8 +67,9 @@ merged or closed PR's `pr<M>/` and disposition records, a closed ticket's `impl-
 and anything else idle past 7 days with no live member's name on it — authorized on
 GitHub state and age — and each sibling key (another key-shaped directory beside this
 run's, under the scratch parent) once the checkout its `checkout-path` names is gone, the
-directory that held that checkout is still there, and nothing in the key changed for 7
-days. A sibling key with no valid `checkout-path` is kept. All of it by
+directory that held that checkout is still there, on the device the checkout was on, and
+nothing in the key changed for 7 days. A sibling key with no valid `checkout-path` is
+kept. All of it by
 `reclaim-scratch.mjs` (ADR 0029) — never on git evidence, which is Reap's.
 _Avoid_: reap, prune, cleanup
 
@@ -447,10 +448,11 @@ under — `~/.fleet/scratch/<repo-key>/`, `<repo-key>` being the workspace's fol
 name (a trailing `.git` dropped from a git dir's name), a dash and the first 8 hex characters of the sha256 of its realpath.
 Computed by `scratch-root.mjs`, never recorded and never injected by a harness:
 the controller writes an absolute path under it into every Dispatch, and a
-member never builds a root of its own. Its top level holds `checkout-path`, one
-line naming the checkout the root's path was computed from, which the sibling
-pass reads to tell whether a key's checkout is gone; the root's own path is
-still computed, never recorded.
+member never builds a root of its own. Its top level holds `checkout-path`, the
+checkout's path and its device, one line each: the checkout the root's path was
+computed from, and the device it was on, which the sibling pass reads to tell
+whether a key's checkout is gone and whether its drive is mounted; the root's own
+path is still computed, never recorded.
 _Avoid_: scratchpad, `/tmp` dir, `.fleet/scratch`
 
 **Suite slot**:

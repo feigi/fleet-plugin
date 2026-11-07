@@ -454,10 +454,11 @@ ledger.
 
 Straight after that, the same step reclaims the other keys under the scratch parent:
 `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run reclaim-scratch.mjs --siblings --root <scratch> --apply`. It
-first writes this key's `checkout-path`, the checkout the key was computed from. A
-sibling key goes whole only when the checkout its `checkout-path` names is gone, the
-directory that held it is still there, and nothing under the key has changed in 7 days;
-every other key stays whole, a key with no valid `checkout-path` included. The call asks
+first writes this key's `checkout-path`, the checkout the key was computed from and its
+device. A sibling key goes whole only when the checkout its `checkout-path` names is
+gone, the directory that held it is still there on that device, and nothing under the key
+has changed in 7 days; every other key stays whole, a key with no valid `checkout-path`
+included. The call asks
 GitHub nothing, runs whatever the root sweep answered, and records nothing on the ledger.
 The step's output names each sibling key removed and each kept with nothing changed in 7
 days, with the reason. A non-zero exit, and each path its receipt's `failed[]` names, is

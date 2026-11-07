@@ -21,12 +21,14 @@
 //
 // `--siblings` is the sibling pass, its own invocation: `--root` names the
 // live key, and the pass judges the other key-shaped directories beside it
-// (judgeSiblings below) by the checkout each records and by age, judging each
-// again just before `--apply` removes it. Under `--apply` it first writes the
-// live key's own `checkout-path`, and only that. Any other key passed as
-// `--root` would put the real live key among the judged siblings. It reads no
-// ledger, asks GitHub nothing, and is never combined with --pr or
-// --after-rotate.
+// (judgeSiblings below) by the checkout each records and the device it was
+// on, and by age, judging each again just before `--apply` removes it. A key
+// whose checkout is gone is removed only while the directory that held it is
+// still there on that device: a drive's mount folder left behind empty reads
+// as another device. Under `--apply` it first writes the live key's own
+// `checkout-path`, and only that. Any other key passed as `--root` would put
+// the real live key among the judged siblings. It reads no ledger, asks
+// GitHub nothing, and is never combined with --pr or --after-rotate.
 //
 // THE ROOT SWEEP judges every entry directly under `--root`:
 //   pr<M>/, dispositions-fix-pr-<M>[-x].json
@@ -173,7 +175,8 @@ import { REVIEWS_DIR, reviewTargets } from "./run-records.mjs";
 
 const NAME = "reclaim-scratch";
 // The file at a key's top level naming the checkout the key's hash is taken
-// over: one line, an absolute path.
+// over and the device that checkout was on: two lines, an absolute path, then
+// lstat's `dev` in decimal.
 export const CHECKOUT_FILE = "checkout-path";
 const die = makeDie(NAME);
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -653,13 +656,14 @@ function judgeSiblings(root, cutoff) {
 // A read of `checkout-path` that leaves no file to judge, rather than an error.
 const NO_CHECKOUT_FILE = new Set(["ENOENT", "ENOTDIR", "EISDIR", "EACCES", "EPERM"]);
 
-// The checkout `key`'s `checkout-path` names, `{ checkout }`, or the `{ reason }`
-// the key is kept for instead: `no checkout file: …` when there is no valid
-// file — missing, unreadable, not a regular file, anything but one absolute
-// path, or a path whose sha256 does not start with the key's 8-hex suffix —
-// or the error any other failure to read it left. Only a regular file is read:
-// a FIFO there would block the pass and a link to a device such as /dev/zero
-// would never end.
+// The checkout `key`'s `checkout-path` names and the device it was on,
+// `{ checkout, device }`, or the `{ reason }` the key is kept for instead:
+// `no checkout file: …` when there is no valid file — missing, unreadable,
+// not a regular file, a path alone with no device, anything but an absolute
+// path then a decimal device number on two lines, or a path whose sha256 does
+// not start with the key's 8-hex suffix — or the error any other failure to
+// read it left. Only a regular file is read: a FIFO there would block the pass
+// and a link to a device such as /dev/zero would never end.
 function checkoutOf(key) {
   const file = join(key, CHECKOUT_FILE);
   const none = (why) => ({ reason: `no checkout file: ${why}` });
@@ -671,19 +675,20 @@ function checkoutOf(key) {
     if (NO_CHECKOUT_FILE.has(e.code)) return none(e.code === "ENOENT" ? `${CHECKOUT_FILE} is missing` : `${CHECKOUT_FILE} cannot be read (${e.code})`);
     return { reason: `its ${CHECKOUT_FILE} cannot be read: ${e.message}` };
   }
-  const line = text.endsWith("\n") ? text.slice(0, -1) : text;
-  if (line.includes("\n") || !isAbsolute(line)) return none(`${CHECKOUT_FILE} holds no single absolute path`);
+  const lines = (text.endsWith("\n") ? text.slice(0, -1) : text).split("\n");
+  if (lines.length === 1 && isAbsolute(lines[0])) return none(`${CHECKOUT_FILE} records no device`);
+  const [line, device] = lines;
+  if (lines.length !== 2 || !isAbsolute(line) || !isDigits(device)) return none(`${CHECKOUT_FILE} holds no absolute path and device number`);
   const suffix = basename(key).slice(-8);
   if (!createHash("sha256").update(line).digest("hex").startsWith(suffix)) return none(`${line} does not hash to the key's suffix ${suffix}`);
-  return { checkout: line };
+  return { checkout: line, device };
 }
 
-// Whether anything exists at `p` (lstat): true, false, or the error that
-// leaves it unknown.
-function existsAt(p) {
+// What lstat finds at `p`: its stats (bigint, so a device number is exact),
+// false when nothing is there, or the error that leaves it unknown.
+function lstatAt(p) {
   try {
-    lstatSync(p);
-    return true;
+    return lstatSync(p, { bigint: true });
   } catch (e) {
     if (e.code === "ENOENT" || e.code === "ENOTDIR") return false;
     return e;
@@ -693,44 +698,51 @@ function existsAt(p) {
 // One sibling key's verdict, `{remove, reason, idle}`. `idle` is whether
 // nothing under the key was found modified within the retention, searched for
 // every key. Removed only when its checkout file is valid, nothing exists at
-// the checkout it names, the directory that held that checkout does exist,
-// nothing under the key is fresh and every part of it could be read. A key
-// whose checkout still exists is its own phase 0's to reclaim; one whose
-// checkout's parent is gone too may sit on an unplugged drive.
+// the checkout it names, the directory that held that checkout does exist and
+// is on the device the checkout was on, nothing under the key is fresh and
+// every part of it could be read. A key whose checkout still exists is its
+// own phase 0's to reclaim; one whose checkout's parent is gone too, or is on
+// another device now, may sit on an unplugged drive: a drive's mount folder
+// can stay behind as an empty directory on the device underneath.
 function judgeSibling(path, cutoff) {
   const unreadable = [];
   const idle = freshUnder(path, cutoff, unreadable) === null;
   const keep = (reason) => ({ remove: false, reason, idle });
   const found = checkoutOf(path);
   if (found.reason !== undefined) return keep(found.reason);
-  const { checkout } = found;
-  const at = existsAt(checkout);
+  const { checkout, device } = found;
+  const at = lstatAt(checkout);
   if (at instanceof Error) return keep(`whether its checkout ${checkout} exists cannot be told: ${at.message}`);
   if (at) return keep(`its checkout ${checkout} still exists, so its own phase 0 reclaims it`);
   const held = dirname(checkout);
-  const up = existsAt(held);
+  const up = lstatAt(held);
   if (up instanceof Error) return keep(`whether ${held}, the directory that held its checkout ${checkout}, exists cannot be told: ${up.message}`);
   if (!up) return keep(`neither its checkout ${checkout} nor ${held}, the directory that held it, exists`);
+  if (up.dev.toString() !== device) return keep(`its checkout ${checkout} is gone, but ${held}, the directory that held it, is on device ${up.dev} and the checkout was on device ${device}: its drive may not be mounted`);
   if (!idle) return keep("sibling key modified within 7 days");
   if (unreadable.length > 0) return keep(`sibling key could not be read whole (${unreadable[0]})`);
   return { remove: true, reason: `its checkout ${checkout} is gone and nothing under it changed in 7 days`, idle: true };
 }
 
 // The live key's own `checkout-path`, written when it is missing or says
-// anything but this workspace's canonical path: a temp file in the key,
-// renamed over it. A failure is returned as a failed[] entry, null otherwise.
+// anything but this workspace's canonical path and the device that checkout
+// is on now: a temp file in the key, renamed over it. A failure, reading the
+// device included, is returned as a failed[] entry, null otherwise.
 function writeCheckout(root) {
   const file = join(root, CHECKOUT_FILE);
   let checkout;
+  let device;
   try {
     checkout = dirname(fleetFile(null, { canonicalise: true }));
+    device = lstatSync(checkout, { bigint: true }).dev.toString();
   } catch (e) {
     return { path: file, error: e.message };
   }
-  if (checkoutOf(root).checkout === checkout) return null;
+  const saved = checkoutOf(root);
+  if (saved.checkout === checkout && saved.device === device) return null;
   const tmp = join(root, `.${CHECKOUT_FILE}.${process.pid}.tmp`);
   try {
-    writeFileSync(tmp, `${checkout}\n`);
+    writeFileSync(tmp, `${checkout}\n${device}\n`);
     renameSync(tmp, file);
   } catch (e) {
     try {
