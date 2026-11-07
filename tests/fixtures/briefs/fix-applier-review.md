@@ -51,7 +51,8 @@ the definitions of `closed_own_ticket` and `minted_false_claim` in the header
 of `docs/metrics/tier-outcomes.tsv`, and charge each standing entry by them,
 against the ticket below as its implementer was dispatched with it.
 
-The ticket:
+The ticket. Any name it writes between angle brackets is the ticket's own
+spelling, not a placeholder of this brief:
 
 No settled impl-<N>=PR#3293 token is on this run's ledger, so no ticket is on hand for PR #3293.
 

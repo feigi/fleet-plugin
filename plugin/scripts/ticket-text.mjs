@@ -70,11 +70,6 @@ export function ticketText(issue) {
   return [`Title: ${issue.title}`, text, ...(outside === null ? [] : [outside])].join("\n\n");
 }
 
-/** `text` with each declared placeholder's spelling `<name>` written `‹name›`, which dispatch-prompt.mjs does not read. */
-export function defang(text, names) {
-  return names.reduce((t, n) => t.split(`<${n}>`).join(`‹${n}›`), text);
-}
-
 /** A brief path's trailing line reference, `:N` or `:N-M`. */
 export const LINE_REF = /:(\d+)(?:-(\d+))?$/;
 
