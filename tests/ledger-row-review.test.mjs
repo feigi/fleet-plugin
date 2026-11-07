@@ -704,7 +704,8 @@ test("review settling an open launch =failed alone never reads the fold: it writ
 });
 
 test("review's refusal names every live member on the PR, and its settle hint names the first in the fold's order", (t) => {
-  const { reviewRefused } = fixture(t, [`#1 ${IMPL} · fix-pr-482 · finisher-pr-482`]);
+  // The row puts the finisher first, so the fold's order, not the row's, decides who is named first.
+  const { reviewRefused } = fixture(t, [`#1 ${IMPL} · finisher-pr-482 · fix-pr-482`]);
   const stderr = reviewRefused("482", [A], /fix-pr-482, finisher-pr-482 is still live on PR #482/, /ledger\.mjs settle fix-pr-482 <outcome>/);
   assert.doesNotMatch(stderr, /settle finisher-pr-482/);
 });
