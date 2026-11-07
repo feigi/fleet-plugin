@@ -1,0 +1,233 @@
+{
+  "pr": 4395,
+  "head": "b5321cd341cab0d61c02c46d181016a4e6020d8f",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I did not write to that checkout; these modifications were already there when I audited it."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv' and ' M docs/metrics/tier-outcomes.tsv'. I did not touch either file. My calls only read files and ran git status, so they are not mine."
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv` (the only command I ran in that directory was `pwd`, so these modifications are not mine)"
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — `git status --porcelain -uall` printed ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. I did not write there: eval started in that directory, but every path I wrote was an absolute path under the scratch dir. The two files were modified by something else."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv` (not written by this review: my only commands with that cwd were `pwd` and the final `git status`; every other command cd'd into the snapshot, my copy, or the run scratch dir)"
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv' (not touched by me; the shell tool was broken by an extension error, so I used python subprocess, which only read and ran git status there)."
+    }
+  ],
+  "counts": {
+    "survived": 2,
+    "refuted": 0,
+    "unverified": 10,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4395/run-kWKel5YN/snapshot-b5321cd3",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "plugin/skills/run-team/references/phase-0.md",
+      "line": 658,
+      "claim": "The documented `replace #N` procedure (tick-rows.md:111 sends it to phase-0.md's NEED resume steps, which say `ledger.mjs row <N> \"impl-<N>-b\"`) is now refused with exit 2 mid-run, because row N holds the settled `impl-<N>=PR#<M>` of the closed PR, and the PR did not update either doc although tick-rows.md:113 says the old PR's token should stay on that 'two-PR row'.",
+      "evidence": "probe.sh case 2 against copy/plugin/scripts/ledger.mjs, ledger row `#7 impl-7=PR#20 → PR#20`: `row 7 impl-7-b` → `ledger: row #7: drops settled member token 'impl-7=PR#20' — …` exit=2, row unchanged; `row 7 \"impl-7=PR#20 → PR#20 · impl-7-b\"` → exit=0. Doc text from `sed -n 650,664p references/phase-0.md`: \"Record it the ordinary way — `ledger.mjs row <N>\\n\\\"impl-<N>-b\\\"`\"; `sed -n 104,120p references/tick-rows.md`: \"`replace #N` — the `NEED resume` procedure (phase 0): `impl-<N>-b` … Its new PR settles onto the same row, and that two-PR row is a legitimate shape\". The ticket's triage asked which flows legitimately drop a member token with `row`; this one is not addressed in the diff (only references/ledger.md changed).",
+      "suggested_fix": "In phase-0.md's NEED resume step (and SKILL.md:74's pointer to it), spell the row write as `ledger.mjs row <N> \"<text> · impl-<N>-b\"` — the row's current text plus the replacement, as tick-rows.md's `release #N` line already does — so `replace #N` mid-run carries `impl-<N>=PR#<M>`; a cross-run resume with no carried row stays `\"impl-<N>-b\"`.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Ran snapshot ledger.mjs in a scratch repo with row `#7 impl-7=PR#20 → PR#20`. `row 7 \"impl-7-b\"` gave exit=2 `drops settled member token 'impl-7=PR#20'`, and the row stayed unchanged. phase-0.md:658 still documents exactly `ledger.mjs row <N> \"impl-<N>-b\"`, and tick-rows.md:111-113 still says the new PR settles onto the same two-PR row. The diff doesn't touch either doc, so the documented replace procedure is refused as claimed. This is a direct probe, not a test-suite red/kill. Not checked: whether the replace flow is meant to use a different command in practice. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. I did not write in that directory; these were already modified, probably by other agents."
+        },
+        {
+          "refuted": false,
+          "reason": "I did not run the probe or build a copy; this verdict rests on reading the snapshot. phase-0.md:658 sends the replacement through `ledger.mjs row <N> \"impl-<N>-b\"`. tick-rows.md:113 says the new PR settles onto the same row and calls that two-PR row legitimate. ledger-grammar.mjs `settledMemberRefusal` refuses any `row` rewrite that omits a settled member token, which is any member token with an outcome, such as `impl-7=PR#20`. The refusal returns the message the claim quotes, `drops settled member token …`. The ledger.md text I read (line 121) says the same and names no exception for a replacement. I did not check whether the row still holds the settled token when `replace #N` is sent, so that step is inferred from the claim's own scenario. I did not confirm that the PR left phase-0.md and tick-rows.md unchanged, so that part is from the claim, not checked. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I changed no files, so these modifications were already there."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/skills/run-team/SKILL.md",
+      "line": 216,
+      "claim": "SKILL.md still says '`row` drops the tokens you do not restate' without the exception for settled member tokens. This PR makes `row` exit 2 on exactly that case, so the sentence is now false for settled member tokens. The SKILL.md copy is a Ledger-section summary that the PR's ledger.md edit did not carry over.",
+      "evidence": "Line 216 of the snapshot reads: '... adds a token and keeps every token already on the row but a `tier=` it replaces; `row` drops the tokens you do not restate. Write member tokens ...'. settledMemberRefusal (ledger-grammar.mjs:518-527) is called from ledger.mjs:818-820 and dies, so a rewrite that omits a settled token never drops it. Only ledger.md:121 was edited; the diff does not touch SKILL.md.",
+      "suggested_fix": "Qualify the SKILL.md sentence the way ledger.md:121 does: '`row` drops the tokens you do not restate, except a settled member token, which it refuses to drop'.",
+      "dimension": "comments",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Read the snapshot, no test run. SKILL.md:216 still says 'row drops the tokens you do not restate' with no exception. ledger.mjs:818-820 dies via settledMemberRefusal when a rewrite omits a settled member token, so the sentence is false for that case. Live and malformed tokens can still be dropped, so it is only partly wrong. The diff touches no SKILL.md (grep of pr.diff shows only other mentions). CWD-AUDIT: not run, because the bash tool was broken by an extension error; I used read-only eval and wrote nothing in /Users/chris/dev/fleet-plugin."
+        },
+        {
+          "refuted": false,
+          "reason": "Read-only check, no suite run. SKILL.md:216 still reads '`row` drops the tokens you do not restate' with no settled-token exception. The PR's ledger.md edit adds that exception ('row refuses to drop... exits 2'). No other line in SKILL.md says `row` refuses or exits on a settled token (regex search for `row` near refus/exit found nothing). The other 'settled' mentions in SKILL.md (lines 204, 386, 387, 401, 636, 759) are about other things. The sentence is therefore stale for settled member tokens. I did not run ledger.mjs to confirm the exit 2 itself. The sentence stays true for unsettled tokens, so the finding is a minor doc inconsistency. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/ticket-features.tsv, M docs/metrics/tier-outcomes.tsv (both modified before my work; I wrote nothing there)."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger-grammar.mjs",
+      "line": 524,
+      "claim": "Because duplicates are counted, a row that already holds the same settled token twice (a violation of rowWriteRefusal's own 'unique members: one token per member, live or settled' rule) can no longer be cleaned with `row`; the only fix left is hand-editing ledger.md, which the skills discourage.",
+      "evidence": "probe.sh case 4: row `#9 impl-9=bailed · impl-9=bailed`, `row 9 impl-9=bailed` → `drops settled member token 'impl-9=bailed'` exit=2. One way this shape arises: `settle` rewrites every bare copy on a row (ledger.mjs:2695 `.map((w) => (w === name ? token : w))`), so `impl-9 · impl-9` becomes two settled copies. I did not reproduce the settle path end to end.",
+      "suggested_fix": "Count settled tokens by distinct text (a Set) rather than as a multiset, so dropping a duplicate copy is allowed and dropping the last copy is still refused. Or keep the multiset and say in the refusal text how to repair such a row.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger-grammar.mjs",
+      "line": 525,
+      "claim": "The check compares settled tokens byte for byte while parseToken accepts `applied:<head>` case-insensitively, so a rewrite that changes only the case of a fix-applier's head is refused as a dropped token (harmless but stricter than the grammar).",
+      "evidence": "probe.sh case 5: row `#30 fix-pr-30=applied:abcdef1`, `row 30 fix-pr-30=applied:ABCDEF1` → `drops settled member token 'fix-pr-30=applied:abcdef1'` exit=2.",
+      "suggested_fix": "No change needed if byte-exact preservation is intended, which matches the doc's 'as the row holds it'. Otherwise normalise the head's case before comparing.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/pull.mjs",
+      "line": 974,
+      "claim": "The new settled-token refusal makes pull.mjs's two ledger row writers exit 2 on a row that holds a settled member token. They write a replacement row (`impl-<N> · tier=…` in stage_row, `excluded · <token>` in answer_collision) and never carry the row's settled tokens. The Pull then stops with `ledger.mjs row failed` and the ledger is untouched. It is a loud stop, not a swallowed error.",
+      "evidence": "In the copy I ran the argv pull.mjs builds. `ledger.mjs --file L row 3551 'impl-3551-b · tier=slow-high'` on `#3551 impl-3551=bailed · tier=smol-high` exited 2 with `row #3551: drops settled member token 'impl-3551=bailed' — a rewrite must carry every settled member token…`. `row 3551 'excluded · behind-issue:#3'` exited 2 the same way, and so did `row 7 'excluded · behind-issue:#3'` on `#7 impl-7=PR#9 → PR#9 · ports=1`. The ledger file was byte-identical afterwards. The shortlist path skips rows that hold an impl token (pull.mjs:1228), so only `next --head <N>` for a ticket whose row already has a settled impl can reach this. tests/ledger.test.mjs:3941 was edited to carry `impl-3551=bailed` in its re-Pull row call, and no pull.test.mjs fixture covers a settled row.",
+      "suggested_fix": "Decide whether `pull.mjs next --head <N>` should handle a settled row. If it should, have stage_row and answer_collision read the row and carry its settled tokens. If it shouldn't, say so in pull.md. Either way, add a pull.test.mjs case for it.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger-grammar.mjs",
+      "line": 519,
+      "claim": "settledMemberRefusal protects only a token that parses with no error and has an outcome. A settled token whose outcome is malformed, and a `=`-less live token, can still be dropped by `row` with only the stderr `dropped:` line. The doc comment and the new test state this on purpose, so I found no unintended swallow.",
+      "evidence": "Ran the grammar unit test and the new `row lets a rewrite add, drop or change a live member token…` test; both pass. I read the parseToken source. A token with an outcome outside its family's vocabulary returns `error !== null` and is excluded by the filter. A rewrite that adds one is refused by the existing malformed-token die at ledger.mjs:781.",
+      "suggested_fix": "None needed.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/ledger-grammar.test.mjs",
+      "claim": "No finding above suggestion: every mutation I applied to the new settledMemberRefusal was killed. A few are killed only by a thrown TypeError (removing the `t !== null` guard) rather than an assertion about that guard.",
+      "evidence": "red: ./agent-test tests/ledger-grammar.test.mjs → exit 1, fail 1 incl settledMemberRefusal: every settled member token the row holds must be on the rewrite as written, duplicates counted; live, malformed and non-member tokens are free; baseline: ./agent-test tests/ledger-grammar.test.mjs → exit 0, same test pass. red: ./agent-test tests/ledger.test.mjs → exit 1, fail 1 incl row refuses a rewrite that drops a settled member token, naming the first one, and writes nothing; baseline: ./agent-test tests/ledger.test.mjs → exit 0, same test pass",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/skills/run-team/references/ledger.md",
+      "line": 121,
+      "claim": "The added ledger.md text defines the refused token as 'any member token carrying an outcome'. The same paragraph then says a malformed member token may still be dropped. A malformed token also carries an outcome, so the two sentences conflict. The code refuses only tokens with no parse error and an outcome.",
+      "evidence": "settledMemberRefusal filters on `t !== null && t.error === null && t.outcome !== null` (ledger-grammar.mjs:19-22). The ledger.md:121 added text says 'any member token carrying an outcome ... A live member token, and a malformed one, may still be dropped'. The test 'row lets a rewrite add, drop or change a live member token, and drop a malformed one but never add one' pins that a malformed token can be dropped.",
+      "suggested_fix": "Reword the parenthetical to 'any well-formed member token carrying an outcome'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body: it says 'the drop-and-warn test now drops a live member token instead of a settled one'. In the diff, that test ('row names every token a rewrite dropped on stderr...') keeps its drop assertions on non-member and arrow tokens, and its fixtures now carry the settled `impl-5=PR#9`. The live-token drop is a new `live` fixture added to the same test (a row holding `impl-6`), not a swap of a settled drop for a live one.",
+      "evidence": "Diff hunk at tests/ledger.test.mjs @@ -4105: the old `dropped`/`several`/`none` rewrites now include `impl-5=PR#9`, and `const live = tokenFixture(t, [\"#6 impl-6 · ports=16326\"])` is added as a new case.",
+      "suggested_fix": "Say the test now carries the settled token in each rewrite and gains a live-token drop case.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger-grammar.mjs",
+      "line": 524,
+      "claim": "settledMemberRefusal can never refuse a new row (oldLine === null), yet it still parses every word of `line` before reaching that result; an explicit early return, as cellChangeRefusal already does, makes the no-op case clear and removes the null branch from the `settled` helper.",
+      "evidence": "Ran node simplify/probe.mjs in the measuring copy. The rewrite `if (oldLine === null) return null; const settled = (text) => text.split(/\\s+/).filter(isSettledToken);` was compared with the shipped settledMemberRefusal over 14×13 (oldLine, line) pairs, covering null, the test's mixed row, duplicates, changed outcomes, malformed tokens and extra whitespace, using assert.equal. Output: `pairs equal: 182`.",
+      "suggested_fix": "export function settledMemberRefusal(oldLine, line) {\n  if (oldLine === null) return null;\n  const settled = (text) => text.split(/\\s+/).filter(isSettledToken);\n  const lost = added(settled(line), settled(oldLine))[0];\n  ...\n}",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger-grammar.mjs",
+      "line": 527,
+      "claim": "The new `t !== null && t.error === null && t.outcome !== null` predicate copies the one settledOnLedger already uses for `## Dispatched` (line 659). The same settled test appears a third time at line 664. A shared `isSettledToken(word)` helper would keep the definition of 'settled' in one place, so the readers and this write guard cannot drift apart.",
+      "evidence": "grep `error === null && .*outcome !== null` over plugin/scripts/*.mjs returns ledger-grammar.mjs:527, :659 and :664. In probe.mjs, `const isSettledToken = (w) => { const t = parseToken(w); return t !== null && t.error === null && t.outcome !== null; }` was used inside the simpler settledMemberRefusal (182/182 pairs equal). Over [impl-1=PR#2, fix-pr-3=bogus, merge-bot-1, finisher-pr-4=labelled], the helper gave the same names as settledOnLedger([], …): `[ 'impl-1', 'finisher-pr-4' ] [ 'impl-1', 'finisher-pr-4' ]`.",
+      "suggested_fix": "Add `export const isSettledToken = (word) => { const t = parseToken(word); return t !== null && t.error === null && t.outcome !== null; };` near parseToken. Use it in settledMemberRefusal (`text.split(/\\s+/).filter(isSettledToken)`) and in settledOnLedger's dispatched loop (`if (isSettledToken(e)) settled.add(parseToken(e).name)`, or keep the parsed t). Line 664 has an extra PR-bound clause and could share only the base predicate.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/ledger.test.mjs",
+      "line": 4129,
+      "claim": "The test helper `named` escapes `#`, `=` and `:` with `.replace(/[#=:]/g, \"\\\\$&\")`, but none of these is a regex metacharacter, so the escaping does nothing. The module-level `SETTLED_DROP` constant is used only in this one place, through `.source`. Writing the pattern directly would read more plainly.",
+      "evidence": "Ran in probe.mjs: for each token in [impl-5=PR#9, fix-pr-12=applied:abcdef1, finisher-pr-12=labelled, impl-6=PR#12], the escaped and unescaped `new RegExp(`'${tok}'`)` gave the same .test() result on exact, suffixed, prefixed and wrong-PR inputs (assert.equal, printed `regex escape no-op: ok`). `grep SETTLED_DROP|const named` in tests/ledger.test.mjs shows SETTLED_DROP defined at 4125 and used only at 4129.",
+      "suggested_fix": "const named = (token) => new RegExp(`drops settled member token '${token}' — a rewrite must carry every settled member token as the row holds it`); and drop the SETTLED_DROP constant. Keep the escape only if a later token may contain regex metacharacters such as `.` or `+`.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

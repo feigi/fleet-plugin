@@ -1,0 +1,67 @@
+{
+  "pr": 4391,
+  "head": "cdc6f3e85fc696c2fccbd5e8e91ac4951ba9d90e",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "tests",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/ticket-features.tsv, M docs/metrics/tier-outcomes.tsv (I never wrote there; these are not mine, probably other agents' metrics writes)."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I did not touch these; I only read the directory with `pwd` and `git status`, so they come from another agent or the controller."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin —  M docs/metrics/ticket-features.tsv ;  M docs/metrics/tier-outcomes.tsv (this agent never wrote to that tree: every command after the first `pwd` ran in the snapshot or in my scratch copy, and every edit was under …/correctness/copy, so these two modifications pre-date this review or come from the controller)"
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 2,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4391/run-EB7006GF/snapshot-cdc6f3e8",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "tests/ledger-dispatch.test.mjs",
+      "line": 1742,
+      "claim": "The new test discriminates the union-vs-replace mutation. Changing `[...tickets, Number(claim[1])]` to `[Number(claim[1])]` turns it red. Dropping the claim term entirely (`tickets`) leaves it green. That is correct for this test, because the claim-only half of the union is not its job.",
+      "evidence": "red: node --test --test-name-pattern=\"a settled token's ticket stays\" tests/ledger-dispatch.test.mjs (copy with claim-replace mutant) → exit 1, fail 1 incl a settled token's ticket stays the PR's own…; baseline: same cmd unmutated → exit 0, tests 1 pass 1 fail 0 cancelled 0, test pass. Control: mutant `tickets` (claim ticket dropped) → exit 0, test pass. A separate existing test, not run here, is the one that would catch that mutant.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body: the mutation-run figure 'tests/ledger-dispatch.test.mjs: 145 tests, 144 pass' does not match the file's visible test count. The file has 141 top-level test( calls including the new one. Subtests or parameterized cases could account for the difference, so this is not shown to be wrong.",
+      "evidence": "grep -c '^\\s*\\(test\\|it\\)(' tests/ledger-dispatch.test.mjs → 141. The independent run (node --test on the file) timed out at 300s, so the 145 could not be reproduced.",
+      "suggested_fix": "Confirm the 145 count (it may include subtests) or correct it.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

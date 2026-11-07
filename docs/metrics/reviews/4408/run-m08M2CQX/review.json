@@ -1,0 +1,295 @@
+{
+  "pr": 4408,
+  "head": "f154a752dcb49ec77feaf7f5d8c37cc659300033",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I never wrote to this checkout; both are metrics files that I cannot attribute to myself or to another agent."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. I never wrote there (all my commands ran in the scratch dir or via absolute paths), so I can't tell who modified these two metrics files."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I only read files, so these edits are not mine. Most likely they come from another agent or the controller."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin —  M docs/metrics/ticket-features.tsv,  M docs/metrics/tier-outcomes.tsv (not written by this review: my only command there was the initial `pwd`, and every write went to my scratch copy)"
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (this pass only read from that directory and wrote nothing there; it was the eval kernel's cwd, and every write went into the scratch copy)"
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I never wrote to that tree; shared-run activity from other agents is likely, but I did not verify that."
+    }
+  ],
+  "counts": {
+    "survived": 2,
+    "refuted": 0,
+    "unverified": 15,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4408/run-m08M2CQX/snapshot-f154a752",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "plugin/scripts/fleet-tick.mjs",
+      "line": 1056,
+      "claim": "liveFixers/reviewHeld miss a fix-applier that is live in `## Dispatched` once its token is gone from the PR's row. In that state the tick prints DISPATCH review and `ledger.mjs review` writes the launch, so a review overlaps a live fix-applier. That is the overlap the ticket exists to prevent, and the ticket's liveness rule says a PR-bound member counts off `## Dispatched` and its own PR's row.",
+      "evidence": "In my copy, tests/zz-probe-4408.test.mjs PROBE A ran: `dispatch 20 impl-20`, then `settle impl-20 PR#21`, then `dispatch 21 fix-pr-21`, giving rows [\"#20 impl-20=PR#21 · fix-pr-21\"] and dispatched [\"impl-20=PR#21\",\"fix-pr-21\"]. Then `row 20 impl-20=PR#21` exited 0 with 'rewrote row #20; dropped: fix-pr-21'. Then `review 21 review=member:review-pr-21` exited 0 with 'review on row #20', so it was not refused. Separately, probe-tick.mjs ran deriveRun on rows [\"#20 impl-20=PR#21 · conflict-hold:#21\"] with dispatched [\"impl-20=PR#21\",\"fix-pr-21\"] (fix-pr-21 unsettled) and got {\"reviewDue\":[21],\"fixDue\":[],\"conflictHeld\":[21]}. Cause: st.fixMembers and st.finishers are filled only from row tokens (fleet-tick.mjs:937, 953), so a member that appears only in `## Dispatched` never reaches liveFixers. The comment at 1052-1055 says a PR-bound member counts off `## Dispatched`. The board's old liveMember had the same blind spot, so it is inherited, but it now also gates the new ledger refusal.",
+      "suggested_fix": "Build liveFixers from the merged `members` map: every unsettled fix-pr-<M>/finisher-pr-<M> (any retry letter) whose number is the PR, not only the names on the PR's rows. Alternatively, make `ledger.mjs row` refuse to drop a live member's token. Either way, add a test with a Dispatched-only live fix-pr-<M>.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Reproduced on the snapshot with deriveRun, using dispatched [\"impl-20=PR#21\",\"fix-pr-21\"] and PR 21 open and owned. With row \"#20 impl-20=PR#21 · fix-pr-21\", reviewDue is [] (held). With the row's fix-pr-21 token gone (\"#20 impl-20=PR#21\" or \"… · conflict-hold:#21\"), reviewDue is [21], even though fix-pr-21 is still live and unsettled in ## Dispatched. fixMembers and finishers are filled only from row tokens, so liveFixers and reviewHeld miss it, as claimed. I did not rerun the ledger.mjs `row` and `review` steps; I checked only the tick side. The token can only leave the row through a hand-edited `row`, so the state is uncommon. The line 1052-1055 comment still says a PR-bound member counts off ## Dispatched. No test run, so there is no red:/baseline: line. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/ticket-features.tsv, M docs/metrics/tier-outcomes.tsv. I wrote nothing there; I only read it and ran a probe from the scratch dir."
+        },
+        {
+          "refuted": false,
+          "reason": "I ran deriveRun from the snapshot with a PR shaped like the claim's (owned:true, MERGEABLE, closingIssuesReferences:[], labels:[]) and the row '#20 impl-20=PR#21 · conflict-hold:#21'. With dispatched ['impl-20=PR#21','fix-pr-21'] (fix-pr-21 unsettled) it gave reviewDue=[21], fixDue=[]. With dispatched ['impl-20=PR#21'] only, it gave the same result. So a live fix-applier that is in `## Dispatched` but absent from the PR's row does not hold review. As a control, the row '#20 impl-20=PR#21 · fix-pr-21' gave reviewDue=[] (held), so the token in the row is what holds it. The cause is in the fold: fleet-tick.mjs:937 and :953 fill st.fixMembers and st.finishers only from row tokens. liveFixers (:1056) therefore never sees a Dispatched-only member, although its comment says a PR-bound member counts off `## Dispatched`. The state is reachable: ledger.mjs:873 shows `row` rewrites a row and only reports 'dropped: …' on stderr. I did not rerun the `ledger.mjs review` step, because the shell tool was broken, and I used the claim's own run for it. The mitigating points are that the state needs an explicit controller row rewrite, and that the board's old liveMember had the same blind spot. Neither one refutes the claim. Runs: `node p.mjs`, a scratch script in my dir that imports the snapshot's deriveRun. No `./agent-test` run and no measure-copy, since the claim is checked by deriveRun directly. No red/kill evidence line is claimed. CWD-AUDIT: not run — bash tool failed on every call (pix-optimizer extension error), so `pwd` and `git status` could not be run. I wrote only under the scratch dir and never into the controller cwd."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/fleet-tick.mjs",
+      "line": 863,
+      "claim": "The new `fleetHead` comment says `reviewHeld` is read by 'the tick's reviewDue and fixDue and the ledger's `review` and `dispatch`', but only reviewDue and compute-board.mjs call `reviewHeld`. fixDue reads `owedReview`, which is derived from reviewDue. `ledger.mjs review` calls `liveFixers` after checking `st.inFlight`. `ledger.mjs dispatch` reads `st.inFlight` and `st.openLaunch` directly.",
+      "evidence": "`grep -rnE 'reviewHeld|liveFixers'` over the snapshot. Call sites of `reviewHeld(`: fleet-tick.mjs:1234 (reviewDue) and compute-board.mjs:714. `liveFixers(` is called in ledger.mjs:3377 (review), and the dispatch refusal at ledger.mjs:2528-2533 uses `st.inFlight`/`st.openLaunch` with no `reviewHeld`. The accurate wording is in the `reviewHeld` doc comment at fleet-tick.mjs:1057-1063: 'the tick's reviewDue and the board's backlog read this one gate, and ledger.mjs review and dispatch refuse the two halves of it'. The two comments disagree.",
+      "suggested_fix": "Reword to match the `reviewHeld` doc: reviewDue and the board read `reviewHeld`, fixDue waits on reviewDue, and the ledger's `review` and `dispatch` refuse its two halves.",
+      "dimension": "comments",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "I grepped `reviewHeld|liveFixers` over snapshot plugin/scripts and the call sites match the claim. `reviewHeld(` is called only at fleet-tick.mjs:1234 (reviewDue) and compute-board.mjs:714. fixDue (line 1282) uses `owedReview`, which is `new Set(reviewDue)` (line 1237), so it depends on the gate only through reviewDue. `liveFixers` is called in ledger.mjs:3377 (review), guarded by `st.inFlight`. The comment at fleet-tick.mjs:863 does say reviewHeld is 'read by the tick's reviewDue and fixDue and the ledger's review and dispatch', which overstates direct reads. This is a wording-accuracy finding, and I ran no code. I did not re-read ledger.mjs 2528-2533 (dispatch) or the doc comment at fleet-tick.mjs:1057-1063 myself, so the dispatch point and the 'two comments disagree' point rest on the claim's evidence. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/ticket-features.tsv, M docs/metrics/tier-outcomes.tsv. I did not touch these; I only ran read-only commands in that directory."
+        },
+        {
+          "refuted": false,
+          "reason": "Grep over snapshot plugin/*.mjs: reviewHeld( called only at fleet-tick.mjs:1234 (reviewDue) and compute-board.mjs:714; ledger.mjs:3377 calls liveFixers only (review). The comment at line 863 names fixDue and ledger review/dispatch as readers of reviewHeld, which is inaccurate. Pattern limited to .mjs under plugin; dispatch/fixDue indirect dependence was not traced beyond the claim's evidence. No test run (comment-only finding). CWD-AUDIT: not run, no writes made in /Users/chris/dev/fleet-plugin"
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 2527,
+      "claim": "runDispatch now folds the whole ledger twice for a fix-pr: once through prFold/foldLedger for the in-flight check, then again inside tickFold/deriveRun for the fix-failed cap. Each fold gives its own refusal wording for the same malformed ledger, and the second pass is redundant work.",
+      "evidence": "Read only, not executed for timing: ledger.mjs 2526-2535 calls prFold(data.rows, …) and then tickFold(\"fix-applier failure count\"), and tickFold calls deriveRun, which calls foldLedger itself (grep shows deriveRun reading `members`/`byPr` from foldLedger).",
+      "suggested_fix": "Read the in-flight state from the one deriveRun result (for example, expose `reviewing` or the per-PR openLaunch from it) so dispatch folds once and gives one refusal message.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 3369,
+      "claim": "`ledger.mjs review <pr> review=…` now refuses to open a launch whenever the tick's strict fold refuses ANY row or Dispatched entry of the ledger, even a row on an unrelated PR. Before this PR `review` only checked `rowWriteRefusal`. The refusal is loud and mentions the cause, not silent, but it is a new coupling.",
+      "evidence": "probe.sh case A: rows `#1 impl-1=PR#482 → PR#482` and `#2 impl-2=PR#483 · fix-pr-483=bogus`, then `review 482 review=member:review-pr-482` → exit 2, `review #482: row '#2 …': fix-pr-483: 'bogus' is not an outcome of fix-pr-M … fleet-tick.mjs refuses this ledger, so the members live on PR #482 cannot be read off it; fix it with `ledger.mjs row`; nothing written`. Same for case G (`review=garbage` already on PR #482's own row). `=failed` settles and `--result` calls skip the fold and still write (case A2 exit 0). Not a swallowed error: the catch rethrows non-LedgerError, dies exit 2, and writes nothing.",
+      "suggested_fix": "None required. The message names the cause and `ledger.mjs row` as the way out, matching the existing `tickFold` dispatch behaviour.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/fleet-tick.mjs",
+      "line": 1056,
+      "claim": "`liveFixers`/`reviewHeld` read only `st.fixMembers`/`st.finishers`, which are filled from PR rows. A fix-applier recorded live only in `## Dispatched`, with no token on the PR's row, is not seen, so `review` launches beside it. The tick's reviewDue has the same blind spot, so the two stay consistent. `ledger.mjs dispatch` writes the token onto the PR's row, so this arises only from a hand-edited ledger.",
+      "evidence": "probe.sh case B: `## Dispatched` holds `fix-pr-482`, the row is `#1 impl-1=PR#482 → PR#482`, and `review 482 review=member:review-pr-482` → exit 0, review written. Case C (stray `#482 fix-pr-482` row) is refused with exit 2, as intended.",
+      "suggested_fix": "None required. Optionally note in the `reviewHeld` comment that a Dispatched-only live member holds nothing.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 2523,
+      "claim": "The dispatch refusal reads only `st.inFlight`, which `foldLedger` leaves set for a `review=` launch that never got a `reviewed=`. This includes a stale launch whose PR has since merged. Dispatching a fix-applier on such a PR is refused until a human settles the launch `=failed`. The refusal is loud and names the exact command, so nothing is hidden.",
+      "evidence": "probe2.sh case E: row `#1 impl-1=PR#482 → PR#482 · review=wf:abc`, then `dispatch 482 fix-pr-482` → exit 2, `a review of PR #482 is in flight (review=wf:abc) … settle its launch failed: `ledger.mjs review 482 review=wf:abc=failed``.",
+      "suggested_fix": "None required.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "evidence": "Checked and found no problem. `prFold`'s catch rethrows every non-LedgerError and die()s only on LedgerError, with a message that matches what failed (probe cases A, D, G show correct attribution). `liveFixers` dereferences `members.get(n).outcome` for n in fixMembers/finishers, and `fixMembers.add` (fleet-tick.mjs:937) and `finishers.add` (:953) only run after `note()` has put the name in `members`, so the dereference cannot be undefined. No new dereference was moved inside an existing try. `foldLedger`'s `open` argument (`new Set()` in prFold) is read only at fleet-tick.mjs:1035 for premise checks, so passing an empty set does not change in-flight or live-fixer results. There are no empty catches and no silent fallbacks in the diff.",
+      "claim": "No swallowed errors, hidden fallbacks, mislabelled catches or newly widened try blocks were found in the diff.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/fleet-tick.test.mjs",
+      "claim": "The new reviewHeld/liveFixers/openLaunch tests discriminate all the changed behaviour I mutated: each non-equivalent mutant had a named test red, and the 4 survivors are equivalent mutants.",
+      "evidence": "red: TICK → exit 1, fail 2 incl 'deriveRun: a live fix-applier or finisher on a PR holds it out of review, never-reviewed or past-pin' (mutant: reviewDue uses state.inFlight only); red: TICK → exit 1, fail 3 incl 'deriveRun: a never-reviewed PR with a conflict hold is review-due first, and fix-due once its review returns' (mutant: fixDue drops !owedReview.has(n)); red: LED → exit 1, fail 3 incl 'review refuses a launch while a fix-applier or finisher on the PR is live, naming the member and the way out' (mutant: runReview refusal disabled); red: LED → exit 1, fail 2 incl 'dispatch refuses a fix-applier of any suffix while a review of its PR is in flight, and writes it once the review returns or fails' (mutant: dispatch fix-pr gate disabled); red: TICK → exit 1, fail 2 incl 'a ticket row and an unrelated fallback row each keep their own card' (mutant: compute-board reviewHeld dropped); baseline: LED → exit 0, 222 tests pass; TICK → exit 0, 751 tests pass. The failing tests were read from the `✖` lines of each narrowed run, not from a standalone single-test run. The baselines are for the whole file sets.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/compute-board.mjs",
+      "line": 98,
+      "claim": "The untouched header comment says a PR is owed a review unless a live `review=` or any `reviewed=` is on a row. After this diff `reviewOwed` also returns false when a fix-applier or finisher is live. The comment at line ~770, which the diff did update, states this, but the header does not.",
+      "evidence": "compute-board.mjs:98-103 reads 'the PR is owed none while any row naming it carries ANY live `review=` … or any `reviewed=`'. compute-board.mjs:711-715 shows `reviewOwed` now returns false on `reviewHeld(st, fold.members)`, which includes `liveFixers`.",
+      "suggested_fix": "Add 'or a live fix-applier or finisher on it' to the header sentence, or point it at `reviewHeld`.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/adr/0034-the-fleet-owns-prs-by-author-and-a-ticketless-pr-merges-on-an-inert-diff-only.md",
+      "line": 19,
+      "claim": "ADR 0034 point 5 defines `reviewDue` as 'not queued, owned, and either no review on record or a `past-pin` halt'. The diff adds a fourth condition, not held by `reviewHeld`, so the sentence is now incomplete. An ADR is a historical record, so this is low severity.",
+      "evidence": "Snapshot docs/adr/0034…md line 19. fleet-tick.mjs:1233-1236 now has `.filter((p) => !isQueued(p) && p.owned && !reviewHeld(state(p.number), members) && (…))`.",
+      "suggested_fix": "Leave it as history, or add an amendment note.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body: 'Settle's fix-pr checks and the fold's `fleetHead` rule are untouched' is true of behaviour, since the diff only adds comment text to the `fleetHead` block and `ledger.mjs` settle is not in the diff. However, the new `fleetHead` comment paragraph (fleet-tick.mjs:862-870) now states a new invariant, the no-overlap guarantee, and with the inaccurate attribution above. A reader who trusts the PR body's 'untouched' will not look at that block.",
+      "evidence": "pr.diff: the only hunk in fleet-tick.mjs near line 859 adds comment lines. No `settle` code changed. All other PR body and commit message assertions checked as accurate: `reviewHeld` and `liveFixers` are exported at fleet-tick.mjs:1056 and 1063, the board's `liveMember` is gone (grep finds no match in compute-board.mjs), `openLaunch` is in the fold at lines 883/966/972/979/990, `die` exits 2 (arg.mjs:182), SKILL.md is 74,976 bytes against the 75,000 budget at skill-budget.test.mjs:56, and the dispatch refusal names the open launch and both ways out.",
+      "suggested_fix": "None beyond fixing the comment at line 863.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/fleet-tick.mjs",
+      "line": 883,
+      "claim": "The new `openLaunch` field on the per-PR fold state duplicates `inFlight`, and the invariant `inFlight === (openLaunch !== null)` is held only by hand-synchronised writes. Nothing makes a divergent state unrepresentable.",
+      "evidence": "`grep -n 'inFlight' fleet-tick.mjs` shows 4 write sites: the initial state (883), the lenient malformed review= branch (965/966), the review= branch (971/972) and two reviewed= Object.assign branches (979, 990). I read each one and `openLaunch` is set alongside `inFlight` in all of them. The invariant holds today. It is enforced only by convention at each site, and the diff's own comment documents it.",
+      "suggested_fix": "Store only `openLaunch` and derive `inFlight` with a getter or helper, e.g. `const inFlight = (st) => st.openLaunch !== null`. Alternatively, put the transitions behind one function such as `openReview(st, tok)` / `closeReview(st)`.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/fleet-tick.mjs",
+      "line": 1056,
+      "claim": "`liveFixers` and `reviewHeld` dereference `members.get(n).outcome` with no guard. They rely on the unstated invariant that every name in `st.fixMembers` and `st.finishers` is a key of `members`, and the helpers' signatures do not show it.",
+      "evidence": "In the snapshot, `members.set` happens at line 780 for each dispatched token and the `fixMembers.add` and `finishers.add` calls are at 937 and 953. The existing `anyLive` (1172) and `fixLive` (1335) use the same unguarded pattern. The invariant holds in the paths I read, and all three callers pass `fold.members`. A caller that passes a different map gets a TypeError rather than a typed failure.",
+      "suggested_fix": "Optional: use `members.get(n)?.outcome === null` if a missing member should count as not live. Otherwise document the precondition on `liveFixers`.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/fleet-tick.mjs",
+      "line": 883,
+      "claim": "The new `openLaunch` field holds the same fact as the existing `inFlight` field: every assignment site (lines 883, 965-966, 971-972, 979, 990) sets `inFlight` to exactly `openLaunch !== null`. So the PR adds a second copy of one fact that can drift.",
+      "evidence": "In the copy, an invariant check `if (st.inFlight !== (st.openLaunch !== null)) throw` ran at the end of every foldLedger row across 88 test files (4039 tests). It never threw, exit 0. A direct foldLedger probe over strict and lenient rows printed inFlight/openLaunch pairs true/token, false/null, false/null, true/review=wf:b, lenient-malformed true/review=bogus, false/null. I then deleted the `inFlight` field and replaced every reader (reviewHeld, fixOwed, reviewing, ledger dispatch line 2529, ledger review line 3377) with `st.openLaunch !== null`. The same 88 files passed again: exit 0, 4039 passed, 0 failed.",
+      "suggested_fix": "Drop `inFlight` from the byPr state and its four assignment sites, keeping only `openLaunch`. Read in-flight as `st.openLaunch !== null` in reviewHeld, fixOwed, `reviewing`, and ledger.mjs's dispatch and review gates. Update the comment above `st` to say `openLaunch` non-null means a review is in flight.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/fleet-tick.mjs",
+      "line": 1049,
+      "claim": "The `!st.inFlight` conjunct in `pastPinDue` is now dead, and so is the `st !== undefined` one. Its only two callers (deriveRun.reviewDue and compute-board's reviewOwed) reach it only after `!reviewHeld(st, …)`, which already requires `!st.inFlight`. Both callers also reach it only with a defined `st`: reviewDue short-circuits on `!state(n)?.reviewedAny`, and compute-board returns early on `st === undefined`.",
+      "evidence": "grep `pastPinDue` across snapshot/plugin found three hits: its definition at fleet-tick.mjs:1049 and the two callers at fleet-tick.mjs:1235 and compute-board.mjs:715. grep across snapshot/tests found no direct caller. In the copy I changed it to `(st, head) => st.pastPinHalt && st.reviewedHead !== null && !String(head).toLowerCase().startsWith(st.reviewedHead)` and ran the 88 related test files: exit 0, 4039 passed, 0 failed.",
+      "suggested_fix": "export const pastPinDue = (st, head) => st.pastPinHalt && st.reviewedHead !== null && !String(head).toLowerCase().startsWith(st.reviewedHead); and change its comment to say `st` is a defined byPr state with no review in flight, which reviewHeld has already ruled out.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/fleet-tick.mjs",
+      "line": 1233,
+      "claim": "The 'is this PR owed a review' rule now exists twice: deriveRun.reviewDue (`!reviewHeld(state(n)) && (!state(n)?.reviewedAny || pastPinDue(state(n), head))`, which calls `state(p.number)` three times) and compute-board's reviewOwed (`st === undefined → true; reviewHeld → false; else !reviewedAny || pastPinDue`). The PR edited both to add reviewHeld, and the board's comment calls it 'the same rule'. One exported predicate would remove the duplicate and the repeated `state()` lookups.",
+      "evidence": "In the copy I added `export const reviewOwed = (st, members, head) => st === undefined || (!reviewHeld(st, members) && (!st.reviewedAny || pastPinDue(st, head)))` to fleet-tick.mjs. reviewDue's filter became `!isQueued(p) && p.owned && reviewOwed(state(p.number), members, p.headRefOid)`, and compute-board's became `const reviewOwed = (prNum) => reviewOwedState(fold.byPr.get(prNum), fold.members, prByNum.get(prNum)?.headRefOid)`, importing it in place of pastPinDue and reviewHeld. The 88 related test files, including board-*.test.mjs, fleet-tick.test.mjs and ledger-*.test.mjs, ran with exit 0, 4039 passed, 0 failed.",
+      "suggested_fix": "Export one `reviewOwed(st, members, head)` from fleet-tick.mjs (the form above) and use it in deriveRun.reviewDue and in compute-board.mjs's reviewOwed. compute-board would then no longer import pastPinDue or reviewHeld.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 3377,
+      "claim": "`const live = st === undefined || !st.inFlight ? [] : liveFixers(st, fold.members)` is a negated compound condition inside a ternary. The equivalent `st?.inFlight ? liveFixers(st, fold.members) : []` says the same thing directly. Likewise `if (st !== undefined && st.inFlight)` at line 2529 is `if (st?.inFlight)`.",
+      "evidence": "In the copy I rewrote line 3377 as `const live = st?.inFlight ? liveFixers(st, fold.members) : [];` and line 2529 as `if (st?.inFlight) {`. The 88 related test files ran with exit 0, 4039 passed, 0 failed, including the PR's new tests in ledger-row-review.test.mjs and ledger-dispatch.test.mjs that exercise both refusals.",
+      "suggested_fix": "const live = st?.inFlight ? liveFixers(st, fold.members) : [];  and  if (st?.inFlight) { … }. If `inFlight` is dropped as in the first finding, use `st?.openLaunch` and `st !== undefined && st.openLaunch !== null` instead.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

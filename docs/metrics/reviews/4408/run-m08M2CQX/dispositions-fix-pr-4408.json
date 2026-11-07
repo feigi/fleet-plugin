@@ -1,0 +1,201 @@
+{
+  "head": "f154a752dcb49ec77feaf7f5d8c37cc659300033",
+  "run": "run-m08M2CQX",
+  "entries": [
+    {
+      "bucket": "survived",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "remedyFiles": [
+        "plugin/scripts/fleet-tick.mjs",
+        "tests/fleet-tick.test.mjs",
+        "tests/ledger-row-review.test.mjs"
+      ],
+      "charge": "unmet"
+    },
+    {
+      "bucket": "survived",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "remedyFiles": [
+        "plugin/scripts/fleet-tick.mjs"
+      ],
+      "charge": "false-claim"
+    },
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted: one refusal per malformed ledger, measured; folding once would widen deriveRun",
+      "issue": 4415,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4408/fix-o10AlqTJ/u0/verdict.json",
+      "remedyFiles": [
+        "plugin/scripts/ledger.mjs",
+        "plugin/scripts/fleet-tick.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted: the refusal is loud and names its way out; no change asked",
+      "issue": 4415,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4408/fix-o10AlqTJ/u1/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted: its premise and none-required remedy are wrong; the defect is survived[0], applied",
+      "issue": 4415,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4408/fix-o10AlqTJ/u2/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted: the refusal is the ticket's required behaviour",
+      "issue": 4415,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4408/fix-o10AlqTJ/u3/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4408/fix-o10AlqTJ/u4/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 5,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted: three non-equivalent mutants survive; test gap filed open as #4414",
+      "issue": 4415,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4408/fix-o10AlqTJ/u5/verdict.json",
+      "remedyFiles": [
+        "tests/ledger-row-review.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 6,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4408/fix-o10AlqTJ/u6/verdict.json",
+      "remedyFiles": [
+        "plugin/scripts/compute-board.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 7,
+      "scope": "out",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "below the claim bar: a historical ADR, out of the ticket's scope",
+      "issue": 4415,
+      "remedyFiles": [
+        "docs/adr/0034-the-fleet-owns-prs-by-author-and-a-ticketless-pr-merges-on-an-inert-diff-only.md"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 8,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted: the PR body already discloses the comment edit",
+      "issue": 4415,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4408/fix-o10AlqTJ/u8/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 9,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "mutual-exclusion",
+      "issue": 4415,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4408/fix-o10AlqTJ/g9-11-12-14/verdict-u9.json",
+      "remedyFiles": [
+        "plugin/scripts/fleet-tick.mjs",
+        "plugin/scripts/ledger.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 10,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "refuted: the invariant holds; the guard would hide a broken one",
+      "issue": 4415,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4408/fix-o10AlqTJ/u10/verdict.json",
+      "remedyFiles": [
+        "plugin/scripts/fleet-tick.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 11,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4408/fix-o10AlqTJ/g9-11-12-14/verdict-u11.json",
+      "remedyFiles": [
+        "plugin/scripts/fleet-tick.mjs",
+        "plugin/scripts/ledger.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 12,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4408/fix-o10AlqTJ/g9-11-12-14/verdict-u12.json",
+      "remedyFiles": [
+        "plugin/scripts/fleet-tick.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 13,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4408/fix-o10AlqTJ/u13/verdict.json",
+      "remedyFiles": [
+        "plugin/scripts/fleet-tick.mjs",
+        "plugin/scripts/compute-board.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 14,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4408/fix-o10AlqTJ/g9-11-12-14/verdict-u14.json",
+      "remedyFiles": [
+        "plugin/scripts/ledger.mjs"
+      ]
+    }
+  ]
+}

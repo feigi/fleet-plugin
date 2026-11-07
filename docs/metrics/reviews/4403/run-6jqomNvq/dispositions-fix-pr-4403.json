@@ -1,0 +1,86 @@
+{
+ "head": "b201695a2a6d33831276bb9855208369b04daee4",
+ "run": "run-6jqomNvq",
+ "entries": [
+  {
+   "bucket": "unverified",
+   "index": 0,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4403/fix-bvey8zwR/u0-u2/verdict-u0.json",
+   "reason": "refuter let it survive; applied as `inspect(value, { customInspect: false })` in describeValue, pinned by a new test that kills the mutant"
+  },
+  {
+   "bucket": "unverified",
+   "index": 1,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "issue": 4413,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4403/fix-bvey8zwR/u1/verdict-u1.json",
+   "reason": "refuted by its refuter: no reader parses these refusals line by line, and the ticket requires no single-line text"
+  },
+  {
+   "bucket": "unverified",
+   "index": 2,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4403/fix-bvey8zwR/u0-u2/verdict-u2.json",
+   "reason": "same defect as unverified[0], ruled by one refuter; fixed by the same customInspect: false change, so its alternative second-try remedy, unreachable after it, was not added"
+  },
+  {
+   "bucket": "unverified",
+   "index": 3,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "issue": 4413,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4403/fix-bvey8zwR/u3/verdict-u3.json",
+   "reason": "refuted by its refuter: narrowing the catch to TypeError made runnerPrRefusal throw a bare Error/RangeError for a value whose toString throws one"
+  },
+  {
+   "bucket": "unverified",
+   "index": 4,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "defer",
+   "issue": 4413,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4403/fix-bvey8zwR/u4-u7/verdict-u4.json",
+   "reason": "refuted by its refuter (ruled together with conflicting unverified[7]): the JSON.stringify swap is an equivalent mutant and the String swap is already killed by tests/review-core-scratch-refusal.test.mjs"
+  },
+  {
+   "bucket": "unverified",
+   "index": 5,
+   "scope": "out",
+   "claimKind": "shape",
+   "disposition": "defer",
+   "issue": 4413,
+   "reason": "out of scope, claim about shape below the claim bar: no wrong behavior alleged, line not on the PR's diff, and the ticket leaves which values are accepted or refused out of scope"
+  },
+  {
+   "bucket": "unverified",
+   "index": 6,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4403/fix-bvey8zwR/u6/verdict-u6.json",
+   "remedyFiles": [
+    "plugin/scripts/review-core.mjs",
+    "plugin/scripts/review-eval.mjs"
+   ],
+   "reason": "refuter let it survive; applied as runnerScratchAbsoluteRefusal shared by runReview and runReviewToFile, describeValue made module-private"
+  },
+  {
+   "bucket": "unverified",
+   "index": 7,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "defer",
+   "issue": 4413,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4403/fix-bvey8zwR/u4-u7/verdict-u7.json",
+   "reason": "refuted by its refuter (ruled together with conflicting unverified[4]): the ticket puts runnerScratchRefusal through the one shared formatter"
+  }
+ ]
+}

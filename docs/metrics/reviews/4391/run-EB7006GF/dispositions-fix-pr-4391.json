@@ -1,0 +1,24 @@
+{
+  "head": "cdc6f3e85fc696c2fccbd5e8e91ac4951ba9d90e",
+  "run": "run-EB7006GF",
+  "entries": [
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4391/fix-suM8WN3h/U0/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted: env -u FORCE_COLOR node --test tests/ledger-dispatch.test.mjs on the pinned copy → exit 0, tests 145 pass 145; the PR body's 145 total is correct (the gap to the grep count is the file's t.test subtests)",
+      "issue": 4397,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4391/fix-suM8WN3h/U1/verdict.json"
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "pr": 4386,
+  "head": "9ed6a3b8e5da35697ebc99cb1ba6a8ff2e6b7da7",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv' and ' M docs/metrics/tier-outcomes.tsv'. I did not touch these. They are the controller checkout's own modified files, and I ran only read-only commands there."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I wrote nothing there, so these were already modified when I started. They are probably another agent's metrics refresh."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv' and ' M docs/metrics/tier-outcomes.tsv'. I wrote nothing in that directory; these modifications were already there or come from another agent."
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. These were already present when I audited; this pass only ran read-only commands (cat/grep/cmp/json.load and `git status`), none of which write those files."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv' and ' M docs/metrics/tier-outcomes.tsv'. I only read and ran no writes. Both files are tracked metrics files modified in the controller checkout (they look like the controller's own writes), and not by this review. Note: the bash tool failed in this session with a pix-optimizer extension error, so I ran the same commands through eval/subprocess."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin —  M docs/metrics/ticket-features.tsv,  M docs/metrics/tier-outcomes.tsv (my only command in that directory was `pwd`; these modifications were not made by this review member)"
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 1,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4386/run-LDN4cmqO/snapshot-9ed6a3b8",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "docs/metrics/reviews/4353/run-Jz2ZE0E6/review.json",
+      "claim": "Several recorded review runs were degraded, but each record states the degradation. None is hidden or reported as clean, so I found no swallowed failure in the diff. The ledger's final #4368 row is the one case where nothing in the review.json records says why the run stopped.",
+      "evidence": "Ran json.load over the 19 added review.json files. Four records have suiteVerdict.usable=False: 4351/run-9Q0NHFUF and run-P1RIsmQw (\"no suite slot within 1800 s … not a test failure\"), 4353/run-xy2V1z4M (same reason), and 4353/run-7v3E3LF1 (\"the Install step did not run in the snapshot … so the shared test run was skipped\"). 4356/run-LUvGgDKg also has usable=False, and its dimensionsUnrun lists 'tests' (\"the reviewer returned nothing — spend limit, timeout, or terminal error\"). 4353/run-Jz2ZE0E6 has usable=True but dimensionsUnrun lists 'correctness' with the same reason, so a green suite with one dimension unrun sits in a record marked usable. The ledger records the failures too (fix-pr-4351=failed, finisher-pr-4349=failed, finisher-pr-4374=halted:other, merge-bot-*=killed, dispositions-mismatch for fix-pr-4353).",
+      "suggested_fix": "None needed for this PR. If a reader treats suiteVerdict.usable alone as 'review complete', it will miss unrun dimensions, because usable=True coexists with a non-empty dimensionsUnrun. That is a consumer concern, not something this diff introduces.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}
