@@ -48,9 +48,11 @@
 //   holds one directive per line:
 //     arg <flag> <placeholder>   the argument `--<flag>` fills `<placeholder>`
 //     path <flag>                that argument must be an absolute path
+//     free <flag>                that argument is free text (THE LEFTOVER CHECK)
 //     literal <text>             `<text>` is carried to the member as written
 //     ticket <placeholder>       the renderer fills `<placeholder>` with the
-//                                ticket of the PR `--pr` names (THE TICKET)
+//                                ticket of the PR `--pr` names (THE TICKET),
+//                                which is free text
 //   A placeholder is `<` + a letter + anything but `<`, `>` and a newline +
 //   `>`, matched by its inner text exactly; it may hold spaces. No flag and
 //   no placeholder is declared twice, and --member, --json and --kind are
@@ -66,10 +68,19 @@
 //   with newlines and ended by one. Sections may repeat and interleave, which
 //   is how kinds share text without a copy.
 // - Substitution is one pass over the template: a value is never rescanned,
-//   so a value holding another placeholder's spelling is not substituted into.
-//   After it, any declared placeholder still present in the output — which
-//   only a caller passing a value like `<branch>` can cause — refuses, naming
-//   it.
+//   so a value holding another placeholder's spelling is not substituted into,
+//   and reaches the member as written.
+//
+// THE LEFTOVER CHECK. A caller passing an unfilled value like `<branch>` would
+// leave the member a placeholder, so a value that spells one is refused, naming
+// it — but what counts as spelling one depends on what the argument carries. An
+// argument that carries an identifier or a path is refused when its value
+// contains the spelling of any placeholder this brief fills. An argument the
+// template marks `free`, and the ticket, carry text someone else wrote, which
+// may spell placeholders as part of what it says: those are refused only when
+// the value, trimmed, is exactly its own placeholder's spelling, an unfilled
+// copy. This script holds no list of which arguments those are; the template
+// says.
 //
 // THE TICKET. A `ticket` placeholder in the selected text is filled with the
 // ticket the PR's implementer was dispatched with, which the renderer finds
@@ -78,8 +89,7 @@
 // `<scratch>` the `--scratch` value — so a template declaring `ticket`
 // declares `--pr` and `--scratch` too, and a kind carrying the placeholder
 // carries theirs. It is composed by ticket-text.mjs's ticketText(), as the
-// implementer's was, and defanged as the implementer's was, by the
-// implementer template's argument placeholders and this template's own. Two
+// implementer's was, and inserted as it comes, unmodified. Two
 // tickets naming one PR are each rendered, in row order. An issue file that
 // is missing or unreadable refuses, naming its path; nothing asks the tracker
 // in its place. No ledger, or no settled token naming the PR, fills it with a
@@ -99,7 +109,7 @@ import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { ROWS, ledgerSection, memberTokens } from "./ledger-grammar.mjs";
 import { runnerScratchRefusal } from "./review-core.mjs";
-import { defang, ticketText } from "./ticket-text.mjs";
+import { ticketText } from "./ticket-text.mjs";
 
 const NAME = "dispatch-prompt";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -124,15 +134,18 @@ function parseTemplate(role, text) {
 
   const args = [];
   const paths = new Set();
+  const free = new Set();
   const literals = new Set();
   let ticket = null;
   for (const line of lines.slice(1, close)) {
-    const m = /^(arg|path|literal|ticket) (.+)$/.exec(line);
+    const m = /^(arg|path|free|literal|ticket) (.+)$/.exec(line);
     if (m === null) refuse(`has a frontmatter line that is no directive: ${line}`);
     if (m[1] === "literal") {
       literals.add(m[2]);
     } else if (m[1] === "path") {
       paths.add(m[2]);
+    } else if (m[1] === "free") {
+      free.add(m[2]);
     } else if (m[1] === "ticket") {
       if (ticket !== null) refuse(`declares a ticket placeholder twice: <${ticket}> and <${m[2]}>`);
       ticket = m[2];
@@ -146,6 +159,8 @@ function parseTemplate(role, text) {
     }
   }
   for (const flag of paths) if (!args.some((a) => a.flag === flag)) refuse(`marks --${flag} as a path but never declares it`);
+  for (const flag of free) if (!args.some((a) => a.flag === flag)) refuse(`marks --${flag} as free text but never declares it`);
+  for (const flag of free) if (paths.has(flag)) refuse(`marks --${flag} as both a path and free text`);
   for (const a of args) if (literals.has(a.placeholder)) refuse(`declares <${a.placeholder}> as both an argument and a literal`);
   if (ticket !== null && (literals.has(ticket) || args.some((a) => a.placeholder === ticket))) {
     refuse(`declares <${ticket}> as the ticket and as an argument or a literal`);
@@ -168,7 +183,7 @@ function parseTemplate(role, text) {
   const whole = sections.flatMap((s) => s.lines).join("\n");
   for (const p of [...args.map((a) => a.placeholder), ...(ticket === null ? [] : [ticket])]) if (!whole.includes(`<${p}>`)) refuse(`declares <${p}> but never carries it`);
   if (ticket !== null) for (const flag of TICKET_FLAGS) if (!args.some((a) => a.flag === flag)) refuse(`declares the ticket <${ticket}> but no --${flag} to find it by`);
-  return { args, paths, literals, ticket, sections, kinds };
+  return { args, paths, free, literals, ticket, sections, kinds };
 }
 
 function loadTemplate(role) {
@@ -190,8 +205,8 @@ const TICKET_FLAGS = ["pr", "scratch"];
 // The text a `ticket` placeholder is filled with, for PR `pr` under scratch
 // root `scratch` (THE TICKET above): each ticket a settled `impl-<N>=PR#<pr>`
 // token on the ledger's rows names, once, in row order, composed by
-// ticketText() and defanged by `names`.
-function ticketFor(pr, scratch, names) {
+// ticketText().
+function ticketFor(pr, scratch) {
   let ledger;
   try {
     ledger = fleetFile("ledger.md");
@@ -223,7 +238,7 @@ function ticketFor(pr, scratch, names) {
     if (typeof issue?.title !== "string") {
       return die(`cannot read ticket #${n}, the ticket PR #${pr}'s implementer was dispatched with, from ${path}: it holds no issue with a title`);
     }
-    return defang(ticketText(issue), names);
+    return ticketText(issue);
   }).join("\n\n");
 }
 
@@ -340,15 +355,27 @@ if (carriesTicket) {
     die(`template ${role}.md carries the ticket <${template.ticket}> in kind ${kind} without ${TICKET_FLAGS.map((f) => `--${f}`).join(" and ")} to find it by`);
   }
   const [pr, scratch] = by.map((a) => values.get(a.placeholder));
-  const names = [...loadTemplate("implementer").args, ...template.args].map((a) => a.placeholder).concat(template.ticket);
-  values.set(template.ticket, ticketFor(pr, scratch, names));
+  values.set(template.ticket, ticketFor(pr, scratch));
 }
 
-const brief = `${body.replace(PLACEHOLDER, (whole, inner) => (values.has(inner) ? values.get(inner) : whole))}\n`;
+// THE LEFTOVER CHECK, once every value is in: an unfilled copy of a free text
+// value is refused, and so is an identifier or a path spelling a placeholder
+// this brief fills.
 const filled = [...required.map((a) => a.placeholder), ...(carriesTicket ? [template.ticket] : [])];
-for (const p of filled) {
-  if (brief.includes(`<${p}>`)) die(`the rendered brief still carries <${p}> — an argument value spells it`);
+const unfilled = (placeholder) => die(`the rendered brief still carries <${placeholder}> — its value is the unfilled placeholder`);
+for (const a of required) {
+  const value = values.get(a.placeholder);
+  if (template.free.has(a.flag)) {
+    if (value.trim() === `<${a.placeholder}>`) unfilled(a.placeholder);
+    continue;
+  }
+  for (const p of filled) {
+    if (value.includes(`<${p}>`)) die(`the rendered brief still carries <${p}> — an argument value spells it`);
+  }
 }
+if (carriesTicket && values.get(template.ticket).trim() === `<${template.ticket}>`) unfilled(template.ticket);
+
+const brief = `${body.replace(PLACEHOLDER, (whole, inner) => (values.has(inner) ? values.get(inner) : whole))}\n`;
 
 const payload = {
   role,

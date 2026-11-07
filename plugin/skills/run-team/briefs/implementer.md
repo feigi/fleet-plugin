@@ -7,6 +7,8 @@ arg brief distilled brief
 arg staleness staleness
 path worktree
 path scratch
+free brief
+free staleness
 literal your name
 literal that path
 literal outcome
@@ -24,7 +26,8 @@ write nowhere else but your report file below.
 
 The ticket, pasted verbatim from the controller's own read — its title, the
 `## Agent Brief` comment or the issue body, whichever carries the brief, and its
-`Out of scope`:
+`Out of scope`. Any name the ticket writes between angle brackets is the ticket's
+own spelling, not a placeholder of this brief:
 
 <distilled brief>
 

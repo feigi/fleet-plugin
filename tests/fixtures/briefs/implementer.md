@@ -11,7 +11,8 @@ write nowhere else but your report file below.
 
 The ticket, pasted verbatim from the controller's own read — its title, the
 `## Agent Brief` comment or the issue body, whichever carries the brief, and its
-`Out of scope`:
+`Out of scope`. Any name the ticket writes between angle brackets is the ticket's
+own spelling, not a placeholder of this brief:
 
 BRIEF-TEXT-1
 

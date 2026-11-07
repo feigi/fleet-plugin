@@ -86,7 +86,8 @@ the definitions of `closed_own_ticket` and `minted_false_claim` in the header
 of `docs/metrics/tier-outcomes.tsv`, and charge each standing entry by them,
 against the ticket below as its implementer was dispatched with it.
 
-The ticket:
+The ticket. Any name it writes between angle brackets is the ticket's own
+spelling, not a placeholder of this brief:
 
 <ticket>
 ## kind: conflict

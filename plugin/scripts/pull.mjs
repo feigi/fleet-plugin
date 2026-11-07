@@ -115,9 +115,7 @@
 //   8  row, render, dispatch   `ledger.mjs row … --routing <line>`, the row and
 //                 the router's line in one write, `dispatch-prompt.mjs render
 //                 implementer --member impl-<N>`, `ledger.mjs dispatch`. The
-//                 brief and the staleness text are given with `‹name›` for each
-//                 `<name>` the implementer template declares: the renderer
-//                 refuses a value that spells one.
+//                 brief and the staleness text are given as they are.
 //
 // THE STATE is `<scratch>/impl-<N>/pull.json`: every command run (script, its
 // arguments, exit status, bounded stdout, time), every question asked and every
@@ -141,7 +139,7 @@ import { isCLI } from "./is-cli.mjs";
 import { LabelMapUnreadable, readLabelMap } from "./label-map.mjs";
 import { EXCLUDED_REASON, POLICY_CELL, memberTokens, parseRouting, premisesOf, pullEnded, tierValues } from "./ledger-grammar.mjs";
 import { sessionFromReceipt } from "./phase0-receipt.mjs";
-import { LINE_REF, briefPaths, briefText, defang, outOfScope, strandedRuling, ticketText } from "./ticket-text.mjs";
+import { LINE_REF, briefPaths, briefText, outOfScope, strandedRuling, ticketText } from "./ticket-text.mjs";
 
 const NAME = "pull";
 const SCRIPTS = dirname(fileURLToPath(import.meta.url));
@@ -382,23 +380,6 @@ export function sectionsOf(hs, from, to) {
   const above = hs.filter((h) => h.line <= from).at(-1);
   const within = hs.filter((h) => h.line > from && h.line <= to);
   return [above === undefined ? "(no heading above)" : above.text, ...within.map((h) => h.text)].join(" → ");
-}
-
-// The placeholders the implementer's brief template declares. dispatch-prompt.mjs
-// refuses a value that spells one, and a ticket's text is a value: one that
-// names `<N>` would stop every render, with the claim standing.
-const TEMPLATE = join(SCRIPTS, "..", "skills", "run-team", "briefs", "implementer.md");
-
-function declaredPlaceholders() {
-  const lines = readFileSync(TEMPLATE, "utf8").split("\n");
-  if (lines[0] !== "---") return [];
-  const names = [];
-  for (const line of lines.slice(1)) {
-    if (line === "---") break;
-    const m = /^arg \S+ (.+)$/.exec(line);
-    if (m !== null) names.push(m[1]);
-  }
-  return names;
 }
 
 // ── children ─────────────────────────────────────────────────────────────────
@@ -981,16 +962,10 @@ class Pull {
     const { st } = this;
     const worktree = join(this.p.cwd, ".worktrees", `${st.ticket}-${st.member}`);
     const staleness = st.staleness.length === 0 ? "no probe was run" : st.staleness.join("; ");
-    let names;
-    try {
-      names = declaredPlaceholders();
-    } catch (e) {
-      return this.stop(`cannot read the brief template ${TEMPLATE} (${e.code ?? e.message})`);
-    }
     const r = this.script("render", "dispatch-prompt.mjs", [
       "render", "implementer", "--member", st.member, "--ticket", String(st.ticket), "--worktree", worktree,
       "--branch", `implementer/${st.ticket}-${st.member}`, "--scratch", this.p.scratch,
-      "--brief", defang(ticketText(this.issue()), names), "--staleness", defang(staleness, names),
+      "--brief", ticketText(this.issue()), "--staleness", staleness,
     ]);
     if (r.status !== 0) return this.stop(withText(`dispatch-prompt.mjs render refused (${r.how}) — the claim stands`, r));
     st.stage = "dispatch";

@@ -23,7 +23,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { CASES, GOLDEN_DIR, PLUGIN, argvOf, briefFixtureName, cleanEnv, flagsOf, installRenderer, label } from "./support/render-brief.mjs";
-import { defang, ticketText } from "../plugin/scripts/ticket-text.mjs";
+import { ticketText } from "../plugin/scripts/ticket-text.mjs";
 
 const TMP = realpathSync(mkdtempSync(join(tmpdir(), "dispatch-prompt-")));
 after(() => rmSync(TMP, { recursive: true, force: true }));
@@ -520,8 +520,6 @@ function ticketRun(issue, { rows = ["#4120 impl-4120=PR#3293 → PR#3293"] } = {
   return { repo, scratch };
 }
 const fixCase = (kind) => CASES.find((c) => c.role === "fix-applier" && c.kind === kind);
-const declaredIn = (role) => readFileSync(join(PLUGIN, "skills", "run-team", "briefs", `${role}.md`), "utf8")
-  .split("\n---\n")[0].split("\n").map((l) => /^arg \S+ (.+)$/.exec(l)?.[1]).filter(Boolean);
 const ISSUE = {
   title: "The thing is wrong",
   body: "## Problem\n\nrun <N> twice\n\n### Out of scope\n\n- the other thing",
@@ -530,9 +528,9 @@ const ISSUE = {
 
 test("fix-applier review prints the ticket text the implementer's dispatch for that PR's ticket carried", () => {
   const { repo, scratch } = ticketRun(ISSUE);
-  // What pull.mjs hands the implementer: ticketText(), defanged by the implementer template's placeholders.
-  const carried = defang(ticketText(ISSUE), declaredIn("implementer"));
-  assert.ok(carried.includes("‹N›") && carried.includes("### Out of scope"), "the control ticket exercises the defang and the body's Out of scope");
+  // What pull.mjs hands the implementer: ticketText(), as it is.
+  const carried = ticketText(ISSUE);
+  assert.ok(carried.includes("<N>") && carried.includes("### Out of scope"), "the control ticket spells a placeholder and carries the body's Out of scope");
   const impl = render(argvOf({ ...CASES[0], args: { ...CASES[0].args, brief: carried } }), { cwd: repo });
   assert.equal(impl.status, 0, impl.err);
   assert.ok(impl.out.includes(carried));
@@ -540,17 +538,84 @@ test("fix-applier review prints the ticket text the implementer's dispatch for t
     const c = fixCase(kind);
     const r = render(argvOf({ ...c, args: { ...c.args, pr: "3293", scratch } }), { cwd: repo });
     assert.equal(r.status, 0, r.err);
-    assert.ok(r.out.includes(`The ticket:\n\n${carried}\n`), `${kind} did not carry the implementer's ticket text:\n${r.out}`);
+    assert.ok(r.out.includes(`spelling, not a placeholder of this brief:\n\n${carried}\n`), `${kind} did not carry the implementer's ticket text right after the sentence introducing it:\n${r.out}`);
   }
 });
 
-test("a ticket spelling one of the fix-applier's own placeholders is defanged, not refused", () => {
-  const issue = { ...ISSUE, comments: [{ body: "## Agent Brief\n\nthe token names `fix-pr-<M>:<run>` on <pr>" }] };
+test("a fix-applier review brief carries a ticket spelling its own placeholders and the implementer's as written", () => {
+  const issue = { ...ISSUE, comments: [{ body: "## Agent Brief\n\nthe token names `fix-pr-<M>:<run>` on <pr> in <worktree>, impl-<N> under <scratch> on <branch>" }] };
   const { repo, scratch } = ticketRun(issue);
   const c = fixCase("review");
   const r = render(argvOf({ ...c, args: { ...c.args, pr: "3293", scratch } }), { cwd: repo });
   assert.equal(r.status, 0, r.err);
-  assert.ok(r.out.includes("the token names `fix-pr-<M>:‹run›` on ‹pr›"), r.out);
+  assert.ok(r.out.includes("the token names `fix-pr-<M>:<run>` on <pr> in <worktree>, impl-<N> under <scratch> on <branch>"), r.out);
+  assert.equal(r.out.includes("\u2039"), false, "no spelling is rewritten to a lookalike bracket");
+  // Every placeholder of the brief itself is filled: what is left once the ticket is cut out spells none.
+  const rest = r.out.split(ticketText(issue)).join("");
+  for (const p of ["abs-path", "branch", "testCmd", "checkCmd", "scratch", "pr", "run"]) assert.equal(rest.includes(`<${p}>`), false, `<${p}> is left in the brief`);
+});
+
+test("an implementer brief whose ticket and staleness spell placeholders carries them as written, every placeholder of the brief filled", () => {
+  const [impl] = CASES;
+  const brief = "Title: spells\n\nRun with `--scratch <scratch>` in impl-<N> on <branch>, as <abs-path> and <distilled brief> say.";
+  const staleness = "gone check at <scratch>/impl-<N>: still reproduces <staleness>";
+  const r = render(argvOf({ ...impl, args: { ...impl.args, brief, staleness } }));
+  assert.equal(r.status, 0, r.err);
+  assert.ok(r.out.includes(brief) && r.out.includes(staleness), r.out);
+  assert.equal(r.out.includes("\u2039"), false, "no spelling is rewritten to a lookalike bracket");
+  const rest = r.out.split(brief).join("").split(staleness).join("");
+  for (const p of ["N", "abs-path", "branch", "scratch", "distilled brief", "staleness"]) assert.equal(rest.includes(`<${p}>`), false, `<${p}> is left in the brief`);
+  assert.ok(rest.includes(`Implement ticket ${impl.args.ticket}.`) && rest.includes(`worktree \`${impl.args.worktree}\``), rest);
+});
+
+test("an identifier argument spelling a declared placeholder is refused, exit 2 naming it", () => {
+  const [impl] = CASES;
+  for (const [flag, value, named] of [["branch", "<branch>", "<branch>"], ["branch", "x-<scratch>-y", "<scratch>"], ["ticket", "<N>", "<N>"], ["scratch", "/abs/<branch>", "<branch>"]]) {
+    const r = render(argvOf({ ...impl, args: { ...impl.args, [flag]: value } }));
+    assert.equal(r.status, 2, `--${flag} ${value}: ${r.err}`);
+    assert.equal(r.out, "");
+    assert.ok(r.err.includes(named), `--${flag} ${value}: ${r.err}`);
+  }
+});
+
+test("a free text argument is refused exactly when it is its own unfilled placeholder", () => {
+  const [impl] = CASES;
+  for (const [flag, value] of [["brief", "<distilled brief>"], ["brief", "  <distilled brief>\n"], ["staleness", "<staleness>"]]) {
+    const r = render(argvOf({ ...impl, args: { ...impl.args, [flag]: value } }));
+    assert.equal(r.status, 2, `--${flag} ${JSON.stringify(value)}: ${r.err}`);
+    assert.equal(r.out, "");
+    assert.ok(r.err.includes(`<${flag === "brief" ? "distilled brief" : "staleness"}>`), r.err);
+  }
+  // What it must ACCEPT: another placeholder's spelling, and its own spelling inside a longer text.
+  for (const [flag, value] of [["brief", "<staleness>"], ["staleness", "<distilled brief>"], ["brief", "say <distilled brief> again"]]) {
+    const r = render(argvOf({ ...impl, args: { ...impl.args, [flag]: value } }));
+    assert.equal(r.status, 0, `--${flag} ${value}: ${r.err}`);
+    assert.ok(r.out.includes(value), r.out);
+  }
+});
+
+test("a template marking a flag free that it never declares, or also marks a path, is refused", () => {
+  const rd = CASES.find((c) => c.role === "recipe-deriver");
+  const undeclared = install("free-undeclared", {
+    edit: (briefs) => {
+      const p = join(briefs, "recipe-deriver.md");
+      writeFileSync(p, readFileSync(p, "utf8").replace("---\n", "---\nfree ghost\n"));
+    },
+  });
+  const u = render(argvOf(rd), { inst: undeclared });
+  assert.equal(u.status, 2, u.err);
+  assert.equal(u.out, "");
+  assert.ok(u.err.includes("marks --ghost as free text but never declares it"), u.err);
+  const impl = CASES[0];
+  const both = install("free-and-path", {
+    edit: (briefs) => {
+      const p = join(briefs, "implementer.md");
+      writeFileSync(p, readFileSync(p, "utf8").replace("free brief\n", "free brief\nfree scratch\n"));
+    },
+  });
+  const r = render(argvOf(impl), { inst: both });
+  assert.equal(r.status, 2, r.err);
+  assert.ok(r.err.includes("marks --scratch as both a path and free text"), r.err);
 });
 
 test("with the ticket's issue.json missing or unreadable, the render refuses naming the path, and prints nothing", () => {

@@ -20,7 +20,7 @@ import { seedLabelMap } from "./support/label-map-seed.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { renderBrief } from "./support/render-brief.mjs";
 import { issueMetrics } from "../plugin/scripts/ticket-router.mjs";
-import { briefPaths, briefText, defang, outOfScope, strandedRuling } from "../plugin/scripts/ticket-text.mjs";
+import { briefPaths, briefText, outOfScope, strandedRuling } from "../plugin/scripts/ticket-text.mjs";
 import { chainHead, diffHunks, headings, implRow, parseAnswer, pathHits, relabel, sectionsOf } from "../plugin/scripts/pull.mjs";
 import { LABEL_ROLES } from "../plugin/scripts/label-map.mjs";
 import { pullOf } from "../plugin/scripts/fleet-tick.mjs";
@@ -2124,15 +2124,7 @@ test("a `gh pr list` that fails, or prints no list of numbered PRs with their he
   }
 });
 
-test("defang writes the spelling of each declared placeholder `‹name›` and leaves every other `<…>` alone", () => {
-  assert.equal(defang("run <N> on <abs-path> with <qid> and <distilled brief>", ["N", "abs-path", "distilled brief"]), "run ‹N› on ‹abs-path› with <qid> and ‹distilled brief›");
-  assert.equal(defang("nothing to do", ["N"]), "nothing to do");
-});
-
-test("a ticket that spells a placeholder the implementer template declares reaches the renderer without the spelling", () => {
-  const template = readFileSync(join(PLUGIN, "skills", "run-team", "briefs", "implementer.md"), "utf8");
-  const names = [...template.matchAll(/^arg \S+ (.+)$/gm)].map((m) => m[1]);
-  assert.equal(names.includes("N"), true, "the template declares <N>");
+test("a ticket and a staleness text that spell placeholders of the implementer template reach the renderer as written", () => {
   const issue = { ...ISSUE, body: "## What to build\n\nRun `pull.mjs next --head <N>` in <branch>, giving <distilled brief> and <qid>.\n" };
   const f = fixture({ issue });
   f.next("--head", "12");
@@ -2141,14 +2133,11 @@ test("a ticket that spells a placeholder the implementer template declares reach
   const end = f.answer(12, "collision", "clear");
   assert.equal(end.status, 0, end.stdout + end.err);
   const render = f.calls("dispatch-prompt")[0].args;
-  for (const flag of ["--brief", "--staleness"]) {
-    const value = render[render.indexOf(flag) + 1];
-    for (const name of names) assert.equal(value.includes(`<${name}>`), false, `${flag} spells <${name}>`);
-  }
   const brief = render[render.indexOf("--brief") + 1];
-  assert.equal(brief.includes("‹N›") && brief.includes("‹branch›") && brief.includes("‹distilled brief›"), true);
-  assert.equal(brief.includes("<qid>"), true, "a spelling the template does not declare is the ticket's own");
-  assert.equal(render[render.indexOf("--staleness") + 1].includes("‹scratch›"), true);
+  const staleness = render[render.indexOf("--staleness") + 1];
+  for (const spelling of ["<N>", "<branch>", "<distilled brief>", "<qid>"]) assert.equal(brief.includes(spelling), true, `--brief carries ${spelling} as written`);
+  assert.equal(staleness.includes("<scratch>"), true, "--staleness carries <scratch> as written");
+  assert.equal(`${brief}${staleness}`.includes("\u2039"), false, "nothing is rewritten to a lookalike bracket");
 });
 
 test("SKILL.md Phase 1 names `pull.mjs next` as the Pull's entry, and its step paragraphs stay in references/pull.md", () => {
