@@ -690,6 +690,26 @@ test("review writes with a fix-applier live when it opens no launch: a launch se
   assert.deepEqual(together.rows(), [`#1 ${IMPL} · fix-pr-482 · ${A} · ${r1}`]);
 });
 
+// A malformed review token already on the row is carried forward by a row write
+// but refused by the strict fold, so the fold is observable through it: a call
+// that folds refuses; a call that opens no launch never reads the fold.
+const FOLD_REFUSED = [`#1 ${IMPL} · review=bogus · ${A} · fix-pr-482`];
+
+test("review settling an open launch =failed alone never reads the fold: it writes on a ledger the tick refuses", (t) => {
+  const { review, rows, reviewRefused } = fixture(t, FOLD_REFUSED);
+  // The fixture really is one the fold refuses: a new launch is refused for that, not for the live member.
+  reviewRefused("482", [`${A}=failed`, B], /fleet-tick\.mjs refuses this ledger/, /nothing written/);
+  assert.equal(review("482", `${A}=failed`).row, "#1");
+  assert.deepEqual(rows(), [`#1 ${IMPL} · review=bogus · ${A}=failed · fix-pr-482`]);
+});
+
+test("review's refusal names every live member on the PR, and its settle hint names the first in the fold's order", (t) => {
+  // The row puts the finisher first, so the fold's order, not the row's, decides who is named first.
+  const { reviewRefused } = fixture(t, [`#1 ${IMPL} · finisher-pr-482 · fix-pr-482`]);
+  const stderr = reviewRefused("482", [A], /fix-pr-482, finisher-pr-482 is still live on PR #482/, /ledger\.mjs settle fix-pr-482 <outcome>/);
+  assert.doesNotMatch(stderr, /settle finisher-pr-482/);
+});
+
 test("review launches once the fix-applier or finisher on the PR is settled, and while one is live on another PR", (t) => {
   for (const settled of ["fix-pr-482=killed", "fix-pr-482=failed", "fix-pr-482=no-op", "fix-pr-482=applied:def5678", "finisher-pr-482=labelled"]) {
     const { review } = fixture(t, [`#1 ${IMPL} · ${settled}`]);
