@@ -538,7 +538,7 @@ test("fix-applier review prints the ticket text the implementer's dispatch for t
     const c = fixCase(kind);
     const r = render(argvOf({ ...c, args: { ...c.args, pr: "3293", scratch } }), { cwd: repo });
     assert.equal(r.status, 0, r.err);
-    assert.ok(r.out.includes(`\n\n${carried}\n`), `${kind} did not carry the implementer's ticket text:\n${r.out}`);
+    assert.ok(r.out.includes(`spelling, not a placeholder of this brief:\n\n${carried}\n`), `${kind} did not carry the implementer's ticket text right after the sentence introducing it:\n${r.out}`);
   }
 });
 

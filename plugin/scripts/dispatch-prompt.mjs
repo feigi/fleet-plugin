@@ -75,11 +75,12 @@
 // leave the member a placeholder, so a value that spells one is refused, naming
 // it — but what counts as spelling one depends on what the argument carries. An
 // argument that carries an identifier or a path is refused when its value
-// contains any declared placeholder's spelling. An argument the template marks
-// `free`, and the ticket, carry text someone else wrote, which may spell
-// placeholders as part of what it says: those are refused only when the value,
-// trimmed, is exactly its own placeholder's spelling, an unfilled copy. This
-// script holds no list of which arguments those are; the template says.
+// contains the spelling of any placeholder this brief fills. An argument the
+// template marks `free`, and the ticket, carry text someone else wrote, which
+// may spell placeholders as part of what it says: those are refused only when
+// the value, trimmed, is exactly its own placeholder's spelling, an unfilled
+// copy. This script holds no list of which arguments those are; the template
+// says.
 //
 // THE TICKET. A `ticket` placeholder in the selected text is filled with the
 // ticket the PR's implementer was dispatched with, which the renderer finds
