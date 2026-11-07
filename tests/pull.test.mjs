@@ -1838,7 +1838,8 @@ function pullThrough(f) {
   return f.answer(12, "collision", "clear");
 }
 
-const dispatchName = (r) => JSON.parse(r.out.find((l) => l.startsWith("DISPATCH ")).slice("DISPATCH ".length)).name;
+const dispatchSpec = (r) => JSON.parse(r.out.find((l) => l.startsWith("DISPATCH ")).slice("DISPATCH ".length));
+const dispatchName = (r) => dispatchSpec(r).name;
 const renderArg = (f, flag) => {
   const render = f.calls("dispatch-prompt")[0].args;
   return render[render.indexOf(flag) + 1];
@@ -1869,6 +1870,17 @@ test("a name `## Dispatched` holds settled is not the Pull's member either", () 
   assert.deepEqual(f.calls("claim-ticket")[0].args, ["12", "impl-12", "implementer", "--apply"]);
 });
 
+test("a router refusal after a replacement is named releases the claim under the impl-12 pair, not the member", () => {
+  const f = fixture();
+  seedLedger(f, { retired: ["impl-12"] });
+  f.control("ticket-router", { exit: 2, err: "ticket-router: no table" });
+  const r = pullThrough(f);
+  assert.equal(r.status, 2, r.stdout + r.err);
+  assert.match(r.err, /its claim is released/);
+  assert.equal(f.state().member, "impl-12-b");
+  assert.deepEqual(f.calls("release-ticket")[0].args, ["12", "impl-12", "implementer", "--apply"], "the claim belongs to the ticket");
+});
+
 test("a name this session used on another ticket is no reason to rename this one: impl-12 is still impl-12", () => {
   const f = fixture();
   seedLedger(f, { rows: ["#13 impl-13=released"], retired: ["impl-14", "impl-120"] });
@@ -1890,7 +1902,7 @@ test("a re-Pull of a row holding a settled impl-12 token carries it and names th
   assert.deepEqual(f.ledgerRouted(), [`impl-12-b ${drawn}`]);
   assert.deepEqual(f.calls("claim-ticket")[0].args, ["12", "impl-12", "implementer", "--apply"]);
   assert.equal(renderArg(f, "--member"), "impl-12-b");
-  assert.equal(JSON.parse(r.out.find((l) => l.startsWith("DISPATCH ")).slice(9)).agent, "fleet-implementer-task-high");
+  assert.equal(dispatchSpec(r).agent, "fleet-implementer-task-high");
 
   // The same row with no draw: the member alone follows the carried token.
   const g = fixture();
@@ -1936,13 +1948,31 @@ test("a collision answered behind-* on a row holding a settled impl-12 token kee
   assert.deepEqual(g.ledgerRows(), ["#12 excluded · behind-issue:#9"]);
 });
 
+test("a `## Retired` line naming no member blocks only the name: a collision answered behind-* still writes its Exclusion", () => {
+  const f = fixture();
+  seedLedger(f, { retired: ["not a member line"] });
+  f.ghRules([{ match: "^issue view 9 --json state$", out: '{"state":"OPEN"}' }]);
+  toCollision(f);
+  const r = f.answer(12, "collision", "behind-issue:#9");
+  assert.equal(r.status, 1, r.stdout + r.err);
+  assert.match(r.stdout, /^LEFT #12: excluded · behind-issue:#9 — next entry$/m);
+  assert.deepEqual(f.ledgerRows(), ["#12 excluded · behind-issue:#9"]);
+
+  // Picking the name reads `## Retired`, so a claim refuses on the same line, before anything is claimed.
+  const g = fixture();
+  seedLedger(g, { retired: ["not a member line"] });
+  const s = pullThrough(g);
+  assert.equal(s.status, 2, s.stdout + s.err);
+  assert.match(s.err, /## Retired has a line 'not a member line' that names no member or reviewer — fix the ledger by hand/);
+  assert.equal(g.calls("claim-ticket").length, 0);
+});
+
 test("with every retry letter through -z used the Pull leaves, naming that none is left, before any claim", () => {
   const f = fixture();
   const letters = "bcdefghijklmnopqrstuvwxyz".split("");
   f.ledgerRow(12, ["impl-12=released", ...letters.map((l) => `impl-12-${l}=released`)].join(" · "));
   const rows = f.ledgerRows();
-  toCollision(f);
-  const r = f.answer(12, "collision", "clear");
+  const r = pullThrough(f);
   assert.equal(r.status, 1, r.stdout + r.err);
   assert.match(r.stdout, /^LEFT #12: no retry letter is left: impl-12 was already used this session \(impl-12=released\)/m);
   assert.equal(f.calls("claim-ticket").length, 0);

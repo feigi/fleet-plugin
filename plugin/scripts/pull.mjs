@@ -239,6 +239,9 @@ const carriedTokens = (rows, ticket) => {
   return row === undefined ? [] : settledMemberTokens(row);
 };
 
+/** Whether `x` is an array of strings, the shape `ledger.mjs read` prints `rows`, `dispatched` and `retired` in. */
+const strings = (x) => Array.isArray(x) && x.every((s) => typeof s === "string");
+
 /**
  * The `--impl-row` the router is given: the row count the Pull creates — or,
  * while an exploration assignment is rolling (the latest row 5k and every row
@@ -656,10 +659,8 @@ class Pull {
     return result(10, block(qid, this.st.ticket, context));
   }
 
-  // The ledger as `ledger.mjs read` prints it, the parts a Pull reads: `rows`, `dispatched` (`## Dispatched` as its
-  // tokens) and `retired` (the names `## Retired` holds). An entry or line the grammar cannot read is a refusal, as
-  // `ledger.mjs dispatch` refuses it, before anything is claimed.
-  ledger() {
+  // `ledger.mjs read`'s JSON, refused when it is unreadable or carries no `rows`.
+  readLedger() {
     const r = this.script("ledger", "ledger.mjs", ["read"]);
     if (r.status !== 0) throw new Refusal(withText(`ledger.mjs read ${r.how}`, r));
     let data = null;
@@ -668,8 +669,15 @@ class Pull {
     } catch {
       // Falls through to the refusal below.
     }
-    const strings = (x) => Array.isArray(x) && x.every((s) => typeof s === "string");
     if (!strings(data?.rows)) throw new Refusal("ledger.mjs read printed no {rows}");
+    return data;
+  }
+
+  // The ledger as `ledger.mjs read` prints it, the parts the member's name is picked from: `rows`, `dispatched`
+  // (`## Dispatched` as its tokens) and `retired` (the names `## Retired` holds). An entry or line the grammar cannot
+  // read is a refusal, as `ledger.mjs dispatch` refuses it, before anything is claimed.
+  ledger() {
+    const data = this.readLedger();
     if (!strings(data.dispatched) || !strings(data.retired)) throw new Refusal("ledger.mjs read printed no {dispatched, retired}");
     const bad = data.dispatched.find((e) => parseToken(e) === null);
     if (bad !== undefined) throw new Refusal(`ledger.mjs read: ## Dispatched has an entry '${bad}' this grammar cannot parse — fix the ledger by hand`);
@@ -678,8 +686,9 @@ class Pull {
     return { rows: data.rows, dispatched: data.dispatched, retired: names };
   }
 
+  // The rows alone, for the readers that write a row or route: a section only the name needs cannot block them.
   ledgerRows() {
-    return this.ledger().rows;
+    return this.readLedger().rows;
   }
 
   // ── the ticket, as read ──
@@ -1211,7 +1220,7 @@ function readLedgerRows(p) {
  * could not read is a refusal (exit 2) that says the exclusion stands.
  */
 function heldOut(p, n) {
-  const row = readLedgerRows(p).find((r) => rowKey(r) === `#${n}`);
+  const row = rowOf(readLedgerRows(p), n);
   const premises = row === undefined ? null : premisesOf(row);
   if (premises === null) return null;
   const standing = standingPremise(premises, p.cwd);
@@ -1250,7 +1259,7 @@ function shortlistHead(p, run) {
   // empty one.
   const unreadable = [];
   for (const { n } of list.shortlist) {
-    const row = rows.find((r) => rowKey(r) === `#${n}`);
+    const row = rowOf(rows, n);
     if (row !== undefined && isImplRow(row)) continue;
     const premises = row === undefined ? null : premisesOf(row);
     const standing = premises === null ? null : standingPremise(premises, p.cwd);
