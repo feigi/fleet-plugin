@@ -1,0 +1,203 @@
+{
+  "pr": 4387,
+  "head": "e9c5f95fcd57390713388d70c4d02c86f345277f",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I did not write either file; I ran only read-only commands. They were already modified when the audit ran."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — printed ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. I ran only read and grep calls and never wrote to that tree, so another agent or the controller modified these two files."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. I made no writes there: my shell ran only the pwd, the git status audit, and probes inside the scratch copy. Another agent probably modified those two files. The copy's own `git status --porcelain -uall` printed nothing."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv' (not touched by me; I wrote only in the scratch copy. The bash tool was broken by an extension error, so I used eval/python subprocess, whose cwd was that directory)."
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin —  M docs/metrics/ticket-features.tsv\\n M docs/metrics/tier-outcomes.tsv (not written by this pass: every command here ran via `cd` into the snapshot or simplify/ scratch; the only writes were probe-simplify.mjs and the mutant edits, both inside simplify/copy)"
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin —  M docs/metrics/ticket-features.tsv,  M docs/metrics/tier-outcomes.tsv (not written by this pass: every command after the initial `pwd` used absolute paths or chained `cd` into the snapshot/scratch dir; origin of these modifications unknown to me)"
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 11,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4387/run-KH8LaP0t/snapshot-e9c5f95f",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/review-core.mjs",
+      "line": 969,
+      "claim": "runnerWorktreeRefusal throws a TypeError instead of returning its refusal string for a BigInt or a circular object, breaking its documented 'null or message' contract (though runReviewToFile still throws before any run, so the retry bug the ticket targets does not recur).",
+      "evidence": "node probe.mjs in correctness/ against the copy: `refusal bigint THREW TypeError Do not know how to serialize a BigInt`; `refusal circular THREW TypeError Converting circular structure to JSON`; `toFile bigint threw TypeError Do not know how to serialize a BigInt calls 0`; `runReview {\"pr\":7,\"worktree\":\"1n\"} -> TypeError Do not know how to serialize a BigInt labels []`. Same JSON.stringify pattern as the pre-existing runnerTestCmdRefusal, so it's a shared trait, not a regression.",
+      "suggested_fix": "Optional and out of this ticket's scope: format the offending value with a non-throwing serializer (e.g. try JSON.stringify, fall back to String/typeof) across all runner*Refusal helpers in a separate change.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/review-core.mjs",
+      "line": 969,
+      "claim": "For a Symbol or function worktree the refusal ends in 'got undefined', and for a boxed String('/wt') it says 'args.worktree is required … got \"/wt\"'. Both messages misstate what was passed. The values are still refused correctly.",
+      "evidence": "node probe.mjs: `refusal symbol \"…got undefined\"`, `refusal fn \"…got undefined\"`, `refusal boxed \"args.worktree is required — the checkout the review snapshots, got \\\"/wt\\\"\"`; `toFile boxed threw Error review-runner: args.worktree is required … got \"/wt\" calls 0`.",
+      "suggested_fix": "None required for the ticket. If wanted, name the type in the message (e.g. `got ${typeof v} …`) for non-string values.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/review-core.mjs",
+      "line": 1099,
+      "claim": "For the same multiply-bad arguments, the two entry points now report different refusals. runReview checks the worktree before the pr-digits and testCmd refusals, and runReviewToFile checks it after them. Before this PR, runReview with pr \"abc\" and worktree \" \" reported the pr-digits error.",
+      "evidence": "Probes against the copy: runReview {pr:\"abc\",worktree:\" \"} -> `review-pr: args.worktree is required … got \" \"`, while runReviewToFile {pr:\"abc\",…,worktree:\" \"} -> `review-runner: args.pr must be a PR number, got \"abc\" calls 0`. runReview {pr:7,worktree:\" \",testCmd:undefined} -> worktree refusal, while runReviewToFile {pr:7,worktree:\" \"} -> `args.testCmd is required … got undefined`. The ticket brief explicitly endorses placing the shared refusal just after the combined guard, and a falsy worktree already preceded testCmd in runReview before this PR, so this is cosmetic.",
+      "suggested_fix": "Acceptable as-is per the ticket. If the entry points should match, move runReview's worktree refusal below the testCmd refusal (before scratch/dimension resolution), which keeps the 'no dispatch, no directory' guarantee.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/review-eval.mjs",
+      "line": 178,
+      "claim": "The new refusal only rejects blank or non-string `worktree` values. A string containing a newline or shell metacharacters (e.g. '/wt\\n', '/wt; rm') passes both the runner and the core, and gets interpolated into the snapshot agent's shell. That path then fails only as the generic 'snapshot agent returned nothing' after one dispatch, and the runner retries it once. This is pre-existing and the PR does not claim to cover it, so it is not a regression.",
+      "evidence": "Probe: runReviewToFile with worktree '/wt\\n' and with '/wt; rm' printed 'no throw' (the injected run was invoked). runReview with the same values dispatched 1 agent and threw 'review-pr: the snapshot agent returned nothing (it died, or it exhausted its structured-ou…'.",
+      "suggested_fix": "Optional and out of scope for this PR: if a value that cannot name a checkout should be refused, extend runnerWorktreeRefusal to also reject control characters and newlines.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/review-core.mjs",
+      "line": 1098,
+      "claim": "The new refusal is thrown from inside `reviewRun`, under `runReview`'s try/finally. It is not swallowed: `finally` calls `evictRunRoot`, which returns at once because `run.runRoot` is still null, and the original Error propagates. I found no new silent-failure path.",
+      "evidence": "Probe: runReview with ' ', '\\t', 7, [], {}, true as worktree rejected with 'review-pr: args.worktree is required — … got <value>' and dispatched 0 agents. runReviewToFile rejected with 'review-runner: …' and never called `run` (calls=0), so the retry loop and its catch were not reached. Mutation: removing the throw line in reviewRun made 'runReview with a blank or non-string worktree refuses before any agent is dispatched' fail (pass 3, fail 1), so the test does cover that throw.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/review-core-worktree-refusal.test.mjs",
+      "line": 93,
+      "claim": "Nothing tests that a padded non-blank worktree such as ' /wt ' is accepted untouched, so a mutant that also refuses (or trims) padded strings survives, although the comment says 'Refused, never trimmed or coerced'.",
+      "evidence": "mutant M4 in plugin/scripts/review-core.mjs added `&& worktree.trim()===worktree` to runnerWorktreeRefusal; the narrowed run `./agent-test tests/review-core-worktree-refusal.test.mjs tests/review-runner.test.mjs` → exit 0, fail 0, all 24 pass (survived); baseline same command → exit 0, 24 pass.",
+      "suggested_fix": "Add `assert.equal(runnerWorktreeRefusal(\" /wt \"), null)` to the accept test.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/review-core-worktree-refusal.test.mjs",
+      "line": 119,
+      "claim": "The message for an absent or empty worktree at runReview is not pinned. Dropping `|| !worktree` from the legacy guard, which makes the new refusal produce the message, survives; the runReview tests only cover blank and non-string values.",
+      "evidence": "mutant M10 changed `if (!pr || !worktree) throw` to `if (!pr) throw` in review-core.mjs; the same narrowed run → exit 0, fail 0, 24 pass (survived); baseline exit 0, 24 pass.",
+      "suggested_fix": "Add undefined and \"\" to the runReview loop, asserting the intended message, or confirm the new message is the intended one.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/review-core.mjs",
+      "line": 1098,
+      "claim": "The guard `!pr || !worktree` is followed by runnerWorktreeRefusal, so worktree validity is enforced by two checks, one truthiness and one type/blank. The invariant lives in runtime code only. That is unavoidable in untyped .mjs, and the second check correctly runs after the combined-message check. This is stylistic, not a defect.",
+      "evidence": "Read the diff hunk at review-core.mjs lines 1096-1099. The tests pin both messages: an absent pr gives the combined message, and a blank or non-string worktree gives the args.worktree message.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/review-core-worktree-refusal.test.mjs",
+      "line": 28,
+      "claim": "The runReview test's literal list `[\" \", \"\\n\", 7, {}, [], true]` restates the truthy subset of `REFUSED` declared at line 10, so a value added to REFUSED later silently skips the end-to-end check.",
+      "evidence": "Probe in simplify/copy: `node probe-simplify.mjs` printed `filter==list true 6` (JSON of REFUSED.filter(Boolean) equals the literal). Mutant replacing the literal with `REFUSED.filter(Boolean)`, then `node --test tests/review-core-worktree-refusal.test.mjs tests/review-core-testcmd.test.mjs tests/review-runner.test.mjs tests/select-dimensions.test.mjs` → exit 0, `tests 79 pass 79 fail 0`.",
+      "suggested_fix": "`for (const worktree of REFUSED.filter(Boolean)) {` with a short comment that the falsy values get the combined required-args message, which the last test covers.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/review-core.mjs",
+      "line": 968,
+      "claim": "runnerWorktreeRefusal repeats runnerTestCmdRefusal's predicate `typeof x === \"string\" && x.trim() !== \"\"` exactly (lines 958 and 968), so the two 'non-blank string' rules can drift; the repo already names this predicate `filled` in recipe-prove.mjs:239 and derive-testcmd.sh:327.",
+      "evidence": "grep over snapshot plugin/ for the predicate: review-core.mjs:958 and :968 among others. Mutant in simplify/copy adding `const filled = (s) => typeof s === \"string\" && s.trim() !== \"\";` and using `if (filled(testCmd)) return null;` / `if (filled(worktree)) return null;` → the 4 targeted test files pass, `tests 79 pass 79 fail 0`, exit 0.",
+      "suggested_fix": "Add one module-local `const filled = (s) => typeof s === \"string\" && s.trim() !== \"\";` above runnerTestCmdRefusal and use it in both refusals. Keep the two exported functions and their messages as they are. This is optional: the duplication is one line.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/review-core.mjs",
+      "line": 1109,
+      "claim": "The new refusal is placed between the required-args guard and the long comment that starts 'The truthiness check above…' and documents the isDigits(pr) check further down, so the PR had to add a sentence about the worktree refusal to a comment about `pr`. The code order can't change without changing behavior, so the fix is to the comment only.",
+      "evidence": "Read review-core.mjs:1098-1124 in the snapshot. Probe in simplify/copy: runReview with {pr:\"abc\",worktree:\" \"} → 'review-pr: args.worktree is required — … got \" \"' with 0 dispatches, so the worktree refusal currently wins over the pr-digits refusal and moving it below line 1124 would change which error is reported.",
+      "suggested_fix": "Keep the code order. Delete the added sentence at lines 1109-1111 ('A truthy `worktree` that is blank or not a string is refused by the shared rule just below the truthiness check, not by the check itself.') and give lines 1099-1100 a one-line comment of their own, e.g. `// A truthy worktree that is blank or not a string: runnerWorktreeRefusal's rule.`, so the pr comment covers pr only.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

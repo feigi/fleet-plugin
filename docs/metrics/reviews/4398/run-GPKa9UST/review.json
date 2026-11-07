@@ -1,0 +1,445 @@
+{
+  "pr": 4398,
+  "head": "8ca2b531763aedb6fea39479ecc830ef5f24d784",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (pre-existing; I wrote nothing there; bash tool was failing so I ran the audit via eval). Note: I ran the probe in the snapshot itself rather than a measure-copy, and it only read files; the scratch dir has a node symlink in types/bin."
+    },
+    {
+      "dimension": "comments",
+      "state": "missing",
+      "line": null
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — `git status --porcelain -uall` printed ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. I wrote nothing there; those paths look like another agent's. Negative claim: I found no swallowed error, empty catch, or fallback that hides a fault in the production code. The only try/catch added is the one in prCommitClosing. It wraps only commitClosingIssues and ends in die(), so it fails loudly. A commits read that fails, is not a list, is at or over the 100 cap, or holds an unreadable commit exits 2 in both dispatch and settle. Settle skips the commits read when the PR is not OPEN or does not close #N, so the exit 3 is kept."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv` (not written by this pass: every command here cd'd into the snapshot, the scratch dir or the copy, or was a read-only gh/curl call)"
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. These were already there: every command in this run used an absolute cwd in the snapshot, my copy or …/simplify, and none of them writes docs/metrics."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (I never wrote there; my only writes were in the scratch copy; likely other agents' metric appends)."
+    }
+  ],
+  "counts": {
+    "survived": 8,
+    "refuted": 0,
+    "unverified": 16,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4398/run-GPKa9UST/snapshot-8ca2b531",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "plugin/scripts/closing-refs.mjs",
+      "line": 52,
+      "claim": "commitClosingIssues splices headline and body with a newline, but gh cuts long commit subjects at 69 chars + '…' and starts messageBody with '…'. A subject-line keyword that crosses the cut is missed, or picks up the wrong issue number: '…, closes #3637' scans as [] or as #363.",
+      "evidence": "Real gh on this PR: `gh pr view 4398 --json commits` printed messageHeadline \"fix: read commit messages' closing keywords in the settle and the fin…\" (70 chars) and messageBody starting \"…isher gate\". `gh api .../commits/8ca2b531` printed the full subject on one line. In the copy, node -e commitClosingIssues([{oid:'abc1234', messageHeadline:subj.slice(0,69)+'…', messageBody:'…'+subj.slice(69)}]): subj 'feat: tighten the readers of the settle and the finisher gate, closes #3637' gave `scan []`, and subj '…finisher, closes #3637 x' gave `scan2 [{\"number\":363,\"oid\":\"abc1234\"}]`.",
+      "suggested_fix": "When messageHeadline ends with '…' and messageBody starts with '…', join them as headline.slice(0,-1)+body.slice(1) before splitting into lines. Add a test with a truncated-headline commit.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Ran the snapshot's commitClosingIssues on the claim's two inputs. Headline was subj.slice(0,69)+'…' and body was '…'+subj.slice(69). Subject 1 (the 75-char one ending 'closes #3637') gave [], so the keyword is missed. Subject 2 (ending 'closes #3637 x') gave [{number:363,oid:'abc1234'}], so the number is truncated. The code at closing-refs.mjs:52 joins headline and body with '\\n', as the claim says. I did not re-check that gh truncates long subjects; I relied on the claim's evidence for that. No test red/kill was claimed, and I did not use measure-copy; I ran the function directly from the snapshot. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I did not touch those files; I only read the cwd, and I wrote only under my scratch dir."
+        },
+        {
+          "refuted": false,
+          "inconclusive": true,
+          "reason": "I couldn't run anything. The bash tool failed on every call with an extension error (pix-optimizer: ctx.ui.theme.fg undefined). The js eval worker also failed to initialize (worker-entry.ts ModuleNotFound). I didn't build the measure-copy and ran no node repro, so there is no red or green run. Reading the source only shows the mechanism is plausible. commitClosingIssues (closing-refs.mjs:63) scans `${messageHeadline}\\n${body}` with no handling for gh's '…' truncation. That would split a keyword across the cut, as the claim says, but I did not run it. The claim's line number (52) doesn't match the snapshot, where the join is on line 63. CWD-AUDIT: not run (pwd never printed because bash failed)."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 1
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/closing-refs.mjs",
+      "line": 52,
+      "claim": "COMMIT_SLOSE does not accept a colon after the keyword. GitHub documents that `Closes: #10` and `CLOSES: #10` close the issue, including from a commit message. So a commit saying `Fixes: #K` with #K in-progress passes the settle and the gate, and it still closes #K at merge, stranding the claim. The new closing-refs test also pins `closes: #5` as closing nothing.",
+      "evidence": "curl of github/docs linking-a-pull-request-to-an-issue.md line 57: \"The keywords can be followed by colons or in uppercase. For example: `Closes: #10`, `CLOSES #10`, or `CLOSES: #10`.\" Line 61: commit-message keywords close the issue on merge to the default branch. In the copy, the PROBE settle test with commits [commit(..., 'the work', 'Closes: #7')] and issue 7 labelled in-progress printed `PROBE colon outcome PR#6 []`: it settled and read no issue. The PROBE dispatch test with 'Closes: #3637' and #3637 in-progress printed `status 0`: the finisher was dispatched. node -e: 'Closes: #7' and 'FIXES: #7' both scan to [].",
+      "suggested_fix": "Allow an optional ':' between the keyword and '#N', e.g. `(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?[ \\t\\r\\v\\f]*#([0-9]+)`, and move 'closes: #5' from the closes-nothing list to the positive cases. drop-merged-label.sh has the same gap, but the ticket puts changing it out of scope.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Ran commitClosingIssues on the snapshot with a body of 'Closes: #7\\nFIXES: #8\\nFixes #9'. It returned only [{number:9}], so the colon forms are not matched. The regex at closing-refs.mjs:52 allows only whitespace between keyword and '#'. I did not re-run the settle and dispatch probes or the GitHub docs quote. I checked only the scan function, which is the root of the claim. Scope: this one function on this input; the full suite and the colon-pinning test were not run. CWD-AUDIT: not run (nothing written there; I only ran read-only commands in /Users/chris/dev/fleet-plugin)"
+        },
+        {
+          "refuted": false,
+          "reason": "Ran commitClosingIssues on the snapshot with messageBody 'Closes: #7'. It returned [] (the regex at closing-refs.mjs:52 allows only whitespace between keyword and #N). Nothing elsewhere handles the colon form: drop-merged-label.sh uses the same scan, which the code comment says outright. The claim cites GitHub docs saying colon forms close issues. I did not fetch the docs myself, so that point rests on the finding's quote. CWD-AUDIT: clean /Users/chris/dev/fleet-plugin"
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 2259,
+      "claim": "Every commit-borne number that is not the PR's own ticket is read with `gh issue view`. A commit that names a number with no issue or PR behind it (a typo, an upstream number in a cherry-pick, `fix #0`) makes both the settle and the gate exit 2 'could not look'. That is the transient code, and run-team says to re-run it once gh answers, but gh never will, so this blocks forever instead of giving a refusal the implementer could act on.",
+      "evidence": "Real gh: `gh issue view 999999 -R feigi/fleet-plugin --json labels` printed 'GraphQL: Could not resolve to an issue or pull request with the number of 999999.' and exit=1. Same for 0. A PR number (4398) answered exit 0. node -e: commitClosingIssues on 'closes #0' gives [{number:0}]. Copy PROBE (settle, stub dies on a missing issue file): commit 'fixes #99999 upstream' gave f.refused('impl-5', 2, /could not read issue #99999's labels/), which passed. Copy PROBE2 (dispatch, failsOn issue 99999) printed `status 2 stderr ledger: dispatch finisher-pr-3606: could not look — gh issue view 99999 --json title,labels exited 1 ...; nothing written dispatched []`. SKILL.md:822 says an exit 2 that could not look \"is run again once gh and git answer\".",
+      "suggested_fix": "Treat gh's 'Could not resolve to an issue or pull request' answer for a commit-borne number as 'no issue, so GitHub closes nothing', or report it as a refusal (exit 3 / gate failure line) naming the commit. Keep the exit-2 death for transient failures only. Add a test for a commit naming a nonexistent issue.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "The snapshot code matches the claim. `closingRefusals` at ledger.mjs:2258-2259 calls `issueRead(m)` for every commit-borne number that isn't in the PR body's refs. `issueRead` (2157-2167) runs `gh issue view N --json title,labels` through `lookJson` and `look`. `look` (2080-2084) treats any gh exit other than 0 as 'could not look' and dies with exit 2. So a commit naming a number with no issue or PR behind it takes the same exit-2 path as a gh outage. I read the code only. Bash failed in this session with an extension error, so I could not run anything, and I did not reproduce the real-gh exit 1 or the probe output the claim quotes. I accepted the claim's own gh evidence. Reading the code gave no counter-evidence. No files were written or mutated. CWD-AUDIT: not run (bash unavailable; I could not run pwd or git status)."
+        },
+        {
+          "refuted": false,
+          "reason": "Source read at snapshot ledger.mjs:2259 confirms the claim's mechanism. issueRead(m) runs `gh issue view N --json title,labels` through lookJson, which dies 'could not look' with exit 2 on any gh failure. Nothing in closingRefusals or checkReaders separates a nonexistent issue from a transient gh error. I found no handling elsewhere that makes a missing number a refusal. I could not run anything: the bash tool errored on every call (a pix-optimizer extension failure), so I built no copy, ran no probe and did not check that the line is PR-added in pr.diff. This rests on source reading plus the finding's own real-gh evidence, not on a run of mine. CWD-AUDIT: not run (bash unavailable; I wrote nothing outside scratch and made no edits)."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "tests/closing-refs.test.mjs",
+      "line": 112,
+      "claim": "The test \"it names what drop-merged-label.sh's commit scan names\" pipes through `rtk grep -Eo` inside a `sh -c` and never checks the spawn's status or stderr. Without `rtk` on PATH it fails with a misleading mismatch assertion instead of naming the missing tool, and the repo's CI never installs rtk.",
+      "evidence": "Ran in my copy with PATH limited to symlinks for node, sh, grep, printf and cat, plus /usr/bin:/bin: `node --test --test-name-pattern='drop-merged-label' tests/closing-refs.test.mjs`. Result: `✖ it names what drop-merged-label.sh's commit scan names` with `AssertionError: \"Closes #1\" actual [1] expected []`. The real cause, `rtk: not found` on the shell side, is never shown, because `r.status` and `r.stderr` are ignored and `fromShell` just becomes []. `grep -rn rtk .github` in the copy matched nothing, so CI has no rtk. Matches elsewhere are only tests/member-record*.test.mjs, plugin/scripts/member-record.mjs and this test. The full suite passed on the author's host, where /opt/homebrew/bin/rtk exists.",
+      "suggested_fix": "Use plain `grep -Eo '[0-9]+'` in the pipeline. Assert `r.status === 0 || r.status === 1` (grep's no-match status) and an empty stderr, so a broken shell side fails with its own message.",
+      "dimension": "silent-failure",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "inconclusive": true,
+          "reason": "I couldn't run anything: the bash tool failed on every call with a pix-optimizer extension error, and the eval tool failed with a worker-entry ModuleNotFound. I made no measuring copy and ran no test, so there is no red or green run. A static read of the snapshot supports the claim. tests/closing-refs.test.mjs:112 runs `... | rtk grep -Eo '[0-9]+'` inside `sh -c`. Lines 113-115 never check `r.status` or `r.stderr`, so a missing `rtk` leaves `fromShell` empty, and the assertion would then fail with a mismatch instead of naming the missing tool. A grep for `rtk` under the snapshot's .github directory returned no matches, so CI has no rtk. The test's real title is \"it names what drop-merged-label.sh's commit scan names, on the same texts\"; the claim quotes a shortened form. I don't know whether `rtk` is on PATH on CI runners, and I couldn't reproduce the `actual [1] expected []` assertion. CWD-AUDIT: not run, because pwd never executed."
+        },
+        {
+          "refuted": false,
+          "reason": "Claim holds. The drop-merged-label.sh scan has no rtk (grep found none in it). Only the test's `| rtk grep -Eo` needs it, and the .github dir has no rtk match. I ran the narrowed test in the snapshot, not in a measuring copy, since the bash tool was broken and I used eval. With PATH=node symlink:/usr/bin:/bin, where rtk is absent, it failed with an AssertionError starting at \"Closes #1\", not a missing-tool message. With the normal PATH it passed. I did not read r.status or stderr in the test from the run; the source line shows they are ignored. red: node --test --test-name-pattern=drop-merged-label tests/closing-refs.test.mjs (PATH without rtk) → exit 1, fail 1 incl it names what drop-merged-label.sh's commit scan names; baseline: same cmd, normal PATH → exit 0, pass 1. The test name in the snapshot has the suffix ', on the same texts'. I ran with PATH=$B:/usr/bin:/bin, where $B holds only a node symlink, a looser restriction than the claim's, so sh, grep, printf and cat came from /usr/bin and /bin. I did not check CI workflow files other than by grepping .github. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/ticket-features.tsv, M docs/metrics/tier-outcomes.tsv (not touched by me; I ran nothing there)."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 1
+    },
+    {
+      "severity": "important",
+      "file": "tests/closing-refs.test.mjs",
+      "line": 112,
+      "claim": "The drop-merged-label.sh parity test shells out through `rtk grep -Eo` in its pipeline, so it depends on the rtk wrapper binary being on PATH; on a host without rtk the shell side yields no numbers and the test would fail (or, for empty-expected texts, pass vacuously).",
+      "evidence": "grep -n rtk tests/closing-refs.test.mjs → line 112: `printf '%s\\n' \"$1\" | LC_ALL=C grep -Eio '${shell}' | rtk grep -Eo '[0-9]+'`. Test passes here only because rtk is installed (13/13 pass, ./agent-test tests/closing-refs.test.mjs → exit 0).",
+      "suggested_fix": "Use plain `grep -Eo '[0-9]+'` (what drop-merged-label.sh itself uses) so the test does not depend on a tool wrapper.",
+      "dimension": "tests",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Line 112 of tests/closing-refs.test.mjs in the snapshot does pipe through `rtk grep -Eo '[0-9]+'`. I ran a pipeline with the same shape under PATH=/usr/bin:/bin. It printed `sh: rtk: command not found` and exited 127, so the shell side yields no numbers when rtk is absent. I did not run the test itself without rtk, and I did not build a measure-copy. Texts that expect numbers would therefore fail, and texts that expect none would pass without checking anything. The claim holds for the code as merged. The bash tool was broken in this session, so I used the eval tool. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I did not touch these files; they were already modified when I started."
+        },
+        {
+          "refuted": false,
+          "reason": "Claim holds. Line 112 of tests/closing-refs.test.mjs pipes through `rtk grep -Eo '[0-9]+'`. The shell script under test (drop-merged-label.sh lines 100 and 121) uses plain `grep -Eo`, so the rtk dependency exists only in the test. I ran the same pipeline with PATH=/usr/bin:/bin and no rtk: it printed `rtk: command not found` and exit 127. fromShell is then empty, but the JS side returns [1] for 'closes #1'. deepEqual would fail for the non-empty texts, and the empty-expected texts would pass vacuously. I did not run the full test without rtk; this is the pipeline run plus reading the test code. The finding's impact is a portability gap in the test, not a correctness bug in the product. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv' and ' M docs/metrics/tier-outcomes.tsv'. These were not written by this check, which only read files and ran the PATH-restricted pipeline."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "tests/closing-refs.test.mjs",
+      "line": 112,
+      "claim": "The parity test shells out to `rtk grep -Eo '[0-9]+'` instead of plain `grep -Eo`, so it needs the rtk binary on PATH, and the PR body's 'a test runs both scans over the same texts' holds only where rtk is installed.",
+      "evidence": "grep on the snapshot's tests/closing-refs.test.mjs line 112: spawnSync(\"sh\", [\"-c\", `printf '%s\\\\n' \"$1\" | LC_ALL=C grep -Eio '${shell}' | rtk grep -Eo '[0-9]+'`, ...]). The first stage uses plain grep, as drop-merged-label.sh:100 does. The suite passed 9094/9094 on this host, which has rtk. Not probed on a host without it; the bash tool was unavailable.",
+      "suggested_fix": "Use plain `grep -Eo '[0-9]+'` in the pipeline, as drop-merged-label.sh line 100 does.",
+      "dimension": "comments",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Line 112 of the snapshot's tests/closing-refs.test.mjs pipes into `rtk grep -Eo '[0-9]+'` (confirmed by grep). With rtk off PATH, an equivalent pipeline printed `sh: rtk: command not found`, exited 127 and produced empty output. In the test, that makes fromShell empty, so the parity comparison would not hold. I did not run the full test without rtk. I ran only the equivalent pipeline, using PATH=/usr/bin:/bin, and my bash tool was erroring, so I ran it through eval. CWD-AUDIT: not run. /Users/chris/dev/fleet-plugin, where I made no writes."
+        },
+        {
+          "refuted": false,
+          "reason": "Line 112 (also pr.diff:289) pipes into `rtk grep -Eo '[0-9]+'`. I ran the same pipeline with PATH=/usr/bin:/bin, so no rtk, in a Python subprocess. It exited 127 with stderr `rtk: command not found` and empty stdout. The test would then compute fromShell=[] and the deepEqual would fail for any text with a closing ref. So the dependency is real and the claim holds. I didn't run the full suite or a mutant: the bash tool errored on an extension failure, so I used grep and eval instead. CWD-AUDIT: not run (bash unavailable, nothing written in cwd)."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 2799,
+      "claim": "The `settle <member> --from-report` banner still lists the impl-N=PR#M checks as 'no other closing reference there is a ticket another claim holds'. The diff added a second, commit-borne check to that settle and left the banner unchanged.",
+      "evidence": "Snapshot ledger.mjs 2799-2807 has no mention of commits. The added check is at 3007-3015 (prCommitClosing, check text 'PR #N's commit … closes #K, which another claim holds (in-progress) — reword that commit to \"Refs #K\"'). The diff touches the nearby comment at ~2999-2003 but not the banner.",
+      "suggested_fix": "Add to the banner: 'and no issue a commit message of the PR closes by a closing keyword is one, commits read by `gh pr view --json commits`; a list that fills gh's 100-commit cap could not look (exit 2)'.",
+      "dimension": "comments",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Read the snapshot. The banner at ledger.mjs 2799-2807 says only 'no other closing reference there is a ticket another claim holds' and never mentions commits. The added commit-borne check is at 3007-3015, and the settle code comments at 2999-3003 mention commits. So the banner doesn't describe the second check. I ran nothing, only read the file, so it is a documentation-gap finding with no red/green run. The finding is minor: 'closing reference' could loosely cover commit keywords. CWD-AUDIT: not run; the shell errored on every call, and `pwd` never printed a path."
+        },
+        {
+          "refuted": false,
+          "reason": "Read the snapshot directly. The banner at ledger.mjs 2799-2807 lists the impl-N=PR#M checks and says nothing about commits. The added commit-borne check is at 3007-3015 (prCommitClosing, which refuses with 'reword that commit to \"Refs #K\"'), and the nearby comment at 2999-3003 does mention commits. The banner is therefore stale relative to the code. I found no other place that documents this check. The bash tool failed with an extension error, so I ran nothing, did not build the measuring copy, and did not read pr.diff. A comment-staleness claim needs no test run, and the evidence holds on the read alone. The banner phrase 'no other closing reference' could arguably cover commit-borne references, but it does not name them, and it reads as the PR's closingIssuesReferences. CWD-AUDIT: unrepo (pwd not obtained because bash failed)"
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "tests/closing-refs.test.mjs",
+      "line": 112,
+      "claim": "The parity test pipes the shell scan through `rtk grep`, an optional local wrapper; on a machine without `rtk` on PATH the test fails on its first text.",
+      "evidence": "Ran `node --test tests/closing-refs.test.mjs` with PATH=<dir with only node>:/usr/bin:/bin. The test 'it names what drop-merged-label.sh's commit scan names' failed at the first text, \"Closes #1\": actual [1], expected []. The full suite passed only because /opt/homebrew/bin/rtk exists here.",
+      "suggested_fix": "Use plain `grep -Eo '[0-9]+'` (or extract the numbers in JS) in the spawnSync command.",
+      "dimension": "types",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Line 112 of the snapshot's tests/closing-refs.test.mjs pipes the scan through `rtk grep -Eo '[0-9]+'`, so the claim holds. I did not run the full `./agent-test` or build a measure-copy. I ran the test's exact pipeline for the text 'Closes #1' with the keyword pattern reduced to `close[sd]?[^0-9]*#[0-9]+`. With PATH=/usr/bin:/bin, `rtk grep` gave exit 127 ('rtk: command not found') and empty stdout. The test would read that as an empty shell result, which gives actual [1] versus expected [] as the claim says. With rtk on PATH it gave '1'. Plain `grep` in place of `rtk grep` on the minimal PATH gave '1', so the failure comes from the rtk dependency alone. Searched only line 112 and `grep -n rtk` on that test file. Nothing in the file guards against rtk being missing. red: sh pipeline with `rtk grep` on PATH=/usr/bin:/bin → exit 127, stdout empty; baseline: same pipeline on the normal PATH → exit 0, stdout '1'. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I wrote nothing there, so these changes were already present."
+        },
+        {
+          "refuted": false,
+          "reason": "red: node --test --test-name-pattern=drop-merged-label tests/closing-refs.test.mjs (PATH=<dir with only node>:/usr/bin:/bin, FORCE_COLOR unset, run in the snapshot) → exit 1, tests 1, fail 1 incl 'it names what drop-merged-label.sh's commit scan names' (actual [1], expected []). Baseline: rtk is on PATH here (/opt/homebrew/bin/rtk), which the claim says is why the full suite passes. I did not run the baseline. The shell script drop-merged-label.sh contains no `rtk`, so the dependency comes only from test line 112 (`| rtk grep -Eo`). Nothing in the snapshot handles a missing rtk. The run was in the snapshot, not a measure-copy, and I did not mutate it. CWD-AUDIT: not run; the bash tool failed to start, so I never ran pwd or git status.",
+          "inconclusive": false
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/closing-refs.mjs",
+      "line": 52,
+      "claim": "`closes <this-owner>/<this-repo>#K` in a commit closes #K in this repository on merge, but the scan excludes every owner/repo form. A same-repository qualified reference therefore slips past both checks. The ticket excludes owner/repo forms on the premise that they name another repository, so this is a spec gap rather than a deviation.",
+      "evidence": "node -e in the copy: commitClosingIssues([{oid:'abc1234', messageHeadline:'closes feigi/fleet-plugin#7', messageBody:''}]) gave []. The GitHub docs (line 54) give KEYWORD OWNER/REPOSITORY#N as a closing form. I did not run a real merge to confirm a same-repository close (reasoned only).",
+      "suggested_fix": "Optionally capture owner/repo#N and keep it when it matches the PR's own repository, using the PR url as ownClosingIssues does. Otherwise record the exclusion as a known gap.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/skills/run-team/SKILL.md",
+      "line": 564,
+      "claim": "The diff also rewrites the unrelated release-label bullet ('refuses the finisher otherwise' → 'refuses otherwise') and shortens 'a ticket another claim holds' to 'another claim's ticket'. These are edits outside the ticket, forced by the SKILL.md byte ceiling: the file now sits at 74,999 of 75,000 bytes, so the next prose edit has no headroom. The new gate text '(a named commit: report it, no retry)' also does not say that the fix is rewording the commit, which the ticket's Controller/prose bullet asks for. Only finisher.md says it in full.",
+      "evidence": "`wc -c plugin/skills/run-team/SKILL.md` printed 74999. tests/skill-budget.test.mjs:56 sets `[SKILL, 75_000, true]`. The diff hunk at pr.diff lines 189-192 shows both bullets rewritten.",
+      "suggested_fix": "Accept as budget-driven, or move the commit-borne clause into references/finisher.md (which already carries it) and restore the release-label bullet's wording.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/closing-refs.mjs",
+      "line": 25,
+      "claim": "[INFERENCE: whether GitHub closes the issue in these cases was not checked] commitClosingIssues returns [] for several shapes of commit message, and the new gate treats [] as nothing to refuse. It mirrors drop-merged-label.sh, but any case where GitHub's own closing rules are broader than that script is a silent pass of the gate.",
+      "evidence": "Ran `commitClosingIssues` on single-commit messages. Each of these returned []: `Closes: #5`, `closes thisorg/thisrepo#5` (a qualified reference to the PR's own repository), a non-breaking space between the keyword and `#5`, `Closes\\n#5`, and `fixes #99999999999999999999`. The last one is dropped silently by `Number.isSafeInteger`. `Closes #5.`, `Closes #5, #6` (only 5), `closes  #5`, `Closes #007` (7) and a CRLF body all behave as the regex says. Note that tests/closing-refs.test.mjs line ~273 deliberately asserts `closes: #5` and `closes owner/repo#5` close nothing, so this is intended parity with the shell scan and was not run against GitHub.",
+      "suggested_fix": "Confirm against GitHub's closing-keyword behaviour whether a colon after the keyword and a same-repo `owner/repo#N` close the issue. If they do, widen both this regex and the shell scan together, so a commit-borne claim-holding ticket is not missed.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/closing-refs.mjs",
+      "line": 55,
+      "claim": "A digit before the keyword (e.g. `9fix #5`, `2closes #5`) is untested: dropping \\p{N} from the boundary class survives.",
+      "evidence": "red: none. Mutant COMMIT_CLOSE boundary `[^\\p{L}\\p{N}_]`→`[^\\p{L}_]`: ./agent-test tests/closing-refs.test.mjs → exit 0, 13 pass 0 fail (survived); baseline: same cmd → exit 0, 13 pass. Dropping \\p{N} entirely only via the `_` variant is killed by the 'larger word' test? No — `re_fix` case exists but this mutant removes N not `_`.",
+      "suggested_fix": "Add `9fix #5` / `1closes #5` to the negative list in 'a keyword inside a larger word…' (and the parity texts).",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/closing-refs.mjs",
+      "line": 59,
+      "claim": "The Number.isSafeInteger guard (huge issue numbers, e.g. #99999999999999999999) and the empty-string oid refusal (`oid: \"\"`) are not covered by any test.",
+      "evidence": "Mutants `Number.isSafeInteger(number) && ` removed and ` || c.oid === \"\"` removed: ./agent-test tests/closing-refs.test.mjs → exit 0, 13 pass 0 fail each (survived); baseline exit 0, 13 pass.",
+      "suggested_fix": "Add `closes #99999999999999999999` → [] and `{oid:\"\",…}` → throws 'a commit with no oid' cases.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 3012,
+      "claim": "In settle, passing `[]` instead of `[live.number]` as ownTickets to claimedElsewhere for commit-borne numbers survives, but it is an equivalent mutant (live.number is always in `numbers` and so already filtered out of byCommit) — not a test gap.",
+      "evidence": "Mutant `byCommit.map(...), [live.number], issueLabels`→`[]`: ./agent-test tests/ledger-settle-report.test.mjs → exit 0, 93 pass 0 fail; baseline exit 0, 93 pass. Reasoned equivalent from the filter on line 3011.",
+      "suggested_fix": "Optionally drop the redundant `[live.number]` argument or leave as is.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 2139,
+      "claim": "The COMMITS_LIMIT cut-off, list-shape guard, gate commit refusal (no refs filter, ownTickets, oid slice, push) and settle commit checks (numbers filter, check polarity, oid slice, OPEN guard, read-before-guard) are discriminated by the tests: each mutant was killed.",
+      "evidence": "Killed by combined run ./agent-test tests/ledger-dispatch.test.mjs tests/ledger-settle-report.test.mjs tests/closing-refs.test.mjs → exit 1 with fails incl 'a commits read that fails or cannot be trusted whole is exit 2…' (limit >= → >, no limit die, no list die), 'a commit closing a ticket another claim holds refuses the finisher…' (gate no-push, oid slice), 'a commit-borne and a body-borne ticket…' (gate no refs filter), \"a commit closing a PR's own ticket does not stand in…\" (ownTickets→[]); settle file alone → exit 1 incl 'impl-N=PR#M: a commit closing a ticket whose issue carries in-progre…' (check true, oid slice, read outside guard), 'a PR that is not OPEN, or does not close #N…' (no state guard); baseline: ./agent-test tests/ledger-settle-report.test.mjs → exit 0, 93 pass. Dispatch-file baseline run alone not separately captured.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body: it says 'five prose files and the brief fixture', but the diff edits four prose files (plugin/skills/next-ticket/SKILL.md, run-team/SKILL.md, run-team/briefs/implementer.md, run-team/references/finisher.md) plus the fixture tests/fixtures/briefs/implementer.md. The body's own Prose bullet lists the same five items, fixture included.",
+      "evidence": "The `diff --git` headers in pr.diff list plugin/skills/next-ticket/SKILL.md, run-team/SKILL.md, run-team/briefs/implementer.md and run-team/references/finisher.md as prose, plus tests/fixtures/briefs/implementer.md.",
+      "suggested_fix": "Say 'four prose files and the brief fixture'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body: 'a test runs both scans over the same texts' overstates the parity. The test pins `LC_ALL=C` for the shell scan while the JS pattern uses Unicode classes (`\\p{L}\\p{N}`). Its 13 sample texts are all ASCII, so a non-ASCII letter before a keyword is untested. closing-refs.mjs's comment also says the JS scan 'counts what drop-merged-label.sh's commit scan counts' with no locale caveat, but the script's `[^[:alnum:]_]` depends on the caller's locale.",
+      "evidence": "closing-refs.mjs line 25 (COMMIT_CLOSE with `[^\\p{L}\\p{N}_]`); drop-merged-label.sh:93 (`[^[:alnum:]_]`, no LC_ALL set); closing-refs.test.mjs line 112 (`LC_ALL=C`) and the texts at lines 107-110. Static read only.",
+      "suggested_fix": "Note in the closing-refs.mjs comment that the shell's word-character class follows the locale, or add a non-ASCII text to the parity test.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/closing-refs.mjs",
+      "line": 27,
+      "claim": "commitClosingIssues returns `{number, oid}` as a bare object. The ledger call sites rely on `.number` and `.oid` (`c.oid.slice(0,7)`) with no exported type or factory. The oid string and the Number.isSafeInteger guarantees are held only by the function's runtime checks. This is acceptable in untyped JS, and the callers are consistent with it.",
+      "evidence": "Read diff lines 27-42 and the call sites at diff lines 128-131 and 160-163. Nothing there contradicts the shape, and the runtime validation matches what the callers use.",
+      "suggested_fix": "Optional: add a JSDoc @typedef for `{number: number, oid: string}`.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 2150,
+      "claim": "COMMITS_LIMIT is a separate export from the gh `--json commits` read, and `>= COMMITS_LIMIT` refuses a PR with exactly 100 commits even though that list is complete. This is a documented conservative choice, not a type-level hole.",
+      "evidence": "Read diff lines 44-47 and 76-78. The comment says gh gives no count of the rest, so a full list cannot be told from a cut-off one.",
+      "suggested_fix": "None required.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 2258,
+      "claim": "The same three-step block appears at both call sites, and prCommitClosing is used nowhere else. The block is: read the commit closes, drop the numbers the body already closes, run claimedElsewhere, then map the result back to commits. It is at closingRefusals (2258-2260) and in the settle path (3011-3013, where `held` is renamed `heldByCommit`). It can be one checkReaders helper.",
+      "evidence": "In the copy I added `commitsClaimedElsewhere(pr, judged, own, labelsOf)` to checkReaders, returned it in place of prCommitClosing, and replaced both blocks with `for (const c of commitsClaimedElsewhere(pr, refs, ownTickets, (m) => issueRead(m).labels))` and `for (const c of commitsClaimedElsewhere(report.pr, numbers, [live.number], issueLabels))`. Result: `node --test tests/closing-refs.test.mjs tests/ledger-dispatch.test.mjs tests/ledger-settle-report.test.mjs` → ℹ tests 258, ℹ pass 258, ℹ fail 0. To show those tests reach both sites, I made the helper `return []` and ran `--test-name-pattern='[Cc]ommit'`: 6 of 16 failed, including 'a commit closing a ticket another claim holds refuses the finisher…' (dispatch) and 'impl-N=PR#M: a commit closing a ticket whose issue carries in-progress…' (settle).",
+      "suggested_fix": "In checkReaders: `const commitsClaimedElsewhere = (pr, judged, own, labelsOf) => { const byCommit = prCommitClosing(pr).filter((c) => !judged.includes(c.number)); const held = claimedElsewhere(byCommit.map((c) => c.number), own, labelsOf); return byCommit.filter((c) => held.includes(c.number)); };`. Return it from checkReaders in place of prCommitClosing. Both call sites then become `for (const c of commitsClaimedElsewhere(...)) { failures.push(…) / check(…, false) }`.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/closing-refs.mjs",
+      "line": 62,
+      "claim": "In commitClosingIssues, splitting the message into lines does nothing: the matches are the same whether you split or not. The joined message can go straight to matchAll. COMMIT_CLOSE's gap class `[ \\t\\r\\v\\f]*` already excludes \\n, so no match crosses a line. Each \\n is itself a `[^\\p{L}\\p{N}_]` lead character, and a match always ends in a digit, so the \\n is never already used up. That makes a match at the start of a line identical to the `^` case after a split.",
+      "evidence": "Fuzz in the copy (node …/simplify/probe.mjs): commitClosingIssues compared with the same loop using `${headline}\\n${body}`.matchAll(COMMIT_CLOSE) and no split, over 300000 random 1-3 commit lists. The inputs were built from keywords, #N, digits, _, \\n, \\r, \\r\\n, \\t, \\f, é, \\u2028, a null body and a 20-digit #N. Output: `split-vs-joined trials 300000 diffs 0`. With that edit applied, tests/closing-refs.test.mjs passed 13/13, including its 'closes\\n#5' and drop-merged-label.sh parity cases.",
+      "suggested_fix": "`for (const m of `${c.messageHeadline}\\n${body}`.matchAll(COMMIT_CLOSE)) { const number = Number(m[1]); if (Number.isSafeInteger(number) && !first.has(number)) first.set(number, c.oid); }`. To keep the 'per line' framing for readers, add a one-line comment saying the gap class excludes \\n.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 2136,
+      "claim": "In prCommitClosing, `v === null || typeof v !== \"object\" || !Array.isArray(v.commits)` is three tests where one does the same job: `!Array.isArray(v?.commits)`. Every non-object, including null, has no `commits` array. The `v?.labels` form is already used next to it, in prLabels and issueLabels.",
+      "evidence": "Probe in the copy compared both guards over null, undefined, 0, 1, \"s\", \"\", true, false, [], [1], {}, {commits:null}, {commits:{}}, {commits:[]}, {commits:[1]} and {commits:\"x\"}. Output: `guard cases 16 diffs 0`. With the edit applied, the 258 targeted tests passed, including the ones whose answer 'is no list'.",
+      "suggested_fix": "`if (!Array.isArray(v?.commits)) { die(`${where}: could not look — ${what} printed no list of commits: ${cause(r.stdout)}; nothing written`); }`",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/closing-refs.test.mjs",
+      "line": 112,
+      "claim": "The parity probe pipes through `rtk grep -Eo '[0-9]+'`, but drop-merged-label.sh, which it is meant to mirror, uses plain `grep -Eo '[0-9]+'` (line 100). The rtk wrapper adds nothing. It is also a hidden host dependency: with no rtk on PATH the test fails. Swapping in plain `grep` keeps the result on this host. [Strictly a portability defect, not just a simplification. The CI jobs were not run here.]",
+      "evidence": "`grep -rn 'rtk ' tests plugin/scripts` found it at tests/closing-refs.test.mjs:112. `grep -n grep plugin/scripts/drop-merged-label.sh` shows `grep -Eo '[0-9]+'` at line 100. `which rtk` → /opt/homebrew/bin/rtk. Run in the copy with PATH limited to sh/node/grep/printf symlinks and `--test-name-pattern='drop-merged-label'`: the PR's file (git show HEAD:tests/closing-refs.test.mjs) gave ℹ pass 0, ℹ fail 1. The same test with `| grep -Eo` gave ℹ pass 1, ℹ fail 0.",
+      "suggested_fix": "`printf '%s\\\\n' \"$1\" | LC_ALL=C grep -Eio '${shell}' | grep -Eo '[0-9]+'`",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/closing-refs.test.mjs",
+      "line": 69,
+      "claim": "The test file defines its own `const commit = (oid, messageHeadline, messageBody = \"\") => …`, but tests/support/queue-gh.mjs now exports `commit()` with the same signature. The file already imports `ref, prUrl` from that module, so it can import `commit` too and drop the local copy. commitClosingIssues ignores the extra authors/date fields that queue-gh's version adds.",
+      "evidence": "In the copy I changed the import to `{ ref, prUrl, commit }` and deleted the local `const commit` line. `node --test tests/closing-refs.test.mjs` → ℹ tests 13, ℹ pass 13, ℹ fail 0.",
+      "suggested_fix": "`import { ref, prUrl, commit } from \"./support/queue-gh.mjs\";` and delete line 69's local `commit`.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

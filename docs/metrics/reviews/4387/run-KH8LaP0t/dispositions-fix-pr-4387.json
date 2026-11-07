@@ -1,0 +1,123 @@
+{
+  "head": "e9c5f95fcd57390713388d70c4d02c86f345277f",
+  "run": "run-KH8LaP0t",
+  "entries": [
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4387/fix-Vh5x1EZB/f0/verdict.json",
+      "disposition": "defer",
+      "issue": 4390,
+      "reason": "refuted by its refuter; recorded on the suggestion-band record",
+      "remedyFiles": [
+        "plugin/scripts/review-core.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4387/fix-Vh5x1EZB/f1/verdict.json",
+      "disposition": "defer",
+      "issue": 4390,
+      "reason": "refuted by its refuter; recorded on the suggestion-band record",
+      "remedyFiles": [
+        "plugin/scripts/review-core.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4387/fix-Vh5x1EZB/f2/verdict.json",
+      "disposition": "defer",
+      "issue": 4390,
+      "reason": "refuted by its refuter; recorded on the suggestion-band record"
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4387/fix-Vh5x1EZB/f3/verdict.json",
+      "disposition": "defer",
+      "issue": 4390,
+      "reason": "refuted by its refuter; recorded on the suggestion-band record"
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4387/fix-Vh5x1EZB/f4/verdict.json",
+      "disposition": "apply",
+      "reason": "refuter let it survive: a no-defect observation with no remedy, confirmed by probe and a mutation kill; nothing in the tree to change"
+    },
+    {
+      "bucket": "unverified",
+      "index": 5,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4387/fix-Vh5x1EZB/f5/verdict.json",
+      "disposition": "apply",
+      "remedyFiles": [
+        "tests/review-core-worktree-refusal.test.mjs"
+      ],
+      "reason": "refuter let it survive: mutant refusing padded strings survived the PR tests and the added assertion kills it; applied as the assertion in the accept test"
+    },
+    {
+      "bucket": "unverified",
+      "index": 6,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4387/fix-Vh5x1EZB/f6/verdict.json",
+      "disposition": "defer",
+      "issue": 4390,
+      "reason": "refuted by its refuter; recorded on the suggestion-band record"
+    },
+    {
+      "bucket": "unverified",
+      "index": 7,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4387/fix-Vh5x1EZB/f7/verdict.json",
+      "disposition": "defer",
+      "issue": 4390,
+      "reason": "refuted by its refuter; recorded on the suggestion-band record"
+    },
+    {
+      "bucket": "unverified",
+      "index": 8,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4387/fix-Vh5x1EZB/f8/verdict.json",
+      "disposition": "defer",
+      "issue": 4390,
+      "reason": "refuted by its refuter; recorded on the suggestion-band record"
+    },
+    {
+      "bucket": "unverified",
+      "index": 9,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4387/fix-Vh5x1EZB/f9/verdict.json",
+      "disposition": "defer",
+      "issue": 4390,
+      "reason": "refuted by its refuter; recorded on the suggestion-band record"
+    },
+    {
+      "bucket": "unverified",
+      "index": 10,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4387/fix-Vh5x1EZB/f10/verdict.json",
+      "disposition": "defer",
+      "issue": 4390,
+      "reason": "refuted by its refuter; recorded on the suggestion-band record"
+    }
+  ]
+}

@@ -1,0 +1,148 @@
+{
+  "head": "6249db27f4946d37b87221d5abe4d52bab3966cd",
+  "run": "run-WEmkQ4Jj",
+  "entries": [
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4392/fix-MD7BydyQ/u0/verdict.json",
+      "disposition": "apply",
+      "reason": "survived; its remedy is 'none required' (the claim is that the code is correct), so applying it changes nothing",
+      "remedyFiles": []
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4392/fix-MD7BydyQ/u1/verdict.json",
+      "disposition": "defer",
+      "issue": 4396,
+      "reason": "refuted by its refuter; recorded on the closed suggestion-band record"
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4392/fix-MD7BydyQ/u2/verdict.json",
+      "disposition": "apply",
+      "reason": "refuter reproduced the exit 2 vs exit 3 change; remedy applied as a PR-body bullet (gh pr edit), no code change"
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4392/fix-MD7BydyQ/u3/verdict.json",
+      "disposition": "defer",
+      "issue": 4396,
+      "reason": "refuted by its refuter; recorded on the closed suggestion-band record"
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4392/fix-MD7BydyQ/u4/verdict.json",
+      "disposition": "defer",
+      "issue": 4396,
+      "reason": "refuted by its refuter; recorded on the closed suggestion-band record"
+    },
+    {
+      "bucket": "unverified",
+      "index": 5,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4392/fix-MD7BydyQ/u5/verdict.json",
+      "disposition": "defer",
+      "issue": 4396,
+      "reason": "refuted by its refuter; recorded on the closed suggestion-band record"
+    },
+    {
+      "bucket": "unverified",
+      "index": 6,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4392/fix-MD7BydyQ/u6/verdict.json",
+      "disposition": "defer",
+      "issue": 4396,
+      "reason": "refuted by its refuter; recorded on the closed suggestion-band record"
+    },
+    {
+      "bucket": "unverified",
+      "index": 7,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4392/fix-MD7BydyQ/u7/verdict.json",
+      "disposition": "defer",
+      "issue": 4396,
+      "reason": "refuted by its refuter; recorded on the closed suggestion-band record"
+    },
+    {
+      "bucket": "unverified",
+      "index": 8,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4392/fix-MD7BydyQ/u8/verdict.json",
+      "disposition": "defer",
+      "issue": 4396,
+      "reason": "refuted by its refuter; recorded on the closed suggestion-band record"
+    },
+    {
+      "bucket": "unverified",
+      "index": 9,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4392/fix-MD7BydyQ/u9/verdict.json",
+      "disposition": "defer",
+      "issue": 4396,
+      "reason": "refuted by its refuter; recorded on the closed suggestion-band record"
+    },
+    {
+      "bucket": "unverified",
+      "index": 10,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4392/fix-MD7BydyQ/u10/verdict.json",
+      "disposition": "apply",
+      "reason": "survived; its remedy is 'none required' (the claim is that the code is correct), so applying it changes nothing",
+      "remedyFiles": []
+    },
+    {
+      "bucket": "unverified",
+      "index": 11,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4392/fix-MD7BydyQ/u11/verdict.json",
+      "disposition": "apply",
+      "remedyFiles": [
+        "plugin/scripts/ledger.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 12,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4392/fix-MD7BydyQ/u12/verdict.json",
+      "disposition": "apply",
+      "remedyFiles": [
+        "tests/ledger-settle-report.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 13,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4392/fix-MD7BydyQ/u13/verdict.json",
+      "disposition": "apply",
+      "remedyFiles": [
+        "tests/ledger-settle-report.test.mjs"
+      ]
+    }
+  ]
+}

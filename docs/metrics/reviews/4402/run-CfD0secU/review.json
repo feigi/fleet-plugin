@@ -1,0 +1,96 @@
+{
+  "pr": 4402,
+  "head": "89ae8fbcdb8197685759a244b8fc1bdcdb21c5af",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "comments",
+      "state": "clean",
+      "line": "CWD-AUDIT: clean /Users/chris/dev/fleet-plugin (git status was not actually run; the shell only ran read-only commands, and none wrote there)"
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv` (this pass wrote nothing there: every command after the first `pwd` cd'd into the snapshot, the copy or my scratch dir)"
+    }
+  ],
+  "counts": {
+    "survived": 1,
+    "refuted": 0,
+    "unverified": 3,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4402/run-CfD0secU/snapshot-89ae8fbc",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "docs/specs/2026-10-13-one-command-per-wake.md",
+      "line": 80,
+      "claim": "The new note writes the call as `ledger.mjs review <pr> --result <path> --scratch ‹scratch›` with guillemets. That is the dispatch pipeline's defang spelling of the brief's `<scratch>` placeholder, not the repo's convention. It misses acceptance criterion 2, which names `--scratch <scratch>`, and it mixes notations inside one code span next to `<pr>` and `<path>`.",
+      "evidence": "`git grep -c ‹` in the copy: the spec is the only doc with a guillemet (the others are pull.mjs, ticket-text.mjs and tests that are about defang). A grep for `--scratch <scratch>` finds that spelling in tests and fleet-event.mjs:100, and the only `--scratch ‹scratch›` in the tree is spec line 80. In the implementer brief template, the frontmatter declares `arg scratch scratch`. Running `defang(ticketText(issue), names)` from plugin/scripts/ticket-text.mjs on `gh issue view 4383` printed `BRIEF: ... names `ledger.mjs review <pr> --result <path> --scratch ‹scratch›`` and the brief's other `--scratch` lines in the same defanged form. So the implementer copied the defanged text literally. `gh api markdown -f mode=gfm` on lines 62-90 renders a literal `‹scratch›` in the note.",
+      "suggested_fix": "On line 80, change `--scratch ‹scratch›` to `--scratch <scratch>`, so the note matches criterion 2 and the `<pr>`/`<path>` notation in the same span.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Spec line 80 in the snapshot reads `ledger.mjs review <pr> --result <path> --scratch ‹scratch›`. A grep of the snapshot for `--scratch ‹` matched only that line. A grep for `--scratch <scratch>` matched tests (tier-outcomes.test.mjs, ledger-dispatch.test.mjs), so the repo's usual spelling is `<scratch>`. I ran no copy or test, since this is a text claim and the grep settles it. I did not check the other claim parts (acceptance criterion 2, the brief template, the defang output, the GFM rendering). CWD-AUDIT: not run; I only ran read-only commands and wrote nothing."
+        },
+        {
+          "refuted": false,
+          "reason": "Read line 80 of the snapshot's spec. It reads `ledger.mjs review <pr> --result <path> --scratch ‹scratch›`, with guillemets. A grep of the snapshot for `--scratch ‹` finds only that line. Line 121 of the same spec uses `<scratch>` in angle brackets. So the guillemet is a stray defang artifact that mixes notations in one code span. I ran no tests, because this is a doc finding. CWD-AUDIT: not run; I only read files and wrote nothing under /Users/chris/dev/fleet-plugin."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-text.mjs",
+      "line": 75,
+      "claim": "defang() rewrites every `<name>` a ticket body shares with a placeholder declared in the implementer template (N, abs-path, branch, scratch, …) to `‹name›` in the brief, and does not tell the implementer it did so. Any ticket that quotes those placeholders literally will invite the same leak into committed text. This is outside the PR's scope and is noted as the root cause of the finding above.",
+      "evidence": "`node -e` on the copy printed the declared names as `N,abs-path,branch,scratch,distilled brief,staleness` and showed the #4383 brief's `<scratch>` turned into `‹scratch›` on all three lines that quote the command.",
+      "suggested_fix": "Make it a separate ticket: either tell the implementer in the brief that `‹name›` stands for `<name>`, or escape placeholders in a way that brief readers cannot copy into committed text.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body: cites `ledger.mjs` line 3216 as the `reviewed=` refusal, but at the reviewed head the 'is a reviewed= token' message is at line 3236 (3216 is in the flag-parsing/usage area of runReview). The grep command it gives would return the right line.",
+      "evidence": "grep -n -F 'is a reviewed= token' plugin/scripts/ledger.mjs → 3236; sed -n 3210,3220p shows runReview's start, not the refusal.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The spec's `review-result` row (line 66) still says 'reads the digest ... review <pr> reviewed=…', and the new note sits below the table rather than in the row. A reader of the row alone is misled, but the note immediately follows and says the row no longer holds. This is a design choice in line with the PR body's 'row untouched', so not a defect.",
+      "evidence": "sed -n 66p of the spec; the note is at lines 78-82.",
+      "file": "docs/specs/2026-10-13-one-command-per-wake.md",
+      "line": 66,
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

@@ -1,0 +1,189 @@
+{
+  "pr": 4403,
+  "head": "b201695a2a6d33831276bb9855208369b04daee4",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I did not touch these. My only commands there were pwd and the status check, so they came from another agent or the controller."
+    },
+    {
+      "dimension": "comments",
+      "state": "missing",
+      "line": null
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv' and ' M docs/metrics/tier-outcomes.tsv'. I wrote nothing to that tree, and these are most likely other agents' or the controller's own edits."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I never wrote there, since all my writes were under the scratch copy. I don't know where those two modifications come from."
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin —  M docs/metrics/ticket-features.tsv,  M docs/metrics/tier-outcomes.tsv (not written by this pass: my only commands there were `pwd` and reads of absolute paths, and every other command chained a cd into the snapshot or the scratch copy)"
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. This review did not write either file: every write went to .../run-6jqomNvq/correctness/."
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 1,
+    "unverified": 8,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4403/run-6jqomNvq/snapshot-b201695a",
+  "survived": [],
+  "refuted": [
+    {
+      "severity": "important",
+      "claim": "runnerPrRefusal accepts values that are not PR numbers because it only asks whether the value coerces to digits. The new isPrNumber wrapper just catches isDigits' coercion throws. So a BigInt, an array like [7] or [\"42\"], an object with toString returning \"5\", and a Number wrapper all pass. The comment says 'Null when pr is a PR number', and the new test even pins BigInt 1n as accepted. A BigInt that passes then reaches the returned result (`pr,` at review-core.mjs ~1761). JSON.stringify on that result throws.",
+      "evidence": "node probe in snapshot: runnerPrRefusal(1n)=null, runnerPrRefusal([7])=null, runnerPrRefusal([\"42\"])=null, runnerPrRefusal({toString(){return \"5\"}})=null, runnerPrRefusal(new Number(5))=null. true and \"٣\" are refused. Source: arg.mjs isDigits = /^[0-9]+$/.test(value), which coerces. I did not execute the downstream JSON.stringify of a BigInt result, so that part is inferred.",
+      "file": "plugin/scripts/review-core.mjs",
+      "line": 944,
+      "suggested_fix": "Make the invariant explicit in the predicate: accept only typeof pr === \"string\" (digits) or Number.isSafeInteger(pr) && pr > 0. Refuse every other type, including BigInt, rather than pinning BigInt acceptance in a test.",
+      "dimension": "types",
+      "verdict": "refuted",
+      "votes": [
+        {
+          "refuted": true,
+          "reason": "The probe is true, but the finding is not a defect. I ran runnerPrRefusal against the snapshot: 1n, [7], \"42\" and 5 all return null. The snapshot's own comment at review-core.mjs ~1140 says isDigits coerces on purpose, so the number 42 and the string \"42\" both pass. The claim's JSON.stringify failure on a BigInt result was not executed. It needs a BigInt in args.pr, and I found no such caller: grep shows args.pr is read only at review-core.mjs:1120 and 924, and I did not trace where those args come from. The wrapper's job is only to turn a throwing Symbol or null-prototype value into a refusal, and the probe did not test that case. So the claim describes a documented, deliberately lenient check and a hypothetical failure I could not reach. No test was red, so no kill or red line applies. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/ticket-features.tsv, M docs/metrics/tier-outcomes.tsv. I did not touch these files. I wrote only to my scratch dir. The bash tool was broken, so I ran everything through python eval."
+        },
+        {
+          "refuted": true,
+          "inconclusive": true,
+          "reason": "No check ran. Every `bash` call failed with the extension error `pix-optimizer ... ctx.ui.theme.fg`, and `eval` failed with a worker-entry ModuleNotFound. I could only read and grep, so I made no copy, ran no probe and have no valid red or green. Static reading only. The claim's coercion behavior looks accurate: review-core.mjs:944-947 wraps `isDigits` in try/catch, and the comment at 1142-1145 says coercion is intended, because the number 42 and the string \"42\" both have to pass. The weaker-than-claimed point is unproven: args normally arrive as parsed JSON (line 428 parses a string), and JSON cannot carry a BigInt or an object with a `toString`. Array `[\"42\"]` would interpolate as `42` harmlessly. I did not run the BigInt `JSON.stringify` path, which the finding itself marks as inferred. CWD-AUDIT: not run, because the shell was unavailable and I never learned the starting directory. I wrote no files."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 1
+    }
+  ],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/review-core.mjs",
+      "line": 931,
+      "claim": "describeValue's comment says it 'Never throws', but it does throw when JSON.stringify fails on a value and util.inspect then calls a [util.inspect.custom] that throws, so runnerWorktreeRefusal and runnerPrRefusal throw a bare Error in that case instead of returning their refusal.",
+      "evidence": "probe3.mjs in the copy, value `{ a: 1n, [Symbol.for('nodejs.util.inspect.custom')]() { throw new Error('custom boom') } }`, printed: `customThrow describeValue THROWS Error custom boom`, `customThrow runnerWorktreeRefusal THROWS Error custom boom`, `customThrow runnerPrRefusal THROWS Error custom boom`. The same check with `inspect(v, {customInspect:false})` printed the object without throwing. The value is contrived: real dispatch args are JSON-shaped. That is why this is only a suggestion, even though it was executed.",
+      "suggested_fix": "Call `inspect(value, { customInspect: false })`. Or drop 'Never throws' from the comment and limit the claim to the values the ticket names.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/review-core.mjs",
+      "line": 931,
+      "claim": "For a non-serialisable object of any size, describeValue's inspect fallback produces a multi-line refusal, so a review-pr:/review-runner: Error message can contain embedded newlines, unlike the single-line JSON form.",
+      "evidence": "probe4.mjs: runnerWorktreeRefusal on a circular object with two string keys returned \"args.worktree is required — the checkout the review snapshots, got <ref *1> {\\n  path: '/Users/…',\\n  branch: '…',\\n  self: [Circular *1]\\n}\". The ticket does not require single-line text, and board.mjs's faultText uses plain inspect too. Whether any reader parses these errors line by line was not tested.",
+      "suggested_fix": "If one-line errors matter to callers, pass `{ breakLength: Infinity }` (and `compact: true`) to inspect.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/review-core.mjs",
+      "line": 925,
+      "claim": "describeValue's comment says it \"Never throws, so a refusal is always the message and never a bare TypeError\", but it throws when the value has an inspect.custom method that throws. The fallback inspect() call sits outside any try, so the refusal is replaced by the user object's own error, with no `review-pr:` or `review-runner:` prefix.",
+      "evidence": "Probe: `describeValue({[inspect.custom](){throw new Error(\"boom-custom\")}, toJSON(){throw new Error(\"boom-json\")}})`, runnerPrRefusal and runnerWorktreeRefusal on the same value all printed `THROWS Error boom-custom`. A throwing toJSON alone, Proxy with throwing traps, revoked Proxy, null-prototype and throwing toString objects all returned normal refusal text. The input is contrived: args normally arrive as JSON-decoded data, so a throwing custom inspector is unlikely in practice.",
+      "suggested_fix": "Either drop the \"Never throws\" claim from the comment, or wrap the inspect() fallback in a second try that returns a fixed string such as `<unprintable ${typeof value}>`.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/review-core.mjs",
+      "line": 938,
+      "claim": "isPrNumber's bare `catch { return false }` discards the caught error and answers \"not a PR number\" for any throw from isDigits, not only the Symbol/null-prototype coercion TypeError the comment names. Today isDigits is `/^[0-9]+$/.test(value)`, so coercion is its only throw path. A later bug in isDigits would be reported to the caller as a bad `args.pr` value.",
+      "evidence": "Read arg.mjs (`export function isDigits(value) { return /^[0-9]+$/.test(value); }`). Probe: null-prototype object and throwing-toString object both returned the refusal `args.pr must be a PR number, got {}`. The old code threw a TypeError for both. The new behaviour is the intended one, and no unrelated failure is masked today.",
+      "suggested_fix": "Optional: catch only TypeError, or only the coercion case, so any other fault in isDigits still propagates.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/review-core-worktree-refusal.test.mjs",
+      "claim": "Nothing tests that the ..-segment and pr<N>-suffix scratch refusals in runnerScratchRefusal use describeValue. Swapping it for JSON.stringify or String there leaves every test green.",
+      "evidence": "red: n/a (mutant survived); baseline: ./agent-test tests/review-core-worktree-refusal.test.mjs tests/review-runner.test.mjs tests/shared-refusal.test.mjs → exit 0, tests 36 pass 36. With the describeValue calls at review-core.mjs:971 and 974 replaced by JSON.stringify, the same run still gave pass 36, fail 0. This is effectively equivalent, since those branches only see string inputs, so it is low value.",
+      "suggested_fix": "None required. Optionally, have shared-refusal assert that these two messages call describeValue, to keep one printing path.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "Exporting the refusal functions as plain string|null returns makes the invariant a convention. Callers must remember to throw on non-null, and runReviewToFile and reviewRun each hand-order the refusals. Nothing in the type system guarantees that a value reaching `${scratch}/pr${pr}` has been validated.",
+      "evidence": "Read review-core.mjs 1146-1181 and review-eval.mjs 169-178. Each refusal is called, then thrown, in separate hand-written sequences. In reviewRun, scratch is checked for non-string by a separate inline guard after runnerScratchRefusal, which passes every non-string by contract.",
+      "file": "plugin/scripts/review-core.mjs",
+      "line": 1161,
+      "suggested_fix": "Optionally return a parsed/branded value (for example, a normalised prNumber string) from one validator, so downstream code consumes the validated form instead of the raw arg.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/review-core.mjs",
+      "line": 1170,
+      "claim": "The 'args.scratch must be an absolute path' refusal is written out twice (review-core.mjs:1170-1172 and review-eval.mjs:171-173), and the two copies differ only in their prefix. The PR edits both identically, and that duplicate is the only reason describeValue has to be exported to review-eval.mjs. Moving it into one shared runnerScratchAbsoluteRefusal, matching the other runner*Refusal helpers, removes the duplicate and lets describeValue stay private to the module.",
+      "evidence": "In my copy (simplify/copy) I added `export function runnerScratchAbsoluteRefusal(scratch) { if (typeof scratch === \"string\" && isAbsolute(scratch)) return null; return `args.scratch must be an absolute path, got ${describeValue(scratch)}`; }`. I changed `export function describeValue` to `function describeValue`, and replaced both inline checks with `const absoluteRefusal = runnerScratchAbsoluteRefusal(scratch); if (absoluteRefusal) throw new Error(`review-pr: ${absoluteRefusal}`)` (`review-runner:` in review-eval.mjs). Each caller keeps its own order. I dropped describeValue from review-eval's import. Ran `node --test tests/review-runner.test.mjs tests/review-core-worktree-refusal.test.mjs tests/review-core-scratch-refusal.test.mjs tests/shared-refusal.test.mjs`: tests 72, pass 72, fail 0. These include the new exact-message regexes for 1n, circular and Symbol scratch in both callers. grep for describeValue in tests/ found no test that imports it. review-eval.mjs still uses isAbsolute at line 245 (runRootOf), so its node:path import stays.",
+      "suggested_fix": "In review-core.mjs: `export function runnerScratchAbsoluteRefusal(scratch) { if (typeof scratch === \"string\" && isAbsolute(scratch)) return null; return `args.scratch must be an absolute path, got ${describeValue(scratch)}`; }`. Call it from reviewRun (after runnerScratchRefusal, as now) and from runReviewToFile (before runnerScratchRefusal, as now), each adding its own `review-pr:`/`review-runner:` prefix. Make describeValue module-private and remove it from review-eval.mjs's import list.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/review-core.mjs",
+      "line": 971,
+      "claim": "In runnerScratchRefusal, both changes from JSON.stringify(scratch) to describeValue(scratch) do nothing: line 970 already returns null for any non-string, and JSON.stringify of a string never throws and always returns a string. The fallback in describeValue can't be reached from here, so the edit adds churn and a call through a helper with no change in behavior.",
+      "evidence": "Ran in the copy: `node --input-type=module -e` importing describeValue from ./plugin/scripts/review-core.mjs and comparing describeValue(s) with JSON.stringify(s) for 20,007 strings (fixed edge cases '', '../x', '/tmp/pr5', a lone surrogate '\\ud800', '\\u2028\"\\\\\\n', and a 1000-char string, plus 20,000 random UTF-16 strings). Output: `strings 20007 mismatches 0`. Then I changed review-core.mjs lines 976/979 in the copy back to JSON.stringify(scratch) and re-ran the 4 refusal test files above: tests 72, pass 72, fail 0.",
+      "suggested_fix": "Keep `JSON.stringify(scratch)` in the two runnerScratchRefusal messages, or keep describeValue only for uniformity on purpose. Either choice gives identical output for every value that reaches those lines.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

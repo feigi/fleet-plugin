@@ -1,0 +1,66 @@
+{
+  "head": "ef9ea9b97441b67e81ff7bcc1359ba23269b470f",
+  "run": "run-c8UaeV7v",
+  "entries": [
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted by its refuter; see verdictPath",
+      "issue": 4406,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4399/fix-0m4d37S0/u0/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted by its refuter; see verdictPath",
+      "issue": 4406,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4399/fix-0m4d37S0/u1/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted by its refuter; see verdictPath",
+      "issue": 4406,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4399/fix-0m4d37S0/u2/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted by its refuter; see verdictPath",
+      "issue": 4406,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4399/fix-0m4d37S0/u3/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted by its refuter; see verdictPath",
+      "issue": 4406,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4399/fix-0m4d37S0/u4/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 5,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "refuted by its refuter; see verdictPath",
+      "issue": 4406,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4399/fix-0m4d37S0/u5/verdict.json"
+    }
+  ]
+}

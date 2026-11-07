@@ -1,0 +1,124 @@
+{
+  "head": "b5321cd341cab0d61c02c46d181016a4e6020d8f",
+  "run": "run-kWKel5YN",
+  "entries": [
+    {
+      "bucket": "survived",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "charge": "none",
+      "chargeReason": "defect-outside-acceptance",
+      "remedyFiles": [
+        "plugin/skills/run-team/references/phase-0.md"
+      ]
+    },
+    {
+      "bucket": "survived",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "charge": "none",
+      "chargeReason": "not-the-implementers-text",
+      "remedyFiles": [
+        "plugin/skills/run-team/SKILL.md"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4395/fix-GXulYA0s/u0/verdict.json",
+      "reason": "in-scope suggestion its refuter refuted; recorded on the suggestion-band record",
+      "issue": 4401
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4395/fix-GXulYA0s/u1/verdict.json",
+      "reason": "in-scope suggestion its refuter refuted; recorded on the suggestion-band record",
+      "issue": 4401
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4395/fix-GXulYA0s/u2/verdict.json",
+      "reason": "in-scope suggestion its refuter refuted; recorded on the suggestion-band record; the residual design question it surfaced is filed open as #4400",
+      "issue": 4401
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4395/fix-GXulYA0s/u3/verdict.json",
+      "reason": "in-scope suggestion its refuter refuted; recorded on the suggestion-band record",
+      "issue": 4401
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4395/fix-GXulYA0s/u4/verdict.json",
+      "reason": "in-scope suggestion its refuter refuted; recorded on the suggestion-band record",
+      "issue": 4401
+    },
+    {
+      "bucket": "unverified",
+      "index": 5,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4395/fix-GXulYA0s/u5/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 6,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4395/fix-GXulYA0s/u6/verdict.json",
+      "reason": "in-scope suggestion its refuter refuted; recorded on the suggestion-band record",
+      "issue": 4401
+    },
+    {
+      "bucket": "unverified",
+      "index": 7,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4395/fix-GXulYA0s/u7/verdict.json",
+      "reason": "in-scope suggestion its refuter refuted; recorded on the suggestion-band record",
+      "issue": 4401
+    },
+    {
+      "bucket": "unverified",
+      "index": 8,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4395/fix-GXulYA0s/u8/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 9,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4395/fix-GXulYA0s/u9/verdict.json"
+    }
+  ]
+}

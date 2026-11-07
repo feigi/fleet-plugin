@@ -1,0 +1,46 @@
+{
+  "head": "89ae8fbcdb8197685759a244b8fc1bdcdb21c5af",
+  "run": "run-CfD0secU",
+  "entries": [
+    {
+      "bucket": "survived",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "remedyFiles": ["docs/specs/2026-10-13-one-command-per-wake.md"],
+      "charge": "none",
+      "chargeReason": "not-the-implementers-text",
+      "reason": "Applied: spec line 80 now reads `--scratch <scratch>`. The `‹scratch›` spelling came from the ticket as the implementer was dispatched with it. Every `--scratch` line of .fleet/briefs/impl-4383.md, acceptance criterion 2 included, reads `--scratch ‹scratch›` (defang of the declared `scratch` placeholder), so the implementer met criterion 2 as dispatched and the text is the ticket's, not the implementer's."
+    },
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "out",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "issue": 4409,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4402/fix-j4nFKpSK/u0/verdict.json",
+      "remedyFiles": ["plugin/scripts/ticket-text.mjs"],
+      "reason": "Out of scope: ticket #4383 excludes any code or test. The refuter survived it (refuted=false: defang() on the pinned copy rewrote declared placeholders to ‹name› with no notice), so it is filed as its own open needs-triage issue."
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4402/fix-j4nFKpSK/u1/verdict.json",
+      "reason": "No line, so in scope. The refuter survived it (refuted=false: at 89ae8fb `grep -n -F 'is a reviewed= token' plugin/scripts/ledger.mjs` matches line 3236, and line 3216 is runReview's flag parsing). Applied by editing the PR body's citation to line 3236."
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "out",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "issue": 4410,
+      "reason": "Out of scope: line 66 is the review-result row, which the PR's diff does not touch, and ticket #4383 requires that row to stay as written. The claim is about layout and concedes it is not a defect, so it is below the claim bar. No refuter was dispatched, and it is recorded in the closed suggestion-band record."
+    }
+  ]
+}

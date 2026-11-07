@@ -1,0 +1,240 @@
+{
+  "pr": 4392,
+  "head": "6249db27f4946d37b87221d5abe4d52bab3966cd",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv' (I did not touch these; I only ran pwd and read-only commands, so they were modified by another agent or earlier process)"
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I ran no command that writes there. These look like the controller's own metrics files, not from this review."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I never wrote to this checkout. My only command there was `pwd`, and later `git status` as read-only. These two files are most likely modified by another member or the controller."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. These files are outside this PR's diff, and none of my commands wrote there: every command cd'd into the scratch dir or used absolute scratch paths, and my edits went only to correctness/mut1 and correctness/mut2."
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. Neither was written by this pass: every write here went to my scratch copy."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (I did not write to this tree; these are not from my commands)"
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 14,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4392/run-WEmkQ4Jj/snapshot-6249db27",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 2996,
+      "claim": "No logic error or scope creep found: the fix-pr settle asks gh for PR M's headRefName first, only for applied and no-op. It records the branch check as the first receipt check and reads origin, verify-sha.sh and the Recipe gate only when every earlier check passed, including the refuted-reason checks. That matches every acceptance criterion and out-of-scope item in #4348, and the tests detect both ways of removing the change.",
+      "evidence": "Mutant A (correctness/mut1: `if (claimsBranch && checks.every(...))` → `if (claimsBranch && required !== undefined)`): `node --test --test-name-pattern='fix-pr|could not look|refuted|settle' tests/ledger-settle-report.test.mjs tests/recipe-check.test.mjs` → ℹ tests 85, pass 79, fail 6. Failures include 'a refused branch check reads nothing from git…', 'a refused check other than the branch check keeps git unread…', 'a report naming a branch origin lacks…' and both new recipe-check 'refused before verify-sha.sh' tests. Mutant B (correctness/mut2: the branch check forced to `true`): same files, --test-name-pattern='fix-pr-M|settle: a fix-applier report whose branch' → ℹ tests 25, pass 19, fail 6. Failures include the applied and no-op 'naming another pushed branch that holds the head is exit 3' tests and the replacement fix-pr-6-c refusal. Baseline test-run.log: ℹ tests 9086, pass 9086, fail 0.",
+      "suggested_fix": "None required.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 3008,
+      "claim": "The fallback that used to map any other outcome to \"failed\" is gone: `outcome = report.outcome === \"applied\" ? … : report.outcome`. It is equivalent today only because report-schema.mjs:142 limits fix-pr outcome to [\"applied\",\"no-op\",\"failed\"]. If a value is ever added to that enum, it would settle unchecked under its own name instead of being treated as failed. This is a small refactor beyond the ticket's ask.",
+      "evidence": "grep 'applied.*no-op.*failed' plugin/scripts/report-schema.mjs → `142: outcome: { type: \"string\", enum: [\"applied\", \"no-op\", \"failed\"] }`. Reasoned from code, not executed.",
+      "suggested_fix": "Optional: keep an explicit `else outcome = \"failed\"` or an exhaustive check, so a future enum value cannot skip the branch check unnoticed.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 3005,
+      "claim": "A no-op report on a PR whose row has no reviewed= now needs a gh pr view call before it is refused. When gh is unreachable, it exits 2 (could not look) instead of the earlier exit 3 ('row names a reviewed= head'). This follows from the ticket's rule to ask GitHub first and is noted only as a behavior change.",
+      "evidence": "Read snapshot ledger.mjs 2999-3031: prView(live.number, \"headRefName\") runs before the deriveRun fold and the `review === undefined` check. Not executed for the gh-unreachable plus no-reviewed= combination.",
+      "suggested_fix": "None required; mention it in the PR description if behavior changes should be listed.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 3005,
+      "claim": "The new branch check compares only the report's branch string to PR M's headRefName. It does not look at whether PR M comes from a fork. A fork-headed PR whose branch name equals a branch on origin would pass this check and go on to the origin read, which would then read the wrong branch without any refusal.",
+      "evidence": "Read only. `grep headRepository|isCrossRepository plugin/scripts/ledger.mjs` returned nothing, and prView requests only `headRefName`. I did not build a fork-PR fixture, so this is unexecuted. It is an inherent limit of the string compare, not a swallowed error.",
+      "suggested_fix": "Also request headRepositoryOwner or isCrossRepository and refuse when the PR is cross-repository, or state the same-repo assumption in the comment.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 3051,
+      "claim": "`required` is initialised to null and is dereferenced (`required.head`) at line 3068 and in the check name. The only guard is the `checks.every(ok)` gate. It holds today because the no-op path sets `required` or pushes a failing check. Any later edit that sets `required` conditionally without a failing check would throw a bare TypeError, not a LedgerError, and the settle would crash instead of refusing with exit 3.",
+      "evidence": "Read the code: when `review === undefined`, check(..., false) is pushed, `required` stays null, and the deref is skipped because `checks.every` is false. The test 'fix-pr-M=no-op: a PR with no reviewed= is exit 3' passed in my copy (155/155), so the current path is correct. This is a fragility note about coupling, not a live bug.",
+      "suggested_fix": "Guard on `required !== null` explicitly, or make the no-op branch `die` or return a single value.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 3051,
+      "claim": "The git read at the end is skipped whenever any earlier check failed. A report that fails both the branch check and the origin check therefore shows only the first failure. This is by design and covered by tests, and the refusal output is not wrong. It does mean a second fault stays hidden until the first is fixed.",
+      "evidence": "Test 'a refused check other than the branch check keeps git unread, so an origin that cannot be reached is still exit 3' passed in my copy. I did not run an alternative to measure how the refusal reads with several failures.",
+      "suggested_fix": "None needed; no silent swallow found.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "I found no swallowed errors, no catch that mislabels a failure, and no new dereference moved inside an existing try. The one try/catch in the touched region wraps `deriveRun` and rethrows anything that is not a LedgerError. The new `prView` call sits outside it. prView's failure paths (gh exits non-zero, non-JSON output, non-string headRefName) all `die` with exit 2 and 'nothing written'. The tests that cover them passed in my copy.",
+      "evidence": "The tests 'could not look: a gh pr view that fails, or answers without a string headRefName, is exit 2 ...' and 'a refused branch check reads nothing from git ...' passed (155/155 in my copy). The suite ./agent-test also passed 9086/9086 in the pre-run log.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/ledger-settle-report.test.mjs",
+      "line": 222,
+      "claim": "Mutant D (adding `,state` to the prView field list) is killed mainly because the gh stub matches arguments exactly. The ghLog regex `/^pr view 6 --json headRefName$/m` is the only direct assertion of the request, so the kill is partly accidental.",
+      "evidence": "red: ./agent-test tests/ledger-settle-report.test.mjs (copy mD, `\"headRefName,state\"`) → exit 1, fail 28 incl 'fix-pr-M: the branch check is the first of the receipt's checks and every git read follows it'; baseline: ./agent-test tests/ledger-settle-report.test.mjs (unmutated copy) → tests 96, pass 96, fail 0 (exit code not captured)",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 3008,
+      "claim": "The line `outcome = report.outcome === \"applied\" ? ... : report.outcome` replaces the old explicit `outcome = \"failed\"` branch, so the `failed` outcome now depends on report-schema.mjs having already restricted fix-pr outcomes to applied/no-op/failed. I did not read report-schema.mjs, so this is unverified.",
+      "evidence": "Read of diff lines 36-60 shows the removed `else { outcome = \"failed\"; }` and the new pass-through of `report.outcome`. I did not grep report-schema.mjs.",
+      "suggested_fix": "If the enum is not enforced upstream, restore the explicit `failed` branch or assert the outcome is one of the three values.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 3051,
+      "claim": "The `required` variable starts as `null` and is dereferenced (`required.head`, `required.why`) in the late git-read block. It is safe only because that block runs under `checks.every(ok)` and the no-op path adds a failing check whenever it leaves `required` null. The invariant is not encoded in the types, so a later change to either place could cause a null dereference.",
+      "evidence": "Diff lines 62-80 and 91-104. On the no-op path, `required` stays null only when the fold throws or `review === undefined`; the diff shows `check(..., false)` for the second case and I assumed the same for the first. The `else` branch uses `required` for any non-applied outcome, but the `claimsBranch` guard limits it to no-op.",
+      "suggested_fix": "Build `required` as a discriminated value, or return early or throw when it is not set. Alternatively, keep the origin check next to the code that computes `required`.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 3005,
+      "claim": "`prView(live.number, \"headRefName\")` is validated at runtime: prFieldOk.headRefName is isString, and a missing or non-string value gives exit 2. So the destructured `headRefName` is guaranteed to be a string, and no unchecked cast is involved.",
+      "evidence": "Grep output at ledger.mjs:2103 shows `headRefName: isString` in prFieldOk, and prView at 2104-2115 calls lookJson and checks fields. The added test 'a gh pr view that fails, or answers without a string headRefName' covers undefined, null, 5 and an array.",
+      "suggested_fix": "None needed.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 3055,
+      "claim": "The added applied-branch git read evaluates `head === report.head` twice: once inside check(...) and again in a separate `if`. `check` already returns `ok`, and the same function uses `if (check(...))` elsewhere (line 2943 in recipeGate, line 3046 in the refuted loop).",
+      "evidence": "In my copy I replaced lines 3055-3056 with `if (check(`origin refs/heads/${report.branch} is ${report.head}`, head === report.head)) {`. I then ran `node --test tests/ledger-settle-report.test.mjs tests/recipe-check.test.mjs` from the copy's root. It exited 0 with pass 154 and fail 0. That run includes the receipt.checks deepEqual at test line 580 and the recipe-check tests that need recipeGate to run on a matching head and be skipped on a mismatch.",
+      "suggested_fix": "if (check(`origin refs/heads/${report.branch} is ${report.head}`, head === report.head)) {\n  // verify-sha.sh is the fetch …\n  recipeGate(report.head, () => verifyShaOf(report.branch, report.head));\n}",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/ledger-settle-report.test.mjs",
+      "line": 614,
+      "claim": "The new `ghLog` helper repeats the existence check and read of gh.log that `issueReads` (line 161) already does. `issueReads` is just `ghLog` filtered to `issue view` lines, so the two helpers can drift apart.",
+      "evidence": "In my copy I moved `ghLog` up beside `issueReads` and redefined `const issueReads = (f) => ghLog(f).split(\"\\n\").filter((l) => l.startsWith(\"issue view\"));`. A missing log still gives [] because \"\" splits to [\"\"] and the filter drops it. I ran the same `node --test` on both files: exit 0, pass 154, fail 0. That covers the four `issueReads` callers at lines 191, 334, 350 and 436 and the three `ghLog` callers.",
+      "suggested_fix": "Define `const ghLog = (f) => (existsSync(join(f.root, \"gh.log\")) ? readFileSync(join(f.root, \"gh.log\"), \"utf8\") : \"\");` once near line 160, then `const issueReads = (f) => ghLog(f).split(\"\\n\").filter((l) => l.startsWith(\"issue view\"));`.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/ledger-settle-report.test.mjs",
+      "line": 616,
+      "claim": "The two added tests at lines 616 (applied) and 627 (no-op) have the same body apart from `outcome`. Both send a CLAIM branch, expect exit 3 naming both branches and assert stderr has no origin read; only the applied test checks that the member stays unsettled. Neighbouring new tests (lines 637, 649, 682) already fold this case with `for (const outcome of [\"applied\", \"no-op\"])`.",
+      "evidence": "In my copy I replaced both tests with one test. It loops over [\"applied\",\"no-op\"], seeds the reviewed= row for both, as line 637 already does, and keeps all three assertions for each outcome, so the no-op case also gains the `dispatched` check. I ran `node --test tests/ledger-settle-report.test.mjs tests/recipe-check.test.mjs`: exit 0, tests 154, pass 154, fail 0.",
+      "suggested_fix": "test(\"fix-pr-M: an applied or no-op report naming another pushed branch that holds the head is exit 3, naming both branches, and writes nothing\", () => {\n  for (const outcome of [\"applied\", \"no-op\"]) {\n    const f = fixture();\n    f.ok(\"review\", \"6\", \"review=member:review-pr-6\", `reviewed=${f.head.slice(0, 12)}:0/0/0:run-abcd1234`);\n    f.ok(\"dispatch\", \"6\", \"fix-pr-6\");\n    onFeat(f);\n    f.report(\"fix-pr-6\", fixReport(f, { outcome, branch: CLAIM }));\n    const r = f.refused(\"fix-pr-6\", 3, /failed: the report's branch is PR #6's head branch \\(report: implementer\\/5-impl-5, GitHub: feat\\)/);\n    assert.doesNotMatch(r.stderr, /origin refs\\/heads/, outcome);\n    assert.equal(dispatched(f, \"fix-pr-6\"), \"fix-pr-6\", `${outcome}: the member stays dispatched, unsettled`);\n  }\n});",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

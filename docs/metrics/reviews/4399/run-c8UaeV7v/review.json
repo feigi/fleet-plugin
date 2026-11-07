@@ -1,0 +1,140 @@
+{
+  "pr": 4399,
+  "head": "ef9ea9b97441b67e81ff7bcc1359ba23269b470f",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I did not touch these; they are most likely metrics written by other fleet agents."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I did not touch these files and cannot account for them; they are probably another agent's metrics writes."
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv` (this pass wrote nothing there; every command here cd'd into the snapshot or the scratch dir)"
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. This pass did not write either file: every command here ran in the snapshot or the scratch dir, apart from a bare `pwd` and this read-only `git -C … status`."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I never wrote to that directory. These two metrics files were modified by something else, likely another agent sharing the controller checkout."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv' (not touched by me; I only ran read/probe commands in scratch copies; these look like the controller's own metrics files)."
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 6,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4399/run-c8UaeV7v/snapshot-ef9ea9b9",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/phase0.mjs",
+      "line": 606,
+      "claim": "fleetIdentity uses the JS realpathSync, which keeps the case of the path as given, so on case-insensitive APFS an alarm file naming the same checkout spelled with different letter case is still refused with 'names fleet … restart omp'. realpathSync.native would match it.",
+      "evidence": "`node probe.mjs copy/plugin/scripts/phase0.mjs` printed `REFUSE different case of checkout dir (case-insensitive APFS) \".../probe-yaTs80/REPO/.fleet\" -> /private/var/.../REPO/.fleet` while fleetDir is `.../Repo/.fleet`. `node -e 'fs.realpathSync(\"/USERS/chris/.fleet/scratch\")'` printed `/USERS/chris/.fleet/scratch`, and `fs.realpathSync.native(...)` printed `/Users/chris/.fleet/scratch`. [INFERENCE] Whether omp ever records a differently-cased cwd was not observed. The ticket's own measured failure, /var vs /private/var, MATCHes. The git top-level check that the ticket says to reuse has the same behaviour, so this is consistent with the existing code, not a regression.",
+      "suggested_fix": "If 'whatever the spelling' should cover case on macOS, use realpathSync.native(dirname(path)) in fleetIdentity. Otherwise leave it as is, consistent with the git top-level check.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/phase0.mjs",
+      "line": 610,
+      "claim": "The bare `catch {}` in fleetIdentity swallows every realpathSync error (ENOENT, EACCES, ELOOP, EMFILE, a NUL byte) and returns the raw path. It fails closed: an unresolvable path is compared as spelled, so it can only turn a would-be pass into a refusal. The refusal then reads `names fleet \"X\", not Y`, with no hint that resolution failed.",
+      "evidence": "In a standalone probe, an unresolvable path came back unchanged and a resolvable one was canonicalised: `loop/.fleet`, `dangling/.fleet` and `link/sub/x/.fleet` (through a mode-000 dir) returned as given, and `link/.fleet` and `link/sub/../.fleet` became `real/.fleet`. Non-string, relative and empty inputs were returned as given. A transient EACCES/EMFILE on one side alone would give a refusal that looks like a different-fleet mismatch. This was not run end-to-end.",
+      "suggested_fix": "Optional: narrow the catch to `e.code === \"ENOENT\"`, `ENOTDIR` or `ELOOP` and rethrow the rest. Or add `(path could not be resolved: <code>)` to the refusal text when either side fell back to the raw path.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/phase0.test.mjs",
+      "line": 83,
+      "claim": "The catch-fallback branch is not pinned against a constant return. If the catch returns a fixed value instead of the raw path, all 112 phase0 tests still pass.",
+      "evidence": "In my copy I changed the catch to `return \"X\";` and ran `node --test tests/phase0.test.mjs`: 112 tests, 112 pass, 0 fail. The refusal test's `no-such` case only exercises one unresolvable side, because the fixture's own `.fleet` dir always resolves. With two different unresolvable spellings, such a mutant would compare them equal and let a false alarm pass.",
+      "suggested_fix": "Add a case where both rec.fleet and fleetDir are unresolvable and differ, expecting a refusal. Or unit-test fleetIdentity directly.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/phase0.test.mjs",
+      "line": 550,
+      "claim": "Both new alarm tests discriminate: every mutant of fleetIdentity/the compare that I applied was killed by the named test, and the unmutated tree is green on the same narrowed run.",
+      "evidence": "red: ./agent-test tests/phase0.test.mjs --test-name-pattern='alarm: a file naming' → exit 1, fail 1 incl 'alarm: a file naming this .fleet/ through a symlinked spelling passes…' (mutant A identity; mutant E realpath(whole path) gave the same); baseline: same cmd → exit 0, tests 112 pass 112, that test ✔. red: same cmd → exit 1, fail 1 incl 'alarm: a file naming another checkout's .fleet/ is refused, through a symlink or not, and so is a relative one' (mutant D, isAbsolute dropped); baseline: same cmd → exit 0, that test ✔. red: same cmd → exit 1, fail 2 incl the same 'refused' test (mutant C, check removed); baseline: same cmd → exit 0, that test ✔. No surviving mutant, so no coverage gap to report.",
+      "suggested_fix": "None needed.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/phase0.mjs",
+      "line": 22,
+      "claim": "The diff introduces no new types or casts, since it is plain .mjs. The invariant 'path is an absolute string' is enforced at runtime by fleetIdentity's typeof/isAbsolute guard, which falls back to the raw input, so it is a runtime check and not a type guarantee.",
+      "evidence": "Read the diff; the only changed logic is `fleetIdentity(rec.fleet) !== fleetIdentity(fleetDir)`. A non-string or relative value is returned unchanged, so two equal relative spellings still compare equal, exactly as before the change. The new test covers a relative `.fleet` against an absolute fleetDir and expects it to be refused. I found no illegal state this change makes reachable.",
+      "suggested_fix": "None required.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/phase0.test.mjs",
+      "line": 559,
+      "claim": "In the new symlink test, `assert.equal(r.stdout.includes(\"alarm threw\"), false)` can never be the assertion that fails: the only source of that text is phase0.mjs:834, which turns a throw into a `failed` result, and that always exits 3 (phase0.mjs:848-857). So the `r.status === 0` check on the line before it, and the later `steps.alarm.status === \"ok\"` check, already catch every case it could catch.",
+      "evidence": "grep `threw` phase0.mjs → only :834 `result = failed(`${name} threw: ${e.message}`)`; sed -n 826,860p shows failed → `stop = \"failed\"` → `process.exitCode = 3`. Mutant in the measuring copy: added `if (path.includes(\"/link/\")) throw new Error(\"mutant\");` to fleetIdentity, then ran `node --test --test-name-pattern=\"symlinked spelling\" tests/phase0.test.mjs`. Output: `phase0: alarm: failed — alarm threw: mutant`, AssertionError `actual: 3, expected: 0` at tests/phase0.test.mjs:558:10. The status assertion stops the test first, so line 559 is never reached.",
+      "suggested_fix": "Delete line 559 (`assert.equal(r.stdout.includes(\"alarm threw\"), false);`). Optionally use `assert.match(r.stdout, /^phase0: alarm: ok/m)` instead, as the neighbouring 'a matching file passes' test does, if the printed status line should be checked.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "head": "9ed6a3b8e5da35697ebc99cb1ba6a8ff2e6b7da7",
+  "run": "run-LDN4cmqO",
+  "entries": [
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4386/fix-EBIEEVb0/unverified-0/verdict.json",
+      "issue": 4388,
+      "reason": "refuted by its refuter: Refuted: the finding asserts no defect and proposes no change, so there is nothing to apply. I ran no test or mutant, because the claim is about static records. Ran: `git diff --name-status <base> 9ed6a3b` (19 added review.json), then python json.load over each at the pinned sha. Observed facts match the claim. Four records have suiteVerdict.usable=false with a stated reason: 4351/run-9Q0NHFUF and run-P1RIsmQw, and 4353/run-xy2V1z4M ('no suite slot within 1800 s … not a test failure'), plus 4353/run-7v3E3LF1 (Install step did not run). 4356/run-LUvGgDKg is usable=false and also names 'tests' in dimensionsUnrun. 4353/run-Jz2ZE0E6 is usable=true with dimensionsUnrun=[correctness, 'reviewer ret"
+    }
+  ]
+}
