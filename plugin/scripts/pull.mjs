@@ -104,8 +104,16 @@
 //                 the brief's Out of scope section are printed as the
 //                 behind-issue candidates. Then `clear`, `behind-pr:#M`,
 //                 `behind-issue:#M`, or `paths <p>…`, which scans again and
-//                 asks again. An exclusion is a ledger row.
-//   6  claim      `claim-ticket.sh <N> impl-<N> implementer --apply`.
+//                 asks again. An exclusion is a ledger row, and the row's settled
+//                 member tokens follow its `excluded · <token>`.
+//   6  claim      `claim-ticket.sh <N> impl-<N> implementer --apply`. The claim, the
+//                 worktree and the branch always take the `impl-<N>` pair; the
+//                 member that works the ticket is named first, from `ledger.mjs
+//                 read`, the way `ledger.mjs dispatch` names a replacement:
+//                 `impl-<N>` when this omp session has not used it (not
+//                 dispatched, settled on a row or retired), else the next free
+//                 retry name (`impl-<N>-b`, `-c`, …). With no retry letter left
+//                 the Pull is left, exit 1, before anything is claimed.
 //   7  route      `ticket-router.mjs route …`, which routes by the Objective
 //                 the phase-0 receipt records; a router that refuses releases
 //                 the claim, and a release that fails is exit 2 with the claim
@@ -113,8 +121,9 @@
 //                 `excluded · behind-issue:#<N>`: another open ticket
 //                 sequences after this one.
 //   8  row, render, dispatch   `ledger.mjs row … --routing <line>`, the row and
-//                 the router's line in one write, `dispatch-prompt.mjs render
-//                 implementer --member impl-<N>`, `ledger.mjs dispatch`. The
+//                 the router's line in one write — the row's settled member
+//                 tokens carried, then the member —, `dispatch-prompt.mjs render
+//                 implementer --member <member>`, `ledger.mjs dispatch`. The
 //                 brief and the staleness text are given as they are.
 //
 // THE STATE is `<scratch>/impl-<N>/pull.json`: every command run (script, its
@@ -137,7 +146,7 @@ import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { LabelMapUnreadable, readLabelMap } from "./label-map.mjs";
-import { EXCLUDED_REASON, POLICY_CELL, memberTokens, parseRouting, premisesOf, pullEnded, tierValues } from "./ledger-grammar.mjs";
+import { EXCLUDED_REASON, POLICY_CELL, memberTokens, parseRouting, parseToken, premisesOf, priorUse, pullEnded, readRetired, replacementName, settledMemberTokens, tierValues } from "./ledger-grammar.mjs";
 import { sessionFromReceipt } from "./phase0-receipt.mjs";
 import { LINE_REF, briefPaths, briefText, outOfScope, strandedRuling, ticketText } from "./ticket-text.mjs";
 
@@ -214,6 +223,24 @@ export function closeComment(commit, subject) {
 
 const rowKey = (row) => row.split(/\s/)[0];
 const isImplRow = (row) => memberTokens(row).some((t) => t.family === "impl");
+
+/**
+ * The name a ticket is claimed under, and its worktree and branch are named
+ * for: the claim belongs to the ticket, whichever member works it.
+ */
+const pairOf = (ticket) => `impl-${ticket}`;
+
+/** `ticket`'s row in `rows`, or undefined. */
+const rowOf = (rows, ticket) => rows.find((r) => rowKey(r) === `#${ticket}`);
+
+/** The settled member tokens a rewrite of `ticket`'s row must carry, in the row's order. */
+const carriedTokens = (rows, ticket) => {
+  const row = rowOf(rows, ticket);
+  return row === undefined ? [] : settledMemberTokens(row);
+};
+
+/** Whether `x` is an array of strings, the shape `ledger.mjs read` prints `rows`, `dispatched` and `retired` in. */
+const strings = (x) => Array.isArray(x) && x.every((s) => typeof s === "string");
 
 /**
  * The `--impl-row` the router is given: the row count the Pull creates — or,
@@ -426,7 +453,7 @@ function goneBranches(out) {
 function fresh(ticket, session) {
   return {
     ticket,
-    member: `impl-${ticket}`,
+    member: null,
     started: now(),
     status: "running",
     stage: "inflight",
@@ -632,16 +659,36 @@ class Pull {
     return result(10, block(qid, this.st.ticket, context));
   }
 
-  ledgerRows() {
+  // `ledger.mjs read`'s JSON, refused when it is unreadable or carries no `rows`.
+  readLedger() {
     const r = this.script("ledger", "ledger.mjs", ["read"]);
     if (r.status !== 0) throw new Refusal(withText(`ledger.mjs read ${r.how}`, r));
+    let data = null;
     try {
-      const { rows } = JSON.parse(r.stdout);
-      if (Array.isArray(rows) && rows.every((x) => typeof x === "string")) return rows;
+      data = JSON.parse(r.stdout);
     } catch {
       // Falls through to the refusal below.
     }
-    throw new Refusal("ledger.mjs read printed no {rows}");
+    if (!strings(data?.rows)) throw new Refusal("ledger.mjs read printed no {rows}");
+    return data;
+  }
+
+  // The ledger as `ledger.mjs read` prints it, the parts the member's name is picked from: `rows`, `dispatched`
+  // (`## Dispatched` as its tokens) and `retired` (the names `## Retired` holds). An entry or line the grammar cannot
+  // read is a refusal, as `ledger.mjs dispatch` refuses it, before anything is claimed.
+  ledger() {
+    const data = this.readLedger();
+    if (!strings(data.dispatched) || !strings(data.retired)) throw new Refusal("ledger.mjs read printed no {dispatched, retired}");
+    const bad = data.dispatched.find((e) => parseToken(e) === null);
+    if (bad !== undefined) throw new Refusal(`ledger.mjs read: ## Dispatched has an entry '${bad}' this grammar cannot parse — fix the ledger by hand`);
+    const { names, malformed } = readRetired(data.retired);
+    if (malformed.length > 0) throw new Refusal(`ledger.mjs read: ## Retired has a line '${malformed[0]}' that names no member or reviewer — fix the ledger by hand`);
+    return { rows: data.rows, dispatched: data.dispatched, retired: names };
+  }
+
+  // The rows alone, for the readers that write a row or route: a section only the name needs cannot block them.
+  ledgerRows() {
+    return this.readLedger().rows;
   }
 
   // ── the ticket, as read ──
@@ -908,7 +955,15 @@ class Pull {
     } catch (e) {
       return this.stop(e.message);
     }
-    const r = this.script("claim", "claim-ticket.sh", [String(st.ticket), st.member, "implementer", "--apply"]);
+    // The claim belongs to the ticket, so it is made under the `impl-<N>` pair; the member that works it is the
+    // next name this session has not used on the number, and is chosen before anything is claimed.
+    const base = pairOf(st.ticket);
+    const { rows, dispatched, retired } = this.ledger();
+    const prior = priorUse(base, rows, dispatched, retired);
+    const member = prior === undefined ? base : replacementName(base, rows, dispatched, retired);
+    if (member === null) return this.leave(`no retry letter is left: ${base} was already used this session (${prior}) and every retry letter after it is taken`);
+    st.member = member;
+    const r = this.script("claim", "claim-ticket.sh", [String(st.ticket), base, "implementer", "--apply"]);
     if (r.status === 0) {
       st.stage = "route";
       return null;
@@ -931,7 +986,7 @@ class Pull {
     const routing = r.status === 0 ? parseRouting(line) : null;
     if (routing === null) {
       const said = r.status === 0 ? `printed no routing line: ${r.stdout}` : withText(`refused (${r.how})`, r);
-      const rel = this.script("release", "release-ticket.sh", [String(st.ticket), st.member, "implementer", "--apply"]);
+      const rel = this.script("release", "release-ticket.sh", [String(st.ticket), pairOf(st.ticket), "implementer", "--apply"]);
       if (rel.status !== 0) {
         // The claim stands, so the Pull is not over: it stays at this step, and running it again routes, or refuses and releases, again.
         return this.stop(`ticket-router.mjs ${said}\n${withText(`its claim is STILL STANDING: release-ticket.sh failed (${rel.how})`, rel)}`);
@@ -950,9 +1005,12 @@ class Pull {
     const { cell, draw } = st.route;
     // `tier=` marks a draw; a Pull routed without one still dispatches at the
     // cell the router printed, carried as `cell=` so the row reads as undrawn.
-    // The Routing itself goes to `## Routed` in the same write.
+    // The Routing itself goes to `## Routed` in the same write. The row's
+    // settled member tokens are carried ahead of the member: a rewrite drops
+    // none, and the earlier `tier=` and `cell=` words are the earlier member's.
     const carrier = draw !== "-" ? ` · tier=${cell}` : cell !== POLICY_CELL ? ` · cell=${cell}` : "";
-    const r = this.script("row", "ledger.mjs", ["row", String(st.ticket), `${st.member}${carrier}`, "--routing", st.route.line]);
+    const text = [...carriedTokens(this.ledgerRows(), st.ticket), `${st.member}${carrier}`].join(" · ");
+    const r = this.script("row", "ledger.mjs", ["row", String(st.ticket), text, "--routing", st.route.line]);
     if (r.status !== 0) return this.stop(withText(`ledger.mjs row failed (${r.how})`, r));
     st.stage = "render";
     return null;
@@ -960,11 +1018,11 @@ class Pull {
 
   stage_render() {
     const { st } = this;
-    const worktree = join(this.p.cwd, ".worktrees", `${st.ticket}-${st.member}`);
+    const worktree = join(this.p.cwd, ".worktrees", `${st.ticket}-${pairOf(st.ticket)}`);
     const staleness = st.staleness.length === 0 ? "no probe was run" : st.staleness.join("; ");
     const r = this.script("render", "dispatch-prompt.mjs", [
       "render", "implementer", "--member", st.member, "--ticket", String(st.ticket), "--worktree", worktree,
-      "--branch", `implementer/${st.ticket}-${st.member}`, "--scratch", this.p.scratch,
+      "--branch", `implementer/${st.ticket}-${pairOf(st.ticket)}`, "--scratch", this.p.scratch,
       "--brief", ticketText(this.issue()), "--staleness", staleness,
     ]);
     if (r.status !== 0) return this.stop(withText(`dispatch-prompt.mjs render refused (${r.how}) — the claim stands`, r));
@@ -1104,7 +1162,9 @@ class Pull {
       for (const p of text.split(/\s+/)) if (!st.addedPaths.includes(p)) st.addedPaths.push(p);
       return null;
     }
-    const r = this.script("exclude", "ledger.mjs", ["row", String(st.ticket), `excluded · ${token}`]);
+    // An Exclusion still carries the row's settled member tokens: the rewrite drops none.
+    const excluded = [`${EXCLUDED_REASON} ${token}`, ...carriedTokens(this.ledgerRows(), st.ticket)].join(" · ");
+    const r = this.script("exclude", "ledger.mjs", ["row", String(st.ticket), excluded]);
     if (r.status !== 0) return this.stop(withText(`ledger.mjs row failed (${r.how})`, r));
     return this.leave(`${EXCLUDED_REASON} ${token}`);
   }
@@ -1160,7 +1220,7 @@ function readLedgerRows(p) {
  * could not read is a refusal (exit 2) that says the exclusion stands.
  */
 function heldOut(p, n) {
-  const row = readLedgerRows(p).find((r) => rowKey(r) === `#${n}`);
+  const row = rowOf(readLedgerRows(p), n);
   const premises = row === undefined ? null : premisesOf(row);
   if (premises === null) return null;
   const standing = standingPremise(premises, p.cwd);
@@ -1199,7 +1259,7 @@ function shortlistHead(p, run) {
   // empty one.
   const unreadable = [];
   for (const { n } of list.shortlist) {
-    const row = rows.find((r) => rowKey(r) === `#${n}`);
+    const row = rowOf(rows, n);
     if (row !== undefined && isImplRow(row)) continue;
     const premises = row === undefined ? null : premisesOf(row);
     const standing = premises === null ? null : standingPremise(premises, p.cwd);

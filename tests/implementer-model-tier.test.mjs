@@ -92,7 +92,7 @@ test("the dispatch section dispatches every implementer at its definition's tier
     /Keep `name: impl-<N>`/,
     "member-lifecycle no longer keeps the impl-<N> name alongside the dispatched agent",
   );
-  assert.match(slice, /keep `name: impl-<N>`/, "the dispatch section no longer keeps the impl-<N> name");
+  assert.match(slice, /keep the `name` `DISPATCH` printed/, "the dispatch section no longer keeps the name `DISPATCH` printed alongside the dispatched agent");
   // `row` REPLACES the line (ledger.mjs's `data.rows = after`, `line` in place
   // of the old row). The `token` addition is the script's own behaviour, pinned
   // in tests/ledger.test.mjs ("token appends to the row and keeps every token

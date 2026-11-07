@@ -1822,6 +1822,165 @@ test("the row carries tier=<CELL> exactly when DRAW is not `-`, cell=<CELL> when
   }
 });
 
+// ── the member's name: the next free one when this session has used `impl-<N>` ──
+
+// The ledger as `ledger.mjs` writes it, for the sections no verb writes by hand: `## Retired` is written only by a
+// rotate, and `## Dispatched` carries a settled token no `row` call reaches.
+function seedLedger(f, { rows = [], dispatched = [], retired = [] }) {
+  const list = (xs) => xs.map((x) => `- ${x}`).join("\n");
+  const retiredSection = retired.length === 0 ? "" : `\n\n## Retired\n\n${list(retired)}`;
+  writeFileSync(join(f.fleet, "ledger.md"), `# Fleet run ledger\n\n## Rows\n\n${list(rows)}\n\n## Dispatched\n\n${list(dispatched)}\n\n## Filed\n\n\n\n## Ruled\n\n${retiredSection}\n`);
+}
+
+// A Pull answered through to its end with the plainest tokens, as far as it goes.
+function pullThrough(f) {
+  toCollision(f);
+  return f.answer(12, "collision", "clear");
+}
+
+const dispatchSpec = (r) => JSON.parse(r.out.find((l) => l.startsWith("DISPATCH ")).slice("DISPATCH ".length));
+const dispatchName = (r) => dispatchSpec(r).name;
+const renderArg = (f, flag) => {
+  const render = f.calls("dispatch-prompt")[0].args;
+  return render[render.indexOf(flag) + 1];
+};
+
+test("a name `## Retired` holds is not the Pull's member: it dispatches impl-12-b, claimed under the impl-12 pair", () => {
+  const f = fixture();
+  seedLedger(f, { retired: ["impl-12"] });
+  const r = pullThrough(f);
+  assert.equal(r.status, 0, r.stdout + r.err);
+  assert.equal(dispatchName(r), "impl-12-b");
+  assert.deepEqual(f.calls("claim-ticket")[0].args, ["12", "impl-12", "implementer", "--apply"], "the claim belongs to the ticket");
+  assert.deepEqual(f.calls("dispatch-prompt")[0].args.slice(0, 4), ["render", "implementer", "--member", "impl-12-b"]);
+  assert.equal(renderArg(f, "--worktree"), join(f.repo, ".worktrees", "12-impl-12"), "a replacement works in the claim's worktree");
+  assert.equal(renderArg(f, "--branch"), "implementer/12-impl-12");
+  assert.deepEqual(f.ledgerRows().filter((x) => x.startsWith("#12 ")), ["#12 impl-12-b"]);
+  assert.deepEqual(f.ledgerRouted(), [`impl-12-b ${ROUTE_OK}`], "the Routing is filed under the member");
+  assert.match(readFileSync(join(f.fleet, "ledger.md"), "utf8"), /## Dispatched\n\n- impl-12-b brief=[0-9a-f]{8}/);
+  assert.equal(f.state().member, "impl-12-b");
+});
+
+test("a name `## Dispatched` holds settled is not the Pull's member either", () => {
+  const f = fixture();
+  seedLedger(f, { dispatched: ["impl-12=released brief=0123abcd"] });
+  const r = pullThrough(f);
+  assert.equal(r.status, 0, r.stdout + r.err);
+  assert.equal(dispatchName(r), "impl-12-b");
+  assert.deepEqual(f.calls("claim-ticket")[0].args, ["12", "impl-12", "implementer", "--apply"]);
+});
+
+test("a router refusal after a replacement is named releases the claim under the impl-12 pair, not the member", () => {
+  const f = fixture();
+  seedLedger(f, { retired: ["impl-12"] });
+  f.control("ticket-router", { exit: 2, err: "ticket-router: no table" });
+  const r = pullThrough(f);
+  assert.equal(r.status, 2, r.stdout + r.err);
+  assert.match(r.err, /its claim is released/);
+  assert.equal(f.state().member, "impl-12-b");
+  assert.deepEqual(f.calls("release-ticket")[0].args, ["12", "impl-12", "implementer", "--apply"], "the claim belongs to the ticket");
+});
+
+test("a name this session used on another ticket is no reason to rename this one: impl-12 is still impl-12", () => {
+  const f = fixture();
+  seedLedger(f, { rows: ["#13 impl-13=released"], retired: ["impl-14", "impl-120"] });
+  const r = pullThrough(f);
+  assert.equal(r.status, 0, r.stdout + r.err);
+  assert.equal(dispatchName(r), "impl-12");
+  assert.deepEqual(f.ledgerRows().filter((x) => x.startsWith("#12 ")), ["#12 impl-12"]);
+});
+
+test("a re-Pull of a row holding a settled impl-12 token carries it and names the next member; the earlier tier= is not carried", () => {
+  const drawn = "POLICY=slow-high CELL=task-high DRAW=2/5 BY=every-5th STRATUM=heavy BRIEF=9658 CRITERIA=8 SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok";
+  const f = fixture();
+  f.control("ticket-router", { out: `${drawn}\n` });
+  f.ledgerRow(12, "impl-12=released · tier=smol-high");
+  const r = pullThrough(f);
+  assert.equal(r.status, 0, r.stdout + r.err);
+  assert.equal(dispatchName(r), "impl-12-b");
+  assert.deepEqual(f.ledgerRows().filter((x) => x.startsWith("#12 ")), ["#12 impl-12=released · impl-12-b · tier=task-high"]);
+  assert.deepEqual(f.ledgerRouted(), [`impl-12-b ${drawn}`]);
+  assert.deepEqual(f.calls("claim-ticket")[0].args, ["12", "impl-12", "implementer", "--apply"]);
+  assert.equal(renderArg(f, "--member"), "impl-12-b");
+  assert.equal(dispatchSpec(r).agent, "fleet-implementer-task-high");
+
+  // The same row with no draw: the member alone follows the carried token.
+  const g = fixture();
+  g.ledgerRow(12, "impl-12=released · tier=smol-high");
+  assert.equal(pullThrough(g).status, 0);
+  assert.deepEqual(g.ledgerRows().filter((x) => x.startsWith("#12 ")), ["#12 impl-12=released · impl-12-b"]);
+});
+
+test("a lifted exclusion in front of a settled impl-12 token is dropped, the token carried", () => {
+  const f = fixture();
+  f.ledgerRow(12, "excluded · behind-issue:#9 · impl-12=bailed");
+  f.ghRules([{ match: "^issue view 9 --json state$", out: '{"state":"CLOSED"}' }]);
+  const r = pullThrough(f);
+  assert.equal(r.status, 0, r.stdout + r.err);
+  assert.deepEqual(f.ledgerRows().filter((x) => x.startsWith("#12 ")), ["#12 impl-12=bailed · impl-12-b"]);
+});
+
+test("every settled member token of the row is carried, in the row's order, and the member is one past the highest", () => {
+  const f = fixture();
+  f.ledgerRow(12, "impl-12=PR#9 → PR#9 · impl-12-b=released");
+  const r = pullThrough(f);
+  assert.equal(r.status, 0, r.stdout + r.err);
+  assert.equal(dispatchName(r), "impl-12-c");
+  assert.deepEqual(f.ledgerRows().filter((x) => x.startsWith("#12 ")), ["#12 impl-12=PR#9 · impl-12-b=released · impl-12-c"]);
+  assert.deepEqual(f.calls("claim-ticket")[0].args, ["12", "impl-12", "implementer", "--apply"]);
+});
+
+test("a collision answered behind-* on a row holding a settled impl-12 token keeps the token on the Exclusion, and claims nothing", () => {
+  const f = fixture();
+  f.ledgerRow(12, "impl-12=released · tier=smol-high");
+  f.ghRules([{ match: "^issue view 9 --json state$", out: '{"state":"OPEN"}' }]);
+  toCollision(f);
+  const r = f.answer(12, "collision", "behind-issue:#9");
+  assert.equal(r.status, 1, r.stdout + r.err);
+  assert.match(r.stdout, /^LEFT #12: excluded · behind-issue:#9 — next entry$/m);
+  assert.deepEqual(f.ledgerRows().filter((x) => x.startsWith("#12 ")), ["#12 excluded · behind-issue:#9 · impl-12=released"]);
+  assert.equal(f.calls("claim-ticket").length, 0);
+
+  // An Exclusion on a row with no settled token is the bare one, as before.
+  const g = fixture();
+  toCollision(g);
+  assert.equal(g.answer(12, "collision", "behind-issue:#9").status, 1);
+  assert.deepEqual(g.ledgerRows(), ["#12 excluded · behind-issue:#9"]);
+});
+
+test("a `## Retired` line naming no member blocks only the name: a collision answered behind-* still writes its Exclusion", () => {
+  const f = fixture();
+  seedLedger(f, { retired: ["not a member line"] });
+  f.ghRules([{ match: "^issue view 9 --json state$", out: '{"state":"OPEN"}' }]);
+  toCollision(f);
+  const r = f.answer(12, "collision", "behind-issue:#9");
+  assert.equal(r.status, 1, r.stdout + r.err);
+  assert.match(r.stdout, /^LEFT #12: excluded · behind-issue:#9 — next entry$/m);
+  assert.deepEqual(f.ledgerRows(), ["#12 excluded · behind-issue:#9"]);
+
+  // Picking the name reads `## Retired`, so a claim refuses on the same line, before anything is claimed.
+  const g = fixture();
+  seedLedger(g, { retired: ["not a member line"] });
+  const s = pullThrough(g);
+  assert.equal(s.status, 2, s.stdout + s.err);
+  assert.match(s.err, /## Retired has a line 'not a member line' that names no member or reviewer — fix the ledger by hand/);
+  assert.equal(g.calls("claim-ticket").length, 0);
+});
+
+test("with every retry letter through -z used the Pull leaves, naming that none is left, before any claim", () => {
+  const f = fixture();
+  const letters = "bcdefghijklmnopqrstuvwxyz".split("");
+  f.ledgerRow(12, ["impl-12=released", ...letters.map((l) => `impl-12-${l}=released`)].join(" · "));
+  const rows = f.ledgerRows();
+  const r = pullThrough(f);
+  assert.equal(r.status, 1, r.stdout + r.err);
+  assert.match(r.stdout, /^LEFT #12: no retry letter is left: impl-12 was already used this session \(impl-12=released\)/m);
+  assert.equal(f.calls("claim-ticket").length, 0);
+  assert.equal(f.calls("ticket-router").length, 0);
+  assert.deepEqual(f.ledgerRows(), rows, "the ledger is untouched");
+  assert.equal(f.state().status, "left");
+});
+
 test("a render that dispatch-prompt refuses exits 2, names it, leaves the claim and the row, and retries at the render", () => {
   const f = fixture();
   toCollision(f);
@@ -1875,9 +2034,11 @@ test("pull.json records every command, question and answer with a time, in the o
     ["collision", "gh", 0],
     ["collision", "git", 0],
     ["collision", "git", 0],
+    ["ledger", "ledger.mjs", 0],
     ["claim", "claim-ticket.sh", 0],
     ["ledger", "ledger.mjs", 0],
     ["route", "ticket-router.mjs", 0],
+    ["ledger", "ledger.mjs", 0],
     ["row", "ledger.mjs", 0],
     ["render", "dispatch-prompt.mjs", 0],
     ["dispatch", "ledger.mjs", 0],
@@ -1888,7 +2049,7 @@ test("pull.json records every command, question and answer with a time, in the o
   assert.equal(st.commands[2].stdout, '{"verdict":"live"}');
   assert.deepEqual(st.commands[4].cmd, ["git", "worktree", "list", "--porcelain", "-z"]);
   assert.deepEqual(st.commands[5].cmd, ["git", "for-each-ref", "--format=%(refname:short)%09%(upstream:track)", "refs/heads"]);
-  assert.deepEqual(st.commands[9].cmd, ["ledger.mjs", "row", "12", "impl-12", "--routing", ROUTE_OK]);
+  assert.deepEqual(st.commands[11].cmd, ["ledger.mjs", "row", "12", "impl-12", "--routing", ROUTE_OK]);
   for (const c of st.commands) assert.match(c.at, NOW);
   assert.deepEqual(st.questions.map((q) => q.qid), ["staleness", "staleness", "decided", "collision"], "Q1 asked once by `next` and once more after the probe");
   assert.deepEqual(st.answers.map((a) => [a.qid, a.token, a.text, a.path ?? null, a.applied]), [

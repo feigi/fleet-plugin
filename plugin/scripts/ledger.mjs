@@ -74,7 +74,7 @@ import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits, writeAll } from "./arg.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { readReceipt } from "./phase0-receipt.mjs";
-import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, settledOnLedger, retiredOnLedger, retiredName, readRetired, agentDefinition, expectedDefinition, CELL, POLICY_CELL, tierValues, cellValues, decidingCell, rowPr, rowNums, rowWriteRefusal, isReviewToken, addedReviewToken, isDispositionsWord, gateVerdictWriter, gateVerdictRefusal, settledMemberRefusal, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, HALT_CAUSES, ROWS, DISPATCHED, ROUTED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, CLOSEOUT_RECEIPT, closeoutArchiveName, BRIEFS, briefsArchiveName, memberRole, parseDispatchedEntry, dispatchedEntry, parseRouting, parseRoutedEntry, routedEntry, headerRe, escapeText, ledgerSection, nextReviewerName, isOmpSessionDirName } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, nextMergeBot, sessionMemberNames, priorUse, replacementName, liveOnLedger, settledOnLedger, retiredOnLedger, retiredName, readRetired, agentDefinition, expectedDefinition, CELL, POLICY_CELL, tierValues, cellValues, decidingCell, rowPr, rowNums, rowWriteRefusal, isReviewToken, addedReviewToken, isDispositionsWord, gateVerdictWriter, gateVerdictRefusal, settledMemberRefusal, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, HALT_CAUSES, ROWS, DISPATCHED, ROUTED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, CLOSEOUT_RECEIPT, closeoutArchiveName, BRIEFS, briefsArchiveName, memberRole, parseDispatchedEntry, dispatchedEntry, parseRouting, parseRoutedEntry, routedEntry, headerRe, escapeText, ledgerSection, nextReviewerName, isOmpSessionDirName } from "./ledger-grammar.mjs";
 import { deriveRun, foldLedger, liveFixers, LedgerError, labelOffMember, CONFLICT_HOLD, PARKED } from "./fleet-tick.mjs";
 import { stateFileIn, readState, writeState, assessBeat, stallsAt } from "./fleet-state.mjs";
 import { processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "./proc.mjs";
@@ -2416,7 +2416,7 @@ async function runDispatch() {
   // `## Dispatched`, on a row or in `## Retired` — so the controller never
   // counts. An explicit `merge-bot-<n>` is accepted only when it is that one.
   // `sessionNames` is every name beyond `## Dispatched` the session has used.
-  const sessionNames = [...data.rows.flatMap(memberTokens).map((t) => t.name), ...retired];
+  const sessionNames = sessionMemberNames(data.rows, retired);
   const member = parseMember(name === "merge-bot" ? nextMergeBot(data.dispatched, sessionNames) : name);
   if (!member) die(unknownMember(name));
   if (member.bound === null) {
@@ -2443,16 +2443,11 @@ async function runDispatch() {
   // and omp still holds that peer under the name (see runRotate()). The
   // replacement's name is spelled out: one letter past the highest this
   // session has used on the number, wherever that name sits.
-  const settledOnRow = data.rows.flatMap(memberTokens).find((t) => t.name === member.name && t.outcome !== null);
-  const prior =
-    data.dispatched.find((e) => parseToken(e).name === member.name) ??
-    (settledOnRow && `${settledOnRow.name}=${settledOnRow.outcome}`) ??
-    (retired.includes(member.name) ? "retired by rotate" : undefined);
+  const prior = priorUse(member.name, data.rows, data.dispatched, retired);
   if (prior !== undefined) {
     // Never a merge bot: it is accepted only as the number past every name
     // the session holds, so none of the three places above can name it.
-    const used = [...data.dispatched.map((e) => parseToken(e).name), ...sessionNames];
-    const next = nextRetry(member.name, used);
+    const next = replacementName(member.name, data.rows, data.dispatched, retired);
     die(`${member.name} was already dispatched this session (${prior}) — a replacement takes a name of its own`
       + (next === null ? `, and ${member.name} has no retry letter left` : ` (${next})`));
   }
