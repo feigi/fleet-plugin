@@ -614,9 +614,13 @@ test("alarm: a file naming another checkout's .fleet/ is refused, through a syml
   }
 });
 
-test("alarm: a file whose path climbs out of a directory that does not exist is refused, though it lexically names this .fleet/", () => {
+test("alarm: a file whose path climbs out of a directory that does not exist, out of a file, or out of a symlink into another checkout, is refused, though it lexically names this .fleet/", () => {
   const f = fixture();
-  for (const fleet of [`${f.repo}/nope/../.fleet`, `${f.repo}/nope/../nope2/../.fleet`]) {
+  writeFileSync(join(f.repo, "afile"), "");
+  const other = join(f.dir, "other-checkout");
+  mkdirSync(other);
+  symlinkSync(other, join(f.repo, "hop"));
+  for (const fleet of [`${f.repo}/nope/../.fleet`, `${f.repo}/nope/../nope2/../.fleet`, `${f.repo}/afile/../.fleet`, `${f.repo}/hop/../.fleet`]) {
     f.alarm({ pid: OMP, lstart: "omp-start", fleet });
     const r = f.run();
     assert.equal(r.status, 3, `${fleet}: ${r.stdout}${r.err}`);
