@@ -1768,7 +1768,7 @@ test("(11) a sibling key whose checkout-path ends without a newline is read the 
 test("(11) a sibling key whose checkout is gone, the directory that held it on another device than the one recorded, is kept whole with the reason, however idle", (t) => {
   const f = siblingFixture(t);
   const checkout = f.gone("repo");
-  const key = f.key(checkout, { days: 0, content: `${checkout}\n${f.dev + 1n}\n` });
+  const key = f.key(checkout, { content: `${checkout}\n${f.dev + 1n}\n` });
   mkdirSync(join(key, "pr7", "run-1"), { recursive: true });
   writeFileSync(join(key, "pr7", "run-1", "review.json"), "x");
   f.age(key, 8);
@@ -1788,7 +1788,8 @@ test("(11) --siblings --apply writes the live key's checkout-path holding the wo
   const file = join(f.root, "checkout-path");
   const link = join(f.base, "route");
   symlinkSync(f.repo, link);
-  const right = `${realpathSync(f.repo)}\n${f.dev}\n`;
+  const canonical = realpathSync(f.repo);
+  const right = `${canonical}\n${f.dev}\n`;
 
   const dry = f.run(["--siblings", "--root", f.root]);
   assert.equal(dry.status, 0, dry.stderr);
@@ -1808,7 +1809,7 @@ test("(11) --siblings --apply writes the live key's checkout-path holding the wo
   assert.equal(lstatSync(file).mtimeMs, before, "a checkout file already right was rewritten");
 
   // Another path, another device, a path alone and a device alone each have it rewritten.
-  for (const stale of ["/somewhere/else\n", `${realpathSync(f.repo)}\n${f.dev + 1n}\n`, `${realpathSync(f.repo)}\n`, `/somewhere/else\n${f.dev}\n`]) {
+  for (const stale of ["/somewhere/else\n", `${canonical}\n${f.dev + 1n}\n`, `${canonical}\n`, `/somewhere/else\n${f.dev}\n`]) {
     writeFileSync(file, stale);
     const fixed = f.run(["--siblings", "--root", f.root, "--apply"]);
     assert.equal(fixed.status, 0, fixed.stderr);
