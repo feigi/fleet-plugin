@@ -120,6 +120,12 @@ function isSettledToken(word) {
   return t !== null && t.error === null && t.outcome !== null;
 }
 
+/** Every settled member token of a row's text, in the row's order, duplicates
+ * kept: the tokens a rewrite of the row must carry (settledMemberRefusal). */
+export function settledMemberTokens(text) {
+  return text.split(/\s+/).filter(isSettledToken);
+}
+
 /** The dispatch-prompt.mjs role a member of `family` is rendered as. */
 export function memberRole(family) {
   return FAMILIES[family].role;
@@ -529,7 +535,7 @@ export function gateVerdictRefusal(oldLine, line) {
  * own malformed-token check), so a row can still be repaired.
  */
 export function settledMemberRefusal(oldLine, line) {
-  const settled = (text) => (text === null ? [] : text.split(/\s+/).filter(isSettledToken));
+  const settled = (text) => (text === null ? [] : settledMemberTokens(text));
   const lost = added(settled(line), settled(oldLine))[0];
   if (lost === undefined) return null;
   return `drops settled member token '${lost}' — a rewrite must carry every settled member token as the row holds it; `
@@ -949,6 +955,31 @@ export function nextRetry(name, names) {
   const top = [name, ...names].map(parseMember).filter((m) => m !== null && m.family === family && m.number === number)
     .map((m) => m.retry ?? "a").sort().at(-1);
   return top === "z" ? null : `${family}-${number}-${String.fromCharCode(top.charCodeAt(0) + 1)}`;
+}
+
+/** Every name this omp session has used beyond `## Dispatched`: each member
+ * token on any row, live or settled, and each name `## Retired` holds
+ * (`retired`, read through readRetired().names). */
+export function sessionMemberNames(rows, retired) {
+  return [...rows.flatMap(memberTokens).map((t) => t.name), ...retired];
+}
+
+/** How `name` was already used this session, as `ledger.mjs dispatch` words it
+ * in its refusal, or undefined when no place holds it: a `## Dispatched`
+ * entry, a settled token on a row, or a `## Retired` line. `dispatched` is
+ * `## Dispatched` as its tokens. */
+export function priorUse(name, rows, dispatched, retired) {
+  const settledOnRow = rows.flatMap(memberTokens).find((t) => t.name === name && t.outcome !== null);
+  return dispatched.find((e) => parseToken(e).name === name) ??
+    (settledOnRow && `${settledOnRow.name}=${settledOnRow.outcome}`) ??
+    (retired.includes(name) ? "retired by rotate" : undefined);
+}
+
+/** The replacement name `ledger.mjs dispatch` spells out for `name`, one retry
+ * letter past the highest this session has used on its number wherever that
+ * name sits, or null when `-z` is used. */
+export function replacementName(name, rows, dispatched, retired) {
+  return nextRetry(name, [...dispatched.map((e) => parseToken(e).name), ...sessionMemberNames(rows, retired)]);
 }
 
 // An implementer cell is `<role>-<level>` — an omp role and a thinking

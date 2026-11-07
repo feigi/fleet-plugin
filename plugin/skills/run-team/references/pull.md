@@ -691,6 +691,22 @@ after a router refusal `next --head <N>` starts the ticket over; exit 3 is a
 usage mistake, or an answer the question does not take, and records nothing.
 The record is `<scratch>/impl-<N>/pull.json`.
 
+**The Pull's member is named before anything is claimed, and the claim keeps the
+pair.** The claim, the worktree and the branch always take the `impl-<N>` pair,
+because the claim belongs to the ticket; only the member that works it is
+named, from `ledger.mjs read`, the way `ledger.mjs dispatch` names a
+replacement. When this omp session has not used `impl-<N>` — not dispatched,
+not a settled token on a row, not under `## Retired` — the member is `impl-<N>`.
+When it has, the member is the next free name (`impl-<N>-b`, `-c`, …), and a
+replacement works in the same worktree and branch. A ticket whose retry letters
+are all used leaves the Pull, exit 1, with a reason saying so, before any claim.
+The row, the render's `--member`, `ledger.mjs dispatch`, the `DISPATCH` line's
+`name` and the Routing under `## Routed` all carry that name. A row rewrite
+carries the row's settled member tokens — `impl-<N>=released`, `=bailed`,
+`=PR#<M>` — ahead of the member, in row order, and drops the earlier `tier=` and
+`cell=` words; a `behind-*` answer writes `excluded · <token>` followed by the
+same tokens, so no rewrite drops one.
+
 ## No multi-select, no maintainer tick
 
 **No multi-select, no maintainer tick.** Selection and ordering are batched —
