@@ -617,15 +617,28 @@ test("alarm: a file naming another checkout's .fleet/ is refused, through a syml
 test("alarm: a file whose path climbs out of a directory that does not exist, out of a file, or out of a symlink into another checkout, is refused, though it lexically names this .fleet/", () => {
   const f = fixture();
   writeFileSync(join(f.repo, "afile"), "");
+  mkdirSync(join(f.repo, ".fleet"), { recursive: true });
+  writeFileSync(join(f.repo, ".fleet", "afile"), "");
   const other = join(f.dir, "other-checkout");
   mkdirSync(other);
   symlinkSync(other, join(f.repo, "hop"));
-  for (const fleet of [`${f.repo}/nope/../.fleet`, `${f.repo}/nope/../nope2/../.fleet`, `${f.repo}/afile/../.fleet`, `${f.repo}/hop/../.fleet`]) {
+  for (const fleet of [`${f.repo}/nope/../.fleet`, `${f.repo}/nope/../nope2/../.fleet`, `${f.repo}/afile/../.fleet`, `${f.repo}/hop/../.fleet`, `${f.repo}/.fleet/afile/..`]) {
     f.alarm({ pid: OMP, lstart: "omp-start", fleet });
     const r = f.run();
     assert.equal(r.status, 3, `${fleet}: ${r.stdout}${r.err}`);
     assert.match(r.stdout, /^phase0: alarm: failed — controller alarm file .* names fleet .* — restart omp$/m, fleet);
     assert.equal(f.receipt().steps.alarm.status, "failed");
+  }
+});
+
+test("alarm: a file spelling this .fleet/ as a directory of it climbed out of, or as dot, passes, and .FLEET is refused as another name", () => {
+  const f = fixture();
+  mkdirSync(join(f.repo, ".fleet", "adir"), { recursive: true });
+  for (const [fleet, status] of [[`${f.repo}/.FLEET`, 3], [`${f.repo}/.fleet/adir/..`, 0], [`${f.repo}/.fleet/.`, 0]]) {
+    f.alarm({ pid: OMP, lstart: "omp-start", fleet });
+    const r = f.run();
+    assert.equal(r.status, status, `${fleet}: ${r.stdout}${r.err}`);
+    assert.equal(f.receipt().steps.alarm.status, status === 0 ? "ok" : "failed", fleet);
   }
 });
 
