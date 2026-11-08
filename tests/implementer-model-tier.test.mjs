@@ -110,6 +110,20 @@ test("the dispatch section dispatches every implementer at its definition's tier
   );
 });
 
+// docs/components/implementer.md's dispatch step names the member too. The
+// Pull names it `impl-<N>` only when this session has not used that name, else
+// the next free retry name (`impl-<N>-b`, …), so the step dispatches under the
+// name the Pull printed, never a fixed `impl-<N>`.
+const IMPLEMENTER_DOC = Pin.file(join(import.meta.dirname, "..", "docs", "components", "implementer.md"));
+test("the implementer component doc dispatches under the name the Pull printed", () => {
+  const step = IMPLEMENTER_DOC.bullet("1. **Dispatch.**", "2. **Prompt carries only what varies**", "implementer doc dispatch step").text;
+  assert.match(
+    step,
+    Pin.phrase("dispatches in the background under the name the Pull printed"),
+    "docs/components/implementer.md no longer dispatches under the name the Pull printed, so a reader takes every member to be named `impl-<N>`",
+  );
+});
+
 // The rule is "omit `model`", so the paragraph that states it names no value
 // for `model` and no vendor model at all. The pins above assert the mechanism
 // is present and stay green beside an appended sentence that contradicts it —
