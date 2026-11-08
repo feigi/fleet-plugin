@@ -94,7 +94,7 @@
 import { spawnSync } from "node:child_process";
 import { statSync } from "node:fs";
 import { resolve } from "node:path";
-import { makeDie, defineFlags, writeAll } from "./arg.mjs";
+import { makeDie, defineFlags, writeAll, ghBudget } from "./arg.mjs";
 import { inertVerdict } from "./finisher-scope.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { LABEL_LIST_ARGS, LABEL_LIST_LIMIT, releaseLabelsDefined, releaseLabelsIn } from "./release-labels.mjs";
@@ -180,9 +180,16 @@ try {
 // GIT_DIR would retarget every call at another repository.
 const GH_ENV = gitEnv();
 
+// Each call is killed at GH_TIMEOUT_MS, so a `gh` that never answers fails its
+// step at exit 2, its `error` naming ETIMEDOUT, never a finisher that does not
+// return. 60 s: the longest read is `read-labels`, a PR view carrying every
+// comment on the PR. FINISHER_LABEL_GH_TIMEOUT can only shorten it (arg.mjs's
+// ghBudget()).
+const GH_TIMEOUT_MS = ghBudget(60, process.env.FINISHER_LABEL_GH_TIMEOUT);
+
 // stdout parsed, stderr captured: what `gh` said is the receipt's `error`.
 function gh(step, args) {
-  const r = spawnSync("gh", args, { encoding: "utf8", env: GH_ENV, stdio: ["ignore", "pipe", "pipe"], ...(repo === null ? {} : { cwd: repo }) });
+  const r = spawnSync("gh", args, { encoding: "utf8", env: GH_ENV, stdio: ["ignore", "pipe", "pipe"], timeout: GH_TIMEOUT_MS, ...(repo === null ? {} : { cwd: repo }) });
   if (r.error) fail(step, `could not run gh: ${r.error.message}`);
   if (r.signal) fail(step, `gh was killed by ${r.signal}`);
   if (r.status !== 0) fail(step, (r.stderr ?? "").trim() || `gh exited ${r.status}`);

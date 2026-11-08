@@ -294,6 +294,33 @@ test("CLI: a well-formed --pr value is accepted and the CLI succeeds", () => {
   assert.equal(payload.profile, "single-file");
 });
 
+// #4431: the PR read is bounded. The stub stalls before it answers a
+// single-file PR; under a 1 s DIFF_STATS_GH_TIMEOUT a read that lost its bound
+// waits 30 s out and sizes the PR at exit 0, which the refusal below is not.
+const runStalled = (seconds, budget) => {
+  const bin = mkdtempSync(join(tmpdir(), "diff-stats-bin-"));
+  writeExecStub(join(bin, "gh"), `#!/bin/sh\nsleep ${seconds} </dev/null >/dev/null 2>&1\necho '{"files":[{"path":"a.ts","additions":1,"deletions":0}],"changedFiles":1}'\n`);
+  const r = spawnSync(process.execPath, [SCRIPT, "--pr", "5"], {
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, DIFF_STATS_GH_TIMEOUT: budget },
+  });
+  rmSync(bin, { recursive: true, force: true });
+  return r;
+};
+
+test("CLI: a gh that never answers dies (exit 2) at the bound, naming ETIMEDOUT — never a measurement", () => {
+  const r = runStalled(30, "1");
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.equal(r.stdout.trim(), "");
+  assert.match(r.stderr, /^diff-stats: gh failed: ETIMEDOUT$/m);
+});
+
+test("CLI: a gh that answers slowly, inside the bound, is read as usual", () => {
+  const r = runStalled(2, "10");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(JSON.parse(r.stdout).profile, "single-file");
+});
+
 // #3494: `--repo` names the repository the PR is in, so the sizing reads the
 // worktree's PR rather than the same-numbered one in the caller's cwd. The gh
 // stub logs every call's args; an absent `--repo` must leave the invocation as

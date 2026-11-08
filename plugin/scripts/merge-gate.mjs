@@ -98,7 +98,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { makeDie, defineFlags, writeAll } from "./arg.mjs";
+import { makeDie, defineFlags, writeAll, ghBudget } from "./arg.mjs";
 import { gitEnv, mainCheckoutDirFromGitCommonDir } from "./git-env.mjs";
 import { readLabelMap } from "./label-map.mjs";
 
@@ -271,8 +271,15 @@ function readInstruments() {
 // --- gh pr view -----------------------------------------------------------
 // null for anything that is not the four fields in their gh shapes: a parse
 // that succeeds on the wrong shape must not reach a check that reads it.
+//
+// Killed at GH_TIMEOUT_MS, so a `gh` that never answers is a failed read like
+// any other — null, the gate's `pr-unreadable` — never a gate that does not
+// return. Joined to CHILD here rather than in it: the other children CHILD
+// serves are not `gh`. 30 s: one PR view. MERGE_GATE_GH_TIMEOUT can only
+// shorten it (arg.mjs's ghBudget()).
+const GH_TIMEOUT_MS = ghBudget(30, process.env.MERGE_GATE_GH_TIMEOUT);
 function readPr() {
-  const r = spawnSync("gh", ["pr", "view", String(pr), "--json", "labels,reviewDecision,headRefOid,body,url,closingIssuesReferences"], CHILD);
+  const r = spawnSync("gh", ["pr", "view", String(pr), "--json", "labels,reviewDecision,headRefOid,body,url,closingIssuesReferences"], { ...CHILD, timeout: GH_TIMEOUT_MS });
   if (r.error || r.status !== 0) return null;
   let v;
   try {

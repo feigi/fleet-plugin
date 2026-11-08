@@ -97,7 +97,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { makeDie, defineFlags } from "./arg.mjs";
+import { makeDie, defineFlags, ghBudget } from "./arg.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { isCLI } from "./is-cli.mjs";
@@ -118,6 +118,11 @@ export const BASELINE_CELL = "slow-high";
 export const MIN_N = 20;
 export const EXIT = { ok: 0, tripped: 3, none: 4 };
 export const GH_PR_LIMIT = 1000;
+// Each slice's `gh pr list` is killed after this long, so a `gh` that never
+// answers is a failed read — the die() in main(), naming ETIMEDOUT — never a
+// report that does not return. 120 s: one slice is up to GH_PR_LIMIT PRs.
+// PR_COST_GH_TIMEOUT can only shorten it (arg.mjs's ghBudget()).
+const GH_TIMEOUT_MS = ghBudget(120, process.env.PR_COST_GH_TIMEOUT);
 
 // A slice of the window that cannot be proven fully read.
 export class PrListIncomplete extends Error {}
@@ -441,7 +446,7 @@ function main() {
     try {
       out = execFileSync("gh", ["pr", "list", "--state", "all", "--search", `created:${created}`,
         "--limit", String(GH_PR_LIMIT), "--json", "number,state,mergedAt"], {
-        encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024, env: gitEnv(),
+        encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024, env: gitEnv(), timeout: GH_TIMEOUT_MS,
       });
     } catch (e) {
       die(`gh pr list failed: ${e.code ?? (e.signal ? `killed by ${e.signal}` : `exit ${e.status}`)}`);

@@ -38,9 +38,14 @@ const SCRIPT = fileURLToPath(new URL("../plugin/scripts/ci-state.mjs", import.me
 // resolves the repository by running git, so an ambient GIT_DIR or
 // GIT_WORK_TREE reaching it would answer for another repository — the stub
 // logs either one it receives, so a test can assert none ever does.
+//
+// `$GH_HANG`, set, names the call (`$1 $2`) that sleeps `$GH_HANG_S` seconds
+// before answering as usual — a GitHub that stalls — with its stdio off the
+// pipes, so the sleep holds none open once the script kills this shell.
 const GH_STUB = `#!/bin/sh
 [ -n "\${GIT_DIR+x}\${GIT_WORK_TREE+x}" ] && echo "ambient GIT_DIR=\${GIT_DIR-} GIT_WORK_TREE=\${GIT_WORK_TREE-}" >> "$GH_LOG"
 echo "$*" >> "$GH_LOG"
+[ -n "$GH_HANG" ] && [ "$1 $2" = "$GH_HANG" ] && sleep "$GH_HANG_S" </dev/null >/dev/null 2>&1
 fail() { [ -n "$GH_FAIL_MSG" ] && echo "$GH_FAIL_MSG" >&2; exit 1; }
 case "$1 $2" in
   "api graphql") case "$*" in *baseExpr=*) f="$BASE_READ_FILE" ;; *) f="$PR_READ_FILE" ;; esac
@@ -1928,4 +1933,38 @@ test("ci-state.mjs routes every outbound write through arg.mjs's writeAll(), wit
     /^writeAll\(1, `\$\{JSON\.stringify\(payload\)\}\\n`\);/m,
     "the verdict payload must go out through writeAll() on fd 1 — the write every pipe-buffer test above is about",
   );
+});
+
+// --- #4431: every gh read is bounded --------------------------------------
+// Each case stalls one gh call for 30 s under a 1 s CI_STATE_GH_TIMEOUT, so a
+// read that lost its bound waits the stall out, reads the stub's normal reply,
+// and passes as green — the assertions below fail on exactly that.
+const ciHang = (call, seconds = "30", budget = "1") => ({ GH_HANG: call, GH_HANG_S: seconds, CI_STATE_GH_TIMEOUT: budget });
+const GREEN_REPO = { ".github/workflows/ci.yml": CI_WORKFLOW };
+
+for (const call of ["repo view", "api graphql", "run list"]) {
+  test(`a gh ${call} that never answers dies at the bound, naming ETIMEDOUT — never a verdict`, () => {
+    const r = run([], { repoFiles: GREEN_REPO, spawnEnv: ciHang(call) });
+    assert.equal(r.status, 2, r.stderr);
+    assert.equal(r.payload, null, "a read that timed out printed a verdict");
+    assert.match(r.stderr, /gh failed: ETIMEDOUT/);
+  });
+}
+
+// The behind-count is the one read allowed to fail: a compare that timed out
+// is the documented unknown (null), never 0, which reads as "not behind".
+test("a behind-count compare that never answers is unknown at the bound, and the verdict stands", () => {
+  const r = run([], { repoFiles: GREEN_REPO, spawnEnv: ciHang("api --hostname") });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.payload.verdict, "green");
+  assert.equal(r.payload.behind, null);
+  assert.match(r.stderr, /gh failed: ETIMEDOUT/);
+});
+
+// What the bound must ACCEPT: a gh that answers slowly, inside it, is read.
+test("a slow gh that answers inside the bound is read as usual", () => {
+  const r = run([], { repoFiles: GREEN_REPO, spawnEnv: ciHang("run list", "2", "10") });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.payload.verdict, "green");
+  assert.doesNotMatch(r.stderr, /ETIMEDOUT/);
 });

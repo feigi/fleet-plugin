@@ -35,6 +35,7 @@ import { readReceipt } from "./phase0-receipt.mjs";
 import { RECEIPT, RECEIPT_HELD, CLOSEOUT_RECEIPT, OBJECTIVES, isOmpSessionDirName } from "./ledger-grammar.mjs";
 import { lastSegment } from "./pull-attribution.mjs";
 import { NAME, warnOnce, execRead } from "./board-common.mjs";
+import { ghBudget } from "./arg.mjs";
 import { mergedReadPrs, issuesOfPrs } from "./compute-board.mjs";
 import { readCostGuard } from "./fleet-tick.mjs";
 import { parseFrontmatter } from "./tier-roles.mjs";
@@ -77,11 +78,24 @@ function jsonKind(v) {
   return v === null ? "null" : Array.isArray(v) ? "array" : typeof v;
 }
 
+// The `gh` reads below pass this bound (readMainMetrics keeps its own), so a
+// `gh` that never answers is a failed read on that read's own path — tryRun's
+// null, readStates' `none` — never a gather that does not return. 30 s: the
+// lists are capped at a hundred rows (OPEN_PR_LIMIT, POOL_LIMIT).
+// BOARD_GH_TIMEOUT can only shorten it (arg.mjs's ghBudget()).
+const GH_TIMEOUT_MS = ghBudget(30, process.env.BOARD_GH_TIMEOUT);
+
 // Every external read is wrapped: a failure returns null and the caller keeps a
 // last-known value. Partial board beats a crashed loop or a false alarm.
-async function tryRun(cmd, args) {
-  const r = await execRead(cmd, args);
-  if (r.error) { console.error(`${NAME}: ${cmd} ${args.join(" ")} failed: ${r.error.message}`); return null; }
+// `opts` joins execRead's for this read; a read its `timeout` killed is named
+// as timed out, since the error's own message names only the command.
+async function tryRun(cmd, args, opts = {}) {
+  const r = await execRead(cmd, args, opts);
+  if (r.error) {
+    const why = opts.timeout !== undefined && r.error.killed && r.code === null ? `timed out after ${opts.timeout / 1000}s` : r.error.message;
+    console.error(`${NAME}: ${cmd} ${args.join(" ")} failed: ${why}`);
+    return null;
+  }
   return r.stdout;
 }
 
@@ -200,7 +214,7 @@ async function readStates(prNums, issueNums) {
     ...issueNums.map((n) => `i${n}:issue(number:${n}){state}`),
   ].join(" ");
   const r = await execRead("gh", ["api", "graphql", "-F", "owner={owner}", "-F", "name={repo}",
-    "-f", `query=query($owner:String!,$name:String!){repository(owner:$owner,name:$name){${fields}}}`]);
+    "-f", `query=query($owner:String!,$name:String!){repository(owner:$owner,name:$name){${fields}}}`], { timeout: GH_TIMEOUT_MS });
   let repo;
   try { repo = JSON.parse(r.stdout)?.data?.repository; } catch {}
   if (!isJsonObject(repo) || !prNums.some((n) => Object.prototype.hasOwnProperty.call(repo, `p${n}`))) {
@@ -1213,7 +1227,7 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, stateDir 
   }
 
   const issuesJson = roles === null ? null : await tryRun("gh", ["issue", "list", "--label", roles["ready-for-agent"],
-    "--state", "open", "--limit", String(POOL_LIMIT), "--json", "number,title,labels"]);
+    "--state", "open", "--limit", String(POOL_LIMIT), "--json", "number,title,labels"], { timeout: GH_TIMEOUT_MS });
   // title: falls back to the same `#<number>` placeholder titleFor() already
   // uses for an issue it cannot find at all (compute-board.mjs). An unrowed
   // issue becomes a POOL card straight from this array — compute-board.mjs's
@@ -1237,7 +1251,7 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, stateDir 
   }));
 
   const prsJson = await tryRun("gh", ["pr", "list", "--state", "open", "--limit", String(OPEN_PR_LIMIT),
-    "--json", "number,state,labels,title,headRefOid"]);
+    "--json", "number,state,labels,title,headRefOid"], { timeout: GH_TIMEOUT_MS });
   // No default for `title` or `state` here, unlike the issue row above — raw
   // passthrough, deliberately. `title`: compute-board.mjs's titleFor() already
   // falls through a falsy `pr.title` to the real issue title (`if (pr &&
@@ -1299,7 +1313,7 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, stateDir 
   // Repo identity + web URL for PR links — the url carries the host, so links
   // resolve on GitHub Enterprise, not just github.com. From the fleet's cwd, so
   // the board stays repo-agnostic. On failure, carry the previous board's values.
-  const repoJson = await tryRun("gh", ["repo", "view", "--json", "nameWithOwner,url"]);
+  const repoJson = await tryRun("gh", ["repo", "view", "--json", "nameWithOwner,url"], { timeout: GH_TIMEOUT_MS });
   let repo = prev?.repo ?? null;
   let repoUrl = prev?.repoUrl ?? null;
   if (repoJson) {

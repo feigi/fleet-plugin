@@ -13,7 +13,8 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync, utimesSync, readFileSync, symlinkSync, chmodSync, existsSync } from "node:fs";
 import { tempDir } from "./support/temp-dir.mjs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { spawnSync } from "node:child_process";
 import { mapCi, receiptSpendDir, gatherSpend, gather } from "../plugin/scripts/board-gather.mjs";
 import { RECEIPT } from "../plugin/scripts/ledger-grammar.mjs";
 import { computeBoard } from "../plugin/scripts/compute-board.mjs";
@@ -1519,4 +1520,74 @@ test("every gatherSpend return carries the tag the page routes on (#959)", () =>
   assert.equal(gatherSpend({ dir: fixture(TURN) }).ok, true);
   // And the one return that is deliberately NOT an object: nothing yet.
   assert.equal(gatherSpend({ dir: tempDir("spend-") }), null);
+});
+
+// #4431: every gh read gather() makes is bounded. BOARD_GH_TIMEOUT is read
+// when board-gather.mjs loads, so each gather runs in a child process of its
+// own with the override in its env. The stub stalls the call named by
+// GH_HANG for GH_HANG_S seconds before answering a board that has an issue in
+// the pool, no open PR, a row PR that merged, and a repository; under a 1 s
+// bound a read that lost its bound waits the stall out and reads that answer,
+// which each case below refutes.
+const GATHER_URL = pathToFileURL(GATHER).href;
+function gatherStalled(hang, seconds, budget) {
+  const cwd = seededRepo("board-gather-bound-");
+  const bin = tempDir("board-gather-bound-bin-");
+  const scriptDir = tempDir("board-gather-bound-scripts-");
+  writeFileSync(join(scriptDir, "ci-state.mjs"), "process.stdout.write('{}');\n");
+  writeFileSync(join(scriptDir, "ledger.mjs"),
+    `process.stdout.write(${JSON.stringify(JSON.stringify({ rows: ["#907 impl-907=PR#940"], filed: [], ruled: [] }))});\n`);
+  writeExecStub(join(bin, "gh"), `#!/usr/bin/env node
+const a = process.argv.slice(2);
+if (a.slice(0, 2).join(" ") === process.env.GH_HANG) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(process.env.GH_HANG_S) * 1000);
+const out = (v) => process.stdout.write(JSON.stringify(v));
+if (a[0] === "issue" && a[1] === "list") out([{ number: 7, title: "t", labels: [] }]);
+else if (a[0] === "pr" && a[1] === "list") out([]);
+else if (a[0] === "api" && a[1] === "graphql") out({ data: { repository: { p940: { number: 940, state: "MERGED" } } } });
+else if (a[0] === "repo" && a[1] === "view") out({ nameWithOwner: "acme/repo", url: "https://github.com/acme/repo" });
+else process.exit(1);
+`);
+  const driver = `import { gather } from ${JSON.stringify(GATHER_URL)};
+const r = await gather({ ledgerFile: ${JSON.stringify(join(cwd, "ledger.md"))}, prevFile: null, scriptDir: ${JSON.stringify(scriptDir)}, interval: 15, spendDir: null, cwd: ${JSON.stringify(cwd)} });
+process.stdout.write(JSON.stringify({ poolOk: r.poolOk, issues: r.issues.map((i) => i.number), prsOk: r.prsOk, merged: r.merged, repo: r.repo }));`;
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", driver], {
+    cwd, encoding: "utf8",
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GH_HANG: hang, GH_HANG_S: String(seconds), BOARD_GH_TIMEOUT: String(budget) },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  return { ...JSON.parse(r.stdout), stderr: r.stderr };
+}
+
+test("#4431: a gh issue list that never answers is an unread pool at the bound, never an empty one", () => {
+  const r = gatherStalled("issue list", 30, 1);
+  assert.equal(r.poolOk, false);
+  assert.deepEqual(r.issues, []);
+  assert.match(r.stderr, /board: gh issue list .* failed: timed out after 1s/);
+});
+
+test("#4431: a gh pr list that never answers is an unread PR list at the bound", () => {
+  const r = gatherStalled("pr list", 30, 1);
+  assert.equal(r.prsOk, false);
+  assert.match(r.stderr, /board: gh pr list .* failed: timed out after 1s/);
+});
+
+test("#4431: a merged read that never answers merges nothing at the bound", () => {
+  const r = gatherStalled("api graphql", 30, 1);
+  assert.deepEqual(r.merged, []);
+  assert.match(r.stderr, /merged read \(1 PR\) failed \(killed by SIGTERM\)/);
+});
+
+test("#4431: a gh repo view that never answers leaves the repository unknown at the bound", () => {
+  const r = gatherStalled("repo view", 30, 1);
+  assert.equal(r.repo, null);
+  assert.match(r.stderr, /board: gh repo view .* failed: timed out after 1s/);
+});
+
+test("#4431: a gh that answers slowly, inside the bound, is read as usual", () => {
+  const r = gatherStalled("api graphql", 2, 10);
+  assert.deepEqual(r.merged, [940]);
+  assert.equal(r.poolOk, true);
+  assert.deepEqual(r.issues, [7]);
+  assert.equal(r.repo, "acme/repo");
+  assert.doesNotMatch(r.stderr, /timed out|SIGTERM/);
 });

@@ -43,7 +43,7 @@
 
 import { execFileSync } from "node:child_process";
 import { parseArgs } from "node:util";
-import { makeDie, makeArg, makeHas } from "./arg.mjs";
+import { makeDie, makeArg, makeHas, ghBudget } from "./arg.mjs";
 import { LABEL_ROLES, readLabelMap } from "./label-map.mjs";
 
 const NAME = "candidates";
@@ -70,6 +70,12 @@ const withDropped = has("with-dropped");
 // the fleet and nothing said so.
 const limit = Number(arg("limit") ?? 500);
 if (!Number.isInteger(limit) || limit < 1) die(`--limit must be a positive integer, got '${arg("limit")}'`);
+
+// The issue read below is killed after this long, so a `gh` that never answers
+// is a failed query — the die() below, naming ETIMEDOUT — never a caller left
+// waiting. 60 s: it is one read, but of up to `limit` issues with their whole
+// bodies. CANDIDATES_GH_TIMEOUT can only shorten it (arg.mjs's ghBudget()).
+const GH_TIMEOUT_MS = ghBudget(60, process.env.CANDIDATES_GH_TIMEOUT);
 
 // The accepted flag set, declared once, and the only check on flag NAMES.
 // Before this check, an unrecognised flag was ignored, so
@@ -460,7 +466,7 @@ function query(label) {
   console.error(`$ gh ${args.join(" ")}`);
   let out;
   try {
-    out = execFileSync("gh", args, { encoding: "utf8" });
+    out = execFileSync("gh", args, { encoding: "utf8", timeout: GH_TIMEOUT_MS });
   } catch (e) {
     // Fail closed. A failed query and an empty queue are different facts, and
     // only one of them means "there is no work".

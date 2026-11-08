@@ -6,7 +6,8 @@
 // the exit code. The stub answers from files in its own directory, keyed by
 // call: `pr-view-N.out` is the Nth `gh pr view`, and `<key>.fail` makes that
 // call print its text on stderr and exit 1. A call with no file answers an
-// empty success.
+// empty success. `<key>.hang` holds a number of seconds that call sleeps first,
+// with its stdio off the pipes — a GitHub that stalls.
 //
 // Each case holds every input at the baseline except the one under test, so
 // removing a check reds the case named after it.
@@ -57,6 +58,7 @@ case "$1 $2" in
 "label list") key=label-list ;;
 *) echo "stub gh: unexpected $*" >&2; exit 99 ;;
 esac
+if [ -f "$d/$key.hang" ]; then sleep "$(cat "$d/$key.hang")" </dev/null >/dev/null 2>&1; fi
 if [ -f "$d/$key.fail" ]; then cat "$d/$key.fail" >&2; exit 1; fi
 if [ -f "$d/$key.out" ]; then cat "$d/$key.out"; fi
 exit 0
@@ -77,12 +79,12 @@ function git(cwd, ...args) {
 // A rig for one case: a fresh stub directory and a repository the script runs
 // in (`repo`), holding the run ledger (`rows` are its rows), the Label map
 // (`roles` merged over the identity map; null for no map) and an
-// `origin/main` to take a pin's merge base against. `outs` and `fails` are
-// keyed by the stub's call keys. The baseline is a ticket PR with one release
+// `origin/main` to take a pin's merge base against. `outs`, `fails` and
+// `hangs` are keyed by the stub's call keys. The baseline is a ticket PR with one release
 // label, a `--kill` claim, and a read-back that carries the label.
 // `commit(files)` makes a commit holding `files` (path → text) on top of
 // origin/main and answers its SHA, the pin of a case about the diff.
-function rig({ outs = {}, fails = {}, closes = [5], rows = [], roles = {} } = {}) {
+function rig({ outs = {}, fails = {}, hangs = {}, closes = [5], rows = [], roles = {} } = {}) {
   const dir = tempDir("finisher-label-");
   const bin = join(dir, "bin");
   mkdirSync(bin);
@@ -104,6 +106,7 @@ function rig({ outs = {}, fails = {}, closes = [5], rows = [], roles = {} } = {}
     ...outs,
   };
   for (const [k, v] of Object.entries(all)) writeFileSync(join(bin, `${k}.out`), v);
+  for (const [k, v] of Object.entries(hangs)) writeFileSync(join(bin, `${k}.hang`), String(v));
   for (const [k, v] of Object.entries(fails)) writeFileSync(join(bin, `${k}.fail`), v);
   const log = (name) => (existsSync(join(bin, name)) ? readFileSync(join(bin, name), "utf8") : "");
   const lines = (name) => log(name).trim().split("\n").filter(Boolean);
@@ -167,6 +170,29 @@ test("exit 0: one release label, the head recorded, the label added and read bac
     exit: 0,
     firstRead: ["patch", "bug"],
   });
+});
+
+// --- #4431: every gh call is bounded -------------------------------------------
+// The first labelling read stalls 30 s under a 1 s FINISHER_LABEL_GH_TIMEOUT,
+// so a call that lost its bound waits the stall out and labels the PR at exit
+// 0 — the run below refuses at the bound with nothing past the read.
+const ghBound = (seconds) => ({ env: { FINISHER_LABEL_GH_TIMEOUT: String(seconds) } });
+
+test("exit 2: a gh that never answers fails its step at the bound, naming ETIMEDOUT, and nothing past it runs", () => {
+  const t = rig({ hangs: { "pr-view-1": 30 } });
+  const r = t.run(undefined, ghBound(1));
+  assert.equal(r.status, 2, r.stderr);
+  assert.equal(r.out.step, "read-labels");
+  assert.match(r.out.error, /ETIMEDOUT/);
+  assert.equal(r.out.added, false);
+  assert.deepEqual(t.calls(), [VIEW]);
+});
+
+test("exit 0: a slow gh that answers inside the bound is read as usual", () => {
+  const t = rig({ hangs: { "pr-view-1": 2 } });
+  const r = t.run(undefined, ghBound(10));
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(t.calls(), [VIEW, COMMENT, EDIT, BACK]);
 });
 
 // --- the Label map -----------------------------------------------------------
