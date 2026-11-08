@@ -1,0 +1,128 @@
+{
+ "head": "02546334a7135ae8c7bcc49eda44edfc282f4ff4",
+ "run": "run-LBvAYeOQ",
+ "entries": [
+  {
+   "bucket": "unverified",
+   "index": 0,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "reason": "refuted: fail-safe keep; only a hand-written non-canonical file reaches it, and the BigInt remedy measured as adding a removal",
+   "issue": 4425,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4420/fix-UqXqcVAE/U0/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 1,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "reason": "refuted: the ticket's ruled design; a checkout that was its own mount is gone only once unmounted, and is kept",
+   "issue": 4425,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4420/fix-UqXqcVAE/U1/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 2,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "reason": "refuted: the reason wording is the ticket's and test-pinned; renumbering is an accepted, documented limit",
+   "issue": 4425,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4420/fix-UqXqcVAE/U2/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 3,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "reason": "refuted: probe showed a symlinked held dir keeps a drive-recorded key; the ticket specifies lstat's dev",
+   "issue": 4425,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4420/fix-UqXqcVAE/U3/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 4,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "reason": "survived: the claim holds and its remedy is no change, so applying it edits nothing",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4420/fix-UqXqcVAE/U4/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 5,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "defer",
+   "reason": "refuted: the ticket rules the sentence ends the Status paragraph",
+   "issue": 4425,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4420/fix-UqXqcVAE/U5/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 6,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "reason": "refuted: the statements carry the ticket's measurement and re-measured as written; a citation breaks the ticket's docs rule",
+   "issue": 4425,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4420/fix-UqXqcVAE/U6/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 7,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "reason": "refuted: same claim as unverified[0]; fail-safe, writer emits only canonical decimals",
+   "issue": 4425,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4420/fix-UqXqcVAE/U7/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 8,
+   "scope": "out",
+   "claimKind": "shape",
+   "disposition": "defer",
+   "reason": "out of scope, below the claim bar: a result-shape refactor separate from the ticket; correct today",
+   "issue": 4425
+  },
+  {
+   "bucket": "unverified",
+   "index": 9,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "defer",
+   "reason": "refuted: behaviour-neutral swap, no clearer than the length test it replaces",
+   "issue": 4425,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4420/fix-UqXqcVAE/U9/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 10,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "reason": "survived: days: 0 is overwritten by f.age(key, 8); dropped",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4420/fix-UqXqcVAE/U10/verdict.json",
+   "remedyFiles": [
+    "tests/reclaim-scratch.test.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 11,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "reason": "survived: realpathSync(f.repo) computed once as canonical",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4420/fix-UqXqcVAE/U11/verdict.json",
+   "remedyFiles": [
+    "tests/reclaim-scratch.test.mjs"
+   ]
+  }
+ ]
+}

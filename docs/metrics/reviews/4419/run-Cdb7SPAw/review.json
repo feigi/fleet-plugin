@@ -1,0 +1,133 @@
+{
+  "pr": 4419,
+  "head": "e5d5da38b37b16038a9a4a0d76debd5d9f77a26e",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "tests",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv' (not touched by me; I only ran git status there; likely controller/other agents' metrics writes)."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv` (this review never wrote to that tree: every write went to my scratch dir under correctness/)"
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I never wrote to that checkout, so these two files were changed by something else (metrics, likely another agent)."
+    }
+  ],
+  "counts": {
+    "survived": 1,
+    "refuted": 0,
+    "unverified": 6,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4419/run-Cdb7SPAw/snapshot-e5d5da38",
+  "survived": [
+    {
+      "severity": "important",
+      "claim": "PR body: says 'three tests in tests/ledger-row-review.test.mjs', but the diff adds exactly two tests.",
+      "evidence": "The diff has 2 added `test(` calls: 'review settling an open launch =failed alone never reads the fold…' and 'review's refusal names every live member on the PR…'. The body's two bullets also describe only these two, and the third `test(` in the hunk's context is pre-existing. The one added `const FOLD_REFUSED` is a fixture, not a test.",
+      "suggested_fix": "Change the body to 'two tests' (or add the missing third test if the ticket wanted one).",
+      "dimension": "comments",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "I read the diff with grep. It has one hunk in tests/ledger-row-review.test.mjs, and that hunk adds exactly two `test(` lines: 'review settling an open launch =failed alone never reads the fold...' and 'review's refusal names every live member...'. Line 4 of pr-messages.md says 'three tests in tests/ledger-row-review.test.mjs', and line 9 says 'each of the three mutants ... turned one of the new tests red'. The body's own bullets describe only two tests. The claim is true as stated. I did not run the suite, because the claim is about the PR body text and the diff. The bash tool failed with an extension error on every call, so I made no measuring copy. CWD-AUDIT: not run (bash unavailable); I changed no files."
+        },
+        {
+          "refuted": false,
+          "reason": "Read pr.diff (31 lines, one file) and pr-messages.md. Body line 3 says 'three tests in tests/ledger-row-review.test.mjs'. The diff adds exactly two `test(` calls (lines 13 and 21); the third `test(` at line 27 is a context line, not added. The body's two bullets describe only those two, and the commit message adds no third test. The body's other 'three' refers to three mutants, not tests. Nothing elsewhere in the diff or messages handles or explains the discrepancy, so the count claim is wrong as stated. I ran no test suite: the claim is about text, and text checks settle it. Bash tool was broken, so I used eval/python. CWD-AUDIT: not run (bash failed with an extension error; cwd /Users/chris/dev/fleet-plugin was only printed, nothing was written there)."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "tests/ledger-row-review.test.mjs",
+      "line": 706,
+      "claim": "The two-live-members test is titled 'settle hint names the first in the fold's order', but its row lists fix-pr-482 before finisher-pr-482, so the fold's order and the row's order are the same; a mutant that orders the live members by where they sit on the row survives every review/ledger test.",
+      "evidence": "Mutated a copy of ledger.mjs:3377 to `const live = (st?.openLaunch ? liveFixers(st, fold.members) : []).sort((x, y) => line.indexOf(x) - line.indexOf(y));`. Running `node --test tests/ledger-row-review.test.mjs tests/ledger.test.mjs tests/ledger-dispatch.test.mjs` gave `tests 396, pass 396, fail 0`. Probe on the row `#1 impl-1=PR#482 → PR#482 · finisher-pr-482 · fix-pr-482`: the unmutated snapshot prints `fix-pr-482, finisher-pr-482 is still live … settle fix-pr-482 <outcome>` (fold order), and the mutant prints `finisher-pr-482, fix-pr-482 … settle finisher-pr-482 <outcome>`. All three ticket mutants still die (see the next finding), so the ticket's acceptance criteria are met; this gap only concerns what the test's title claims.",
+      "suggested_fix": "Seed the two-members row as `#1 ${IMPL} · finisher-pr-482 · fix-pr-482` (the assertions stay the same), so the test pins the fold's order and not the order on the row. Or reword the title so it does not claim fold order.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "Each of the ticket's three mutants, plus a fourth that swaps the fold's order, turns exactly one new test red; unchanged code is green. No logic error was found in the new tests.",
+      "evidence": "In correctness/copy, `node --test tests/ledger-row-review.test.mjs` with each mutant applied alone: M1 (drop `&& !tok.endsWith(\"=failed\")` at ledger.mjs:3374) → fail 1, 'review settling an open launch =failed alone never reads the fold…'. M2 (`${live.join(\", \")}` → `${live[0]}`) → fail 1, 'review's refusal names every live member…'. M3 (`settle ${live[0]}` → `settle ${live[live.length - 1]}`) → fail 1, same test. M4 (fleet-tick.mjs:1066 `[...st.finishers, ...st.fixMembers]`) → fail 1, same test. Control run (narrowed to the new tests) → pass 3, fail 0. The probe confirms the fixture is refused for the reason the test claims: for `[A=failed, B]` on the seeded row, stderr is `'review=bogus' is not review=wf:<runId> | member:review-pr-<n>, optionally =failed — fleet-tick.mjs refuses this ledger … nothing written` (exit 2). The same call without review=bogus gives `fix-pr-482 is still live on PR #482` (exit 2). So the test's /fleet-tick\\.mjs refuses this ledger/ regex does tell the fold refusal apart from the live-member refusal.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The PR body says 'three tests in tests/ledger-row-review.test.mjs', but the diff adds two `test(...)` blocks: the ticket's 'fold really refuses' criterion is an assertion inside the =failed-settle test, not a test of its own.",
+      "evidence": "Read pr.diff: it contains exactly two added `test(` calls (\"review settling an open launch =failed alone never reads the fold…\" and \"review's refusal names every live member on the PR…\") and one added const, FOLD_REFUSED. test-run.log lines 4615-4616 show those two tests and no others from this PR.",
+      "suggested_fix": "Change 'three tests' to 'two tests' in the PR body. No code change is needed.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/ledger-row-review.test.mjs",
+      "line": 693,
+      "claim": "Both new tests discriminate. The 'never reads the fold' test fails when the fold guard is removed or the `=failed` exclusion is dropped. The 'names every live member / first in fold order' test fails when the settle hint picks the wrong member or the member list order changes. Neither fails on the unrelated mutation.",
+      "evidence": "red: ./agent-test tests/ledger-row-review.test.mjs (guard → `if (true)`) → exit 1, fail 1 incl 'review settling an open launch =failed alone never reads the fold: it writes on a ledger the tick refuses'; baseline: same cmd → exit 0, tests 60 pass 60, that test pass. Dropping `&& !tok.endsWith(\"=failed\")` gives the same red on the same test. red: same cmd (hint `live[0]` → `live[live.length-1]`) → exit 1, fail 1 incl 'review's refusal names every live member on the PR, and its settle hint names the first in the fold's order'; baseline: same cmd → exit 0, that test pass. Reversing the join order gives the same red on the same test. Negative control: `if (false)` (never fold) → exit 1, fail 5. The failures are the 3 pre-existing refusal tests plus both new tests. The 'only fails on its own mutation' discrimination is therefore shown by the first four mutants, each failing exactly 1 test. The new tests do not go red for an unrelated reason.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body: the 'each of the three mutants … turned one of the new tests red' claim cannot be true as worded if only two tests exist, so three mutants cannot each turn a distinct new test red.",
+      "evidence": "Diff adds two tests. The ticket's mutants were not run or available to me, so this is unverified.",
+      "suggested_fix": "State which tests each mutant failed, or correct the mutant count.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The other added comments and body claims match the code: the =failed-only call skips the fold, the refusal text 'fleet-tick.mjs refuses this ledger … nothing written' exists, refusals leave the ledger byte-identical, and the settle hint names live[0].",
+      "evidence": "ledger.mjs lines 3369-3382: the fold is read only if some token starts with `review=` and does not end in `=failed`; the die messages match the test regexes; refusedCall asserts byte-identical. The PR body's 'no change to ledger.mjs/fleet-tick.mjs' matches the diff, which touches only the test file.",
+      "suggested_fix": "None.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

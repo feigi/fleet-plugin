@@ -1,0 +1,166 @@
+{
+ "head": "3842e8f79488c124c0bec9ad777b8a63bc6b6087",
+ "run": "run-bWJDBLYu",
+ "entries": [
+  {
+   "bucket": "unverified",
+   "index": 0,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "reason": "refuter returned refuted=true: line 375 is unreachable today (20 ticket values logged, none `<ticket>`; deleting it leaves 135/135) but it enforces the header's stated ticket rule, and the cluster ruling keeps it; recorded on the suggestion-band record",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4421/fix-hnJ7nbRP/u0/verdict.json",
+   "remedyFiles": [
+    "plugin/scripts/dispatch-prompt.mjs"
+   ],
+   "issue": 4427
+  },
+  {
+   "bucket": "unverified",
+   "index": 1,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "reason": "refuter returned refuted=true: the EXIT line is a compressed list item and every remaining refusal is a leftover in the script's own vocabulary; recorded on the suggestion-band record",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4421/fix-hnJ7nbRP/u1/verdict.json",
+   "remedyFiles": [
+    "plugin/scripts/dispatch-prompt.mjs"
+   ],
+   "issue": 4427
+  },
+  {
+   "bucket": "unverified",
+   "index": 2,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "reason": "refuter returned refuted=false: the carry test stayed green with the ticket moved off its sentence; the anchored assertion now goes red on that mutant and stays green on an edit elsewhere in the template (applied)",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4421/fix-hnJ7nbRP/u2/verdict.json",
+   "remedyFiles": [
+    "tests/dispatch-prompt.test.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 3,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "reason": "refuter returned refuted=false: M1/M2/M3 each reddened the named test against a green baseline; the finding states the change is correct and suggests no fix, so applying it changes nothing",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4421/fix-hnJ7nbRP/u3/verdict.json",
+   "remedyFiles": []
+  },
+  {
+   "bucket": "unverified",
+   "index": 4,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "reason": "refuter returned refuted=false: diff touches only the ticket's files, no `\u2039` or defang under plugin/; the finding suggests no fix, so applying it changes nothing",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4421/fix-hnJ7nbRP/u4/verdict.json",
+   "remedyFiles": []
+  },
+  {
+   "bucket": "unverified",
+   "index": 5,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "reason": "refuter returned refuted=true: dead-code facts hold but deletion is rejected by the cluster ruling (unverified[0]); recorded on the suggestion-band record",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4421/fix-hnJ7nbRP/u5/verdict.json",
+   "remedyFiles": [
+    "plugin/scripts/dispatch-prompt.mjs"
+   ],
+   "issue": 4427
+  },
+  {
+   "bucket": "unverified",
+   "index": 6,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "reason": "refuter returned refuted=true: the message wording predates the PR, matches the identifier branch and is pinned by a test; cosmetic; recorded on the suggestion-band record",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4421/fix-hnJ7nbRP/u6/verdict.json",
+   "remedyFiles": [
+    "plugin/scripts/dispatch-prompt.mjs",
+    "tests/dispatch-prompt.test.mjs"
+   ],
+   "issue": 4427
+  },
+  {
+   "bucket": "unverified",
+   "index": 7,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "reason": "refuter returned refuted=false: an unreadable template still refuses loudly in the renderer, pull.mjs stops on its non-zero status, no new catch or fallback; the finding suggests no fix, so applying it changes nothing",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4421/fix-hnJ7nbRP/u7/verdict.json",
+   "remedyFiles": []
+  },
+  {
+   "bucket": "unverified",
+   "index": 8,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "reason": "refuter returned refuted=true: the surviving mutant reproduces but deletion is rejected by the cluster ruling (unverified[0]) and no test can reach the check; recorded on the suggestion-band record",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4421/fix-hnJ7nbRP/u8/verdict.json",
+   "remedyFiles": [
+    "plugin/scripts/dispatch-prompt.mjs"
+   ],
+   "issue": 4427
+  },
+  {
+   "bucket": "unverified",
+   "index": 9,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "reason": "refuter returned refuted=false: literal spellings and arguments the kind does not use are accepted in an identifier value; THE LEFTOVER CHECK header now says 'any placeholder this brief fills' (applied, PR body reconciled)",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4421/fix-hnJ7nbRP/u9/verdict.json",
+   "remedyFiles": [
+    "plugin/scripts/dispatch-prompt.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 10,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "reason": "refuter returned refuted=true: reproducible only by a deliberate template edit, no real template marks pr/scratch/worktree free, and no regression; recorded on the suggestion-band record",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4421/fix-hnJ7nbRP/u10/verdict.json",
+   "remedyFiles": [
+    "plugin/scripts/dispatch-prompt.mjs",
+    "tests/dispatch-prompt.test.mjs"
+   ],
+   "issue": 4427
+  },
+  {
+   "bucket": "unverified",
+   "index": 11,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "reason": "refuter returned refuted=true: probe facts hold but its header rewrite and inlining contradict the PR's stated ticket rule; rejected by the cluster ruling (unverified[0]); recorded on the suggestion-band record",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4421/fix-hnJ7nbRP/u11/verdict.json",
+   "remedyFiles": [
+    "plugin/scripts/dispatch-prompt.mjs"
+   ],
+   "issue": 4427
+  },
+  {
+   "bucket": "unverified",
+   "index": 12,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "defer",
+   "reason": "refuter returned refuted=true: conditional on keeping the check, a pure refactor with no behaviour gain; rejected by the cluster ruling (unverified[0]); recorded on the suggestion-band record",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4421/fix-hnJ7nbRP/u12/verdict.json",
+   "remedyFiles": [
+    "plugin/scripts/dispatch-prompt.mjs"
+   ],
+   "issue": 4427
+  }
+ ]
+}

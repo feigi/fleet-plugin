@@ -1,0 +1,128 @@
+{
+  "pr": 4411,
+  "head": "12baab0134626a8982ed7cb6a0c431c7ba0cdd22",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": false,
+    "reason": "`./agent-test` produced no counts — the shared test run crashed, hit its deadline, or printed no summary (The suite never launched. Every bash call (two runs of the exact block, plus one tail of the log) failed before executing, with: 'Extension /Users/chris/.omp/plugins/node_modules/@xynogen/pix-optimizer/src/index.ts failed: undefined is not an object (evaluating ctx.ui.theme.fg)'. The read tool reports test-run.log at /Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4411/run-nTj1T7vR/ as not found, so the redirect never opened and no TEST_RUN_EXIT or summary was produced. No counts are reported. The bash tool needs its pix-optimizer extension fixed before the run can be dispatched again.) — a failed run, not a pass"
+  },
+  "dimensionsRun": [
+    "correctness",
+    "tests",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "comments",
+      "state": "missing",
+      "line": null
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv' (I never wrote to this tree; my writes went only to the copy's plugin/scripts/phase0.mjs, which I restored)"
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv' (not touched by me: I only ran read-only commands there; those are other agents' metrics files)"
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 7,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4411/run-nTj1T7vR/snapshot-12baab01",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "tests/phase0.test.mjs",
+      "line": 567,
+      "claim": "No logic error found: both new tests pass on the unmutated tree and each kills the mutant the ticket names (G kills only test 14, H kills only test 15), so the PR does what #4405 asks.",
+      "evidence": "Narrowed run in the measuring copy (`node --test --test-reporter=tap --test-name-pattern='^alarm:' tests/phase0.test.mjs`). Unmutated: exit 0, tests 18, pass 18. G (`fleetIdentity(rec.fleet) !== fleetDir`): exit 1, fail 1, 'not ok 14 - alarm: phase 0's own .fleet/ spelled through a symlink…'. H (`return realpathSync(dirname(path))`): exit 1, fail 1, 'not ok 15 - alarm: a file naming another directory of this checkout is refused…'. Controls: Gb (`rec.fleet !== fleetIdentity(fleetDir)`) fails test 13. K (`return realpathSync(path)`) fails tests 13 and 14. Whole file: exit 0, tests 114, pass 114.",
+      "suggested_fix": "None needed.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/phase0.test.mjs",
+      "line": 572,
+      "claim": "Test 14 depends on git printing an absolute GIT_COMMON_DIR exactly as spelled. The test checks this itself: its output assertion `join(link, \".fleet\")` fails if git ever canonicalises the path, so the test can go red but can never pass without testing anything. I measured this only on Apple Git 2.54.0, not on CI's Linux git.",
+      "evidence": "Test 14 passed on git 2.54.0 (Apple Git-157), with its receipt output equal to `controller alarm armed: pid …, <link>/.fleet`, so fleetDir was spelled through the link. Mutant G turned that test red, so the non-canonical side was really exercised. Linux git was not run.",
+      "suggested_fix": "None required. If CI on another git version ever fails here, the output assertion is the place to look.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/phase0.test.mjs",
+      "line": 583,
+      "claim": "The refusal half of test 14 checks the exit code and the stdout line but not `receipt().steps.alarm.status === \"failed\"`, which test 15 and the existing test 16 both check. This is a small inconsistency, not a correctness gap, because exit 3 plus the `alarm: failed` line already pin the refusal.",
+      "evidence": "Read tests/phase0.test.mjs:583-585 against :596-598 and :611-613 in the snapshot. No mutant was built that this omission would let survive.",
+      "suggested_fix": "Optionally add `assert.equal(f.receipt().steps.alarm.status, \"failed\");` after line 585 so it matches its neighbours.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "No scope creep: the diff adds only two tests to tests/phase0.test.mjs and changes no production code, fixture helpers or other tests, which matches the ticket's 'Candidate remedy'.",
+      "evidence": "Read pr.diff whole (46 lines): it has one `diff --git` header (tests/phase0.test.mjs), one hunk `@@ -564,6 +564,41 @@`, and every changed line is an addition.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/phase0.test.mjs",
+      "line": 567,
+      "claim": "Both new tests discriminate: the symlinked-own-spelling test is killed by dropping realpath and by basename-only, and the other-directory test is killed by dropping basename or by prefix matching, each uniquely.",
+      "evidence": "red: ./agent-test tests/phase0.test.mjs (mutant: fleetIdentity returns path) → exit 1, fail 2 incl alarm: phase 0's own .fleet/ spelled through a symlink is the same .fleet/ as the file's real spelling…; baseline: ./agent-test tests/phase0.test.mjs → exit 0, tests 114, pass 114 (full-suite runs, narrowing unprovable). red: same cmd (mutant: basename-only) → exit 1, fail 3 incl the same new test. red: same cmd (mutant: realpath(dirname) without basename) → exit 1, fail 1 incl alarm: a file naming another directory of this checkout is refused, through a symlink or not. red: same cmd (mutant: startsWith instead of !==) → exit 1, fail 1 incl the same test.",
+      "suggested_fix": "None needed.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body and commit 12baab01: the statements that each new test 'fails under its mutant' (fleetIdentity with no realpath, fleetIdentity dropping the .fleet basename, and the compare) are unverified. I could not run any mutation in this review.",
+      "evidence": "I read the code and the tests. fleetIdentity (phase0.mjs:606-610) canonicalises with join(realpathSync(dirname(path)), basename(path)). The compare is at phase0.mjs:650. The new test cases are consistent with those mutants: GIT_COMMON_DIR through the link gives a non-canonical fleetDir, and `fleet`/`other` paths differ in basename or directory. Bash was broken, so no mutant was executed. The '114 of 114' count agrees with the static count (79 top-level tests plus 35 REFUSALS entries = 114), but that is a count of tests, not a pass result.",
+      "suggested_fix": "Have the main agent run the two new tests against the two mutants in its own copy to confirm the claim.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The comment at tests/phase0.test.mjs:571, 'An absolute GIT_COMMON_DIR is the way git answers `--git-common-dir` as spelled, so phase 0 derives its own `.fleet/` through the link', is plausible but not shown by any run in this review.",
+      "evidence": "Static read only. fleetDir comes from fleetFile(null) at phase0.mjs:745. GIT_ENV scrubs only GIT_DIR, GIT_WORK_TREE and GH_REPO (tests lines 34-37), so GIT_COMMON_DIR reaches the child. The test's own assertion at line 578, that the output is `join(link, \".fleet\")`, would fail if the claim were wrong.",
+      "suggested_fix": "No change needed if the full file run is green.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

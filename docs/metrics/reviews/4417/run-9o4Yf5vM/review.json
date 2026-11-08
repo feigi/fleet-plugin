@@ -1,0 +1,74 @@
+{
+  "pr": 4417,
+  "head": "c910fb68a8229ae76a3808a135e0f9cfa2ea41cf",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": false,
+    "reason": "`./agent-test` produced no counts — the shared test run crashed, hit its deadline, or printed no summary (The suite command was never confirmed to have run. My single bash invocation of the required block failed before any output came back, with 'Extension /Users/chris/.omp/plugins/node_modules/@xynogen/pix-optimizer/src/index.ts failed: undefined is not an object (evaluating ctx.ui.theme.fg)'. A follow-up bash call failed the same way, so the shell tool is unusable in this session. A read of test-run.log returned 'not found', which indicates the command never created the log, so the suite did not start. No TEST_RUN_EXIT value, slotWaitMs, or counts were observed. I did not re-run the command, per the one-run rule. The main agent should check whether the pix-optimizer extension is broken and then decide whether to re-dispatch this step.) — a failed run, not a pass"
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv' and ' M docs/metrics/tier-outcomes.tsv'. I did not touch these. They are modified in the controller checkout, probably by another agent or run, and I can't account for them."
+    },
+    {
+      "dimension": "types",
+      "state": "missing",
+      "line": null
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. I did not write to this checkout in this session, so these modifications predate it or come from another agent."
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I wrote nothing there and ran only read-only commands (os.getcwd, git status). The same two modified files appear as already present in earlier reviews' cwdAudit lines in this PR's own records (4386/run-LDN4cmqO/review.json), so they belong to the controller checkout and are not this review's doing."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv' and ' M docs/metrics/tier-outcomes.tsv'. I never wrote there, and these are the same two files every review.json's own CWD-AUDIT lines report as already modified."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv` (`git -C /Users/chris/dev/fleet-plugin status --porcelain -uall`, exit 0). I did not write those files: every write this dispatch made went under …/pr4417/run-9o4Yf5vM/correctness/."
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 1,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4417/run-9o4Yf5vM/snapshot-c910fb68",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "docs/metrics/reviews/4402/run-CfD0secU/review.json",
+      "claim": "The recorded cwdAudit for the 'comments' dimension of PR 4402 is state 'clean', but its own line says git status was not actually run. That is an unverified claim stored as a clean audit.",
+      "evidence": "jq '.cwdAudit' on reviews/4402/run-CfD0secU/review.json printed [{\"dimension\":\"comments\",\"state\":\"clean\",\"line\":\"CWD-AUDIT: clean /Users/chris/dev/fleet-plugin (git status was not actually run; ...)\"}, {\"dimension\":\"correctness\",\"state\":\"dirty\", ...}]. The other 9 PRs' lines all show dirty, with the same two modified TSV files.",
+      "suggested_fix": "This is a historical record, so leave it. Or mark the state 'unrun' if the schema allows it.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}
