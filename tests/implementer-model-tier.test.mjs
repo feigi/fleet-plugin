@@ -89,8 +89,8 @@ test("the dispatch section dispatches every implementer at its definition's tier
   // agent silently unmakes the member.
   assert.match(
     tier,
-    /Keep `name: impl-<N>`/,
-    "member-lifecycle no longer keeps the impl-<N> name alongside the dispatched agent",
+    /Keep the `name` `DISPATCH` printed/,
+    "member-lifecycle no longer keeps the name `DISPATCH` printed alongside the dispatched agent",
   );
   assert.match(slice, /keep the `name` `DISPATCH` printed/, "the dispatch section no longer keeps the name `DISPATCH` printed alongside the dispatched agent");
   // `row` REPLACES the line (ledger.mjs's `data.rows = after`, `line` in place
@@ -107,6 +107,20 @@ test("the dispatch section dispatches every implementer at its definition's tier
     RUN_TEAM.section("### What a wake owes beyond its call", "run-team wake section").text,
     Pin.phrase("`ledger.mjs token <key> <token>…` adds a token and keeps every token already on the row but a `tier=` it replaces"),
     "The wake section no longer sends a token addition to `token`, or no longer says `token` replaces a `tier=`, so a controller re-types the row with `row` and drops its tokens, or expects a second `tier=` beside the first",
+  );
+});
+
+// docs/components/implementer.md's dispatch step names the member too. The
+// Pull names it `impl-<N>` only when this session has not used that name, else
+// the next free retry name (`impl-<N>-b`, …), so the step dispatches under the
+// name the Pull printed, never a fixed `impl-<N>`.
+const IMPLEMENTER_DOC = Pin.file(join(import.meta.dirname, "..", "docs", "components", "implementer.md"));
+test("the implementer component doc dispatches under the name the Pull printed", () => {
+  const step = IMPLEMENTER_DOC.bullet("1. **Dispatch.**", "2. **Prompt carries only what varies**", "implementer doc dispatch step").text;
+  assert.match(
+    step,
+    Pin.phrase("dispatches in the background under the name the Pull printed"),
+    "docs/components/implementer.md no longer dispatches under the name the Pull printed, so a reader takes every member to be named `impl-<N>`",
   );
 });
 

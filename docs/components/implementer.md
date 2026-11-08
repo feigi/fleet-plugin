@@ -14,8 +14,9 @@ every 5th Pull by ledger count runs at an exploration cell — see
 
 ## How it works
 1. **Dispatch.** One implementer per Pull, never batched: the
-   controller records `ledger.mjs dispatch <N> impl-<N>`, then
-   dispatches in the background under the name `impl-<N>` — a
+   controller records `ledger.mjs dispatch <N> <name>`, then
+   dispatches in the background under the name the Pull printed
+   (`impl-<N>`, or a retry name such as `impl-<N>-b`) — a
    brand-new agent, never resumed.
 2. **Prompt carries only what varies**: the worktree's absolute path,
    branch, `<scratch>/impl-<N>/`, and the ticket's distilled brief.
