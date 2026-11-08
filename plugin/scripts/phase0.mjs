@@ -600,22 +600,24 @@ function shortlist({ cwd }) {
 }
 
 // The alarm step accepts a `fleet` spelling only when the OS resolves it to
-// this checkout's `.fleet/`. So the checkout holding it (the directory part)
-// must stat as a directory and is then resolved through symlinks by the OS: a
-// `..` after a directory that does not exist, or after a file, is not folded
-// away (darwin's realpath folds `file/..`; the stat and the directory check
-// refuse it), a `..` after a directory or a symlink to one resolves where the
-// OS takes it, and on a case-insensitive volume a letter-case variant of the
-// checkout path is the same checkout. The `.fleet` name is compared as given,
-// so it works before `.fleet/` exists and `.FLEET` is another name. A path
-// that is not absolute, or whose checkout does not resolve to a directory,
-// stays as given.
+// this checkout's `.fleet/`. So the OS stats the part that must exist (the
+// path itself when its last name is `.` or `..`, else the checkout holding it,
+// the directory part), and then resolves that checkout through symlinks. A
+// `..` after a directory that does not exist, after a file, or out of a
+// directory the OS may not search is refused by that stat, though darwin's
+// realpath folds `file/..` and `unsearchable/..` and `join` folds a trailing
+// `..` as text; a `..` after a directory or a symlink to one resolves where
+// the OS takes it; and on a case-insensitive volume a letter-case variant of
+// the checkout path is the same checkout. The `.fleet` name is compared as
+// given, so it works before `.fleet/` exists and `.FLEET` is another name. A
+// path that is not absolute, or that the OS does not resolve, stays as given.
 function fleetIdentity(path) {
   if (typeof path !== "string" || !isAbsolute(path)) return path;
   try {
     const checkout = dirname(path);
-    if (!statSync(checkout).isDirectory()) return path;
-    return join(realpathSync.native(checkout), basename(path));
+    const name = basename(path);
+    statSync(name === "." || name === ".." ? path : checkout);
+    return join(realpathSync.native(checkout), name);
   } catch {
     return path;
   }
