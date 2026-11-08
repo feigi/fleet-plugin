@@ -252,14 +252,14 @@ terminating in exactly one dispatch or an empty shortlist:
    <scratch>/impl-<N>/issue.json --guard .fleet/cost-guard.json` prints the Pull's
    Routing, `POLICY=… CELL=… DRAW=… BY=… STRATUM=… BRIEF=… CRITERIA=… PARENT=… SIZED=… OBJECTIVE=… TRIPPED=… REASON=…`
    (the router's arguments paragraph below the list says what each argument is);
-   then `ledger.mjs row <N> "impl-<N>[ · tier=<CELL>]" --routing "<that line>"`,
-   `tier=<CELL>` exactly when `DRAW` is not `-`, which writes the row and files
-   the line verbatim under `impl-<N>` in `## Routed` in one write; then the
+   then `ledger.mjs row <N> "<member>[ · tier=<CELL>]" --routing "<that line>"`,
+   `<member>` the name the Pull printed, `tier=<CELL>` exactly when `DRAW` is not `-`, which writes the row and files
+   the line verbatim under that name in `## Routed` in one write; then the
    dispatch at once: claim what you are about to dispatch; dispatch what you
    have just claimed. A Pull routed without a draw writes `cell=<CELL>` instead,
    unless `CELL` is the policy cell, `slow-high`, which a row with neither runs.
    `ledger.mjs` refuses a line that is not a Routing and a second, different
-   Routing for `impl-<N>`; the same line again — the row step re-run after its
+   Routing for that name; the same line again — the row step re-run after its
    write landed — rewrites the row and leaves the entry as it was. Router
    exit 2 → no row and no dispatch: release the claim (`release-ticket.sh`, SKILL.md's
    Failure handling row for a claim abandoned mid-run) and emit an event, a probe that could not look — a table the router
@@ -356,7 +356,7 @@ the open PR, or the branch name until its PR exists, or the issue this ticket
 sequences after. No new ledger section. `shortlist.mjs` probes every premise at
 each refresh — MERGED or CLOSED lifts a `behind-pr`, CLOSED lifts a
 `behind-issue` — and a lifted ticket re-enters the shortlist in its own
-oldest-first slot; its row is rewritten to `impl-<N> …` when it is pulled,
+oldest-first slot; its row is rewritten under the name the Pull printed when it is pulled,
 because `row` replaces the whole line. `pull.mjs next --head <N>` reads the
 ticket's row too when it would start a Pull (no record, or an ended one, or one
 from another session; a Pull in progress or dispatched is resumed or reprinted
@@ -412,10 +412,10 @@ a worktree, a branch and an `in-progress` label with no member behind them,
 released by the end-of-run sweep rather than by a member that did the work.
 
 **Record the dispatch before you make it.** `ledger.mjs row` wrote the row at
-the Pull's step 7; `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run dispatch-prompt.mjs render
-implementer --member impl-<N> …` then renders its brief, and
-`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run ledger.mjs dispatch <N> impl-<N>`
-marks `impl-<N>` live on it and in `## Dispatched`, and the call follows.
+the Pull's step 7, under the name the Pull printed (`<member>` below); `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run dispatch-prompt.mjs render
+implementer --member <member> …` then renders its brief, and
+`~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run ledger.mjs dispatch <N> <member>`
+marks `<member>` live on it and in `## Dispatched`, and the call follows.
 Its JSON carries `agent`, the definition that call names, and `brief.path`,
 the rendered brief whose content is that call's prompt — read both off that
 output, never recall them. Live implementers are the `impl-` tokens with no

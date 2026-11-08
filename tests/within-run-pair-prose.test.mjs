@@ -167,7 +167,8 @@ test("Pull step 7 routes through ticket-router.mjs and writes tier= exactly when
   assert.match(slice, /Router\s+exit\s+2\s+→\s+no\s+row\s+and\s+no\s+dispatch/, "step 7 dispatches on a router usage error");
   assert.match(slice, /--impl-row\s+<k>\[\s+--chain-head\]/, "step 7 no longer passes --chain-head for a ticket another sequences after");
   assert.match(slice, /--guard\s+\.fleet\/cost-guard\.json/, "step 7 no longer hands the router the cost guard");
-  assert.match(slice, /ledger\.mjs\s+row\s+<N>\s+"impl-<N>\[\s+·\s+tier=<CELL>\]"\s+--routing\s+"<that\s+line>"/, "step 7 no longer files the router's line with the row");
+  assert.match(slice, /ledger\.mjs\s+row\s+<N>\s+"<member>\[\s+·\s+tier=<CELL>\]"\s+--routing\s+"<that\s+line>"/, "step 7 no longer files the router's line with the row");
+  assert.match(slice, /`<member>`\s+the\s+name\s+the\s+Pull\s+printed/, "step 7 no longer says which name the row carries");
   assert.match(slice, /in\s+`## Routed`\s+in\s+one\s+write/, "step 7 no longer writes the row and its Routing in one write");
   assert.doesNotMatch(slice, /route=<REASON>\]/, "step 7 writes the retired route= token on the row again");
   assert.match(slice, /release\s+the\s+claim\s+\(`release-ticket\.sh`/, "step 7 no longer releases the claim on a router exit 2");
