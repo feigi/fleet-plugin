@@ -24,11 +24,11 @@ Plus whatever your Recipe runs (§2.3): `mvn`, `go`, `cargo`, …
 
 ### 1.2 `gh` authentication — HARD
 - Logged in with `repo` scope to the GitHub host that owns your repo.
-- The login must be stored by `gh auth login` (kept by gh under `HOME`), not supplied only through an environment variable: a token held only in `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN` or `GITHUB_ENTERPRISE_TOKEN` does not satisfy this. The reason: phase 0 runs from an omp eval cell, and omp starts eval kernels with a reduced environment that keeps `HOME` but none of gh's variables.
+- The login must be stored by `gh auth login` in gh's default config directory (`$XDG_CONFIG_HOME/gh`, else `~/.config/gh`; gh keeps the token there or in the system credential store), not supplied only through an environment variable: a token held only in `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN` or `GITHUB_ENTERPRISE_TOKEN` does not satisfy this, and neither does a login kept in a directory only `GH_CONFIG_DIR` names. The reason: phase 0 runs from an omp eval cell, and omp starts eval kernels with a reduced environment that keeps `HOME` and `XDG_CONFIG_HOME` but none of gh's variables.
 - All members and the controller share this identity; no per-actor attribution.
 - GitHub Enterprise: works; `ci-state.mjs` takes `--hostname` from `gh repo view`'s resolution of the cwd's repository.
 
-Check: `env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GITHUB_ENTERPRISE_TOKEN gh auth status` exits 0.
+Check: `env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GITHUB_ENTERPRISE_TOKEN -u GH_CONFIG_DIR gh auth status` exits 0.
 
 ### 1.3 omp with fleet plugin — HARD
 Install: `omp plugin install @feigi/fleet-ctl` per [README → Installation](../README.md#installation).
