@@ -23,9 +23,12 @@ supported ([ADR 0009](adr/0009-supported-platforms-are-macos-linux-wsl.md)). All
 Plus whatever your Recipe runs (§2.3): `mvn`, `go`, `cargo`, …
 
 ### 1.2 `gh` authentication — HARD
-- Logged in (`gh auth status`) with `repo` scope to the GitHub host that owns your repo.
+- Logged in with `repo` scope to the GitHub host that owns your repo.
+- The login must be stored by `gh auth login` (kept by gh under `HOME`), not supplied only through an environment variable: a token held only in `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN` or `GITHUB_ENTERPRISE_TOKEN` does not satisfy this. The reason: phase 0 runs from an omp eval cell, and omp starts eval kernels with a reduced environment that keeps `HOME` but none of gh's variables.
 - All members and the controller share this identity; no per-actor attribution.
 - GitHub Enterprise: works; `ci-state.mjs` takes `--hostname` from `gh repo view`'s resolution of the cwd's repository.
+
+Check: `env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GITHUB_ENTERPRISE_TOKEN gh auth status` exits 0.
 
 ### 1.3 omp with fleet plugin — HARD
 Install: `omp plugin install @feigi/fleet-ctl` per [README → Installation](../README.md#installation).
