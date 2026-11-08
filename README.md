@@ -61,6 +61,10 @@ it now, so delete it once no worktree claimed before the upgrade remains.
 
 ## Quickstart
 
+Before a repository's first run, set it up as
+[`docs/requirements.md` §2](docs/requirements.md#2-your-repository) says: its
+labels (§2.4), its `.gitignore` (§2.5) and its GitHub settings (§2.6).
+
 Start a fleet run over the `ready-for-agent` queue — implementers and reviewers
 (one optional argument, the In-flight bound, default 5), plus one
 non-configurable merge bot:

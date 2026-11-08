@@ -45,7 +45,11 @@
 #      Installation section at run time, against a scratch `config.yml`
 #      holding the three `modelRoles` and a dummy API key, and requires
 #      exit 0.
-#   6. Requires `npm pack --dry-run --json` in `plugin/` to list every file
+#   6. Runs docs/requirements.md §2.4's two label-map lines as written, read
+#      out of §2.4 at run time, in a scratch repository against a `gh` stub
+#      holding GitHub's nine default labels (nothing reaches GitHub): the
+#      `set` line, then the `ensure` line, each required to exit 0.
+#   7. Requires `npm pack --dry-run --json` in `plugin/` to list every file
 #      `git ls-files plugin` lists, naming each one it leaves out.
 #
 # No test suite runs from an install anywhere in this script.
@@ -225,6 +229,76 @@ YML
   fi
 fi
 
+# ---- requirements.md §2.4's label-map lines, run as written ----
+# A new repository's labels are the first thing its first run stops on, so
+# §2.4 tells the reader to run `label-map.mjs ensure` and then `set --create
+# --accept-suggestions` beforehand. Both lines are read out of §2.4 at run
+# time — never kept as a copy here — so an edit that breaks what a fresh
+# consumer types is caught on arrival. Nothing reaches GitHub: a `gh` stub
+# first on PATH holds GitHub's nine default labels in a file.
+REQ_SECTION="$(awk '/^### 2\.4/{on=1;next} /^### /{on=0} on' docs/requirements.md)"
+label_map_line() {
+  grep -E "^${ENTRY_RE}scripts/fleet-run[[:space:]]+label-map\\.mjs[[:space:]]+$1([[:space:]]|\$)" <<<"$REQ_SECTION" || true
+}
+ENSURE_LINE="$(label_map_line ensure)"
+SET_LINE="$(label_map_line set)"
+label_lines_ok=1
+for pair in "ensure:$ENSURE_LINE" "set:$SET_LINE"; do
+  verb="${pair%%:*}"
+  line="${pair#*:}"
+  if [ -z "$line" ] || [ "$(wc -l <<<"$line")" -ne 1 ]; then
+    echo "::error::install-and-smoke: docs/requirements.md §2.4 has no single \`$verb\` line (the Package entry's fleet-run label-map.mjs $verb ...)"
+    fail=1
+    label_lines_ok=0
+  fi
+done
+if [ "$label_lines_ok" -eq 1 ]; then
+  LABEL_REPO="$SCRATCH_HOME/label-repo"
+  STUB_BIN="$SCRATCH_HOME/gh-stub-bin"
+  mkdir -p "$LABEL_REPO" "$STUB_BIN"
+  git -C "$LABEL_REPO" init -q -b main
+  printf '.worktrees/\n.fleet/\n' > "$LABEL_REPO/.gitignore"
+  printf '%s\n' bug documentation duplicate enhancement "good first issue" "help wanted" invalid question wontfix > "$SCRATCH_HOME/gh-stub-labels"
+  cat > "$STUB_BIN/gh" <<'STUB'
+#!/usr/bin/env bash
+labels="${GH_STUB_LABELS:?}"
+if [ "$*" = "label list --limit 1000 --json name" ]; then
+  jq -R -n -c '[inputs | {name: .}]' < "$labels"
+  exit 0
+fi
+if [ "${1:-}" = label ] && [ "${2:-}" = create ]; then
+  if [ "$#" -eq 3 ] && [ "$3" != -- ]; then
+    name="$3"
+  elif [ "$#" -eq 4 ] && [ "$3" = -- ]; then
+    name="$4"
+  else
+    echo "gh stub: unsupported call: gh $*" >&2
+    exit 64
+  fi
+  if grep -qixF -- "$name" "$labels"; then
+    echo "label with name \"$name\" already exists; use \`gh label edit\` to modify" >&2
+    exit 1
+  fi
+  printf '%s\n' "$name" >> "$labels"
+  exit 0
+fi
+echo "gh stub: unsupported call: gh $*" >&2
+exit 64
+STUB
+  chmod +x "$STUB_BIN/gh"
+  for pair in "set:$SET_LINE" "ensure:$ENSURE_LINE"; do
+    verb="${pair%%:*}"
+    line="${pair#*:}"
+    echo "== §2.4's $verb line: $line =="
+    verb_rc=0
+    (cd "$LABEL_REPO" && HOME="$SCRATCH_HOME" PATH="$STUB_BIN:$PATH" GH_STUB_LABELS="$SCRATCH_HOME/gh-stub-labels" bash -c "$line") || verb_rc=$?
+    if [ "$verb_rc" -ne 0 ]; then
+      echo "::error::install-and-smoke: §2.4's $verb line exited $verb_rc (want 0): $line"
+      fail=1
+    fi
+  done
+fi
+
 # ---- npm's file list holds every tracked file under plugin/ ----
 # npm publishes what plugin/package.json's `files` lists, and the linked
 # install above holds the whole directory, so nothing else notices a tracked
@@ -259,4 +333,4 @@ if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 
-echo "install-and-smoke: provenance clean, every Package-entry path the prose names is a real file, every fleet-run callsite target resolved, arg.mjs ran clean, README's tier line exited 0, npm pack lists every tracked file under plugin/"
+echo "install-and-smoke: provenance clean, every Package-entry path the prose names is a real file, every fleet-run callsite target resolved, arg.mjs ran clean, README's tier line exited 0, requirements.md §2.4's set and ensure lines exited 0, npm pack lists every tracked file under plugin/"
