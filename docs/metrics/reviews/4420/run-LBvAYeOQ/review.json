@@ -1,0 +1,216 @@
+{
+  "pr": 4420,
+  "head": "02546334a7135ae8c7bcc49eda44edfc282f4ff4",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": false,
+    "reason": "`./agent-test` produced no counts — the shared test run crashed, hit its deadline, or printed no summary (The single foreground run of the block was attempted via the bash tool, but the bash tool call returned 'Extension /Users/chris/.omp/plugins/node_modules/@xynogen/pix-optimizer/src/index.ts failed: undefined is not an object (evaluating ctx.ui.theme.fg)' before any output. A follow-up check failed with the same error, and reading the expected log path returned 'not found', so the suite is not confirmed to have started or finished. No TEST_RUN_EXIT, counts, or slotWaitMs were observed. The command was not re-run, per instructions. The tooling error (pix-optimizer extension in the shell tool) needs fixing before the suite can be run and reported.) — a failed run, not a pass"
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "missing",
+      "line": null
+    },
+    {
+      "dimension": "comments",
+      "state": "missing",
+      "line": null
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv' and ' M docs/metrics/tier-outcomes.tsv'. I made no writes there (my commands in that tree were only `pwd`, `wc -l` and `git status`), so these belong to other agents or the controller."
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. I did not write either file: in that directory I only ran os.getcwd() and this status command, and every other command used an absolute path or the copy as cwd."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. This review wrote nothing in that tree; every command after the first `pwd` changed directory into the scratch or snapshot path, so these modifications came from another agent or controller."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I wrote nothing in that checkout, so these are not from my work."
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 12,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4420/run-LBvAYeOQ/snapshot-02546334",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 681,
+      "claim": "checkoutOf accepts a device line with leading zeros, because isDigits is /^[0-9]+$/. judgeSibling then compares it as a string with `up.dev.toString()`, so a key that is in fact on the recorded device is kept forever with a false reason: 'its drive may not be mounted', on device 16777234 versus 016777234.",
+      "evidence": "Probe P1 in my measuring copy: f.key(checkout, { content: `${checkout}\\n0${f.dev}\\n` }) on an existing held dir, aged 8 days, then `--siblings --apply`. removed was [], and the kept reason was '... the directory that held it, is on device 16777234 and the checkout was on device 016777234: its drive may not be mounted'. The writer never produces leading zeros (P4 wrote `16777234`), so only a hand-written or foreign file reaches this. It fails safe (the key is kept), but the reason is wrong.",
+      "suggested_fix": "Either require a canonical decimal in checkoutOf (/^(0|[1-9][0-9]*)$/), so the file counts as 'holds no absolute path and device number', or compare BigInt(device) === up.dev.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 721,
+      "claim": "The writer records the checkout's own st_dev, but the judge compares it with the st_dev of the checkout's parent. A checkout that was itself a separate filesystem while its parent was on another one (a btrfs subvolume, a bind mount, or an APFS volume mounted as the repo directory) therefore never passes the device test after the repo is deleted. Its key is kept forever with 'its drive may not be mounted'.",
+      "evidence": "[INFERENCE] from the code: writeCheckout records `lstatSync(checkout).dev` (around :737) and judgeSibling compares `lstatAt(dirname(checkout)).dev` (:718, :721). Not run, because the probe tree had no way to create a nested mount. The brief's 'Known limits' already says Linux and btrfs device numbers were not measured. This case fails safe (the key is kept, never wrongly removed).",
+      "suggested_fix": "No code change needed if this is accepted as a limit. Otherwise add a line to the component doc's known limits: a checkout that was its own mount is never reclaimed by the sibling pass.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 224,
+      "claim": "A device-number mismatch is always reported as 'its drive may not be mounted', even when the real cause is a renumbered device (macOS slot reuse or a reboot, which the docs say were not measured). A deleted repo's key is then kept indefinitely and never retried, because the live-key rewrite only happens for a repo that still exists.",
+      "evidence": "Read the diff and the judgeSibling code at line 224: `if (up.dev.toString() !== device) return keep(...may not be mounted)`. The test only simulates a mismatch by writing `dev+1n` into the file. Real device renumbering was not reproduced here, so this is [INFERENCE]. The key is not silently dropped: it appears in kept[] with the reason, and docs/components/scratch-reclaim.md states the macOS caveat.",
+      "suggested_fix": "Optional: word the reason as 'on another device than recorded (drive unmounted or device renumbered)'. Alternatively, document that stale keys left by renumbered devices need manual removal.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 221,
+      "claim": "`held` is judged with lstat, which does not follow a symlink. If the directory that held the checkout is now a symlink, its `dev` is the link's own device, not the target's. A drive that is unmounted behind a symlinked parent would therefore read as 'same device' and the key could be removed.",
+      "evidence": "Read lstatAt, which calls lstatSync(p,{bigint:true}). I did not build a symlinked-parent fixture or probe it, so this is [INFERENCE]. The recorded checkout path is canonical, so the parent was a real directory when written. Using lstat on the parent matches the old existsAt behaviour.",
+      "suggested_fix": "Low priority. Either accept this as pre-existing lstat semantics, or use statSync for the held directory's device comparison.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/reclaim-scratch.test.mjs",
+      "claim": "The new device tests discriminate: removing the device-mismatch keep in judgeSibling, ignoring the device when deciding to rewrite the live key's checkout-path, and dropping the numeric-device validation each fail exactly the test written for it. A semantically equivalent rewrite of the device comparison stays green.",
+      "evidence": "Kill A (delete device-mismatch line): red: cd mA && ./agent-test tests/reclaim-scratch.test.mjs --test-name-pattern='\\(11\\)' → exit 1, fail 1 incl '(11) a sibling key whose checkout is gone, the directory that held it on another device than the one recorded, is kept whole with the reason, however idle'; baseline: same command on unmutated copy → exit 0, tests 111 pass 111, that test pass. Kill B (rewrite check ignores device): red: same command in mB → exit 1, fail 1 incl '(11) --siblings --apply writes the live key's checkout-path holding the workspace's canonical path and its device, rewrites only one that says anything else, and a dry run writes nothing'; baseline: same command → exit 0, that test pass. Kill C (isDigits(device) → false): red: same command in mC → exit 1, fail 1 incl '(11) a sibling key with no checkout-path, one holding a path alone, a relative path, a non-numeric device or a third line, or one whose path does not hash to the key's suffix is kept as having no checkout file'; baseline: same command → exit 0, that test pass. Control E (String(up.dev) instead of up.dev.toString()): same command in mE → exit 0, tests 111, pass 111, fail 0, cancelled 0. No fix needed.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/adr/0029-scratch-is-reclaimed-on-github-terminal-state-and-age.md",
+      "line": 27,
+      "claim": "The new 'Amended by #4332' sentence is appended to the end of the #4274 amendment (it follows 'a third trigger beside decision 3's two controller edges.') instead of sitting beside the #4112 amendment that it modifies.",
+      "evidence": "Read the ADR header, lines 6-30. The #4112 amendment, at lines 10-18, still says a key is removed whole 'only when its checkout is gone, that directory is present and nothing under it changed in 7 days', with no mention of the device. The #4332 amendment, at lines 27-30, qualifies that rule but sits after the #4274 and #4076 amendments. A reader of the #4112 text gets the old rule, and the correction is about 10 lines away.",
+      "suggested_fix": "Put the #4332 sentence directly after the #4112 amendment, or add 'on that device' to the #4112 sentence.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/components/scratch-reclaim.md",
+      "line": 96,
+      "claim": "The macOS device-number caveat ('belongs to the disk slot it is attached in, not to the volume', slot reuse, renumbering) is stated as fact, but nothing in the PR shows it was measured. The doc itself says reboot and Linux behaviour 'were not measured'.",
+      "evidence": "I found no probe, fixture or test in the diff that exercises device renumbering or slot reuse. The test file only varies `dev` by adding 1n. I could not check the claim because bash was down.",
+      "suggested_fix": "Mark the slot and renumbering statements as observed on a named setup, or cite where they were measured.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 681,
+      "claim": "The device number is a decimal string validated only by isDigits and compared to `up.dev.toString()` (`!==` at line 224), so a file holding a zero-padded device such as '007' passes validation but never matches; the key is then kept with a misleading 'drive may not be mounted' reason.",
+      "evidence": "Read from the diff (not executed): checkoutOf accepts any /^[0-9]+$/ device (line 681 area) and judgeSibling compares `up.dev.toString() !== device` (line 224). The failure is safe, since the key is kept and never wrongly removed. The writer always emits canonical `dev.toString()`, so only a hand-edited or foreign file can hit it.",
+      "suggested_fix": "Normalise at parse time, e.g. `BigInt(device).toString()`, or compare as bigints: `up.dev !== BigInt(device)`. A second option is to tighten the grammar to /^(0|[1-9][0-9]*)$/.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 211,
+      "claim": "checkoutOf and lstatAt return untagged unions that callers tell apart by `found.reason !== undefined` and `instanceof Error`, plus a truthiness test on the Stats result. Nothing enforces that these variants are exclusive.",
+      "evidence": "Read from the diff: lstatAt returns BigIntStats | false | Error; judgeSibling tests `instanceof Error`, then `if (at)`, then `!up`. The order is correct today. Reordering the checks would misclassify, because a Stats object is truthy and an Error is truthy. The PR kept this existing pattern rather than introducing it.",
+      "suggested_fix": "Optional: return a tagged result, e.g. `{kind:'exists'|'absent'|'unknown', stats?, error?}`.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/reclaim-scratch.mjs",
+      "line": 679,
+      "claim": "checkoutOf indexes `lines[0]` and tests `lines.length === 1` before it destructures `[line, device]`, so the next line reads the same values a second time under different names. Destructuring first and testing `device === undefined && isAbsolute(line)` gives the same verdict for every input and is easier to read.",
+      "evidence": "I swapped lines 679-680 in my measure-copy to `const [line, device] = lines; if (device === undefined && isAbsolute(line)) return none(...)` and ran `node --test --test-name-pattern=\"\\(11\\)\" tests/reclaim-scratch.test.mjs`: tests 19, pass 19, fail 0. The probe compared the old and new logic over 16 inputs (\"\", \"\\n\", \"/a\", \"/a\\n\", \"a\", \"/a\\n1\", \"/a\\n1\\n\", \"/a\\n\\n\", \"\\n1\\n\", three-line, \"/a\\nx\\n\", two-path, \"/\", and others) and printed `inputs=16 diffs=0`. They agree because split() always returns at least one element, so device is undefined exactly when lines.length === 1.",
+      "suggested_fix": "const [line, device] = lines;\nif (device === undefined && isAbsolute(line)) return none(`${CHECKOUT_FILE} records no device`);\nif (lines.length !== 2 || !isAbsolute(line) || !isDigits(device)) return none(`${CHECKOUT_FILE} holds no absolute path and device number`);",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/reclaim-scratch.test.mjs",
+      "line": 1771,
+      "claim": "The new other-device test passes `days: 0` to f.key(), but it then calls `f.age(key, 8)`, which walks every node under the key, the key itself included, and re-ages it. The `days: 0` aging is always overwritten and can be dropped.",
+      "evidence": "fixture.age at lines 131-134 walks every node under `p` and `p` itself. I removed `days: 0, ` from line 1771 in my copy and re-ran the (11) tests: tests 19, pass 19, fail 0, and this test still passes with the same kept reason and idle=true.",
+      "suggested_fix": "const key = f.key(checkout, { content: `${checkout}\\n${f.dev + 1n}\\n` });",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/reclaim-scratch.test.mjs",
+      "line": 1811,
+      "claim": "The checkout-path rewrite test calls `realpathSync(f.repo)` three times: once in `right` and twice inside the stale-content list. Computing it once as `const canonical = realpathSync(f.repo)` removes the repeated syscalls and makes it plain that the stale variants differ from `right` only in their other field.",
+      "evidence": "In my copy I added `const canonical = realpathSync(f.repo);`, built `right` from it, and replaced both `${realpathSync(f.repo)}` uses in the loop at line 1811 with `${canonical}`. Re-running the (11) tests gave tests 19, pass 19, fail 0.",
+      "suggested_fix": "const canonical = realpathSync(f.repo);\nconst right = `${canonical}\\n${f.dev}\\n`;\n…\nfor (const stale of [\"/somewhere/else\\n\", `${canonical}\\n${f.dev + 1n}\\n`, `${canonical}\\n`, `/somewhere/else\\n${f.dev}\\n`]) {",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

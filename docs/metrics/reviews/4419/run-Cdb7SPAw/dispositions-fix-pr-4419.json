@@ -1,0 +1,68 @@
+{
+ "head": "e5d5da38b37b16038a9a4a0d76debd5d9f77a26e",
+ "run": "run-Cdb7SPAw",
+ "entries": [
+  {
+   "bucket": "survived",
+   "index": 0,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "charge": "false-claim",
+   "reason": "PR body's 'three tests' corrected via gh pr edit; the commit body makes no test-count claim."
+  },
+  {
+   "bucket": "unverified",
+   "index": 0,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4419/fix-nMLNsQAZ/u0/verdict.json",
+   "remedyFiles": [
+    "tests/ledger-row-review.test.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 1,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4419/fix-nMLNsQAZ/u1/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 2,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4419/fix-nMLNsQAZ/u2/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 3,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4419/fix-nMLNsQAZ/u3/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 4,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "issue": 4426,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4419/fix-nMLNsQAZ/u4/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 5,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "issue": 4426,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4419/fix-nMLNsQAZ/u5/verdict.json"
+  }
+ ]
+}

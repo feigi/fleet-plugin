@@ -1,0 +1,247 @@
+{
+  "pr": 4421,
+  "head": "3842e8f79488c124c0bec9ad777b8a63bc6b6087",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "missing",
+      "line": null
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv' and ' M docs/metrics/tier-outcomes.tsv'. I never wrote to that checkout, so these are the controller's own metrics files, not from my probes."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I wrote nothing there, and my only commands were the git status audit and read-only wc/pwd; the modifications are pre-existing or another agent's."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` / ` M docs/metrics/tier-outcomes.tsv` (no command of mine wrote there: my shell work ran in the snapshot or my copy, and the only commands aimed at this path were `pwd` and this audit)"
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (no command of mine ran with that directory as cwd, and none wrote there; those two changes were not made by this pass)."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I did not touch these. I only ran read-only commands there, and the other agents sharing the checkout are the likely cause."
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 1,
+    "unverified": 13,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4421/run-bWJDBLYu/snapshot-3842e8f7",
+  "survived": [],
+  "refuted": [
+    {
+      "severity": "important",
+      "claim": "The leftover check no longer refuses a free-text value (--brief, --staleness) that carries its own unfilled placeholder inside longer text. It refuses only when the trimmed value is exactly the placeholder, so the fault it existed to catch (a controller leaving `<distilled brief>` or `<staleness>` unfilled) now renders exit 0.",
+      "evidence": "Probe in my copy of the head, using the repo's own render() harness on the implementer CASES[0]. `--brief \"Title: x\\n\\n<distilled brief>\"`: status 0, no stderr, value in the brief. `--brief \"<distilled brief>.\"`: status 0. `--staleness \"no probe was run; <staleness>\"`: status 0. `--brief \"Title: t\\n\\n<N> <branch> <scratch> <abs-path>\"`: status 0. The exact `--brief \"<distilled brief>\"` is still refused with exit 2. Per the diff, the old code refused any value whose rendered output contained a filled placeholder's spelling. The unfilled-copy case inside a longer value was refused before and now passes silently.",
+      "file": "plugin/scripts/dispatch-prompt.mjs",
+      "line": 367,
+      "suggested_fix": "This is the intended trade-off, since tickets may quote placeholders, but it should be a documented decision. Callers always compose the value (pull.mjs passes ticketText(), which starts with `Title:`), so the exact-match guard cannot fire for them. If the unfilled-copy guard is meant to protect composed values, also refuse a value containing its own placeholder on a line of its own, or have the controller mark the span it composed. Otherwise state in THE LEFTOVER CHECK comment that composed free text is unchecked.",
+      "dimension": "silent-failure",
+      "verdict": "refuted",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "The merged code at dispatch-prompt.mjs (diff lines ~125-150) does what the claim says. For a `free` argument it refuses only when `value.trim() === \"<placeholder>\"`. A longer value with an embedded unfilled placeholder skips the check, and the old brief.includes check is gone. The header comment in the diff states this as intended behaviour (\"refused only when the value, trimmed, is exactly its own placeholder's spelling\"), so the regression in coverage is real. I could not confirm the exit codes by running it. My probe reached the renderer, but instruments.sh refused with 'no base' (exit 2) for both the exact and the embedded value, because the probe had no repo/env setup. The probe therefore showed no difference between them. That makes the runtime half inconclusive, and I relied on code reading for the verdict. No mutant or test run was made, so there is no red/baseline line. CWD-AUDIT: not run; I made no edits in /Users/chris/dev/fleet-plugin, and my only write was p.mjs in the scratch dir."
+        },
+        {
+          "refuted": true,
+          "reason": "I ran no probe and built no copy, so this rests on reading pr.diff only. The PR's own header comment describes the behavior the finding reports, as a deliberate design. It names THE LEFTOVER CHECK and says arguments the template marks `free`, and the ticket, carry text someone else wrote, which may spell placeholders as part of what it says. Those are refused only when the trimmed value is exactly its own placeholder's spelling. Identifier and path arguments are still refused if their value contains any declared placeholder. Per the diff, the new check still refuses a bare `<distilled brief>` or `<staleness>`, which the finding itself confirms. The finding's probes show the intended narrowing, not a silent failure. The change gives up partial-leftover detection inside free text on purpose, so a brief or ticket can legitimately mention `<N>` and the like. The finding proves the documented tradeoff, not a defect. Its claim that the fault the check existed to catch now renders exit 0 overstates this, since the bare-unfilled case is still caught. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I did not write to that directory, and it was probably dirty before this run."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/dispatch-prompt.mjs",
+      "line": 375,
+      "claim": "The new ticket-unfilled check (`carriesTicket && values.get(template.ticket).trim() === '<ticket>'`) can never fire and no test covers it. ticketFor() always returns text that starts with 'No settled impl-<N>=PR#…' or 'Title: '.",
+      "evidence": "Mutant M4 deleted line 375 in the copy, then `node --test tests/dispatch-prompt.test.mjs`: pass 135, fail 0 (the mutant survives). `node -e` with ticketText({title:'',body:'<ticket>'}) returned \"Title: \\n\\n<ticket>\" and ticketText({title:'<ticket>',body:''}) returned \"Title: <ticket>\\n\\n\". In both cases `.trim()==='<ticket>'` was false. dispatch-prompt.mjs:208-243 has exactly two kinds of return: the 'No settled…' fallback string, or ticketText() joined with blank lines.",
+      "suggested_fix": "Drop line 375, or keep it and add a comment saying it guards a future ticketFor() change. Today it reads as a live refusal path that nothing exercises.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/dispatch-prompt.mjs",
+      "line": 24,
+      "claim": "The EXIT paragraph of the header still lists 'a leftover declared placeholder in the output' as a refusal. After this PR a rendered brief can legitimately contain declared placeholder spellings that came from free-text values: the PR's own new test asserts that `<scratch>`, `<branch>` and `<distilled brief>` survive into the output with exit 0. The THE LEFTOVER CHECK paragraph was updated, but this line was not.",
+      "evidence": "`sed -n 22,27p plugin/scripts/dispatch-prompt.mjs` in the snapshot prints '…a leftover // declared placeholder in the output, …'. The test 'an implementer brief whose ticket and staleness spell placeholders carries them as written…' passed in my baseline run (135/135) with r.out containing those spellings.",
+      "suggested_fix": "Reword it to something like 'an identifier or path value spelling a placeholder the brief fills, or a free-text value that is its own unfilled placeholder (THE LEFTOVER CHECK)'.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/dispatch-prompt.test.mjs",
+      "line": 541,
+      "claim": "The fix-applier carry assertion got weaker. It used to check `The ticket:\\n\\n${carried}\\n` and now checks only `\\n\\n${carried}\\n`, so it no longer pins where in the brief the ticket lands (right after the new 'not a placeholder of this brief' sentence). The new sentence's placement is pinned only by the golden fixtures, and those come from the no-ledger fallback path.",
+      "evidence": "Diff hunk @@ -540,17 +538,84 @@ in pr.diff swaps the anchored include for the bare one. Not mutation-tested: I did not move the sentence and re-run.",
+      "suggested_fix": "Assert `spelling, not a placeholder of this brief:\\n\\n${carried}\\n` so the sentence and the ticket stay adjacent.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The ruling's mutation acceptance criteria hold, and I found no logic error in the narrowed check. Restoring a contains-check on free-text values turns criterion 1 red, dropping the identifier check turns criterion 3 red, and dropping the free-text exact-equality check turns criterion 4 red. This is a positive confirmation, not a defect.",
+      "evidence": "In my copy, `node --test tests/dispatch-prompt.test.mjs` for each mutant. M1 (free branch removed, so free values hit the contains-check): fail 3, namely 'fix-applier review prints the ticket text…', 'an implementer brief whose ticket and staleness spell placeholders…' and 'a free text argument is refused exactly when…'. M2 (identifier `value.includes` die removed): fail 3, namely 'a value spelling a declared placeholder exits 2…', 'an identifier argument spelling a declared placeholder is refused…' and 'an argument value spelling the ticket placeholder is refused…'. M3 (free `trim()===` refusal removed): fail 1, 'a free text argument is refused exactly when it is its own unfilled placeholder'. Baseline: 135/135 pass.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "No scope creep beyond the ticket. Every change maps to a ruling item: defang() removed from ticket-text.mjs, pull.mjs and dispatch-prompt.mjs; a `free` directive added with refusals for an undeclared flag and for a flag marked both free and path; the two template sentences; fixtures re-blessed; the defang tests rewritten. Templates other than implementer and fix-applier are untouched, and no `‹` remains under plugin/.",
+      "evidence": "`grep -n '^diff --git' pr.diff` lists 10 files: dispatch-prompt.mjs, pull.mjs, ticket-text.mjs, the briefs fix-applier.md and implementer.md, dispatch-prompt.test.mjs, 3 fixtures and pull.test.mjs. `grep -rn 'defang\\|‹' --exclude-dir=node_modules --exclude-dir=.git .` in the snapshot matches nothing under plugin/. Frontmatter dump of all 7 templates: `free` appears only in implementer.md (brief, staleness).",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The ticket branch of the leftover check, `values.get(template.ticket).trim() === <ticket>`, is dead code. ticketFor() returns either `Title: …` text from ticketText() or the fixed `No settled impl-<N>=PR#…` sentence, and neither can trim to `<ticket>`. It gives the false impression that an unfilled ticket is guarded.",
+      "evidence": "The diff (ticket-text.mjs:70) shows ticketText() returning `[`Title: ${issue.title}`, text, …].join(\"\\n\\n\")`. ticketFor() (snapshot lines 228-241) has only those two return shapes. I read both and wrote no probe for this one.",
+      "file": "plugin/scripts/dispatch-prompt.mjs",
+      "line": 375,
+      "suggested_fix": "Delete the line. The value is built by the script, not passed by the caller.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The `unfilled` refusal message says 'the rendered brief still carries <X>', but the check now runs on the argument value before any brief is rendered, so it mislabels what was inspected.",
+      "evidence": "Probe output for `--brief \"<distilled brief>\"`: `dispatch-prompt: the rendered brief still carries <distilled brief> — its value is the unfilled placeholder`. In the snapshot (lines 364-377) the check runs before `const brief = …` is computed.",
+      "file": "plugin/scripts/dispatch-prompt.mjs",
+      "line": 364,
+      "suggested_fix": "Reword to e.g. `--brief is the unfilled placeholder <distilled brief>`, naming the flag. The identifier branch at line 372 keeps the old wording, which is fine.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "No new catch block, fallback or try-wrapped dereference was introduced. The one try/catch the PR removed (pull.mjs's unreadable-template stop in the dispatch step) is not a lost signal, because the renderer itself now loads the template and refuses on failure.",
+      "evidence": "The diff only removes code from try blocks (pull.mjs declaredPlaceholders try/catch; the ticketFor call loses an argument). Grep of the snapshot for `defang|declaredPlaceholders|‹` finds no remaining caller in plugin/ or tests/. Remaining hits are historical docs/metrics review files and an unrelated citation-sweep test. pull.mjs still uses readFileSync, join and SCRIPTS elsewhere, so there are no dangling imports. The full suite reported 9145 pass / 0 fail.",
+      "file": "plugin/scripts/pull.mjs",
+      "line": 962,
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/dispatch-prompt.mjs",
+      "line": 375,
+      "claim": "The ticket-placeholder unfilled check `if (carriesTicket && values.get(template.ticket).trim() === `<${template.ticket}>`) unfilled(...)` is killed by no test, and the ticket value looks unable to reach it. ticketFor() returns either a `No settled impl-<N>=...` line or ticketText() output beginning `Title:`, or it dies, so the value never equals `<ticket>`. The check is probably dead code. If it is meant to guard something, nothing tests it.",
+      "evidence": "Deleted line 375 in the copy, then ran `./agent-test tests/dispatch-prompt.test.mjs` → exit 0, tests 135, pass 135, fail 0, so the mutant survived. Baseline: the same command on the unmutated tree → exit 0, tests 135, pass 135. Dropping only `.trim()` on that line also survived (exit 0, 135/135). The ticketFor reachability argument is [INFERENCE] from reading the source, not something I executed.",
+      "suggested_fix": "Delete the dead check. If it stays, add a test that reaches it.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/dispatch-prompt.mjs",
+      "line": 78,
+      "claim": "The THE LEFTOVER CHECK header says an identifier or path argument is refused when its value contains 'any declared placeholder's spelling'. The code checks only `filled`: the placeholders of the arguments this kind requires, plus the ticket placeholder when the kind carries it. Placeholders declared as `literal`, and arguments the selected kind does not use, are not checked. The PR body repeats the 'any declared placeholder spelling' wording.",
+      "evidence": "Read dispatch-prompt.mjs lines 360-373: `const filled = [...required.map(a=>a.placeholder), ...(carriesTicket ? [template.ticket] : [])]` and the loop `for (const p of filled) if (value.includes(`<${p}>`)) die(...)`. The code comment at line 361 correctly says 'a placeholder this brief fills', so the header contradicts it. I read this and did not run a render to confirm.",
+      "suggested_fix": "Reword the header (and the PR body) to 'any placeholder this brief fills' — the required arguments' placeholders and the ticket's.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/dispatch-prompt.mjs",
+      "line": 185,
+      "claim": "The `free` directive's invariants are only partly enforced at parse time. A template can mark `free pr` (a ticket-lookup key in TICKET_FLAGS) or `free worktree`, which turns off the identifier leftover check for that argument. Only the `free`+`path` overlap is refused (the parseTemplate check 'marks --X as both a path and free text').",
+      "evidence": "Not executed (bash unavailable). Read from the diff and the snapshot: parseTemplate refuses only `free` of an undeclared flag and `free` together with `path`. At lines 365-370, any flag in `template.free` skips the identifier check and is compared only to its own `<placeholder>`. Lines 352-357 use the `pr` and `scratch` values to find the ticket (`scratch` is protected only by the path overlap check). The comment says 'the template says' which args are free, so this is documented rather than type-enforced.",
+      "suggested_fix": "Optionally refuse `free` on a flag in TICKET_FLAGS in parseTemplate. The same goes for any flag the renderer interprets itself (such as worktree, and the scratch check for review-runner). That would make the invariant 'free = opaque text only' a parse-time rule, not a convention.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/dispatch-prompt.mjs",
+      "line": 375,
+      "claim": "The ticket's unfilled-copy check `if (carriesTicket && values.get(template.ticket).trim() === `<${template.ticket}>`) unfilled(template.ticket);` can never fire. ticketFor() only ever returns one of two things: the literal `No settled impl-<N>=PR#… token …` text (line 228), or ticketText() results joined together. ticketText always starts with `Title: ` (ticket-text.mjs line 69). So the trimmed value can never be exactly `<ticket>`. With this line gone, the `unfilled` helper (line 364) has only one caller left and adds an extra layer for nothing.",
+      "evidence": "Probe in simplify/copy: `node probe-tmp.mjs` called ticketText on adversarial issues with title `<ticket>`, an empty title with body `<ticket>`, a whitespace title with an Agent Brief comment of `<ticket>`, and title `<ticket>\\n` with body `  <ticket>  `. It printed `\"Title: <ticket>\" false`, `\"Title: \\n\\n<ticket>\" false`, `\"Title:  \\n\\n## Agent Brief\\n<ticket>\" false`, `\"Title: <ticket>\\n\\n\\n<ticket>\" false`. Mutation in simplify/copy: deleted line 375 and inlined `unfilled` into its one remaining call (git diff: 2 insertions, 4 deletions). Then `node --test tests/dispatch-prompt.test.mjs` gave tests 135, pass 135, fail 0. The ticket placeholder stays in `filled`, so the existing test 'an argument value spelling the ticket placeholder is refused after the render, not filled' still passes.",
+      "suggested_fix": "Delete line 375. Inline the message at line 368: `if (value.trim() === `<${a.placeholder}>`) die(`the rendered brief still carries <${a.placeholder}> — its value is the unfilled placeholder`);`. Then drop the `const unfilled = …` helper at line 364. Also reword the header comment for THE LEFTOVER CHECK (lines 74-82) and THE TICKET (lines 88-89 of the diff): the ticket is inserted unchecked, because ticketText's `Title:` prefix means it can never be an unfilled copy. That replaces the current text, which implies the ticket is refused when it is exactly its own spelling.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/dispatch-prompt.mjs",
+      "line": 363,
+      "claim": "If the ticket check is kept as a guard rather than deleted, write it as one loop over (placeholder, isFree) pairs. The ticket is just a free entry, so this removes the special case after the loop and the one-off `unfilled` closure, and `filled` no longer holds a second copy of the placeholder list.",
+      "evidence": "Mutation in simplify/copy replaced lines 363-375 with: `const checked = [...required.map((a) => [a.placeholder, template.free.has(a.flag)]), ...(carriesTicket ? [[template.ticket, true]] : [])]; for (const [p, free] of checked) { const value = values.get(p); if (free) { if (value.trim() === `<${p}>`) die(`…its value is the unfilled placeholder`); continue; } for (const [q] of checked) if (value.includes(`<${q}>`)) die(`…an argument value spells it`); }`. The refusal order (args in `required` order, then the ticket) and both messages are the same as now. `node --test tests/dispatch-prompt.test.mjs` gave tests 135, pass 135, fail 0. An earlier version of the merged loop (using `required.find(...)?.flag`) also passed `node --test tests/dispatch-prompt.test.mjs tests/pull.test.mjs` with tests 254, pass 254, fail 0.",
+      "suggested_fix": "const checked = [...required.map((a) => [a.placeholder, template.free.has(a.flag)]), ...(carriesTicket ? [[template.ticket, true]] : [])];\nfor (const [p, free] of checked) {\n  const value = values.get(p);\n  if (free) {\n    if (value.trim() === `<${p}>`) die(`the rendered brief still carries <${p}> — its value is the unfilled placeholder`);\n    continue;\n  }\n  for (const [q] of checked) if (value.includes(`<${q}>`)) die(`the rendered brief still carries <${q}> — an argument value spells it`);\n}",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

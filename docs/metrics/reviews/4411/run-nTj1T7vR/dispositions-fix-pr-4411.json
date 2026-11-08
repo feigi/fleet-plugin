@@ -1,0 +1,79 @@
+{
+  "head": "12baab0134626a8982ed7cb6a0c431c7ba0cdd22",
+  "run": "run-nTj1T7vR",
+  "entries": [
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "suggestion; refuter let it survive (refuted:false) — the claim is that the PR is correct, alleging no defect, so claimKind shape, below the claim bar; nothing to apply (suggested fix 'None needed'); recorded on #4423 under Below the claim bar",
+      "issue": 4423,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4411/fix-ZFfelAV9/u0/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "suggestion; refuter refuted it (refuted:true): the self-check holds and the finding's own remedy is none; recorded on #4423",
+      "issue": 4423,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4411/fix-ZFfelAV9/u1/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "suggestion; refuter refuted it (refuted:true): the omission is real but no mutant survives it — the one built is killed by sibling alarm tests; recorded on #4423",
+      "issue": 4423,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4411/fix-ZFfelAV9/u2/verdict.json",
+      "remedyFiles": [
+        "tests/phase0.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "suggestion; refuter let it survive (refuted:false) — the claim is that the PR has no scope creep, alleging no defect, so claimKind shape, below the claim bar; nothing to apply (no suggested fix); recorded on #4423 under Below the claim bar",
+      "issue": 4423,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4411/fix-ZFfelAV9/u3/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "suggestion; refuter let it survive (refuted:false), reproducing every kill — the claim is that both new tests discriminate, alleging no defect, so claimKind shape, below the claim bar; nothing to apply (suggested fix 'None needed'); recorded on #4423 under Below the claim bar",
+      "issue": 4423,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4411/fix-ZFfelAV9/u4/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 5,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "suggestion; refuter refuted it (refuted:true): it ran mutants G, H and the no-realpath mutant and every PR-body and commit claim held; recorded on #4423",
+      "issue": 4423,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4411/fix-ZFfelAV9/u5/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 6,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "suggestion; refuter refuted it (refuted:true): a full Test-entrypoint run showed the test the comment heads passing its spelled-through-the-link assertion; recorded on #4423",
+      "issue": 4423,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4411/fix-ZFfelAV9/u6/verdict.json"
+    }
+  ]
+}

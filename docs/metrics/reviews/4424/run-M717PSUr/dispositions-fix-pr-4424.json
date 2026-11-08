@@ -1,0 +1,187 @@
+{
+  "head": "2d32c7de916e4edc72a5f1f5647cdd2882412eb7",
+  "run": "run-M717PSUr",
+  "entries": [
+    {
+      "bucket": "survived",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "remedyFiles": [
+        "tests/pull.test.mjs"
+      ],
+      "charge": "none",
+      "chargeReason": "defect-outside-acceptance"
+    },
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "reason": "refuter survived (reproduced: malformed ## Retired blocked the collision Exclusion, exit 2 vs exit 1 pre-PR); ledgerRows() made a rows-only reader, regression test added; won the mutual-exclusion pair against unverified[11]",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4424/fix-XA0OcFW4/u0/verdict.json",
+      "remedyFiles": [
+        "plugin/scripts/pull.mjs",
+        "tests/pull.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted: the behaviour is the ticket's ruled carry; no defect, no change proposed",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4424/fix-XA0OcFW4/u1/verdict.json",
+      "issue": 4428
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted: reachable only when a live token's worktree and branch were torn down unsettled (real claim-ticket.sh refuses otherwise); the ticket lists live-token rows out of scope",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4424/fix-XA0OcFW4/u2/verdict.json",
+      "issue": 4428
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "remedy-outside-diff",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4424/fix-XA0OcFW4/u3/verdict.json",
+      "remedyFiles": [
+        "plugin/skills/run-team/references/member-lifecycle.md",
+        "tests/implementer-model-tier.test.mjs",
+        "tests/run-team-shape-prose.test.mjs"
+      ],
+      "issue": 4429
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "refuted: the comment is a past-tense measurement record",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4424/fix-XA0OcFW4/u4/verdict.json",
+      "issue": 4428
+    },
+    {
+      "bucket": "unverified",
+      "index": 5,
+      "scope": "out",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "out of scope (wording predates the PR) and below the claim bar; no refuter",
+      "issue": 4428
+    },
+    {
+      "bucket": "unverified",
+      "index": 6,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "refuter survived on a direct priorUse call with a raw entry line, but the fix pass measured `ledger.mjs read` printing ## Dispatched as tokens (brief split off) for both callers, so the current doc is accurate and the suggested wording false",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4424/fix-XA0OcFW4/u6/verdict.json",
+      "issue": 4428
+    },
+    {
+      "bucket": "unverified",
+      "index": 7,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted under the no-abstain rule: no false claim found, mutation claims undecided; no change proposed",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4424/fix-XA0OcFW4/u7/verdict.json",
+      "issue": 4428
+    },
+    {
+      "bucket": "unverified",
+      "index": 8,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "reason": "refuter survived (0 differences over 281,760 combos); explicit ternary",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4424/fix-XA0OcFW4/u8/verdict.json",
+      "remedyFiles": [
+        "plugin/scripts/ledger-grammar.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 9,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "reason": "refuter survived; priorUse doc notes a malformed outcome still burns the name",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4424/fix-XA0OcFW4/u9/verdict.json",
+      "remedyFiles": [
+        "plugin/scripts/ledger-grammar.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 10,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "reason": "refuter survived; JSDoc notes `name` must parse as a member name (nextRetry, replacementName)",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4424/fix-XA0OcFW4/u10/verdict.json",
+      "remedyFiles": [
+        "plugin/scripts/ledger-grammar.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 11,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "refuted on the mutual-exclusion ruling: unverified[0]'s fix makes ledgerRows() a rows-only reader, so this premise is false",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4424/fix-XA0OcFW4/u11/verdict.json",
+      "issue": 4428
+    },
+    {
+      "bucket": "unverified",
+      "index": 12,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "reason": "refuter survived; heldOut and shortlistHead use rowOf",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4424/fix-XA0OcFW4/u12/verdict.json",
+      "remedyFiles": [
+        "plugin/scripts/pull.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 13,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "reason": "refuter survived; settled closure replaced by settledMemberTokens(x ?? \"\")",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4424/fix-XA0OcFW4/u13/verdict.json",
+      "remedyFiles": [
+        "plugin/scripts/ledger-grammar.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 14,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "reason": "refuter survived; dispatchSpec helper, -z test uses pullThrough",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4424/fix-XA0OcFW4/u14/verdict.json",
+      "remedyFiles": [
+        "tests/pull.test.mjs"
+      ]
+    }
+  ]
+}

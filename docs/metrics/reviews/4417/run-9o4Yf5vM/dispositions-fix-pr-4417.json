@@ -1,0 +1,16 @@
+{
+  "head": "c910fb68a8229ae76a3808a135e0f9cfa2ea41cf",
+  "run": "run-9o4Yf5vM",
+  "entries": [
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted: in-scope suggestion; one refuter returned refuted=true \u2014 the record is verbatim review output and the proposed 'unrun' state does not exist in the cwdAudit schema (unknown words parse to 'missing'); filed on the closed suggestion-band record",
+      "issue": 4418,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4417/fix-HzIpHFia/unverified-0/verdict.json"
+    }
+  ]
+}

@@ -1,0 +1,343 @@
+{
+  "pr": 4424,
+  "head": "2d32c7de916e4edc72a5f1f5647cdd2882412eb7",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I only ran read-only commands in that directory, so I did not write these two files and they come from other agents."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I never wrote to that checkout, so these were already modified and come from another agent or the controller."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv` (not written by this agent; my only command against that path was `git status`; likely the controller's own metrics output)"
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv` (mtimes Nov 7 13:31:14 and 15:33:16). I ran nothing in that directory beyond os.getcwd and read-only reads; every command cd'd into the snapshot or the scratch copy by absolute path. Neither file is in this PR's diff."
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. This pass never wrote to that path: every write went under …/pr4424/run-M717PSUr/simplify/."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I made no edits there, so these changes are not from me."
+    }
+  ],
+  "counts": {
+    "survived": 1,
+    "refuted": 3,
+    "unverified": 15,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4424/run-M717PSUr/snapshot-2d32c7de",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "tests/pull.test.mjs",
+      "claim": "No test pins that the release of a standing claim uses the `impl-<N>` pair when the member is a replacement. Changing release-ticket.sh's argument from pairOf(st.ticket) to st.member leaves all 128 pull.test.mjs tests passing.",
+      "evidence": "mutant M5, pull.mjs ~line 999: `[String(st.ticket), pairOf(st.ticket), \"implementer\", \"--apply\"]` replaced by `[String(st.ticket), st.member, ...]`. Run: `./agent-test tests/pull.test.mjs` in copy c5 → exit 0, tests 128, pass 128, fail 0. Every release assertion (pull.test.mjs 1751, 1795, 1961, 2214) runs with member == impl-12, so none can see the difference. The new replacement tests ('a name ## Retired holds...' and the others) never route a refusal after a replacement claim. Baseline: `./agent-test tests/pull.test.mjs` in the unmutated copy → exit 0, tests 128, pass 128, fail 0, cancelled 0. This is a survival, not a kill, so there is no red line.",
+      "suggested_fix": "Add a test where a settled impl-12 token forces member impl-12-b and ticket-router refuses. Assert that release-ticket's args are [\"12\",\"impl-12\",\"implementer\",\"--apply\"].",
+      "dimension": "tests",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Mutant applied at pull.mjs:999 (pairOf(st.ticket) -> st.member) in my own copy. Run: env -u FORCE_COLOR ./agent-test tests/pull.test.mjs → exit 0, tests 128, pass 128, fail 0, cancelled 0. The mutant survives, so no test pins the replacement case, as claimed. I did not run a separate baseline, but the claim's 128/128 is consistent with this run. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/ticket-features.tsv, M docs/metrics/tier-outcomes.tsv. I did not touch these files, and another agent probably modified them."
+        },
+        {
+          "refuted": false,
+          "reason": "I reproduced the claim. In my own copy I changed pull.mjs line 999 from `pairOf(st.ticket), \"implementer\"` to `st.member, \"implementer\"`. `git diff --stat` showed the 1-line change. `env -u FORCE_COLOR ./agent-test tests/pull.test.mjs` then exited 0 with tests 128, pass 128, fail 0, cancelled 0. That is the same result the claim reports for the unmutated tree; I did not run the baseline myself. Line 999 is the refusal-path release, which runs when routing is null. `st.member` at line 975 differs from `pairOf(st.ticket)` for a replacement (line 973), so the mutation changes behaviour but no test sees it. I found no test covering it elsewhere. I only ran the suite, not a targeted grep for a test that routes a refusal after a replacement claim. The survival therefore stands, and it is not a kill, so there is no red line. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I made no writes there and these were already modified; the audit only reports them."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [
+    {
+      "severity": "important",
+      "file": "plugin/scripts/pull.mjs",
+      "line": 1022,
+      "claim": "A re-Pull of an `impl-<N>=PR#<M>` row that holds a Gate verdict (`reviewed=...`) or an open review launch (`review=member:...`) still stops at the row step with its claim standing, because carriedTokens() carries only settled member tokens and ledger.mjs refuses a rewrite that drops a Gate verdict or an open launch. The new references/pull.md paragraph says such re-Pulls work ('A row rewrite carries the row's settled member tokens — ... `=PR#<M>` — ... so no rewrite drops one').",
+      "evidence": "In the copy I seeded the row `#12 impl-12=PR#9 → PR#9 · review=wf:a reviewed=abc1234:2/0/0:run-abc1234r` and ran pullThrough (PROBE1). Result: status 2, err 'pull: #12: ledger.mjs row failed (exit 2) / ledger: row #12: drops Gate verdict 'reviewed=abc1234:2/0/0:run-abc1234r' — a rewrite carries every Gate verdict exactly as the row holds it', claims 1, releases 0, stage 'row', member 'impl-12-b', row unchanged. PROBE7 with `review=member:review-pr-9`: status 2, 'this write removes open launch 'review=member:review-pr-9' from PR #9's rows — an open launch is never removed', claims 1, releases 0, stage 'row'. With pull.mjs reverse-applied to its pre-PR version, PROBE1 fails the same way (member impl-12), so the bug predates this PR. It is the ticket's own failure (a stop at the row step with the claim standing), now on a different token kind.",
+      "suggested_fix": "Either carry Gate verdicts and review tokens too (every word gateVerdictRefusal and the open-launch rule protect, in row order), or check the rewrite with the ledger's refusal predicates (rowWriteRefusal/gateVerdictRefusal/settledMemberRefusal) in stage_claim and leave before claiming when the row cannot be rewritten. Separately, narrow the pull.md sentence so it promises nothing for rows that carry review tokens, and add a pull.test.mjs case for a reviewed `=PR#M` row.",
+      "dimension": "correctness",
+      "verdict": "refuted",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Reproduced in a measure-copy at the reviewed head. I added probes to tests/pull.test.mjs in the copy and seeded `#12 impl-12=PR#9 → PR#9`. I then added the review token with `ledger.mjs review 9 ...`, because a direct row write of a review token is refused. With `review=member:review-pr-9`, pullThrough returned status 2 with 'ledger.mjs row failed (exit 2) ... this write removes open launch ... an open launch is never removed', and the row was unchanged. With `review=wf:a`, the result was the same. The claim's `reviewed=` Gate-verdict probe could not be seeded, because `ledger.mjs review` accepts a `reviewed=` token only via `--result <path>`. So I did not run that variant. Its refusal text ('drops Gate verdict') is in ledger-grammar.mjs:522. Source also matches the claim: `carriedTokens` returns `settledMemberTokens(row)` only (pull.mjs:239-241), and `references/pull.md:708` says 'no rewrite drops one'. The tests ran in the copy and the injected probes printed output (positive control). I did not run the pre-PR comparison from the evidence. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. I did not write those files; I only ran read-only commands and wrote only to the scratch copy."
+        },
+        {
+          "refuted": true,
+          "reason": "Not run: I built no copy and ran no probe, so this verdict rests on reading the snapshot and the claim's own evidence. Code reading: carriedTokens() (pull.mjs:239) returns settledMemberTokens(row), which keeps only member-family tokens. `reviewed=` and `review=member:` are Gate/launch tokens, outside that set. The new pull.md text (line 705) says only that a rewrite carries the row's settled member tokens (`impl-<N>=released`, `=bailed`, `=PR#<M>`) and that no rewrite drops one. That statement is true for member tokens, and the PR's test at pull.test.mjs:1913 covers a re-Pull of an `=PR#9` row with a released member. The claimed failure, a re-Pull of a row holding a Gate verdict or an open launch, is a different token kind. The claim's own evidence says it fails the same way on the pre-PR pull.mjs, so the PR neither introduced nor documented it. It also stops loudly at the row step through ledger.mjs's refusal ('drops Gate verdict …', 'an open launch is never removed'), not silently. That makes it a separate pre-existing gap, not a defect in this PR's change or its paragraph. Weakness: I did not reproduce PROBE1/PROBE7, and I did not check whether the code before the row stage would also block such a re-Pull. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv`, ` M docs/metrics/tier-outcomes.tsv`. These were already modified when I started, and I wrote nothing there."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/pull.mjs",
+      "line": 1022,
+      "claim": "A Pull row rewrite silently drops a malformed settled member token such as `impl-12=bogus`, and the Pull exits 0. The PR's comment and docs say 'a rewrite drops none', but `carriedTokens` uses `isSettledToken`, which excludes tokens whose outcome is out of vocabulary.",
+      "evidence": "Probe in the copy: seedLedger rows [\"#12 impl-12=bogus · impl-12-b=released\"], then the Pull through to dispatch. Output: STATUS 0, DISPATCH name impl-12-c, ROWS [\"#12 impl-12-b=released · impl-12-c\"]. The `impl-12=bogus` token vanished with no refusal or warning. A direct `ledger.mjs row 12 impl-12=bogus` is refused (\"malformed member token 'impl-12=bogus'\"), so this only happens on a hand-edited ledger, but the Pull then repairs it without saying so. The drop is also inconsistent with the PR's own priorUse, which counted `impl-12=bogus` as a settled use of impl-12 when choosing the name.",
+      "suggested_fix": "In `carriedTokens`, or in stage_row/exclude, refuse (Refusal) when the row holds a member token with `error !== null`, as `ledger.mjs read`/dispatch do for a malformed Dispatched entry. Alternatively carry it through so `ledger.mjs row` raises its own malformed-token refusal.",
+      "dimension": "silent-failure",
+      "verdict": "refuted",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Ran the snapshot's real `settledMemberTokens` (what `carriedTokens` at pull.mjs:239-242 calls, used at the row rewrite on line 1022) on 'impl-12=bogus · impl-12-b=released · impl-12-c'. It returned ['impl-12-b=released'], so the bogus token is dropped. The code at ledger-grammar.mjs:118-120 shows why: `isSettledToken` requires a non-null outcome, and a malformed token fails that. The comment at pull.mjs:1181 says 'a rewrite drops none', and this contradicts it. I did not run the full Pull-to-dispatch probe, and I did not build a measure-copy. I did not run ./agent-test, so there is no red/baseline line. The bash tool was broken by an extension error, so I used Python subprocess to run node. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I did not touch these files; they were already modified by other work."
+        },
+        {
+          "refuted": true,
+          "reason": "I did not build a copy or run the probe, so this rests on reading the source and the claim's own evidence. The drop itself is plausible: `carriedTokens` (pull.mjs:239) calls `settledMemberTokens`, which filters with `isSettledToken` (ledger-grammar.mjs:118). That function requires `error === null`, so an out-of-vocabulary outcome like `impl-12=bogus` is excluded and a rewrite omits it. But ledger-grammar.mjs documents this on `settledOnLedger`: 'Malformed tokens are the caller's to have refused: one here is read as nothing.' The claim itself concedes `ledger.mjs row` refuses such a token, so it only arises on a hand-edited ledger. That makes the drop a deliberate, documented contract rather than a silent regression. The evidence shows only that a rewrite drops a token the grammar already treats as nothing. It does not show a defect in the PR. The `priorUse` inconsistency is real but minor, and the claim's evidence doesn't show it causes a wrong outcome. I'm refuting because the evidence proves something weaker than 'a rewrite silently loses a valid settled token'. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I made no writes there, so these were already modified before my run."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/skills/run-team/references/pull.md",
+      "line": 255,
+      "claim": "Untouched pull.md text still says the Pull's row, Routing, render and dispatch all use the literal member `impl-<N>` (lines 255, 257, 262, 416-418). The diff falsifies this: the member is now `impl-<N>-b`, `-c`, … when the session already used `impl-<N>`.",
+      "evidence": "Read snapshot pull.md lines 246-268 and 412-420. Step 7 says `ledger.mjs row <N> \"impl-<N>[ · tier=<CELL>]\"` and 'files the line verbatim under `impl-<N>` in `## Routed`'. The Record-the-dispatch paragraph says `render implementer --member impl-<N>`, `ledger.mjs dispatch <N> impl-<N>` and 'marks `impl-<N>` live'. The diff's own new paragraph at pull.md:691-706 and the pull.mjs stage_row/stage_render/stage_dispatch code use `st.member`, which can be a retry name. Line 359, 'row is rewritten to `impl-<N> …`', is the same stale kind but milder.",
+      "suggested_fix": "Reword these spots to '<member>' (with a pointer to the new paragraph), or add an 'impl-<N> unless the session has used it' qualifier.",
+      "dimension": "comments",
+      "verdict": "refuted",
+      "votes": [
+        {
+          "refuted": false,
+          "inconclusive": false,
+          "reason": "I read the snapshot with grep, since this is a doc-text claim and no test applies. Lines 255, 257, 262 and 416-418 of pull.md still say the row, the routing filing, the render `--member` and `ledger.mjs dispatch` all use the literal `impl-<N>`. Line 359 says the same in a milder form. The new paragraph at 694-708 says the Pull's member is `impl-<N>-b`, `-c`, … when the session already used `impl-<N>`, and that the row, render `--member`, dispatch and Routing all carry that name. The two passages conflict as claimed. The claim is true as merged. I ran no tests or mutants. CWD-AUDIT: unrun — every bash call, including `pwd`, failed with a pix-optimizer extension error, so I never learned the cwd or ran the git status audit."
+        },
+        {
+          "refuted": true,
+          "reason": "Handled elsewhere. I read pull.md lines 250-264, 355-360, 412-420 and 685-708 in the snapshot (read only, no test run). The lines at 255, 257, 262 and 416-418 do say `impl-<N>`. That is the normal case, where the session hasn't used `impl-<N>` yet. The new paragraph at about 691-706 says 'The row, the render's `--member`, `ledger.mjs dispatch`, the `DISPATCH` line's `name` and the Routing under `## Routed` all carry that name.' It also says the member is `impl-<N>-b`, `-c`, … when the name is taken. That wording names the same row, render, dispatch and Routing steps the claim lists, so the retry case is documented in the same file and the earlier `impl-<N>` text is not falsified. At most it is a wording nit, not a defect. Checks not run: whether line 359 or the Step 7 text are read as a standalone instruction anywhere else, and the pull.mjs code paths. CWD-AUDIT: not run, since I made no writes, but nothing in /Users/chris/dev/fleet-plugin was touched."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/pull.mjs",
+      "line": 700,
+      "claim": "ledgerRows() now goes through ledger(), so the malformed-`## Dispatched` and malformed-`## Retired` refusals, added for choosing the member name, now also block the collision Exclusion write and stage_route. Neither needs those sections. With a malformed Retired line, a `behind-issue` answer now exits 2 and writes no Exclusion where the pre-PR code left the ticket (exit 1) with the Exclusion written.",
+      "evidence": "PROBE8 seeds Retired ['not a member line'] and answers collision `behind-issue:#9` (issue #9 OPEN). With the PR: status 2, err 'pull: ledger.mjs read: ## Retired has a line 'not a member line' that names no member or reviewer — fix the ledger by hand', rows [], state running at stage collision. With pull.mjs reverse-applied (`git apply -R --include=plugin/scripts/pull.mjs pr.diff` in the copy): status 1, out 'LEFT #12: excluded · behind-issue:#9 — next entry', rows ['#12 excluded · behind-issue:#9'], status left.",
+      "suggested_fix": "Keep the Dispatched/Retired validation only on the path that picks the name (stage_claim). Have ledgerRows() validate only `rows` as it did before, or give ledger() a flag that skips the section checks for the row-only readers.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/pull.mjs",
+      "line": 158,
+      "claim": "carriedTokens() drops every word on the row that is not a settled member token: the `→ PR#M` arrow, `ports=`, `tier-ok=` and similar. ledger.mjs accepts this and names the dropped words on stderr. It follows the ruling's spec (settled member tokens only) and is no worse than the pre-PR rewrite, which dropped everything. The new test at pull.test.mjs (diff line 433) pins the arrow's loss as intended.",
+      "evidence": "PROBE4: the row `impl-12=PR#9 → PR#9 · ports=1 · tier-ok=impl-12:fleet-implementer-smol-high` goes through pullThrough with status 0, dispatches impl-12-b, and the row reads ['#12 impl-12=PR#9 · impl-12-b'].",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/pull.mjs",
+      "line": 1022,
+      "claim": "Only settled tokens are carried. A live (unsettled) member token on the row is dropped by the rewrite before `ledger.mjs dispatch` gets a chance to refuse, so the refusal leaves the row without the live member's token.",
+      "evidence": "Probe: seedLedger rows [\"#12 impl-12\"], dispatched [\"impl-12 brief=0123abcd\"]. The Pull claimed under impl-12 and rewrote the row to [\"#12 impl-12-b\"]. Dispatch then refused with exit 2: 'impl-12 is still live — settle impl-12 killed'. Final ROWS [\"#12 impl-12-b\"], so the live impl-12 is missing from the row while it is still in ## Dispatched. This is reachable in the fixture only because claim-ticket.sh is stubbed; the real script refuses an existing worktree or branch (claim-ticket.sh:156/160), so I could not show it is reachable in production.",
+      "suggested_fix": "Check for a live member on the ticket's row, or for a live Dispatched entry of `impl-<N>*`, in stage_claim and leave/refuse before claiming. Alternatively carry live tokens too.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/skills/run-team/references/member-lifecycle.md",
+      "line": 154,
+      "claim": "member-lifecycle.md still tells the controller to 'Keep `name: impl-<N>`', while the SKILL.md implementer line now says to keep the name `DISPATCH` printed. The Pull can now print `impl-<N>-b`.",
+      "evidence": "grep of member-lifecycle.md line 154 gives 'Keep `name: impl-<N>`: the name is what makes a member…'. tests/implementer-model-tier.test.mjs:92 still pins that phrase. The diff changed the SKILL.md assertion to /keep the `name` `DISPATCH` printed/.",
+      "suggested_fix": "Say 'keep the `name` DISPATCH printed (`impl-<N>`, or its retry name)' in member-lifecycle.md, and update the pin at test:92.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/implementer-model-tier.test.mjs",
+      "line": 117,
+      "claim": "The measurement comment says the contradicting sentence was added 'before `Keep `name: impl-<N>``' in the dispatch paragraph. That phrase no longer appears in the SKILL.md dispatch section, because the diff replaced it with 'keep the `name` `DISPATCH` printed'.",
+      "evidence": "Diff hunk in plugin/skills/run-team/SKILL.md (implementer bullet) and tests/implementer-model-tier.test.mjs:92-96. The comment at line 117 was not touched.",
+      "suggested_fix": "Update the comment to the new anchor phrase.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger-grammar.mjs",
+      "line": 935,
+      "claim": "The nextMergeBot doc says the extra `names` are 'a retired bot's and a settled token on a row'. The callers (ledger.mjs dispatch via sessionMemberNames) pass every member token on any row, live or settled, plus retired names. The new sessionMemberNames doc says exactly that, so the two docs now disagree.",
+      "evidence": "Snapshot ledger-grammar.mjs:935-945 (nextMergeBot doc) against :960-965, where sessionMemberNames is `[...rows.flatMap(memberTokens).map(t=>t.name), ...retired]` with the doc 'each member token on any row, live or settled'. The old inline code in ledger.mjs was identical, so the stale wording predates this PR, but the PR's new doc exposes it.",
+      "suggested_fix": "Change nextMergeBot's doc to 'any member token on a row'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger-grammar.mjs",
+      "line": 971,
+      "claim": "The priorUse doc says `dispatched` is '`## Dispatched` as its tokens'. The entries are whole lines, e.g. `impl-12=released brief=0123abcd` in the tests. priorUse returns that full entry, and the refusal prints it as `(${prior})`.",
+      "evidence": "tests/pull.test.mjs seedLedger usage `dispatched: [\"impl-12=released brief=0123abcd\"]`. priorUse does `dispatched.find((e) => parseToken(e).name === name)` and returns `e`.",
+      "suggested_fix": "Say 'as its entry lines (token plus brief)'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body and commit 2d32c7de: no factual assertion I could check against the tree is false. Checked the four exports, the two pull.mjs ledger write paths (row and exclude), the docs/SKILL.md phrase and the pinned test, and the tree f1d46b7 equal to the head tree. The one unverified claim is the earlier timing-test failures.",
+      "evidence": "Compared pr-messages.md against pr.diff and the snapshot. `git rev-parse HEAD^{tree}` printed f1d46b78dc3c786752adcd3a6698225ef6e1ca26.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger-grammar.mjs",
+      "line": 971,
+      "claim": "priorUse() returns a string for the first of three sources that holds the name (dispatched entry, settled token on a row, retired), or undefined for none. The result is built with `a ?? (x && y) ?? z`, which works only because `undefined && y` is `undefined`. The invariant is enforced by a JSDoc sentence and an expression trick, with no type or named result.",
+      "evidence": "Read lines 963-981 of the snapshot's ledger-grammar.mjs. The `settledOnRow && ...` form is correct, since `find` returns an object or undefined, and both callers (ledger.mjs runDispatch, pull.mjs claim) test `prior !== undefined`. I found no concrete bug. Not executed.",
+      "suggested_fix": "Optional: write `settledOnRow ? ... : ...` explicitly, or return a tagged `{where, text}`.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger-grammar.mjs",
+      "line": 125,
+      "claim": "settledMemberTokens() and memberTokens() tokenise the row text separately (`split(/\\s+/).filter(isSettledToken)` against `.filter(Boolean).map(parseToken)`). The meaning of 'settled' (error null and outcome non-null) lives in isSettledToken, while settledOnLedger/priorUse use `t.outcome !== null` and ignore `error`, so a malformed outcome counts as settled in priorUse and not in settledMemberTokens.",
+      "evidence": "Read lines 112-128 and 971-975. priorUse's `t.outcome !== null` does not check `t.error`, whereas isSettledToken requires `error === null`. The difference is presumably deliberate: a malformed token still marks the name as used, but is not required to be carried. Not executed, and no test was run against it.",
+      "suggested_fix": "Add a one-line comment at priorUse saying a malformed outcome still burns the name, so the difference from isSettledToken reads as intended.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger-grammar.mjs",
+      "line": 953,
+      "claim": "replacementName() and nextRetry() call `parseMember(name)` and destructure it unguarded, so an unparseable name throws a TypeError at runtime. The parameter has no non-null type.",
+      "evidence": "Read nextRetry: `const { family, number } = parseMember(name);`. Both callers pass a parsed member's `name` (ledger.mjs, after `if (!member) die`) or `pairOf(ticket)` (pull.mjs, always `impl-<N>`), so the null case is unreachable today. Not executed.",
+      "suggested_fix": "None needed; optionally note in the JSDoc that `name` must already be a valid member name.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/pull.mjs",
+      "line": 700,
+      "claim": "The PR moved the ledger-read body into the new `ledger()` and left `ledgerRows()` as a one-line wrapper (`return this.ledger().rows;`); that wrapper adds nothing and has 3 callers (lines 987, 1022, 1182).",
+      "evidence": "In the measure copy: removed `ledgerRows()` and replaced its 3 callers with `this.ledger().rows`. `grep -rn '\\.ledgerRows()' plugin tests` found no other Pull callers (only the fixture's f./g.ledgerRows()). `node --check plugin/scripts/pull.mjs` passed. `node --test tests/pull.test.mjs tests/ledger-grammar.test.mjs tests/ledger.test.mjs tests/implementer-model-tier.test.mjs` gave 380 pass, 0 fail. The pull.json command log is unchanged because each `ledger()` call still runs one `ledger.mjs read`.",
+      "suggested_fix": "Delete `ledgerRows()` and call `this.ledger().rows` in stage_route, stage_row and answer_collision, or destructure: `const { rows } = this.ledger();`.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/pull.mjs",
+      "line": 236,
+      "claim": "The new `rowOf(rows, ticket)` helper has one caller (`carriedTokens`), while the same lookup is still spelled inline at heldOut (line 1239, `readLedgerRows(p).find((r) => rowKey(r) === `#${n}`)`) and shortlistHead (line 1278, `rows.find((r) => rowKey(r) === `#${n}`)`). That leaves one lookup in two forms.",
+      "evidence": "`grep -n 'rowOf|rowKey' plugin/scripts/pull.mjs` shows rowOf used only at line 240 and the inline lookups at 1239 and 1278. In the measure copy: replaced both with `rowOf(readLedgerRows(p), n)` and `rowOf(rows, n)`. `node --check` passed, and the 4-file test run gave 380 pass, 0 fail.",
+      "suggested_fix": "Reuse `rowOf` in heldOut (`const row = rowOf(readLedgerRows(p), n);`) and in shortlistHead (`const row = rowOf(rows, n);`), so every row lookup takes one form.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger-grammar.mjs",
+      "line": 538,
+      "claim": "In `settledMemberRefusal`, the local closure `settled = (text) => (text === null ? [] : settledMemberTokens(text))` can be replaced by `settledMemberTokens(x ?? \"\")`. On empty input, `\"\".split(/\\s+/)` gives `[\"\"]`, `isSettledToken(\"\")` is false (parseMember(\"\") is null), so the result is `[]`, the same as the null branch.",
+      "evidence": "In the measure copy: replaced the closure and its call with `const lost = added(settledMemberTokens(line ?? \"\"), settledMemberTokens(oldLine ?? \"\"))[0];`. `node --check plugin/scripts/ledger-grammar.mjs` passed. tests/ledger-grammar.test.mjs (which covers settledMemberRefusal) and tests/ledger.test.mjs passed within the 380/380 run.",
+      "suggested_fix": "`const lost = added(settledMemberTokens(line ?? \"\"), settledMemberTokens(oldLine ?? \"\"))[0];` and drop the `settled` closure.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/pull.test.mjs",
+      "line": 1841,
+      "claim": "The new `dispatchName` helper parses the DISPATCH line, but the PR's own test at line 1893 parses the same line again inline (`JSON.parse(r.out.find(...).slice(9)).agent`). Also, the -z test (lines 1932-1934) writes out `toCollision(f); f.answer(12, \"collision\", \"clear\")`, which is exactly the new `pullThrough(f)`.",
+      "evidence": "`grep -n 'DISPATCH ' tests/pull.test.mjs` shows lines 1841 and 1893 both parsing the line. In the measure copy: added `const dispatchSpec = (r) => JSON.parse(…)` with `dispatchName = (r) => dispatchSpec(r).name`, used `dispatchSpec(r).agent` at line 1893, and replaced the -z test's toCollision+answer pair with `pullThrough(f)`. `rows` is still captured before it. The 4-file run gave 380 pass, 0 fail.",
+      "suggested_fix": "`const dispatchSpec = (r) => JSON.parse(r.out.find((l) => l.startsWith(\"DISPATCH \")).slice(\"DISPATCH \".length)); const dispatchName = (r) => dispatchSpec(r).name;` then `assert.equal(dispatchSpec(r).agent, \"fleet-implementer-task-high\")`. In the -z test: `const rows = f.ledgerRows(); const r = pullThrough(f);`.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

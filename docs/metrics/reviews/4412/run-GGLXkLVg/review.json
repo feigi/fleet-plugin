@@ -1,0 +1,140 @@
+{
+  "pr": 4412,
+  "head": "48d6a7eca4dd9b9d9f2b6470612328f4d4ad1158",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": false,
+    "reason": "`./agent-test` produced no counts — the shared test run crashed, hit its deadline, or printed no summary (the test-run agent returned nothing) — a failed run, not a pass"
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv'. I did not write to that checkout and ran only git status there, so those two modifications are not mine."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv`. I wrote nothing there; my only action in that directory was `pwd`, plus an eval whose Python working directory was it. I did not create these changes and cannot say who did."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/ticket-features.tsv` and ` M docs/metrics/tier-outcomes.tsv` (this review never wrote to that tree: every command cd'd into the snapshot or scratch dir, or used absolute scratch paths)"
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/ticket-features.tsv', ' M docs/metrics/tier-outcomes.tsv' (not touched by me; I only did read-only pwd/diff reads there, so these come from other agents)."
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 7,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4412/run-GGLXkLVg/snapshot-48d6a7ec",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/phase0.mjs",
+      "line": 610,
+      "claim": "On macOS, `<repo>/afile/../.fleet`, where `afile` is a regular file, is still accepted as this checkout's .fleet/ after the fix, even though the OS cannot open that path (ENOTDIR). The reason is that darwin's realpath(3), which realpathSync.native calls, folds `file/..` without checking that `file` is a directory.",
+      "evidence": "Probe test through the real alarm step at PR head: PROBE-RESULT {\"nope\":\"3 failed\",\"nope2\":\"3 failed\",\"hop\":\"3 failed\",\"sub\":\"0 ok\",\"afile\":\"0 ok\",...}. Direct check: `fs.realpathSync.native('<r>/afile/..')` -> '<r>' (no throw), `fs.statSync('<r>/afile/..')` -> ENOTDIR, `ls -d r/afile/..` -> 'Not a directory', `/bin/realpath r/afile/..` -> '<r>'; node v26.13.0, Darwin 27.2.0. Low impact: the triage notes that controller-alarm.mjs derives `fleet` from git, so real records never contain `..`. This is the same class of input as the ticket's, and the fix covers it only on Linux, where I did not measure.",
+      "suggested_fix": "If the step should refuse every spelling the OS cannot open, also refuse a `fleet` whose `path.normalize()` differs from it, an alternative remedy the issue itself names, or stat the directory part. Otherwise, note in the fleetIdentity comment that this residual is accepted.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/phase0.mjs",
+      "line": 610,
+      "claim": "Switching to realpathSync.native also changes behavior the PR does not mention: on case-insensitive APFS, a case-variant spelling of the checkout (`<dir>/REPO/.fleet` for `<dir>/repo`) is now accepted, where before it was refused. A case-variant `.fleet` basename (`<repo>/.FLEET`) is still refused, so two spellings of the same directory now get different answers.",
+      "evidence": "Same probe at PR head: upperRepo \"0 ok\", upperFleet \"3 failed\". On the mutant restoring JS realpathSync: upperRepo \"3 failed\", upperFleet \"3 failed\". Direct check: `fs.realpathSync('<p>/R')` -> '<p>/R', `fs.realpathSync.native('<p>/R')` -> '<p>/r'. Arguably correct: the alarm comment says 'the same directory, whichever way omp and this process each spell the path'. No test pins it either way.",
+      "suggested_fix": "Mention the case-canonicalization change in the PR body or the fleetIdentity comment, and optionally pin it with a test, so a later resolver swap cannot silently undo it.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/phase0.test.mjs",
+      "line": 582,
+      "claim": "The new test covers the ticket's nonexistent-directory spellings and fails without the fix. Nothing pins the symlink-hop spelling (`<repo>/hop/../.fleet`, with hop pointing into another checkout), which the fix also corrects.",
+      "evidence": "Mutant run (realpathSync.native -> realpathSync): '✖ alarm: a file whose path climbs out of a directory that does not exist is refused...' with 'actual: 0, expected: 3' on `<repo>/nope/../.fleet`, so the test catches the regression. Probe at PR head: hop \"3 failed\" (refused). On the mutant: hop \"0 ok\". The triage comment's item 4 asks for this case, and the PR's test loop does not include it.",
+      "suggested_fix": "Add `${f.repo}/hop/../.fleet`, with `symlinkSync(other, join(f.repo, 'hop'))`, to the new test's loop.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/phase0.mjs",
+      "line": 611,
+      "claim": "The bare `catch { return path; }` in fleetIdentity swallows every realpath error (ENOENT, EACCES, ELOOP) and returns the path unnormalised. The alarm step still fails closed, but its message cannot say why: it reports 'names fleet X, not Y', as if the fleets differed, even when the cause was an unreadable path component.",
+      "evidence": "A standalone probe of the post-change function printed FALLBACK(ENOENT) for `R/repo/nope/../.fleet`, `R/repo/nope/../nope2/../.fleet`, `R/nope/.fleet` and the dangling-symlink case. It printed FALLBACK(EACCES) for `R/noperm/sub/.fleet` under a mode-000 parent. Each returned the raw string, which then differs from the resolved fleetDir. The new test confirms the refusal and the `names fleet ... — restart omp` message for the `..` cases. An EACCES parent that resolves to the same directory is not covered by any test; I did not run that scenario end to end.",
+      "suggested_fix": "Optional. Have fleetIdentity return a marker or the error code, and append it to the refusal text when an identity could not be resolved. The documented 'stays as given' contract, and the fact that the direction is fail-closed, make this low priority.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/phase0.mjs",
+      "line": 610,
+      "claim": "The change fixes the `..` fold without a false accept. A path whose dirname does not exist now hits ENOENT and falls back to the raw string, which does not equal fleetDir. No new dereference moved inside the try: `dirname`, `basename` and `join` already sat there, and only `realpathSync` became `.native`.",
+      "evidence": "The probe returned `R/repo/../repo/.fleet => R/repo/.fleet`, since the dirname exists and resolves, and FALLBACK for nonexistent-dir `..` paths. With non-native `realpathSync` restored in the copy, the new test fails (`ℹ pass 0 / ✖ ... climbs out of a directory that does not exist ...`). With `.native`, all 18 alarm tests pass.",
+      "suggested_fix": "None.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/phase0.test.mjs",
+      "line": 582,
+      "claim": "The new test kills the sole source change: removing `.native` from realpathSync in fleetIdentity makes it fail, and the unmutated tree passes it.",
+      "evidence": "red: ./agent-test tests/phase0.test.mjs --test-name-pattern='climbs out of a directory' → exit 1, fail 1 incl 'alarm: a file whose path climbs out of a directory that does not exist is refused, though it lexically names this .fleet/' (mutant: realpathSync(dirname(path))); baseline: same cmd → exit 0, tests 113 pass 113 fail 0 cancelled 0, that test pass. The name-pattern argument was ignored, so the full file ran in both runs.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/phase0.mjs",
+      "line": 603,
+      "claim": "The rewritten comment is accurate but run-on: 'resolved through symlinks by the OS, so a `..` after a directory that does not exist is not folded away, and the `.fleet` name kept' joins two clauses awkwardly and could be misread as the `..` handling applying to the `.fleet` name.",
+      "evidence": "Read the diff and phase0.mjs:602-612. The code at line 610 is join(realpathSync.native(dirname(path)), basename(path)), which matches both claims. Only the wording is a problem.",
+      "suggested_fix": "Split into two sentences, e.g. 'the checkout holding it is resolved through symlinks by the OS realpath, so a `..` after a nonexistent directory is not folded away lexically; the `.fleet` name is kept so it works before `.fleet/` exists.'",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

@@ -1,0 +1,90 @@
+{
+  "head": "48d6a7eca4dd9b9d9f2b6470612328f4d4ad1158",
+  "run": "run-GGLXkLVg",
+  "entries": [
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "reason": "refuter returned refuted=false: <repo>/afile/../.fleet accepted at head on darwin; statSync(dirname) before realpathSync.native refuses it (applied, test entry added; m1 mutant removing the stat reddens the afile entry)",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4412/fix-a2zIwGhs/u0/verdict.json",
+      "remedyFiles": [
+        "plugin/scripts/phase0.mjs",
+        "tests/phase0.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuter returned refuted=true: case-variant checkout spelling is accepted, which is correct on a case-insensitive volume; only a doc mention remains; recorded on the suggestion-band record",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4412/fix-a2zIwGhs/u1/verdict.json",
+      "remedyFiles": [
+        "plugin/scripts/phase0.mjs"
+      ],
+      "issue": 4422
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "reason": "refuter returned refuted=false: hop-only entry red on the realpathSync mutant, green at head; hop/../.fleet entry added (m2 mutant reddens it)",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4412/fix-a2zIwGhs/u2/verdict.json",
+      "remedyFiles": [
+        "tests/phase0.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "out",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "out of scope: line 611 untouched by the PR, catch predates it, ticket asks for refusal not diagnostics; refuter returned refuted=true; recorded on the suggestion-band record",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4412/fix-a2zIwGhs/u3/verdict.json",
+      "remedyFiles": [
+        "plugin/scripts/phase0.mjs"
+      ],
+      "issue": 4422
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "reason": "refuter returned refuted=false; the finding states the change is correct and its suggested fix is none, so applying it changes nothing",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4412/fix-a2zIwGhs/u4/verdict.json",
+      "remedyFiles": []
+    },
+    {
+      "bucket": "unverified",
+      "index": 5,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "reason": "refuter returned refuted=false; the finding states the change is correct and its suggested fix is none, so applying it changes nothing",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4412/fix-a2zIwGhs/u5/verdict.json",
+      "remedyFiles": []
+    },
+    {
+      "bucket": "unverified",
+      "index": 6,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "refuter returned refuted=true: both clauses true and the misreading does not parse; comment rewritten anyway by the unverified[0] fix; recorded on the suggestion-band record",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4412/fix-a2zIwGhs/u6/verdict.json",
+      "remedyFiles": [
+        "plugin/scripts/phase0.mjs"
+      ],
+      "issue": 4422
+    }
+  ]
+}
