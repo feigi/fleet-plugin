@@ -240,12 +240,9 @@ REQ_SECTION="$(awk '/^### 2\.4/{on=1;next} /^### /{on=0} on' docs/requirements.m
 label_map_line() {
   grep -E "^${ENTRY_RE}scripts/fleet-run[[:space:]]+label-map\\.mjs[[:space:]]+$1([[:space:]]|\$)" <<<"$REQ_SECTION" || true
 }
-ENSURE_LINE="$(label_map_line ensure)"
-SET_LINE="$(label_map_line set)"
 label_lines_ok=1
-for pair in "ensure:$ENSURE_LINE" "set:$SET_LINE"; do
-  verb="${pair%%:*}"
-  line="${pair#*:}"
+for verb in ensure set; do
+  line="$(label_map_line "$verb")"
   if [ -z "$line" ] || [ "$(wc -l <<<"$line")" -ne 1 ]; then
     echo "::error::install-and-smoke: docs/requirements.md §2.4 has no single \`$verb\` line (the Package entry's fleet-run label-map.mjs $verb ...)"
     fail=1
@@ -286,9 +283,8 @@ echo "gh stub: unsupported call: gh $*" >&2
 exit 64
 STUB
   chmod +x "$STUB_BIN/gh"
-  for pair in "set:$SET_LINE" "ensure:$ENSURE_LINE"; do
-    verb="${pair%%:*}"
-    line="${pair#*:}"
+  for verb in set ensure; do
+    line="$(label_map_line "$verb")"
     echo "== §2.4's $verb line: $line =="
     verb_rc=0
     (cd "$LABEL_REPO" && HOME="$SCRATCH_HOME" PATH="$STUB_BIN:$PATH" GH_STUB_LABELS="$SCRATCH_HOME/gh-stub-labels" bash -c "$line") || verb_rc=$?
