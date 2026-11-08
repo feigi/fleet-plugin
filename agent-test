@@ -631,8 +631,24 @@ for arg do
         # Only node can judge its own flags. Read as paths, every documented
         # `node --test` flag (`--test-name-pattern=x`, `--test-only`,
         # `--test-reporter=tap`) and POSIX's own `--` refused as a missing
-        # file. A typo'd flag stays loud: node rejects it itself.
-        -*) ;;
+        # file. So a flag reaches node — but node reads its own options only
+        # BEFORE the first file operand and drops one after it with no error:
+        # `<file> --test-name-pattern=x` ran every test at exit 0, and a typo'd
+        # flag there exited 0 too. $operand already records whether an earlier
+        # argument named something to run (an existing path, a directory, a
+        # quoted glob), so a flag meeting it is refused here in this runner's
+        # voice rather than handed to a node that ignores it. Nothing is
+        # reordered: a flag's value is sometimes a separate word naming an
+        # existing path (`--import ./setup.mjs`), which is an operand and not
+        # part of the flag, so moving the flag alone would split it from its
+        # value. Before the first operand a typo'd flag stays loud: node
+        # rejects it itself.
+        -*)
+          if [ -n "$operand" ]; then
+            printf "agent-test: %s comes after a test path, where node does not read it — put node's options before the first test path\n" "$arg" >&2
+            exit 1
+          fi
+          ;;
         # Shell globbing is off (`set -f` above), so an argument like this
         # reached the shell unexpanded on purpose — the deliberately
         # supported quoted-glob form (`./agent-test 't/*.test.mjs'`). Only

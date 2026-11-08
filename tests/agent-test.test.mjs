@@ -1511,6 +1511,60 @@ test("runner: an argv of flags alone refuses instead of reaching node's own disc
   assert.match(ok.stdout, /^(?:ℹ|#) pass 1$/m);
 });
 
+// A dash-led argument after one that names something to run is refused. Node
+// reads its own options only before the first file operand and drops a later
+// flag with no error, so `<file> --test-name-pattern=one` ran every test at
+// exit 0 — a narrowed run that was not narrowed, and a typo'd flag there
+// exited 0 too. The runner refuses it in its own voice rather than moving it
+// (a flag's value is sometimes a separate word naming an existing path, so
+// reordering cannot tell the two apart). Nothing is reordered: the same flag
+// BEFORE the file still reaches node and narrows the run.
+//
+// The fixture is one file holding two tests and a pattern matching one: the
+// pre-fix runner exited 0 with `tests 2`, and `tests 1` is what the flag-first
+// control proves a honoured flag looks like. Each trailing shape is a distinct
+// arm that records an operand — file, directory, quoted glob — and `--` is
+// refused after one as POSIX's marker is dropped the same way.
+//
+// The refusal's other half is what it must ACCEPT: an existing dash-named
+// file after a path is a path, not a flag, so the runner does not refuse it
+// and node does (`node: bad option`, reported with the run's output, not on
+// the runner's own stderr).
+test("runner: a flag after a test path is refused, not silently dropped by node", () => {
+  const TWO = 'import { test } from "node:test";\ntest("one", () => {});\ntest("two", () => {});\n';
+  const a = apply({ "t/a.test.mjs": TWO, "d/b.test.mjs": TWO });
+  writeFileSync(join(a.wt, "-dash.test.mjs"), TWO);
+
+  const control = a.run("--test-name-pattern=one", "t/a.test.mjs");
+  assert.equal(control.status, 0, control.stdout + control.stderr);
+  assert.match(control.stdout, /(?:ℹ|#) tests 1(?!\d)/, control.stdout);
+
+  for (const [label, argv, named] of [
+    ["file", ["t/a.test.mjs", "--test-name-pattern=one"], "--test-name-pattern=one"],
+    ["directory", ["d", "--test-name-pattern=one"], "--test-name-pattern=one"],
+    ["quoted glob", ["t/*.test.mjs", "--test-only"], "--test-only"],
+    ["typo'd flag", ["t/a.test.mjs", "--test-name-patern=x"], "--test-name-patern=x"],
+    ["--", ["t/a.test.mjs", "--"], "--"],
+    ["-- then flag", ["t/a.test.mjs", "--", "--test-name-pattern=one"], "--"],
+  ]) {
+    const r = a.run(...argv);
+    const out = `${label}: ${r.stdout}${r.stderr}`;
+    assert.equal(r.status, 1, out);
+    assert.match(r.stderr, /^agent-test: /, out);
+    assert.ok(r.stderr.includes(named), out);
+    assert.match(r.stderr, /before the first test path/, out);
+    assert.doesNotMatch(r.stdout, /(?:ℹ|#) (?:tests|pass)/, out);
+  }
+
+  const dash = a.run("t/a.test.mjs", "-dash.test.mjs");
+  assert.notEqual(dash.status, 0, dash.stdout + dash.stderr);
+  assert.match(dash.stdout + dash.stderr, /node: bad option/, dash.stdout + dash.stderr);
+  assert.doesNotMatch(dash.stderr, /agent-test: /, dash.stdout + dash.stderr);
+
+  const dashes = a.run("--", "t/a.test.mjs");
+  assert.equal(dashes.status, 0, dashes.stdout + dashes.stderr);
+});
+
 // #961. The corpus above is spelled entirely with arguments that do not
 // exist, so it pins one row of the classification and leaves the rule that
 // produces it unpinned: a dash-led argument is an operand where it EXISTS,
