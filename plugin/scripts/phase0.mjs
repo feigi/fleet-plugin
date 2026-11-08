@@ -599,18 +599,25 @@ function shortlist({ cwd }) {
   return ok("shortlist built");
 }
 
-// The same `.fleet/` by the directory it names: the checkout holding it is
-// stat'd, then resolved through symlinks by the OS, so a `..` after a
-// directory that does not exist, or after a file, is not folded away (darwin's
-// realpath folds `file/..`; the stat refuses it). The `.fleet` name is kept as
-// given, so it works before `.fleet/` exists. A path that is not absolute, or
-// whose checkout does not resolve, stays as given.
+// The alarm step accepts a `fleet` spelling only when the OS resolves it to
+// this checkout's `.fleet/`. So the OS stats the part that must exist (the
+// path itself when its last name is `.` or `..`, else the checkout holding it,
+// the directory part), and then resolves that checkout through symlinks. A
+// `..` after a directory that does not exist, after a file, or out of a
+// directory the OS may not search is refused by that stat, though darwin's
+// realpath folds `file/..` and `unsearchable/..` and `join` folds a trailing
+// `..` as text; a `..` after a directory or a symlink to one resolves where
+// the OS takes it; and on a case-insensitive volume a letter-case variant of
+// the checkout path is the same checkout. The `.fleet` name is compared as
+// given, so it works before `.fleet/` exists and `.FLEET` is another name. A
+// path that is not absolute, or that the OS does not resolve, stays as given.
 function fleetIdentity(path) {
   if (typeof path !== "string" || !isAbsolute(path)) return path;
   try {
     const checkout = dirname(path);
-    statSync(checkout);
-    return join(realpathSync.native(checkout), basename(path));
+    const name = basename(path);
+    statSync(name === "." || name === ".." ? path : checkout);
+    return join(realpathSync.native(checkout), name);
   } catch {
     return path;
   }
