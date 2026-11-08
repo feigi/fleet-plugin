@@ -89,8 +89,8 @@ test("the dispatch section dispatches every implementer at its definition's tier
   // agent silently unmakes the member.
   assert.match(
     tier,
-    /Keep `name: impl-<N>`/,
-    "member-lifecycle no longer keeps the impl-<N> name alongside the dispatched agent",
+    /Keep the `name` `DISPATCH` printed/,
+    "member-lifecycle no longer keeps the name `DISPATCH` printed alongside the dispatched agent",
   );
   assert.match(slice, /keep the `name` `DISPATCH` printed/, "the dispatch section no longer keeps the name `DISPATCH` printed alongside the dispatched agent");
   // `row` REPLACES the line (ledger.mjs's `data.rows = after`, `line` in place

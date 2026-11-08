@@ -716,6 +716,12 @@ const CHANGED = [
     "The review throws on missing `args.pr`/`args.worktree` and on a snapshot agent that returned no tree, and a failure surfaces mid-loop, where \"react, never block\" makes it easy to log and carry on — leaving a PR that *reads* as reviewed and is not.",
     "The review throws on missing `args.pr`/`args.worktree`/`args.testCmd` and on a snapshot agent that returned no tree, and a failure surfaces mid-loop, where \"react, never block\" makes it easy to log and carry on — leaving a PR that *reads* as reviewed and is not.",
   ],
+  // The Pull can print a retry name (`impl-<N>-b`, …) when this session already
+  // used `impl-<N>`, so the tier section keeps the name `DISPATCH` printed.
+  [
+    "Keep `name: impl-<N>`: the name is what makes a member, and both the spend classifier and `member-outcomes.mjs` read it.",
+    "Keep the `name` `DISPATCH` printed (`impl-<N>`, or the retry name the Pull chose when this session already used `impl-<N>`): the name is what makes a member, and both the spend classifier and `member-outcomes.mjs` read it.",
+  ],
 ];
 
 // Sentences deleted outright, each named with what stands in its place.
