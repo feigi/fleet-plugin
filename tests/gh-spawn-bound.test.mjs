@@ -1,6 +1,7 @@
-// #4431. Every `gh` a script in plugin/scripts/ spawns carries a finite
+// #4431. Every `gh` a plugin/scripts/*.mjs script spawns carries a finite
 // timeout, so a GitHub call that stalls is a failed read on that script's own
 // failure path, never a caller that hangs until someone kills the pid by hand.
+// The `.sh` scripts beside them are not read here.
 // The suites of the scripts #4431 bounded drive each bound against a `gh` stub
 // that sleeps past it; this sweep pins the next spawn, the one no suite drives.
 //
@@ -8,11 +9,15 @@
 // function or to a FUNNEL: a function, here or in a module it imports, that
 // hands one of its own parameters on as the command of another such call
 // (ci-state.mjs's spawn()/run()/runJson()/tryRun(), board-common.mjs's
-// execRead(), board-gather.mjs's tryRun(), diff-stats.mjs's run()). The
-// spawn is bounded when its own arguments carry a `timeout`/`timeoutMs` — a
-// key, a shorthand, or an options object declared in the same file that
-// carries one — or when the funnel it goes through bounds every call it makes.
-// A `timeout` of 0, null, undefined or Infinity is no bound.
+// execRead(), board-gather.mjs's tryRun(), diff-stats.mjs's run()). So is a
+// spawn whose command or argument is a shell line that runs gh — `execSync("gh
+// pr view 1")`, `spawnSync("sh", ["-c", "gh pr view 1"])`. The spawn is bounded
+// when its own arguments carry a `timeout` key at the top level of an options
+// object — written inline, as a shorthand, or in an object declared in the same
+// file — or when the funnel it goes through bounds every call it makes. A
+// `timeoutMs` key is no bound, since child_process ignores it; neither is a
+// `timeout` nested inside another key's value, nor one of 0, null, undefined or
+// Infinity, written out or as a constant this file declares as one of them.
 //
 // Read on each file with its comments blanked, so a bound written in a comment
 // is no bound, and with string and regex bodies blanked for the bracket
@@ -125,7 +130,20 @@ function pieces(skel, code, open) {
 
 // A `timeout` that can bound something: a key with any value but the four that
 // bound nothing, or a shorthand property.
-const BOUND = /(?:^|[{,\s])timeout(?:Ms)?\s*(?::\s*(?!(?:0|null|undefined|Infinity)\s*[,}]|0\s*$)\S|[,}]|$)/;
+const BOUND = /(?:^|[{,\s])timeout\s*(?::\s*(?!(?:0|null|undefined|Infinity)\s*[,}]|0\s*$)(\S[^,}]*)|[,}]|$)/;
+
+// `s` with everything nested inside its own outermost brackets blanked, so a
+// key read off it is a top-level key of the object `s` opens.
+function topLevel(s) {
+  let d = 0;
+  let out = "";
+  for (const ch of s) {
+    if (OPEN.includes(ch)) d++;
+    out += d <= 1 ? ch : " ";
+    if (CLOSE.includes(ch)) d--;
+  }
+  return out;
+}
 
 // What a source file offers the sweep: its child_process names, its functions
 // and the funnels among them.
@@ -188,18 +206,29 @@ function analyse(src, file) {
     calls.push({ at: m.index, callee: m[1], args: pieces(skel, code, open), line: lineOf(m.index) });
   }
 
+  // A `timeout` key at the top level of `s` with a value that can bound
+  // something: not an identifier this file declares as one of the four that
+  // bound nothing (a shorthand's value is the identifier `timeout`).
+  const nothing = (id) => new RegExp(`\\b(?:const|let|var)\\s+${id.replace(/\$/g, "\\$")}\\s*=\\s*(?:0|null|undefined|Infinity)\\s*[;\\n]`).test(skel);
+  const bounds = (s) => {
+    const m = topLevel(s).match(BOUND);
+    if (!m) return false;
+    const value = m[1] === undefined ? "timeout" : m[1].trim();
+    return !(/^[\w$]+$/.test(value) && nothing(value));
+  };
+
   // A call carries a bound when an argument other than its command names one
   // inline, or is an identifier (bare or spread) declared in this file as an
   // object that carries one.
   const declared = (id) => {
     for (const m of skel.matchAll(new RegExp(`\\b(?:const|let)\\s+${id.replace(/\$/g, "\\$")}\\s*=\\s*\\{`, "g"))) {
       const open = m.index + m[0].length - 1;
-      if (BOUND.test(skel.slice(open, closing(skel, open) + 1))) return true;
+      if (bounds(skel.slice(open, closing(skel, open) + 1))) return true;
     }
     return false;
   };
   const carries = (c, cmdAt) => c.args.some(({ skel: a }, i) => i !== cmdAt
-    && (BOUND.test(a) || [...a.matchAll(/(?:^|\.\.\.)([\w$]+)/g)].some((m) => declared(m[1]))));
+    && (bounds(a) || [...topLevel(a).matchAll(/(?:^|\.\.\.)([\w$]+)/g)].some((m) => declared(m[1]))));
 
   const within = (at) => [...fns.values()].filter((f) => f.start <= at && at <= f.end).sort((x, y) => x.start - y.start).at(-1);
 
@@ -220,6 +249,15 @@ function analyse(src, file) {
 
   return { file, primitives, imports, fns, calls, carries, within, loopLiterals, problems };
 }
+
+// A shell line that runs gh: gh heading the line, or heading a command after
+// `;`, `&`, `|` or `(`. Read off the string literals of a spawn's command, and
+// off those of its other arguments with a word after gh, so an argument that
+// is only "gh" (a search term, an author) runs nothing.
+const SHELL_GH = /(?:^|[;&|(]\s*)gh(?:\s|$)/;
+const ARG_GH = /(?:^|[;&|(]\s*)gh\s/;
+const STRINGS = /(["'`])((?:\\.|(?!\1)[^\\])*)\1/g;
+const runsGh = (c, cmdAt) => c.args.some(({ code }, i) => [...code.matchAll(STRINGS)].some((s) => (i === cmdAt ? SHELL_GH : ARG_GH).test(s[2])));
 
 // Whole-directory sweep: every gh spawn, and whether it is bounded.
 function sweep(sources) {
@@ -267,7 +305,7 @@ function sweep(sources) {
       if (spawn === null) continue;
       const cmd = c.args[spawn.index]?.code ?? "";
       const where = `${mod.file}:${c.line}`;
-      if (/^["']gh["']$/.test(cmd)) {
+      if (/^["']gh["']$/.test(cmd) || runsGh(c, spawn.index)) {
         spawns.push({ where, bounded: spawn.bounded });
       } else if (/^(["'])[^"']*\1$/.test(cmd) || cmd === "process.execPath" || /^join\(/.test(cmd)) {
         continue;
@@ -343,8 +381,22 @@ test("the sweep refuses an unbounded gh spawn in each shape it follows", () => {
     "arrow funnel": MOD(`const run = (cmd, args) => spawnSync(cmd, args, { encoding: "utf8" });\nrun("gh", ["x"]);`),
     "options object without one": MOD(`const OPTS = { encoding: "utf8" };\nspawnSync("gh", ["x"], OPTS);`),
     "spread options without one": MOD(`const CHILD = { encoding: "utf8" };\nspawnSync("gh", ["x"], { ...CHILD });`),
+    "timeoutMs, which child_process ignores": MOD(`spawnSync("gh", ["x"], { encoding: "utf8", timeoutMs: 5000 });`),
+    "timeout nested in another key": MOD(`spawnSync("gh", ["x"], { env: { ...process.env, timeout: "5" } });`),
+    "constant that bounds nothing": MOD(`const T = 0;\nspawnSync("gh", ["x"], { timeout: T });`),
+    "shell line": MOD(`execSync("gh pr view 1", { encoding: "utf8" });`, "execSync"),
+    "shell: true": MOD(`spawnSync("gh pr list", { shell: true });`),
+    "sh -c": MOD(`spawnSync("sh", ["-c", "git fetch && gh pr view 1"]);`),
   };
   for (const [name, src] of Object.entries(refused)) assert.deepEqual(verdicts({ "x.mjs": src }), [false], name);
+  // The shell-line shapes are refused for the bound they lack: each, given
+  // one, is a bounded gh spawn.
+  const shellBounded = {
+    "shell line": MOD(`execSync("gh pr view 1", { encoding: "utf8", timeout: 5_000 });`, "execSync"),
+    "shell: true": MOD(`spawnSync("gh pr list", { shell: true, timeout: 5_000 });`),
+    "sh -c": MOD(`spawnSync("sh", ["-c", "git fetch && gh pr view 1"], { timeout: 5_000 });`),
+  };
+  for (const [name, src] of Object.entries(shellBounded)) assert.deepEqual(verdicts({ "x.mjs": src }), [true], name);
   const imported = {
     "common.mjs": MOD(`export function execRead(cmd, args, opts = {}) { return execFile(cmd, args, { ...opts }); }`, "execFile"),
     "x.mjs": `import { execRead } from "./common.mjs";\nawait execRead("gh", ["x"]);\n`,
@@ -366,7 +418,7 @@ test("the sweep accepts the bound shapes already in the repository", () => {
   for (const [name, src] of Object.entries(accepted)) assert.deepEqual(verdicts({ "x.mjs": src }), [true], name);
   // Not gh, so nothing to bound: a sibling script, node itself, git, a funnel
   // only ever handed another command.
-  const notGh = MOD(`spawnSync(process.execPath, [join(SCRIPT_DIR, "x.mjs")]);\nspawnSync("git", ["status"]);\nspawnSync(join(SCRIPT_DIR, "x.sh"));\nfunction run(cmd, a) { return spawnSync(cmd, a); }\nrun("sh", ["y"]);`);
+  const notGh = MOD(`spawnSync(process.execPath, [join(SCRIPT_DIR, "x.mjs")]);\nspawnSync("git", ["status"]);\nspawnSync("git", ["log", "--author", "gh"]);\nspawnSync(join(SCRIPT_DIR, "x.sh"));\nfunction run(cmd, a) { return spawnSync(cmd, a); }\nrun("sh", ["y"]);`);
   assert.deepEqual(sweep({ "x.mjs": notGh }), { spawns: [], problems: [] });
 });
 

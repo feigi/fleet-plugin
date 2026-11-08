@@ -218,9 +218,10 @@ async function readStates(prNums, issueNums) {
   let repo;
   try { repo = JSON.parse(r.stdout)?.data?.repository; } catch {}
   if (!isJsonObject(repo) || !prNums.some((n) => Object.prototype.hasOwnProperty.call(repo, `p${n}`))) {
-    // `how` as runCiState() spells it; never r.error.message, which repeats
+    // `how` as runCiState() spells it, but a read this bound killed is named
+    // as timed out, as tryRun() names one; never r.error.message, which repeats
     // the whole query — one field per number — into every failed tick's line.
-    const how = r.code ?? (r.signal ? `killed by ${r.signal}` : `exit ${r.status}`);
+    const how = r.error?.killed && r.code === null ? `timed out after ${GH_TIMEOUT_MS / 1000}s` : (r.code ?? (r.signal ? `killed by ${r.signal}` : `exit ${r.status}`));
     const n = prNums.length;
     console.error(`${NAME}: gh api graphql merged read (${n} PR${n === 1 ? "" : "s"}) failed (${how}) with no usable answer`);
     return none;

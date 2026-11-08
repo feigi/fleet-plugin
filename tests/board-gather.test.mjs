@@ -1574,7 +1574,7 @@ test("#4431: a gh pr list that never answers is an unread PR list at the bound",
 test("#4431: a merged read that never answers merges nothing at the bound", () => {
   const r = gatherStalled("api graphql", 30, 1);
   assert.deepEqual(r.merged, []);
-  assert.match(r.stderr, /merged read \(1 PR\) failed \(killed by SIGTERM\)/);
+  assert.match(r.stderr, /merged read \(1 PR\) failed \(timed out after 1s\)/);
 });
 
 test("#4431: a gh repo view that never answers leaves the repository unknown at the bound", () => {
