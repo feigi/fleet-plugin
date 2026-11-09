@@ -170,6 +170,7 @@ test("Pull step 7 routes through ticket-router.mjs and writes tier= exactly when
   assert.match(slice, /ledger\.mjs\s+row\s+<N>\s+"<member>\[\s+·\s+tier=<CELL>\]"\s+--routing\s+"<that\s+line>"/, "step 7 no longer files the router's line with the row");
   assert.match(slice, /`<member>`\s+the\s+name\s+the\s+Pull\s+printed/, "step 7 no longer says which name the row carries");
   assert.match(slice, /in\s+`## Routed`\s+in\s+one\s+write/, "step 7 no longer writes the row and its Routing in one write");
+  assert.match(slice, /a\s+second,\s+different\s+Routing\s+for\s+that\s+name;/, "step 7 no longer refuses a second Routing under the row's member name");
   assert.doesNotMatch(slice, /route=<REASON>\]/, "step 7 writes the retired route= token on the row again");
   assert.match(slice, /release\s+the\s+claim\s+\(`release-ticket\.sh`/, "step 7 no longer releases the claim on a router exit 2");
   // The Pull's one read is what the router reads: a second fetch would be a
