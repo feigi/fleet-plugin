@@ -99,6 +99,30 @@ These stay literal strings in every repository:
 
 A repository whose tracker spells a role differently declares it in the `Label in our tracker` column of the triage-label table in `docs/agents/triage-labels.md` (the file `/setup-matt-pocock-skills` writes; the fleet only reads it). A role that neither the table nor the tracker's live labels settles is asked once, with a suggestion where one exists — the default when nothing else fits, and never a string that has vanished from the tracker; the answer is kept as fleet state, not written into the repository. A confirmed label the tracker lacks is created, but only on that confirmation.
 
+**Before the first run,** settle the roles nothing settles yet, so the run's phase 0 never stops on them. Run it from the repository's main checkout, once §2.5's `.gitignore` lines are in place: `ensure` (when it exits 0) and `set` both write `.fleet/labels.json`, a commit made before `.fleet/` is ignored (for example `git add -A`) can include it, and ignoring it afterwards never untracks it.
+
+First, see what the first run would ask:
+
+```sh
+~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run label-map.mjs ensure
+```
+
+Exit 0 prints the map: every role is settled and there is nothing more to do. Exit 3 prints, as JSON, the question the first run would ask. Its `uncertain` list holds each role nothing settled, with its `suggestion` and its `candidates` (live labels close to the role's name).
+
+Then add a row naming the role's label in the triage-label table for every role whose `candidates` is not empty — `onhold` listing `candidates: ["on-hold"]` needs a row naming `on-hold` or the label you mean — and for every role the tracker calls by another word; `ensure` cannot see that case, its `candidates` stays empty. `set --accept-suggestions` alone takes a suggestion without showing the variant beside it, so a role with candidates is settled by a row, never by the flag. A repository without `docs/agents/triage-labels.md` (only `/setup-matt-pocock-skills` writes it) needs only this much: the parser reads the first table whose second header cell is exactly `Label in our tracker`, with a separator row under the header and each row's first cell the role.
+
+```
+| Role | Label in our tracker |
+|---|---|
+| onhold | paused |
+```
+
+Last, take each remaining suggestion. This creates the labels the tracker lacks (with no colour) and prints the map. Running it is your confirmation that those labels may be created, and `ensure` then exits 0:
+
+```sh
+~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run label-map.mjs set --create --accept-suggestions
+```
+
 The Label map derivation step (`label-map.mjs ensure`, see [Label map](components/label-map.md)) replaces a hand-run check loop. It checks every mapped string against the tracker's live label list, so a label renamed or deleted since the last run is caught before the pre-flight and before any dispatch. The run-team controller's phase 0 runs it, and the solo entry points, `/next-ticket` and `/review-and-fix`, run it first too.
 
 Every script that reads or writes a label resolves its role through the map's reader — `stranded.mjs`, the tick and `dispositions-check.mjs` among them — so a different string declared in the table is the one their label queries use.
