@@ -1,0 +1,77 @@
+{
+  "head": "d9739d6cb02fb5f972ab7986c4575f14e6ca81f5",
+  "run": "run-LdH0Qg4j",
+  "entries": [
+    {
+      "bucket": "survived",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "charge": "none",
+      "chargeReason": "defect-outside-acceptance",
+      "remedyFiles": ["docs/requirements.md", "tests/requirements-gh-stored-login-prose.test.mjs"],
+      "reason": "Applied the GH_CONFIG_DIR half only. Measured: the old Check finds a login kept in a GH_CONFIG_DIR directory; omp 18.18.0's eval-kernel filterEnv drops GH_CONFIG_DIR but KEEPS XDG_CONFIG_HOME (called directly: returned only HOME and XDG_CONFIG_HOME). So the suggested `-u XDG_CONFIG_HOME` (and the `env -i HOME PATH` alternative, and 'must sit in ~/.config/gh') would fail a login phase 0 does reach; not applied. Check now adds `-u GH_CONFIG_DIR`; bullet names gh's default config directory and the GH_CONFIG_DIR case; reason says the kernel keeps HOME and XDG_CONFIG_HOME. The Check text and the four-variable acceptance criteria come from #4416; the GH_CONFIG_DIR gap lies outside them."
+    },
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "issue": 4438,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4435/fix-P9p4oGX5/u0/verdict.json",
+      "reason": "Refuted: no requirements.md Check is tested behaviourally; a gh stub would only test env -u, not gh. Recorded on the suggestion-band record."
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4435/fix-P9p4oGX5/u1/verdict.json",
+      "remedyFiles": ["tests/requirements-gh-stored-login-prose.test.mjs"],
+      "reason": "Survived (reorder of -u flags reddened the Check test). Check test now asserts each unset variable separately."
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "issue": 4438,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4435/fix-P9p4oGX5/u2/verdict.json",
+      "reason": "Refuted: the kernel-environment claim measured true and is the ticket's own acceptance wording; a citation fixes no defect. Recorded on the suggestion-band record."
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4435/fix-P9p4oGX5/u3/verdict.json",
+      "remedyFiles": ["docs/requirements.md", "tests/requirements-gh-stored-login-prose.test.mjs"],
+      "reason": "Survived (every login here is `(keyring)`, hosts.yml holds no token; gh auth login defaults to the system credential store). Bullet and test header now name gh's config directory and the credential store."
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "issue": 4438,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4435/fix-P9p4oGX5/u4/verdict.json",
+      "reason": "Refuted: pre-flight runs in the eval kernel, which carries none of the token variables, so an environment-only login already fails the unchanged gh-auth row. Recorded on the suggestion-band record."
+    },
+    {
+      "bucket": "unverified",
+      "index": 5,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "issue": 4438,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4435/fix-P9p4oGX5/u5/verdict.json",
+      "reason": "Refuted by measurement: full suite 9168/9168 green, test file red (4 of 6) against the merge-base doc, GH_TOKEN-only Check exits 1. Recorded on the suggestion-band record."
+    }
+  ]
+}

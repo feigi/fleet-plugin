@@ -1,0 +1,95 @@
+{
+ "head": "8badf1de025d7235c89f1b6ea5d541d81c41c692",
+ "run": "run-DHkyUU3f",
+ "entries": [
+  {
+   "bucket": "unverified",
+   "index": 0,
+   "scope": "in",
+   "claimKind": "behavior",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4433/fix-SpdkrOnJ/u0/verdict.json",
+   "disposition": "defer",
+   "issue": 4440,
+   "reason": "refuted by its refuter; recorded on the suggestion-band record"
+  },
+  {
+   "bucket": "unverified",
+   "index": 1,
+   "scope": "in",
+   "claimKind": "behavior",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4433/fix-SpdkrOnJ/u1/verdict.json",
+   "disposition": "apply"
+  },
+  {
+   "bucket": "unverified",
+   "index": 2,
+   "scope": "in",
+   "claimKind": "behavior",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4433/fix-SpdkrOnJ/u2/verdict.json",
+   "disposition": "defer",
+   "issue": 4440,
+   "reason": "refuted by its refuter; recorded on the suggestion-band record"
+  },
+  {
+   "bucket": "unverified",
+   "index": 3,
+   "scope": "in",
+   "claimKind": "behavior",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4433/fix-SpdkrOnJ/u3/verdict.json",
+   "disposition": "defer",
+   "issue": 4440,
+   "reason": "refuted by its refuter; recorded on the suggestion-band record"
+  },
+  {
+   "bucket": "unverified",
+   "index": 4,
+   "scope": "in",
+   "claimKind": "behavior",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4433/fix-SpdkrOnJ/u4/verdict.json",
+   "disposition": "defer",
+   "issue": 4440,
+   "reason": "refuted by its refuter; recorded on the suggestion-band record"
+  },
+  {
+   "bucket": "unverified",
+   "index": 5,
+   "scope": "in",
+   "claimKind": "behavior",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4433/fix-SpdkrOnJ/u5/verdict.json",
+   "disposition": "defer",
+   "issue": 4440,
+   "reason": "refuted by its refuter; recorded on the suggestion-band record"
+  },
+  {
+   "bucket": "unverified",
+   "index": 6,
+   "scope": "in",
+   "claimKind": "behavior",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4433/fix-SpdkrOnJ/u6/verdict.json",
+   "disposition": "defer",
+   "issue": 4440,
+   "reason": "refuted by its refuter; recorded on the suggestion-band record (residual filed open as #4439)"
+  },
+  {
+   "bucket": "unverified",
+   "index": 7,
+   "scope": "in",
+   "claimKind": "shape",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4433/fix-SpdkrOnJ/u7/verdict.json",
+   "disposition": "apply",
+   "remedyFiles": [
+    ".github/scripts/install-and-smoke.sh"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 8,
+   "scope": "in",
+   "claimKind": "shape",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4433/fix-SpdkrOnJ/u8/verdict.json",
+   "disposition": "defer",
+   "issue": 4440,
+   "reason": "refuted by its refuter; recorded on the suggestion-band record"
+  }
+ ]
+}

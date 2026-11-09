@@ -1,0 +1,278 @@
+{
+  "pr": 4442,
+  "head": "81dcff99196fc3fc8e8641dd85004abd8336a232",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/tier-outcomes.tsv; ?? docs/metrics/runs/2026-11-08T200658Z/{closeout.json,ledger.md,phase0.json,plugin-version}. These come from the controller's own metrics run, not from this review: I wrote nothing there."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-08T200658Z/{closeout.json,ledger.md,phase0.json,plugin-version}`. I wrote nothing there; these look like another agent's run artifacts."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-08T200658Z/{closeout.json,ledger.md,phase0.json,plugin-version}` (this pass wrote nothing there; all writes went to the correctness/ scratch dir and its copy)"
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-08T200658Z/{closeout.json,ledger.md,phase0.json,plugin-version}`. None of my commands wrote there: my first command was `pwd`, and every command after it either cd'd into scratch/the copy or used an absolute scratch path. The run directory's timestamp points to another agent's metrics/close-out writer."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv` and untracked docs/metrics/runs/2026-11-08T200658Z/{closeout.json,ledger.md,phase0.json,plugin-version}. I wrote nothing there; these look like run-metrics output from another agent or the controller, and I cannot attribute them to a command of mine."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv` and untracked `docs/metrics/runs/2026-11-08T200658Z/{closeout.json,ledger.md,phase0.json,plugin-version}`. I did not touch these. They are fleet metrics output from the controller or another agent."
+    }
+  ],
+  "counts": {
+    "survived": 1,
+    "refuted": 3,
+    "unverified": 11,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4442/run-3vf2N1zo/snapshot-81dcff99",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 225,
+      "claim": "The sweep that implements acceptance criterion 1 counts some unbounded gh spawns as bounded and does not see others at all, so a new unbounded spawn in one of these shapes passes it.",
+      "evidence": "Ran the PR's own `sweep()` (lines 1-292 of the test copied into probe/sweep-probe.test.mjs) on synthetic sources. `spawnSync(\"gh\", [...], { encoding: \"utf8\", timeoutMs: 5000 })` returned bounded:true, although Node's child_process ignores `timeoutMs`. `spawnSync(\"gh\", [...], { env: { ...process.env, timeout: \"5\" } })` returned bounded:true. `const T = 0; spawnSync(\"gh\", [\"x\"], { timeout: T })` returned bounded:true. `execSync(\"gh pr view 1\")` and `spawnSync(\"sh\", [\"-c\", \"gh pr view 1\"])` returned spawns:[] and problems:[], so the sweep did not see them. The control, `spawnSync(\"gh\", [\"x\"], { encoding: \"utf8\" })`, returned bounded:false.",
+      "suggested_fix": "Accept `timeoutMs` only as an argument to a funnel whose own bounded call maps it to `timeout`, never on a direct child_process primitive. Match `timeout` only as a top-level key of the options argument. Count a literal `gh ` command string in execSync/exec or in an `sh -c` argument as a gh spawn, or refuse it by name.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "The claim holds. I ran the snapshot's own BOUND regex (line 128) in node on the claimed option shapes. `timeoutMs: 5000`, `env: {..., timeout: \"5\"}` and `timeout: T` each returned true (counted as bounded). The control `{ encoding: \"utf8\" }` returned false. By reading the sweep code, a string-literal command that isn't exactly \"gh\" is skipped. So `execSync(\"gh pr view 1\")` and `spawnSync(\"sh\", [\"-c\", \"gh ...\"])` are never recorded as gh spawns. I did not run the full sweep() on synthetic sources, and I built no measure-copy and ran no ./agent-test. This is a code-reading and regex check only. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv` and untracked `docs/metrics/runs/2026-11-08T200658Z/` files (closeout.json, ledger.md, phase0.json, plugin-version). I did not write any of these; they appear to be the review harness's own metrics output."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [
+    {
+      "severity": "important",
+      "file": "plugin/scripts/ci-state.mjs",
+      "line": 147,
+      "claim": "The ticket's Change asks for `killSignal: \"SIGKILL\"` (per #2645) on every bounded gh spawn, but none of the PR's new bounds sets it, so a gh that ignores SIGTERM outlives the bound and the caller still waits for it.",
+      "evidence": "Stub probe/bin/gh: `trap '' TERM; echo \"$*\" >> $GH_LOG; sleep 6 </dev/null >/dev/null 2>&1; exit 1`. Running `CI_STATE_GH_TIMEOUT=1 node copy/plugin/scripts/ci-state.mjs --pr 42` printed `ci-state.mjs exit=2 elapsed=7s calls=1 … ci-state: gh failed: ETIMEDOUT`. `DIFF_STATS_GH_TIMEOUT=1 … diff-stats.mjs --pr 42` printed `exit=2 elapsed=6s … diff-stats: gh failed: ETIMEDOUT`. Both took 6-7 s against a 1 s bound and still reported ETIMEDOUT. Mutant: with `killSignal: \"SIGKILL\"` added to ci-state.mjs:147 the same run printed `exit=2 elapsed=1s`. Grep `killSignal|SIGKILL` over the snapshot's plugin/scripts finds no gh spawn that sets it. The PR's sweep (gh-spawn-bound.test.mjs) checks only that a timeout is present, so nothing enforces this part of the ticket.",
+      "suggested_fix": "Add `killSignal: \"SIGKILL\"` beside `timeout: GH_TIMEOUT_MS` at every site the PR bounds: ci-state spawn(), candidates query(), diff-stats run(), finisher-label gh(), labelled-head gh(), merge-gate readPr(), pr-cost main(), and the board-gather execRead/tryRun opts. Extend the sweep's BOUND check to require it, and add a SIGTERM-trapping stub case to ci-state.test.mjs.",
+      "dimension": "correctness",
+      "verdict": "refuted",
+      "votes": [
+        {
+          "refuted": true,
+          "reason": "The snapshot has .out-of-scope/gh-spawn-sigkill-bound.md. It explicitly refuses adding killSignal SIGKILL to bounded gh spawns. That file cites #2645 as a prior request. It says real gh does not ignore SIGTERM, and the overrun reproduces only with a trap '' TERM stub. The PR diff and PR messages contain no killSignal/SIGKILL requirement. So the PR omitting it follows repo policy, and the stub-only evidence shows nothing about real gh. I did not run the mutant; this verdict rests on reading the out-of-scope file, the PR diff and the PR messages. I did not search for the ticket text itself. CWD-AUDIT: not run, I made no changes in /Users/chris/dev/fleet-plugin."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/merge-gate.mjs",
+      "line": 283,
+      "claim": "merge-gate.mjs's output does not name the timeout as the ticket requires: a PR read killed at the bound produces exactly the same output as an ordinary `gh pr view` exit 1.",
+      "evidence": "Probe test reusing merge-gate.test.mjs's gate() harness. `gate(t, { env: { GH_HANG_S: \"30\", MERGE_GATE_GH_TIMEOUT: \"1\" } })` gave code 2, stdout `{\"pr\":42,\"verdict\":\"unknown\",\"reason\":\"pr-unreadable\",…}`, stderr \"\". `gate(t, { prViewExit: 1 })` gave the same code 2, the same stdout and the same empty stderr. readPr() is `if (r.error || r.status !== 0) return null;`, so r.error.code === \"ETIMEDOUT\" is thrown away. The ticket says a timed-out read fails on its existing die / null path, \"naming the timeout\".",
+      "suggested_fix": "When readPr() returns null because of a timeout (r.error?.code === \"ETIMEDOUT\"), write a stderr line such as `merge-gate: gh pr view timed out after ${GH_TIMEOUT_MS/1000}s`, or give that case a distinct reason such as `pr-unreadable:timeout`. Assert it in the new merge-gate never-answers test.",
+      "dimension": "correctness",
+      "verdict": "refuted",
+      "votes": [
+        {
+          "refuted": true,
+          "reason": "I read the snapshot but ran nothing. readPr() at merge-gate.mjs:283 does return null for any r.error, so the ETIMEDOUT code is discarded. A timed-out read and a `gh pr view` exit 1 therefore both give pr-unreadable. I did not run the probe. I also could not find the ticket text that supposedly requires naming the timeout, so the 'as the ticket requires' half is unverified. The in-code comment at lines 275-279 describes the timeout as 'a failed read like any other — null, the gate's pr-unreadable', which suggests this behaviour is intended. Verdict defaults to refuted because of that unverified requirement. CWD-AUDIT: not run (no git status taken on /Users/chris/dev/fleet-plugin); I wrote nothing there."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/finisher-label.mjs",
+      "line": 193,
+      "claim": "When a bounded gh WRITE (pr comment, pr edit --add-label) times out, the receipt reports `commented:false` / `added:false` and the error `could not run gh: spawnSync gh ETIMEDOUT`, although gh was run and the write may have landed server-side.",
+      "evidence": "Probe in my copy with the test rig, a 1 s FINISHER_LABEL_GH_TIMEOUT and the stub's `pr-comment` hung 30 s. Output: exit 2, receipt `\"commented\":false,\"added\":false,\"step\":\"comment\",\"error\":\"could not run gh: spawnSync gh ETIMEDOUT\"`, and the stub's call log shows `pr comment 42 --body ready-to-merge-head: aaaa…` was issued. With `pr-edit` hung: `\"commented\":true,\"added\":false,\"step\":\"add-label\"` with the same wording, and `pr edit 42 --add-label ready-to-merge` was issued. Before this diff such a call hung instead of reporting a state.",
+      "suggested_fix": "In gh(), check `r.error?.code === \"ETIMEDOUT\"` before the generic branch. Report `gh timed out after Ns; the write may have landed`. For the three write steps (add-patch, comment, add-label), leave the receipt flag as unknown rather than false. Alternatively document that a retry re-reads state first, which the script already does. labelled-head.mjs only has reads, so it has the wording problem only.",
+      "dimension": "silent-failure",
+      "verdict": "refuted",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Snapshot line 192-193: gh() runs spawnSync with timeout and on r.error calls fail(step, `could not run gh: ${r.error.message}`) for every step, writes included. A runtime check (spawnSync sleep 5 with timeout 300 ms) gave error.message `spawnSync sleep ETIMEDOUT` with SIGTERM. That is the same wording the claim reports, and it shows a timed-out child that did start still goes through the r.error path. So a timed-out write is reported as `could not run gh` although gh ran and the write may have landed. I did not build the copy or run the full rig probe, so the commented/added receipt fields and the call log come from the claim, not from my run. Verdict rests on code reading plus that spawnSync check. CWD-AUDIT: not run, I wrote nothing in /Users/chris/dev/fleet-plugin (only read the snapshot and ran node in /tmp)."
+        },
+        {
+          "refuted": true,
+          "reason": "The observation is accurate, but it's weaker than the claim. The script header says a timed-out call fails its step at exit 2 with `error` naming ETIMEDOUT (lines 180-183). `commented`/`added` are documented as 'this run posted/wrote', so false means unconfirmed, not 'did not land'. The step and ETIMEDOUT are reported. A rerun is idempotent: the step-2 head-record dedup skips the comment when the newest record already names the pin (header lines 37-38 and 43-45), and the label write is guarded the same way. The only flaw is the 'could not run gh' wording, which is cosmetic. I read the source only and ran no probe, so this verdict rests on code reading. CWD-AUDIT: not run; I only read files, so /Users/chris/dev/fleet-plugin was not touched."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/board-gather.mjs",
+      "line": 214,
+      "claim": "board-gather's merged-state read (readStates) reports a timeout as `killed by SIGTERM` rather than `timed out after Ns`, unlike the tryRun() reads the same PR changed, so an operator cannot tell a bound firing from an outside kill.",
+      "evidence": "Not run by this pass. The PR's own passing test (pr.diff lines ~417-421, test-run.log line 401 `✔ #4431: a merged read that never answers merges nothing at the bound`) asserts `/merged read \\(1 PR\\) failed \\(killed by SIGTERM\\)/` for that case. The tryRun cases assert `failed: timed out after 1s`.",
+      "suggested_fix": "In readStates' failure message, apply the same `r.error.killed && r.code === null` → `timed out after ${GH_TIMEOUT_MS/1000}s` mapping that tryRun() now uses.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/merge-gate.mjs",
+      "line": 282,
+      "claim": "A timed-out `gh pr view` is indistinguishable from every other unreadable PR. readPr() returns null on `r.error` with no stderr line, so the output is `pr-unreadable` with empty stderr and nothing names the timeout.",
+      "evidence": "Ran the gate() harness with GH_HANG_S=30 and MERGE_GATE_GH_TIMEOUT=1. Result: code 2, stdout verdict `unknown`, reason `pr-unreadable`, `\"stderr\":\"\"`. The test asserts only the reason string. The silent null for r.error is older than this diff, but the diff adds a new, common cause that now looks the same as a malformed reply.",
+      "suggested_fix": "Before `return null`, when `r.error?.code === \"ETIMEDOUT\"`, write `merge-gate: gh pr view timed out after Ns` to stderr, as candidates.mjs, ci-state and diff-stats already name ETIMEDOUT.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/board-gather.mjs",
+      "line": 225,
+      "claim": "readStates' log line for a timed-out merged read says `failed (killed by SIGTERM)`, while the three tryRun reads in the same file say `timed out after Ns`. So the timeout cause is named for some bounded reads and mislabeled as a bare signal for this one.",
+      "evidence": "The new test `a merged read that never answers merges nothing at the bound` pins the regex `/merged read \\(1 PR\\) failed \\(killed by SIGTERM\\)/`, while the sibling tests pin `timed out after 1s`. execRead resolves `code:null, signal:'SIGTERM'` for a timeout, and readStates builds `how` from `r.code ?? (r.signal ? 'killed by …' …)`.",
+      "suggested_fix": "Give readStates the same `timed out after ${GH_TIMEOUT_MS/1000}s` wording as tryRun, using the `killed && code === null` test, and update the test regex.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 948,
+      "claim": "The sweep passes unbounded gh spawns whose command is a string literal containing gh, such as `execSync(\"gh pr list\")` or `spawnSync(\"gh pr list\",{shell:true})`, and `sh -c \"gh …\"`. Its header claims coverage of 'every gh a script in plugin/scripts/ spawns', but .sh scripts are not swept at all.",
+      "evidence": "Added plugin/scripts/zz-probe.mjs to my copy with `execSync(\"gh pr list --json number\")`, `spawnSync(\"gh pr list\",{shell:true})` and `spawnSync(\"sh\",[\"-c\",\"gh pr list\"])`, all unbounded. `node --test tests/gh-spawn-bound.test.mjs` reported 6 pass, 0 fail. The file was removed afterward. The branch `/^([\"'])[^\"']*\\1$/.test(cmd) → continue` skips any quoted literal. grep also shows unbounded `gh` calls in plugin/scripts/claim-ticket.sh, delete-merged-branch.sh and drop-merged-label.sh. No such spawn exists today, so this is a gap in the guard, not a live fault.",
+      "suggested_fix": "Make the literal-string branch flag any literal that matches /\\bgh\\b/ unless it is exactly \"gh\". Treat `execSync`/`exec` as a problem for non-trivial commands. Narrow the header comment to `*.mjs`, or add a stated .sh exclusion.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/board-gather.mjs",
+      "line": 86,
+      "claim": "The default bound values (30/60/120 s) are not pinned by any test in board-gather, candidates, ci-state, diff-stats or finisher-label. Raising each default by 1 s is not detected, because every stub test sets the *_GH_TIMEOUT env override. fleet-tick is the exception: its TIMED_OUT message exposes the default.",
+      "evidence": "batch mutation, exit codes only (failing test not named, not rerun narrowed): `./agent-test tests/<s>.test.mjs tests/gh-spawn-bound.test.mjs` with ghBudget default +1 → exit 0 (survived) for board-gather:86, candidates:78, ci-state:144, diff-stats:178, finisher-label:188. fleet-tick:1739 default+1 → exit 1. Unmutated per-script baseline was exit 0 in the same batch.",
+      "suggested_fix": "Either accept the defaults as untested policy, or export each script's default and assert it in the sweep.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/arg.mjs",
+      "line": 1,
+      "claim": "The arg.mjs header describes the module as 'Shared CLI-boundary helpers' and lists its exports (die, arg, numArg, has, sweep, stray, isFlagLike/hasEqualsForm/isDigits, writeAll), but the diff adds the exported ghBudget() and leaves that list unchanged.",
+      "evidence": "Read arg.mjs:1-13 in the snapshot. The header names the helpers exhaustively and has no mention of ghBudget. The diff adds ghBudget at arg.mjs:319-331 and adds no header line. board-gather.mjs, which did not import arg.mjs before this diff, now imports it for ghBudget alone. Nothing is false today; a reader of the header would not expect a timeout helper there.",
+      "suggested_fix": "Add ghBudget() (the shared per-script `gh` timeout rule) to the header's list of what arg.mjs holds.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body: 'Removing the bound from ci-state.mjs's spawn() made the sweep and the three ci-state never-answers cases fail' is accurate but understates the effect: a fourth ci-state case, the behind-count compare, also fails.",
+      "evidence": "Mutation in my copy (timeout removed from spawn()): the sweep test failed, and the ci-state suite failed 4 cases: 'a behind-count compare that never answers is unknown at the bound…', 'a gh api graphql…', 'a gh repo view…' and 'a gh run list that never answers dies at the bound…'. The three named 'never answers dies' cases are the three the body means, so the claim stands as written.",
+      "suggested_fix": "None required; optionally say 'four ci-state cases'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The other PR body and commit-message assertions I checked against the diff and snapshot all hold. Eight scripts are bounded with the stated seconds (120/60/60/60/30/120/30/30). ghBudget moved from fleet-tick.mjs to arg.mjs, and its unit test moved from fleet-tick.test.mjs to gh-spawn-bound.test.mjs. board-gather's tryRun now says 'timed out after Ns'. merge-gate's CHILD is unchanged. The sweep run against the pre-change scripts flags exactly the spawns in the eight named scripts.",
+      "evidence": "Reverse-apply of the 8 scripts' hunks in my copy, then `node --test tests/gh-spawn-bound.test.mjs`, listed unbounded spawns only in board-gather.mjs (202, 1215, 1239, 1302), candidates.mjs:463, ci-state.mjs (7), diff-stats.mjs:235, finisher-label.mjs:185, labelled-head.mjs:114, merge-gate.mjs:275 and pr-cost.mjs:442. In-code comment claims were checked against the code: the ETIMEDOUT messages via die()/fail() at exit 2, merge-gate's `pr-unreadable` null path, readStates returning `none`, `shortlist.mjs` GH_TIMEOUT_MS = 20_000, the OPEN_PR_LIMIT and POOL_LIMIT values of 100, and the CHILD users being git/sh/node. No comment I checked was falsified.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/arg.mjs",
+      "line": 326,
+      "claim": "The invariant that the gh timeout can only shorten the default is enforced at runtime by ghBudget(), which returns the default in silence for any invalid or too-large override. Each caller then re-derives the timeout from a bare `process.env.X` string. No type or branded value marks a budget, so nothing stops a later call site from passing a raw number to `timeout:` without going through ghBudget.",
+      "evidence": "Read the diff hunk for ghBudget and grepped its call sites (9 importers, all of the form ghBudget(N, process.env.X)). Each script's timeout is a module constant GH_TIMEOUT_MS. I found no call site that bypasses ghBudget. Whether every gh spawn is covered is guarded by the new tests/gh-spawn-bound.test.mjs, which I only read in the diff and did not run.",
+      "suggested_fix": "No change needed. The test-based guard for the bypass case is the right tool in an untyped .mjs codebase.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger.mjs",
+      "line": 189,
+      "claim": "The PR adds arg.mjs's ghBudget() as the shared shorten-only budget rule, and its comment cites \"ledger.mjs's LEDGER_GIT_TIMEOUT rule\" as the source. But ledger.mjs still has its own private gitBudget() with exactly the same body, and recipe-prove.mjs's commandBudget() is that rule again with a fixed default. That leaves three copies of one rule that can drift apart, when the stated point of the helper was to keep one.",
+      "evidence": "Command: `grep -rn \"gitBudget\\|commandBudget\" plugin tests` showed ledger.mjs:189 `function gitBudget(defaultSeconds, override)` and recipe-prove.mjs:142 `export function commandBudget(override)`. Probe: simplify/probe-budget.mjs pulled gitBudget out of ledger.mjs's source and compared it with ghBudget, and compared commandBudget(v) with ghBudget(1200, v). It covered 24 overrides (undefined, null, \"\", \"0\", \"007\", \"-1\", \"3.5\", \"1e1\", \" 5\", \"5 \", \"abc\", 5, 0, NaN, Infinity, a 20-digit string, …) at defaults 10, 20 and 1200. Output: `gitBudget body identical text: true` and `DEF 1200 cases 24 mismatches 0`. I then made the substitution in my copy: ledger.mjs got `const GIT_TIMEOUT_MS = ghBudget(10, process.env.LEDGER_GIT_TIMEOUT);` plus the import, and recipe-prove.mjs got `export const commandBudget = (override) => ghBudget(COMMAND_DEFAULT_SECONDS, override);` (net 4 insertions, 11 deletions). Running `node --test tests/recipe-prove.test.mjs tests/ledger.test.mjs tests/gh-spawn-bound.test.mjs` gave `ℹ tests 325 / ℹ pass 325 / ℹ fail 0`.",
+      "suggested_fix": "In ledger.mjs, import ghBudget from ./arg.mjs, delete gitBudget(), and write `const GIT_TIMEOUT_MS = ghBudget(10, process.env.LEDGER_GIT_TIMEOUT);`. Keep the rule's rationale comment in one place: arg.mjs. In recipe-prove.mjs, write `export const commandBudget = (override) => ghBudget(COMMAND_DEFAULT_SECONDS, override);`, or call ghBudget directly and update recipe-prove.test.mjs. The helper now bounds git and a recipe command as well as gh, so a neutral name (e.g. `budgetMs`) would fit better than `ghBudget`.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 322,
+      "claim": "The new sweep test types out the list of the eight scripts #4431 bounded twice: once inside the 11-file list at :300-301 and again at :322. A script bounded later and added to only one list makes the two pins disagree without any error.",
+      "evidence": "From reading :300-301 and :322 in the copy, the 8 names at :322 are the first 8 entries of the :300 list. In my copy I added `const BOUNDED = [\"ci-state.mjs\", \"candidates.mjs\", \"finisher-label.mjs\", \"labelled-head.mjs\", \"merge-gate.mjs\", \"pr-cost.mjs\", \"diff-stats.mjs\", \"board-gather.mjs\"];` and changed the two loops to `[...BOUNDED, \"fleet-tick.mjs\", \"ticketless.mjs\", \"gh-aliased-read.mjs\"]` and `BOUNDED`. `node --test tests/gh-spawn-bound.test.mjs` gave `ℹ tests 6 / ℹ pass 6 / ℹ fail 0`.",
+      "suggested_fix": "Hoist one module-level `const BOUNDED = [...8 scripts...]`. Iterate `[...BOUNDED, \"fleet-tick.mjs\", \"ticketless.mjs\", \"gh-aliased-read.mjs\"]` in the first test and `BOUNDED` in the second.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

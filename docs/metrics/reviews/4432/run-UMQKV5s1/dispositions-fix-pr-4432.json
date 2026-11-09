@@ -1,0 +1,70 @@
+{
+ "head": "183f4313bbad5e4326600469b70107b2f9efe009",
+ "run": "run-UMQKV5s1",
+ "entries": [
+  {
+   "bucket": "unverified",
+   "index": 0,
+   "scope": "out",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "reason": "out of scope (ticket #4429 excludes pull.md); the claim survived its refuter, so it is filed open",
+   "issue": 4436,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4432/fix-zllGgHjJ/u0/verdict.json",
+   "remedyFiles": [
+    "plugin/skills/run-team/references/pull.md",
+    "tests/render-before-dispatch-prose.test.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 1,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4432/fix-zllGgHjJ/u1/verdict.json",
+   "remedyFiles": [
+    "tests/implementer-model-tier.test.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 2,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "reason": "refuted: the parenthetical's removal is killed by run-team-shape-prose's CHANGED test, as the ticket prescribes",
+   "issue": 4443,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4432/fix-zllGgHjJ/u2/verdict.json",
+   "remedyFiles": [
+    "tests/implementer-model-tier.test.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 3,
+   "scope": "out",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "reason": "refuted: a past-tense measurement record that the ticket says to leave as written",
+   "issue": 4443,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4432/fix-zllGgHjJ/u3/verdict.json",
+   "remedyFiles": [
+    "tests/implementer-model-tier.test.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 4,
+   "scope": "out",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "reason": "refuted: dated design specs are historical records, and the ticket excludes them",
+   "issue": 4443,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4432/fix-zllGgHjJ/u4/verdict.json",
+   "remedyFiles": [
+    "docs/specs/2026-08-27-fleet-member-outcomes-plan-2-tiering.md"
+   ]
+  }
+ ]
+}

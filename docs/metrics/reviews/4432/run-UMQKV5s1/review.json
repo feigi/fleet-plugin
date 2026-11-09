@@ -1,0 +1,108 @@
+{
+  "pr": 4432,
+  "head": "183f4313bbad5e4326600469b70107b2f9efe009",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": false,
+    "reason": "`.github/scripts/check-tracked.sh '*.mjs' -n1 node --check && .github/scripts/check-tracked.sh '*.json' -n1 jq empty && .github/scripts/check-tracked.sh 'plugin/agents/*.md' node plugin/scripts/frontmatter-check.mjs && .github/scripts/check-tracked.sh 'plugin/skills/*/SKILL.md' node plugin/scripts/frontmatter-check.mjs && .github/scripts/check-tracked.sh 'plugin/commands/*.md' node plugin/scripts/frontmatter-check.mjs && node plugin/scripts/tier-outcomes.mjs check --file docs/metrics/tier-outcomes.tsv --member-outcomes docs/metrics/member-outcomes.tsv && node plugin/scripts/ticket-router.mjs --check --table plugin/scripts/router-table.json --features docs/metrics/ticket-features.tsv --members docs/metrics/member-outcomes.tsv --verdicts docs/metrics/tier-outcomes.tsv && .github/scripts/check-tracked.sh '*.sh' shellcheck -x -S warning && npx --yes -p renovate@44.115.7 renovate-config-validator --strict --no-global renovate.json` produced no counts — the shared test run crashed, hit its deadline, or printed no summary (The log has no test-runner summary line (no tests/pass/fail counts were printed). The command's checks all completed with exit 0: node --check on 425 *.mjs, jq on 156 *.json, frontmatter-check on 29 agents, 3 SKILL.md and 2 commands, tier-outcomes check (319 checked, 0 failed), ticket-router check, shellcheck on 20 *.sh, and renovate-config-validator (validated successfully). Wall time 702.47s.) — a failed run, not a pass"
+  },
+  "dimensionsRun": [
+    "correctness",
+    "tests",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — untracked docs/metrics/runs/2026-11-08T200658Z/{closeout.json,ledger.md,phase0.json,plugin-version}. I did not write these."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — untracked docs/metrics/runs/2026-11-08T200658Z/{closeout.json,ledger.md,phase0.json,plugin-version}. Those were not made by me; they look like the controller's own run output."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ?? docs/metrics/runs/2026-11-08T200658Z/closeout.json; ?? docs/metrics/runs/2026-11-08T200658Z/ledger.md; ?? docs/metrics/runs/2026-11-08T200658Z/phase0.json; ?? docs/metrics/runs/2026-11-08T200658Z/plugin-version. None of these came from this review: every command after the first `pwd` changed into the snapshot or into .../correctness/ first, and the only writes were in .../correctness/copy and its two log files. They look like the controller's own run-record artifacts [INFERENCE]."
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 5,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4432/run-UMQKV5s1/snapshot-183f4313",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/skills/run-team/references/pull.md",
+      "line": 416,
+      "claim": "pull.md's 'Record the dispatch before you make it' paragraph (lines 416-418) still names the member as the literal `impl-<N>`: `render implementer --member impl-<N>`, `ledger.mjs dispatch <N> impl-<N>` and 'marks `impl-<N>` live'. That is the same fixed-name wording this PR removes from member-lifecycle.md and implementer.md, so the docs sweep is incomplete in one place.",
+      "evidence": "I grepped the snapshot (excluding tests/fixtures/**) for 'dispatch <N> impl-<N>|--member impl-<N>|…'. It hits pull.md:416-417 and tests/render-before-dispatch-prose.test.mjs:21, which pins that exact phrase. pull.md:703-704, read in the same snapshot, says 'The row, the render's `--member`, `ledger.mjs dispatch`, the `DISPATCH` line's `name` … all carry that name' (the retry name). The ticket's Out of scope section excludes pull.md, and docs/metrics/reviews/4424/run-M717PSUr/review.json:130 shows that review refuted this same claim. So it does not block this PR. I did not run a mutation on it.",
+      "suggested_fix": "Optionally file a follow-up to reword pull.md:416-418 to `<member>` (the name the Pull printed) and update the pin at tests/render-before-dispatch-prose.test.mjs:21 to match. Nothing is needed in this PR.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/components/implementer.md",
+      "line": 17,
+      "claim": "The docs/components/implementer.md change (dispatch uses the Pull-printed `<name>`, with a retry name such as `impl-<N>-b`) is guarded by no test. Reverting it to `impl-<N>` leaves the suite green.",
+      "evidence": "red: n/a (no red). M4 mutation `dispatch <N> <name>` -> `dispatch <N> impl-<N>` in docs/components/implementer.md; `node --test tests/implementer-model-tier.test.mjs tests/run-team-shape-prose.test.mjs` -> exit 0, pass 35, fail 0. baseline: same cmd -> exit 0, pass 35. A grep of tests/ for 'retry name such as' found nothing.",
+      "suggested_fix": "Optionally add an assertion in implementer-model-tier.test.mjs that implementer.md names the Pull-printed name. This is low value because the doc is descriptive.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/implementer-model-tier.test.mjs",
+      "line": 92,
+      "claim": "The updated regex /Keep the `name` `DISPATCH` printed/ pins only the prefix. Dropping the retry-name parenthetical is caught only by the CHANGED entry in run-team-shape-prose, not by this test, so the discrimination rests on that second test.",
+      "evidence": "red: node --test tests/implementer-model-tier.test.mjs tests/run-team-shape-prose.test.mjs -> exit 1, fail 1 incl 'every sentence of the pre-rewrite SKILL.md is in SKILL.md or across references/...' (M2, parenthetical removed); baseline: same cmd -> exit 0, that test pass. implementer-model-tier's test stayed green under M2.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/implementer-model-tier.test.mjs",
+      "line": 117,
+      "claim": "The measurement comment still says a contradicting sentence was added 'before `Keep `name: impl-<N>``', but that phrase now appears nowhere in member-lifecycle.md. It was the anchor the PR replaced.",
+      "evidence": "grep in the snapshot finds the phrase at tests/implementer-model-tier.test.mjs:117 and in the CHANGED old-text pair in the shape-prose test. member-lifecycle.md has 0 matches. Its line 154 now reads 'Keep the `name` `DISPATCH` printed'. The PR body says 'the measurement comment is untouched', which is accurate, so this is a deliberate historical note. It still points at text a reader can no longer find.",
+      "suggested_fix": "Reword the comment to 'before `Keep the `name` `DISPATCH` printed`', or label it a historical measurement.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/specs/2026-08-27-fleet-member-outcomes-plan-2-tiering.md",
+      "line": 225,
+      "claim": "Dated spec docs still quote 'Keep `name: impl-<N>`' (plan-2-tiering.md:225) and 'name: impl-<N>' (slot-based-fleet-loop-design.md:89), which the merged text no longer matches.",
+      "evidence": "grep over the snapshot found both lines. They are dated design specs, so this is probably intentional history.",
+      "suggested_fix": "None needed unless specs are meant to track current wording.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

@@ -1,0 +1,133 @@
+{
+  "pr": 4444,
+  "head": "d817308548402dea4dc769ce532f936ae2f3361c",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [
+    {
+      "dimension": "correctness",
+      "reason": "the reviewer returned nothing — spend limit, timeout, or terminal error"
+    },
+    {
+      "dimension": "silent-failure",
+      "reason": "the reviewer returned nothing — spend limit, timeout, or terminal error"
+    },
+    {
+      "dimension": "tests",
+      "reason": "the reviewer returned nothing — spend limit, timeout, or terminal error"
+    }
+  ],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — printed ' M docs/metrics/tier-outcomes.tsv' and untracked docs/metrics/runs/2026-11-08T200658Z/{closeout.json,ledger.md,phase0.json,plugin-version}. I only ran the read-only git status and did not create these; they are most likely from the controller's own run."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/tier-outcomes.tsv' and untracked docs/metrics/runs/2026-11-08T200658Z/{closeout.json,ledger.md,phase0.json,plugin-version} (not made by this review; controller-owned metrics files)."
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-08T200658Z/closeout.json`, `?? docs/metrics/runs/2026-11-08T200658Z/ledger.md`, `?? docs/metrics/runs/2026-11-08T200658Z/phase0.json`, `?? docs/metrics/runs/2026-11-08T200658Z/plugin-version`. These are not from this dispatch: my only command run in that directory was `pwd`, and every other command chained a `cd` into the snapshot or simplify/ first."
+    }
+  ],
+  "counts": {
+    "survived": 1,
+    "refuted": 0,
+    "unverified": 4,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4444/run-tMWQ7jnc/snapshot-d8173085",
+  "survived": [
+    {
+      "severity": "important",
+      "claim": "tests/agent-test.test.mjs:1482 still describes the flag-detection arm as `-*) ;;`, but this diff turned that arm into `-*)` with an `if [ -n \"$operand\" ]` refusal body, so the quoted code shape no longer exists. The line sits in the #352 test comment, which the diff does not touch.",
+      "evidence": "grep -n -- '-\\*) ;;' agent-test tests/agent-test.test.mjs returned only tests/agent-test.test.mjs:1482. agent-test:646-651 holds the new multi-line `-*)` arm.",
+      "file": "tests/agent-test.test.mjs",
+      "line": 1482,
+      "suggested_fix": "Reword to 'the flag-detection arm (`-*)`)', or drop the literal code.",
+      "dimension": "comments",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "I confirmed this by grep and by reading the files at the snapshot; I built no copy and ran no test, because the claim concerns comment text. Searching `-*) ;;` in agent-test and tests/agent-test.test.mjs finds one hit, tests/agent-test.test.mjs:1482. That comment says the flag-detection arm is `-*) ;;`. agent-test:646-651 now has a multi-line `-*)` arm with an `if [ -n \"$operand\" ]` refusal body. The pr.diff line 10 removes `-*) ;;` and line 23 adds `-*)`. The comment is stale, though minor, since its narrowing-to-`--*` argument still holds. My pattern would have missed variants with different spacing. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-08T200658Z/closeout.json`, `?? docs/metrics/runs/2026-11-08T200658Z/ledger.md`. I wrote nothing there, so these changes were already present."
+        },
+        {
+          "refuted": false,
+          "reason": "I confirmed it by reading the snapshot, not by running the suite. The claim is a stale code quote in a comment, so there is no test behaviour to run, and I ran no test and made no mutant. tests/agent-test.test.mjs:1482 says the flag-detection arm is `-*) ;;`. At agent-test:646-651 the arm is now a multi-line `-*)` whose body is `if [ -n \"$operand\" ]` ... `exit 1`. In agent-test, `-\\*) ;;` matches nothing. In pr.diff it matches only the removed line 10, `-        -*) ;;`. So the quoted shape is gone from the code, and the diff does not edit the comment. I did not check whether other parts of the same comment also went stale. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — the output showed ` M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-08T200658Z/closeout.json` and `?? docs/metrics/runs/2026-11-08T200658Z/ledger.md`. I printed only the first 3 lines (head -3). I did not touch those files, and none of them is a file I read or wrote."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "claim": "The comment at agent-test:~109 says 'the flag arm names nothing and stays silent'. The flag arm can now refuse with exit 1 and a message, so 'stays silent' is stale. The comment at ~120-123 ('each of the nine exits inside this loop is `exit 1`') is also unchecked against the new tenth exit, and the new arm is itself an exit that reads $operand.",
+      "evidence": "agent-test:105-109 and 120-123 are untouched by the diff. The new refusal at agent-test:646-651 prints to stderr and exits 1 inside the loop. A grep of non-comment lines in 102-738 found 13 lines containing `exit 1`, so the 'nine' figure cannot be tied to a count in the current tree.",
+      "file": "agent-test",
+      "line": 122,
+      "suggested_fix": "Say the flag arm records no operand, and either recount the exits or drop the number.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body: '`--import=./setup.mjs` keeps working' is true only when the flag comes before the first path. After a path, the new arm refuses every dash-led non-existent argument, `=` form included.",
+      "evidence": "agent-test:646-651 refuses any `-*` argument that is not an existing path whenever $operand is non-empty. It does not look at whether the flag has an `=`.",
+      "suggested_fix": "State 'before the first path' in the body.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/agent-test.test.mjs",
+      "line": 1564,
+      "claim": "The new test's last check, `const dashes = a.run(\"--\", \"t/a.test.mjs\"); assert.equal(dashes.status, 0, …)`, repeats the `\"--\"` row of the existing test \"a node --test flag reaches node instead of being read as a path\" (test:1458-1461), which runs the same argv `a.run(\"--\", \"t/a.test.mjs\")` and makes the same exit-0 check. It adds a runner spawn and catches no defect the older test misses.",
+      "evidence": "In my copy I added a mutant to the `-*)` arm that refuses `--` only before any operand: `[ -z \"$operand\" ] && [ \"$arg\" = -- ] && { echo MUTANT >&2; exit 1; }`. Then I ran `node --test --test-reporter=spec --test-name-pattern=flag tests/agent-test.test.mjs`. Result: `✖ runner: a node --test flag reaches node instead of being read as a path` (`AssertionError: --: MUTANT`), `✖ runner: an argv of flags alone refuses…`, and `✖ runner: a flag after a test path is refused…` (`AssertionError: MUTANT`, failing only at the `dashes` assertion, since the loop rows and the `dash` row carry other messages). So the older test already catches what `dashes` guards. With the mutant reverted and the `dashes` lines deleted, the same command printed `ℹ tests 3 ℹ pass 3 ℹ fail 0`.",
+      "suggested_fix": "Delete lines 1564-1565 (`const dashes = …` and its `assert.equal`). Optionally add a comment pointing to the existing `--`-before-file row in the earlier test.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/agent-test.test.mjs",
+      "line": 1560,
+      "claim": "The `dash` block recomputes `dash.stdout + dash.stderr` four times across three assertions. The loop just above already binds that once as `out`.",
+      "evidence": "In my copy I replaced lines 1559-1562 with `const dash = a.run(\"t/a.test.mjs\", \"-dash.test.mjs\"); const dashOut = dash.stdout + dash.stderr; assert.notEqual(dash.status, 0, dashOut); assert.match(dashOut, /node: bad option/, dashOut); assert.doesNotMatch(dash.stderr, /agent-test: /, dashOut);`. Then I ran `node --test --test-reporter=spec --test-name-pattern=flag tests/agent-test.test.mjs`: `✔ runner: a flag after a test path is refused, not silently dropped by node`, `ℹ tests 3 ℹ pass 3 ℹ fail 0`. The assertions check the same values as before.",
+      "suggested_fix": "`const dashOut = dash.stdout + dash.stderr;` and use `dashOut` for the match target and the three messages. `doesNotMatch` keeps reading `dash.stderr` alone.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}
