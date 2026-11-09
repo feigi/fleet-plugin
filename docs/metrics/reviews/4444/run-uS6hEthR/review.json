@@ -1,0 +1,171 @@
+{
+  "pr": 4444,
+  "head": "d817308548402dea4dc769ce532f936ae2f3361c",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [
+    {
+      "dimension": "comments",
+      "reason": "the reviewer returned nothing — spend limit, timeout, or terminal error"
+    },
+    {
+      "dimension": "simplify",
+      "reason": "the reviewer returned nothing — spend limit, timeout, or terminal error"
+    }
+  ],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — it printed ` M docs/metrics/tier-outcomes.tsv` and untracked docs/metrics/runs/2026-11-08T200658Z/{closeout.json,ledger.md,phase0.json,plugin-version}. I ran no writes there, so these are not mine; most likely the controller's own run metrics."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-08T200658Z/closeout.json`, `?? docs/metrics/runs/2026-11-08T200658Z/ledger.md`, `?? docs/metrics/runs/2026-11-08T200658Z/phase0.json`, `?? docs/metrics/runs/2026-11-08T200658Z/plugin-version`. I wrote nothing there; these are metrics files from the controller's own run."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-08T200658Z/{closeout.json,ledger.md,phase0.json,plugin-versiondone}` (pre-existing controller metrics files; I never wrote to that tree)."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-08T200658Z/closeout.json`, `?? docs/metrics/runs/2026-11-08T200658Z/ledger.md`, `?? docs/metrics/runs/2026-11-08T200658Z/phase0.json`, `?? docs/metrics/runs/2026-11-08T200658Z/plugin-version`. This pass ran only `pwd` and this `git status` there; these paths are not from this pass."
+    }
+  ],
+  "counts": {
+    "survived": 1,
+    "refuted": 0,
+    "unverified": 7,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4444/run-uS6hEthR/snapshot-d8173085",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "agent-test",
+      "line": 647,
+      "claim": "A dash-led argument placed after a leading `--` but before any path is still dropped silently, with exit 0. This is the same silent-drop class the PR says it closes, and it covers typo'd flags, which the PR text says stay loud.",
+      "evidence": "In the copy, `./agent-test -- --test-name-pattern=one fx/a.test.mjs` printed `tests 2`, `pass 2` and exited 0. The flag was ignored and a two-test file ran in full. `./agent-test -- --test-name-patern=typo fx/a.test.mjs` and `./agent-test -- --bogus-flag fx/a.test.mjs` also printed `tests 2`, `pass 2` and exited 0. Raw `node --test -- --test-name-patern=typo fx/a.test.mjs` does the same, so node drops everything after `--`. The new guard only fires when $operand is already set. A leading `--` is a flag arm that sets no operand, so the flag after it is waved through. The new test's `-- then flag` row is `t/a.test.mjs -- --flag`, which has a path first, so it does not cover this ordering.",
+      "suggested_fix": "Track having passed a literal `--`. In the `-*)` arm, once `--` has been seen, refuse any later dash-led argument that is not an existing path. Alternatively refuse a bare `--` outright, since its comment already calls it \"no more a path than a flag\". Add a test row for `-- --test-name-pattern=one t/a.test.mjs`.",
+      "dimension": "silent-failure",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Reproduced in my own copy at the reviewed head (receipt exit 0, kind built). `./agent-test -- --test-name-pattern=one fx/a.test.mjs` printed tests 2 and pass 2 and exited 0, so the flag was dropped. `./agent-test -- --bogus-flag fx/a.test.mjs` did the same. The positive control `./agent-test --test-name-pattern=one fx/a.test.mjs` printed tests 1, so the flag does take effect when it comes before the path. I read the code at agent-test:640-648: the guard fires only when $operand is set, and a leading `--` sets none. I did not run the typo'd `--test-name-patern` variant. The `--bogus-flag` run covers the same case. This is a narrow edge case, but the claim is true of the code as merged. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-08T200658Z/closeout.json`, `?? docs/metrics/runs/2026-11-08T200658Z/ledger.md`. The output was cut to its first 3 lines by `head -3`. I did not touch these files and ran nothing in that directory."
+        },
+        {
+          "refuted": false,
+          "reason": "Reproduced in my own copy (head f66c691, install ok). Running `env -u FORCE_COLOR ./agent-test -- --test-name-pattern=one fx/a.test.mjs` exited 0 and printed `tests 2`, `pass 2`, so the flag was dropped. `./agent-test -- --bogus-flag fx/a.test.mjs` also exited 0 with `tests 2`, `pass 2`, so a bogus flag is waved through too. The control `./agent-test --test-name-pattern=one fx/a.test.mjs` printed `tests 1`, `pass 1`, so the flag does reach node when `--` is absent. Nothing else in agent-test handles the case: the guard only checks `$operand`, which a leading `--` never sets. The new test's `-- then flag` row puts a path first, so it doesn't cover this ordering. I did not run the `--test-name-patern=typo` variant from the claim, but `--bogus-flag` is the same typo'd-flag case. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv` and untracked `docs/metrics/runs/2026-11-08T200658Z/*`. I didn't write these. They are the controller's own metrics files, and I made no edits there.",
+          "inconclusive": false
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "agent-test",
+      "line": 647,
+      "claim": "No logic error found: the refusal fires exactly when a flag-arm argument follows a file, directory or quoted-glob operand. Every behavior the ticket lists as unchanged is unchanged.",
+      "evidence": "In correctness/copy with pt/t/a.test.mjs and pt/d/b.test.mjs (tests one/two), `env -u FORCE_COLOR ./agent-test <args>` gave:\n- `pt/t/a.test.mjs --test-name-pattern=one` → exit 1, `agent-test: --test-name-pattern=one comes after a test path…`\n- `--test-name-pattern=one pt/t/a.test.mjs` → exit 0, tests 1\n- `pt/d --test-only`, `'pt/t/*.test.mjs' --test-only`, `pt/t/nomatch*.mjs --test-only`, `pt/t/a.test.mjs pt/d --test-only`, `pt/t/a.test.mjs --`, `pt/t/a.test.mjs -`, `pt/t/a.test.mjs -x` → each exit 1 with the refusal naming the argument\n- `-- pt/t/a.test.mjs` → exit 0, tests 2\n- `pt/t/a.test.mjs -dash.test.mjs` (file exists) → reached node: tests 3, pass 2, exit 1, no agent-test: line\n- `--test-name-pattern=one` alone → the existing flags-only refusal\n- `--import=./pt/setup.mjs --test-name-pattern=one pt/t/a.test.mjs` → exit 0, tests 1\n- `-- --test-name-pattern=one pt/t/a.test.mjs` → exit 0, tests 2 (out of scope per the brief)",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/agent-test.test.mjs",
+      "line": 59,
+      "claim": "The new test passes on the PR tree and kills both directions of the mutation proof the ticket asks for.",
+      "evidence": "Mutants ran in correctness/copy with `node --test tests/agent-test.test.mjs`, FORCE_COLOR and NODE_TEST_CONTEXT unset.\n- (a) The refusal block in the flag arm replaced with `:`, run with `--test-name-pattern='flag after a test path'` → exit 1, tests 1, fail 1: '✖ runner: a flag after a test path is refused, not silently dropped by node'.\n- (b) `if [ -n \"$operand\" ]` replaced with `if true`, full file → exit 1, tests 62, fail 4. The failures include '✖ runner: a node --test flag reaches node instead of being read as a path' and the new test.\n- Baseline: test-run.log:63 `✔ runner: a flag after a test path is refused…`.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "agent-test",
+      "line": 122,
+      "claim": "The loop-head comment says 'each of the nine exits inside this loop is `exit 1`'. The loop now holds 13 such exits: it held 12 before the PR, so the count was already wrong, and the PR adds one more without correcting it.",
+      "evidence": "`awk 'NR>=96 && NR<=730 && /exit [0-9]/'` on the snapshot agent-test lists exit-1 calls at lines 253, 344, 382, 390, 398, 406, 428, 534, 539, 603, 608, 649 (new) and 724, which is 13. Line 122 says nine.",
+      "suggested_fix": "Drop the number (\"each exit inside this loop is `exit 1`\") or correct it to 13. Optionally also reword line 107, \"the flag arm names nothing and stays silent\": the arm still records no operand, but it is no longer silent after one.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "agent-test",
+      "line": 648,
+      "claim": "The refusal text says the flag 'comes after a test path' even when the earlier operand is a flag's separate-word value, not a test path. This is the brief's own expected consequence, so only the wording is in question.",
+      "evidence": "`./agent-test --import ./pt/setup.mjs --test-name-pattern=one pt/t/a.test.mjs` → exit 1, `agent-test: --test-name-pattern=one comes after a test path, where node does not read it — put node's options before the first test path`. No test path precedes the flag; `./pt/setup.mjs` was counted as the operand. The `--import=./pt/setup.mjs` spelling runs tests 1, exit 0.",
+      "suggested_fix": "Optional: say \"after an existing path or glob\" so a caller using `--import ./x.mjs` can see why it was refused, or name the `--flag=value` spelling in the message.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "No scope creep: the diff changes only the flag arm and its comment in agent-test, plus one new test in the runner's suite. That matches the ticket's Refuse shape and its 'nothing is reordered' constraint.",
+      "evidence": "`git apply --stat pr.diff` → `agent-test | 20 +-`, `tests/agent-test.test.mjs | 54 +`, 2 files. The agent-test hunk (pr.diff:5-31) touches only the `-*)` arm at lines 631-651. Grepping plugin/, README.md, AGENTS.md, CONTEXT.md and docs/adr for `test-name-pattern|flags alone|flags-only|#352` found no doc describing the old behavior that would need an update.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "agent-test",
+      "line": 647,
+      "claim": "The refusal also fires on legitimate node invocations where an option's value is a separate word naming an existing path. It is loud (exit 1) rather than silent, but it blocks a valid run and its message misdescribes the cause.",
+      "evidence": "With `fx/setup.mjs` existing, `./agent-test --import ./fx/setup.mjs --test-name-pattern=one fx/a.test.mjs` exited 1 with `--test-name-pattern=one comes after a test path, where node does not read it`. Node would read that flag, because it comes before the first real file operand. The existing path `./fx/setup.mjs` is the `--import` value, not a test path. The code comment acknowledges the value-as-operand ambiguity but only uses it to justify not reordering.",
+      "suggested_fix": "Accept the false refusal as a documented limit, or recognise space-separated value-taking options (`--import`, `--require`, `--test-reporter`, …) so their following word is not recorded as an operand.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/agent-test.test.mjs",
+      "line": 1560,
+      "claim": "The new test discriminates: disabling, exit-code-flipping, or stream-redirecting the refusal in agent-test each turns it red, and an always-refuse mutant also turns it red via the flag-first control; only unasserted message wording can change while it stays green.",
+      "evidence": "red: ./agent-test --test-name-pattern=\"a flag after a test path\" tests/agent-test.test.mjs → exit nonzero, fail 1 incl 'runner: a flag after a test path is refused, not silently dropped by node' (mutants if-false, exit 0, stdout, no-arg, no-prefix); baseline: same cmd → exit 0, tests 1 pass 1, named test pass. Always-refuse: red: ./agent-test tests/agent-test.test.mjs → fail 4 incl the named test; baseline: same → exit 0, tests 62 pass 62, named test pass. Reworded message 'ignores it' survived (green), expected.",
+      "suggested_fix": "None required.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

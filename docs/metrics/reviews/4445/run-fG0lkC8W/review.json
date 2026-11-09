@@ -1,0 +1,115 @@
+{
+  "pr": 4445,
+  "head": "7b5dc6e9e42bb7f2701894d5516d60b03a1e9dd5",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "tests",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv` plus untracked docs/metrics/runs/2026-11-08T200658Z/{closeout.json,ledger.md,phase0.json,plugin-version} (more entries may follow; I printed only the first lines). I made no writes there, so these files belong to the controller or another agent."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-08T200658Z/closeout.json`, `?? docs/metrics/runs/2026-11-08T200658Z/ledger.md`, `?? docs/metrics/runs/2026-11-08T200658Z/phase0.json`, `?? docs/metrics/runs/2026-11-08T200658Z/plugin-version`. I did not create these: my only commands in that directory were `pwd` and this read-only `git -C … status`. Their paths are run-metrics artifacts from the controller's run 2026-11-08T200658Z."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/tier-outcomes.tsv; ?? docs/metrics/runs/2026-11-08T200658Z/{closeout.json,ledger.md,phase0.json,plugin-version,…} (I never wrote there; belongs to the controller's own run metrics)."
+    }
+  ],
+  "counts": {
+    "survived": 1,
+    "refuted": 0,
+    "unverified": 4,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4445/run-fG0lkC8W/snapshot-7b5dc6e9",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "plugin/skills/run-team/references/pull.md",
+      "claim": "The changed sentence 'a second, different Routing for that name' (was `impl-<N>`) is pinned by no test: replacing it with `impl-<N>` leaves the whole suite green.",
+      "evidence": "red: none (mutant survived). Mutation `s/Routing for that name; the same/Routing for impl-<N>; the same/` on pull.md: `./agent-test` (full, in my copy) → exit 0, tests 9172, fail 0; narrowed 6 run-team prose files → tests 171, fail 0; baseline unmutated → exit 0, pass 15/15 and full suite green per shared run.",
+      "suggested_fix": "Add an assert.match in within-run-pair-prose.test.mjs step-7/router-args test for /Routing\\s+for\\s+that\\s+name/.",
+      "dimension": "tests",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "I did not run the mutant myself, so I have no red or green evidence line of my own. I checked statically instead. I read pr.diff, which changes the sentence at pull.md:261-262 to 'a second, different Routing for that name'. I grepped the whole snapshot, tests included, for 'second, different', 'Routing for', 'refuses a line that is not a Routing' and 'rewrites the row and leaves the entry'. The only hit on that sentence is pull.md itself. The test titles in ledger.test.mjs:3977 and ledger-grammar.test.mjs:798 describe ledger behaviour and do not read pull.md. The moved-text fixture phase-1-2-pull.txt does not contain this sentence, because its hunk stops after 'have just claimed. Router'. Nothing visible pins the wording, which agrees with the claim's full-suite mutant run (exit 0, 9172 tests, 0 fail). The search covered the snapshot only. It would miss a test that builds the prose by concatenation or regex. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/tier-outcomes.tsv' and untracked docs/metrics/runs/2026-11-08T200658Z/{closeout.json,ledger.md,phase0.json,plugin-version}. I only read there and never wrote, so I did not cause it."
+        },
+        {
+          "refuted": false,
+          "reason": "I did not run the mutation, so this is static evidence only and the full-suite survival is unconfirmed. The changed sentence sits at pull.md line 262 in the snapshot. I searched every file in tests/ for 'second, different', 'different Routing', 'Routing for' and 'not a Routing'. The only hits are unrelated tests and one ledger.test.mjs title about the ledger.mjs behavior. No prose test (pull.test.mjs, run-team-pull-prose.test.mjs) pins this sentence. The only `impl-<N>` hit in pull.test.mjs is a comment at line 1825 about member naming. Lens 2 found nothing that handles it elsewhere. The behavior is covered by a ledger.mjs test, but the prose wording is not. My search would have missed a test that builds the pattern dynamically or matches a looser regex over pull.md. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/tier-outcomes.tsv' and untracked docs/metrics/runs/2026-11-08T200658Z/* (closeout.json, ledger.md, phase0.json, plugin-version). I wrote nothing there, so these were already present."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/skills/run-team/references/pull.md",
+      "line": 262,
+      "claim": "The reworded step-7 clause \"refuses … a second, different Routing for that name\" is one of the ticket's acceptance-criterion sites, but no test pins it: reverting it to the old literal `impl-<N>` passes every test that reads pull.md's step 7.",
+      "evidence": "In the copy I ran `perl -0pi -e 's/Routing for that name;/Routing for \\`impl-<N>\\`;/' pull.md` and then `node --test --test-reporter=tap tests/render-before-dispatch-prose.test.mjs tests/within-run-pair-prose.test.mjs tests/run-team-pull-prose.test.mjs`, which printed `# fail 0` (mutant M3 survived). The other five reverts were all caught: row example `# fail 2`, behind-issue rewrite `# fail 1`, 'verbatim under' `# fail 1`, 'marks live' `# fail 2`, render/record order swap `# fail 2`. A grep of snapshot tests/ for `second,? different|Routing for|not a Routing|different Routing` finds only ledger.test.mjs:3977 (behaviour) and ledger-grammar/ledger-rotate code tests. No prose pin exists, and the moved-text fixture's step-7 slice ends at 'have just claimed. Router' without that sentence. The full suite was not run against this mutant.",
+      "suggested_fix": "In within-run-pair-prose.test.mjs's step-7 test, add an assertion such as `assert.match(slice, /second,\\s+different\\s+Routing\\s+for\\s+that\\s+name/, …)` next to the new `<member>` pin.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/skills/run-team/references/pull.md",
+      "line": 256,
+      "claim": "Step 7 and the record-the-dispatch paragraph define `<member>` as \"the name the Pull printed\", but pull.mjs prints the member name only in the final `DISPATCH {\"name\",…}` line, after row, render and dispatch have run. A reader stepping through step 7 has seen no printed name yet; the naming rule at pull.md:694 says the member is \"named\", not printed, before the claim.",
+      "evidence": "Reasoned, not executed. Grep of the snapshot's plugin/scripts/pull.mjs for `DISPATCH|st.member` shows the name is set at :965 (`st.member = member`), used at :1012/:1024/:1035, and printed only at :1056 (`DISPATCH ${JSON.stringify(this.st.dispatch)}`, name: st.member at :1044). The ticket's Agent Brief prescribes 'the name the Pull printed' wording, so the PR follows the ticket.",
+      "suggested_fix": "Optional: phrase it as the member the Pull named (the `name` its `DISPATCH` line prints), matching pull.md:694-704. Not required by the ticket.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/within-run-pair-prose.test.mjs",
+      "claim": "Two changed phrases ('rewritten under the name the Pull printed when it is pulled'; 'the line verbatim under that name in `## Routed`' ) are killed only by the generic moved-text fixture test (any-sentence-mismatch), not by a named behavioural pin, so the kill is incidental. The 'verbatim under that name' phrase is covered by the step-7 test only via the `in ## Routed in one write` regex, which survived this mutation there.",
+      "evidence": "Mutations on pull.md → ./agent-test tests/run-team-pull-prose.test.mjs tests/run-team-drivers-prose.test.mjs tests/run-team-shape-prose.test.mjs tests/run-team-war-stories-prose.test.mjs tests/render-before-dispatch-prose.test.mjs tests/within-run-pair-prose.test.mjs → fail 1 of 171, the only failure being 'every sentence removed from phases 1 and 2 is found across references/…'; the two target tests (render-before-dispatch, within-run-pair) stayed green. No unmutated narrowed baseline for this exact 6-file command was run, so inconclusive for kill scoring.",
+      "suggested_fix": "Add direct asserts for these two phrases in the step-7 / Pull next-head tests.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body: 'its three prose pins' does not match the diff. The diff changes pins in two test files plus a fixture. The render-before-dispatch test has 1 changed assertion. The within-run-pair-prose test has 1 edited assertion and 1 added. That is three assertion lines, but the body's next sentence names the pins as two ('the render-before-dispatch pin, the Step 7 pin in within-run-pair-prose') plus the fixture, so the count is ambiguous.",
+      "evidence": "grep of the diff's assert lines: tests/render-before-dispatch-prose.test.mjs has -97/+98 (1 assertion); tests/within-run-pair-prose.test.mjs has -110/+111 (edited) and +112 (new, `<member>` the name the Pull printed). Everything else the body claims checks out. The grep check prints nothing (rc=1). The remaining `impl-<N>` mentions in pull.md (lines 47, 248, 252, 375-379, 444, 692-705) are the claim pair, branch, worktree and scratch path, as the body says. The member-naming claim matches the 'Pull's member is named before anything is claimed' section at pull.md:694-708.",
+      "suggested_fix": "Say 'three changed pin assertions in two test files' or drop the count.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

@@ -1,0 +1,73 @@
+{
+  "head": "d817308548402dea4dc769ce532f936ae2f3361c",
+  "run": "run-uS6hEthR",
+  "entries": [
+    {
+      "bucket": "survived",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "charge": "false-claim"
+    },
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "issue": 4448,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4444/fix-jyCvX7qd/unverified-0/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "issue": 4448,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4444/fix-jyCvX7qd/unverified-1/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4444/fix-jyCvX7qd/unverified-2/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4444/fix-jyCvX7qd/unverified-3/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "issue": 4448,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4444/fix-jyCvX7qd/unverified-4/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 5,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4444/fix-jyCvX7qd/unverified-5/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 6,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4444/fix-jyCvX7qd/unverified-6/verdict.json"
+    }
+  ]
+}

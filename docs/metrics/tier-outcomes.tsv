@@ -938,3 +938,10 @@
 2026-11-07	4419	4414		task-high	yes	yes	review run-Cdb7SPAw at e5d5da3, record dispositions-fix-pr-4419.json: survived[0] false-claim "PR body: says 'three tests in tests/ledger-row-review.test.mjs', but the diff adds exactly two tests."	light			
 2026-11-07	4421	4409		task-high	yes	no	review run-bWJDBLYu at 3842e8f, record dispositions-fix-pr-4421.json: no finding stands				
 2026-11-07	4424	4400		task-high	yes	no	review run-M717PSUr at 2d32c7d, record dispositions-fix-pr-4424.json: none: survived[0] defect-outside-acceptance	heavy			
+2026-11-08	4433	4394		task-high	yes	no	review run-DHkyUU3f at 8badf1d, record dispositions-fix-pr-4433.json: no finding stands	light			
+2026-11-08	4434	4404		task-high	yes	no	review run-aZBE6g7U at aad0606, record dispositions-fix-pr-4434.json: none: survived[0] defect-outside-acceptance	light			
+2026-11-08	4432	4429		task-high	yes	no	review run-UMQKV5s1 at 183f431, record dispositions-fix-pr-4432.json: no finding stands				
+2026-11-08	4435	4416		task-high	yes	no	review run-LdH0Qg4j at d9739d6, record dispositions-fix-pr-4435.json: none: survived[0] defect-outside-acceptance	light			
+2026-11-09	4442	4431		slow-medium	no	yes	review run-3vf2N1zo at 81dcff9, record dispositions-fix-pr-4442.json: survived[0] both "The sweep that implements acceptance criterion 1 counts some unbounded gh spawns as bounded and does not see others at all, so a new unbounded spawn in one of these shapes passes it."	heavy			
+2026-11-09	4444	4437		task-high	yes	yes	review run-uS6hEthR at d817308, record dispositions-fix-pr-4444.json: survived[0] false-claim "A dash-led argument placed after a leading `--` but before any path is still dropped silently, with exit 0. This is the same silent-drop class the PR says it closes, and it covers typo'd flags, which the PR text says stay loud."; unrun: comments, simplify	light			
+2026-11-09	4445	4436		task-high	yes	no	review run-fG0lkC8W at 7b5dc6e, record dispositions-fix-pr-4445.json: none: survived[0] defect-outside-acceptance	light			

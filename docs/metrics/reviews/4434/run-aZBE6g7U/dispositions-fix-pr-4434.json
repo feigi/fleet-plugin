@@ -1,0 +1,120 @@
+{
+  "head": "aad060676fa30723f711db42b92160a9fda35461",
+  "run": "run-aZBE6g7U",
+  "entries": [
+    {
+      "bucket": "survived",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "remedyFiles": [
+        "plugin/scripts/phase0.mjs",
+        "tests/phase0.test.mjs"
+      ],
+      "charge": "none",
+      "chargeReason": "defect-outside-acceptance"
+    },
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4434/fix-eQqSBxgt/U0/verdict.json",
+      "reason": "refuter confirmed the fix and its mutant kill; no change suggested, applied with nothing to change"
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "issue": 4441,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4434/fix-eQqSBxgt/U1/verdict.json",
+      "reason": "refuted: symlinked-.fleet refusal is covered by the comment's 'name compared as given' and fails closed"
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "out",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "issue": 4441,
+      "reason": "out of scope per #4404 (other realpathSync call sites); below the claim bar, no refuter"
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "out",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "issue": 4441,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4434/fix-eQqSBxgt/U3/verdict.json",
+      "reason": "out of scope (pre-existing catch, #4404 names refusal text out of scope); refuter refuted"
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "issue": 4441,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4434/fix-eQqSBxgt/U4/verdict.json",
+      "reason": "refuted: no wrong accept through the raw-return fallback"
+    },
+    {
+      "bucket": "unverified",
+      "index": 5,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4434/fix-eQqSBxgt/U5/verdict.json",
+      "remedyFiles": [
+        "tests/phase0.test.mjs"
+      ],
+      "reason": "added a case-variant checkout alarm test, skipped on a case-sensitive volume"
+    },
+    {
+      "bucket": "unverified",
+      "index": 6,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "issue": 4441,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4434/fix-eQqSBxgt/U6/verdict.json",
+      "reason": "refuted: the Test entrypoint runs tests/phase0.test.mjs"
+    },
+    {
+      "bucket": "unverified",
+      "index": 7,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4434/fix-eQqSBxgt/U7/verdict.json",
+      "remedyFiles": [
+        "tests/phase0.test.mjs"
+      ],
+      "reason": "added a case-variant checkout alarm test, skipped on a case-sensitive volume"
+    },
+    {
+      "bucket": "unverified",
+      "index": 8,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "issue": 4441,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4434/fix-eQqSBxgt/U8/verdict.json",
+      "reason": "refuted: the sentence was true; survived[0]'s fix rewrote it"
+    },
+    {
+      "bucket": "unverified",
+      "index": 9,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4434/fix-eQqSBxgt/U9/verdict.json",
+      "reason": "refuter confirmed no types are involved; no change suggested, applied with nothing to change"
+    }
+  ]
+}

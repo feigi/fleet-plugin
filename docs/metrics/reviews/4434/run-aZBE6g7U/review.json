@@ -1,0 +1,210 @@
+{
+  "pr": 4434,
+  "head": "aad060676fa30723f711db42b92160a9fda35461",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": false,
+    "reason": "`.github/scripts/check-tracked.sh '*.mjs' -n1 node --check && .github/scripts/check-tracked.sh '*.json' -n1 jq empty && .github/scripts/check-tracked.sh 'plugin/agents/*.md' node plugin/scripts/frontmatter-check.mjs && .github/scripts/check-tracked.sh 'plugin/skills/*/SKILL.md' node plugin/scripts/frontmatter-check.mjs && .github/scripts/check-tracked.sh 'plugin/commands/*.md' node plugin/scripts/frontmatter-check.mjs && node plugin/scripts/tier-outcomes.mjs check --file docs/metrics/tier-outcomes.tsv --member-outcomes docs/metrics/member-outcomes.tsv && node plugin/scripts/ticket-router.mjs --check --table plugin/scripts/router-table.json --features docs/metrics/ticket-features.tsv --members docs/metrics/member-outcomes.tsv --verdicts docs/metrics/verdicts.tsv && .github/scripts/check-tracked.sh '*.sh' shellcheck -x -S warning && npx --yes -p renovate@44.115.7 renovate-config-validator --strict --no-global renovate.json` produced no counts — the shared test run crashed, hit its deadline, or printed no summary (The shell tool is unusable: every bash call, including a plain `ls`, fails with 'Extension /Users/chris/.omp/plugins/node_modules/@xynogen/pix-optimizer/src/index.ts failed: undefined is not an object (evaluating ctx.ui.theme.fg)'. The suite command was submitted once and failed at that tool error, before it produced any output. Afterwards, /Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4434/run-aZBE6g7U/test-run.log does not exist, so the command never launched, and no TEST_RUN_EXIT line was printed. No counts are available. The run has not been retried, because I could not confirm it had not started. Next step: fix or disable the pix-optimizer extension, then rerun the suite block once.) — a failed run, not a pass"
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "missing",
+      "line": null
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — it printed four untracked files under docs/metrics/runs/2026-11-08T200658Z/ (closeout.json, ledger.md, phase0.json, plugin-version). I did not create them. They look like another run's output."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ?? docs/metrics/runs/2026-11-08T200658Z/closeout.json, ?? docs/metrics/runs/2026-11-08T200658Z/ledger.md, ?? docs/metrics/runs/2026-11-08T200658Z/phase0.json, ?? docs/metrics/runs/2026-11-08T200658Z/plugin-version (I wrote none of these. They are run-record files under docs/metrics/runs/ that I did not create.)"
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ?? docs/metrics/runs/2026-11-08T200658Z/closeout.json, ?? docs/metrics/runs/2026-11-08T200658Z/ledger.md, ?? docs/metrics/runs/2026-11-08T200658Z/phase0.json, ?? docs/metrics/runs/2026-11-08T200658Z/plugin-version (not written by this pass: every command here ran with cwd set to simplify/ or simplify/copy, and the only write outside them was none)"
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — untracked docs/metrics/runs/2026-11-08T200658Z/{closeout.json,ledger.md,phase0.json,plugin-version}. Not made by me, since I only read the diff and worked in the scratch copy; this looks like the controller's own run artifacts."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ?? docs/metrics/runs/2026-11-08T200658Z/closeout.json, ?? docs/metrics/runs/2026-11-08T200658Z/ledger.md, ?? docs/metrics/runs/2026-11-08T200658Z/phase0.json, ?? docs/metrics/runs/2026-11-08T200658Z/plugin-version (I did not write these: all my writes went to scratch or my copy. They look like the controller's own run artifacts.)"
+    }
+  ],
+  "counts": {
+    "survived": 1,
+    "refuted": 0,
+    "unverified": 10,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4434/run-aZBE6g7U/snapshot-aad06067",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "plugin/scripts/phase0.mjs",
+      "line": 615,
+      "claim": "The step still accepts a `fleet` spelling the OS refuses to resolve, which contradicts the new comment's opening claim that a spelling is accepted 'only when the OS resolves it to this checkout's .fleet/': `<repo>/.fleet/noperm/..`, where noperm is a mode-000 directory, passes the alarm step (exit 0, ok), but the OS gives EACCES for that path. stat(dirname) and realpath.native(dirname) need search permission only on noperm's parents, and the joined `..` is then folded lexically.",
+      "evidence": "Ran it through the real alarm step: I added a temporary test to my copy's tests/phase0.test.mjs (fixture(); mkdir .fleet/noperm; chmod 000; f.alarm({fleet:`${f.repo}/.fleet/noperm/..`}); f.run()), then ran `node --test --test-name-pattern='PROBE4434' tests/phase0.test.mjs` → printed 'PROBE …/repo/.fleet/noperm/.. 0 ok'. Standalone probe2.mjs (uid 501): 'step: ACCEPT', 'OS stat: EACCES', 'OS readdir: EACCES'. Real-world impact is low, since omp's controller-alarm.mjs writes the alarm file.",
+      "suggested_fix": "When basename(path) is '..' or '.', resolve the whole path, e.g. statSync(path) or realpathSync.native(path) on the joined form, or refuse any `fleet` whose `normalize()` differs from it. Otherwise, weaken the comment's 'only when the OS resolves it' to name this residual.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Probe replicating the snapshot's fleetIdentity logic (statSync + realpathSync.native on dirname, join basename) on <repo>/.fleet/noperm/.. with noperm mode 000: step resolves to <repo>/.fleet and isDirectory true (accepted), while OS statSync(path) gives EACCES. Claim confirmed, though I ran the function logic standalone, not via a measure-copy or the alarm step. Impact is low, as the claim says. CWD-AUDIT: not run; the cwd /Users/chris/dev/fleet-plugin was only read from and never written to."
+        },
+        {
+          "refuted": false,
+          "reason": "I couldn't refute it. I ran the snapshot's fleetIdentity logic standalone, copied from the snapshot's phase0.mjs (dirname → statSync → realpathSync.native → join) on `<r>/.fleet/noperm/..` with noperm at mode 000. It accepted the path and resolved it to `<r>/.fleet`, so the alarm comparison would pass. The OS stat on the same path gave EACCES. The comment's opening claim is therefore contradicted, as the finding says. Nothing elsewhere in fleetIdentity guards against it. This was a standalone logic probe, not a measure-copy run of the real alarm step or the test suite, so I'm not claiming a kill or a valid red. Real-world impact is low, as the finding notes. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ?? docs/metrics/runs/2026-11-08T200658Z/closeout.json, ledger.md, phase0.json, plugin-version (untracked; I did not write them)."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/phase0.mjs",
+      "line": 613,
+      "claim": "The fix itself is correct and covered by a test: with the `.isDirectory()` guard, `<repo>/.fleet/afile/..` (afile a regular file) is refused, and the new test entry kills the pre-fix mutant. The diff touches only fleetIdentity's guard and comment plus tests/phase0.test.mjs, so I found no scope creep.",
+      "evidence": "In copy: `env -u FORCE_COLOR node --test --test-name-pattern='alarm' tests/phase0.test.mjs` → ℹ tests 21, pass 21, fail 0. Mutant `if (!statSync(checkout).isDirectory()) return path;` → `statSync(checkout);`: `--test-name-pattern='climbs|dot'` → tests 2, pass 1, fail 1: '✖ alarm: a file whose path climbs out of … is refused' with AssertionError on `<repo>/.fleet/afile/..`.",
+      "suggested_fix": "None needed.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/phase0.test.mjs",
+      "line": 57,
+      "claim": "The new test name and the comment say that spelling this .fleet/ as `.fleet/.` passes, but that holds only when `.fleet` is a real directory. If `.fleet` is a symlink, fleetIdentity resolves `<repo>/.fleet/.` through the link while it keeps `<repo>/.fleet` unresolved, so a spelling the OS resolves to the same directory is refused. The guarantee is narrower than the test name implies. The PR did not introduce this behavior; the new test pins the passing case.",
+      "evidence": "probe.mjs (copied post-PR fleetIdentity, standalone, not run through the real step): repo2/.fleet → symlink to ext; `symlinked .fleet /repo2/.fleet/. refuse` while `/repo2/.fleet ACCEPT`. The same probe confirms the documented behavior: '.FLEET refuse | OS: same', 'lowercase repo ACCEPT | OS: same', 'adir/.. ACCEPT', '.fleet/.. refuse', 'afile/. refuse'. A search of plugin/ for a .fleet symlink found only main-checkout.mjs comments about dangling symlinks, and no code that creates a .fleet symlink.",
+      "suggested_fix": "Optional: say in the comment that the `.fleet` name is not resolved, so a `.`/`..` spelling through a symlinked `.fleet` is refused.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/phase0.mjs",
+      "line": 761,
+      "claim": "The ticket's caveat asked triage to decide whether the git top-level check (JS realpathSync) moves together with fleetIdentity. The diff leaves line 761 on JS realpathSync without saying so, and the two resolvers stay inconsistent. I judged this harmless for that site (cwd and git's --show-toplevel are already absolute and contain no `..`), but I did not execute that judgment.",
+      "evidence": "`grep -n 'realpathSync' plugin/scripts/phase0.mjs` (snapshot) → 618: realpathSync.native in fleetIdentity; 761: `realpathSync(top.stdout) !== realpathSync(cwd)`. The diff has no hunk at line 761.",
+      "suggested_fix": "Mention the decision in the PR body. No code change is required.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/phase0.mjs",
+      "line": 619,
+      "claim": "fleetIdentity's bare `catch { return path; }` masks every fs error (ELOOP, ENOENT, ENOTDIR, EACCES) as 'return the raw spelling'. The alarm refusal then says only `names fleet \"X\", not Y`, and never says the checkout failed to resolve.",
+      "evidence": "A copy of the PR's fleetIdentity run with node printed: ELOOP for a symlink loop (returned the raw path), ENOENT for `repo/nope/../.fleet`, ENOTDIR for `.fleet/afile/../x/..`, and EACCES under a chmod 0 directory. Each case returned the raw path with no signal. Behaviour is fail-closed: the unresolved spelling differs from the resolved fleetDir, so alarm() returns failed. The failure message does not name the errno. The catch pre-dates this PR and the PR only adds an `isDirectory()` early return, which exits through the same raw-path fallback. I found no case where a swallowed error produces a false `ok`.",
+      "suggested_fix": "Optional. Return `{path, cause}` or include `e.code` in the alarm failure message when resolution of either side fails. Alternatively, catch only ENOENT and ENOTDIR and let ELOOP and EACCES surface.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/phase0.mjs",
+      "line": 617,
+      "claim": "The new `if (!statSync(checkout).isDirectory()) return path;` sits inside the existing try, so it relies on the same broad fallback. The raw return is only safe because the other side of the comparison resolves differently.",
+      "evidence": "Probe: `R/repo/.fleet/afile/..` (afile is a regular file) returned the raw `.fleet/afile/..` and did not collapse to `.fleet`. So it is refused when fleetDir resolves to `R/repo/.fleet`. `adir/..` and `.fleet/.` resolved to `R/repo/.fleet`, and `.FLEET` stayed distinct, matching the new tests. The new statSync/isDirectory dereference adds no new swallowed failure mode beyond the stat errors the catch already covered. If fleetDir and rec.fleet are the same unresolvable string they compare equal and pass. That is lexically identical, so it does no harm.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/phase0.test.mjs",
+      "claim": "The new comment says a letter-case variant of the checkout path is the same checkout on a case-insensitive volume. No test covers that. Lowercasing the resolved checkout dir in fleetIdentity leaves all 5 alarm tests green.",
+      "evidence": "narrowed probe (not scored; testCmd runs no tests): node --test --test-name-pattern='alarm: a file' tests/phase0.test.mjs with `realpathSync.native(checkout).toLowerCase()` -> pass 5, fail 0. The probe was not rerun against a mixed-case checkout path.",
+      "suggested_fix": "Add a case-variant checkout spelling test, skipped when the volume is case-sensitive. Otherwise drop the case-insensitivity claim from the comment.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/phase0.test.mjs",
+      "claim": "The shipped suite command never executes tests/phase0.test.mjs, so these tests do not gate through the listed testCmd. They discriminate only when run with node --test.",
+      "evidence": "testCmd is node --check / jq / frontmatter / tier-outcomes / ticket-router / shellcheck / renovate. The mutants M1, M2 and M4 were killed only by direct `node --test` runs: 4 pass / 1 fail each, with the named test failing and the baseline 5/5 green. These are probes, not kills.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/phase0.mjs",
+      "line": 603,
+      "claim": "The new fleetIdentity comment says that on a case-insensitive volume a letter-case variant of the checkout path is the same checkout. This holds on darwin, but no test in the diff or in tests/phase0.test.mjs pins it.",
+      "evidence": "The probe `fs.realpathSync.native(cwd+'/cs/aBC')` on a directory created as `Abc` returned `.../cs/Abc`, so the claim is true on this host. `grep -i 'case-insens|letter-case' tests/phase0.test.mjs` found nothing. The only case test added is `.FLEET`, which covers the basename.",
+      "suggested_fix": "Optionally add a test for a case-variant checkout path, or reword the comment as host-dependent. This is not a defect.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/phase0.mjs",
+      "line": 606,
+      "claim": "The comment says 'the stat and the directory check refuse it' for a `..` after a file. Each check covers a different case. `<repo>/afile/../.fleet` is refused by the stat, which throws. `<repo>/.fleet/afile/..` is refused by the new isDirectory check. The shared wording could read as if both checks apply to both spellings.",
+      "evidence": "Read fleetIdentity at lines 613-622. The dirname of `<repo>/afile/../.fleet` is `<repo>/afile/..`, and statSync of that throws, so the catch returns the path. The dirname of `<repo>/.fleet/afile/..` is `<repo>/.fleet/afile`, which stats fine, so the new isDirectory check returns the path.",
+      "suggested_fix": "Optionally say 'the stat (a path through a file) and the directory check (a file as the checkout itself)'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/phase0.mjs",
+      "line": 599,
+      "claim": "The change adds no new types and no casts. It is plain JavaScript with no type annotations, so there is no type-level invariant to check. fleetIdentity is unchanged in signature: it takes `any` and returns a string or the input unchanged. The new `isDirectory()` guard is a runtime check, which is the only option in this JS file.",
+      "evidence": "Read the full diff (70 lines). The only code change is `statSync(checkout)` becoming `if (!statSync(checkout).isDirectory()) return path;`. By reading the diff, I traced `.fleet/afile/..` (dirname is a file, so the path is returned as given and refused), `.fleet/adir/..` and `.fleet/.` (both normalise to `.fleet` through join). I did not run these cases.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

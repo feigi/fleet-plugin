@@ -1,0 +1,59 @@
+{
+  "head": "7b5dc6e9e42bb7f2701894d5516d60b03a1e9dd5",
+  "run": "run-fG0lkC8W",
+  "entries": [
+    {
+      "bucket": "survived",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "charge": "none",
+      "chargeReason": "defect-outside-acceptance",
+      "remedyFiles": [
+        "tests/within-run-pair-prose.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4445/fix-qJRarhp4/u0/verdict.json",
+      "remedyFiles": [
+        "tests/within-run-pair-prose.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted: ticket #4436 prescribes 'the name the Pull printed'; row/render/dispatch are the Pull script's own stages and the DISPATCH line carries the name",
+      "issue": 4449,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4445/fix-qJRarhp4/u1/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "refuted: the moved-text fixture test, updated by this PR, goes red on both phrase mutants \u2014 a dedicated guard, so the suggested asserts duplicate it",
+      "issue": 4449,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4445/fix-qJRarhp4/u2/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted: the PR body's count matches the three pin artifacts its own preceding sentence names and the diff touches",
+      "issue": 4449,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4445/fix-qJRarhp4/u3/verdict.json"
+    }
+  ]
+}

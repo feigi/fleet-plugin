@@ -1,0 +1,142 @@
+{
+  "pr": 4435,
+  "head": "d9739d6cb02fb5f972ab7986c4575f14e6ca81f5",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": false,
+    "reason": "`.github/scripts/check-tracked.sh '*.mjs' -n1 node --check && .github/scripts/check-tracked.sh '*.json' -n1 jq empty && .github/scripts/check-tracked.sh 'plugin/agents/*.md' node plugin/scripts/frontmatter-check.mjs && .github/scripts/check-tracked.sh 'plugin/skills/*/SKILL.md' node plugin/scripts/frontmatter-check.mjs && .github/scripts/check-tracked.sh 'plugin/commands/*.md' node plugin/scripts/frontmatter-check.mjs && node plugin/scripts/tier-outcomes.mjs check --file docs/metrics/tier-outcomes.tsv --member-outcomes docs/metrics/member-outcomes.tsv && node plugin/scripts/ticket-router.mjs --check --table plugin/scripts/router-table.json --features docs/metrics/ticket-features.tsv --members docs/metrics/member-outcomes.tsv --verdicts docs/metrics/tier-outcomes.tsv && .github/scripts/check-tracked.sh '*.sh' shellcheck -x -S warning && npx --yes -p renovate@44.115.7 renovate-config-validator --strict --no-global renovate.json` produced no counts — the shared test run crashed, hit its deadline, or printed no summary (the test-run agent returned nothing) — a failed run, not a pass"
+  },
+  "dimensionsRun": [
+    "correctness",
+    "tests",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "comments",
+      "state": "unrepo",
+      "line": "CWD-AUDIT: unrepo/unknown — not run (bash tool unavailable)."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ?? docs/metrics/runs/2026-11-08T200658Z/{closeout.json,ledger.md,phase0.json,plugin-version} (untracked run artifacts that I did not create; I never wrote to that tree)."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ?? docs/metrics/runs/2026-11-08T200658Z/closeout.json, ?? docs/metrics/runs/2026-11-08T200658Z/ledger.md, ?? docs/metrics/runs/2026-11-08T200658Z/phase0.json, ?? docs/metrics/runs/2026-11-08T200658Z/plugin-version (controller run-artifact paths; this pass wrote nothing outside correctness/)"
+    }
+  ],
+  "counts": {
+    "survived": 1,
+    "refuted": 0,
+    "unverified": 6,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4435/run-LdH0Qg4j/snapshot-d9739d6c",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "docs/requirements.md",
+      "line": 31,
+      "claim": "The new §1.2 Check still passes for a stored login that phase 0 cannot see: when gh's config lives in GH_CONFIG_DIR or XDG_CONFIG_HOME, the Check finds the login, but omp's eval kernel drops both variables. A user with a non-default gh config dir therefore passes the documented prerequisite and then fails phase 0's `labels` step, which is the exact failure #4416 reports.",
+      "evidence": "Ran in correctness/ with gh 2.103.3. Setup: probe/cfg/hosts.yml and probe/xdg/gh/hosts.yml each hold a dummy oauth_token; HOME=probe/home is empty.\n(A) `env HOME=$P/home GH_CONFIG_DIR=$P/cfg env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GITHUB_ENTERPRISE_TOKEN gh auth token` → prints the token, exit 0. Running `gh auth status` under the same env → 'Failed to log in to github.com account probeuser (…/probe/cfg/hosts.yml) … The token … is invalid', exit 1. So the Check found and used the GH_CONFIG_DIR login; with a valid token it would exit 0.\n(A') Same as (A) with XDG_CONFIG_HOME=$P/xdg in place of GH_CONFIG_DIR: `gh auth token` prints the token, exit 0.\n(B) The eval-kernel allowlist from #4416 and memory iIT6Dx: `env -i HOME=$P/home PATH=… SHELL TERM TMPDIR USER LOGNAME gh auth token` → 'no oauth token found for github.com', exit 1. `gh auth status` → 'You are not logged into any GitHub hosts. To log in, run: gh auth login', exit 1.",
+      "suggested_fix": "Add `-u GH_CONFIG_DIR -u XDG_CONFIG_HOME` to the Check, or run it under the kernel's allowlist: `env -i HOME=\"$HOME\" PATH=\"$PATH\" gh auth status`. Also say in the stored-login bullet that the login must sit in gh's default config dir under HOME (~/.config/gh). Then extend the prose test's VARIABLES/Check pin to match.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Snapshot docs/requirements.md:31 Check is `env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GITHUB_ENTERPRISE_TOKEN gh auth status`. It doesn't unset GH_CONFIG_DIR or XDG_CONFIG_HOME. I ran `env HOME=<empty> GH_CONFIG_DIR=<cfg with hosts.yml> env -u GH_TOKEN -u GITHUB_TOKEN gh auth token`. It printed the token and exited 0, so gh finds a login stored under GH_CONFIG_DIR while HOME is empty. That matches the claim's part (A). I did not re-run `gh auth status` here. My `env -i` control failed with exit 127 (PATH quoting), so I did not reproduce (B). That the eval kernel drops GH_CONFIG_DIR and XDG_CONFIG_HOME rests on memory iIT6Dx and the claim's own evidence; I did not measure it. The doc says only 'kept by gh under HOME', so the Check has a real gap for non-default config dirs. Whether that counts as a defect is a judgement call. CWD-AUDIT: not run; I wrote only under the scratch dir and left /Users/chris/dev/fleet-plugin untouched."
+        },
+        {
+          "refuted": false,
+          "reason": "I ran nothing myself and relied on the claim's evidence plus the diff. Nothing elsewhere in the PR handles the gap. The new §1.2 Check is `env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GITHUB_ENTERPRISE_TOKEN gh auth status`, and it unsets only those four variables. It leaves GH_CONFIG_DIR and XDG_CONFIG_HOME in place. So a login stored under either variable still passes the Check. The claim's evidence (A) and (A') shows gh reading its config from those variables. The claim's evidence (B) says the eval-kernel allowlist, from #4416 and memory iIT6Dx, drops them. I did not check that allowlist. The doc does say the login is 'kept by gh under HOME', so the claim shows the Check is weaker than the stated requirement. It does not show the prose is wrong. The finding is low severity and applies only to users with a non-default gh config location. CWD-AUDIT: not run; I made no writes in /Users/chris/dev/fleet-plugin."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "tests/requirements-gh-stored-login-prose.test.mjs",
+      "line": 36,
+      "claim": "The new test pins only the Check's text. Nothing checks that the Check behaves as the acceptance criterion requires (exit non-zero for a GH_TOKEN-only login, exit 0 with a stored login). That behaviour rests on the PR body's one-off manual measurement, and the GH_CONFIG_DIR gap above would pass this test.",
+      "evidence": "Ran `node --test tests/requirements-gh-stored-login-prose.test.mjs` in the measuring copy: 6/6 pass. The test file's own header calls itself 'PRESENCE pins'. A behavioural check would need a gh stub or a real login, so this is a judgment call. I did not execute a mutant for this point.",
+      "suggested_fix": "Optional: keep this as a prose test. If the Check changes as suggested above, update the pinned command string to match.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/requirements-gh-stored-login-prose.test.mjs",
+      "line": 43,
+      "claim": "The Check test pins the exact order of the four `-u` flags, so a harmless reordering of the unset list in docs/requirements.md would fail it, although the behaviour is unchanged.",
+      "evidence": "Swapping `-u GH_TOKEN -u GITHUB_TOKEN` to `-u GITHUB_TOKEN -u GH_TOKEN` in the Check line made the narrowed run exit 1. I did not isolate the failing test name for that mutant, so this is inferred from the test's `includes` on a joined string. Baseline: `node --test tests/requirements-gh-stored-login-prose.test.mjs` → exit 0, 6 pass. All other tests discriminated correctly; I found no surviving mutants.",
+      "suggested_fix": "Assert each `-u NAME` separately (as the bullet test does for the variable names) and that `gh auth status` follows `env`, if order-independence is wanted.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/requirements.md",
+      "line": 27,
+      "claim": "The new claim that omp starts eval kernels with a reduced environment that keeps HOME but none of gh's variables is asserted as fact. Nothing in the snapshot's docs/ or plugin/ backs it, and the PR body's 'Measured here' only exercises the gh Check command, not the kernel's environment.",
+      "evidence": "grep of the snapshot's docs/ and plugin/ for 'reduced env|keeps .?HOME|GH_TOKEN' found the claim only in requirements.md:27. Related text elsewhere (docs/research/in-flight-baseline.md:500) describes GH_TOKEN being present in a session. Not checked against omp's source.",
+      "suggested_fix": "Cite an ADR, a research note or omp documentation for the kernel environment, or mark the claim as observed behaviour with its version.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/requirements.md",
+      "line": 27,
+      "claim": "'kept by gh under HOME' is not always true. gh can store the login in the OS keychain instead of hosts.yml, so the phrase can mislead on macOS. The test comment in tests/requirements-gh-stored-login-prose.test.mjs repeats it as 'where `gh auth login` stores its login'.",
+      "evidence": "Read the diff. This is gh behaviour I know of but did not run here [INFERENCE]. The phrase appears at requirements.md:27 and in the test header comment.",
+      "suggested_fix": "Word it as 'stored by gh (config under HOME or the keychain), not an env var'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/requirements.md",
+      "line": 31,
+      "claim": "The new §1.2 Check unsets the four token variables before `gh auth status`. The pre-flight `gh-auth` row at requirements.md:197 still reads `gh auth status` (§1.2) with no `env -u`, yet it cites §1.2. The PR body says the row is 'unchanged in meaning', but the row now cites a Check it does not run, so a GH_TOKEN-only login passes pre-flight and fails §1.2.",
+      "evidence": "The snapshot grep shows the row `| gh-auth | gh auth status (§1.2) | exit 0 |` at requirements.md:197 and `{ name: \"gh-auth\", argv: [\"gh\",\"auth\",\"status\"] }` in plugin/scripts/preflight.mjs:70. The diff leaves both unchanged. Whether preflight runs with the token variables set was not checked.",
+      "suggested_fix": "Note the gap in the row or in §1.2, or make preflight's gh-auth check match the Check.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body: 'Full suite green via recipe-check.mjs on the head's tree', 'red before the doc edit', and 'Measured here: ... exits 1' are not checkable from the snapshot. The review's own suite run produced no counts and is unusable.",
+      "evidence": "The test-run log shows no counts. I did not re-run any test. The diff itself is consistent with the other claims: no plugin/ file changes, the §1.2 text and Check match the body, and the test file exists with the described pins.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

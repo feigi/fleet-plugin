@@ -1,0 +1,171 @@
+{
+  "pr": 4433,
+  "head": "8badf1de025d7235c89f1b6ea5d541d81c41c692",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": false,
+    "reason": "`.github/scripts/check-tracked.sh '*.mjs' -n1 node --check && .github/scripts/check-tracked.sh '*.json' -n1 jq empty && .github/scripts/check-tracked.sh 'plugin/agents/*.md' node plugin/scripts/frontmatter-check.mjs && .github/scripts/check-tracked.sh 'plugin/skills/*/SKILL.md' node plugin/scripts/frontmatter-check.mjs && .github/scripts/check-tracked.sh 'plugin/commands/*.md' node plugin/scripts/frontmatter-check.mjs && node plugin/scripts/tier-outcomes.mjs check --file docs/metrics/tier-outcomes.tsv --member-outcomes docs/metrics/member-outcomes.tsv && node plugin/scripts/ticket-router.mjs --check --table plugin/scripts/router-table.json --features docs/metrics/ticket-features.tsv --members docs/metrics/member-outcomes.tsv --verdicts docs/metrics/tier-outcomes.tsv && .github/scripts/check-tracked.sh '*.sh' shellcheck -x -S warning && npx --yes -p renovate@44.115.7 renovate-config-validator --strict --no-global renovate.json` produced no counts — the shared test run crashed, hit its deadline, or printed no summary (Run exited 0 but printed no test counts. The log holds only validation steps: node --check on 425 .mjs files, jq on 156 .json files, frontmatter checks on 29 agents, 3 skills and 2 commands, tier-outcomes check (651 rows; 319 checked, 0 failed), ticket-router check, shellcheck on 20 .sh files, and renovate-config-validator ('Config validated successfully against 1 file(s)'). No tests/pass/fail/skipped summary was printed, so no counts are reported.) — a failed run, not a pass"
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — untracked: docs/metrics/runs/2026-11-08T200658Z/{closeout.json,ledger.md,phase0.json,plugin-version}. These are fleet run-metrics files that I did not create or touch."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ?? docs/metrics/runs/2026-11-08T200658Z/closeout.json, ledger.md, phase0.json, plugin-version (untracked run-metrics files I did not create; I wrote nothing in this directory)."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "missing",
+      "line": null
+    },
+    {
+      "dimension": "comments",
+      "state": "missing",
+      "line": null
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ?? docs/metrics/runs/2026-11-08T200658Z/closeout.json, ?? docs/metrics/runs/2026-11-08T200658Z/ledger.md, ?? docs/metrics/runs/2026-11-08T200658Z/phase0.json, ?? docs/metrics/runs/2026-11-08T200658Z/plugin-version (none written by this agent: every write of mine went under pr4433/run-DHkyUU3f/simplify/; these look like the controller's run-ledger files)"
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — `?? docs/metrics/runs/2026-11-08T200658Z/closeout.json`, `?? docs/metrics/runs/2026-11-08T200658Z/ledger.md`, `?? docs/metrics/runs/2026-11-08T200658Z/phase0.json`, `?? docs/metrics/runs/2026-11-08T200658Z/plugin-version`. These are the controller's run-metrics files. This reviewer wrote nothing there: every command after the first `pwd` cd'd into the snapshot or the scratch dir."
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 9,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4433/run-DHkyUU3f/snapshot-8badf1de",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": ".github/scripts/install-and-smoke.sh",
+      "line": 256,
+      "claim": "The new step's setup commands (mkdir, `git init -q -b main`, the gh stub heredoc, chmod) run bare under `set -euo pipefail`, so if one fails the script aborts with no `::error::install-and-smoke:` line naming the cause, unlike every other check in the script.",
+      "evidence": "Not executed as a failure; reasoned from the snapshot's `set -euo pipefail` at install-and-smoke.sh:56 and the bare `git -C \"$LABEL_REPO\" init -q -b main` at :259. Every behavioural run of the step passed: harness.sh on the unmodified copy printed `HARNESS fail=0`, EXIT=0; set created the 7 missing labels; ensure exited 0; and the label repo's status was only `?? .gitignore` (with `!! .fleet/labels.json` under --ignored).",
+      "suggested_fix": "Optional: wrap the setup in `if ! { ...; }; then echo '::error::install-and-smoke: could not build the §2.4 scratch repository/gh stub'; fail=1; else ... fi` so a setup failure is named like the other checks.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "No logic error or scope creep found: the ruling's acceptance mutants all turn the new step red with the message the ruling asks for, and the §2.4 prose claims hold when run against label-map.mjs.",
+      "evidence": "harness.sh mutants in the copy. (1) `sed '120s/ --create//' docs/requirements.md`: set exits 1 ('pass --create to create it' for 7 roles), then `::error::install-and-smoke: §2.4's set line exited 1 (want 0): ~/.omp/.../fleet-run label-map.mjs set --accept-suggestions`; ensure exited 3; HARNESS fail=1. (2) Line 104 (the ensure line) deleted: `::error::install-and-smoke: docs/requirements.md §2.4 has no single \\`ensure\\` line ...`, fail=1. (3) Set line duplicated: `... has no single \\`set\\` line ...`, fail=1. probe2.sh: row `| onhold | paused |` with paused absent gives ensure rc=3 with `{\"role\":\"onhold\",\"suggestion\":\"paused\",\"origin\":\"table\"...}`, then set --create creates `paused` (rc=0), then ensure rc=0. With live `on-hold` and no row, ensure lists `candidates:[\"on-hold\"]`. Row `| onhold | on-hold |` maps onhold→on-hold and ensure exits 0. `node --test` on tests/package-entry-resolver, consumer-technology-prose, head-moved-after-label-prose, run-team-picker and shipped-surface-prose: tests 65, pass 65, fail 0. The scratch HOME nested at $REPO_ROOT/.install-and-smoke-home also gave fail=0.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": ".github/scripts/install-and-smoke.sh",
+      "line": 31,
+      "claim": "label_map_line ends in `|| true`, so a grep failure with rc>1 (for example a malformed regex from ENTRY_RE or the verb) is treated like no match and is later reported as \"§2.4 has no single `<verb>` line\", which names the wrong cause.",
+      "evidence": "Static read only (bash tool unavailable, not executed). The same script handles this correctly at lines ~143-148 and ~168-172 with `grep_rc=$?` and an `rc -gt 1` branch that prints 'the grep itself failed'. The new helper does not, and the README tier-line grep at line 211 has the same `|| true` shape. The failure is not hidden: it still sets fail=1 and skips the label run, so impact is a mislabelled diagnostic.",
+      "suggested_fix": "Capture rc as at lines 144-148: `rc=0; out=$(grep ... <<<\"$REQ_SECTION\") || rc=$?`, and report rc>1 as a broken grep. Only rc=1 should mean the line is missing.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": ".github/scripts/install-and-smoke.sh",
+      "line": 84,
+      "claim": "The label run depends on the earlier `omp plugin link` step having installed fleet-run under $SCRATCH_HOME. If that link failed, both §2.4 lines fail on a missing `~/.omp/...` path and the error names the line's exit code, not the link failure.",
+      "evidence": "Static read only (not executed). Line 84 runs `HOME=$SCRATCH_HOME ... bash -c \"$line\"`, and the `~` in the line expands to the scratch HOME. The failure is still loud (fail=1 and a `::error::` per verb). The only issue is the cascading, misleading attribution.",
+      "suggested_fix": "Optional: skip the label block, or note the link failure in its error, when the earlier link step already set fail=1.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": ".github/scripts/install-and-smoke.sh",
+      "line": 52,
+      "claim": "The gh stub answers every unsupported `gh` call with exit 64 and a message, so it does not turn an unexpected call into a pass. Whether label-map.mjs ever swallows a gh failure and still exits 0 is unverified.",
+      "evidence": "Static read only. label-map.mjs maps gh run errors, non-zero status, non-JSON and a bad list shape to LabelMapUnavailable, which `die()` turns into a non-zero exit (lines ~350-366, 713-731, 746-750). I found no catch that discards a gh failure. The post-`set` `ensure` line also re-reads the stub's label file, so a create that never took effect would exit 3. This is not a defect, just the limit of what was checked.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": ".github/scripts/install-and-smoke.sh",
+      "claim": "The new requirements.md §2.4 label-map check in install-and-smoke.sh has not been shown to discriminate; this review could not run any mutation against it.",
+      "evidence": "Not run. Bash tool unavailable (extension error on every call), and the job needs omp via bun. Inconclusive, so no kill or red is claimed.",
+      "suggested_fix": "In CI, mutate docs/requirements.md §2.4 (remove the ensure line, or change the fleet-run path) and confirm install-and-smoke fails with '::error::install-and-smoke: docs/requirements.md §2.4 has no single ...'.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "I found no false factual assertion in the PR's added comments, the §2.4 prose, the PR body or the commit message. The comments and prose I checked match label-map.mjs and the tree: exit 0 and exit 3 behaviour, the `uncertain` entry fields `suggestion` and `candidates`, `set --create` creating labels with no colour, the cache `.fleet/labels.json` written by both verbs, and 8 label roles including `onhold`. They also match the 9 GitHub default labels in the stub, the heading anchor `#2-your-repository`, the §2.5 and §2.6 section numbers, and the script's step 6/7 renumbering and its error strings (`has no single \\`ensure\\` line`, `§2.4's set line exited`). The ci.yml comment above install-and-smoke (lines 313-324) was already a partial summary before this diff. It does not name the tier line or the npm pack check, so this diff does not newly falsify it. I could not verify the body's '9162 pass' figure or its mutation results, because I did not run the script or the suite.",
+      "evidence": "Read-only comparison of the diff against label-map.mjs lines 10-110, 111-120 and 535-578, install-and-smoke.sh lines 1-60 and 133-244, docs/requirements.md headings, and ci.yml 310-350.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": ".github/scripts/install-and-smoke.sh",
+      "line": 243,
+      "claim": "ENSURE_LINE/SET_LINE plus the \"verb:$LINE\" pair packing and ${pair%%:*}/${pair#*:} unpacking, done in two loops (lines 243-248 and 289-291), is extra indirection: each loop can just go over the verbs and call label_map_line \"$verb\" itself, which removes two variables and four parameter-expansion lines and gives the same output.",
+      "evidence": "Mutant (python str.replace on an extracted copy of the block, in simplify/probe) changed both loops to `for verb in ensure set; do line=\"$(label_map_line \"$verb\")\"` / `for verb in set ensure; do line=\"$(label_map_line \"$verb\")\"` and dropped ENSURE_LINE/SET_LINE. Ran orig vs mutant: identical stdout/stderr/exit/stub label file on the real docs (FAIL=0, both lines printed their map) and on a fixture with §2.4's `set` line removed (both printed `::error::install-and-smoke: docs/requirements.md §2.4 has no single \\`set\\` line ...`, FAIL=1); python printed `True True` for both comparisons. `shellcheck -x -S warning` exited 0 on both the original and the mutated full script.",
+      "suggested_fix": "label_lines_ok=1\nfor verb in ensure set; do\n  line=\"$(label_map_line \"$verb\")\"\n  if [ -z \"$line\" ] || [ \"$(wc -l <<<\"$line\")\" -ne 1 ]; then ...; fi\ndone\n...\n  for verb in set ensure; do\n    line=\"$(label_map_line \"$verb\")\"\n    echo \"== §2.4's $verb line: $line ==\" ...",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": ".github/scripts/install-and-smoke.sh",
+      "line": 269,
+      "claim": "In the gh stub, the `label create -- <name>` (4-arg) branch and the case-insensitive `already exists` branch never run with this fixture: label-map only creates roles missing case-insensitively from the list the stub just served, and its fixed role suggestions (needs-triage … ready-to-merge) never start with `-`. That makes the stub's create handler 14 lines where 4 would do.",
+      "evidence": "Probe ran the PR block as written, with the stub's argv logged to a file. Every call was `6|label|list|--limit|1000|--json|name|` (3 times) or `3|label|create|<role>|` for the seven defaults GitHub lacks (needs-triage, needs-info, ready-for-agent, ready-for-human, in-progress, onhold, ready-to-merge). There were no 4-arg `--` calls, and nothing reached the already-exists branch. label-map.mjs:707 adds `--` only when string.startsWith(\"-\"), and label-map.mjs:695 builds `missing` with the same lc() comparison. A mutant with the simplified stub (and the loop change above) gave identical output and an identical final label file (python `True True`), and shellcheck exited 0. Caveat: a future §2.4 `set` line answering a role with a `-`-leading label would make the simplified stub exit 64 (a loud CI failure) where the current stub succeeds. That only differs on input the docs don't currently contain. The simplified form also accepts a bare `label create --`, which the current stub rejects; label-map never sends that.",
+      "suggested_fix": "if [ \"${1:-}\" = label ] && [ \"${2:-}\" = create ] && [ \"$#\" -eq 3 ] && [ \"$3\" != -- ]; then\n  printf '%s\\n' \"$3\" >> \"$labels\"\n  exit 0\nfi\n(any other call falls through to the existing `unsupported call` exit 64)",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}
