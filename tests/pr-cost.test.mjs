@@ -84,6 +84,7 @@ if (args.slice(0, 2).join(" ") !== "pr list") process.exit(9);
 const fx = process.env.FIXTURE_PRS;
 fs.appendFileSync(fx + ".args", JSON.stringify(args) + "\\n");
 fs.writeFileSync(fx + ".gitdir", process.env.GIT_DIR ?? "unset");
+if (process.env.FIXTURE_HANG_S) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(process.env.FIXTURE_HANG_S) * 1000);
 if (process.env.FIXTURE_FAIL_ON && args.join(" ").includes(process.env.FIXTURE_FAIL_ON)) { process.stderr.write("gh stub: refused"); process.exit(1); }
 process.stdout.write(JSON.stringify(searchPrs(JSON.parse(fs.readFileSync(fx, "utf8")), args, FIRST_DAY)));
 `);
@@ -263,6 +264,30 @@ test("--guard: a slice that fails is exit 2 with no guard file, never an empty s
   assert.equal(r.status, 2);
   assert.match(r.stderr, /pr-cost: gh pr list failed: exit 1/);
   assert.equal(r.guard, null);
+});
+
+// #4431: each slice's read is bounded. FIXTURE_HANG_S stalls the stub before
+// it answers; under a 1 s PR_COST_GH_TIMEOUT a read that lost its bound waits
+// 30 s out and reads the slice whole, which the refusal below is not.
+const prCostHang = (seconds, budget) => (dir) => ({ cwd: dir, args: ["--guard"], env: { FIXTURE_HANG_S: seconds, PR_COST_GH_TIMEOUT: budget } });
+
+test("--guard: a gh pr list that never answers is exit 2 at the bound, naming ETIMEDOUT, with no guard file", () => {
+  const w = world();
+  addCell(w, "slow-high", 1, 0, 10);
+  const r = runCli(w, null, { at: prCostHang("30", "1") });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /pr-cost: gh pr list failed: ETIMEDOUT/);
+  assert.equal(r.guard, null);
+});
+
+test("--guard: a gh pr list that answers slowly, inside the bound, is read as usual", () => {
+  const w = world();
+  addCell(w, "slow-high", 1, 0, 10);
+  const fast = runCli(w);
+  const slow = runCli(w, null, { at: prCostHang("2", "10") });
+  assert.equal(slow.status, fast.status, slow.stderr);
+  assert.equal(slow.stdout, fast.stdout);
+  assert.notEqual(slow.guard, null);
 });
 
 test("--guard: a window just under the search cap is one read, not refused (the cap refusal is for a full read only)", () => {

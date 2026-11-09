@@ -1697,7 +1697,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isCLI } from "./is-cli.mjs";
 import { parseArgs } from "node:util";
-import { makeDie, isDigits } from "./arg.mjs";
+import { makeDie, isDigits, ghBudget } from "./arg.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { ghAliasedRead } from "./gh-aliased-read.mjs";
 import { fleetFile, FleetDirUnresolvable, scratchRoot } from "./fleet-dir.mjs";
@@ -1735,13 +1735,7 @@ const MAX_BUFFER = 64 * 1024 * 1024;
 // not per tick: the probes run one after another, so a tick whose probes all
 // hang waits one bound for each of them. 20 s, shortlist.mjs's own gh bound.
 // FLEET_TICK_GH_TIMEOUT overrides it, in seconds, and can only ever
-// SHORTEN it — ledger.mjs's LEDGER_GIT_TIMEOUT rule: a value that is not a
-// positive whole number below the default leaves the default standing, in
-// silence. Exported for its own test; it touches nothing.
-export function ghBudget(defaultSeconds, override) {
-  const seconds = isDigits(String(override)) ? Number(override) : 0;
-  return (seconds > 0 && seconds < defaultSeconds ? seconds : defaultSeconds) * 1000;
-}
+// SHORTEN it — arg.mjs's ghBudget().
 const GH_TIMEOUT_MS = ghBudget(20, process.env.FLEET_TICK_GH_TIMEOUT);
 const TIMED_OUT = `timed out after ${GH_TIMEOUT_MS / 1000}s`;
 // Why a `gh` execFileSync threw. Never interpolates e.stderr or e.message:

@@ -18,7 +18,7 @@
 
 import { execFileSync } from "node:child_process";
 import { isCLI } from "./is-cli.mjs";
-import { makeDie, defineFlags } from "./arg.mjs";
+import { makeDie, defineFlags, ghBudget } from "./arg.mjs";
 
 const NAME = "diff-stats";
 
@@ -171,10 +171,15 @@ const { arg, numArg, sweep, stray } = defineFlags(die, { flags: { pr: "value", r
 const MARKER = "… (truncated)";
 const cut = (s, n = 120) => (s.length > n ? `${s.slice(0, Math.max(0, n - MARKER.length))}${MARKER}` : s);
 
+// run()'s one child is `gh pr view`, killed at GH_TIMEOUT_MS so a `gh` that
+// never answers is a failed query — the die() below, naming ETIMEDOUT — never a
+// review left waiting. 30 s: one PR view. DIFF_STATS_GH_TIMEOUT can only
+// shorten it (arg.mjs's ghBudget()).
+const GH_TIMEOUT_MS = ghBudget(30, process.env.DIFF_STATS_GH_TIMEOUT);
 function run(cmd, args) {
   console.error(`$ ${cmd} ${args.join(" ")}`);
   try {
-    return execFileSync(cmd, args, { encoding: "utf8" });
+    return execFileSync(cmd, args, { encoding: "utf8", timeout: GH_TIMEOUT_MS });
   } catch (e) {
     // Fail closed. A broken query must not read as "empty diff". The harm is not
     // a trim — computeStats([]) yields profile "empty", which review-core.mjs

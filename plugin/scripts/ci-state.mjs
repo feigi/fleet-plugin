@@ -13,7 +13,7 @@
 
 import { execFileSync } from "node:child_process";
 import { gitEnv } from "./git-env.mjs";
-import { makeDie, defineFlags, writeAll } from "./arg.mjs";
+import { makeDie, defineFlags, writeAll, ghBudget } from "./arg.mjs";
 
 const NAME = "ci-state";
 
@@ -134,9 +134,17 @@ function emitRateLimited(query) {
 // reads pass a larger one (see graphql() below). `capture` keeps the child's
 // stderr instead of forwarding it, for the one read whose failure can still
 // turn out to be an answer (see graphql()).
+//
+// Every read is killed at GH_TIMEOUT_MS, so a `gh` that never answers fails
+// on its caller's own path — run() dies ETIMEDOUT at exit 2, tryRun()'s
+// behind-count stays unknown — never a call that does not return. 120 s: the
+// longest reads here walk pages, the rulesets read's `--paginate` and the
+// workflow-tree graphql reply that carries every workflow file at two
+// commits. CI_STATE_GH_TIMEOUT can only shorten it (arg.mjs's ghBudget()).
+const GH_TIMEOUT_MS = ghBudget(120, process.env.CI_STATE_GH_TIMEOUT);
 function spawn(cmd, args, { maxBuffer, capture = false } = {}) {
   vlog(`$ ${cmd} ${args.join(" ")}`);
-  return execFileSync(cmd, args, { encoding: "utf8", env: gitEnv(), ...(maxBuffer ? { maxBuffer } : {}), ...(capture ? { stdio: "pipe" } : {}) });
+  return execFileSync(cmd, args, { encoding: "utf8", env: gitEnv(), timeout: GH_TIMEOUT_MS, ...(maxBuffer ? { maxBuffer } : {}), ...(capture ? { stdio: "pipe" } : {}) });
 }
 
 // Three disjoint shapes — Node-aborted (ENOENT/ENOBUFS), signal, exit.

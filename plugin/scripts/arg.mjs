@@ -316,6 +316,18 @@ export function isDigits(value) {
   return /^[0-9]+$/.test(value);
 }
 
+// The bound, in ms, a script kills each of its `gh` spawns at:
+// `defaultSeconds`, unless `override` — the script's own environment variable,
+// in seconds — is a positive whole number below it. It can only ever SHORTEN
+// the bound (ledger.mjs's LEDGER_GIT_TIMEOUT rule), so no environment can
+// stretch a stalled `gh` past the default; anything else leaves the default
+// standing, in silence. The override is for a test that has to see the
+// timeout fire without waiting the default out.
+export function ghBudget(defaultSeconds, override) {
+  const seconds = isDigits(String(override)) ? Number(override) : 0;
+  return (seconds > 0 && seconds < defaultSeconds ? seconds : defaultSeconds) * 1000;
+}
+
 // numArg() is built ON arg(), not beside it, so the digits test runs AFTER arg()'s own
 // value guards: `--pr` given trailing still reports "--pr needs a value" and
 // `--pr=5` still reports the `=` form. Where both would refuse, the more

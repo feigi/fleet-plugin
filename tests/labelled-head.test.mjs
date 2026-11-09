@@ -14,7 +14,9 @@
 // program it was handed through `jq` over `timeline.json`, the way `gh api -q`
 // filters, so the shipped program is the one under test. `timeline.raw`, when
 // present, is printed in place of that run, for an answer no `-q` program
-// gives. `<key>.fail` makes that call print its text on stderr and exit 1.
+// gives. `<key>.fail` makes that call print its text on stderr and exit 1, and
+// `<key>.hang` holds a number of seconds that call sleeps first, with its
+// stdio off the pipes — a GitHub that stalls.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -52,6 +54,7 @@ case "$1 $2" in
 "api repos/{owner}/{repo}/issues/42/timeline?per_page=100") key=timeline ;;
 *) echo "stub gh: unexpected $*" >&2; exit 99 ;;
 esac
+if [ -f "$d/$key.hang" ]; then sleep "$(cat "$d/$key.hang")" </dev/null >/dev/null 2>&1; fi
 if [ -f "$d/$key.fail" ]; then cat "$d/$key.fail" >&2; exit 1; fi
 if [ "$key" = timeline ]; then
   [ "$3 $4" = "--paginate -q" ] || { echo "stub gh: unexpected $*" >&2; exit 99; }
@@ -74,8 +77,8 @@ const forcePushed = (sha) => ({ event: "head_ref_force_pushed", commit_id: sha, 
 // A rig for one case: a fresh stub directory and a repository the script runs
 // in, holding the Label map (`roles` merged over the identity map; null for no
 // map). `pages` is the timeline, one array per page; `raw`, when given, is what
-// the timeline call prints instead.
-function rig({ prView, pages = [], raw = null, fails = {}, roles = {} } = {}) {
+// the timeline call prints instead. `fails` and `hangs` are keyed by call key.
+function rig({ prView, pages = [], raw = null, fails = {}, hangs = {}, roles = {} } = {}) {
   const dir = tempDir("labelled-head-");
   const bin = join(dir, "bin");
   mkdirSync(bin);
@@ -89,6 +92,7 @@ function rig({ prView, pages = [], raw = null, fails = {}, roles = {} } = {}) {
   writeFileSync(join(bin, "timeline.json"), pages.map((p) => JSON.stringify(p)).join("\n"));
   if (raw !== null) writeFileSync(join(bin, "timeline.raw"), raw);
   for (const [k, v] of Object.entries(fails)) writeFileSync(join(bin, `${k}.fail`), v);
+  for (const [k, v] of Object.entries(hangs)) writeFileSync(join(bin, `${k}.hang`), String(v));
   const log = (name) => (existsSync(join(bin, name)) ? readFileSync(join(bin, name), "utf8").trim().split("\n").filter(Boolean) : []);
   const run = (args = ["--pr", "42"], { env = {}, stdout = "pipe" } = {}) => {
     const full = args.includes("--repo") ? args : [...args, "--repo", repo];
@@ -238,6 +242,27 @@ test("exit 2: a timeline line that is not an event object is refused rather than
   assert.equal(r.status, 2, r.stderr);
   assert.equal(r.out.step, "read-timeline");
   assert.match(r.out.error, /unexpected shape/);
+});
+
+// #4431: every read is bounded. Each stalls 30 s under a 1 s
+// LABELLED_HEAD_GH_TIMEOUT; a read that lost its bound waits the stall out and
+// routes at exit 0, the timeline below reading `clean`.
+const ghBound = (seconds) => ({ env: { LABELLED_HEAD_GH_TIMEOUT: String(seconds) } });
+
+for (const [key, step] of [["pr-view", "read-pr"], ["timeline", "read-timeline"]]) {
+  test(`exit 2: a ${step} gh that never answers fails at the bound, naming ETIMEDOUT — never a route`, () => {
+    const r = rig({ pages: [[label("ready-to-merge")]], hangs: { [key]: 30 } }).run(undefined, ghBound(1));
+    assert.equal(r.status, 2, r.stderr);
+    assert.equal(r.out.route, null);
+    assert.equal(r.out.step, step);
+    assert.match(r.out.error, /ETIMEDOUT/);
+  });
+}
+
+test("a slow gh that answers inside the bound is read as usual", () => {
+  const r = rig({ pages: [[label("ready-to-merge")]], hangs: { "pr-view": 2 } }).run(undefined, ghBound(10));
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.out.route, "timeline");
 });
 
 // The receipt is the only carrier of the route: a decided route whose receipt

@@ -55,7 +55,7 @@
 import { spawnSync } from "node:child_process";
 import { statSync } from "node:fs";
 import { resolve } from "node:path";
-import { makeDie, defineFlags, writeAll } from "./arg.mjs";
+import { makeDie, defineFlags, writeAll, ghBudget } from "./arg.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { readLabelMap } from "./label-map.mjs";
 import { newestHeadRecord } from "./ready-to-merge-head.mjs";
@@ -110,8 +110,14 @@ if (repo !== null) {
 // GIT_DIR would retarget every call at another repository.
 const GH_ENV = gitEnv();
 
+// Each read is killed at GH_TIMEOUT_MS, so a `gh` that never answers fails its
+// step at exit 2, its `error` naming ETIMEDOUT, never a route decided late or
+// not at all. 60 s: `read-timeline` walks every page of the PR's timeline.
+// LABELLED_HEAD_GH_TIMEOUT can only shorten it (arg.mjs's ghBudget()).
+const GH_TIMEOUT_MS = ghBudget(60, process.env.LABELLED_HEAD_GH_TIMEOUT);
+
 function gh(step, args) {
-  const r = spawnSync("gh", args, { encoding: "utf8", env: GH_ENV, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024, ...(repo === null ? {} : { cwd: repo }) });
+  const r = spawnSync("gh", args, { encoding: "utf8", env: GH_ENV, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024, timeout: GH_TIMEOUT_MS, ...(repo === null ? {} : { cwd: repo }) });
   if (r.error) fail(step, `could not run gh: ${r.error.message}`);
   if (r.signal) fail(step, `gh was killed by ${r.signal}`);
   if (r.status !== 0) fail(step, (r.stderr ?? "").trim() || `gh exited ${r.status}`);

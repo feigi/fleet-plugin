@@ -74,6 +74,10 @@ const STUB = `#!/bin/sh
 # then reads jq- and not gojq.
 JQ_RAN="\${JQ_BIN:-jq}"
 [ -n "$ENGINE_LOG" ] && "$JQ_RAN" --version > "$ENGINE_LOG" 2>&1
+# \`$GH_HANG_S\`, set, stalls the answer that many seconds — a GitHub that
+# hangs — with stdio off the pipes, so the sleep holds none open once the
+# script kills this shell.
+[ -n "$GH_HANG_S" ] && sleep "$GH_HANG_S" </dev/null >/dev/null 2>&1
 expr=""
 search=""
 fields=""
@@ -1768,6 +1772,22 @@ test("a signal-killed gh is named by its signal, not reported as `exit null`", (
   assert.equal(status, 2);
   assert.match(stderr, /^candidates: gh issue list failed: killed by SIGTERM$/m);
   assert.doesNotMatch(stderr, /exit null/);
+});
+
+// #4431: the query is bounded. The stub stalls 30 s under a 1 s
+// CANDIDATES_GH_TIMEOUT, so a query that lost its bound waits the stall out
+// and lists the ticket — exit 0, which the refusal below is not.
+test("a gh that never answers fails the query at the bound, naming ETIMEDOUT — never a list", () => {
+  const { status, stderr, rows } = run([ticket(11, "## What to build\n\nx\n")], undefined, null, { GH_HANG_S: "30", CANDIDATES_GH_TIMEOUT: "1" });
+  assert.equal(status, 2, stderr);
+  assert.deepEqual(rows, []);
+  assert.match(stderr, /^candidates: gh issue list failed: ETIMEDOUT$/m);
+});
+
+test("a slow gh that answers inside the bound is read as usual", () => {
+  const { status, stderr, rows } = run([ticket(11, "## What to build\n\nx\n")], undefined, null, { GH_HANG_S: "2", CANDIDATES_GH_TIMEOUT: "10" });
+  assert.equal(status, 0, stderr);
+  assert.deepEqual(rows.map((r) => r.n), [11]);
 });
 
 test("a payload past the pipe buffer arrives whole — truncated JSON must never read as exit 0", () => {

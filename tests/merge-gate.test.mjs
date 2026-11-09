@@ -97,8 +97,12 @@ process.stdout.write(" ".repeat(Number(process.env.MG_PAD ?? 0)) + (process.env.
 process.exitCode = Number(process.env.MG_EXIT);
 `;
 
+// `$GH_HANG_S`, set, stalls every call that many seconds before it answers —
+// a GitHub that hangs — with its stdio off the pipes, so the sleep holds none
+// open once the gate kills this shell.
 const GH_STUB = `#!/bin/sh
 printf 'gh %s\\n' "$*" >> "$CALL_LOG"
+[ -n "$GH_HANG_S" ] && sleep "$GH_HANG_S" </dev/null >/dev/null 2>&1
 case "$1 $2" in
   "pr view") cat "$PR_VIEW_FILE"; exit "$PR_VIEW_EXIT" ;;
   *) echo "gh: unstubbed call: $*" >&2; exit 1 ;;
@@ -905,6 +909,20 @@ test("gh pr view exits non-zero → 2 pr-unreadable", (t) => {
   assertRow(r, 2, "unknown", "pr-unreadable");
   assert.equal(r.json.head, null);
   assert.equal(r.json.bodyDigest, null);
+});
+
+// #4431: the PR read is bounded. It stalls 30 s under a 1 s
+// MERGE_GATE_GH_TIMEOUT, so a read that lost its bound waits the stall out,
+// reads the mergeable baseline and passes — the row below is unanswerable.
+test("gh pr view that never answers → 2 pr-unreadable at the bound, never a pass", (t) => {
+  const r = gate(t, { env: { GH_HANG_S: "30", MERGE_GATE_GH_TIMEOUT: "1" } });
+  assertRow(r, 2, "unknown", "pr-unreadable");
+  assert.equal(r.json.head, null);
+});
+
+test("gh pr view that answers slowly, inside the bound → read as usual", (t) => {
+  const r = gate(t, { env: { GH_HANG_S: "2", MERGE_GATE_GH_TIMEOUT: "10" } });
+  assertRow(r, 0, "mergeable", null);
 });
 
 test("gh pr view misparses → 2 pr-unreadable", (t) => {

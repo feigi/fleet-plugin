@@ -4993,7 +4993,6 @@ test("CLI: a record whose controller cannot be judged keeps today's wording and 
 // case stalls one gh call for 30s under a 1s override, so a spawn that lost its
 // bound waits the stall out, reads the stub's normal reply, and fails the
 // assertions on the disclosed timeout — inside spawnBounded's own backstop.
-import { ghBudget } from "../plugin/scripts/fleet-tick.mjs";
 
 const hang = (call, seconds = "30", budget = "1") => ({ GH_HANG: call, GH_HANG_S: seconds, FLEET_TICK_GH_TIMEOUT: budget });
 
@@ -5087,14 +5086,6 @@ test("CLI: every gh spawn in fleet-tick.mjs passes the shared bound", () => {
     .filter((m) => !/\btimeout:\s*GH_TIMEOUT_MS\s*[,}]/.test(code.slice(m.index, code.indexOf(");", m.index))))
     .map((m) => `line ${lineOf(m.index)}`);
   assert.deepEqual(unbounded, []);
-});
-
-test("ghBudget: the override only ever shortens, and anything but digits leaves the default", () => {
-  const cases = [
-    [undefined, 20_000], ["", 20_000], ["5", 5_000], ["1", 1_000], ["19", 19_000],
-    ["20", 20_000], ["600", 20_000], ["0", 20_000], ["-1", 20_000], ["3.5", 20_000], ["1e1", 20_000], [" 5", 20_000], ["abc", 20_000],
-  ];
-  for (const [override, ms] of cases) assert.equal(ghBudget(20, override), ms, JSON.stringify(override));
 });
 
 // ---------------------------------------------------------------------------
