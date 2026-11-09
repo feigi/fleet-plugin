@@ -63,6 +63,11 @@ set -f
 # reorders argv, which needs its own measurement, and no briefed workflow
 # passes flags alone. (#352)
 operand=
+# Whether a leading `--` has gone by with no operand before it. Node treats
+# everything after `--` as an operand, so a flag there is dropped as silently
+# as one after a path: the flag arm below refuses it. Assigned for the reason
+# $operand is.
+dashdash=
 # Where this runner itself lives, resolved physically. Both vendored guards
 # below judge an argument by where it DIVERGES from here, and each used to
 # derive that for itself from the same `dirname "$0"` — byte-identical
@@ -104,7 +109,8 @@ for arg do
   # `-e`, then the argument's shape — the same three questions a standalone
   # classification had to ask again, in another shape, with nothing but a
   # comment keeping the two answers in agreement. Each arm that names
-  # something to run says so; the flag arm names nothing and stays silent.
+  # something to run says so; the flag arm names nothing, so it never sets
+  # $operand.
   # Existence, not spelling, is what settles a dash-led argument, and the arm
   # ORDER is what carries that: an existing dash-named path reaches `-d` or
   # `-e` before anything can read it as a flag, while a dash-led glob that
@@ -119,7 +125,7 @@ for arg do
   # The arms that refuse an argument outright — every vendored spelling, the
   # unreadable directory, the typo — used to run after the classification and
   # now run before any arm records one. Nothing observable rides on that,
-  # because each of the nine exits inside this loop is `exit 1`: an argument
+  # because every exit inside this loop is `exit 1`: an argument
   # they refuse leaves the process there, and $operand is never read again.
   if [ -d "$arg" ]; then
     operand=1
@@ -641,12 +647,28 @@ for arg do
         # reordered: a flag's value is sometimes a separate word naming an
         # existing path (`--import ./setup.mjs`), which is an operand and not
         # part of the flag, so moving the flag alone would split it from its
-        # value. Before the first operand a typo'd flag stays loud: node
-        # rejects it itself.
+        # value. The same reading is this refusal's known limit: in
+        # `--import ./setup.mjs --test-only <file>` node reads `--test-only`,
+        # but `./setup.mjs` has already set $operand, so the runner refuses a
+        # call node would have run. Its message names the way out, the
+        # `--import=./setup.mjs` spelling, which is one word and sets nothing.
+        # A leading `--` drops a flag the same way: node reads every
+        # word after it as an operand, so `-- --test-name-pattern=x <file>`
+        # ran every test at exit 0 and a typo'd flag there exited 0 too.
+        # $dashdash records one, and a dash-led argument after it is refused
+        # in this runner's voice as well. Before the first operand and before
+        # any `--`, a typo'd flag stays loud: node rejects it itself.
         -*)
           if [ -n "$operand" ]; then
-            printf "agent-test: %s comes after a test path, where node does not read it — put node's options before the first test path\n" "$arg" >&2
+            printf "agent-test: %s comes after an existing path or glob, where node does not read it — put node's options before the first test path, and spell a path-valued one with = (--import=./setup.mjs)\n" "$arg" >&2
             exit 1
+          fi
+          if [ -n "$dashdash" ]; then
+            printf "agent-test: %s comes after \`--\`, where node reads it as a path, not an option — put node's options before \`--\`\n" "$arg" >&2
+            exit 1
+          fi
+          if [ "$arg" = -- ]; then
+            dashdash=1
           fi
           ;;
         # Shell globbing is off (`set -f` above), so an argument like this

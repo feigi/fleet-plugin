@@ -1565,6 +1565,43 @@ test("runner: a flag after a test path is refused, not silently dropped by node"
   assert.equal(dashes.status, 0, dashes.stdout + dashes.stderr);
 });
 
+// The same silent drop with no path before the flag: node reads every word
+// after a leading `--` as an operand, so `-- --test-name-pattern=one <file>`
+// ran every test at exit 0 and a typo'd flag there exited 0 too. The runner
+// records the `--` and refuses a later dash-led argument in its own voice,
+// naming `--` rather than a test path. Its other half is what it must ACCEPT:
+// a path after `--` still runs; an existing dash-named file after `--` is a
+// path, not a flag, so the runner does not refuse it and node does (`node:
+// bad option`, as after a test path); and a flag before the `--` still reaches
+// node and narrows the run.
+test("runner: a flag after a leading -- is refused, not silently dropped by node", () => {
+  const TWO = 'import { test } from "node:test";\ntest("one", () => {});\ntest("two", () => {});\n';
+  const a = apply({ "t/a.test.mjs": TWO });
+  writeFileSync(join(a.wt, "-dash.test.mjs"), TWO);
+
+  for (const named of ["--test-name-pattern=one", "--test-name-patern=x", "--"]) {
+    const r = a.run("--", named, "t/a.test.mjs");
+    const out = `${named}: ${r.stdout}${r.stderr}`;
+    assert.equal(r.status, 1, out);
+    assert.match(r.stderr, /^agent-test: /, out);
+    assert.ok(r.stderr.includes(`${named} comes after \`--\``), out);
+    assert.doesNotMatch(r.stdout, /(?:ℹ|#) (?:tests|pass)/, out);
+  }
+
+  const path = a.run("--", "t/a.test.mjs");
+  assert.equal(path.status, 0, path.stdout + path.stderr);
+  assert.match(path.stdout, /(?:ℹ|#) tests 2(?!\d)/, path.stdout);
+
+  const dash = a.run("--", "-dash.test.mjs");
+  assert.notEqual(dash.status, 0, dash.stdout + dash.stderr);
+  assert.match(dash.stdout + dash.stderr, /node: bad option/, dash.stdout + dash.stderr);
+  assert.doesNotMatch(dash.stderr, /agent-test: /, dash.stdout + dash.stderr);
+
+  const before = a.run("--test-name-pattern=one", "--", "t/a.test.mjs");
+  assert.equal(before.status, 0, before.stdout + before.stderr);
+  assert.match(before.stdout, /(?:ℹ|#) tests 1(?!\d)/, before.stdout);
+});
+
 // #961. The corpus above is spelled entirely with arguments that do not
 // exist, so it pins one row of the classification and leaves the rule that
 // produces it unpinned: a dash-led argument is an operand where it EXISTS,
