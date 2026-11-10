@@ -526,6 +526,490 @@
 # this header. #1071 documents this asymmetry deliberately rather than removing
 # it — renaming either column is a larger change nobody has weighed.
 #
+# 2026-11-10 (#4454): 102 ROWS BACKFILLED FROM THEIR REVIEW EVIDENCE: PRs
+# #2259, #2262, #2263, #2278, #2384, #2394, #2395, #2411, #2422, #2424, #2425,
+# #2426, #2437, #2438, #2439, #2442, #2448, #2449, #2450, #2453, #2457, #2462,
+# #2463, #2469, #2477, #2478, #2479, #2486, #2487, #2488, #2493, #2494, #2495,
+# #2500, #2501, #2508, #2510, #2511, #2519, #2520, #2528, #2533, #2535, #2536,
+# #2538, #2539, #2555, #2556, #2558, #2563, #2567, #2575, #2576, #2577, #2579,
+# #2580, #2581, #2584, #2597, #2598, #2599, #2602, #2607, #2608, #2614, #2616,
+# #2617, #2618, #2619, #2625, #2629, #2639, #2642, #2643, #2644, #2652, #2653,
+# #2654, #2658, #2659, #2660, #2662, #2671, #2672, #2673, #2674, #2682, #2683,
+# #2688, #2689, #2690, #2694, #2699, #2700, #2701, #2705, #2706, #2707, #2710,
+# #2713, #2718, #2721. Range: the 208 merged implementer/* PRs of 2026-09-26
+# to 2026-10-14 that had no row after #4453 and whose specialist transcripts
+# are named `review-pr-<N>.review<dim>.json` with no `pr<N>` suffix (the issue
+# counted 205). Beyond #4453's lookup: the review's run is read off a
+# specialist prompt's `scratch/<runner>/pr<N>/run-*/snapshot-<head>` path,
+# else off the runner's own snapshot answer (runRoot and head); a PR with no
+# `review=member:` token takes the `review-pr-<N>[-x]` transcript that names
+# that run as its runner; a legacy `reviewed=<head>:s/r/u` token with standing
+# findings and no `dispositions-` token is answered by the PR's
+# `fix-pr-<N>[-x]` transcripts in the runner's session whose first prompt
+# names the head or the review's three counts; a head the local clone lacks is
+# fetched from refs/pull/<N>/head. Rules: #3831's, as #3832 and #4454 change
+# them, each row created rather than edited: `ticket` and `tier` as `append`
+# resolves them, `class`, `sizing`, `profile`, `loc` and `files` blank,
+# `run_date` the UTC date of the session that ran the PR's first review (the
+# PR's original run, not the backfill day). Each row's first review was
+# rebuilt from its saved specialist and verifier results; where it had a fix
+# round, the record was recovered from the fix-applier transcripts (every
+# fix-applier of the run, oldest first); a comments-only body check read the
+# PR body and commit messages as they stood when the review began; every
+# standing finding was charged by the fix-applier's Charge instructions; and
+# `deriveRuling` gave both verdicts and the note, which ends ` — backfilled by
+# #4454 from session <dir>`. The ticket text is the brief file the ledger's
+# `brief=` hash names, else the dispatch prompt followed by the issue as
+# GitHub's history gives it at the implementer's start (the dispatch is the
+# first `impl-<T>=PR#<N>` token, else the implementer branch's, else the one
+# issue the PR closes, whose text is read as of the first review's start). 106
+# PRs in the range were not ruled and got no row, grouped by reason: 1 PRs
+# (#2135): evidence lookup: no first review: reviewed=ffe34738:0/0/8 has
+# standing findings, and neither a dispositions token nor a fix-applier
+# transcript names its head or counts; 1 PRs (#2137): evidence lookup: no
+# first review: reviewed=8cfb0ac0:1/0/7 has standing findings, and neither a
+# dispositions token nor a fix-applier transcript names its head or counts; 1
+# PRs (#2138): evidence lookup: no first review: reviewed=53ed47eb:0/2/14 has
+# standing findings, and neither a dispositions token nor a fix-applier
+# transcript names its head or counts; 8 PRs (#2140, #2160, #2182, #2183,
+# #2205, #2223, #2248, #2257): extraction check: survived[0] has 0 entries,
+# not exactly one; survived[1] has 0 entries, not exactly one; 1 PRs (#2143):
+# extraction: the agent failed: No dispositions record exists to extract.
+# fix-pr-2143.jsonl (190 lines) never names `dispositions-fix-pr-2143.json`:
+# `grep -n` for it returns nothing, `grep -c 'dispositions'` returns 0, and
+# `grep -rl 'dispositions-fix-pr'` over the whole session directory, including
+# every artifact log, also finds nothing. I listed every tool call in the
+# transcript (read/bash/edit/grep/glob/wait/yield). None writes or patches a
+# dispositions file. The fix-applier did record its rulings, but only in its
+# final `yield` on line 187, in a different shape: `findings.survived` has 2
+# entries (tests/important; comments/important reaping.md:28, fixed and pushed
+# d3f7c03b), `findings.refuted` has 1 (correctness/important reap.test.mjs
+# SAFE_REGISTRY row), and `findings.unverifiedSuggestionBand` has 11. That
+# payload has no `head`/`run` fields and no per-entry `bucket`/`index`, so it
+# is not the requested record, and rebuilding one from it would mean inventing
+# fields. I also didn't return an empty `entries` list, because that would
+# wrongly say the record exists and holds no survived or refuted entries.; 6
+# PRs (#2145, #2155, #2188, #2199, #2260, #2408): extraction check:
+# survived[0] has 0 entries, not exactly one; survived[1] has 0 entries, not
+# exactly one; survived[2] has 0 entries, not exactly one; 1 PRs (#2152):
+# extraction: the agent failed: There is no dispositions record to extract.
+# fix-pr-2152 never wrote or patched dispositions-fix-pr-2152.json. Here is
+# what I checked: - In the transcript (179 lines, session 2026-09-28), a
+# search for 'dispositions-fix-pr-2152.json' finds nothing. A case-insensitive
+# search for 'disposition' also finds 0 lines. - None of the session's
+# artifact logs name the file. - Neither .fleet/scratch/fix-pr-2152 nor
+# .fleet/scratch/review-pr-2152 exists on disk. - The fix-applier's prompt
+# (line 6) never asked for a dispositions file. It asked only for a final
+# verdict report. - It reported its result once, with yield at line 176:
+# pushed SHA 97442231, previous head acdbc7ef, 3386/3386 tests passing. That
+# report is not a {head, run, entries} record. - The dispositions-file
+# convention in plugin/commands/review-and-fix.md was added later: `git log
+# -S` on that file dates the change to 2026-10-24. This run is from
+# 2026-09-28. A missing record is not the same as a record with no survived or
+# refuted entries, so I did not return an empty `entries` list. I'm returning
+# this error instead.; 3 PRs (#2159, #2172, #2324): extraction check:
+# survived[0] has 0 entries, not exactly one; 7 PRs (#2161, #2334, #2335,
+# #2337, #2338, #2339, #2461): evidence lookup: no first review on the
+# ledgers; 1 PRs (#2165): extraction check: survived[0] has 0 entries, not
+# exactly one; survived[1] has 0 entries, not exactly one; survived[2] has 0
+# entries, not exactly one; survived[3] has 0 entries, not exactly one;
+# survived[4] has 0 entries, not exactly one; survived[5] has 0 entries, not
+# exactly one; 1 PRs (#2167): evidence lookup: no first review:
+# reviewed=cecb7da6:0/0/2 has standing findings, and neither a dispositions
+# token nor a fix-applier transcript names its head or counts; 1 PRs (#2171):
+# evidence lookup: no first review: reviewed=868229b3:0/0/2 has standing
+# findings, and neither a dispositions token nor a fix-applier transcript
+# names its head or counts; 1 PRs (#2173): evidence lookup: no first review:
+# reviewed=0240e323:0/0/4 has standing findings, and neither a dispositions
+# token nor a fix-applier transcript names its head or counts; 1 PRs (#2174):
+# evidence lookup: no first review: reviewed=a3828a3d:0/0/5 has standing
+# findings, and neither a dispositions token nor a fix-applier transcript
+# names its head or counts; 4 PRs (#2175, #2213, #2253, #2416): extraction
+# check: survived[0] has 0 entries, not exactly one; survived[1] has 0
+# entries, not exactly one; survived[2] has 0 entries, not exactly one;
+# survived[3] has 0 entries, not exactly one; 1 PRs (#2178): evidence lookup:
+# no first review: reviewed=0a767d3f:0/0/7 has standing findings, and neither
+# a dispositions token nor a fix-applier transcript names its head or counts;
+# 1 PRs (#2179): evidence lookup: no first review: reviewed=7642fce4:0/0/10
+# has standing findings, and neither a dispositions token nor a fix-applier
+# transcript names its head or counts; 1 PRs (#2180): extraction: the agent
+# failed: No dispositions record exists to extract. The transcript
+# fix-pr-2180.jsonl (196 lines) never names `dispositions-fix-pr-2180.json`:
+# `grep -n 'dispositions-fix-pr-2180.json'` returns no lines, and a
+# case-insensitive grep for 'disposition' in the transcript returns 0 matches.
+# The fix-applier made 65 tool calls in total: 38 bash, 6 edit, 1 glob, 5
+# grep, 12 read, 2 wait and 1 yield. It made no `write` call. All 6 edits
+# target docs/research/external-assumptions/shell.md, docs/requirements.md or
+# docs/adr/0015-…md, three of them by repo-relative path and three by
+# worktree-absolute path. None of its bash commands mention dispositions. The
+# truncated outputs in artifacts 7974 and 6393 don't contain 'dispositions'
+# either. Its final yield is a prose summary: it fixed all 19 stale
+# claim-ticket.sh:N citations and pushed 582deeef. Outside the transcript, no
+# file anywhere in the session directory contains 'dispositions-fix-pr-2180'.
+# /Users/chris/dev/fleet-plugin/.fleet/scratch/fix-pr-2180/ doesn't exist, and
+# no dispositions-fix-pr-2180* file exists under .fleet. This run seems to
+# predate the dispositions-record protocol. I'm reporting this as an error
+# rather than an empty `entries` list, because an empty list would wrongly say
+# a record exists with no survived or refuted entries. For reference, the
+# review file (review-2180.json) has 2 survived findings, 0 refuted and 4
+# unverified.; 1 PRs (#2181): evidence lookup: no first review:
+# reviewed=4157f52e:0/0/3 has standing findings, and neither a dispositions
+# token nor a fix-applier transcript names its head or counts; 1 PRs (#2190):
+# evidence lookup: no first review: reviewed=9be4737e:1/0/4 has standing
+# findings, and neither a dispositions token nor a fix-applier transcript
+# names its head or counts; 1 PRs (#2193): extraction: the agent failed: No
+# disposition record exists to extract. The transcript fix-pr-2193.jsonl (331
+# lines) never mentions `dispositions-fix-pr-2193.json`, and the word
+# "disposition" appears nowhere in it (`grep -c dispositions` returns 0). I
+# listed every tool call: there are reads, greps, edits, bash and eval calls
+# on the worktree and on the scratch dir .fleet/scratch/fix-pr-2193/mutcopy,
+# and none writes or patches a dispositions file. The fix-applier's only
+# structured output is its final `yield` at line 328, a free-form report with
+# these keys: summary, findings_acted_on (4 survived findings, ids
+# "#1".."#4"), unverified_findings_acted_on, findings_judged_not_warranted,
+# backward_compat_reverification, full_suite_result, commit 8167b63e and
+# note_to_finisher. That report has no `head`, `run` or `entries` fields and
+# no bucket/index pairs, so it is not the record. I also found no such file on
+# disk: `find .fleet -name 'dispositions-fix-pr-2193*'` returned nothing,
+# .fleet/scratch/fix-pr-2193/ no longer exists, and the session dir holds only
+# review-pr-2193/. I did not return an empty `entries` list, because that
+# would mean "a record with no survived or refuted entries". Here the
+# fix-applier wrote no record at all, apparently because this run predates the
+# dispositions-record convention. The re-rule driver should treat this row as
+# having no record to charge.; 1 PRs (#2200): extraction: the agent failed: No
+# dispositions record exists in fix-pr-2200's transcript. `grep -n
+# 'dispositions-fix-pr-2200.json'` matches no line of fix-pr-2200.jsonl (303
+# lines), and a case-insensitive search for 'disposition' matches nothing
+# either. I listed every tool call in the transcript. Only two `write` calls
+# appear, to plugin/scripts/scratch-partition-invariant-prose.test.mjs and
+# /tmp/pr_body_new.md. No bash command or edit targets a dispositions file. No
+# other file in the session directory, including the refuter child transcripts
+# under fix-pr-2200/, names `dispositions-fix-pr-2200`. The dispatch prompt on
+# line 6 never asks for the file. The fix-applier finished by calling `yield`
+# on line 301, with result shown on line 302. That result has the keys
+# {branch, deferred, findings, pr, prBodyReconciled, pushedSha, summary,
+# testCmd, testCmdResult, testsDimensionExplanation}; it has no
+# `entries`/`head`/`run` record. The review digest says survived:3 and
+# refuted:1, so an empty `entries` list would wrongly report that the record
+# had no survived or refuted entries. I'm not inventing entries from the
+# yield's `findings`, because those aren't the record you asked for.; 1 PRs
+# (#2201): evidence lookup: no first review: reviewed=d834cb47:0/0/2 has
+# standing findings, and neither a dispositions token nor a fix-applier
+# transcript names its head or counts; 1 PRs (#2204): extraction check:
+# survived[0] has 0 entries, not exactly one; survived[1] has 0 entries, not
+# exactly one; survived[2] has 0 entries, not exactly one; survived[3] has 0
+# entries, not exactly one; survived[4] has 0 entries, not exactly one;
+# survived[5] has 0 entries, not exactly one; survived[6] has 0 entries, not
+# exactly one; 1 PRs (#2211): evidence lookup: no first review:
+# reviewed=def47727:0/1/5 has standing findings, and neither a dispositions
+# token nor a fix-applier transcript names its head or counts; 1 PRs (#2212):
+# extraction: the agent failed: No dispositions record exists to extract: the
+# fix-applier fix-pr-2212 never wrote `dispositions-fix-pr-2212.json` (or any
+# dispositions file). What I checked: (1) `grep -n
+# 'dispositions-fix-pr-2212.json'` over fix-pr-2212.jsonl (428 lines) matches
+# nothing. (2) A case-insensitive search for 'disposition' in the same
+# transcript also matches nothing, and no line contains `"bucket`. (3) I
+# listed every tool call the fix-applier made
+# (read/grep/edit/bash/task/wait/yield). None is a write, edit or bash heredoc
+# to a dispositions file. Its final yield is a summary object (pr, ticket,
+# pushedSha, commits, testCmd, testResult, …) with no entries or buckets. (4)
+# Its subagent transcripts in fix-pr-2212/ (four refuteX jsonl files) mention
+# 'disposition' only in an unrelated memory about '#1174 disposition'. This
+# run (2026-09-29) seems to predate the rule in review-and-fix.md that now
+# tells a fix-applier to write `<scratch>/dispositions-<name>.json`, since the
+# transcript never mentions it. So there's no record in this transcript, and
+# no survived or refuted entries or claims to report. I'm reporting this as an
+# error, not an empty `entries` list, so a missing record isn't mistaken for
+# one that held no survived or refuted entries.; 1 PRs (#2214): evidence
+# lookup: no first review: reviewed=c5e80072:0/0/3 has standing findings, and
+# neither a dispositions token nor a fix-applier transcript names its head or
+# counts; 1 PRs (#2224): extraction: the agent failed: No disposition record
+# exists to extract. The transcript fix-pr-2224.jsonl (202 lines) never names
+# `dispositions-fix-pr-2224.json`. `grep -n 'dispositions-fix-pr-2224.json'`
+# and a case-insensitive grep for `dispositions` both return 0 matches. The
+# only near match is line 32, which is the agent's reasoning using the word
+# "disposition". I also grepped the session's artifact *.log files and the 7
+# refuter sub-transcripts under fix-pr-2224/, and none of them contain that
+# filename. None of the transcript's tool calls is a `write` or `edit` to such
+# a file. The fix-applier ended with a `yield` on line 199, which has a
+# `findings` array and no `{head, run, entries}` record. That array has 1
+# survived item ("survived-tracker-row72"), 8 unverified/suggestion-band items
+# (F1–F8) and 0 refuted. Returning empty `entries` would wrongly say a record
+# exists with no survived or refuted entries, and building entries from the
+# yield would invent a record that was never written. So I am reporting that
+# the record was never written.; 1 PRs (#2245): extraction: the agent failed:
+# No dispositions record exists to extract: fix-pr-2245 never wrote
+# dispositions-fix-pr-2245.json. Checks run: (1) `grep -n
+# 'dispositions-fix-pr-2245.json'` on fix-pr-2245.jsonl (233 lines) found no
+# lines, and `grep -c 'disposition'` gives 0 for that transcript and for its
+# subagent files fix-pr-2245/fix-pr-2245.BewilderedStarfish.{jsonl,md}. (2)
+# The transcript's tool calls are 48 bash, 11 edit, 22 read, 1 task, 1 wait
+# and 1 yield. There are no write calls. All 11 edits target ADR 0019,
+# CONTEXT.md or AGENTS.md in the worktree, and no bash command names the file.
+# (3) A recursive grep for 'dispositions-fix-pr-2245' across the session
+# directory, including its artifact .log files, found nothing. Across all of
+# ~/.omp/agent/sessions and .fleet, the only match was a later session's
+# extractpr2245.jsonl (2026-11-09), which is not the fix-applier. Instead of a
+# record file, the fix-applier reported its ruling only in the
+# `findings_ruling` array of its final `yield`. Its review_digest counts were
+# survived 3, refuted 0, unverified 1. That array is not the `{head, run,
+# entries}` record that was asked for. Returning an empty `entries` list would
+# wrongly say a record exists with no survived or refuted entries, so I'm
+# reporting the record as missing.; 3 PRs (#2246, #2247, #2387): extraction
+# check: survived[0] has 0 entries, not exactly one; survived[1] has 0
+# entries, not exactly one; survived[2] has 0 entries, not exactly one;
+# survived[3] has 0 entries, not exactly one; survived[4] has 0 entries, not
+# exactly one; 1 PRs (#2251): extraction: the agent failed: No dispositions
+# record exists in the fix-pr-2251 transcript, so there are no entries to
+# extract. I did not return an empty `entries` list, because that would say a
+# record exists with no survived or refuted entries, which isn't the case.
+# What I checked: (1) A case-insensitive search for 'disposit' in
+# fix-pr-2251.jsonl (276 lines) finds 0 matches, so no write, edit, patch or
+# mention of dispositions-fix-pr-2251.json appears anywhere. (2) A search of
+# the whole session directory for 'dispositions-fix-pr-2251' finds nothing,
+# including every artifact .log and the six refuter sub-transcripts under
+# fix-pr-2251/. (3) No dispositions* file exists under
+# /Users/chris/dev/fleet-plugin/.fleet or the worktree
+# .worktrees/2217-impl-2217. (4) The fix-applier did read the review result
+# file for run-IDeNNZcL at head 0fe9f26b (transcript line 24: 5 survived, 0
+# refuted, 7 unverified). It ended with a yield at line 273 that reports its
+# rulings in a free-form `findings` object keyed by descriptive names like
+# `survived_critical_correctness_trailing_newline_line56`. It never wrote a
+# {head, run, entries[]} disposition file. (5) Likely reason: the instruction
+# to write `<scratch>/dispositions-<your name>.json`
+# (plugin/commands/review-and-fix.md line 20) first appears in commit c09f080a
+# on 2026-10-10. That is after this 2026-09-29 session, so the version of the
+# procedure the fix-applier followed most likely didn't ask for the file. The
+# record this assignment asks for doesn't exist in the transcript.; 1 PRs
+# (#2270): extraction: the agent failed: No dispositions record exists to
+# extract. Transcript fix-pr-2270.jsonl (449 lines) never names
+# `dispositions-fix-pr-2270.json`: `grep -n` finds no line, and the word
+# "dispositions" never appears in the file. None of its 16 `edit` calls or 76
+# `bash` commands write that file or any other JSON record; the edits go only
+# to worktree-audit.sh and worktree-audit.test.mjs. The six refuter
+# sub-transcripts in fix-pr-2270/ have 0 matches, and no session file or
+# artifact log names it. The scratch directories
+# .fleet/scratch/review-pr-2270/ and .fleet/scratch/pr2270/ are no longer on
+# disk. The fix-applier recorded its outcome only in its final yield (4
+# survived + 14 unverified; 5 applied, 3 refuted, 6 positive confirmations, 2
+# deferred) and in issue #2274, not as a {head, run, entries} disposition
+# file. I'm not returning an empty `entries` list, because that would say a
+# record exists with no survived or refuted entries, and that isn't true
+# here.; 1 PRs (#2271): extraction: the agent failed: I couldn't extract the
+# record because the fix-applier never wrote `dispositions-fix-pr-2271.json`.
+# There is nothing to return, and I didn't want to send back an empty
+# `entries` list, since that would mean the record exists and has no survived
+# or refuted entries. What I checked: - **Transcript (402 lines):** `grep -n
+# 'dispositions-fix-pr-2271.json'` finds nothing. So does `grep
+# 'dispositions'`. A case-insensitive `grep 'disposit'` matches only line 178,
+# which is the fix-applier's own reasoning about whether to defer a finding.
+# It contains no write. - **Every tool call:** I listed every tool call in the
+# transcript (lines 8–399). They are reads, bash commands, edits to the repo
+# worktree `.worktrees/2219-impl-2219` (`reap.sh`, `reap.test.mjs`,
+# `reaping.md`, ADR 0018, `shell.md`), `gh issue create`/`close`, a commit, a
+# push, a PR comment, and the final `yield` at line 399. None writes, patches
+# or edits a dispositions file, under that name or any other. - **The final
+# `yield` (line 399):** it returns `{pr, ticket, pushedSha 0ccf833b…, branch,
+# testCmd, testResult, reviewDigest {survived:4, refuted:1, unverified:12,
+# crashed:0, head:e88f13ba8f990ec1935d8c7bf1c50ff4856c62dd}, verdict}`. That
+# is a summary, not a record of per-finding entries with `bucket` and `index`.
+# - **Artifacts and other files:** the transcript's artifacts (9745, 9757,
+# 9871, 9924, 9941, 9944, 9945, 9956) don't contain the name. Searching the
+# whole session directory, including the `fix-pr-2271/` subagent transcripts
+# and the parent session `.jsonl`, finds no `dispositions-fix-pr-2271`. `find`
+# turned up no such file under `/Users/chris/dev/fleet-plugin/.fleet` or
+# `/tmp`. Building entries from the yield or from the fix-applier's reasoning
+# would be making them up, so I stopped here.; 1 PRs (#2280): evidence lookup:
+# no first review: reviewed=65ea71c4:0/0/2 has standing findings, and neither
+# a dispositions token nor a fix-applier transcript names its head or counts;
+# 1 PRs (#2281): evidence lookup: no first review: reviewed=a156f199:0/0/2 has
+# standing findings, and neither a dispositions token nor a fix-applier
+# transcript names its head or counts; 1 PRs (#2287): evidence lookup: no
+# first review: reviewed=b8e6f12c:2/0/12 has standing findings, and neither a
+# dispositions token nor a fix-applier transcript names its head or counts; 1
+# PRs (#2289): evidence lookup: no first review: reviewed=5fcbc74c:4/0/13 has
+# standing findings, and neither a dispositions token nor a fix-applier
+# transcript names its head or counts; 1 PRs (#2290): evidence lookup: no
+# first review: reviewed=fd13f1aa:0/0/9 has standing findings, and neither a
+# dispositions token nor a fix-applier transcript names its head or counts; 1
+# PRs (#2294): evidence lookup: no first review: reviewed=314c36b7:7/0/10 has
+# standing findings, and neither a dispositions token nor a fix-applier
+# transcript names its head or counts; 1 PRs (#2298): evidence lookup: no
+# first review: reviewed=ca39b18c:7/0/14 has standing findings, and neither a
+# dispositions token nor a fix-applier transcript names its head or counts; 1
+# PRs (#2302): evidence lookup: no first review: reviewed=c11c8443:1/1/10 has
+# standing findings, and neither a dispositions token nor a fix-applier
+# transcript names its head or counts; 1 PRs (#2309): evidence lookup: no
+# first review: reviewed=7a0c20ad:2/1/14 has standing findings, and neither a
+# dispositions token nor a fix-applier transcript names its head or counts; 1
+# PRs (#2310): evidence lookup: no first review: reviewed=1442d82f:0/0/1 has
+# standing findings, and neither a dispositions token nor a fix-applier
+# transcript names its head or counts; 1 PRs (#2311): evidence lookup: no
+# first review: reviewed=47566937:0/1/3 has standing findings, and neither a
+# dispositions token nor a fix-applier transcript names its head or counts; 1
+# PRs (#2312): evidence lookup: no first review: reviewed=8a1d6896:1/1/5 has
+# standing findings, and neither a dispositions token nor a fix-applier
+# transcript names its head or counts; 1 PRs (#2319): evidence lookup: no
+# first review: reviewed=ecda9c1b:0/0/1 has standing findings, and neither a
+# dispositions token nor a fix-applier transcript names its head or counts; 1
+# PRs (#2325): extraction: the agent failed: No dispositions record exists in
+# fix-pr-2325's transcript, so there was nothing to extract. I checked the
+# transcript
+# (/Users/chris/.omp/agent/sessions/-dev-fleet-plugin/2026-10-01T06-33-30-358Z_01a0f62b-07f6-7197-ac1b-18aca670beee/fix-pr-2325.jsonl,
+# 283 lines) in these ways: (1) `grep -n 'dispositions-fix-pr-2325.json'`
+# finds no line at all. (2) The only line that mentions 'disposition' at all
+# is line 258, which is memory-cache text about issue #1174, not this file.
+# (3) The fix-applier's tool calls were 56 bash, 11 edit, 6 grep, 16 read, 4
+# wait and 1 yield, with no `write` call. Every edit targets source or doc
+# files in .worktrees/review-pr-2325 (fleet-tick.mjs, ledger-grammar.mjs,
+# ledger.mjs, ledger-dispatch.test.mjs, SKILL.md, shortlist.test.mjs). No bash
+# command redirects into a .json file. The only scratch files under
+# tmp.qd51GmZMhg/fix-pr-2325/ are body.orig.md, body.new.md, issue1-3.md,
+# full.log, full2.log and probe2.mjs. (4) The assignment prompt (first user
+# message) never asks for a dispositions record. (5) The final yield (line
+# 280) reports pr, branch, reviewed_head fd77c169…, pushed_head 776c4f6a… and
+# commits, with no dispositions or entries field. The fix-applier read the
+# review file's survived/unverified/refuted buckets (bash calls at lines 12-13
+# of its tool calls), but it never recorded dispositions against them. I'm
+# reporting this as an error rather than returning an empty `entries` list,
+# because an empty list would wrongly claim that a record exists with no
+# survived or refuted entries.; 1 PRs (#2355): evidence lookup: no specialist
+# prompt of review-pr-2355 names a run snapshotted at e8dd4a8; 1 PRs (#2356):
+# evidence lookup: no specialist prompt of review-pr-2356 names a run
+# snapshotted at 4fbac31; 1 PRs (#2357): evidence lookup: no specialist prompt
+# of review-pr-2357 names a run snapshotted at f8a3931; 1 PRs (#2358):
+# evidence lookup: no specialist prompt of review-pr-2358 names a run
+# snapshotted at 2453081; 1 PRs (#2365): evidence lookup: no specialist prompt
+# of review-pr-2365 names a run snapshotted at f1d827c; 1 PRs (#2366):
+# evidence lookup: no specialist prompt of review-pr-2366 names a run
+# snapshotted at d8199f4; 1 PRs (#2369): evidence lookup: no specialist prompt
+# of review-pr-2369 names a run snapshotted at 50c404a; 1 PRs (#2376):
+# evidence lookup: no specialist prompt of review-pr-2376 names a run
+# snapshotted at 95f7192; 1 PRs (#2379): evidence lookup: no first review:
+# reviewed=d04905b239ed5ce6c9966f9e6b1187fc725ff5e2:1/0/8 has standing
+# findings, and neither a dispositions token nor a fix-applier transcript
+# names its head or counts; 1 PRs (#2380): evidence lookup: no first review:
+# reviewed=ab86468750455a7fcbbf02e23210582b02525f38:1/0/10 has standing
+# findings, and neither a dispositions token nor a fix-applier transcript
+# names its head or counts; 1 PRs (#2389): evidence lookup: no first review:
+# reviewed=2247a3edd4f75cb17530839021b18903df6978bc:1/2/11 has standing
+# findings, and neither a dispositions token nor a fix-applier transcript
+# names its head or counts; 1 PRs (#2401): evidence lookup: no first review:
+# reviewed=66fca3d1bb42499de6bf5f8c4d07c89b349c1190:2/2/14 has standing
+# findings, and neither a dispositions token nor a fix-applier transcript
+# names its head or counts; 1 PRs (#2402): evidence lookup: no first review:
+# reviewed=53e898c7209519c2eeade410ff0309f4eb53e96c:2/0/4 has standing
+# findings, and neither a dispositions token nor a fix-applier transcript
+# names its head or counts; 1 PRs (#2412): evidence lookup: no first review:
+# reviewed=406298dddea14b9103aeb5c83d2ef1c4edebe242:10/2/17 has standing
+# findings, and neither a dispositions token nor a fix-applier transcript
+# names its head or counts; 1 PRs (#2420): evidence lookup: no first review:
+# reviewed=6f5695ce9fb27d0f30701cb911b636418ad89e48:5/1/20 has standing
+# findings, and neither a dispositions token nor a fix-applier transcript
+# names its head or counts; 1 PRs (#2427): evidence lookup: no specialist
+# prompt of review-pr-2427 names a run snapshotted at fcc5e92; 1 PRs (#2428):
+# deriveRuling:
+# /Users/chris/.fleet/rerule-4454/scratch/pr2428/dispositions-fix-pr-2428.json
+# carries no Charge on this standing finding: survived[0] "The shared run's
+# single failure, `fault()'s writeSync loop spends real time retrying a
+# saturated stderr, not the ~30ms a bare call would take`
+# (board-cli.test.mjs:640, asserting at :680), is a timing flake under
+# full-suite load and not caused by this PR: the PR touches only
+# fleet-tick.mjs and fleet-tick.test.mjs, and the test passes 3/3 when run
+# alone on the same tree."; 1 PRs (#2443): deriveRuling:
+# /Users/chris/.fleet/rerule-4454/scratch/pr2443/dispositions-fix-pr-2443.json
+# carries no Charge on these standing findings: survived[0] "The vacuity guard
+# counts over the whole cumulative tier-outcomes.tsv. Once any earlier
+# post-switch row has checked successfully, a later run whose filled rows all
+# lost their member join (the ticket's blank-ticket case, e.g. impl-327-2)
+# again exits 0 with no warning. After the first post-switch run is committed
+# the guard almost never fires, in either `check --live` or CI."; survived[1]
+# "No test pins the `skipped.severalMemberRows === 0` clause, and that
+# exemption lets one several-member-row ticket hide any number of lost-join
+# rows: 3 no-member-row rows plus 1 several-member-row row give 0 checked and
+# exit 0."; survived[2] "The new vacuity guard still lets `check` exit 0 with
+# `0 checked` when the member-file join is gone for filled post-switch rows,
+# as long as at least one row has several member rows. The guard requires
+# `skipped.severalMemberRows === 0`."; survived[3] "The
+# `skipped.severalMemberRows === 0` clause of the new guard is not covered by
+# any test: deleting it, or replacing it with `>= 0`, leaves the whole file
+# green."; 1 PRs (#2468): deriveRuling:
+# /Users/chris/.fleet/rerule-4454/scratch/pr2468/dispositions-fix-pr-2468.json
+# carries no Charge on this standing finding: survived[0] "No test pins
+# failedBefore's prefix-matching of heads. Replacing sameHead(d.head, head)
+# with strict equality in failedBefore leaves the dispositions-check tests
+# green. The tests use only the identical 7-char head 'abc1234' or an
+# unrelated head. A short-versus-full-SHA mismatch, which production heads can
+# show, would silently skip escalation."; 1 PRs (#2470): deriveRuling:
+# /Users/chris/.fleet/rerule-4454/scratch/pr2470/dispositions-fix-pr-2470.json
+# carries no Charge on these standing findings: survived[0] "The
+# remedy-outside-diff rule filters blank `remedyFiles` names with trim() but
+# compares them untrimmed and unnormalized against the diff's file set. A path
+# naming an in-diff file as ' src/b.js' or 'src/../src/b.js' therefore counts
+# as 'absent from the diff'. For a suggestion-severity finding the deferral
+# passes `ok` with no violation and no escalation, so the rule 'remedy must
+# lie outside the PR's diff' is skipped without any signal. The same variants
+# at critical or important severity escalate to a human rather than pass. The
+# comment in the diff says 'The reason can be gamed', so the intent may be to
+# only catch honest mistakes, but the blank filter shows the check is meant to
+# trim."; survived[1] "The review-and-fix.md step 2 rule is not pinned by any
+# test: the fix-applier must give `remedyFiles` that name at least one file
+# absent from the PR's diff, and `none named, or every one in that diff` is a
+# mismatch. Deleting the whole sentence leaves every test green."; 1 PRs
+# (#2499): deriveRuling:
+# /Users/chris/.fleet/rerule-4454/scratch/pr2499/dispositions-fix-pr-2499.json
+# carries no Charge on this standing finding: survived[0] "PR body: asserts
+# `node --test plugin/scripts/*.test.mjs` 'passed with zero failures', but the
+# full suite at this head fails 7 tests. The failures are environmental, not
+# caused by this docs-only diff: git 2.54.0 Apple Git-157 apparently doesn't
+# leave a detached HEAD or write rebase-merge state in the way the fixtures
+# expect [INFERENCE]. They are in reap.test.mjs: 'a [gone] branch held by a
+# worktree stopped mid-`rebase -i` is kept (#2219)', 'a [gone] branch whose
+# holder check cannot read a worktree's rebase state is kept as unknown
+# (#2219)', 'an rc-0 listing inconsistent with the registry keeps the whole
+# pass: gitdir chmod 000 (#2078)'. They are in release-ticket.test.mjs: 'a
+# sibling worktree stopped mid-`rebase -i` on the claim branch halts the
+# delete (#2218)', 'a sibling stopped mid-rebase whose admin HEAD is corrupted
+# still halts the delete, resolved as held (#2218)', 'a prunable sibling that
+# genuinely holds the claim via a stopped rebase still halts the delete
+# (#2218)', 'a sibling's rebase-merge admin subdirectory unsearchable halts
+# the delete as unknown, too (#2218)'. Reproduced on a fresh copy of the PR
+# head with `./agent-test plugin/scripts/reap.test.mjs
+# plugin/scripts/claim-ticket.test.mjs`, which also reported a failure of
+# '…gitdir missing (#2078)', a variant not in the shared run's list. The
+# reruns hit the same reap.test.mjs fixture assertion ('the worktree must be
+# detached') and the release-ticket.test.mjs tests. The sentence is false for
+# a run on this host and is best reworded to name the environment. red:
+# ./agent-test plugin/scripts/reap.test.mjs
+# plugin/scripts/claim-ticket.test.mjs → exit nonzero, fail 4 of 200 incl the
+# three reap tests above (#2219 x2, #2078 chmod 000); ./agent-test
+# plugin/scripts/release-ticket.test.mjs → fail 4 of 162 incl all four #2218
+# tests; no baseline run was made."; 1 PRs (#2506): rebuild check: rebuilt
+# counts 1/0/9 differ from the ledger's 2/0/7; 1 PRs (#2507): evidence lookup:
+# no session directory's review-pr-2507.jsonl names run-6f52Q4Ln; 1 PRs
+# (#2509): evidence lookup: 2 session directories hold impl-2371.jsonl, not
+# one; 1 PRs (#2529): evidence lookup: 2 session directories hold
+# impl-2522.jsonl, not one; 1 PRs (#2554): evidence lookup: 2 session
+# directories hold impl-2131.jsonl, not one; 1 PRs (#2557): deriveRuling:
+# /Users/chris/.fleet/rerule-4454/scratch/pr2557/dispositions-fix-pr-2557.json
+# carries no Charge on this standing finding: survived[0] "Row 27 still cites
+# `tier-roles.mjs:266-268` for the `omp config reset`/`omp config set` remedy,
+# but at HEAD those lines are the model-catalog `thinking` check; the remedy
+# is at lines 283-294. The diff re-pointed the other tier-roles cites (rows 5,
+# 26, 53, 54) and left this one."; 1 PRs (#2564): evidence lookup: 2 session
+# directories hold impl-2541.jsonl, not one; 1 PRs (#2601): deriveRuling:
+# /Users/chris/.fleet/rerule-4454/scratch/pr2601/dispositions-fix-pr-2601.json
+# carries no Charge on this standing finding: survived[0] "The new Coverage
+# line says ADR 0014 'and every later-numbered ADR' were not scanned, but
+# table rows in the same file cite ADRs 0014, 0020 and 0021 by line range or
+# §Decision, so the line contradicts the table."; 1 PRs (#2604): evidence
+# lookup: 2 session directories hold impl-2133.jsonl, not one; 1 PRs (#2631):
+# evidence lookup: 2 session directories hold impl-2543.jsonl, not one; 1 PRs
+# (#2656): evidence lookup: 2 session directories hold impl-2640.jsonl, not
+# one; 1 PRs (#2712): evidence lookup: 2 session directories hold
+# impl-2703.jsonl, not one; 1 PRs (#2731): evidence lookup: 2 session
+# directories hold impl-2232.jsonl, not one.
+#
 # run_date	pr	ticket	class	tier	closed_own_ticket	minted_false_claim	note	sizing	profile	loc	files
 2026-08-13	450	179	routine	sonnet	yes	yes	comment miscounted its own fixtures (1 built/3 named claimed as 2/2); per-record awk scoping unpinned
 2026-08-13	451	204	routine	sonnet	yes	yes	added comment claimed #65 "never touched \s" — CRLF handling IS the trailing \s*, measured via b4739c8
@@ -1300,3 +1784,105 @@
 2026-10-10	3054	3006		slow-high	yes	no	review run-nAlAJ4LT at 5ae239e, record dispositions-fix-pr-3054.json: no finding stands — backfilled by #4176 from session 2026-10-08T07-00-31-609Z_01a11a50-48f9-7325-8a11-4e2f21e251b3				
 2026-10-10	3056	2881		slow-high	no	yes	review run-DBzjll7m at f2e0385, record dispositions-fix-pr-3056.json: survived[0] false-claim "A refuter pair with one abstaining vote and one crashed vote is never re-dispatched, because the retry predicate `!(votes && votes.some(Boolean))` counts the abstention as a live vote. The finding still lands in `resumeFor`'s crashed bucket and `counts.crashed`. Its `resume` text, review-and-fix step 2 ("a crash that reaches you crashed twice") and SKILL.md:2124 all say the pair was re-dispatched once and died again, which is false for this pair. Before the PR this state could not happen, because an unverified finding never had a live vote."; survived[1] unmet "The fix-applier's in-scope suggestion refuter prompt still reads "Default to refuted=true if uncertain. Verify by RUNNING something — … apply the mutation", in both review-and-fix.md:11 and the SKILL.md copy at about line 2432. It has no Kill/Valid red rule and no abstain path. A flaky red on a "test T does not catch mutant M" suggestion therefore still refutes it (row 4, closed record) and the weak test ships. That is the failure the ticket names, and the acceptance criterion says "No shipped instruction scores a kill on exit status alone". The same gap exists at review-and-fix.md:101 ("Mutation-verify… Apply the mutation, confirm *that* test fails, revert"), which has no green-on-unmutated-tree requirement." — backfilled by #4176 from session 2026-10-08T07-00-31-609Z_01a11a50-48f9-7325-8a11-4e2f21e251b3				
 2026-10-10	3060	2889		slow-high	no	yes	review run-yf5qKgBH at dbe7615, record dispositions-fix-pr-3060.json: survived[0] unmet "When the new launch is written on a row that comes before the row holding the open launch (both rows map to one PR, a layout the PR's own tests use), the one-open-launch refusal swaps the two launches. It names the existing launch as the offender and the new, unwritten one as the open launch, so both suggested ways out ('wait for its reviewed=', 'settle it =failed') point at the wrong launch."; survived[1] false-claim "A reviewer name a different launch kind already used is accepted. `review=member:review-pr-40` after `review=fallback:review-pr-40` (or after `review=wf:review-pr-40`) passes, which contradicts SKILL.md's past-pin row, where `row` 'refuses a second `review-pr-<M>` and names the free one'. It also lets a single-use hub member name be reused."; none: survived[2] defect-outside-acceptance, survived[3] not-the-implementers-text, survived[4] not-the-implementers-text — backfilled by #4176 from session 2026-10-08T07-00-31-609Z_01a11a50-48f9-7325-8a11-4e2f21e251b3				
+2026-09-29	2259	2250		default	yes	no	review run-m8lPHehr at f4d9d4f, record dispositions-fix-pr-2259.json: no finding stands — backfilled by #4454 from session 2026-09-29T08-30-00-554Z_01a0ec48-f96a-73eb-8573-9b912d63a728				
+2026-09-29	2262	2254		default	yes	no	review run-lcJakj3W at d5e1854, record dispositions-fix-pr-2262.json: no finding stands — backfilled by #4454 from session 2026-09-29T08-30-00-554Z_01a0ec48-f96a-73eb-8573-9b912d63a728				
+2026-09-29	2263	2249		default	yes	no	review run-cqvKSHV1 at 9898629, record dispositions-fix-pr-2263.json: no finding stands — backfilled by #4454 from session 2026-09-29T08-30-00-554Z_01a0ec48-f96a-73eb-8573-9b912d63a728				
+2026-09-30	2278	2272		default	yes	no	review run-RBUIDgjE at 1997717, record dispositions-fix-pr-2278.json: no finding stands — backfilled by #4454 from session 2026-09-29T08-30-00-554Z_01a0ec48-f96a-73eb-8573-9b912d63a728				
+2026-10-02	2384	2330		default	yes	no	review run-o3MRGluO at bae004b, record dispositions-fix-pr-2384.json: no finding stands — backfilled by #4454 from session 2026-10-01T06-33-30-358Z_01a0f62b-07f6-7197-ac1b-18aca670beee				
+2026-10-02	2394	2347		default	yes	no	review run-bwV5gExF at 5c85f2b, record dispositions-fix-pr-2394.json: no finding stands — backfilled by #4454 from session 2026-10-01T06-33-30-358Z_01a0f62b-07f6-7197-ac1b-18aca670beee				
+2026-10-02	2395	2349		default	yes	no	review run-vCMs1XZO at 03851db, record dispositions-fix-pr-2395.json: no finding stands — backfilled by #4454 from session 2026-10-01T06-33-30-358Z_01a0f62b-07f6-7197-ac1b-18aca670beee				
+2026-10-02	2411	2360		default	yes	no	review run-jmS6yyfG at 17a87e1, record dispositions-fix-pr-2411.json: no finding stands — backfilled by #4454 from session 2026-10-01T06-33-30-358Z_01a0f62b-07f6-7197-ac1b-18aca670beee				
+2026-10-02	2422	2385		default	yes	no	review run-bS3w268g at 8a6a18e, record dispositions-fix-pr-2422.json: none: survived[0] not-the-implementers-text — backfilled by #4454 from session 2026-10-01T06-33-30-358Z_01a0f62b-07f6-7197-ac1b-18aca670beee				
+2026-10-02	2424	2396		default	yes	no	review run-K7pjwH10 at 25b8ade, record dispositions-fix-pr-2424.json: no finding stands — backfilled by #4454 from session 2026-10-01T06-33-30-358Z_01a0f62b-07f6-7197-ac1b-18aca670beee				
+2026-10-02	2425	2370		default	yes	no	review run-LwRMF5ib at 10c91e2, record dispositions-fix-pr-2425-b.json: no finding stands — backfilled by #4454 from session 2026-10-01T06-33-30-358Z_01a0f62b-07f6-7197-ac1b-18aca670beee				
+2026-10-02	2426	2400		task-high	yes	no	review run-CY5F64Jt at 873e780, record dispositions-fix-pr-2426.json: no finding stands — backfilled by #4454 from session 2026-10-01T06-33-30-358Z_01a0f62b-07f6-7197-ac1b-18aca670beee				
+2026-10-03	2437	2363		task-high	yes	no	review run-uUO6qS7R at 4ea37a9, record dispositions-fix-pr-2437.json: no finding stands — backfilled by #4454 from session 2026-10-01T06-33-30-358Z_01a0f62b-07f6-7197-ac1b-18aca670beee				
+2026-10-02	2438	2397		task-high	no	yes	review run-xBJgd5gK at 3f95c72, record dispositions-fix-pr-2438.json: survived[1] both "Rows 27 and 39 cite ci.yml lines 350-351, 382-383 and 433-437 (and 351, 377, 383, 437), but ci.yml has only 328 lines. The `bun install -g @oh-my-pi/pi-coding-agent@18.4.4` lines are at ci.yml:289 and 325. The diff refreshes citations in other rows but leaves these out of range."; none: survived[0] not-the-implementers-text, survived[2] defect-outside-acceptance, refuted[0] not-the-implementers-text, refuted[1] not-the-implementers-text — backfilled by #4454 from session 2026-10-01T06-33-30-358Z_01a0f62b-07f6-7197-ac1b-18aca670beee				
+2026-10-03	2439	2296		task-high	yes	no	review run-TLTaDaV2 at 01ee604, record dispositions-fix-pr-2439.json: none: survived[0] not-the-implementers-text, survived[1] not-the-implementers-text — backfilled by #4454 from session 2026-10-01T06-33-30-358Z_01a0f62b-07f6-7197-ac1b-18aca670beee				
+2026-10-03	2442	2388		task-high	yes	no	review run-KhBt1Nhu at c55d531, record dispositions-fix-pr-2442.json: no finding stands — backfilled by #4454 from session 2026-10-01T06-33-30-358Z_01a0f62b-07f6-7197-ac1b-18aca670beee				
+2026-10-03	2448	2413		task-high	yes	no	review run-wktDgDof at 87d40c1, record dispositions-fix-pr-2448.json: no finding stands — backfilled by #4454 from session 2026-10-01T06-33-30-358Z_01a0f62b-07f6-7197-ac1b-18aca670beee				
+2026-10-03	2449	2432		task-high	yes	no	review run-ADkDhjcT at a736160, record dispositions-fix-pr-2449.json: no finding stands — backfilled by #4454 from session 2026-10-01T06-33-30-358Z_01a0f62b-07f6-7197-ac1b-18aca670beee				
+2026-10-03	2450	2414		task-high	yes	no	review run-1yRUvqr7 at 65f96f4, record dispositions-fix-pr-2450.json: cleared: survived[0] false-rationale — backfilled by #4454 from session 2026-10-01T06-33-30-358Z_01a0f62b-07f6-7197-ac1b-18aca670beee				
+2026-10-03	2453	2348		task-high	yes	yes	review run-bNK1EqAG at 3175d47, record dispositions-fix-pr-2453.json: survived[1] false-claim "The new controller-facing lead-in says 'Duty 2 runs `<testCmd>` for the baseline and for the mutation'. Duty 2 as written runs `<testCmd>` only for the acceptance mutation, and the ticket explicitly puts adding a baseline run out of scope. So the lead-in misstates duty 2 and invites a controller to brief an unmutated baseline run the ticket left undecided."; none: survived[0] not-the-implementers-text, survived[2] defect-outside-acceptance; cleared: survived[3] false-rationale — backfilled by #4454 from session 2026-10-01T06-33-30-358Z_01a0f62b-07f6-7197-ac1b-18aca670beee				
+2026-10-03	2457	2431		task-high	yes	no	review run-J6STqmCO at 4fc1a68, record dispositions-fix-pr-2457.json: no finding stands — backfilled by #4454 from session 2026-10-01T06-33-30-358Z_01a0f62b-07f6-7197-ac1b-18aca670beee				
+2026-10-03	2462	2417		task-high	yes	no	review run-9XAnk7le at 285207a, record dispositions-fix-pr-2462.json: none: survived[0] defect-outside-acceptance — backfilled by #4454 from session 2026-10-01T06-33-30-358Z_01a0f62b-07f6-7197-ac1b-18aca670beee				
+2026-10-03	2463	2410		task-high	yes	no	review run-ZEtlMhrw at 52e33be, record dispositions-fix-pr-2463.json: no finding stands — backfilled by #4454 from session 2026-10-01T06-33-30-358Z_01a0f62b-07f6-7197-ac1b-18aca670beee				
+2026-10-03	2469	2346		task-high	yes	yes	review run-CcHSz8d9 at db78662, record dispositions-fix-pr-2469.json: survived[2] false-claim "ledgerInUse() uses a bare existsSync() as its only 'is there a ledger' test, so an unreadable ledger directory, a dangling-symlink ledger and a ledger parent that is a file all count as 'no ledger'. The check then exits 0 with verdict ok and token null, writes nothing, and prints nothing to stderr."; none: survived[0] defect-outside-acceptance, survived[1] defect-outside-acceptance, survived[3] defect-outside-acceptance, survived[4] not-the-implementers-text — backfilled by #4454 from session 2026-10-01T06-33-30-358Z_01a0f62b-07f6-7197-ac1b-18aca670beee				
+2026-10-03	2477	2459		task-high	no	yes	review run-g8UfKUiF at c069501, record dispositions-fix-pr-2477.json: survived[0] both "pluginFiles() reads only files ending .mjs/.js/.sh/.md/.yml/.json, so a bare review-pr-*.test.mjs citation in plugin/scripts/board.html or in the extensionless node scripts fleet-run, fleet-provenance or fleet-bootstrap passes the guard. The ticket's remedy says to walk plugin/, and board.html already cites a test file in its comments (line 139: 'which spend-view.test.mjs does')." — backfilled by #4454 from session 2026-10-01T06-33-30-358Z_01a0f62b-07f6-7197-ac1b-18aca670beee				
+2026-10-03	2478	2440		task-high	yes	no	review run-XpIV8aO0 at d28f588, record dispositions-fix-pr-2478.json: no finding stands — backfilled by #4454 from session 2026-10-01T06-33-30-358Z_01a0f62b-07f6-7197-ac1b-18aca670beee				
+2026-10-03	2479	2378		task-high	yes	yes	review run-yJCsY5GG at 93369fb, record dispositions-fix-pr-2479.json: survived[0] false-claim "PR body: 'Verification: `node --test plugin/scripts/*.test.mjs` → all pass at 93369fb3' is false for the shared run; 8 tests fail (4 in release-ticket.test.mjs, 2 in reap.test.mjs reap tests, plus 2 that are load-flaky). The PR is docs-only, so these are unrelated to the diff (rebase-in-progress holder checks, likely environment/git-version dependent) but the all-pass assertion is not reproducible." — backfilled by #4454 from session 2026-10-01T06-33-30-358Z_01a0f62b-07f6-7197-ac1b-18aca670beee				
+2026-10-03	2486	2465		task-high	yes	no	review run-d8s53pxb at dd807af, record dispositions-fix-pr-2486.json: no finding stands — backfilled by #4454 from session 2026-10-01T06-33-30-358Z_01a0f62b-07f6-7197-ac1b-18aca670beee				
+2026-10-03	2487	2464		task-high	yes	no	review run-wL1lzoE6 at 1b0e651, record dispositions-fix-pr-2487.json: no finding stands — backfilled by #4454 from session 2026-10-01T06-33-30-358Z_01a0f62b-07f6-7197-ac1b-18aca670beee				
+2026-10-03	2488	2451		task-high	yes	yes	review run-6xaV0qMw at cc5e641, record dispositions-fix-pr-2488.json: survived[0] false-claim "After the repoint, line 3 says the file covers refactors of `plugin/scripts/review-core.mjs`, but its third measured rejection (lines 25-28: 'Deleting the `testCmd` tombstone comment … the tombstone is an absence marker sitting where a default used to be') describes a comment that does not exist anywhere in review-core.mjs. The PR therefore turns a stale path into a false present-tense claim about a live file." — backfilled by #4454 from session 2026-10-01T06-33-30-358Z_01a0f62b-07f6-7197-ac1b-18aca670beee				
+2026-10-03	2493	2455		task-high	yes	no	review run-I1azaKem at 381f9c3, record dispositions-fix-pr-2493.json: no finding stands — backfilled by #4454 from session 2026-10-01T06-33-30-358Z_01a0f62b-07f6-7197-ac1b-18aca670beee				
+2026-10-03	2494	2447		task-high	yes	no	review run-K7JZpj4N at d6f1b7a, record dispositions-fix-pr-2494.json: no finding stands — backfilled by #4454 from session 2026-10-01T06-33-30-358Z_01a0f62b-07f6-7197-ac1b-18aca670beee				
+2026-10-03	2495	2393		task-high	yes	no	review run-A5kwwtT2 at 54f22d4, record dispositions-fix-pr-2495.json: no finding stands — backfilled by #4454 from session 2026-10-01T06-33-30-358Z_01a0f62b-07f6-7197-ac1b-18aca670beee				
+2026-10-03	2500	2485		task-high	yes	yes	review run-0HHPNW0e at 8be9c76, record dispositions-fix-pr-2500.json: survived[0] false-claim "closedTickets() swallows an unparseable or stateless `gh issue view` reply with an empty `catch { /* unanswered: the hold stands */ }`. If gh exits 0 but prints non-JSON, or JSON with no `state`, the ticket is silently treated as not-closed and the hold stands with nothing on stderr or stdout. This contradicts the function's own comment, 'A probe that cannot answer is disclosed and the hold stands', and the disclosure comment in liftedPremise, which says a bare empty catch would be 'the one silent exception'. Only the nonzero-exit and spawn-error paths are disclosed. This is new code in the diff; the same empty catch already exists in liftedPremise at line 1002, and this PR copied it."; none: survived[1] defect-outside-acceptance — backfilled by #4454 from session 2026-10-01T06-33-30-358Z_01a0f62b-07f6-7197-ac1b-18aca670beee				
+2026-10-03	2501	2359		task-high	yes	no	review run-jhbpgwkR at 258823d, record dispositions-fix-pr-2501.json: no finding stands — backfilled by #4454 from session 2026-10-01T06-33-30-358Z_01a0f62b-07f6-7197-ac1b-18aca670beee				
+2026-10-03	2508	2238		task-high	yes	yes	review run-GC28UUaA at 8640408, record dispositions-fix-pr-2508.json: survived[0] false-claim "PR body: it says every pointer was deleted and the scan 'from the ticket' over claim-ticket.sh and release-ticket.sh gives zero hits. But release-ticket.sh still carries two ticket/ADR pointers the diff does not touch: 'Pre-#760 `-d` refused this' and 'the pre-ADR-0015 bootstrap'. Either the scan pattern misses these or the sweep is incomplete." — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-03	2510	2444		slow-high	yes	no	review run-Bcf2ZaMV at 42e6293, record dispositions-fix-pr-2510.json: none: survived[0] defect-outside-acceptance, survived[1] not-the-implementers-text — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-03	2511	2466		slow-high	yes	no	review run-mL26Ni5X at 34b286c, record dispositions-fix-pr-2511.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-03	2519	2467		slow-high	yes	no	review run-s4rBy8PZ at b87c82e, record dispositions-fix-pr-2519.json: none: survived[0] not-the-implementers-text — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-03	2520	2472		slow-high	yes	no	review run-owa4cOk8 at 3011885, record dispositions-fix-pr-2520.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-03	2528	2512		slow-high	yes	no	review run-147iuZXg at b8c6024, record dispositions-fix-pr-2528.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-03	2533	2531		slow-high	yes	no	review run-yhaRmAGb at 21cf45d, record dispositions-fix-pr-2533.json: cleared: survived[0] false-rationale — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-03	2535	2367		task-high	yes	no	review run-7Xlf2wrG at 898a711, record dispositions-fix-pr-2535.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-03	2536	2374		slow-high	yes	no	review run-J8dhEtuy at c11375a, record dispositions-fix-pr-2536.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-03	2538	2407		slow-high	yes	no	review run-qPa3aKL4 at ac00bbb, record dispositions-fix-pr-2538.json: cleared: survived[0] false-rationale — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-03	2539	2118		slow-high	yes	yes	review run-3YIpQV8C at ce158d4, record dispositions-fix-pr-2539.json: survived[0] false-claim "When an Install step leaves read-only build output in the throwaway worktree (which the repo ignores), a proof that HOLDS crashes instead of reporting PROVEN. `git worktree remove --force` fails, and the fallback `rmSync(wt, {recursive, force})` in the `finally` throws ENOTEMPTY. That uncaught non-Refusal error escapes main and node exits 1 with a stack trace: the NOT PROVEN exit code, but with no `NOT PROVEN` reason. No cache is written, `git worktree prune` is skipped, and the wt directory leaks."; survived[1] false-claim "The `finally` cleanup (`rmSync(wt, {recursive:true, force:true})`) can throw, and when it does it replaces the proof outcome. If the Install step left read-only directories in the worktree (e.g. Go modcache), a proof that held, or a Refusal for a failed proof, dies as an uncaught ENOTEMPTY stack trace with exit 1. Exit 1 is the script's documented NOT PROVEN code, and no cache is written."; survived[2] false-claim "Any non-Refusal error (filesystem errors in writeCache, and the cleanup error above) is rethrown, so Node prints a stack trace and exits 1. That is the code documented as 'NOT PROVEN, no cache written' and not 2 ('proof could not be attempted'). The deriver's report step would mislabel an I/O fault as a failed proof, or have no `NOT PROVEN` reason line to quote."; survived[7] false-claim "The `sh -c` and reader child processes are not covered by the ambient GIT_DIR test, even though the COVERED_MJS comment claims they are."; none: survived[3] defect-outside-acceptance, survived[4] defect-outside-acceptance, survived[5] defect-outside-acceptance, survived[6] defect-outside-acceptance, survived[8] defect-outside-acceptance, survived[9] not-the-implementers-text — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-03	2555	2132		slow-high	yes	no	review run-UZjMxXRn at a534915, record dispositions-fix-pr-2555.json: none: survived[0] defect-outside-acceptance, survived[1] defect-outside-acceptance, survived[2] defect-outside-acceptance, survived[3] defect-outside-acceptance, survived[4] defect-outside-acceptance, survived[5] defect-outside-acceptance, survived[6] defect-outside-acceptance, survived[7] defect-outside-acceptance, survived[8] not-the-implementers-text, survived[9] not-the-implementers-text — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-03	2556	2480		slow-high	yes	no	review run-PYyvgQEa at 589e41b, record dispositions-fix-pr-2556.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-03	2558	2552		slow-high	yes	no	review run-pYyR8vS8 at a4f0573, record dispositions-fix-pr-2558.json: none: survived[0] defect-outside-acceptance, survived[1] defect-outside-acceptance — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-03	2563	2523		slow-high	yes	no	review run-gYvsdoPO at beeafc9, record dispositions-fix-pr-2563.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-03	2567	2525		slow-high	yes	no	review run-AUDD8iig at 9bfa2a1, record dispositions-fix-pr-2567.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-03	2575	2482		slow-high	yes	no	review run-tOQKSYEn at 4faeaf5, record dispositions-fix-pr-2575.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-03	2576	2560		slow-high	yes	no	review run-YUZyp3mh at c7f5126, record dispositions-fix-pr-2576.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-03	2577	2546		task-high	yes	yes	review run-60VWuuRF at 873163a, record dispositions-fix-pr-2577.json: survived[0] false-claim "The new provenance is wrong: the quoted comment was not carried by review-pr.js 'before the re-nest under plugin/' and not 'above its FINDINGS_SCHEMA'. It sat inside the FINDINGS_SCHEMA object literal, directly above `required:`. It survived the re-nest at plugin/workflows/review-pr.js:41 and was deleted along with that file by the omp-only cutover ed9f2967. The ticket asked to 'Confirm the destination says the same thing before citing it', so a PR that only fixes a citation now ships a second inaccurate one."; none: survived[1] defect-outside-acceptance — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-03	2579	2514		slow-high	yes	no	review run-O7Kh16fu at b2aeb73, record dispositions-fix-pr-2579.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-03	2580	2545		slow-high	yes	no	review run-XPkaLdvg at e16ae14, record dispositions-fix-pr-2580.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-03	2581	2570		slow-high	yes	no	review run-f1sJZ5B1 at 6e3a946, record dispositions-fix-pr-2581.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-03	2584	2578		slow-high	yes	no	review run-2GGnu0Lm at 4b9bb4b, record dispositions-fix-pr-2584.json: none: survived[0] defect-outside-acceptance — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-03	2597	2516		task-high	yes	no	review run-dDSguH77 at a949179, record dispositions-fix-pr-2597.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-03	2598	2594		slow-high	yes	no	review run-Jqnd4irw at 8dabc9b, record dispositions-fix-pr-2598.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-03	2599	2142		slow-high	yes	no	review run-Hd6kQ22E at 54a15ba, record dispositions-fix-pr-2599.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-03	2602	2517		slow-high	yes	no	review run-H9jajsFG at 6009a8d, record dispositions-fix-pr-2602.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2607	2542		slow-high	yes	no	review run-nfV6w95g at f92ea18, record dispositions-fix-pr-2607.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2608	2561		slow-high	yes	no	review run-OzH2WJmR at 7590ee2, record dispositions-fix-pr-2608.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2614	2498		task-high	yes	no	review run-RfH7q1sg at ef23a16, record dispositions-fix-pr-2614.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2616	2568		slow-high	yes	no	review run-12wSTJv9 at b7576d1, record dispositions-fix-pr-2616.json: cleared: survived[0] false-rationale — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2617	2609		task-high	yes	no	review run-i4CfzPpA at 8f1186e, record dispositions-fix-pr-2617.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2618	2550		slow-high	yes	no	review run-PNCpOGNM at 30f84bb, record dispositions-fix-pr-2618.json: none: survived[0] defect-outside-acceptance, survived[1] defect-outside-acceptance, survived[2] defect-outside-acceptance — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2619	2615		slow-high	yes	no	review run-30ODe1Cn at 19c11c1, record dispositions-fix-pr-2619.json: none: survived[0] defect-outside-acceptance — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2625	2559		slow-high	yes	no	review run-XYUCKZee at ff2ee26, record dispositions-fix-pr-2625.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2629	2613		slow-high	no	yes	review run-ny3k3Zcg at 7669add, record dispositions-fix-pr-2629.json: survived[0] both "Row 45 was not re-anchored (it is a context line in the diff, not a -/+ line). repo-root.mjs is one of the grown files the ticket names, and the row's quote now ends outside the cited range `repo-root.mjs:464-473`: 'first 255 and cuts the rest' is at line 474, the range opens on the unrelated SHEBANG_BYTES comment (463-465), and the 4096 cutoff the row describes (`const SHEBANG_MAX_BYTES = 4096;`) is at line 483. This is exactly the defect class #2613 covers. The coverage lead-in on line 117 ('all citations above are grounded in ranges actually read') is therefore still untrue after this PR." — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2639	2635		task-high	yes	yes	review run-I90Zbl9Y at 28dab1c, record dispositions-fix-pr-2639.json: survived[0] false-claim "The script-order test cannot detect the real delete moving before the worktree check, or the check being commented out, because it indexes strings that also appear in an echo line and a comment."; survived[1] false-claim "The prose regex is too permissive: a clause with inverted meaning, or one with no 'fresh/re-read' qualifier, still passes." — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2642	2503		slow-high	yes	no	review run-94ZQ45ya at 9c1f824, record dispositions-fix-pr-2642.json: cleared: survived[0] false-rationale — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2643	2134		slow-high	yes	no	review run-VGA2Mv3R at c5da37e, record dispositions-fix-pr-2643.json: none: survived[0] defect-outside-acceptance, survived[1] defect-outside-acceptance, survived[2] defect-outside-acceptance, survived[3] defect-outside-acceptance, survived[4] not-the-implementers-text, survived[5] not-the-implementers-text — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2644	2551		slow-high	yes	no	review run-okWzi37X at 30e2628, record dispositions-fix-pr-2644.json: cleared: survived[0] false-rationale — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2652	2591		slow-high	yes	no	review run-0ZzY3sVq at 61a84dd, record dispositions-fix-pr-2652.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2653	2633		slow-high	yes	no	review run-qLdawJ4V at 84b55e0, record dispositions-fix-pr-2653.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2654	2421		task-high	yes	no	review run-ddKwBzBI at 7e7e16d, record dispositions-fix-pr-2654.json: none: survived[0] defect-outside-acceptance, survived[1] not-the-implementers-text, survived[2] not-the-implementers-text — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2658	2649		slow-high	yes	yes	review run-Mlw3NsNg at 90d6917, record dispositions-fix-pr-2658.json: survived[0] false-claim "The parser accepts a half-blank verdict row (one column blank, the other yes/no). That row is malformed: `append` never writes it, and a no-ruling backfill blanks both columns. pr-cost.mjs and ticket-router.mjs still read it as a floor pass, so a hand-edit that blanks a failing `closed_own_ticket=no` or `minted_false_claim=yes` gets through the parser, the CI `check` gate, and the cost/router readers. This is the silent-pass class #2649 reports, and its evidence lists 'empty' among the malformed values."; none: survived[1] defect-outside-acceptance — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2659	2592		task-high	yes	no	review run-0lfmc1dO at 1f39a84, record dispositions-fix-pr-2659.json: cleared: survived[0] false-rationale — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2660	2657		slow-high	yes	no	review run-HUawX951 at 21c7c4c, record dispositions-fix-pr-2660.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2662	2571		slow-high	yes	no	review run-ST87G2OH at 2d8ba1a, record dispositions-fix-pr-2662.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2671	2667		slow-high	yes	no	review run-6aSQWS9p at 233d262, record dispositions-fix-pr-2671.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2672	2665		slow-high	yes	no	review run-j9fhvTxk at 02c4797, record dispositions-fix-pr-2672.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2673	2593		task-high	yes	no	review run-mBGT5bBy at bd5f3f4, record dispositions-fix-pr-2673.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2674	2669		slow-high	yes	no	review run-6BzHhbLI at 6846a3b, record dispositions-fix-pr-2674.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2682	2663		slow-high	yes	no	review run-zUVV7nyt at 8b1aaaa, record dispositions-fix-pr-2682.json: cleared: survived[0] false-rationale — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2683	2632		slow-high	yes	no	review run-LR5IdD6x at 63dd2a7, record dispositions-fix-pr-2683.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2688	2586		task-high	yes	yes	review run-CaANNfrt at 0cd13bc, record dispositions-fix-pr-2688.json: survived[0] false-claim "A `node` that passes the `node -e 0` probe but then dies on the real read (killed, 127, OOM) is still reported as exit 1 "the Recipe cache ... is unusable:  — " with an empty reason, so the environment fault the PR separates as exit 3 is still presented as a verdict on the cache. recipe-prove then takes the NOT PROVEN branch and discards a good cache instead of reporting no verdict."; none: survived[1] defect-outside-acceptance — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2689	2612		slow-high	yes	no	review run-T5BZq98J at 541ff81, record dispositions-fix-pr-2689.json: none: survived[0] not-the-implementers-text — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2690	2684		slow-high	yes	no	review run-RMcve45n at 6fbe346, record dispositions-fix-pr-2690.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2694	2120		slow-high	yes	no	review run-lJFf7NuK at 4546948, record dispositions-fix-pr-2694.json: none: survived[0] defect-outside-acceptance — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2699	2679		slow-high	yes	no	review run-0mPWETcF at a588ed6, no record: counted no survived and no unverified finding — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2700	2691		slow-high	yes	no	review run-As9LcBIK at 2705cf7, record dispositions-fix-pr-2700.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2701	2677		task-high	yes	no	review run-JoW38PtJ at a1450fe, record dispositions-fix-pr-2701.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2705	2626		task-high	yes	no	review run-Y27qRk9v at 8e8fa8a, record dispositions-fix-pr-2705.json: none: survived[0] not-the-implementers-text — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2706	2637		slow-high	no	yes	review run-GKtk7Zrt at 028ef27, record dispositions-fix-pr-2706.json: refuted[0] both "The prose-pin.mjs bullet is pinned to `845 lines at a7cb31d0`, but its description is e3dcf2cd's narrowed wording, which is false at a7cb31d0. It drops `DIALECT_TOKENS` from the 'read directly' list and says the remaining exports carry 'no external-world assumptions', yet at a7cb31d0 prose-pin.mjs exported DIALECT_TOKENS, which the scan read and recorded as an external assumption (row 34, now retired). The count and the coverage claim now disagree without saying so, which is the defect #2637 was filed to remove." — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2707	2587		slow-high	yes	no	review run-0IddH7IW at e73e285, record dispositions-fix-pr-2707.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2710	2647		slow-high	yes	no	review run-3eMeotyO at 2eef19c, record dispositions-fix-pr-2710.json: none: survived[0] not-the-implementers-text, survived[1] defect-outside-acceptance, survived[2] not-the-implementers-text, refuted[0] defect-outside-acceptance — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2713	2685		slow-high	yes	no	review run-nJVQ9l4V at 305d709, record dispositions-fix-pr-2713.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2718	2676		slow-high	yes	no	review run-kcU0G0a2 at 195e659, record dispositions-fix-pr-2718.json: no finding stands — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
+2026-10-04	2721	2702		task-high	no	no	review run-xvfSha6k at deee0a3, record dispositions-fix-pr-2721.json: survived[0] unmet "On macOS /bin/sh (bash 3.2.57, which runs this #!/bin/sh script on the fleet's darwin hosts), the new `read` loop cuts node's reason off at the first NUL byte, even when cat is present. A zero-filled (crash-corrupted) or NUL-containing recipe.json now reads 'it does not parse: Unexpected token '' and loses the rest; the old `$(cat …)` printed the whole message. This is a regression of the exact reason-fidelity the ticket set out to protect."; none: survived[1] defect-outside-acceptance — backfilled by #4454 from session 2026-10-03T16-26-55-629Z_01a10297-0b0d-772c-b8fe-85d65a35e8d1				
