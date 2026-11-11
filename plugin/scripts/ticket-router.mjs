@@ -40,34 +40,21 @@
 //     within OMP_READ_TIMEOUT_MS, warns and leaves the Pull no Cell to draw;
 //     a read that leaves a role no level to run at, or finds no implementer
 //     definition, warns too.
-//   --check --table <json> --features <tsv> --members <tsv> --verdicts <tsv>
-//     Re-fits from the commit the table records as `fitted_commit` (an empty
-//     corpus while it is null), against the guard snapshot the table itself
-//     records, and exits 1 when the result is not the table: the table is a
-//     code carrier, never hand-edited. A `fitted_commit` this repository does
-//     not hold exits 2 naming the `git fetch` that brings it.
-//
 // The script never touches the network: the issue, the sizing verdict and
-// the guard are files the caller wrote, a fitted commit is fetched by the
-// caller, and the install reads ask the local `omp`.
+// the guard are files the caller wrote, and the install reads ask the local `omp`.
 
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, appendFileSync, mkdirSync, statSync, realpathSync } from "node:fs";
-import { spawnSync } from "node:child_process";
 import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isDeepStrictEqual } from "node:util";
 import { isCLI } from "./is-cli.mjs";
-import { gitEnv } from "./git-env.mjs";
 import { makeDie, defineFlags, isDigits } from "./arg.mjs";
 import { CELL, OBJECTIVES, POLICY_CELL, STARTING_CELLS, drawCell, formatRouting, isRulePath, parseMember } from "./ledger-grammar.mjs";
 import { objectiveFromReceipt, sessionFromReceipt } from "./phase0-receipt.mjs";
-import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
 import {
-  AttributionError, FEATURE_COLUMNS, OPTIONAL_COLUMNS, TRIP_POINTS, attribute, compareCells, generations, parseFeatures, tally,
+  AttributionError, FEATURE_COLUMNS, OPTIONAL_COLUMNS, TRIP_POINTS, attribute, compareCells, generations, tally,
 } from "./pull-attribution.mjs";
 import { searchSplits, standing } from "./split-gate.mjs";
-import { RulingError, parseTierOutcomes } from "./tier-outcomes.mjs";
 import { LINE_REF, briefPaths, briefText } from "./ticket-text.mjs";
 import { catalogEntry, implementerCell, readOmpConfigValue, readOmpModelCatalog, resolveRole } from "./tier-roles.mjs";
 
@@ -671,9 +658,8 @@ const round4 = (x) => Math.round(x * 1e4) / 1e4;
  * routed, each to its own row's cell — restricted to rows the free classifier
  * routed plus exploration rows: a row a live B classifier routed is the A/B's
  * test set, not the fit's. The fit sees no PR state, so a Pull with
- * a Ruling is merged. A fit reads everything in the commit it is given: no row
- * is cut by date, because `--check` re-reads that same commit rather than
- * re-cutting the working tree's files. `order` ranks each cell's generations
+ * a Ruling is merged. A fit reads everything it is given: no row
+ * is cut by date, whatever the working tree's files hold. `order` ranks each cell's generations
  * over every Pull in the window, the restriction aside, so the fit names the
  * same newest generation the guard does. No unit is in a group yet: `book`
  * puts each where a tree walks its features row.
@@ -814,7 +800,7 @@ function judge(objective, pulls = {}, cells, tripped, baseCell) {
   const mergedOf = (c) => pullsOf(c).filter((u) => u.merged).length;
   // A default cell or base short of MIN_N merged PRs has none to give any candidate, whichever stretches they share.
   if (mergedOf(POLICY_CELL) < MIN_N || mergedOf(baseCell) < MIN_N) return record;
-  // JSON writes −0 as 0, so a recorded end is 0 either way; `--check` compares the two.
+  // JSON writes −0 as 0, so a recorded end is 0 either way: normalise it here.
   const range = (m) => m.range(metric)?.map((x) => x + 0) ?? null;
   const reliablyBelow = (r) => r !== null && r[1] < 0;
   // A matched figure as the table prints one, four places; none is unknown, past every figure that is known.
@@ -888,8 +874,7 @@ function judgeSpeedRow(pulls, cells, tripped, costCell) {
 /**
  * The re-fit table, over the tree `prior.splits` holds: this makes no split
  * and takes none away (fitTree grows the tree). `guard` is `{ tripped, n, window_start }` (readGuard's
- * shape); `commit` is the sha of the commit the inputs were read from, or null
- * for the empty corpus before any fit. `rows` and `reasons` hold one set per
+ * shape). `rows` and `reasons` hold one set per
  * objective, and each a row or record for every node. `reasons.cost` holds
  * `judgeRow()`'s record, its `cell` the cell the node's `cost` row holds: a
  * node whose record has no cell holds its parent's `cost` row, as a ticket
@@ -902,13 +887,13 @@ function judgeSpeedRow(pulls, cells, tripped, costCell) {
  * (`guard.n`, which starts again at 0 when a role's model changes): no other
  * Cell the table holds ends it or holds it, whatever its merged PRs.
  */
-export function fitTable({ prior, features, members, verdicts, guard, commit = null }) {
+export function fitTable({ prior, features, members, verdicts, guard }) {
   const window = guard.window_start ?? prior.window_start ?? null;
-  return tableOver({ prior, ...fitPulls({ features, members, verdicts, window }), guard, commit, window });
+  return tableOver({ prior, ...fitPulls({ features, members, verdicts, window }), guard, window });
 }
 
 // The table over the tree `prior.splits` holds, from the fit's Pulls (fitPulls') booked to its groups.
-function tableOver({ prior, units: unbooked, order, guard, commit, window }) {
+function tableOver({ prior, units: unbooked, order, guard, window }) {
   const nodes = treeNodes(prior.splits);
   const units = book(unbooked, prior);
   const { estimates, pulls } = estimate(units, order, nodes);
@@ -931,7 +916,7 @@ function tableOver({ prior, units: unbooked, order, guard, commit, window }) {
   }
   return {
     window_start: window,
-    fitted_commit: commit,
+    fitted_commit: null,
     n_rows: units.length,
     cells: prior.cells,
     burn_in: shortStartingCells(guard.n).length > 0,
@@ -1045,45 +1030,11 @@ function growTree({ prior, units, order, tripped, previous }) {
  * first Fit it fails; that Fit's `gate` is the whole of what the next one reads of this.
  * @returns {{ table: object, gate: { records: string, scored: number, left_out: number, best: object|null, passed: string[], stands: string[] } }}
  */
-export function fitTree({ prior, features, members, verdicts, guard, commit = null, previous = null }) {
+export function fitTree({ prior, features, members, verdicts, guard, previous = null }) {
   const window = guard.window_start ?? prior.window_start ?? null;
   const fitted = fitPulls({ features, members, verdicts, window });
   const { gate, splits } = growTree({ prior, ...fitted, tripped: new Set(guard.tripped), previous });
-  return { table: tableOver({ prior: { ...prior, splits }, ...fitted, guard, commit, window }), gate };
-}
-
-// ---------------------------------------------------------------------------
-// the commit a fit reads
-// ---------------------------------------------------------------------------
-
-const SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
-
-// `git` run in the directory holding `path`, so `path` names a file of the
-// repository around it whichever directory the caller is in.
-function gitBeside(path, args) {
-  const r = spawnSync("git", ["-C", dirname(resolve(path)), ...args], { encoding: "utf8", env: gitEnv(), maxBuffer: 1 << 30 });
-  if (r.error) throw r.error;
-  return r;
-}
-
-/**
- * The full sha `rev` names as a commit in the repository holding `path`, or null when it names none there.
- * Throws when git itself fails (not a repository, unreadable config, no git): that is not an answer about `rev`.
- */
-export function resolveCommit(path, rev) {
-  if (rev.startsWith("-")) return null;
-  const r = gitBeside(path, ["rev-parse", "--verify", "--quiet", `${rev}^{commit}`]);
-  if (r.status === 0) return r.stdout.trim();
-  // `--verify --quiet` exits 1, silently, for a rev that names no commit; any other status is git failing.
-  if (r.status === 1) return null;
-  throw new Error(r.stderr.trim() || `git rev-parse exited ${r.status}`);
-}
-
-/** `path` as committed at `sha`; throws when the commit does not hold it. */
-export function showAt(sha, path) {
-  const r = gitBeside(path, ["show", `${sha}:./${basename(path)}`]);
-  if (r.status !== 0) throw new Error(r.stderr.trim() || `git show exited ${r.status}`);
-  return r.stdout;
+  return { table: tableOver({ prior: { ...prior, splits }, ...fitted, guard, window }), gate };
 }
 
 // ---------------------------------------------------------------------------
@@ -1096,29 +1047,17 @@ function main() {
     flags: {
       session: "value", objective: "value", ticket: "value", arm: "value", "impl-row": "value", issue: "value",
       sizing: "value", guard: "value", table: "value", pending: "value", "chain-head": "bool", "model-roles": "value", catalog: "value", agents: "value",
-      features: "value", members: "value", verdicts: "value", check: "bool",
     },
     positionals: ["route"],
   });
   F.sweep();
   F.stray();
-  const argv = process.argv.slice(2);
-  const mode = F.has("check") ? "check" : argv.find((a) => a === "route");
-  if (!mode || (F.has("check") && argv.includes("route"))) {
-    die("usage: ticket-router.mjs route … | --check … — exactly one mode");
-  }
-  const allowed = {
-    route: ["session", "objective", "ticket", "arm", "impl-row", "issue", "sizing", "guard", "table", "pending", "chain-head", "model-roles", "catalog", "agents"],
-    check: ["check", "table", "features", "members", "verdicts"],
-  }[mode];
-  const given = argv.filter((a) => a.startsWith("--")).map((a) => a.slice(2).split("=")[0]);
-  const foreign = given.find((g) => !allowed.includes(g));
-  if (foreign) die(`--${foreign} does not apply to ${mode === "check" ? "--check" : mode}`);
-  const need = (name) => F.arg(name) ?? die(`${mode === "check" ? "--check" : mode} needs --${name}`);
+  if (!process.argv.slice(2).includes("route")) die("usage: ticket-router.mjs route …");
+  const need = (name) => F.arg(name) ?? die(`route needs --${name}`);
 
-  // `route` with no `--table` routes by the Fit beside `--guard`, else by the starting table.
-  const fit = mode === "route" && F.arg("table") === null && F.arg("guard") !== null ? readFitBeside(F.arg("guard")) : null;
-  const tablePath = mode === "route" ? (F.arg("table") ?? DEFAULT_TABLE) : need("table");
+  // With no `--table`, routes by the Fit beside `--guard`, else by the starting table.
+  const fit = F.arg("table") === null && F.arg("guard") !== null ? readFitBeside(F.arg("guard")) : null;
+  const tablePath = F.arg("table") ?? DEFAULT_TABLE;
   let table = fit?.table ?? null;
   if (table === null) {
     try { table = JSON.parse(readFileSync(tablePath, "utf8")); } catch (e) { die(`cannot read the router table ${tablePath}: ${e.message}`); }
@@ -1126,153 +1065,101 @@ function main() {
     if (valid instanceof Error) die(`${tablePath}: ${valid.message}`);
   }
 
-  if (mode === "route") {
-    const ticket = need("ticket");
-    if (!/^[1-9][0-9]*$/.test(ticket)) die(`--ticket ${ticket} is not an issue number`);
-    const arm = need("arm");
-    if (arm !== "A" && arm !== "B") die(`--arm ${arm} is not A or B`);
-    const implRowArg = need("impl-row");
-    if (!/^[1-9][0-9]*$/.test(implRowArg)) die(`--impl-row ${implRowArg} is not a positive row count`);
-    const issuePath = need("issue");
-    const guardPath = need("guard");
-    // `--session` omitted is the session directory the phase-0 receipt
-    // records; a receipt that records none is a usage error naming it.
-    let sessionArg = F.arg("session");
-    if (sessionArg === null) {
-      try { sessionArg = sessionFromReceipt(); } catch (e) { die(e.message); }
-    }
-    const session = basename(sessionArg.replace(/\/+$/, ""));
-    // `--objective` omitted is the one the receipt records, likewise.
-    let objective = F.arg("objective");
-    if (objective === null) {
-      try { objective = objectiveFromReceipt(); } catch (e) { die(e.message); }
-    } else if (!OBJECTIVES.includes(objective)) {
-      die(`--objective ${objective} is not ${OBJECTIVES.join(" or ")}`);
-    }
-    // A working directory removed under the run, or an install `package.json`
-    // with no readable version, degrades the row and warns, never the exit.
-    let root = null;
-    try { root = process.cwd(); } catch (e) {
-      process.stderr.write(`${NAME}: WARNING cannot resolve the working directory: ${e.message} — every named path reads \`-\`\n`);
-    }
-    const version = installVersion();
-    if (version === null) process.stderr.write(`${NAME}: WARNING ${INSTALL_PACKAGE} names no readable version — plugin_version is blank\n`);
-    const guard = readGuard(readJson(guardPath));
-    const chainHead = F.has("chain-head");
-    // Only a Pull past burn-in that may explore reads what the install runs: its draw, or the share it ran at, needs
-    // the group's exploration Cells. A read that fails or does not answer in OMP_READ_TIMEOUT_MS, a `modelRoles` that
-    // is no record and a catalog with no `models` list leave the Pull no Cell to draw, and warn, never the exit; so
-    // does a read that holds nothing to draw: a role that runs at no level, or no implementer definition.
-    let install = null;
-    if (guard !== null && !table.burn_in && !chainHead) {
-      const warn = (what) => process.stderr.write(`${NAME}: WARNING ${what}\n`);
-      const agents = F.arg("agents") ?? join(SCRIPT_DIR, "..", "agents");
-      const kind = (v) => (v === undefined ? "absent" : v === null ? "null" : Array.isArray(v) ? "an array" : `a ${typeof v}`);
-      try {
-        const modelRoles = F.arg("model-roles") === null
-          ? readOmpConfigValue("modelRoles", { timeout: OMP_READ_TIMEOUT_MS })
-          : JSON.parse(readFileSync(F.arg("model-roles"), "utf8"));
-        const catalog = F.arg("catalog") === null
-          ? readOmpModelCatalog({ timeout: OMP_READ_TIMEOUT_MS })
-          : JSON.parse(readFileSync(F.arg("catalog"), "utf8"));
-        if (typeof modelRoles !== "object" || modelRoles === null || Array.isArray(modelRoles)) {
-          throw new Error(`modelRoles is ${kind(modelRoles)}, not a record of role to model`);
-        }
-        if (!Array.isArray(catalog?.models)) throw new Error(`omp's model catalog has no models list (models: ${kind(catalog?.models)})`);
-        install = installOf({ modelRoles, catalog, definitions: readdirSync(agents) });
-      } catch (e) {
-        warn(`cannot read what this install runs: ${e.message} — no exploration Cell is drawn`);
-      }
-      if (install !== null) {
-        const unrun = ROLES_BY_PRICE.filter((role) => install.ladders[role].length === 0);
-        if (unrun.length > 0) {
-          warn(`this install runs ${unrun.join(", ")} at no level (modelRoles names no model for it, or one omp's catalog lists at none) — no exploration Cell of ${unrun.length === 1 ? "that role" : "those roles"} is drawn`);
-        }
-        if (install.defined.size === 0) warn(`${agents} holds no implementer definition — no exploration Cell is drawn`);
-      }
-    }
-    const { line, row } = route({
-      session, ticket: Number(ticket), arm, implRow: Number(implRowArg), chainHead,
-      issue: readJson(issuePath), sizing: readJson(F.arg("sizing")), guard, table, objective, root, version,
-      fallback: fit?.fallback ?? null, install,
-    });
-    const pending = F.arg("pending") ?? join(dirname(guardPath), "ticket-features.pending.tsv");
-    // The header decision and the append are not atomic and take no lock. That is
-    // safe only while the run's controller is the only process that routes or
-    // drains on a checkout, doing both serially: one controller per checkout is
-    // the rule, and neither this append nor the drain checks it. A pending file
-    // already begun keeps its header's columns, so a plugin updated mid-run
-    // never appends a row wider or narrower than the file. A first line that is
-    // no features header — a required column missing, or a name no features
-    // file carries — is refused, not appended against.
+  const ticket = need("ticket");
+  if (!/^[1-9][0-9]*$/.test(ticket)) die(`--ticket ${ticket} is not an issue number`);
+  const arm = need("arm");
+  if (arm !== "A" && arm !== "B") die(`--arm ${arm} is not A or B`);
+  const implRowArg = need("impl-row");
+  if (!/^[1-9][0-9]*$/.test(implRowArg)) die(`--impl-row ${implRowArg} is not a positive row count`);
+  const issuePath = need("issue");
+  const guardPath = need("guard");
+  // `--session` omitted is the session directory the phase-0 receipt
+  // records; a receipt that records none is a usage error naming it.
+  let sessionArg = F.arg("session");
+  if (sessionArg === null) {
+    try { sessionArg = sessionFromReceipt(); } catch (e) { die(e.message); }
+  }
+  const session = basename(sessionArg.replace(/\/+$/, ""));
+  // `--objective` omitted is the one the receipt records, likewise.
+  let objective = F.arg("objective");
+  if (objective === null) {
+    try { objective = objectiveFromReceipt(); } catch (e) { die(e.message); }
+  } else if (!OBJECTIVES.includes(objective)) {
+    die(`--objective ${objective} is not ${OBJECTIVES.join(" or ")}`);
+  }
+  // A working directory removed under the run, or an install `package.json`
+  // with no readable version, degrades the row and warns, never the exit.
+  let root = null;
+  try { root = process.cwd(); } catch (e) {
+    process.stderr.write(`${NAME}: WARNING cannot resolve the working directory: ${e.message} — every named path reads \`-\`\n`);
+  }
+  const version = installVersion();
+  if (version === null) process.stderr.write(`${NAME}: WARNING ${INSTALL_PACKAGE} names no readable version — plugin_version is blank\n`);
+  const guard = readGuard(readJson(guardPath));
+  const chainHead = F.has("chain-head");
+  // Only a Pull past burn-in that may explore reads what the install runs: its draw, or the share it ran at, needs
+  // the group's exploration Cells. A read that fails or does not answer in OMP_READ_TIMEOUT_MS, a `modelRoles` that
+  // is no record and a catalog with no `models` list leave the Pull no Cell to draw, and warn, never the exit; so
+  // does a read that holds nothing to draw: a role that runs at no level, or no implementer definition.
+  let install = null;
+  if (guard !== null && !table.burn_in && !chainHead) {
+    const warn = (what) => process.stderr.write(`${NAME}: WARNING ${what}\n`);
+    const agents = F.arg("agents") ?? join(SCRIPT_DIR, "..", "agents");
+    const kind = (v) => (v === undefined ? "absent" : v === null ? "null" : Array.isArray(v) ? "an array" : `a ${typeof v}`);
     try {
-      mkdirSync(dirname(pending), { recursive: true });
-      const had = statSync(pending, { throwIfNoEntry: false })?.size > 0 ? readFileSync(pending, "utf8").split("\n", 1)[0].split("\t") : null;
-      if (had !== null) {
-        const missing = FEATURE_COLUMNS.filter((c) => !had.includes(c) && !OPTIONAL_COLUMNS.has(c));
-        const unknown = had.filter((c) => !FEATURE_COLUMNS.includes(c));
-        if (missing.length || unknown.length) {
-          const why = [missing.length ? `lacks ${missing.join(", ")}` : "", unknown.length ? `names ${unknown.map((c) => JSON.stringify(c)).join(", ")}` : ""];
-          throw new Error(`its first line is no ticket-features header: it ${why.filter(Boolean).join(" and ")}`);
-        }
+      const modelRoles = F.arg("model-roles") === null
+        ? readOmpConfigValue("modelRoles", { timeout: OMP_READ_TIMEOUT_MS })
+        : JSON.parse(readFileSync(F.arg("model-roles"), "utf8"));
+      const catalog = F.arg("catalog") === null
+        ? readOmpModelCatalog({ timeout: OMP_READ_TIMEOUT_MS })
+        : JSON.parse(readFileSync(F.arg("catalog"), "utf8"));
+      if (typeof modelRoles !== "object" || modelRoles === null || Array.isArray(modelRoles)) {
+        throw new Error(`modelRoles is ${kind(modelRoles)}, not a record of role to model`);
       }
-      const header = had === null ? `${FEATURE_COLUMNS.join("\t")}\n` : "";
-      appendFileSync(pending, `${header}${formatFeatureRow(row, had ?? FEATURE_COLUMNS)}\n`);
+      if (!Array.isArray(catalog?.models)) throw new Error(`omp's model catalog has no models list (models: ${kind(catalog?.models)})`);
+      install = installOf({ modelRoles, catalog, definitions: readdirSync(agents) });
     } catch (e) {
-      process.stderr.write(`${NAME}: WARNING could not append to ${pending}: ${e.message} — this Pull's ticket-features row is not recorded\n`);
+      warn(`cannot read what this install runs: ${e.message} — no exploration Cell is drawn`);
     }
-    process.stdout.write(`${line}\n`);
-    return;
+    if (install !== null) {
+      const unrun = ROLES_BY_PRICE.filter((role) => install.ladders[role].length === 0);
+      if (unrun.length > 0) {
+        warn(`this install runs ${unrun.join(", ")} at no level (modelRoles names no model for it, or one omp's catalog lists at none) — no exploration Cell of ${unrun.length === 1 ? "that role" : "those roles"} is drawn`);
+      }
+      if (install.defined.size === 0) warn(`${agents} holds no implementer definition — no exploration Cell is drawn`);
+    }
   }
-
-  const short = (sha) => (sha === null ? "no commit" : sha.slice(0, 8));
-  const fileAt = (sha, flag, parse) => {
-    const p = need(flag);
-    try { return parse(showAt(sha, p)); } catch (e) { die(`cannot read --${flag} ${p} at commit ${short(sha)}: ${e.message}`); }
-  };
-  // The three TSVs as committed at `sha`, never the working tree's copies.
-  const corpusAt = (sha) => ({
-    features: fileAt(sha, "features", parseFeatures),
-    members: fileAt(sha, "members", parseMemberTsv),
-    verdicts: fileAt(sha, "verdicts", parseTierOutcomes),
+  const { line, row } = route({
+    session, ticket: Number(ticket), arm, implRow: Number(implRowArg), chainHead,
+    issue: readJson(issuePath), sizing: readJson(F.arg("sizing")), guard, table, objective, root, version,
+    fallback: fit?.fallback ?? null, install,
   });
-  // The commit `rev` names in the repository holding --features, or null; git itself failing is a die, not "no such commit".
-  const commitOf = (rev) => {
-    try { return resolveCommit(need("features"), rev); } catch (e) { die(`cannot resolve ${rev} in the repository holding --features ${need("features")}: ${e.message}`); }
-  };
-  // The commit the table records: null before any fit, else a sha this repository holds.
-  const fittedCommit = () => {
-    const sha = table.fitted_commit;
-    if (sha === null) return null;
-    if (typeof sha !== "string" || !SHA.test(sha)) die(`${tablePath}: \`fitted_commit\` is not null or a full commit sha`);
-    if (commitOf(sha) === null) {
-      die(`${tablePath} was fitted from commit ${sha}, which this repository does not hold — run \`git fetch --depth=1 origin ${sha}\``);
+  const pending = F.arg("pending") ?? join(dirname(guardPath), "ticket-features.pending.tsv");
+  // The header decision and the append are not atomic and take no lock. That is
+  // safe only while the run's controller is the only process that routes or
+  // drains on a checkout, doing both serially: one controller per checkout is
+  // the rule, and neither this append nor the drain checks it. A pending file
+  // already begun keeps its header's columns, so a plugin updated mid-run
+  // never appends a row wider or narrower than the file. A first line that is
+  // no features header — a required column missing, or a name no features
+  // file carries — is refused, not appended against.
+  try {
+    mkdirSync(dirname(pending), { recursive: true });
+    const had = statSync(pending, { throwIfNoEntry: false })?.size > 0 ? readFileSync(pending, "utf8").split("\n", 1)[0].split("\t") : null;
+    if (had !== null) {
+      const missing = FEATURE_COLUMNS.filter((c) => !had.includes(c) && !OPTIONAL_COLUMNS.has(c));
+      const unknown = had.filter((c) => !FEATURE_COLUMNS.includes(c));
+      if (missing.length || unknown.length) {
+        const why = [missing.length ? `lacks ${missing.join(", ")}` : "", unknown.length ? `names ${unknown.map((c) => JSON.stringify(c)).join(", ")}` : ""];
+        throw new Error(`its first line is no ticket-features header: it ${why.filter(Boolean).join(" and ")}`);
+      }
     }
-    return sha;
-  };
-  // The join throws on a features row it cannot date or whose column a split reads holds no plain count, a booked
-  // member row whose `cost` or `work_s` is not a number, and a ruling of a windowed Pull's ticket it cannot place —
-  // for `--check` too on a Pull the fit then skips as a live B classifier's, since every windowed Pull is
-  // booked before that skip. Anything else it throws is a bug, never bad input, so it surfaces with its stack.
-  const joined = (fit) => {
-    try { return fit(); } catch (e) {
-      if (!(e instanceof RulingError || e instanceof AttributionError)) throw e;
-      die(`cannot join --features ${need("features")}, --members ${need("members")} and --verdicts ${need("verdicts")}: ${e.message}`);
-    }
-  };
-
-  for (const flag of ["features", "members", "verdicts"]) need(flag);
-  const fitted = fittedCommit();
-  const { features, members, verdicts } = fitted === null ? { features: [], members: [], verdicts: [] } : corpusAt(fitted);
-  const refit = joined(() => fitTable({ prior: table, features, members, verdicts, guard: { ...table.guard, window_start: table.window_start }, commit: fitted }));
-  const differ = Object.keys({ ...refit, ...table }).filter((k) => !isDeepStrictEqual(refit[k], table[k]));
-  if (differ.length) {
-    process.stderr.write(`${NAME}: ${tablePath} is not a re-fit of its own rows — differs in ${differ.map((k) => `\`${k}\``).join(", ")}; re-fitted:\n${JSON.stringify(refit, null, 2)}\n`);
-    // exitCode, not exit(): a piped stderr is written asynchronously and exit() can cut the payload off.
-    process.exitCode = 1;
-    return;
+    const header = had === null ? `${FEATURE_COLUMNS.join("\t")}\n` : "";
+    appendFileSync(pending, `${header}${formatFeatureRow(row, had ?? FEATURE_COLUMNS)}\n`);
+  } catch (e) {
+    process.stderr.write(`${NAME}: WARNING could not append to ${pending}: ${e.message} — this Pull's ticket-features row is not recorded\n`);
   }
-  process.stdout.write(`${NAME}: ${tablePath} matches a re-fit of ${refit.n_rows} Pulls at ${short(fitted)}\n`);
+  process.stdout.write(`${line}\n`);
 }
 
 if (isCLI(import.meta.url)) main();
