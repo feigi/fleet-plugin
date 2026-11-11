@@ -916,7 +916,6 @@ function tableOver({ prior, units: unbooked, order, guard, window }) {
   }
   return {
     window_start: window,
-    fitted_commit: null,
     n_rows: units.length,
     cells: prior.cells,
     burn_in: shortStartingCells(guard.n).length > 0,

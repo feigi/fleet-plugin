@@ -70,8 +70,8 @@
 // `guard` (the guard it used, as the router reads it: its `computed_at`,
 // `tripped`, per-Cell `n` and `window_start`), `tsv_blobs` (the git blob id of
 // each TSV it read, keyed by path as the guard keys its own), `prior` (the
-// starting table's `fitted_commit`, `cells`, `classifier`, `splits` and
-// `window_start`, and the install's `package.json` `version`), the
+// starting table's `cells`, `classifier`, `splits` and `window_start`, and
+// the install's `package.json` `version`), the
 // fitted `table` and `gate`, the split gate's record: a digest of the Cells
 // and Pulls it searched (`records`), the Pulls it scored and those it left
 // out for want of a recorded assignment probability, the best split it found
@@ -351,7 +351,6 @@ export function writeFit(repo, written, { tablePath = DEFAULT_TABLE, packagePath
     guard: { computed_at: written.computed_at, tripped: guard.tripped, n: guard.n, window_start: guard.window_start },
     tsv_blobs: Object.fromEntries(Object.entries(tsvBlobs).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
     prior: {
-      fitted_commit: prior.fitted_commit,
       version: installVersion(packagePath),
       cells: prior.cells,
       classifier: prior.classifier,

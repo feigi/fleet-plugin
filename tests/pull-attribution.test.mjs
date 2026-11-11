@@ -43,7 +43,7 @@ const parsed = (w) => ({
   features: parseFeatures([FEATURE_COLUMNS.join("\t"), ...w.features.map((f) => FEATURE_COLUMNS.map((c) => f[c] ?? "").join("\t"))].join("\n")),
 });
 const prior = {
-  window_start: null, fitted_commit: null, n_rows: 0, cells: ["slow-high", "task-high", "smol-high"], burn_in: true, splits: {},
+  window_start: null, n_rows: 0, cells: ["slow-high", "task-high", "smol-high"], burn_in: true, splits: {},
   rows: { "*": "slow-high" }, classifier: { b: null, tau: null }, estimates: {}, guard: { tripped: [], n: {} },
 };
 // The prior with one split, where the old light/heavy rule drew its line on the criteria count: five or fewer is `criteria<=5`.

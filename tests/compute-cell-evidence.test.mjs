@@ -525,7 +525,7 @@ const BLOBS = { "docs/metrics/member-outcomes.tsv": "e08ea9cd", "docs/metrics/ti
 // burn-in, task-high on every row it fitted.
 const TASK = (verdict) => ({ cell: "task-high", reason: "sole-qualifier", cells: { "task-high": { verdict, range: [-3.1, -0.4] }, "smol-high": { verdict: "under-floor", range: null } }, pairs: [] });
 const FIT = (o = {}) => ({
-  window_start: "2026-10-03", fitted_commit: null, n_rows: 235, cells: STARTING.cells, burn_in: false,
+  window_start: "2026-10-03", n_rows: 235, cells: STARTING.cells, burn_in: false,
   splits: SPLITS,
   rows: { cost: { "*": "task-high", [ABOVE]: "task-high", [BELOW]: "task-high" }, speed: { "*": "task-high", [ABOVE]: "task-high", [BELOW]: "task-high" } },
   classifier: { b: null, tau: null },

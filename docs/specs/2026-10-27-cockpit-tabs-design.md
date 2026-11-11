@@ -820,6 +820,8 @@ It writes `.fleet/router-preview.json` through a temp file and a rename:
   table }
 ```
 
+*Amended (#4370): the router table and the Fit's prior no longer carry `fitted_commit`; no fit records a commit since `--check` was removed.*
+
 - It runs only when the guard duty wrote a guard.
 - It never fails the run: an error prints
   `metrics-refresh: preview: failed — <why>`, leaves the old file in place

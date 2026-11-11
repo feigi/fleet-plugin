@@ -32,7 +32,7 @@ const INSTALLED_VERSION = JSON.parse(readFileSync(new URL("../plugin/package.jso
 const both = (cost, speed = cost) => ({ cost, speed });
 const UNJUDGED = { cell: "slow-high", reason: "unjudged", cells: {}, pairs: [] };
 const baseTable = (over = {}) => ({
-  window_start: null, fitted_commit: null, n_rows: 0, cells: [...STARTING], burn_in: false,
+  window_start: null, n_rows: 0, cells: [...STARTING], burn_in: false,
   splits: {}, rows: both({ "*": "slow-high" }), classifier: { b: null, tau: null }, estimates: {},
   reasons: both({ "*": UNJUDGED }), guard: { tripped: [], n: {} }, ...over,
 });
@@ -627,7 +627,7 @@ test("route: the shipped table is the starting table, the day-one literal", () =
 
 test("route: the shipped-table check passes a fitted table and fails a table validateTable refuses or one naming a cell with no definition", () => {
   const fitted = twoLeaf({ "*": "smol-high", [ABOVE]: "task-max", [BELOW]: "smol-high" }, { "*": "task-high", [ABOVE]: "task-high", [BELOW]: "task-high" }, {
-    fitted_commit: "a".repeat(40), n_rows: 12, burn_in: false, cells: [...STARTING, "slow-medium", "task-max"],
+    n_rows: 12, burn_in: false, cells: [...STARTING, "slow-medium", "task-max"],
   });
   assertShippable(fitted);
   assertShippable(baseTable());
@@ -670,6 +670,15 @@ test("route: arm B is live only on arm B, with a classifier set and some row not
   const live = routeIn({ table: liveB(), arm: "B", sizing: haikuSizing });
   assert.equal(live.line, BELOW_LINE.replace("SIZED=-", "SIZED=heavy"), "the same inputs with the gate open and arm B do read the sizing, and record it");
   assert.deepEqual([live.row.sizing_src, live.row.sizing_pre, live.row.router_usd], ["haiku", "heavy", "0.5"]);
+});
+
+test("route: a table still carrying the retired commit field is valid and routes the same Cell as the same table without it", () => {
+  const without = twoLeaf({ "*": "slow-high", [ABOVE]: "task-high", [BELOW]: "smol-high" });
+  const leftover = { ...without, fitted_commit: "a".repeat(40) };
+  assert.equal(validateTable(leftover), leftover);
+  const plain = routeIn({ table: without, arm: "A" });
+  assert.equal(plain.line.includes("CELL=smol-high"), true, plain.line);
+  assert.deepEqual(routeIn({ table: leftover, arm: "A" }), plain);
 });
 
 test("route: a live B sizing is read only when its source is the table's classifier and its label is light or heavy", () => {
@@ -1417,10 +1426,9 @@ test("fit: a day-one three-TSV fixture fitted is an estimates-only table over it
   assert.deepEqual(table.splits, SPLITS, "the fit makes no split and takes none away");
   assert.equal(table.burn_in, true);
   assert.deepEqual(table.cells, STARTING);
-  assert.deepEqual(Object.keys(table).sort(), ["burn_in", "cells", "classifier", "estimates", "fitted_commit", "guard", "n_rows", "reasons", "rows", "splits", "window_start"], "the fit writes these fields and no others");
+  assert.deepEqual(Object.keys(table).sort(), ["burn_in", "cells", "classifier", "estimates", "guard", "n_rows", "reasons", "rows", "splits", "window_start"], "the fit writes these fields and no others");
   assert.equal(table.n_rows, 3);
-  assert.equal(table.fitted_commit, null, "a fit records no commit");
-  assert.equal("fitted_through" in table, false, "no date field stays beside the commit");
+  assert.equal("fitted_through" in table, false, "no date field is written");
   assert.equal(table.window_start, "2026-09-01", "the window comes from the guard; the fit never moves it");
   const est = (o) => ({ generation: "m", claims: o.merged, by_hand: o.merged, failed: 0, fix_rounds: 0, review_findings: null, excluded: 0, left_out: 0, unpriced: 0, untimed: 0, older: {}, ...o });
   assert.deepEqual(table.estimates["*"]["task-high"], est({ n: 1, merged: 1, usd_per_merged: 3, minutes_per_merged: 2, fail_rate: 0, fix_rounds: 1 }));

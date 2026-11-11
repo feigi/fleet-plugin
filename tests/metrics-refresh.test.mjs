@@ -361,11 +361,11 @@ test("a phase 0 over fixture records writes router-fit.json beside the fresh gua
   assert.deepEqual(fit.tsv_blobs, guard.tsv_blobs, "the same working-tree files the guard read, by the same keys");
   assert.equal(fit.tsv_blobs["docs/metrics/tier-outcomes.tsv"], git(f.repo, ["hash-object", "docs/metrics/tier-outcomes.tsv"]));
   assert.deepEqual(fit.prior, {
-    fitted_commit: SHIPPED.fitted_commit, version: INSTALLED_VERSION, cells: SHIPPED.cells,
+    version: INSTALLED_VERSION, cells: SHIPPED.cells,
     classifier: SHIPPED.classifier, splits: SHIPPED.splits, window_start: SHIPPED.window_start,
   });
   assert.equal(validateTable(fit.table) instanceof Error, false, "route reads it through validateTable");
-  assert.equal(fit.table.fitted_commit, null, "never committed: no commit names it");
+  assert.deepEqual(Object.keys(fit.table).sort(), ["burn_in", "cells", "classifier", "estimates", "guard", "n_rows", "reasons", "rows", "splits", "window_start"], "the table carries no commit field");
   assert.equal(fit.table.n_rows, 2);
   assert.equal(fit.table.window_start, guard.window_start);
   assert.match(r.stdout, /metrics-refresh: fit: fitted 2 Pulls, in burn-in; \.fleet\/router-fit\.json computed /);

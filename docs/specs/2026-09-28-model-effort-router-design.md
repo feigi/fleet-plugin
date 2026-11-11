@@ -626,6 +626,8 @@ group).*
 }
 ```
 
+*Amended (#4370): the router table and the Fit's prior no longer carry `fitted_commit`; no fit records a commit since `--check` was removed.*
+
 Lives under `plugin/` because the route script runs from the installed
 plugin. **Hierarchical rows:** the script uses `rows[stratum]` when
 present, else `rows["*"]`. The fit judges a row (a stratum, or `*`) when
@@ -659,6 +661,7 @@ view of the Fit reads. A table's groups are the nodes of the tree `splits`
 holds, each with a `cost` and a `speed` row (a group the Fit cannot judge
 holds its parent's, not `*`'s), and there is no `stage`
 (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.2, § 2.4).*
+*Amended (#4370): the router table and the Fit's prior no longer carry `fitted_commit`; no fit records a commit since `--check` was removed.*
 
 **Amended (#2573, 2026-10-13): the table records the commit its fit read,
 not a date.** `fitted_through` is replaced by `fitted_commit`: the sha of the
@@ -674,6 +677,7 @@ place.
 `.fleet/router-fit.json`; its table's own `fitted_commit` stays null, since
 nothing commits a Fit (`docs/specs/2026-11-01-self-refining-router-design.md`
 § 2.3).*
+*Amended (#4370): the router table and the Fit's prior no longer carry `fitted_commit`; no fit records a commit since `--check` was removed.*
 
 ### R4. Allocation — burn-in, then 5k
 
@@ -930,6 +934,7 @@ Its duties, all drawn from this spec:
 `splits` in its prior in place of `stage`, `route` routes by it and nothing
 commits it; its failure line is `metrics-refresh: fit: failed — <why>`
 (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.3).*
+*Amended (#4370): the router table and the Fit's prior no longer carry `fitted_commit`; no fit records a commit since `--check` was removed.*
 
 - Print the role-target drift notice (§ 2).
 - Run the per-cell stopping rule (§ 2) and file a withdrawal issue on floor

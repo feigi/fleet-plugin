@@ -835,7 +835,7 @@ const SHIPPED_TABLE = DAY_ONE_TABLE;
 const policyEvidence = (o = {}) => evidence({ table: SHIPPED_TABLE, ...o });
 // A table fitted on 198 Pulls: the root splits on the brief's length, and the group above the cut has a row of its own.
 const FITTED_ROWS = {
-  ...SHIPPED_TABLE, fitted_commit: "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d", n_rows: 198, window_start: "2026-10-03",
+  ...SHIPPED_TABLE, n_rows: 198, window_start: "2026-10-03",
   splits: { "*": { input: "brief_chars", cut: 4047 } },
   rows: { cost: { "*": "slow-high", [ABOVE]: "task-high", [BELOW]: "slow-high" }, speed: { "*": "slow-high", [ABOVE]: "task-high", [BELOW]: "slow-high" } },
   reasons: {
@@ -998,7 +998,7 @@ const fitRead = (o = {}) => ({
   status: "ok",
   fit: {
     computed_at: "2026-10-26T19:17:40.000Z", guard_computed_at: "2026-10-26T19:17:33.000Z", tsv_blobs: { "docs/metrics/tier-outcomes.tsv": "18b6a980" },
-    prior: { fitted_commit: null, version: "3.104.0", cells: SHIPPED_TABLE.cells, classifier: SHIPPED_TABLE.classifier, splits: SHIPPED_TABLE.splits, window_start: null },
+    prior: { version: "3.104.0", cells: SHIPPED_TABLE.cells, classifier: SHIPPED_TABLE.classifier, splits: SHIPPED_TABLE.splits, window_start: null },
     table: {
       ...SHIPPED_TABLE, n_rows: 235, cells: ["slow-high", "task-high", "smol-high", "slow-medium", "task-max"], burn_in: true,
       rows: { cost: { "*": "task-high" }, speed: { "*": "task-high" } },
