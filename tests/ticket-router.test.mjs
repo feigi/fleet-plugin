@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import {
-  DEFAULT_TABLE, assignmentProb, bArmLive, explorationCells, installOf, installVersion, issueMetrics, route, rowDispatch, rowFor, fitTable, readGuard, stratumOf, validateTable, formatFeatureRow, sliceParent,
+  DEFAULT_TABLE, assignmentProb, bArmLive, explorationCells, installOf, installVersion, issueMetrics, route, rowDispatch, rowFor, fitTable, fitTree, readGuard, stratumOf, validateTable, formatFeatureRow, sliceParent,
 } from "../plugin/scripts/ticket-router.mjs";
 import { AttributionError, FEATURE_COLUMNS as COLUMNS, parseFeatures } from "../plugin/scripts/pull-attribution.mjs";
 import { drawCell, CELL, STARTING_CELLS, formatRouting, parseRouting } from "../plugin/scripts/ledger-grammar.mjs";
@@ -1412,8 +1412,7 @@ test("fit: a day-one three-TSV fixture fitted is an estimates-only table over it
   ];
   const verdicts = [{ pr: "11", ticket: "1" }, { pr: "12", ticket: "2+9", minted_false_claim: "yes" }];
   const p = fitWorld(t, { features, members, verdicts, table: twoLeaf({ "*": "slow-high", [ABOVE]: "slow-high", [BELOW]: "slow-high" }, undefined, { burn_in: true }) });
-  refit(p);
-  const table = JSON.parse(readFileSync(p.table, "utf8"));
+  const table = refit(p);
   assert.deepEqual(table.rows.cost, { "*": "slow-high", [ABOVE]: "slow-high", [BELOW]: "slow-high" }, "no cell has n>=20 yet, so no row is adopted, and every node holds the default");
   assert.deepEqual(table.splits, SPLITS, "the fit makes no split and takes none away");
   assert.equal(table.burn_in, true);
@@ -1460,8 +1459,7 @@ test("fit: an older generation keeps its own fix rounds, and a cell with only ex
   ];
   const verdicts = [{ pr: "11", ticket: "1" }, { pr: "14", ticket: "4" }, { pr: "12", ticket: "2" }];
   const p = fitWorld(t, { features: [a1, a2, b, x], members, verdicts });
-  refit(p);
-  const { "task-high": task, "smol-high": smol } = JSON.parse(readFileSync(p.table, "utf8")).estimates["*"];
+  const { "task-high": task, "smol-high": smol } = refit(p).estimates["*"];
   assert.deepEqual([task.generation, task.fix_rounds, task.older["model-a"].fix_rounds], ["model-b", 0, 1]);
   assert.deepEqual([smol.generation ?? null, smol.n, smol.excluded], [null, 0, 1]);
 });
@@ -1475,8 +1473,7 @@ test("fit: a Pull with a blank work_s on a top-level booked row counts as untime
     { member: "fix-pr-12", agent: "fix-pr-12", pr: "12", role: "fix-applier", cost: "2", work_s: "" },
   ];
   const p = fitWorld(t, { features: [timed, untimed], members, verdicts: [{ pr: "11", ticket: "1" }, { pr: "12", ticket: "2" }] });
-  refit(p);
-  const task = JSON.parse(readFileSync(p.table, "utf8")).estimates["*"]["task-high"];
+  const task = refit(p).estimates["*"]["task-high"];
   assert.deepEqual([task.n, task.merged, task.usd_per_merged, task.minutes_per_merged, task.untimed], [1, 1, 1, 90, 1]);
 });
 
@@ -1547,13 +1544,11 @@ test("fit: a day-one table is the fit of an empty corpus", () => {
 test("a table fitted before work time, its estimates lacking minutes_per_merged and untimed, is valid and is the next fit's prior", (t) => {
   const features = [featureRow({ ticket: "1", chosen_cell: "task-high", exploration_draw: "2/3" })];
   const p = fitWorld(t, { features, members: [], verdicts: [{ pr: "11", ticket: "1" }] });
-  refit(p);
-  const before = JSON.parse(readFileSync(p.table, "utf8"));
+  const before = refit(p);
   for (const row of Object.values(before.estimates)) for (const e of Object.values(row)) { delete e.minutes_per_merged; delete e.untimed; }
   assert.equal(validateTable(before), before);
   writeFileSync(p.table, JSON.stringify(before));
-  refit(p);
-  const after = JSON.parse(readFileSync(p.table, "utf8")).estimates["*"]["task-high"];
+  const after = refit(p).estimates["*"]["task-high"];
   assert.deepEqual([after.minutes_per_merged, after.untimed], [1, 0]);
 });
 
@@ -1826,6 +1821,17 @@ test("fit: features rows dated before the window are not the fit's", () => {
   const next = fitDirect({ features, members: [], verdicts: [ruled(2, 12, { run_date: "2026-09-01" })] }, { window_start: "2026-09-01" });
   assert.equal(next.n_rows, 1, "the window's first day is in; the day before is out");
   assert.deepEqual([next.estimates["*"]["slow-high"].n, next.estimates["*"]["slow-high"].merged], [1, 1]);
+});
+
+test("fit: a guard with no window fits over the prior's window_start", () => {
+  const features = [exploring({ ticket: "1", run_date: "2026-08-31" }), exploring({ ticket: "2", run_date: "2026-09-01", session: SESSION2 })];
+  const input = direct({ features, members: [], verdicts: [ruled(2, 12, { run_date: "2026-09-01" })] });
+  const prior = baseTable({ window_start: "2026-09-01" });
+  const guard = { tripped: [], n: {}, window_start: null };
+  for (const [fit, table] of [["fitTable", fitTable({ prior, ...input, guard })], ["fitTree", fitTree({ prior, ...input, guard }).table]]) {
+    assert.equal(table.window_start, "2026-09-01", `${fit}: the prior's window stands`);
+    assert.equal(table.n_rows, 1, `${fit}: the Pull dated before the prior's window is out`);
+  }
 });
 
 // Pulls in one cell mixing ruled-pass, ruled-failure and not-yet-ruled, each implementer booked at $2.
