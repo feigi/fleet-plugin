@@ -25,6 +25,13 @@
 // this cannot follow — a namespace import, a `require`, a dynamic import — and
 // an unbounded spawn of a command it cannot tell from "gh" fail the sweep by
 // name rather than passing it unread.
+//
+// #4446. The bound must also be one the environment cannot lengthen, under
+// any variable name: each gh spawn's timeout expression is traced (tracer(),
+// below), and the spawn refused when it reaches `process.env` other than
+// through ghBudget() or a Math.min() with a ceiling the environment does not
+// feed. A read that reaches no gh timeout (HOME, GH_REPO, `env: { ...process.env }`,
+// a git bound) is not looked at.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
@@ -145,6 +152,20 @@ function topLevel(s) {
   return out;
 }
 
+// Where the expression starting at `from` ends: at a `;`, or at a closing
+// bracket that closes nothing opened inside it, or, with `comma`, at a `,`
+// between its own pieces.
+function exprEnd(skel, from, comma = false) {
+  let d = 0;
+  let end;
+  for (end = from; end < skel.length; end++) {
+    if (OPEN.includes(skel[end])) d++;
+    else if (CLOSE.includes(skel[end])) { if (d === 0) break; d--; }
+    else if (d === 0 && (skel[end] === ";" || (comma && skel[end] === ","))) break;
+  }
+  return end;
+}
+
 // What a source file offers the sweep: its child_process names, its functions
 // and the funnels among them.
 function analyse(src, file) {
@@ -172,20 +193,12 @@ function analyse(src, file) {
   // Every named function: `function f(…) {…}` and `const f = (…) => …`.
   const fns = new Map();
   const add = (name, paramsOpen, bodyFrom) => {
-    const params = pieces(skel, code, paramsOpen).map((p) => p.code.replace(/=.*$/s, "").trim());
+    const paramPieces = pieces(skel, code, paramsOpen);
+    const params = paramPieces.map((p) => p.code.replace(/=.*$/s, "").trim());
     let start = bodyFrom;
     while (/\s/.test(skel[start])) start++;
-    let end;
-    if (skel[start] === "{") end = closing(skel, start);
-    else {
-      let d = 0;
-      for (end = start; end < skel.length; end++) {
-        if (OPEN.includes(skel[end])) d++;
-        else if (CLOSE.includes(skel[end])) { if (d === 0) break; d--; }
-        else if (d === 0 && skel[end] === ";") break;
-      }
-    }
-    fns.set(name, { params, start, end });
+    const end = skel[start] === "{" ? closing(skel, start) : exprEnd(skel, start);
+    fns.set(name, { name, params, paramPieces, start, end });
   };
   for (const m of skel.matchAll(/\bfunction\s+([\w$]+)\s*\(/g)) {
     const open = m.index + m[0].length - 1;
@@ -247,7 +260,217 @@ function analyse(src, file) {
     return rest === "" && values.length > 0 ? values : null;
   };
 
-  return { file, primitives, imports, fns, calls, carries, within, loopLiterals, problems };
+  // The named functions whose body holds `at`, innermost first.
+  const encl = (at) => [...fns.values()].filter((f) => f.start <= at && at <= f.end).sort((x, y) => y.start - x.start);
+
+  return { file, code, skel, primitives, imports, fns, calls, carries, within, encl, loopLiterals, problems };
+}
+
+// Whether the environment can reach a gh spawn's timeout, decided on the
+// expression that supplies it and never on the name of anything it reads.
+//
+// A bound is lengthened from the environment when `process.env` (dot form,
+// bracket form, a bare `process`) is reached from the timeout expression:
+// directly, through a constant or reassigned variable this file declares or
+// imports, through a local helper's return, or through a funnel parameter,
+// where every value a call hands the funnel is judged the same way. Two
+// shapes cannot lengthen a bound whatever they read, and are not entered:
+// arg.mjs's `ghBudget(seconds, override)`, whose `override` only ever
+// shortens it (its `seconds` is still judged), and a `Math.min(…)` with an
+// argument that is itself clear of the environment, a ceiling the rest can
+// only shorten, as closeout.mjs's remaining-time budget() is.
+//
+// A value is a "ref": source text in both views, the module it was read in,
+// and an offset inside it, from which the functions around it are found.
+function tracer(mods, resolve, spawner) {
+  const escape = (id) => id.replace(/\$/g, "\\$");
+  const refOf = (mod, a, b) => ({ mod, skel: mod.skel.slice(a, b).trim(), code: mod.code.slice(a, b).trim(), at: a });
+  const argRef = (mod, c, i) => (c.args[i] === undefined || c.args[i].skel.startsWith("...") ? null
+    : { mod, skel: c.args[i].skel, code: c.args[i].code, at: c.at });
+  // `s` before and after its first top-level `=`: a pattern and its default.
+  const splitDefault = (s, c) => {
+    let d = 0;
+    for (let k = 0; k < s.length; k++) {
+      if (OPEN.includes(s[k])) d++;
+      else if (CLOSE.includes(s[k])) d--;
+      else if (d === 0 && s[k] === "=" && s[k + 1] !== "=" && s[k + 1] !== ">" && !"=!<>".includes(s[k - 1] ?? "")) {
+        return [{ skel: s.slice(0, k).trim(), code: c.slice(0, k).trim() }, { skel: s.slice(k + 1).trim(), code: c.slice(k + 1).trim() }];
+      }
+    }
+    return [{ skel: s.trim(), code: c.trim() }, null];
+  };
+  // A function's parameters: a name, or a destructured object's keys and the
+  // names they are bound to, each with its default.
+  const paramsOf = (fn) => fn.parsed ??= fn.paramPieces.map((p, index) => {
+    if (p.skel.startsWith("...")) return { index, rest: true };
+    const [pat, def] = splitDefault(p.skel, p.code);
+    if (!pat.skel.startsWith("{")) return { index, name: pat.code, def };
+    const props = pieces(pat.skel, pat.code, 0).filter((q) => !q.skel.startsWith("...")).map((q) => {
+      const [target, d] = splitDefault(q.skel, q.code);
+      const colon = target.skel.indexOf(":");
+      const key = (colon < 0 ? target.code : target.code.slice(0, colon)).trim().replace(/^["']|["']$/g, "");
+      return { key, local: colon < 0 ? key : target.code.slice(colon + 1).trim(), def: d };
+    });
+    return { index, props, def };
+  });
+  const paramBinding = (fn, id) => {
+    for (const p of paramsOf(fn)) {
+      if (p.name === id) return { p };
+      const prop = p.props?.find((q) => q.local === id);
+      if (prop) return { p, prop };
+    }
+    return null;
+  };
+  const callersOf = (mod, fn) => [...mods.values()].flatMap((m) => m.calls.flatMap((c) => {
+    const t = resolve(m, c.callee);
+    return t !== null && t.mod === mod && t.name === fn.name ? [{ mod: m, c }] : [];
+  }));
+  // What a function returns: its expression body, or each `return`.
+  const returnsOf = (mod, fn) => {
+    if (mod.skel[fn.start] !== "{") return [refOf(mod, fn.start, fn.end)];
+    return [...mod.skel.slice(fn.start, fn.end).matchAll(/\breturn\b/g)].map((m) => {
+      const a = fn.start + m.index + m[0].length;
+      return refOf(mod, a, exprEnd(mod.skel, a));
+    });
+  };
+  // Every expression this file gives `id`: `id = …` (a declaration, a
+  // reassignment, a destructuring default) and `const { id } = …`.
+  const declRefs = (mod, id) => {
+    const e = escape(id);
+    const out = [];
+    const forms = [
+      `(?<![\\w$.])${e}\\s*=(?![=>])\\s*`,
+      `\\b(?:const|let|var)\\s*(?:\\{[^{}]*(?<![\\w$.])${e}\\b[^{}]*\\}|\\[[^\\[\\]]*(?<![\\w$.])${e}\\b[^\\[\\]]*\\])\\s*=(?![=>])\\s*`,
+    ];
+    for (const form of forms) {
+      for (const m of mod.skel.matchAll(new RegExp(form, "g"))) {
+        const a = m.index + m[0].length;
+        out.push(refOf(mod, a, exprEnd(mod.skel, a, true)));
+      }
+    }
+    return out;
+  };
+  // Run `visit` on every value `id` can hold where `ref` reads it, once per
+  // name along a path so a variable that feeds itself ends the walk.
+  const viaId = (ref, id, bind, seen, visit) => {
+    const { mod } = ref;
+    const once = (key, refs) => {
+      if (seen.has(key)) return [];
+      seen.add(key);
+      try { return refs().flatMap(visit); } finally { seen.delete(key); }
+    };
+    for (const fn of mod.encl(ref.at)) {
+      const b = paramBinding(fn, id);
+      if (b === null) continue;
+      return once(`${mod.file}#${fn.name}#${id}`, () => {
+        const local = b.prop ? b.prop.local : b.p.name;
+        const provided = bind.get(fn)?.get(local);
+        const refs = [];
+        if (provided !== undefined) refs.push(...provided);
+        else {
+          for (const { mod: m, c } of callersOf(mod, fn)) {
+            const arg = argRef(m, c, b.p.index);
+            if (arg !== null) refs.push(...(b.prop ? keyValues(arg, b.prop.key, bind, seen) : [arg]));
+          }
+        }
+        const own = b.prop ? b.prop.def : b.p.def;
+        if (own !== null && (provided === undefined || provided.length === 0)) refs.push({ mod, ...own, at: fn.start });
+        if (b.prop && b.p.def !== null && (provided === undefined || provided.length === 0)) refs.push(...keyValues({ mod, ...b.p.def, at: fn.start }, b.prop.key, bind, seen));
+        return refs;
+      });
+    }
+    const helper = resolve(mod, id);
+    if (helper !== null) return once(`${helper.mod.file}#${helper.name}`, () => returnsOf(helper.mod, helper.mod.fns.get(helper.name)));
+    const own = declRefs(mod, id);
+    if (own.length > 0) return once(`${mod.file}=${id}`, () => own);
+    const imp = mod.imports.get(id);
+    const from = imp && mods.get(imp.module.slice(2));
+    if (from) return once(`${from.file}=${imp.name}`, () => declRefs(from, imp.name));
+    if (id === "env" && /\bfrom\s*["'](?:node:)?process["']/.test(mod.code)) return visit({ ...ref, skel: "process.env", code: "process.env" });
+    return [];
+  };
+  // The expressions `key` can be given in the options object `ref` reads as:
+  // an object literal, its spreads, a variable or parameter holding one.
+  const keyValues = (ref, key, bind, seen) => {
+    const s = ref.skel;
+    if (s.startsWith("{")) {
+      if (closing(s, 0) !== s.length - 1) return [];
+      const out = [];
+      for (const p of pieces(s, ref.code, 0)) {
+        if (p.skel.startsWith("...")) {
+          out.push(...keyValues({ ...ref, skel: p.skel.slice(3).trim(), code: p.code.slice(3).trim() }, key, bind, seen));
+          continue;
+        }
+        const m = p.code.match(/^(["']?)([\w$]+)\1\s*(:?)/);
+        if (m === null || m[2] !== key) continue;
+        out.push(m[3] === "" ? { ...ref, skel: key, code: key } : { ...ref, skel: p.skel.slice(m[0].length).trim(), code: p.code.slice(m[0].length).trim() });
+      }
+      return out;
+    }
+    if (/^[\w$]+$/.test(s)) return viaId(ref, s, bind, seen, (r) => keyValues(r, key, bind, seen));
+    return [];
+  };
+  // How the environment reaches the value `ref` reads: one reason per read.
+  const judge = (ref, bind, seen) => {
+    const hide = ref.skel.split("");
+    const reasons = [];
+    const part = (p) => ({ ...ref, skel: p.skel, code: p.code });
+    for (const m of ref.skel.matchAll(/(?<![\w$.])(ghBudget|Math\s*\.\s*min)\s*\(/g)) {
+      if (hide[m.index] === " ") continue;
+      const open = m.index + m[0].length - 1;
+      const args = pieces(ref.skel, ref.code, open);
+      if (m[1] === "ghBudget") {
+        if (args.length > 0) reasons.push(...judge(part(args[0]), bind, seen));
+      } else if (!args.some((a) => judge(part(a), bind, seen).length === 0)) continue;
+      for (let k = m.index; k <= closing(ref.skel, open); k++) hide[k] = " ";
+    }
+    const rest = hide.join("");
+    for (const m of rest.matchAll(/(?<![\w$.])[A-Za-z_$][\w$]*/g)) {
+      if (m[0] !== "process") {
+        reasons.push(...viaId(ref, m[0], bind, seen, (r) => judge(r, bind, seen)));
+        continue;
+      }
+      const next = rest.slice(m.index + m[0].length).match(/^\s*(?:\?\.|\.)\s*([\w$]+)/);
+      if (next !== null && next[1] !== "env") continue;
+      reasons.push(`reads ${ref.code.slice(m.index).match(/^process(?:\s*(?:\?\.|\.)\s*env(?:\s*\??\.?\s*(?:[\w$]+|\[[^\]]*\]))?|\s*\[[^\]]*\])?/)[0]}`);
+    }
+    return reasons;
+  };
+  // Every reason the environment reaches the timeout of the spawn call `c`
+  // whose command is argument `cmdAt`: its own `timeout` (and, to a funnel,
+  // `timeoutMs`), then the calls the funnel makes in turn, each with the
+  // funnel's parameters bound to what `c` handed it.
+  const walk = (mod, c, cmdAt, bind) => {
+    const reasons = [];
+    const primitive = mod.primitives.has(c.callee);
+    c.args.forEach((_, i) => {
+      const arg = argRef(mod, c, i);
+      if (i === cmdAt || arg === null) return;
+      for (const key of primitive ? ["timeout"] : ["timeout", "timeoutMs"]) {
+        for (const v of keyValues(arg, key, bind, new Set())) reasons.push(...judge(v, bind, new Set()));
+      }
+    });
+    if (primitive) return reasons;
+    const target = resolve(mod, c.callee);
+    const fn = target.mod.fns.get(target.name);
+    if (bind.has(fn)) return reasons;
+    const bound = new Map();
+    for (const p of paramsOf(fn)) {
+      if (p.rest) continue;
+      const arg = argRef(mod, c, p.index);
+      if (p.name !== undefined) bound.set(p.name, arg === null ? [] : [arg]);
+      else for (const prop of p.props) bound.set(prop.local, arg === null ? [] : keyValues(arg, prop.key, bind, new Set()));
+    }
+    const inside = new Map(bind).set(fn, bound);
+    for (const ic of target.mod.calls) {
+      if (ic.at < fn.start || ic.at > fn.end) continue;
+      const inner = spawner(target.mod, ic);
+      if (inner === null || fn.params.indexOf(ic.args[inner.index]?.code) !== cmdAt) continue;
+      reasons.push(...walk(target.mod, ic, inner.index, inside));
+    }
+    return reasons;
+  };
+  return (mod, c, cmdAt) => [...new Set(walk(mod, c, cmdAt, new Map()))];
 }
 
 // A shell line that runs gh: gh heading the line, or heading a command after
@@ -259,7 +482,8 @@ const ARG_GH = /(?:^|[;&|(]\s*)gh\s/;
 const STRINGS = /(["'`])((?:\\.|(?!\1)[^\\])*)\1/g;
 const runsGh = (c, cmdAt) => c.args.some(({ code }, i) => [...code.matchAll(STRINGS)].some((s) => (i === cmdAt ? SHELL_GH : ARG_GH).test(s[2])));
 
-// Whole-directory sweep: every gh spawn, and whether it is bounded.
+// Whole-directory sweep: every gh spawn, whether it is bounded, and how the
+// environment reaches its bound.
 function sweep(sources) {
   const mods = new Map(Object.entries(sources).map(([file, src]) => [file, analyse(src, file)]));
   const problems = [...mods.values()].flatMap((m) => m.problems);
@@ -298,6 +522,7 @@ function sweep(sources) {
     return v === null ? null : { index: v.index, bounded: v.bounded || mod.carries(c, v.index) };
   };
 
+  const reaches = tracer(mods, resolve, spawner);
   const spawns = [];
   for (const mod of mods.values()) {
     for (const c of mod.calls) {
@@ -306,7 +531,7 @@ function sweep(sources) {
       const cmd = c.args[spawn.index]?.code ?? "";
       const where = `${mod.file}:${c.line}`;
       if (/^["']gh["']$/.test(cmd) || runsGh(c, spawn.index)) {
-        spawns.push({ where, bounded: spawn.bounded });
+        spawns.push({ where, bounded: spawn.bounded, reaches: reaches(mod, c, spawn.index) });
       } else if (/^(["'])[^"']*\1$/.test(cmd) || cmd === "process.execPath" || /^join\(/.test(cmd)) {
         continue;
       } else {
@@ -342,10 +567,17 @@ test("every gh spawn in plugin/scripts/*.mjs carries a finite timeout", () => {
   assert.deepEqual(spawns.filter((s) => !s.bounded).map((s) => s.where), []);
 });
 
-// A script's gh bound is overridable only through ghBudget(), which can only
-// shorten it: every `process.env.*_GH_TIMEOUT` read is ghBudget()'s second
-// argument and nothing else, and each script #4431 bounded declares its bound
-// that way.
+// #4446. A bound no environment variable can lengthen, whatever the variable
+// is called: every gh spawn's timeout expression is traced, and refused when
+// it reaches `process.env` other than through a shortening budget.
+test("no gh spawn's timeout is reachable from the environment", () => {
+  const { spawns } = sweep(readScripts());
+  assert.deepEqual(spawns.flatMap((s) => s.reaches.map((why) => `${s.where} bounds a gh call by the environment: ${why}`)), []);
+});
+
+// The name-based pin that predates the tracer, kept as a tightening: every
+// `process.env.*_GH_TIMEOUT` read is ghBudget()'s second argument and nothing
+// else, and each script #4431 bounded declares its bound that way.
 test("no environment variable can lengthen a script's gh bound", () => {
   const scripts = readScripts();
   const declared = new Set();
@@ -366,6 +598,7 @@ test("no environment variable can lengthen a script's gh bound", () => {
 // and what it must accept, each a bound shape already in the repository.
 const MOD = (body, imports = "spawnSync, execFileSync") => `import { ${imports} } from "node:child_process";\n${body}\n`;
 const verdicts = (sources) => sweep(sources).spawns.map((s) => s.bounded);
+const reaching = (sources) => sweep(sources).spawns.map((s) => s.reaches.length > 0);
 
 test("the sweep refuses an unbounded gh spawn in each shape it follows", () => {
   const refused = {
@@ -416,10 +649,105 @@ test("the sweep accepts the bound shapes already in the repository", () => {
     "funnel bounded at the call": MOD(`async function tryRun(cmd, args, opts = {}) { return execFile(cmd, args, { ...opts }); }\nawait tryRun("gh", ["x"], { timeout: T });`, "execFile"),
   };
   for (const [name, src] of Object.entries(accepted)) assert.deepEqual(verdicts({ "x.mjs": src }), [true], name);
+  for (const [name, src] of Object.entries(accepted)) assert.deepEqual(reaching({ "x.mjs": src }), [false], name);
   // Not gh, so nothing to bound: a sibling script, node itself, git, a funnel
   // only ever handed another command.
   const notGh = MOD(`spawnSync(process.execPath, [join(SCRIPT_DIR, "x.mjs")]);\nspawnSync("git", ["status"]);\nspawnSync("git", ["log", "--author", "gh"]);\nspawnSync(join(SCRIPT_DIR, "x.sh"));\nfunction run(cmd, a) { return spawnSync(cmd, a); }\nrun("sh", ["y"]);`);
   assert.deepEqual(sweep({ "x.mjs": notGh }), { spawns: [], problems: [] });
+});
+
+// #4446. A timeout the environment can lengthen is refused whatever the
+// variable is called, wherever the read sits on the way to the spawn.
+const FUNNEL = `function run(cmd, args, timeoutMs) { return spawnSync(cmd, args, { timeout: timeoutMs }); }`;
+const ENV_MS = "Number(process.env.TICKETLESS_TIMEOUT ?? 60) * 1000";
+
+test("the sweep refuses a gh spawn whose timeout the environment can reach", () => {
+  const refused = {
+    "constant fed by an env read": MOD(`const READ_TIMEOUT_MS = ${ENV_MS};\nspawnSync("gh", ["x"], { timeout: READ_TIMEOUT_MS });`),
+    "env read written inline": MOD(`spawnSync("gh", ["x"], { encoding: "utf8", timeout: ${ENV_MS} });`),
+    "bracket form": MOD(`spawnSync("gh", ["x"], { timeout: Number(process.env["X"]) * 1000 });`),
+    "bracket on process": MOD(`spawnSync("gh", ["x"], { timeout: Number(process["env"].X) * 1000 });`),
+    "optional chain": MOD(`spawnSync("gh", ["x"], { timeout: Number(process.env?.X) * 1000 });`),
+    "env destructured out of process": MOD(`const { env } = process;\nspawnSync("gh", ["x"], { timeout: Number(env.X) });`),
+    "env imported from node:process": MOD(`import { env } from "node:process";\nspawnSync("gh", ["x"], { timeout: Number(env.X) });`),
+    "variable destructured out of the env": MOD(`const { SLOW } = process.env;\nspawnSync("gh", ["x"], { timeout: Number(SLOW) });`),
+    "reassigned from an env read": MOD(`let T = 5_000;\nT = ${ENV_MS};\nspawnSync("gh", ["x"], { timeout: T });`),
+    "constant through a local helper": MOD(`function seconds() { return Number(process.env.X); }\nconst T = seconds() * 1000;\nspawnSync("gh", ["x"], { timeout: T });`),
+    "arrow helper": MOD(`const ms = () => Number(process.env.X);\nspawnSync("gh", ["x"], { timeout: ms() });`),
+    "options object declared in the file": MOD(`const OPTS = { timeout: ${ENV_MS} };\nspawnSync("gh", ["x"], OPTS);`),
+    "options object spread": MOD(`const OPTS = { timeout: ${ENV_MS} };\nspawnSync("gh", ["x"], { ...OPTS });`),
+    "ghBudget whose ceiling is an env read": MOD(`const T = ghBudget(Number(process.env.X), process.env.X_GH_TIMEOUT);\nspawnSync("gh", ["x"], { timeout: T });`),
+    "Math.min with no ceiling clear of the env": MOD(`spawnSync("gh", ["x"], { timeout: Math.min(Number(process.env.A), Number(process.env.B)) });`),
+    "Math.max, which can only lengthen": MOD(`spawnSync("gh", ["x"], { timeout: Math.max(20_000, Number(process.env.X)) });`),
+    "ternary on the env": MOD(`spawnSync("gh", ["x"], { timeout: process.env.SLOW ? 600_000 : 20_000 });`),
+    "env-derived value to a funnel parameter": MOD(`${FUNNEL}\nrun("gh", ["x"], ${ENV_MS});`),
+    "env-derived constant to a funnel parameter": MOD(`${FUNNEL}\nconst T = ${ENV_MS};\nrun("gh", ["x"], T);`),
+    "env-derived value as a funnel's timeoutMs key": MOD(`function run(cmd, args, { timeoutMs } = {}) { return spawnSync(cmd, args, { timeout: timeoutMs }); }\nrun("gh", ["x"], { timeoutMs: ${ENV_MS} });`),
+    "env-derived value in a funnel's opts": MOD(`async function tryRun(cmd, args, opts = {}) { return execFile(cmd, args, { ...opts }); }\nawait tryRun("gh", ["x"], { timeout: ${ENV_MS} });`, "execFile"),
+    "funnel of a funnel": MOD(`${FUNNEL}\nfunction go(cmd, args, t) { return run(cmd, args, t); }\ngo("gh", ["x"], ${ENV_MS});`),
+    "funnel default": MOD(`function run(cmd, args, timeoutMs = ${ENV_MS}) { return spawnSync(cmd, args, { timeout: timeoutMs }); }\nrun("gh", ["x"]);`),
+    "parameter of the function holding the spawn": MOD(`function f(t) { return spawnSync("gh", ["x"], { timeout: t }); }\nf(${ENV_MS});`),
+    "constant imported from another file": {
+      "common.mjs": `export const SLOW_MS = ${ENV_MS};\n`,
+      "x.mjs": MOD(`import { SLOW_MS } from "./common.mjs";\nspawnSync("gh", ["x"], { timeout: SLOW_MS });`),
+    },
+    "funnel imported from another file": {
+      "common.mjs": MOD(FUNNEL).replace("function run", "export function run"),
+      "x.mjs": `import { run } from "./common.mjs";\nrun("gh", ["x"], ${ENV_MS});\n`,
+    },
+  };
+  for (const [name, src] of Object.entries(refused)) {
+    assert.deepEqual(reaching(typeof src === "string" ? { "x.mjs": src } : src), [true], name);
+  }
+  // A script that bounds one spawn through ghBudget() and another through a
+  // differently named variable: only the second is refused.
+  const beside = MOD(`const GH_TIMEOUT_MS = ghBudget(20, process.env.X_GH_TIMEOUT);\nspawnSync("gh", ["a"], { timeout: GH_TIMEOUT_MS });\nspawnSync("gh", ["b"], { timeout: Number(process.env.OTHER) * 1000 });`);
+  assert.deepEqual(reaching({ "x.mjs": beside }), [false, true]);
+  // The refusal names the spawn's file and line, and the read.
+  const [spawn] = sweep({ "x.mjs": refused["constant fed by an env read"] }).spawns;
+  assert.equal(spawn.where, "x.mjs:3");
+  assert.deepEqual(spawn.reaches, ["reads process.env.TICKETLESS_TIMEOUT"]);
+});
+
+test("the sweep accepts a gh timeout the environment can only shorten, and env reads that bound no gh call", () => {
+  const accepted = {
+    literal: MOD(`spawnSync("gh", ["x"], { timeout: 60_000 });`),
+    "named literal constant": MOD(`const T = 20_000;\nspawnSync("gh", ["x"], { timeout: T });`),
+    "arithmetic on literals": MOD(`const SECONDS = 20;\nspawnSync("gh", ["x"], { timeout: SECONDS * 1000 + 500 });`),
+    "ghBudget with its env override": MOD(`const GH_TIMEOUT_MS = ghBudget(20, process.env.X_GH_TIMEOUT);\nspawnSync("gh", ["x"], { timeout: GH_TIMEOUT_MS });`),
+    "ghBudget under any variable name": MOD(`const T = ghBudget(20, process.env.ANYTHING);\nspawnSync("gh", ["x"], { timeout: T });`),
+    "ghBudget inline": MOD(`spawnSync("gh", ["x"], { timeout: ghBudget(20, process.env["X"]) });`),
+    "Math.min of a literal ceiling and an env read": MOD(`spawnSync("gh", ["x"], { timeout: Math.min(20_000, Number(process.env.X)) });`),
+    "Math.min of a constant ceiling and an env deadline": MOD([
+      `const NETWORK_TIMEOUT_MS = 120_000;`,
+      `const deadline = Date.now() + Number(process.env.CALL_MS ?? 600_000);`,
+      `const budget = () => Math.min(NETWORK_TIMEOUT_MS, Math.max(1, Math.floor(deadline - Date.now())));`,
+      `function run(cmd, args, { cwd, env, timeoutMs } = {}) { return spawnSync(cmd, args, { cwd, env, timeout: timeoutMs }); }`,
+      `run("gh", ["x"], { cwd: "/", env: { ...process.env, GH_REPO: "" }, timeoutMs: budget() });`,
+    ].join("\n")),
+    "env spread next to a literal timeout": MOD(`spawnSync("gh", ["x"], { env: { ...process.env, GH_REPO: "" }, timeout: 20_000 });`),
+    "env reads that feed nothing the timeout reads": MOD(`const home = process.env.HOME;\nconst repo = process.env["GH_REPO"];\nspawnSync("gh", ["x"], { cwd: home, env: process.env, timeout: 20_000 });`),
+    "process members that are not the env": MOD(`spawnSync("gh", ["x"], { timeout: process.platform === "win32" ? 60_000 : 20_000 });`),
+    "funnel handed a literal": MOD(`${FUNNEL}\nrun("gh", ["x"], 20_000);`),
+    "funnel handed a ghBudget": MOD(`${FUNNEL}\nrun("gh", ["x"], ghBudget(20, process.env.X_GH_TIMEOUT));`),
+    "funnel timeoutMs key, literal": MOD(`function run(cmd, args, { timeoutMs } = {}) { return spawnSync(cmd, args, { timeout: timeoutMs }); }\nrun("gh", ["x"], { timeoutMs: 20_000 });`),
+    "funnel opts, literal": MOD(`async function tryRun(cmd, args, opts = {}) { return execFile(cmd, args, { ...opts }); }\nawait tryRun("gh", ["x"], { timeout: 20_000 });`, "execFile"),
+    "funnel with a literal default": MOD(`function run(cmd, args, timeoutMs = 20_000) { return spawnSync(cmd, args, { timeout: timeoutMs }); }\nrun("gh", ["x"]);`),
+    "funnel whose env-fed default is overridden": MOD(`function run(cmd, args, timeoutMs = ${ENV_MS}) { return spawnSync(cmd, args, { timeout: timeoutMs }); }\nrun("gh", ["x"], 20_000);`),
+    "constant imported from another file": {
+      "common.mjs": `export const T = 20_000;\n`,
+      "x.mjs": MOD(`import { T } from "./common.mjs";\nspawnSync("gh", ["x"], { timeout: T });`),
+    },
+  };
+  for (const [name, src] of Object.entries(accepted)) {
+    assert.deepEqual(reaching(typeof src === "string" ? { "x.mjs": src } : src), [false], name);
+  }
+  // An env-fed bound on a git call, through the funnel a literal-bound gh call
+  // shares, is no gh bound.
+  const git = MOD(`${FUNNEL}\nrun("git", ["x"], ${ENV_MS});\nrun("gh", ["x"], 20_000);`);
+  assert.deepEqual(reaching({ "x.mjs": git }), [false]);
+  const ledger = MOD(`const LEDGER_LOCK_TIMEOUT_MS = ${ENV_MS};\nspawnSync("git", ["x"], { timeout: LEDGER_LOCK_TIMEOUT_MS });\nspawnSync("gh", ["x"], { timeout: 20_000 });`);
+  assert.deepEqual(reaching({ "x.mjs": ledger }), [false]);
 });
 
 test("the sweep names a child_process reach it cannot follow", () => {
