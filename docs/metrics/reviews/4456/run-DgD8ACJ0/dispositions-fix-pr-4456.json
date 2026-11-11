@@ -1,0 +1,46 @@
+{
+  "head": "2538263ede677420fb923f4b2c3e7f48c9fb264d",
+  "run": "run-DgD8ACJ0",
+  "entries": [
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "reason": "Refuter ran set --create --accept-suggestions then the first-ever ensure in a fixture repo: ensure exit 0, .fleet/labels.json inode/mtime/sha unchanged; positive control (cache removed, ensure rewrote it) showed a write is detectable. Applied: dropped the parenthetical '(a first-ever `ensure` that exits 0 does)' from docs/requirements.md §2.4.",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4456/fix-IuQ7eTws/unverified-0/verdict.json",
+      "remedyFiles": ["docs/requirements.md"]
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "reason": "Verified negative; its refuter let it survive (gh label create --help and gh source pick a random colour when none is given; smoke extraction finds ensure: 1, set: 1). Applying it changes nothing: line 120 stays as written.",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4456/fix-IuQ7eTws/unverified-1/verdict.json",
+      "remedyFiles": ["docs/requirements.md"]
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "out",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "Out of scope: ticket #4439 rules rewording the module's code comments and test names out of scope; the finding itself calls both wordings literally true, so it is shape, below the claim bar; recorded on the suggestion-band record.",
+      "issue": 4458,
+      "remedyFiles": ["plugin/scripts/label-map.mjs", "tests/label-map.test.mjs"]
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "Refuter refuted it: set --create --accept-suggestions then the first-ever ensure exits 0 without writing .fleet/labels.json, so the PR body's '(a first-ever `ensure` that exits 0 does)' is false in the set-first order; recorded on the suggestion-band record, and the PR body was corrected to match the doc fix.",
+      "issue": 4458,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4456/fix-IuQ7eTws/unverified-3/verdict.json"
+    }
+  ]
+}

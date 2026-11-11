@@ -1,0 +1,87 @@
+{
+  "pr": 4456,
+  "head": "2538263ede677420fb923f4b2c3e7f48c9fb264d",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "comments",
+      "state": "clean",
+      "line": "CWD-AUDIT: clean /Users/chris/dev/fleet-plugin (git status was not run; no files were written there; only reads in the snapshot and scratch dir.)"
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ?? docs/metrics/runs/2026-11-11T090131Z/closeout.json, ?? docs/metrics/runs/2026-11-11T090131Z/ledger.md, ?? docs/metrics/runs/2026-11-11T090131Z/phase0.json, ?? docs/metrics/runs/2026-11-11T090131Z/plugin-version. These are the controller's run-metrics files. This review wrote nothing there: every command chained a cd into the snapshot or the scratch dir."
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 4,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4456/run-DgD8ACJ0/snapshot-2538263e",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "docs/requirements.md",
+      "line": 102,
+      "claim": "The new parenthetical '(a first-ever `ensure` that exits 0 does)' is false when `set` has already written a valid cache. The first-ever `ensure` then exits 0 and writes nothing. install-and-smoke.sh runs exactly that order (`set` line, then `ensure` line, lines 286-295).",
+      "evidence": "`bash correctness/probe.sh` ran the copy's label-map.mjs against the smoke script's gh stub in a fresh git repo. Scenario B ran `set --create --accept-suggestions`, giving rc=0 and labels.json sha=22d5ddffd4a9 mtime=1794389291. It then slept 1.1s and ran the first-ever `ensure`, giving rc=0 with labels.json sha=22d5ddffd4a9 mtime=1794389291: unchanged, so nothing was written. Scenario C (no cache, every role live) ran `ensure`, giving rc=0 and labels.json written (sha=7ab204f2e3ac). That confirms the main clause 'writes when it derives the map'. Scenario A (fresh repo, GitHub's nine default labels) ran the first `ensure`, giving rc=3 and labels.json absent. In §2.4's own documented order (`ensure` first) the parenthetical holds, so this does not affect the warning or any acceptance criterion. It is only an overstatement for the set-first order.",
+      "suggested_fix": "Optional: drop the parenthetical, or narrow it to '(the first `ensure` in a repository with no `.fleet/labels.json` yet, when it exits 0, does)'.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/requirements.md",
+      "line": 120,
+      "claim": "The new colour wording '(with gh's default, random colour)' matches gh's behaviour, and every acceptance criterion of #4439 is met with no scope creep. Both §2.4 command lines are unchanged and still extract exactly once each.",
+      "evidence": "`gh label create --help` (gh 2.103.3) prints 'If a color isn't provided, a random one will be chosen.' The smoke extraction (PLUGIN_NAME=@feigi/fleet-ctl, ENTRY_RE and the awk §2.4 slice from install-and-smoke.sh:239-241) run on the copy's docs/requirements.md printed 'ensure: 1' and 'set: 1'. The diff has 2 hunks in docs/requirements.md only. The warning clause 'a commit made before `.fleet/` is ignored ... never untracks it' is kept verbatim at line 102. No action needed; this records the verified negative.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/label-map.mjs",
+      "line": 64,
+      "claim": "Untouched comments (label-map.mjs lines 64 and 656, and the test title at tests/label-map.test.mjs:990) still describe `gh label create <string>` as '(no colour)', while the edited requirements.md now says 'gh's default, random colour'; the two read as contradictory though both are literally true (the code passes no colour flag, so gh picks one).",
+      "evidence": "grep 'no colour' → label-map.mjs:64, :656, tests/label-map.test.mjs:990; code at label-map.mjs:~708 calls spawnGh(['label','create',...string]) with no colour argument.",
+      "suggested_fix": "Reword those comments to 'no colour argument passed (gh picks its default)'. The spec (docs/specs/2026-10-15-label-map.md:59, 'no colour is passed') is already accurate.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body: the claim that `ensure` writes .fleet/labels.json 'when it derives the map (a first-ever `ensure` that exits 0 does)' checks out, and so do 'two command lines untouched' and 'no Label map spec change'. No false factual assertion found in the PR body or commit message.",
+      "evidence": "label-map.mjs:639 ensureLabelMap calls writeLabelMap after derivation, but only on the non-uncertain path (line 637 returns code 3 first). diff touches only docs/requirements.md lines 102 and 120; the command lines are context lines only. The spec already says 'no colour is passed', so it needs no change.",
+      "suggested_fix": "None.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}
