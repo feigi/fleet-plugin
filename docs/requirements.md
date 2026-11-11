@@ -99,7 +99,7 @@ These stay literal strings in every repository:
 
 A repository whose tracker spells a role differently declares it in the `Label in our tracker` column of the triage-label table in `docs/agents/triage-labels.md` (the file `/setup-matt-pocock-skills` writes; the fleet only reads it). A role that neither the table nor the tracker's live labels settles is asked once, with a suggestion where one exists — the default when nothing else fits, and never a string that has vanished from the tracker; the answer is kept as fleet state, not written into the repository. A confirmed label the tracker lacks is created, but only on that confirmation.
 
-**Before the first run,** settle the roles nothing settles yet, so the run's phase 0 never stops on them. Run it from the repository's main checkout, once §2.5's `.gitignore` lines are in place: `set` writes `.fleet/labels.json`, and so does `ensure` when it derives the map (a first-ever `ensure` that exits 0 does), a commit made before `.fleet/` is ignored (for example `git add -A`) can include it, and ignoring it afterwards never untracks it.
+**Before the first run,** settle the roles nothing settles yet, so the run's phase 0 never stops on them. Run it from the repository's main checkout, once §2.5's `.gitignore` lines are in place: `set` writes `.fleet/labels.json`, and so does `ensure` when it derives the map, a commit made before `.fleet/` is ignored (for example `git add -A`) can include it, and ignoring it afterwards never untracks it.
 
 First, see what the first run would ask:
 
