@@ -64,7 +64,7 @@
 // FIT. After the cost guard wrote a guard, and only then, the Router's fit
 // (`ticket-router.mjs`'s fitTree) runs in-process over the working-tree TSVs
 // the guard just read and the guard just written, with the starting table
-// (`router-table.json` beside the scripts) as its prior and no commit. It
+// (`router-table.json` beside the scripts) as its prior. It
 // writes the Fit, `.fleet/router-fit.json`, through a temp file and a rename:
 // `computed_at`, `guard_computed_at` (the guard's own `computed_at`),
 // `guard` (the guard it used, as the router reads it: its `computed_at`,
@@ -341,7 +341,7 @@ export function writeFit(repo, written, { tablePath = DEFAULT_TABLE, packagePath
   const members = read(MEMBERS, parseMemberTsv);
   const verdicts = read(TIERS, parseTierOutcomes);
   const features = read(FEATURES, parseFeatures);
-  const { table, gate } = fitTree({ prior, features, members, verdicts, guard, commit: null, previous });
+  const { table, gate } = fitTree({ prior, features, members, verdicts, guard, previous });
   // The tree the gate grew is the one `route` will read it through.
   const valid = validateTable(table);
   if (valid instanceof Error) throw valid;
