@@ -1,0 +1,91 @@
+{
+ "head": "9e1a341d0b450ad467041e97d3d5c722712639c3",
+ "run": "run-zY9LLwnq",
+ "entries": [
+  {
+   "bucket": "survived",
+   "index": 0,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "charge": "false-claim"
+  },
+  {
+   "bucket": "survived",
+   "index": 1,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "charge": "none",
+   "chargeReason": "defect-outside-acceptance"
+  },
+  {
+   "bucket": "survived",
+   "index": 2,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "charge": "none",
+   "chargeReason": "defect-outside-acceptance"
+  },
+  {
+   "bucket": "survived",
+   "index": 3,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "charge": "none",
+   "chargeReason": "defect-outside-acceptance"
+  },
+  {
+   "bucket": "unverified",
+   "index": 0,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4457/fix-VH7y0NaK/u0/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 1,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4457/fix-VH7y0NaK/u1/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 2,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4457/fix-VH7y0NaK/u2/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 3,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4457/fix-VH7y0NaK/u3/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 4,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4457/fix-VH7y0NaK/u4/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 5,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "issue": 4459,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4457/fix-VH7y0NaK/u5/verdict.json",
+   "reason": "refuted: the finding reports no defect (checked and found accurate), so there is nothing to apply; its refuter read the cited lines at the pinned head and returned refuted=true. Filed under Refuted on the closed suggestion-band record #4459."
+  }
+ ]
+}

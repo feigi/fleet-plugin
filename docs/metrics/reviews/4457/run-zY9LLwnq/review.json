@@ -1,0 +1,212 @@
+{
+  "pr": 4457,
+  "head": "9e1a341d0b450ad467041e97d3d5c722712639c3",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: rebase-check job (pull_request-only branch-currency assertion, not meaningful in a worktree of origin/main); proc-macos job (node --test tests/proc.test.mjs on macOS) (subsumed by the full suite on this macOS host); smoke-omp job (needs pinned omp installed via bun, absent here); install-and-smoke job (needs pinned omp installed via bun and network, absent here).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "tests",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — untracked: docs/metrics/runs/2026-11-11T090131Z/{closeout.json,ledger.md,phase0.json,plugin-version}. I did not create these. They look like the controller's run-metrics output."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — `?? docs/metrics/runs/2026-11-11T090131Z/closeout.json`, `?? docs/metrics/runs/2026-11-11T090131Z/ledger.md`, `?? docs/metrics/runs/2026-11-11T090131Z/phase0.json`, `?? docs/metrics/runs/2026-11-11T090131Z/plugin-version` (I wrote nothing there; every command of mine ran under the scratch dir or the copy)"
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ?? docs/metrics/runs/2026-11-11T090131Z/closeout.json, ledger.md, phase0.json, plugin-version (untracked, not created by me; I wrote nothing there)"
+    }
+  ],
+  "counts": {
+    "survived": 4,
+    "refuted": 0,
+    "unverified": 6,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4457/run-zY9LLwnq/snapshot-9e1a341d",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 338,
+      "claim": "The tracer misses a compound reassignment: on the real ticketless.mjs, `let READ_TIMEOUT_MS = 60_000; READ_TIMEOUT_MS += Number(process.env.TICKETLESS_EXTRA ?? 0) * 1000;` lengthens the gh bound from the environment and the guard suite stays green. The tracer's own doc says it follows 'a constant or reassigned variable', and that claim fails here.",
+      "evidence": "Mutated copy/plugin/scripts/ticketless.mjs line 56 as stated, then ran `node --test --test-reporter=tap tests/gh-spawn-bound.test.mjs` -> exit 0, `# pass 9`, `# fail 0`, then reverted. The same shape in a synthetic source via probe.mjs (`let T = 20_000;\\nT += Number(process.env.SLOW ?? 60) * 1000;\\nspawnSync(\"gh\", [\"x\"], { timeout: T });`) -> `{\"b\":true,\"r\":[]}`. Control `const T = <env>` -> `r:[\"reads process.env.SLOW\"]`. Cause: declRefs' first form `(?<![\\w$.])${e}\\s*=(?![=>])` needs `=` right after the name, so `+=`, `*=`, `||=` and `??=` are never collected.",
+      "suggested_fix": "Make declRefs' assignment form accept an optional compound operator before `=` (e.g. `(?:[-+*/%&|^]|\\*\\*|<<|>>>?|&&|\\|\\||\\?\\?)?=`). Add a refused self-test for `T += <env>`.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Reproduced in my own copy. I changed plugin/scripts/ticketless.mjs line 56 to `let READ_TIMEOUT_MS = 60_000; READ_TIMEOUT_MS += Number(process.env.TICKETLESS_EXTRA ?? 0) * 1000;`. Then I ran `env -u FORCE_COLOR node --test --test-reporter=tap tests/gh-spawn-bound.test.mjs`. Result: exit 0, tests 9, pass 9, fail 0, so the guard stays green with an env-driven timeout. I reverted the mutation. I did not run the synthetic probe or the `const T = <env>` control. I also did not run `./agent-test`; the claim concerns a green result, so there was no red to score. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — untracked docs/metrics/runs/2026-11-11T090131Z/{closeout.json,ledger.md,phase0.json,plugin-version}. These are not mine: I wrote nothing in that directory.",
+          "inconclusive": false
+        },
+        {
+          "refuted": false,
+          "reason": "Reproduced in my own measure-copy (exit 0, install true). I mutated plugin/scripts/ticketless.mjs line 56 to `let READ_TIMEOUT_MS = 60_000; READ_TIMEOUT_MS += Number(process.env.TICKETLESS_EXTRA ?? 0) * 1000;` (line printed back to confirm it applied). I then ran `env -u FORCE_COLOR node --test --test-reporter=tap tests/gh-spawn-bound.test.mjs`, which gave exit 0, tests 9, pass 9, fail 0. So the guard suite stays green with an env-driven compound reassignment, as claimed. I reverted the file; the copy's git status was clean. I did not re-run the synthetic probe.mjs or the `const T = <env>` control. I found nothing elsewhere that catches this, but I only ran this one test file, not the full suite. The claim is therefore a real gap against the tracer's 'reassigned variable' doc. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ?? docs/metrics/runs/2026-11-11T090131Z/{closeout.json,ledger.md,phase0.json,plugin-version}. These untracked files are not from my work; I only wrote in the scratch dir.",
+          "counter_evidence": ""
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 388,
+      "claim": "An env read through a renamed import of node:process escapes the tracer. On the real ticketless.mjs, `import { env as ENV } from \"node:process\"; const READ_TIMEOUT_MS = Number(ENV.TICKETLESS_TIMEOUT ?? 60) * 1000;` passes the guard. That contradicts the ticket's 'whatever the variable is called'. The same holds for `import proc from \"node:process\"` and for `globalThis.process.env`.",
+      "evidence": "Real-script mutant (aliased env import) with `node --test --test-reporter=tap tests/gh-spawn-bound.test.mjs` -> exit 0, `# pass 9`, `# fail 0`, then reverted. In probe.mjs: `import { env as ENV } from \"node:process\"` -> `r:[]`; `import proc from \"node:process\"; ... proc.env.SLOW` -> `r:[]`; `Number(globalThis.process.env.SLOW)` -> `r:[]`. Cause: viaId special-cases only the literal id `env`. The `process` match in judge is `(?<![\\w$.])`, so a `process` preceded by `.` is skipped.",
+      "suggested_fix": "Bind every local name imported from `node:process`/`process` (named with `as`, default, or namespace) to `process` or `process.env`. Also treat `globalThis.process` as `process`. Add those shapes to the refused self-tests.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Confirmed by running. In my own copy (measure-copy exit 0) of plugin/scripts/ticketless.mjs: positive control `Number(process.env.TICKETLESS_TIMEOUT ?? 60)*1000` -> `node --test --test-reporter=tap tests/gh-spawn-bound.test.mjs` exit-run shows `not ok 2 - no gh spawn's timeout is reachable from the environment`, pass 8 fail 1. The mutant with a real `import { env as ENV } from \"node:process\"` and `Number(ENV.TICKETLESS_TIMEOUT ?? 60)*1000` -> `# pass 9`, `# fail 0` (guard bypassed). The test source (line 389) special-cases only `id === \"env\"`, which matches the claimed cause. Did not separately run the `import proc` and `globalThis.process.env` variants. Mutant reverted. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — untracked docs/metrics/runs/2026-11-11T090131Z/{closeout.json,ledger.md,phase0.json} (run metrics, not from me; I wrote nothing there)."
+        },
+        {
+          "refuted": false,
+          "reason": "Confirmed by running in my own measure-copy (exit 0, head 64a01cb). Mutating line 56 of plugin/scripts/ticketless.mjs to `import { env as ENV } from \"node:process\"; const READ_TIMEOUT_MS = Number(ENV.TICKETLESS_TIMEOUT ?? 60) * 1000;` gave, from `node --test --test-reporter=tap tests/gh-spawn-bound.test.mjs`, `# tests 9 / # pass 9 / # fail 0`. The guard did not trip. Positive control: replacing line 56 with plain `process.env.TICKETLESS_TIMEOUT` gave `not ok 2 - no gh spawn's timeout is reachable from the environment` and `# fail 1`. So the tracer catches a direct process.env read but misses the renamed import. This matches the diff, where viaId special-cases only the literal id `env`. I did not rerun the `import proc` and `globalThis.process.env` variants. Both rest on the lookbehind in judge, which I read in the diff. Not handled elsewhere. Both mutants were reverted with git checkout. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — only untracked docs/metrics/runs/2026-11-11T090131Z/{closeout.json,ledger.md,phase0.json,plugin-version}, which I did not create.",
+          "inconclusive": false
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 393,
+      "claim": "Mutating an options object after it is declared escapes the tracer: on the real ticketless.mjs, `opts.timeout = Number(process.env.TICKETLESS_TIMEOUT ?? 60) * 1000;` placed after `const opts = { …, timeout: READ_TIMEOUT_MS, … }` passes the guard.",
+      "evidence": "Inserted that line after ticketless.mjs:78 in the copy and ran `node --test --test-reporter=tap tests/gh-spawn-bound.test.mjs` -> exit 0, `# pass 9`, `# fail 0`, then reverted. Synthetic probes in probe.mjs: `OPTS.timeout = <env>` -> `r:[]`; `Object.assign(OPTS, { timeout: <env> })` -> `r:[]`; `{ timeout: 20_000, ...extra() }` where extra() returns `{ timeout: <env> }` -> `r:[]` (the later spread overrides the literal). Cause: keyValues reads only the object literal in the declaration. It returns [] for a spread whose operand is a call rather than an identifier, and declRefs never collects `X.timeout =` writes.",
+      "suggested_fix": "In keyValues, when tracing identifier X, also collect `X.<key> =` and `X[\"<key>\"] =` writes and `Object.assign(X, …)` sources. Treat a spread of a non-identifier expression as unresolvable: refuse it, or judge the whole expression.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Confirmed. In my own copy, I inserted `opts.timeout = Number(process.env.TICKETLESS_TIMEOUT ?? 60) * 1000;` after the `const opts = {…, timeout: READ_TIMEOUT_MS, …}` line (plugin/scripts/ticketless.mjs:78) and ran `env -u FORCE_COLOR node --test --test-reporter=tap tests/gh-spawn-bound.test.mjs`. It exited 0 with `# tests 9`, `# pass 9`, `# fail 0`, `# cancelled 0`, so the guard did not catch the mutation. I reverted it afterwards. I did not run the synthetic Object.assign and spread probes. I ran the narrowed test file directly instead of `./agent-test`, and it passed, so this is a green run of the mutant rather than a red. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — only untracked docs/metrics/runs/2026-11-11T090131Z/{closeout.json,ledger.md,phase0.json,plugin-version}. They pre-exist the run and are not from my edits, since I only wrote in the scratch copy."
+        },
+        {
+          "refuted": false,
+          "reason": "Confirmed by running. Copy built (exit 0). Baseline: `node --test --test-reporter=tap tests/gh-spawn-bound.test.mjs` → exit 0, tests 9, pass 9, fail 0. I inserted `opts.timeout = Number(process.env.TICKETLESS_TIMEOUT ?? 60) * 1000;` after line 78 of plugin/scripts/ticketless.mjs, right after `const opts = {… timeout: READ_TIMEOUT_MS …}`. The same command then gave exit 0, tests 9, pass 9, fail 0, so the guard does not catch it. I reverted the mutant with git checkout and the baseline stayed green. I did not check the Object.assign or spread-from-call variants, and I found no other check that covers the mutation. This is a guard gap, not a kill, so there is no red line. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — only untracked docs/metrics/runs/2026-11-11T090131Z/* files (closeout.json, ledger.md, phase0.json, plugin-version). I did not write them; all my writes were in the scratch copy."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 358,
+      "claim": "The cycle guard `if (seen.has(key)) return [];` in the tracer's viaId (documented as 'a variable that feeds itself ends the walk') is killed by no test: disabling it leaves all 9 tests green, though a self-referential source overflows the stack.",
+      "evidence": "red: ./agent-test tests/gh-spawn-bound.test.mjs (mutant `if (false) return [];` plus an added probe test 'PROBE cycle terminates' with `function s(){return s()+1}` timeout: s()) → exit 1, fail 1 incl PROBE cycle terminates (RangeError: Maximum call stack size exceeded); baseline: same command, unmutated + probe → exit 0, tests 11 pass 11, PROBE cycle terminates pass. Without the probe the mutant alone ran exit 0 with no failing test (survived). Note: the red is from my added probe, not an existing test.",
+      "suggested_fix": "Add a case to the 'refuses/accepts' tables with a self-referential variable or recursive helper (e.g. `function s(){return s()+1}` as timeout) asserting the sweep terminates and gives the expected verdict.",
+      "dimension": "tests",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Claim holds. Copy built (exit 0, receipt kind built). Mutant `if (false) return [];` at line 358 alone: tests 9 pass 9 fail 0, so no existing test kills it. I added a probe, PROBE2, with self-referential sources passed as `verdicts({\"x.mjs\":MOD(s)})` (my first probe passed the wrong input shape, so it did not exercise the code and passed under the mutant). With the mutant, PROBE2 fails with RangeError: Maximum call stack size exceeded. Unmutated, the same probe passes. The red comes from the added probe, not an existing test. red: ./agent-test tests/gh-spawn-bound.test.mjs → exit 0 (grep pipeline, so the agent-test exit code was not captured), tests 11 fail 1 incl PROBE2 (RangeError: Maximum call stack size exceeded); baseline: same command, guard restored → tests 11 pass 11 fail 0, PROBE2 pass, V [true]x4. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — untracked docs/metrics/runs/2026-11-11T090131Z/{closeout.json,ledger.md,phase0.json,plugin-version}. I did not create these. I only ran `git status` there and wrote nothing in that directory."
+        },
+        {
+          "refuted": false,
+          "reason": "Confirmed in my own copy. Mutant `if (false) return [];` at line 358 left all 9 existing tests green (exit 0, tests 9, pass 9), so no existing test kills the guard. I found no other cycle handling in the test file. With a probe test added (`function s(){return s()+1}` timeout: s()), the mutant fails the probe with RangeError: Maximum call stack size exceeded. With the guard restored, the probe passes. The probe is mine, not an existing test, so the claim is about a gap in coverage, and it holds. red: ./agent-test tests/gh-spawn-bound.test.mjs (mutant + PROBE) → fail 1 incl PROBE cycle terminates (tests 10, pass 9); baseline: same command, guard restored → pass 10, PROBE cycle terminates pass. The `./agent-test` runs were completed runs, with FORCE_COLOR unset. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — untracked docs/metrics/runs/2026-11-11T090131Z/{closeout.json,ledger.md,phase0.json}. I did not create these; all my writes were in the scratch copy."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 419,
+      "claim": "The Math.min exemption counts any argument the environment does not reach as a ceiling, including `Infinity`. So `timeout: Math.min(Infinity, Number(process.env.SLOW) * 1000)` passes both the bound check and the env check, while `timeout: Infinity` alone is refused. The same happens with an identifier the tracer cannot resolve, such as a parameter of a function passed as a callback.",
+      "evidence": "probe.mjs: `Math.min(Infinity, <env>)` -> `{\"b\":true,\"r\":[]}`. `function f(cap) { … timeout: Math.min(cap, <env>) }\\n[1].forEach(f);` -> `{\"b\":true,\"r\":[]}`. `function f(t) { … timeout: t }\\n[<env>].forEach(f);` -> `r:[]`. Unresolvable identifiers come out of viaId as [], so they read as env-free.",
+      "suggested_fix": "Accept a Math.min ceiling only when it resolves to a finite numeric literal or constant. Treat an identifier that resolves to nothing (and is not a known global such as Number or Math) as unknown, not as clean.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 337,
+      "claim": "declRefs ignores scope and judge expands whole member-access bases, so env reads that never reach the gh timeout can still trip the guard. This contradicts the ticket's 'Reads that never reach a gh timeout (HOME, …) must not trip it'. Current main has no such case (0 of 42 real spawns are refused).",
+      "evidence": "probe2.mjs: `function wait() { const ms = Number(process.env.POLL_MS); … }` beside `function read() { const ms = 20_000; return spawnSync(\"gh\", [\"x\"], { timeout: ms }); }` -> `r:[\"reads process.env.POLL_MS\"]`. `const CFG = { home: process.env.HOME, timeoutMs: 20_000 }; spawnSync(\"gh\", [\"x\"], { timeout: CFG.timeoutMs });` -> `r:[\"reads process.env.HOME\"]`. Real tree: `real 42 0` (spawns, reaching).",
+      "suggested_fix": "Limit declRefs to bindings visible from the read's enclosing functions. For `X.key`, run keyValues(X, key) instead of judging all of X. Add both shapes to the accepted self-tests.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 415,
+      "claim": "The ghBudget exemption is decided by callee name only. A script that declares its own `ghBudget(s, o)` that returns the override, unshortened, is accepted, and the env read in its second argument is never judged.",
+      "evidence": "probe.mjs: `function ghBudget(s, o) { return Number(o) * 1000; }\\nspawnSync(\"gh\", [\"x\"], { timeout: ghBudget(20, process.env.SLOW) });` -> `{\"b\":true,\"r\":[]}`.",
+      "suggested_fix": "Grant the exemption only when `ghBudget` resolves to an import of arg.mjs's ghBudget (mod.imports.get(\"ghBudget\")?.module === \"./arg.mjs\") and is not defined locally.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 419,
+      "claim": "Three tracer details survive mutation: the `hide[m.index] === \" \"` already-hidden guard (nested ghBudget/Math.min), the `(?<![\\w$.])` lookbehind on the Math.min/ghBudget matcher, and the `seen.delete(key)` in finally (so a value reached twice via sibling paths is not wrongly cut).",
+      "evidence": "mutants (guard removed; lookbehind changed to (?<![\\w$]); `finally { seen.delete(key); }` → `finally { }`) each: ./agent-test tests/gh-spawn-bound.test.mjs → exit 0, no failing test. Unmutated baseline exit 0, 9/9 pass. Inconclusive as to impact; I did not construct inputs that distinguish them.",
+      "suggested_fix": "Add accept/refuse cases: `x.Math.min(...)`/`obj.ghBudget(...)` member calls, nested min-in-ghBudget, and a value reached twice through sibling arguments.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 84,
+      "claim": "The tracer() header comment names ghBudget's parameters `seconds` and `override`, but arg.mjs declares `ghBudget(defaultSeconds, override)`.",
+      "evidence": "grep of plugin/scripts shows arg.mjs:326 `export function ghBudget(defaultSeconds, override)`. The diff comment reads `arg.mjs's ghBudget(seconds, override)` and `(its seconds is still judged)`. The behaviour described is right: judge() judges args[0] and skips the override. Only the name is off, and the PR body repeats it.",
+      "suggested_fix": "Write `ghBudget(defaultSeconds, override)`, or say 'its first argument is still judged'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "claim": "Checked and found accurate: the PR body's mutant location, the closeout and ghBudget references, the 9205 pass count, and the comment/test cross-references. No falsified factual claims found in comments or messages.",
+      "evidence": "ticketless.mjs:56 is `const READ_TIMEOUT_MS = 60_000` and :82 is the `execFileSync(\"gh\", [\"pr\",\"view\",...], opts)` call, matching the body's `ticketless.mjs:82`. closeout.mjs:657 is `const budget = () => Math.min(NETWORK_TIMEOUT_MS, Math.max(1, ...))`, matching the comment and the accepted-case shape. Comments that reference the tracer, \"#4431 bounded\" and the *_GH_TIMEOUT pin test match the code; the pin test is kept as the body says. A grep for gh-spawn-bound and the old test name found references only in docs/metrics review artifacts, not in comments elsewhere in the tree.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}
