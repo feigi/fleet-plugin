@@ -194,7 +194,7 @@ function botShapeProblem(cfg) {
   for (const rule of cfg.packageRules ?? []) {
     if (!isPlainObject(rule)) return `${BOT}: a \`packageRules\` entry must be an object, got ${JSON.stringify(rule)}`;
   }
-  for (const type of [...Object.keys(SEGMENT_OF), "rollback"]) {
+  for (const type of [...Object.keys(SEGMENT_OF), ...DIGEST_TYPES, "rollback"]) {
     if (cfg[type] !== undefined && !isPlainObject(cfg[type])) {
       return `${BOT}: top-level \`${type}\` override must be an object, got ${JSON.stringify(cfg[type])}`;
     }
@@ -442,6 +442,18 @@ test("enabledManagers without github-actions reds, naming the bot config", () =>
     BOT,
     /enabledManagers is/,
   );
+});
+
+test("a top-level digest or pinDigest override that is not an object reds, naming the bot config", () => {
+  for (const type of DIGEST_TYPES) {
+    assertBroken(
+      withBot((cfg) => {
+        cfg[type] = "x";
+      }),
+      BOT,
+      new RegExp(`top-level \`${type}\` override must be an object`),
+    );
+  }
 });
 
 test("each update type on a rule of its own, with the digest types labelled and automerged, stays green", () => {

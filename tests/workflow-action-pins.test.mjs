@@ -2,9 +2,9 @@
 // and it can only do that quietly — one PR, one dependency, automerged when
 // the change is not a major — if each ref is an exact commit the bot rewrites
 // and a comment it keeps in step. Two properties of the workflow files, read
-// here as DATA with targeted patterns (this repo has no YAML dependency; whole
-// -line `#` comments are blanked first so a commented-out ref cannot satisfy
-// or break a pattern):
+// here as DATA with targeted patterns (this repo has no YAML dependency; a
+// commented-out ref is never read, since a line counts only when `uses:` or
+// `- uses:` opens it):
 //
 //   (a) every `uses:` is `owner/repo@<40-hex SHA> # vX.Y.Z`. A tag ref
 //       (`@v5`) moves under the workflow with no commit recording it — the
@@ -33,15 +33,11 @@ import { join } from "node:path";
 const ROOT = join(import.meta.dirname, "..");
 const WORKFLOWS = ".github/workflows";
 const CI = `${WORKFLOWS}/ci.yml`;
+// GitHub Actions runs a workflow file named `.yml` or `.yaml`, so both are read.
+const WORKFLOW_FILE = /\.ya?ml$/;
 
 const SHA = /^[0-9a-f]{40}$/;
 const VERSION_COMMENT = /^v\d+\.\d+\.\d+$/;
-
-const code = (text) =>
-  text
-    .split("\n")
-    .map((line) => (/^\s*#/.test(line) ? "" : line))
-    .join("\n");
 
 // `- uses: ref # comment`, `uses: "ref"` — the value, then an optional
 // trailing comment. A `uses:` buried in a `run: |` block scalar is shaped the
@@ -50,7 +46,7 @@ const USES = /^\s*(?:-\s+)?uses:\s*(["']?)([^\s"'#]+)\1[ \t]*(?:#[ \t]*(.*?)[ \t
 
 function usesOf(text) {
   const found = [];
-  for (const line of code(text).split("\n")) {
+  for (const line of text.split("\n")) {
     const m = line.match(USES);
     if (!m) continue;
     const [, , value, comment] = m;
@@ -97,7 +93,7 @@ function pinProblems(files) {
 
 const REAL = Object.fromEntries(
   readdirSync(join(ROOT, WORKFLOWS))
-    .filter((name) => name.endsWith(".yml"))
+    .filter((name) => WORKFLOW_FILE.test(name))
     .map((name) => [`${WORKFLOWS}/${name}`, readFileSync(join(ROOT, WORKFLOWS, name), "utf8")]),
 );
 
@@ -128,6 +124,11 @@ test("every workflow in the tree pins its actions by SHA with a version comment,
   assertClean(REAL);
 });
 
+test("a `.yaml` workflow is read as well as a `.yml` one, and nothing else is", () => {
+  for (const name of ["ci.yml", "extra.yaml"]) assert.ok(WORKFLOW_FILE.test(name), `${name} is not read`);
+  for (const name of ["README.md", "notes.yml.bak"]) assert.ok(!WORKFLOW_FILE.test(name), `${name} is read`);
+});
+
 test("a tag ref in any workflow reds, naming the file and the ref", () => {
   for (const file of Object.keys(REAL)) {
     const text = REAL[file];
@@ -147,6 +148,19 @@ test("release.yml at a SHA ci.yml does not use reds, naming release.yml and the 
   const sha = checkoutRef(REAL[RELEASE]);
   const other = "0".repeat(40);
   assertBroken({ ...REAL, [RELEASE]: swap(REAL[RELEASE], sha, other) }, RELEASE, new RegExp(`actions/checkout@${other}\` is not the ref`));
+});
+
+test("ci.yml using one action at two refs: another workflow at the earlier of them stays green", () => {
+  const later = "c".repeat(40);
+  assertClean({ ...REAL, [CI]: `${REAL[CI]}\n      - uses: actions/checkout@${later} # v5.0.0\n` });
+});
+
+test("a `uses:` that is not its step's first key is read too: a tag ref there reds", () => {
+  assertBroken(
+    { ...REAL, [CI]: `${REAL[CI]}\n      - name: a key before uses\n        uses: actions/checkout@v5\n` },
+    CI,
+    /`uses: actions\/checkout@v5` is not pinned to a 40-hex commit SHA/,
+  );
 });
 
 test("an action used outside ci.yml but not in ci.yml reds", () => {
