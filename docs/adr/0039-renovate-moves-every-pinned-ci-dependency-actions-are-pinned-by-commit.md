@@ -29,7 +29,7 @@ Measured on `origin/main` at `24913363`:
    - `major`: labelled `major`, never automerged.
    - `minor`: labelled `minor`, automerged.
    - `patch`, `digest`, `pinDigest`: labelled `patch`, automerged.
-   - Unchanged: schedule, `minimumReleaseAge`, `internalChecksFilter`, `platformAutomerge`, `rebaseWhen`, `dependencyDashboard: false`.
+   - Unchanged: `schedule`, `timezone`, `minimumReleaseAge`, `internalChecksFilter`, `automerge`, `platformAutomerge`, `rebaseWhen`, `dependencyDashboard: false`.
 7. **One PR per dependency.** No grouping. Every merged PR still mints a release.
 8. **No new drift check.** One Renovate app moves every pin, and `pin-drift.yml`'s `.nvmrc` bound already goes red when that app stops. A per-pin bound would false-red on a pin whose upstream simply ships nothing.
 
