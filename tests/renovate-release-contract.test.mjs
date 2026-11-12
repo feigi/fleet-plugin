@@ -31,11 +31,16 @@
 //
 // WHICH UPDATE TYPES THE BOT CAN EMIT. Renovate's schema (44.115.6, fetched
 // 2026-09-25) names ten: major, minor, patch, pin, pinDigest, digest,
-// lockFileMaintenance, rollback, bump, replacement. With `enabledManagers:
-// ["nvm"]` over an exact `.nvmrc` (ADR 0010) the `node-version` datasource
-// yields only the semver three — no digests, no lock file, no range to pin or
-// bump — and `rollback` only once `rollbackPrs` (default false) is opted into.
-// That derivation holds only for the nvm manager, so a widened
+// lockFileMaintenance, rollback, bump, replacement. `enabledManagers` is
+// ["nvm", "github-actions", "custom.regex"] (ADR 0010, ADR 0039):
+//   - `nvm` over an exact `.nvmrc` (the `node-version` datasource) and the
+//     regex manager over exact versions in `.github/workflows/*.yml` yield only
+//     the semver three — no digests, no lock file, no range to pin or bump;
+//   - `github-actions` with `pinDigests: true` adds `digest` (a SHA-pinned
+//     action whose tag moved) and `pinDigest` (an action added later with a
+//     tag ref) on top of the semver three;
+//   - `rollback` only once `rollbackPrs` (default false) is opted into.
+// That derivation holds for exactly these three managers, so any other
 // `enabledManagers` reds here rather than silently checking too few types.
 //
 // HOW THE BOT CONFIG RESOLVES, per Renovate's own source and docs rather than
@@ -77,6 +82,12 @@ const RELEASE = ".github/workflows/release.yml";
 // Renovate's vocabulary on one side, release.yml's segment variables on the
 // other: the size a semver update type must be announced as.
 const SEGMENT_OF = { major: "MAJOR", minor: "MINOR", patch: "PATCH" };
+
+// The bot's update types that carry no size of their own, so SEGMENT_OF does
+// not name them: all the contract asks of them is one release label the gate
+// accepts, and automerge.
+const DIGEST_TYPES = ["digest", "pinDigest"];
+const ENABLED_MANAGERS = ["nvm", "github-actions", "custom.regex"];
 
 const code = (text) =>
   text
@@ -160,7 +171,7 @@ function resolveBot(cfg, type) {
 }
 
 function emittableTypes(cfg) {
-  const types = Object.keys(SEGMENT_OF);
+  const types = [...Object.keys(SEGMENT_OF), ...DIGEST_TYPES];
   const rollback = cfg.rollbackPrs === true || (cfg.packageRules ?? []).some((r) => r.rollbackPrs === true);
   return rollback ? [...types, "rollback"] : types;
 }
@@ -213,6 +224,15 @@ function contractProblems({ bot, gate, release }) {
       `${BOT}: \`major\` updates are automerged — a major must wait for a human, so the rule for \`major\` needs \`"automerge": false\``,
     );
   }
+  // The other half of the same rule: only a major waits for a human. Like the
+  // check above it needs `cfg` alone, so it runs before the workflows parse.
+  for (const type of emittableTypes(cfg)) {
+    if (type !== "major" && !resolveBot(cfg, type).automerge) {
+      problems.push(
+        `${BOT}: \`${type}\` updates are not automerged — only a major waits for a human, so \`${type}\` needs \`"automerge": true\` (inherited from the top level or set on its rule)`,
+      );
+    }
+  }
 
   const g = readGate(gate, problems);
   const r = readRelease(release, problems);
@@ -224,9 +244,9 @@ function contractProblems({ bot, gate, release }) {
     );
   }
 
-  if (JSON.stringify(cfg.enabledManagers) !== JSON.stringify(["nvm"])) {
+  if (JSON.stringify(cfg.enabledManagers) !== JSON.stringify(ENABLED_MANAGERS)) {
     problems.push(
-      `${BOT}: enabledManagers is ${JSON.stringify(cfg.enabledManagers)}, not ["nvm"] — the update types this test checks were derived for the nvm manager alone, so a new manager's update types (digest, pin, …) would go unchecked; extend emittableTypes before widening it`,
+      `${BOT}: enabledManagers is ${JSON.stringify(cfg.enabledManagers)}, not ${JSON.stringify(ENABLED_MANAGERS)} — the update types this test checks were derived for exactly these managers, so a different set could emit types that go unchecked; re-derive emittableTypes before changing it`,
     );
   }
 
@@ -372,7 +392,67 @@ test("the same contract expressed through addLabels and update-type objects stay
       cfg.major = { automerge: false, addLabels: ["major"] };
       cfg.packageRules = [
         { matchUpdateTypes: "minor", addLabels: ["minor"] },
-        { matchUpdateTypes: ["patch"], addLabels: ["patch"] },
+        { matchUpdateTypes: ["patch", "digest", "pinDigest"], addLabels: ["patch"] },
+      ];
+    }),
+  );
+});
+
+test("the types the github-actions manager adds are checked: a digest with no release label reds", () => {
+  assertBroken(
+    withBot((cfg) => {
+      ruleFor(cfg, "patch").matchUpdateTypes = ["patch", "pinDigest"];
+    }),
+    BOT,
+    /`digest` updates get no release label/,
+  );
+});
+
+test("a digest or pinDigest update that is not automerged reds, naming the bot config", () => {
+  for (const type of ["digest", "pinDigest"]) {
+    assertBroken(
+      withBot((cfg) => {
+        const rule = ruleFor(cfg, type);
+        rule.matchUpdateTypes = rule.matchUpdateTypes.filter((t) => t !== type);
+        cfg.packageRules.push({ matchUpdateTypes: [type], labels: ["patch"], automerge: false });
+      }),
+      BOT,
+      new RegExp(`\`${type}\` updates are not automerged`),
+    );
+  }
+});
+
+test("only a major waits for a human: a minor or patch that is not automerged reds", () => {
+  for (const type of ["minor", "patch"]) {
+    assertBroken(
+      withBot((cfg) => {
+        ruleFor(cfg, type).automerge = false;
+      }),
+      BOT,
+      new RegExp(`\`${type}\` updates are not automerged`),
+    );
+  }
+});
+
+test("enabledManagers without github-actions reds, naming the bot config", () => {
+  assertBroken(
+    withBot((cfg) => {
+      cfg.enabledManagers = cfg.enabledManagers.filter((m) => m !== "github-actions");
+    }),
+    BOT,
+    /enabledManagers is/,
+  );
+});
+
+test("each update type on a rule of its own, with the digest types labelled and automerged, stays green", () => {
+  assertClean(
+    withBot((cfg) => {
+      cfg.packageRules = [
+        { matchUpdateTypes: ["major"], automerge: false, labels: ["major"] },
+        { matchUpdateTypes: ["minor"], labels: ["minor"] },
+        { matchUpdateTypes: ["patch"], labels: ["patch"] },
+        { matchUpdateTypes: ["digest"], labels: ["patch"], automerge: true },
+        { matchUpdateTypes: ["pinDigest"], labels: ["patch"] },
       ];
     }),
   );

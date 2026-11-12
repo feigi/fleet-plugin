@@ -49,7 +49,7 @@ jobs:
       # Full history: a shallow clone would date the pin to the checkout itself
       # and read every stall as fresh. The script refuses one (exit 2), so a
       # lost fetch-depth turns this red rather than silently green.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
           persist-credentials: false
