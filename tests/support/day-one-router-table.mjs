@@ -22,7 +22,6 @@ const deepFreeze = (x) => {
 
 export const DAY_ONE_TABLE = deepFreeze({
   window_start: null,
-  fitted_commit: null,
   n_rows: 0,
   cells: ["slow-high", "task-high", "smol-high"],
   burn_in: true,
