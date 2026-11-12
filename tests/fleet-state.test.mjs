@@ -378,7 +378,7 @@ test("writeState: `applied` is written only by the tick, and survives a heartbea
   // merge pass it already reaped after.
   const dir = mkdtempSync(join(tmpdir(), "fleet-state-applied-"));
   const path = join(dir, "heartbeat.json");
-  const applied = { run: 1_700_000_000_000, reapAfter: [1, 3] };
+  const applied = { run: 1_700_000_000_000, reapAfter: [1, 3], reapAfterPrs: [7, 9] };
   writeFileSync(path, JSON.stringify({ quiet: 2, applied, note: "not ours" }));
   const prev = readState(path, "fleet-state-test");
   assert.deepEqual(prev.applied, applied);
@@ -420,6 +420,10 @@ test("readState: `applied` is read against a run or not at all; a junk entry cos
   assert.deepEqual(read({ run: 5, reapAfter: [], sweptAfter: ["fix-pr-7", "", 3, null, "finisher-pr-7"] }).applied, { run: 5, reapAfter: [], sweptAfter: ["fix-pr-7", "finisher-pr-7"] });
   for (const junk of [["", 3, null], "fix-pr-7", []]) {
     assert.deepEqual(read({ run: 5, reapAfter: [1], sweptAfter: junk }).applied, { run: 5, reapAfter: [1] }, `sweptAfter ${JSON.stringify(junk)} leaves no key`);
+  }
+  assert.deepEqual(read({ run: 5, reapAfter: [], reapAfterPrs: [7, 0, -2, 1.5, "3", null, 9] }).applied, { run: 5, reapAfter: [], reapAfterPrs: [7, 9] });
+  for (const junk of [[0, "3", null], 7, []]) {
+    assert.deepEqual(read({ run: 5, reapAfter: [1], reapAfterPrs: junk }).applied, { run: 5, reapAfter: [1] }, `reapAfterPrs ${JSON.stringify(junk)} leaves no key`);
   }
   assert.equal(read("junk").quiet, 3, "a junk `applied` costs the streak beside it");
   rmSync(dir, { recursive: true, force: true });

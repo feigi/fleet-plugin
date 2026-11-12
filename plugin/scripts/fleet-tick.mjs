@@ -86,7 +86,15 @@
 //             holds every dispatching row, ahead of the main-checkout reason;
 //             it never refuses the tick. A step's `drift` or `unanswered` is
 //             advice, named on the line and holding nothing. The receipt's
-//             `session` fills the tier hold's step.
+//             `session` fills the tier hold's step. Its `merge` says whether
+//             the run's merge bot merges (true when it records none) and is
+//             read from the receipt alone, never from a flag: with it off the
+//             merge-bot row prints `IDLE (merging off)` whatever the queue
+//             holds, the in-flight hold reads `HOLD (in-flight n/B, awaiting
+//             human merge)`, a draining run is over with only
+//             `ready-to-merge` PRs open (one conflicting, or on a conflict
+//             hold, still holds it), and `--apply` reaps after each PR the
+//             ledger tracks that gh reads MERGED.
 //   guard     `.fleet/cost-guard.json` beside the shortlist, pr-cost.mjs
 //             --guard's verdict on the implementer cells. Printed as the
 //             `router` row and never acted on here: a missing or unreadable
@@ -384,7 +392,8 @@ function implementers(s) {
   // ready-to-merge queue adds no rebases per PR, and a review owed is the
   // reviewer row's DISPATCH on this same tick.
   if (s.inFlight >= s.bound) {
-    const hold = `HOLD (in-flight ${s.inFlight}/${s.bound})`;
+    // With merging off the merge that brings n below B is the maintainer's.
+    const hold = `HOLD (in-flight ${s.inFlight}/${s.bound}${s.merging === true ? "" : ", awaiting human merge"})`;
     return s.owedCounted.length ? row(hold, { acts: true, extra: replaceStep(s.owedCounted, s.implNames) }) : row(hold);
   }
 
@@ -469,6 +478,10 @@ function mergeBot(s) {
   const parked = s.mergeParked;
   const row = mkRow("merge-bot", s.mergeBotLive, 1,
     `merge-queue=${s.mergeQueue} held=${s.mergeHeld}${parked.length > 0 ? ` parked=${parked.length}` : ""}`);
+  // A run whose merge bot is off dispatches none, whatever the queue holds:
+  // the maintainer merges what carries `ready-to-merge`. Only an explicit
+  // `true` turns the bot on, so a state that names no merging has none.
+  if (s.merging !== true) return row("IDLE (merging off)");
   if (s.mergeBotLive >= 1) return row("AT CAP");
   if (s.mergeQueue === 0) return row("IDLE OK");
   // `ready-to-merge` is the author's sign-off and nothing more. A bot
@@ -1083,6 +1096,9 @@ export const reviewOwed = (st, members, head) => st === undefined
 // The states a PR-state probe answers: anything else is no answer.
 const PR_STATES = ["OPEN", "MERGED", "CLOSED"];
 
+// Whether `pr` (an open PR as openPrs() reads it) carries the label `name`.
+const hasLabel = (pr, name) => pr.labels.some((l) => l && l.name === name);
+
 export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, queuedLabel, closed = new Set(), prStates = new Map()) {
   // `queuedLabel` is the tracker's string for the `ready-to-merge` role, from
   // the Label map the caller read (label-map.mjs) — this fold reads no cache.
@@ -1174,7 +1190,7 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, queued
   const owedReplacement = newest.filter(owesReplacement).map((m) => m.name);
   const owedCounted = newest.filter((m) => owesReplacement(m) && !closed.has(m.number)).map((m) => m.name);
   const inFlightImpl = newest.filter((m) => m.outcome === null && !closing.has(m.number)).length + owedCounted.length;
-  const isQueued = (p) => p.labels.some((l) => l && l.name === queuedLabel);
+  const isQueued = (p) => hasLabel(p, queuedLabel);
   const queued = prs.filter(isQueued);
   const asc = (a, b) => a - b;
   const state = (n) => byPr.get(n);
@@ -1280,6 +1296,13 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, queued
     // anything above.
     prClosed: prSurfaced.filter((k) => prStates.get(k.pr) === "CLOSED").map((k) => ({ ...k, live: liveOn(k.pr) })),
     prUnchecked: prSurfaced.filter((k) => !PR_STATES.includes(prStates.get(k.pr))),
+    // Every PR the ledger tracks — a row resolves to it — that the open list
+    // does not carry, ascending: with merging off, the PRs the caller probes
+    // beside the keyed ones, since the maintainer merges them. `prMerged` is
+    // those the probe read MERGED: each is a merge `--apply` reaps, reclaims
+    // and evicts after, once (reapDuePrs).
+    prTracked: [...byPr.keys()].filter((n) => !open.has(n)).sort(asc),
+    prMerged: [...byPr.keys()].filter((n) => !open.has(n) && prStates.get(n) === "MERGED").sort(asc),
     fixLive: live("fix-pr"),
     mergeBotLive,
     // The number of every merge bot settled `done`: each is a merge pass
@@ -1626,6 +1649,17 @@ export function reapDue(done, applied, controllerAt) {
   return notIn(done, reapedAfter(applied, controllerAt));
 }
 
+// The PR numbers `applied.reapAfterPrs` names for THIS run.
+export function reapedAfterPrs(applied, controllerAt) {
+  return ofThisRun(applied, controllerAt)?.reapAfterPrs ?? [];
+}
+
+// The merges owed their reap, reclaim and evict in a run whose merge bot is
+// off: every PR `merged` (run.prMerged) that reapedAfterPrs() does not name.
+export function reapDuePrs(merged, applied, controllerAt) {
+  return notIn(merged, reapedAfterPrs(applied, controllerAt));
+}
+
 // The members `applied.sweptAfter` names for THIS run.
 export function sweptAfter(applied, controllerAt) {
   return ofThisRun(applied, controllerAt)?.sweptAfter ?? [];
@@ -1704,7 +1738,7 @@ import { fleetFile, FleetDirUnresolvable, scratchRoot } from "./fleet-dir.mjs";
 import { LABEL_MAP_FILE, LabelMapUnreadable, readLabelMap } from "./label-map.mjs";
 import { statePath, readState, writeState, assessBeat, isStalled, isReported, stallReport, stallOwner } from "./fleet-state.mjs";
 import { checkMainCheckout, describe } from "./main-checkout.mjs";
-import { readRunReceipt, phase0Gate, IN_FLIGHT_DEFAULT } from "./phase0-receipt.mjs";
+import { readRunReceipt, phase0Gate, mergingOf, IN_FLIGHT_DEFAULT } from "./phase0-receipt.mjs";
 import { judgeRecord, ProcUnreadable } from "./proc.mjs";
 import { reportFamily, readReport, reportPath, reportsDir } from "./report-files.mjs";
 import { ownClosingIssues } from "./closing-refs.mjs";
@@ -1724,8 +1758,9 @@ const MERGEABLE_STATES = ["MERGEABLE", "CONFLICTING", "UNKNOWN"];
 // cap, because refusing would suppress the one announcement a dead run leaves
 // behind. So it discloses instead — the line says the count is a floor.
 const CLAIMED_LIMIT = 200;
-// The tick's last line once a draining run has nothing left in flight. The
-// tick cannot write the stop — `beat` is fleet-heartbeat's — so it names it.
+// The tick's last line once a draining run has nothing left in flight (with
+// merging off, nothing but PRs the maintainer is to merge). The tick cannot
+// write the stop — `beat` is fleet-heartbeat's — so it names it.
 export const RUN_OVER = `ACTION: run over → fleet-heartbeat.mjs --stop "<reason>"`;
 const MAX_BUFFER = 64 * 1024 * 1024;
 // Every gh spawn below is killed at this bound, so a gh that never answers is
@@ -1764,12 +1799,13 @@ const OPTIONS = {
   "fold-unchanged": { type: "boolean", default: false },
   // `--apply` runs the idempotent follow-ups whose trigger the ledger and the
   // state file show, before the rows: reap.sh, reclaim-scratch.mjs and
-  // evict.mjs after every merge pass settled `done`, reclaim-scratch.mjs
-  // alone after every settle of a fix-applier, a finisher or a review launch
-  // `=failed`, and tier-check.mjs on every implementer
-  // the tick would hold as unchecked. It never dispatches, never settles a
-  // member and writes no ledger row but through those scripts. Without it the
-  // tick is read-only.
+  // evict.mjs after every merge pass settled `done` — and, in a run whose
+  // merge bot is off, after every PR its ledger tracks that gh reads MERGED
+  // — reclaim-scratch.mjs alone after every settle of a fix-applier, a
+  // finisher or a review launch `=failed`, and tier-check.mjs on every
+  // implementer the tick would hold as unchecked. It never dispatches, never
+  // settles a member and writes no ledger row but through those scripts.
+  // Without it the tick is read-only.
   apply: { type: "boolean", default: false },
   // Path override, for tests. An empty value cannot be told from an absent one
   // under parseArgs, and no path is legitimately empty, so empty resolves to
@@ -2056,19 +2092,21 @@ function closedTickets(mismatched, owed, surfacing) {
 // The state of each PR the tick asks gh about, one aliased `gh api graphql`
 // read per hundred PRs however many readings need them: `reviews`, the PRs
 // whose review the ledger reads as in flight yet the open list does not carry,
-// and `keyed`, each ticket's keyed PR the open list does not carry (deriveRun's
-// `prKeyed`). The answer is OPEN, MERGED or CLOSED. A probe that could not
+// `keyed`, each ticket's keyed PR the open list does not carry (deriveRun's
+// `prKeyed`), and `tracked`, every PR the ledger tracks that the open list
+// does not carry (`prTracked`), asked only in a run whose merge bot is off.
+// The answer is OPEN, MERGED or CLOSED. A probe that could not
 // answer — a failed call, an alias GitHub errored on or answered with nothing,
 // a node carrying no state, a state that is none of the three — leaves its PR
 // out of the map and is disclosed, per PR, with what it leaves standing; a
 // call killed at GH_TIMEOUT_MS is disclosed with that bound.
-function prStates(reviews, keyed) {
+function prStates(reviews, keyed, tracked = []) {
   const states = new Map();
   const reviewed = new Set(reviews);
   // Two tickets can be keyed on one PR: each is named, on its one probe.
   const ticketsOf = new Map();
   for (const k of keyed) ticketsOf.set(k.pr, [...(ticketsOf.get(k.pr) ?? []), k.n]);
-  const numbers = [...new Set([...reviews, ...ticketsOf.keys()])].sort((a, b) => a - b);
+  const numbers = [...new Set([...reviews, ...ticketsOf.keys(), ...tracked])].sort((a, b) => a - b);
   const read = ghAliasedRead(numbers, { field: "pullRequest", selection: "{state}", timeoutMs: GH_TIMEOUT_MS });
   for (const number of numbers) {
     const r = read.get(number);
@@ -2080,9 +2118,10 @@ function prStates(reviews, keyed) {
     const unconfirmed = [
       ...(reviewed.has(number) ? [`review on PR#${number} unconfirmed finished, its unit stands`] : []),
       ...(ticketsOf.get(number) ?? []).map((n) => `#${n}'s PR#${number} unconfirmed closed, printed as pr-unchecked`),
-    ].join("; ");
+    ];
+    if (unconfirmed.length === 0) unconfirmed.push(`PR#${number} unconfirmed merged, its reap waits`);
     const why = r.unreachable === "ETIMEDOUT" ? TIMED_OUT : r.unreachable ?? (r.notFound ? "no such pull request" : "no PR state");
-    console.error(`${NAME}: gh api graphql gave no answer for PR#${number} (${why}) — ${unconfirmed}`);
+    console.error(`${NAME}: gh api graphql gave no answer for PR#${number} (${why}) — ${unconfirmed.join("; ")}`);
   }
   return states;
 }
@@ -2121,15 +2160,17 @@ function reportDuty(r, { label, duty, what, summarise }) {
   return summary !== null;
 }
 
-// Reap, then reclaim, then evict, after the merge passes in `due` — once
-// however many there are, since each sweeps the whole repository, scratch
-// root or set of claim trees rather than one pass's share. Each runs whether
-// or not the one before it did: none reads another's result. True only when
-// all three applied, the one case `due` is recorded as reaped after; otherwise
-// the next --apply tick runs them again. `{all, reclaimed}`: the second is true
-// when the root sweep applied, which is also the sweep a settled member owes.
-function applyReap(due) {
-  const label = `reap after ${due.map((n) => `merge-bot-${n}`).join(" ")}`;
+// Reap, then reclaim, then evict, after the merge passes and merges in `due` —
+// once however many there are, since each sweeps the whole repository, scratch
+// root or set of claim trees rather than one pass's or one merge's share. Each
+// runs whether or not the one before it did: none reads another's result. True
+// only when all three applied, the one case `due` is recorded as reaped after;
+// otherwise the next --apply tick runs them again. `{all, reclaimed}`: the
+// second is true when the root sweep applied, which is also the sweep a
+// settled member owes. `due` is merge-bot numbers, `duePrs` the PRs a
+// maintainer merged in a run whose merge bot is off.
+function applyReap(due, duePrs) {
+  const label = `reap after ${[...due.map((n) => `merge-bot-${n}`), ...duePrs.map((n) => `PR#${n}`)].join(" ")}`;
   const reaped = reportDuty(runSibling("reap.sh", ["--apply"]), { label, duty: "reap", what: "reap.sh", summarise: reapSummary });
   const reclaimed = applySweep("reclaim");
   const evicted = reportDuty(runSibling("evict.mjs", ["--apply"]),
@@ -2261,12 +2302,15 @@ export function controllerState(controller, name = NAME) {
 // review unit; an unread state is never read as finished. The issue probe asks
 // only about the tickets whose keyed PR read CLOSED or could not be read: OPEN
 // and MERGED print nothing whatever the issue says. A ledger it cannot read
-// refuses the tick.
-function readRun(prs, queuedLabel) {
+// refuses the tick. `trackMerged` also asks the state of every other PR the
+// ledger tracks that the open list does not carry, which is how a PR the
+// maintainer merged is read MERGED (`prMerged`): a run whose merge bot is off
+// and that `--apply` reaps after hand merges.
+function readRun(prs, queuedLabel, { trackMerged = false } = {}) {
   try {
     const ledger = readLedger();
     const run = deriveRun(ledger, prs, queuedLabel);
-    const states = prStates(run.reviewsOffList, run.prKeyed);
+    const states = prStates(run.reviewsOffList, run.prKeyed, trackMerged ? run.prTracked : []);
     const surfacing = run.prKeyed.filter((k) => states.get(k.pr) !== "OPEN" && states.get(k.pr) !== "MERGED").map((k) => k.n);
     const closed = closedTickets(run.tierMismatch, run.owedReplacement, surfacing);
     return deriveRun(ledger, prs, queuedLabel, closed, states);
@@ -2426,6 +2470,9 @@ function main() {
   const phase0 = phase0Gate(receipt.read, {
     path: receipt.path, controllerAt: controller?.at, controller: controllerState(controller),
   });
+  // Whether the run's merge bot merges is the receipt's word and no flag's: a
+  // tick that forgot an argument must never be the one that dispatches a bot.
+  const merging = mergingOf(receipt.read);
   // The session directory's listing, ahead of every ledger read: a dispatch is
   // written to the ledger before its `task` call makes the transcript, so a
   // stem listed here is on whatever ledger is read after. Listed later, a
@@ -2440,7 +2487,10 @@ function main() {
   // lines are the exception, printed as each duty runs: they say what was
   // done, which is true whether or not the reconcile after them lands.
   const prs = openPrs();
-  let run = readRun(prs, labels["ready-to-merge"]);
+  // A run whose merge bot is off learns of a hand merge through the state of
+  // the PRs its ledger tracks, so `--apply` asks for them.
+  const readOpts = { trackMerged: apply && !merging };
+  let run = readRun(prs, labels["ready-to-merge"], readOpts);
 
   // The main checkout against the run's baseline, on every tick — the
   // backstop for what member-write-guard cannot see. Never a refusal of the tick:
@@ -2450,36 +2500,47 @@ function main() {
 
   if (apply) {
     // Reap, reclaim and evict after every merge pass settled `done` since the
-    // last time they ran, and the root sweep after every settle `sweepAfter`
-    // names that `sweptAfter` does not. A merge pass is recorded in `reapAfter`
-    // only once all three applied, and a settle in `sweptAfter` once a root
-    // sweep applied, the merge pass's own included; each on a fresh read of the
-    // state file so nothing the heartbeat wrote meanwhile is reverted, never
-    // onto a file that could not be read, and never with no controller
-    // record: nothing could tell a list recorded then from the next run's.
+    // last time they ran — and, with merging off, after every PR the ledger
+    // tracks that read MERGED since — and the root sweep after every settle
+    // `sweepAfter` names that `sweptAfter` does not. A merge pass is recorded
+    // in `reapAfter` and a merged PR in `reapAfterPrs` only once all three
+    // applied, and a settle in `sweptAfter` once a root sweep applied, the
+    // merge pass's own included; each on a fresh read of the state file so
+    // nothing the heartbeat wrote meanwhile is reverted, never onto a file
+    // that could not be read, and never with no controller record: nothing
+    // could tell a list recorded then from the next run's.
     const run0 = controller?.at ?? null;
     const due = reapDue(run.mergeBotDone, priorState.applied, run0);
+    const duePrs = merging ? [] : reapDuePrs(run.prMerged, priorState.applied, run0);
     const owed = sweepDue(run.sweepAfter, priorState.applied, run0);
-    const reap = due.length ? applyReap(due) : null;
+    const reap = due.length || duePrs.length ? applyReap(due, duePrs) : null;
     // The root sweep a merge pass ran is the one a settled member owes too.
     const swept = owed.length > 0 && (reap?.reclaimed || applySweep(`reclaim after ${owed.join(" ")}`));
     const reaped = reap?.all ? due : [];
-    if (run0 !== null && (reaped.length > 0 || swept)) {
+    const reapedPrs = reap?.all ? duePrs : [];
+    if (run0 !== null && (reaped.length > 0 || reapedPrs.length > 0 || swept)) {
       const now = readState(path, NAME);
       if (!now.degraded) {
         const reapAfter = [...new Set([...reapedAfter(now.applied, run0), ...reaped])];
+        const reapAfterPrs = [...new Set([...reapedAfterPrs(now.applied, run0), ...reapedPrs])];
         const sweptNames = [...new Set([...sweptAfter(now.applied, run0), ...(swept ? owed : [])])];
-        writeState(path, NAME, now, { applied: { run: run0, reapAfter, ...(sweptNames.length > 0 ? { sweptAfter: sweptNames } : {}) } });
+        writeState(path, NAME, now, {
+          applied: {
+            run: run0, reapAfter,
+            ...(reapAfterPrs.length > 0 ? { reapAfterPrs } : {}),
+            ...(sweptNames.length > 0 ? { sweptAfter: sweptNames } : {}),
+          },
+        });
       }
     }
     // The tier check, on exactly the members the implementer row would hold
     // as unchecked — that row reads the same before the refresh as after it.
     // A verdict written changes the ledger, so the run is read again.
     const unchecked = tierCheckDue(reconcile({
-      ...caps, ...run, heads: unclaimed(current.entries, run), supply: current.scanned, dropped: current.dropped,
+      ...caps, ...run, merging, heads: unclaimed(current.entries, run), supply: current.scanned, dropped: current.dropped,
       shortlistStatus: current.status, refresh: null, mainCheckout, phase0, router,
     }), run.tierUnchecked);
-    if (unchecked.length && applyTierChecks(unchecked, phase0.session)) run = readRun(prs, labels["ready-to-merge"]);
+    if (unchecked.length && applyTierChecks(unchecked, phase0.session)) run = readRun(prs, labels["ready-to-merge"], readOpts);
   }
 
   // The scratch root of the report files and the Pull records alike.
@@ -2536,7 +2597,7 @@ function main() {
   }
 
   const rows = reconcile({
-    ...caps, ...run, heads, supply, dropped, shortlistStatus: current.status, refresh: fresh, mainCheckout, phase0, router, pulls,
+    ...caps, ...run, merging, heads, supply, dropped, shortlistStatus: current.status, refresh: fresh, mainCheckout, phase0, router, pulls,
   });
   const said = describe(mainCheckout, run.live);
   // The report files of the live members, read before the state file for the
@@ -2570,10 +2631,16 @@ function main() {
   const above = [...(phase0.line === null ? [] : [phase0.line]), ...(said === null ? [] : [said]), ...stale.map((s) => s.line)];
   const rowLines = formatLines(rows);
   // The run is over once it is draining and nothing is left in flight: no
-  // open PR and no implementer still holding a claim. Printed last and read
-  // as actionable, so it never folds away: the stop it names is the run's
-  // last act, and only the controller can write it.
-  const over = run.draining !== null && prs.length === 0 && run.implLive === 0;
+  // open PR and no implementer still holding a claim. With merging off a PR
+  // carrying `ready-to-merge` is the maintainer's to merge and holds nothing,
+  // unless GitHub reads it CONFLICTING or a conflict hold stands on it: that
+  // one is owed a fix-applier first. Every other open PR, unreviewed or
+  // unlabelled, still holds it. Printed last and read as actionable, so it
+  // never folds away: the stop it names is the run's last act, and only the
+  // controller can write it.
+  const awaitsMaintainer = (p) => hasLabel(p, labels["ready-to-merge"]) && p.mergeable !== "CONFLICTING" && !run.conflictHeld.includes(p.number);
+  const holding = merging ? prs : prs.filter((p) => !awaitsMaintainer(p));
+  const over = run.draining !== null && holding.length === 0 && run.implLive === 0;
   if (over) rowLines.push(RUN_OVER);
   const advice = [...transcribed, ...reported];
   const lines = [...above, ...advice.map((a) => a.line), ...rowLines];

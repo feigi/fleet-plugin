@@ -392,6 +392,7 @@ as for a `past-pin` re-review below, before any finisher is dispatched.
 A `human` halt is a Ticketless PR whose diff is not inert: the maintainer adds
 `ready-to-merge` at the pinned head, which the merge bot merges off the
 finisher's `ready-to-merge-head:` comment; a moved head is merged by hand.
+Under `no-merge` no bot runs: the maintainer merges it by hand, labelled or not.
 
 The tick prints `DISPATCH review PR#<M>` for a PR whose latest finisher is `halted:past-pin` and whose latest `reviewed=<head>` is not its current head, until a review of it is running or has returned; record that review's launch as any review's, with `ledger.mjs review <M>` onto the PR's row, its runner under the next letter the PR's rows do not carry yet (`review-pr-<M>-b`, or `-c` where a retry already took `-b`) — `review` refuses a second `review-pr-<M>` and names the free one — and its result, recorded by the `review-result` wake, reaches a fresh finisher through the same gate.
 

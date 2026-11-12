@@ -1,5 +1,7 @@
 # Close-out: what each metrics step does and why
 
+Label names in this file are roles; the Label map gives the string to type; a member never derives the map.
+
 `closeout.mjs finish` runs the scrape, the tier-outcomes check, the metrics refresh, the gather of the run records and the review evidence, the commit of the metrics and record files, and the phase-0 receipt move, and SKILL.md's **End of run** says how to drive it. This file is how each of those works, for the controller to read when a step refuses, and how `closeout.mjs reopen` undoes a drain. The verdict rules — what `closed_own_ticket` and `minted_false_claim` mean, and that a value not in hand is left blank — stay in SKILL.md under **Guard: accumulate per PR**, because the controller still rules them.
 
 - **The run ends, or the maintainer says drain** → `fleet-event.mjs drain --reason "<reason>"`
@@ -17,6 +19,8 @@
   2. Act on the review, fix-applier and merge rows until the tick prints
      `ACTION: run over → fleet-heartbeat.mjs --stop "<reason>"`, which it does
      once the run is draining with no open PR and no live implementer.
+     Under `no-merge` a PR carrying `ready-to-merge` holds nothing, unless it conflicts: those
+     PRs stay open for the maintainer, or for a later run's phase 0 to fold in.
   3. `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run closeout.mjs finish --reason "<reason>"` — scrapes
      the run's member facts, checks the tier-outcomes rows, refreshes the
      metrics, gathers the earlier runs' records and the review evidence,

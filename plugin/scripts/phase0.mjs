@@ -2,7 +2,7 @@
 // Phase 0 as one command: the run's start sequence, in order, with a receipt.
 //
 //   phase0.mjs [--session <dir>] [--in-flight n] [--objective cost|speed]
-//              [--spend-dir <dir>]
+//              [--merge | --no-merge] [--spend-dir <dir>]
 //              [--workflow <name> | --declare-no-ci]
 //
 // The session directory is `--session`, else `PI_ARTIFACTS_DIR`, which omp
@@ -125,7 +125,7 @@
 // THE RECEIPT is `.fleet/phase0.json` (resolved through fleet-dir.mjs, so a
 // worktree and the main checkout name one file):
 //
-//   { run, session, scratch, inFlight, objective, pluginVersion,
+//   { run, session, scratch, inFlight, objective, merge, pluginVersion,
 //     steps: { <name>: { status, at, output } } }
 //
 // `status` is ok, pending, failed, drift or unanswered; `at` an ISO time;
@@ -142,6 +142,14 @@
 // default when it records none — and a resume whose `--objective` names the
 // other one exits 2 naming both, leaving the receipt as it was. A resumed
 // receipt recording a value that is not an Objective exits 3 naming it.
+// `merge` is whether the run's merge bot merges: `false` under `--no-merge`,
+// `true` under `--merge` or with neither (MERGE_DEFAULT in
+// phase0-receipt.mjs). `--merge` and `--no-merge` together exit 2. Like the
+// Objective it is fixed for the run: a resumed receipt keeps the one it
+// records — `true` when it records none — and a resume that names the other
+// one exits 2 naming both, leaving the receipt as it was. A resumed receipt
+// recording a value that is not a boolean exits 3 naming it. The tick reads
+// it from this receipt and from no flag of its own.
 // `pluginVersion` is the version the pin recorded, null when it recorded
 // none; a resumed receipt keeps it.
 //
@@ -207,7 +215,7 @@ import { isCLI } from "./is-cli.mjs";
 import { GH_LOGIN_ARGS, isOwnedPr, loginOf, ownershipReadable } from "./owned-pr.mjs";
 import { OBJECTIVES, RECEIPT, RECEIPT_HELD, archiveStamp, receiptArchiveName, rowNums } from "./ledger-grammar.mjs";
 import { ancestry, controllerOf, processSource, ProcUnreadable } from "./proc.mjs";
-import { IN_FLIGHT_DEFAULT, OBJECTIVE_DEFAULT } from "./phase0-receipt.mjs";
+import { IN_FLIGHT_DEFAULT, MERGE_DEFAULT, OBJECTIVE_DEFAULT } from "./phase0-receipt.mjs";
 import { readRecipe } from "./recipe-read.mjs";
 import { gather, recordChanges, refusedLine, unclosedRecords } from "./run-records.mjs";
 
@@ -707,7 +715,7 @@ function main() {
   const die = makeDie(NAME);
   const F = defineFlags(die, {
     flags: {
-      session: "value", "in-flight": "value", objective: "value",
+      session: "value", "in-flight": "value", objective: "value", merge: "bool", "no-merge": "bool",
       "spend-dir": "value", workflow: "value", "declare-no-ci": "bool",
     },
   });
@@ -747,6 +755,8 @@ function main() {
   const inFlight = positive("in-flight") ?? IN_FLIGHT_DEFAULT;
   const named = F.arg("objective");
   if (named !== null && !OBJECTIVES.includes(named)) die(`--objective needs ${OBJECTIVES.join(" or ")}, got ${named}`);
+  if (F.has("merge") && F.has("no-merge")) die("--merge and --no-merge are alternatives, not a pair");
+  const mergeNamed = F.has("no-merge") ? false : F.has("merge") ? true : null;
   if (F.has("declare-no-ci") && !absent("workflow")) die("--workflow and --declare-no-ci are alternatives, not a pair");
   const ci = F.has("declare-no-ci") ? "CI: declared absent (--declare-no-ci)" : absent("workflow") ? null : `CI: workflow ${F.arg("workflow")} (--workflow)`;
   const spendDir = absent("spend-dir") ? null : resolve(F.arg("spend-dir"));
@@ -812,6 +822,20 @@ function main() {
     die(`--objective ${named}: this run's receipt ${receiptPath} records the objective ${kept}, fixed for the run — run phase 0 again without --objective, or with --objective ${kept}`);
   }
   const objective = kept ?? named ?? OBJECTIVE_DEFAULT;
+  // The merge switch is fixed for the run the same way: a resumed receipt's
+  // stands, and one that records none resumes as merge. One recording
+  // anything but a boolean is refused, never read as merge.
+  if (resumed && previous.merge !== undefined && typeof previous.merge !== "boolean") {
+    process.stderr.write(`${NAME}: this run's receipt ${receiptPath} records merge ${JSON.stringify(previous.merge)}, which is not true or false — set it to the value this run began with and re-run\n`);
+    process.exitCode = 3;
+    return;
+  }
+  const keptMerge = resumed ? previous.merge ?? MERGE_DEFAULT : null;
+  if (keptMerge !== null && mergeNamed !== null && mergeNamed !== keptMerge) {
+    const flag = (m) => (m ? "--merge" : "--no-merge");
+    die(`${flag(mergeNamed)}: this run's receipt ${receiptPath} records ${keptMerge ? "merge" : "no-merge"}, fixed for the run — run phase 0 again without ${flag(mergeNamed)}, or with ${flag(keptMerge)}`);
+  }
+  const merge = keptMerge ?? mergeNamed ?? MERGE_DEFAULT;
   if (rotated && !resumed) {
     if (existsSync(held)) {
       process.stderr.write(`${NAME}: cannot hold the previous run's receipt for the rotation: ${held} already holds another\n`);
@@ -822,7 +846,7 @@ function main() {
   }
 
   const pluginVersion = resumed && typeof previous.pluginVersion === "string" ? previous.pluginVersion : null;
-  const receipt = { run: resumed ? previous.run : null, session, scratch, inFlight, objective, pluginVersion, steps: {} };
+  const receipt = { run: resumed ? previous.run : null, session, scratch, inFlight, objective, merge, pluginVersion, steps: {} };
   for (const name of STEP_NAMES) {
     // `alarm` checks the omp running this invocation, so its `ok` is never carried.
     const was = resumed && name !== "alarm" ? previous.steps[name] : undefined;

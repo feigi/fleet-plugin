@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { OBJECTIVE_DEFAULT, objectiveFromReceipt, readReceipt, phase0Gate, sessionFromReceipt, STEP_NAMES } from "../plugin/scripts/phase0-receipt.mjs";
+import { MERGE_DEFAULT, OBJECTIVE_DEFAULT, mergingOf, objectiveFromReceipt, readReceipt, phase0Gate, sessionFromReceipt, STEP_NAMES } from "../plugin/scripts/phase0-receipt.mjs";
 import { OBJECTIVES } from "../plugin/scripts/ledger-grammar.mjs";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 
@@ -156,4 +156,14 @@ test("objectiveFromReceipt: the receipt's objective, or a refusal naming the rec
     writeFileSync(file, JSON.stringify(receipt({ session: "/sessions/run-1", objective })));
     assert.equal(objectiveFromReceipt({ cwd: d }), objective);
   }
+});
+
+test("mergingOf: the receipt's merge, merging when there is no receipt or it records none, and only a true is read as merging", () => {
+  assert.equal(MERGE_DEFAULT, true);
+  assert.equal(mergingOf(ok(receipt({ merge: true }))), true);
+  assert.equal(mergingOf(ok(receipt({ merge: false }))), false);
+  assert.equal(mergingOf(ok(receipt())), true, "a receipt written before it recorded one");
+  assert.equal(mergingOf({ state: "missing" }), true);
+  assert.equal(mergingOf({ state: "unreadable", why: "not JSON" }), true);
+  for (const merge of ["true", "no-merge", 1, 0, null]) assert.equal(mergingOf(ok(receipt({ merge }))), false, JSON.stringify(merge));
 });
