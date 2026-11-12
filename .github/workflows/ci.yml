@@ -67,7 +67,7 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
@@ -109,7 +109,7 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       # .nvmrc is the single source of truth for the target runtime — the one
       # the suite is developed and run against. It holds an EXACT version, and
@@ -119,7 +119,7 @@ jobs:
       # opens its PR, not when the PR merges: the merge waits on the required
       # checks, whenever they finish — and a major bump is not automerged, so
       # its merge waits on a human too. Do not hand-edit this to float.
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version-file: .nvmrc
 
@@ -203,11 +203,14 @@ jobs:
       # to its declared allowed values — an invalid `internalChecksFilter`
       # passes.
       # Pinned, not `@latest`: a floating validator would change what this
-      # step accepts with no commit here saying so. An option newer than the
-      # pin is refused as unknown even where the hosted app accepts it — bump
-      # the pin with the config. npm's EBADENGINE warning is expected: this
+      # step accepts with no commit here saying so. Renovate moves the pin (the
+      # `renovate:` line below is what it reads). A config change that needs
+      # an option newer than the pin still bumps the pin in that same PR: an
+      # option newer than the pin is refused as unknown even where the hosted
+      # app accepts it. npm's EBADENGINE warning is expected: this
       # runs on the .nvmrc Node, outside the range Renovate declares.
       - name: Validate renovate.json
+        # renovate: datasource=npm depName=renovate
         run: npx --yes -p renovate@44.115.7 renovate-config-validator --strict --no-global renovate.json
 
       # gh applies `--jq` with its own embedded gojq (RE2), not the system jq
@@ -221,14 +224,18 @@ jobs:
       # toolchain.
       # `cache: false` because setup-go's cache keys off a go.sum, and this repo
       # has no Go module — there is nothing to key on.
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: stable
           cache: false
 
       # Pinned rather than `@latest`: a gojq release would otherwise change what
       # the engine gate MEANS without any commit here, which is the same silent
-      # drift the pin on the node version above exists to stop.
+      # drift the pin on the node version above exists to stop. The version
+      # follows gh's own go.mod (`github.com/itchyny/gojq`; cli/cli trunk
+      # carries v0.12.19 today), the engine `--jq` runs under. It is moved by
+      # hand when gh moves, and Renovate does not manage it: following gojq's
+      # own releases would test an engine gh does not ship.
       - name: Install gojq
         env:
           GOBIN: ${{ runner.temp }}/gojq
@@ -268,10 +275,10 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       # Exact pin Renovate moves: see ADR 0010. Do not hand-edit this to float.
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version-file: .nvmrc
 
@@ -290,14 +297,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           # A real local branch, not detached HEAD — the fleet's own gh and
           # git callsites assume a named ref (ADR 0003's checkout shape is
           # unchanged by ADR 0021; the link route itself takes a path).
           ref: ${{ github.head_ref || github.ref_name }}
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.0"
 
@@ -305,6 +312,7 @@ jobs:
       # (`@oh-my-pi/pi-coding-agent`), not `omp`/`omp.sh` — measured: neither
       # of those npm names is this package (#1319's own collision class).
       - name: Install pinned omp
+        # renovate: datasource=npm depName=@oh-my-pi/pi-coding-agent
         run: bun install -g @oh-my-pi/pi-coding-agent@18.4.4
 
       - name: smoke-omp
@@ -326,21 +334,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ github.head_ref || github.ref_name }}
           fetch-depth: 0
 
       # Exact pin Renovate moves: see ADR 0010. Do not hand-edit this to float.
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version-file: .nvmrc
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.0"
 
       - name: Install pinned omp
+        # renovate: datasource=npm depName=@oh-my-pi/pi-coding-agent
         run: bun install -g @oh-my-pi/pi-coding-agent@18.4.4
 
       - name: install-and-smoke
