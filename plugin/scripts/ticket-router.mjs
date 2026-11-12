@@ -83,11 +83,9 @@ const OMP_READ_TIMEOUT_MS = 10_000;
 // The fit's adoption floor (merged PRs per side) and margin.
 export const MIN_N = 20;
 const ADOPT_RATIO = 0.75;
-// The starting Cells short of MIN_N merged PRs in a guard's `n`, each with its
-// count, in their order: burn-in holds while any is. `cells` are the starting
-// Cells the install runs (startingCellsOf); a Cell the guard has no count for
-// has 0.
-const shortStartingCells = (n, cells) => cells.map((c) => [c, n[c] ?? 0]).filter(([, k]) => k < MIN_N);
+// Whether any starting Cell of `cells` (startingCellsOf's: the starting Cells the install runs) is short of MIN_N
+// merged PRs in a guard's `n`: burn-in holds while any is. A Cell the guard has no count for has 0.
+const anyStartingCellShort = (n, cells) => cells.some((c) => (n[c] ?? 0) < MIN_N);
 const KINDS = new Set(["bug", "enhancement", "documentation"]);
 const DAY_MS = 86_400_000;
 
@@ -366,6 +364,11 @@ export function validateTable(t) {
     }
   }
   if (typeof t.burn_in !== "boolean") return bad("`burn_in` is not a boolean");
+  // The starting Cells burn-in counted, which a Fit records and the starting table does not.
+  const sc = t.starting_cells;
+  if (sc !== undefined && (!Array.isArray(sc) || sc.length === 0 || new Set(sc).size !== sc.length || !sc.every((c) => STARTING_CELLS.includes(c)))) {
+    return bad("`starting_cells` is not a non-empty list of starting Cells, each once");
+  }
   const cl = t.classifier;
   if (cl === null || typeof cl !== "object") return bad("`classifier` is not an object");
   if (cl.b !== null && cl.b !== "haiku" && cl.b !== "jev") return bad("`classifier.b` is not null, \"haiku\" or \"jev\"");
@@ -413,11 +416,13 @@ export function installOf({ modelRoles, catalog, definitions }) {
 
 /**
  * Whether `install` (installOf's, or null where it was not read) runs `cell`: its level is on its role's ladder. An
- * install that was not read holds nothing unrunnable, so every Cell is runnable there.
+ * install that was not read holds nothing unrunnable, so every Cell is runnable there. Throws on a string that is no
+ * Cell, which no install can answer for.
  */
 export function isRunnable(install, cell) {
   const parsed = CELL.exec(cell);
-  return install === null || parsed === null || install.ladders[parsed[1]].includes(parsed[2]);
+  if (parsed === null) throw new TypeError(`isRunnable: ${JSON.stringify(cell)} is not a Cell`);
+  return install === null || install.ladders[parsed[1]].includes(parsed[2]);
 }
 
 /** Every Cell `install` has an implementer definition for and does not run, sorted; none where it was not read. */
@@ -944,6 +949,8 @@ function judgeSpeedRow(pulls, cells, tripped, costCell) {
  * `startingCells` are the starting Cells the install runs (startingCellsOf) —
  * all three when absent — and the table records them as `starting_cells`, so
  * the records, the guard, the prior and that set fit the same table again.
+ * Throws on a `startingCells` that is empty, which would end burn-in on no
+ * count at all, or that names a Cell that is no starting Cell.
  */
 export function fitTable({ prior, features, members, verdicts, guard, startingCells = STARTING_CELLS }) {
   const window = guard.window_start ?? prior.window_start ?? null;
@@ -952,6 +959,9 @@ export function fitTable({ prior, features, members, verdicts, guard, startingCe
 
 // The table over the tree `prior.splits` holds, from the fit's Pulls (fitPulls') booked to its groups.
 function tableOver({ prior, units: unbooked, order, guard, window, startingCells }) {
+  if (startingCells.length === 0 || !startingCells.every((c) => STARTING_CELLS.includes(c))) {
+    throw new Error(`startingCells is not a non-empty list of starting Cells: ${JSON.stringify(startingCells)}`);
+  }
   const nodes = treeNodes(prior.splits);
   const units = book(unbooked, prior);
   const { estimates, pulls } = estimate(units, order, nodes);
@@ -976,7 +986,7 @@ function tableOver({ prior, units: unbooked, order, guard, window, startingCells
     window_start: window,
     n_rows: units.length,
     cells: prior.cells,
-    burn_in: shortStartingCells(guard.n, startingCells).length > 0,
+    burn_in: anyStartingCellShort(guard.n, startingCells),
     starting_cells: [...startingCells],
     splits: prior.splits,
     rows,

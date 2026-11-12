@@ -939,6 +939,12 @@ test("a step whose at is no time has not run, so its failed line raises no flag 
 
 const SMOL_NONE = { ...CATALOG, value: { models: CATALOG.value.models.map((m) => (m.selector === "anthropic/claude-haiku-5-5" ? { ...m, thinking: null } : m)) } };
 
+test("burn-in that draws nothing says the starting Cells are tripped or unrunnable when the install leaves one out", () => {
+  const guard = guardOk(TODAY().guard.cells, { verdict: "tripped", tripped: ["slow-high", "task-high"] });
+  assert.equal(lineOf(policy({ guard, catalog: SMOL_NONE }), "cost", "*").exploring, "draws nothing: every starting Cell is tripped or unrunnable");
+  assert.equal(lineOf(policy({ guard }), "cost", "*").exploring, "drawn over smol-high", "an install that runs smol-high draws it");
+});
+
 test("the Cells the install does not run are listed with their role, model and levels, apart from the tripped Cells", () => {
   const p = policy({ guard: guardOk(TODAY().guard.cells, { verdict: "tripped", tripped: ["task-high"] }) });
   assert.equal(p.tripped, "tripped by the cost guard: task-high");
@@ -981,6 +987,10 @@ test("a derived default Cell replaces slow-high in the view where the install do
   const p = policy({ catalog: slowNoHigh });
   assert.equal(lineOf(p, "cost", "*").entry.cell, "slow-medium");
   assert.equal(lineOf(p, "cost", "*").entry.held, "slow-high unrunnable here");
+  // With no cost guard the heading names the Cell route dispatches, as the root row does.
+  const noGuard = policy({ guard: { status: "missing" }, catalog: slowNoHigh });
+  assert.equal(noGuard.heading, "no cost guard: every Pull runs at slow-medium, the default Cell");
+  assert.equal(lineOf(noGuard, "cost", "*").entry.cell, "slow-medium");
 });
 
 test("burn-in progress counts the starting Cells the Fit recorded, and says which it left out", () => {
@@ -994,6 +1004,14 @@ test("burn-in progress counts the starting Cells the Fit recorded, and says whic
   // A Fit that records no set counted all three, so the cockpit's own install read decides nothing for it.
   assert.equal(fitted({ fit: FIT_READ({ table: FIT({ burn_in: true, guard: { tripped: [], n: {} } }) }), catalog: SMOL_NONE }).burnIn.heading, "burn-in: 0 of 3 starting Cells have the 20 merged PRs each needs");
   assert.equal(fitted({ fit: FIT_READ({ table: FIT({ burn_in: true, starting_cells: ["nope"], guard: { tripped: [], n: {} } }) }) }).burnIn.cells.length, 3, "a record that names no starting Cell is none");
+});
+
+test("burn-in progress: a recorded set that is empty, partly unknown or out of order counts as the Fit's valid cells in canonical order", () => {
+  const cellsOf = (starting_cells) => fitted({ fit: FIT_READ({ table: FIT({ burn_in: true, starting_cells, guard: { tripped: [], n: {} } }) }) }).burnIn.cells.map((c) => c.cell);
+  const all = ["slow-high", "task-high", "smol-high"];
+  assert.deepEqual(cellsOf([]), all, "an empty record is none");
+  assert.deepEqual(cellsOf(["slow-high", "bogus"]), all, "a record naming an unknown Cell is none");
+  assert.deepEqual(cellsOf(["task-high", "slow-high"]), ["slow-high", "task-high"], "a recorded set counts in the starting Cells' order");
 });
 
 test("while the starting table routes, burn-in progress counts the starting Cells the cockpit's own install read runs", () => {

@@ -97,6 +97,9 @@ test("cellLine: the policy row's Cell unrunnable reads the default Cell, naming 
   assert.equal(lines(undrawn({ reason: "table-cell-unrunnable", unrunnable: ["smol-max", "task-xhigh"] }))[0],
     `slow-high<#cells/slow-high@claude-haiku-5-5> · cost row's Cell (one of smol-max, task-xhigh) unrunnable here: default Cell<#cells/row/cost/${RULE}>`,
     "several, and the row's is not on record: none is named as it");
+  assert.equal(lines(undrawn({ reason: "table-cell-unrunnable", unrunnable: [] }))[0],
+    `slow-high<#cells/slow-high@claude-haiku-5-5> · cost row's Cell unrunnable here: default Cell<#cells/row/cost/${RULE}>`,
+    "a row Cell with no definition is in no list, which is then empty: no list is named");
   assert.equal(lines(drawn({ reason: "table-cell-unrunnable", unrunnable: ["task-xhigh"] }))[0],
     `smol-high<#cells/smol-high@claude-haiku-5-5> · drawn 2 of 3: burn-in · cost row's task-xhigh unrunnable here<#cells/row/cost/${RULE}>`,
     "drawn: the draw, then the reason, and no default Cell");

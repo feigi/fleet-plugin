@@ -819,6 +819,10 @@ test("UNRUNNABLE names Cells right after TRIPPED, and refuses what is no Cell", 
     assert.equal(parseRouting(routingWith({ UNRUNNABLE: bad })), null, JSON.stringify(bad));
   }
   assert.throws(() => formatRouting({ ...parseRouting(SPEC_ROUTING), unrunnable: ["nope"] }), /not a Routing/);
+  for (const unsorted of ["task-max,slow-xhigh", "slow-xhigh,slow-xhigh"]) {
+    assert.equal(parseRouting(routingWith({ UNRUNNABLE: unsorted })), null, `${unsorted}: the list is sorted, each Cell once`);
+  }
+  assert.throws(() => formatRouting({ ...parseRouting(SPEC_ROUTING), unrunnable: ["task-max", "slow-xhigh"] }), /not a Routing/);
 });
 
 test("parseRouting refuses a line that is not a Routing, and formatRouting refuses to write one", () => {

@@ -296,15 +296,16 @@ export function checkRoutes({ agentsDir, agentsSource = `--agents ${agentsDir}`,
       continue;
     }
     const efforts = entry.thinking ?? [];
+    const runs = efforts.join(", ") || "none";
     for (const { file, level } of usedBy[role]) {
       if (efforts.includes(level)) continue;
       const cell = implementerCell(file);
       // An implementer Cell its role's model does not run is routed around, never dispatched: a notice, unless `slow`
       // runs at no level at all, which leaves the default Cell nowhere to run.
       if (cell !== null && !(role === "slow" && efforts.length === 0)) {
-        notices.push(`cell ${cell} unrunnable: modelRoles.${role} → ${model} runs ${efforts.join(", ") || "none"}`);
+        notices.push(`cell ${cell} unrunnable: modelRoles.${role} → ${model} runs ${runs}`);
       } else {
-        violations.push(`${file}: level ${level} is not one modelRoles.${role}'s target ${model} runs at (thinking: ${efforts.join(", ") || "none"}) — omp would clamp it silently`);
+        violations.push(`${file}: level ${level} is not one modelRoles.${role}'s target ${model} runs at (thinking: ${runs}) — omp would clamp it silently`);
       }
     }
   }

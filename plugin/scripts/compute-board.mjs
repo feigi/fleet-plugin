@@ -368,10 +368,11 @@ function reasonWords(r, table) {
     }
     case "table-cell-unrunnable": {
       // The Routing keeps the Cells the install does not run, not which of them the row named: the installed table's
-      // row for the group says, when it names one of them.
+      // row for the group says, when it names one of them. A row Cell with no definition is in no list, which can
+      // then be empty.
       const rowCell = table === null ? undefined : (table.rows[r.objective][r.stratum] ?? table.rows[r.objective]["*"]);
       const cell = r.unrunnable.includes(rowCell) ? rowCell : r.unrunnable.length === 1 ? r.unrunnable[0] : null;
-      const named = cell === null ? `${row}'s Cell (one of ${r.unrunnable.join(", ")})` : `${row}'s ${cell}`;
+      const named = cell !== null ? `${row}'s ${cell}` : r.unrunnable.length === 0 ? `${row}'s Cell` : `${row}'s Cell (one of ${r.unrunnable.join(", ")})`;
       return [part(`${named} unrunnable here${drawn ? "" : ": default Cell"}`, { href: rowHref(r, table) })];
     }
     case "guard-tripped":

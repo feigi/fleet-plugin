@@ -121,7 +121,6 @@ import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { COLUMNS as MEMBER_COLUMNS, ENDINGS, isImplementer, parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
 import { blobId } from "./pr-cost.mjs";
-import { STARTING_CELLS } from "./ledger-grammar.mjs";
 import { FEATURE_COLUMNS, parseFeatures } from "./pull-attribution.mjs";
 import { REPORT_STATUSES } from "./report-files.mjs";
 import { DEFAULT_TABLE, FIT_FILE, INSTALL_PACKAGE, fitTree, installVersion, readGuard, readInstall, startingCellsOf, validateTable } from "./ticket-router.mjs";
@@ -332,7 +331,7 @@ function previousGate(repo) {
 // it cannot read, fit or write, before the rename, so the
 // old file stays as it was: a Fit that throws is no look at the split gate,
 // and the next one reads the gate the old file holds.
-export function writeFit(repo, written, { tablePath = DEFAULT_TABLE, packagePath = INSTALL_PACKAGE, now = new Date(), startingCells = STARTING_CELLS } = {}) {
+export function writeFit(repo, written, { tablePath = DEFAULT_TABLE, packagePath = INSTALL_PACKAGE, now = new Date(), startingCells } = {}) {
   const guard = readGuard(written);
   if (guard === null) throw new Error(`${GUARD} is not a guard the router reads`);
   let prior;

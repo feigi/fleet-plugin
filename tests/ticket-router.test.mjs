@@ -840,6 +840,7 @@ test("validateTable: each malformed router table is refused for its own reason, 
     [/`guard` is not/, bad({ guard: { tripped: [] } })],
     [/`guard` is not/, bad({ guard: { tripped: [], n: null } })],
     [/`guard` is not/, bad({ guard: { tripped: [], n: "x" } })],
+    ...["x", 5, null, [], ["nope"], ["slow-high", "slow-high"], ["slow-medium"]].map((starting_cells) => [/`starting_cells` is not/, bad({ starting_cells })]),
   ];
   for (const [why, table] of cases) {
     const r = validateTable(table);
@@ -855,6 +856,8 @@ test("validateTable: each malformed router table is refused for its own reason, 
     bad({ classifier: { b: "jev", tau: 0.8 } }),
     bad({ classifier: { b: null, tau: 0 } }),
     bad({ guard: { tripped: ["task-high"], n: { "slow-high": 3 } } }),
+    bad({ starting_cells: ["slow-high"] }),
+    bad({ starting_cells: [...STARTING] }),
   ];
   for (const table of valid) assert.equal(validateTable(table), table, JSON.stringify(table));
 });
@@ -2802,6 +2805,13 @@ test("installOf: it names the model each role resolves to, and a Cell its role's
   assert.deepEqual(unrunnableCells({ ...INSTALL, defined: new Set(["slow-high", "smol-max"]) }), ["smol-max"], "only a Cell with a definition is listed");
 });
 
+test("isRunnable: a string that is no Cell throws, whether or not the install was read", () => {
+  for (const install of [INSTALL, null]) {
+    assert.throws(() => isRunnable(install, "bogus"), { name: "TypeError", message: 'isRunnable: "bogus" is not a Cell' });
+    assert.throws(() => isRunnable(install, "huge-high"), { name: "TypeError", message: 'isRunnable: "huge-high" is not a Cell' });
+  }
+});
+
 test("defaultCellOf: slow-high while it runs, else the nearest runnable defined level of slow — downward first, then upward", () => {
   assert.equal(defaultCellOf(null), "slow-high");
   assert.equal(defaultCellOf(INSTALL), "slow-high");
@@ -2941,4 +2951,7 @@ test("fit: burn-in ends over the starting Cells the install runs, the Fit record
   assert.deepEqual([all.burn_in, all.starting_cells], [true, STARTING], "with no set named all three count");
   assert.deepEqual(fitTree({ prior, ...direct(input), guard, startingCells: counted }).table, fitted, "the tree's fit counts the same set");
   assert.equal(fitTree({ prior, ...direct(input), guard }).table.burn_in, true);
+  for (const startingCells of [[], ["slow-medium"]]) {
+    assert.throws(() => fitTable({ prior, ...direct(input), guard, startingCells }), /startingCells is not a non-empty list of starting Cells/, JSON.stringify(startingCells));
+  }
 });

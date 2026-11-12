@@ -1040,8 +1040,9 @@ export function drawCell({ session, ticket, policyCell, cells }) {
 //   REASON    the first thing that went wrong
 // DRAW and BY are `-` together (no draw); so are BRIEF and CRITERIA (no issue
 // read), and PARENT is `-` with them. UNRUNNABLE lists every Cell with an
-// implementer definition whose level its role's model does not run, sorted, `-`
-// for none; it is worked out when the Pull is routed and is no guard verdict. A
+// implementer definition whose level its role's model does not run, sorted and
+// each once — a list out of that order is no Routing — `-` for none; it is
+// worked out when the Pull is routed and is no guard verdict. A
 // line written before PARENT was a part carries none, and reads as `PARENT=-`;
 // one written before UNRUNNABLE was a part carries none, and reads as
 // `UNRUNNABLE=-`.
@@ -1089,12 +1090,8 @@ export function parseRouting(line) {
   // A line written before UNRUNNABLE was a part is one word short of the keys, and one written before PARENT
   // too is two short; each reads with the key it lacks as `-`. A line that holds PARENT= and lacks another
   // key instead fails the per-key check.
-  if (words.length === ROUTING_KEYS.length - 1) {
-    words.splice(UNRUNNABLE_AT, 0, "UNRUNNABLE=-");
-  } else if (words.length === ROUTING_KEYS.length - 2) {
-    words.splice(UNRUNNABLE_AT - 1, 0, "UNRUNNABLE=-");
-    words.splice(PARENT_AT, 0, "PARENT=-");
-  }
+  if (words.length === ROUTING_KEYS.length - 2) words.splice(PARENT_AT, 0, "PARENT=-");
+  if (words.length === ROUTING_KEYS.length - 1) words.splice(UNRUNNABLE_AT, 0, "UNRUNNABLE=-");
   if (words.length !== ROUTING_KEYS.length) return null;
   const v = {};
   for (const [i, key] of ROUTING_KEYS.entries()) {
@@ -1103,8 +1100,9 @@ export function parseRouting(line) {
   }
   const opt = (x, ok) => (x === "-" ? null : ok(x) ? x : undefined);
   const count = (x) => (x === "-" ? null : COUNT.test(x) ? Number(x) : undefined);
-  const tripped = v.TRIPPED === "-" ? [] : v.TRIPPED.split(",");
-  const unrunnable = v.UNRUNNABLE === "-" ? [] : v.UNRUNNABLE.split(",");
+  const cellList = (x) => (x === "-" ? [] : x.split(","));
+  const tripped = cellList(v.TRIPPED);
+  const unrunnable = cellList(v.UNRUNNABLE);
   const d = DRAW.exec(v.DRAW);
   const r = {
     policy: CELL.test(v.POLICY) ? v.POLICY : undefined,
@@ -1118,7 +1116,7 @@ export function parseRouting(line) {
     sized: opt(v.SIZED, (x) => SIZINGS.includes(x)),
     objective: OBJECTIVES.includes(v.OBJECTIVE) ? v.OBJECTIVE : undefined,
     tripped: tripped.every((c) => CELL.test(c)) ? tripped : undefined,
-    unrunnable: unrunnable.every((c) => CELL.test(c)) ? unrunnable : undefined,
+    unrunnable: unrunnable.every((c, i) => CELL.test(c) && (i === 0 || unrunnable[i - 1] < c)) ? unrunnable : undefined,
     reason: ROUTING_REASONS.includes(v.REASON) ? v.REASON : undefined,
   };
   if (Object.values(r).includes(undefined)) return null;
@@ -1131,11 +1129,11 @@ export function parseRouting(line) {
 /** The Routing line for parsed parts; throws on parts no Routing line can carry, so nothing writes one parseRouting refuses. */
 export function formatRouting({ policy, cell, draw, by, stratum, brief, criteria, parent, sized, objective, tripped, unrunnable, reason }) {
   const none = (x) => (x === null ? "-" : String(x));
+  const cells = (xs) => (xs.length === 0 ? "-" : xs.join(","));
   const line = [
     `POLICY=${policy}`, `CELL=${cell}`, `DRAW=${draw === null ? "-" : `${draw.k}/${draw.K}`}`, `BY=${none(by)}`,
     `STRATUM=${stratum}`, `BRIEF=${none(brief)}`, `CRITERIA=${none(criteria)}`, `PARENT=${none(parent)}`, `SIZED=${none(sized)}`,
-    `OBJECTIVE=${objective}`, `TRIPPED=${tripped.length === 0 ? "-" : tripped.join(",")}`,
-    `UNRUNNABLE=${unrunnable.length === 0 ? "-" : unrunnable.join(",")}`, `REASON=${reason}`,
+    `OBJECTIVE=${objective}`, `TRIPPED=${cells(tripped)}`, `UNRUNNABLE=${cells(unrunnable)}`, `REASON=${reason}`,
   ].join(" ");
   if (parseRouting(line) === null) throw new Error(`not a Routing: ${line}`);
   return line;

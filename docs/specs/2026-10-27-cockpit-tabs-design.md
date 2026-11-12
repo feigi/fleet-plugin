@@ -211,6 +211,9 @@ says "no Fit yet: the next phase 0 writes one" when there is no Fit file and
 and with no cost guard it says "no cost guard: every Pull runs at slow-high,
 the default Cell"; the guard column stands
 (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.8).*
+*Amended (#4462): where the install does not run slow-high, the no-cost-guard
+heading names the default Cell `route` derives in its place, e.g. "no cost
+guard: every Pull runs at slow-medium, the default Cell".*
 
 **No cost guard: the guard section's heading** quotes metrics-refresh's own
 line, with its time, from the newest `metrics` step in the phase 0 and
