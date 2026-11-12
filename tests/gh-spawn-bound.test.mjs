@@ -26,13 +26,32 @@
 // an unbounded spawn of a command it cannot tell from "gh" fail the sweep by
 // name rather than passing it unread.
 //
-// #4446. The bound must also be one the environment cannot lengthen, under
-// any variable name: each gh spawn's timeout expression is traced (tracer(),
-// below), and the spawn refused when it reaches `process.env` other than
-// through arg.mjs's ghBudget() or a Math.min() with a ceiling the environment
-// does not feed, or reaches a name the tracer cannot resolve. A read that
-// reaches no gh timeout (HOME, GH_REPO, `env: { ...process.env }`, a git
-// bound) is not looked at.
+// #4446, #4460. The bound must also be one the environment cannot lengthen,
+// under any variable name: each gh spawn's timeout expression is traced
+// (tracer(), below), and the spawn refused when it reaches `process.env`
+// other than through arg.mjs's ghBudget() or a Math.min() it can only
+// shorten, or reaches a name the tracer cannot resolve. A read that reaches
+// no gh timeout (HOME, GH_REPO, `env: { ...process.env }`, a git bound) is
+// not looked at. Four rules say what the environment may still do:
+//   1. A Math.min() the environment reaches keeps its exemption only with a
+//      ceiling: an argument clear of the environment that works out, from
+//      literals, + - * / ** and the names the tracer resolves, to a number
+//      from 1 to CEILING_CAP (at its largest, when it has several values).
+//   2. Every argument of that Math.min() the environment reaches is floored:
+//      each value it can take is a Math.max() with an argument clear of the
+//      environment that is at least 1 (at its smallest), since a timeout of
+//      0 is no timeout. A floor written around the Math.min() is no floor.
+//   3. A member read (x.key, x.key(), f().key) is followed only into a plain
+//      value of the object literals that x, or f's return, resolves to.
+//      `this`, a `new` expression, Object.create(), a class, a function and
+//      a call the tracer cannot open are refused as receivers; a getter, a
+//      setter and a method are refused as the key.
+//   4. Wherever a key is read out of an object (a member read, a gh spawn's
+//      own options, an Object.assign() source), the read is refused when the
+//      literal holds a computed key, a `__proto__` entry, or a getter, setter
+//      or method of that key; or the object is handed to an Object.* or
+//      Reflect.* call other than Object.assign(); or `__proto__`,
+//      `__defineGetter__` or `__defineSetter__` is written or called on it.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
@@ -280,8 +299,15 @@ function analyse(src, file) {
   // The named functions whose body holds `at`, innermost first.
   const encl = (at) => [...fns.values()].filter((f) => f.start <= at && at <= f.end).sort((x, y) => y.start - x.start);
 
-  return { file, code, skel, primitives, imports, processAliases, fns, calls, carries, within, encl, loopLiterals, problems };
+  // The classes this file declares: `class C` and `const C = class`.
+  const classes = new Set([...skel.matchAll(/\bclass\s+([\w$]+)/g)].map((m) => m[1]));
+  for (const m of skel.matchAll(/\b(?:const|let|var)\s+([\w$]+)\s*=\s*class\b/g)) classes.add(m[1]);
+
+  return { file, code, skel, primitives, imports, processAliases, fns, classes, calls, carries, within, encl, loopLiterals, problems };
 }
+
+// The longest, in ms, a Math.min() ceiling may be: rule 1 of the file header.
+const CEILING_CAP = 300_000;
 
 // Whether the environment can reach a gh spawn's timeout, decided on the
 // expression that supplies it and never on the name of anything it reads.
@@ -301,9 +327,12 @@ function analyse(src, file) {
 // lengthen a bound whatever they read, and are not entered: arg.mjs's
 // `ghBudget(defaultSeconds, override)`, imported from ./arg.mjs and not
 // declared here, whose `override` only ever shortens it (its first argument
-// is still judged), and a `Math.min(…)` with an argument that is itself clear
-// of the environment and not Infinity, a ceiling the rest can only shorten,
-// as closeout.mjs's remaining-time budget() is.
+// is still judged), and a `Math.min(…)` that passes rules 1 and 2 of the
+// file header, as closeout.mjs's remaining-time budget() does: numbers()
+// works its ceiling out, floored() checks each argument the environment
+// reaches. A member read goes to keyValues() in read mode, which follows it
+// into plain values only and answers rules 3 and 4 with a refusal: a ref
+// that carries `refuse`, which judge() reports as its reason.
 //
 // A value is a "ref": source text in both views, the module it was read in,
 // and an offset inside it, from which the functions around it are found.
@@ -366,6 +395,8 @@ function tracer(mods, resolve, spawner) {
   // assignment counts where it lands on that binding. `at` of -1 reads at
   // module scope.
   const ASSIGN = "(?:[-+*/%&|^]|\\*\\*|<<|>>>?|&&|\\|\\||\\?\\?)?=(?![=>])";
+  // What a match of ASSIGN ends in, when it is a compound assignment.
+  const COMPOUND = /[-+*/%&|^<>?]=\s*$/;
   const declRefs = (mod, id, at) => {
     const e = escape(id);
     const found = [];
@@ -376,15 +407,15 @@ function tracer(mods, resolve, spawner) {
     for (const [form, destructuring] of forms) {
       for (const m of mod.skel.matchAll(new RegExp(form, "g"))) {
         const declares = destructuring || /\b(?:const|let|var)\s*$/.test(mod.skel.slice(Math.max(0, m.index - 8), m.index));
-        found.push({ m, declares });
+        found.push({ m, declares, destructuring });
       }
     }
     const scopes = new Set(found.filter((f) => f.declares).map((f) => mod.encl(f.m.index)[0] ?? null));
     const scopeOf = (pos) => mod.encl(pos).find((fn) => scopes.has(fn)) ?? null;
     const scope = scopeOf(at);
-    const refs = found.filter((f) => scopeOf(f.m.index) === scope).map(({ m }) => {
+    const refs = found.filter((f) => scopeOf(f.m.index) === scope).map(({ m, destructuring }) => {
       const a = m.index + m[0].length;
-      return refOf(mod, a, exprEnd(mod.skel, a, true));
+      return { ...refOf(mod, a, exprEnd(mod.skel, a, true)), compound: !destructuring && COMPOUND.test(m[0]), destructured: destructuring };
     });
     return { refs, key: `${mod.file}=${id}@${scope?.start ?? 0}` };
   };
@@ -450,7 +481,7 @@ function tracer(mods, resolve, spawner) {
       for (const m of mod.code.matchAll(new RegExp(target, "g"))) {
         if (mod.skel[m.index] !== mod.code[m.index]) continue;
         const a = m.index + m[0].length;
-        out.push(refOf(mod, a, exprEnd(mod.skel, a, true)));
+        out.push({ ...refOf(mod, a, exprEnd(mod.skel, a, true)), compound: COMPOUND.test(m[0]) });
       }
       for (const m of mod.skel.matchAll(/(?<![\w$.])Object\s*\.\s*assign\s*\(/g)) {
         const [first, ...sources] = pieces(mod.skel, mod.code, m.index + m[0].length - 1);
@@ -491,33 +522,118 @@ function tracer(mods, resolve, spawner) {
     const and = ops.filter(([, op]) => op === "&&").at(-1);
     return and === undefined ? null : [cut(and[0] + 2, s.length)];
   };
+  // A read the sweep refuses to follow: a ref that judge() answers with `why`.
+  const refuse = (ref, why) => ({ mod: ref.mod, skel: "", code: "", at: ref.at, refuse: why });
+  const shadowedBy = (ref, id) => ref.mod.encl(ref.at).some((fn) => paramBinding(fn, id) !== null);
+  const isClass = (mod, id) => {
+    const imp = mod.imports.get(id);
+    return mod.classes.has(id) || (imp !== undefined && (mods.get(imp.module.slice(2))?.classes.has(imp.name) ?? false));
+  };
+  // Why the object `id` names, read at `where`, may have a key this sweep
+  // does not see: it is handed to an Object.* or Reflect.* call other than
+  // Object.assign() (whose target writes() follows), or `__proto__`,
+  // `__defineGetter__` or `__defineSetter__` is written or called on it, in
+  // the file that reads it or the one it is imported from.
+  const reshapes = (ref, id, where) => {
+    const imp = ref.mod.imports.get(id);
+    const from = imp && mods.get(imp.module.slice(2));
+    const out = [];
+    for (const [mod, name] of from ? [[ref.mod, id], [from, imp.name]] : [[ref.mod, id]]) {
+      for (const m of mod.skel.matchAll(/(?<![\w$.])(Object|Reflect)\s*\.\s*([\w$]+)\s*\(/g)) {
+        if (m[1] === "Object" && m[2] === "assign") continue;
+        if (pieces(mod.skel, mod.code, m.index + m[0].length - 1).some((p) => p.skel === name)) {
+          out.push(`reads ${where}: ${name} is handed to ${m[1]}.${m[2]}(…), which this sweep does not follow`);
+        }
+      }
+      const e = escape(name);
+      const has = (pattern) => [...mod.code.matchAll(new RegExp(pattern, "g"))].some((m) => mod.skel[m.index] === mod.code[m.index]);
+      if (has(`(?<![\\w$.])${e}\\s*(?:\\.\\s*__proto__\\b|\\[\\s*(["'])__proto__\\1\\s*\\])\\s*${ASSIGN}`)) {
+        out.push(`reads ${where}: ${name}.__proto__ is written, a prototype this sweep does not follow`);
+      }
+      if (has(`(?<![\\w$.])${e}\\s*\\.\\s*__define(?:Getter|Setter)__\\s*\\(`)) {
+        out.push(`reads ${where}: ${name}.__defineGetter__ or __defineSetter__ is called, which this sweep does not follow`);
+      }
+    }
+    return out.map((why) => refuse(ref, why));
+  };
+  // One entry of an object literal, read off its source text `c`: its kind
+  // (`plain`, `shorthand`, `accessor`, `method`, or `computed` for any key
+  // not spelled out), its key, and for a plain entry where its value starts.
+  const MODIFIER = /^(?:(async|get|set)\s+(?=[\w$"'[*])|\*\s*(?=[\w$"'[]))/;
+  const entryOf = (c) => {
+    let rest = c;
+    let at = 0;
+    let accessor = false;
+    let method = false;
+    for (let m = rest.match(MODIFIER); m !== null; m = rest.match(MODIFIER)) {
+      if (m[1] === "get" || m[1] === "set") accessor = true;
+      else method = true;
+      rest = rest.slice(m[0].length);
+      at += m[0].length;
+    }
+    const k = rest.startsWith("[") ? null : rest.match(/^(?:(["'])((?:\\.|(?!\1)[^\\])*)\1|([\w$]+))/);
+    if (k === null) return { kind: "computed" };
+    const key = k[2] ?? k[3];
+    const tail = rest.slice(k[0].length);
+    if (accessor) return { kind: "accessor", key };
+    if (method || /^\s*\(/.test(tail)) return { kind: "method", key };
+    const colon = tail.match(/^\s*:\s*/);
+    if (colon !== null) return { kind: "plain", key, at: at + k[0].length + colon[0].length };
+    return /^\s*$/.test(tail) ? { kind: "shorthand", key } : { kind: "computed" };
+  };
   // The expressions `key` can be given in the options object `ref` reads as:
   // an object literal, its spreads, a variable or parameter holding one, a
   // key written into that variable later, a local helper's return, either
   // value a choice between objects can take. `whole` is set inside a spread
   // or an Object.assign(), where an expression none of those opens is handed
-  // back to be judged whole rather than read as carrying no `key`.
-  const keyValues = (ref, key, bind, seen, whole = false) => {
+  // back to be judged whole rather than read as carrying no `key`. `read` is
+  // the member read being traced, as written (`CFG.ms`), when there is one:
+  // the receivers rule 3 refuses are refused, and an expression none of those
+  // opens is handed back to be judged whole. A literal's entries are
+  // refused as rule 4 says, whoever reads them.
+  const keyValues = (ref, key, bind, seen, whole = false, read = null) => {
+    if (ref.refuse) return [ref];
     const s = ref.skel;
-    const opaque = whole ? [ref] : [];
+    const where = read ?? key;
+    const opaque = whole || read !== null ? [ref] : [];
+    const not = (what) => [refuse(ref, `reads ${where}: ${what}, whose members this sweep does not follow`)];
+    if (read !== null) {
+      if (/^new\b/.test(s)) return not("it is a new expression");
+      if (/^Object\s*\.\s*create\s*\(/.test(s)) return not("it is an Object.create(…) object");
+      if (/^class\b/.test(s)) return not("it is a class");
+      if (/^(?:async\b\s*)?(?:function\b|(?:[\w$]+|\([^()]*\))\s*=>)/.test(s)) return not("it is a function");
+    }
     if (s.startsWith("{")) {
       if (closing(s, 0) !== s.length - 1) return opaque;
       const out = [];
       for (const p of pieces(s, ref.code, 0)) {
         if (p.skel.startsWith("...")) {
-          out.push(...keyValues({ ...ref, skel: p.skel.slice(3).trim(), code: p.code.slice(3).trim() }, key, bind, seen, true));
+          out.push(...keyValues({ ...ref, skel: p.skel.slice(3).trim(), code: p.code.slice(3).trim() }, key, bind, seen, true, read));
           continue;
         }
-        const m = p.code.match(/^(["']?)([\w$]+)\1\s*(:?)/);
-        if (m === null || m[2] !== key) continue;
-        out.push(m[3] === "" ? { ...ref, skel: key, code: key } : { ...ref, skel: p.skel.slice(m[0].length).trim(), code: p.code.slice(m[0].length).trim() });
+        const e = entryOf(p.code);
+        if (e.kind === "computed") out.push(refuse(ref, `reads ${where}: its object holds a computed key, which can be ${key}`));
+        else if (e.key === "__proto__") out.push(refuse(ref, `reads ${where}: its object holds a __proto__ entry, a prototype this sweep does not follow`));
+        else if (e.key !== key) continue;
+        else if (e.kind === "accessor" || e.kind === "method") out.push(refuse(ref, `reads ${where}: its object holds ${key} as a getter, setter or method, not a plain value`));
+        else out.push(e.kind === "shorthand" ? { ...ref, skel: key, code: key } : { ...ref, skel: p.skel.slice(e.at).trim(), code: p.code.slice(e.at).trim() });
       }
       return out;
     }
-    const inner = (r) => keyValues(r, key, bind, seen, whole);
-    if (/^[\w$]+$/.test(s)) return [...viaId(ref, s, bind, seen, inner, () => opaque), ...writes(ref, s, key, bind, seen)];
+    const inner = (r) => keyValues(r, key, bind, seen, whole, read);
+    if (/^[\w$]+$/.test(s)) {
+      if (read !== null) {
+        if (s === "this") return [refuse(ref, `reads ${where}: this holds no object this sweep can follow`)];
+        if (!shadowedBy(ref, s) && isClass(ref.mod, s)) return not(`${s} is a class`);
+        if (!shadowedBy(ref, s) && resolve(ref.mod, s) !== null) return not(`${s} is a function`);
+      }
+      return [...reshapes(ref, s, where), ...viaId(ref, s, bind, seen, inner, () => opaque), ...writes(ref, s, key, bind, seen)];
+    }
     const call = s.match(/^([\w$]+)\s*\(/);
-    if (call !== null && closing(s, call[0].length - 1) === s.length - 1) return viaId(ref, call[1], bind, seen, inner, () => opaque);
+    if (call !== null && closing(s, call[0].length - 1) === s.length - 1) {
+      const unopened = read !== null && !GLOBALS.has(call[1]) ? not(`${call[1]}(…) returns a value this sweep cannot open`) : opaque;
+      return viaId(ref, call[1], bind, seen, inner, () => unopened);
+    }
     const alternatives = branches(ref);
     if (alternatives !== null) return alternatives.flatMap(inner);
     return opaque;
@@ -525,15 +641,15 @@ function tracer(mods, resolve, spawner) {
   // JavaScript's own names: a read of one reaches no environment.
   const GLOBALS = new Set(["Number", "Math", "Date", "String", "Boolean", "BigInt", "JSON", "Object", "Array",
     "parseInt", "parseFloat", "isFinite", "isNaN", "Infinity", "NaN", "undefined", "null", "true", "false",
-    "new", "typeof", "void", "await", "this", "instanceof", "in", "of"]);
+    "typeof", "void", "await", "instanceof", "in", "of"]);
   // ghBudget() is arg.mjs's only where this file imports it from there and
   // declares no ghBudget of its own.
   const isGhBudget = (mod) => !mod.fns.has("ghBudget") && mod.imports.get("ghBudget")?.module === "./arg.mjs"
     && mod.imports.get("ghBudget").name === "ghBudget";
   // How the environment reaches the value `ref` reads: one reason per read.
-  // `ceiling` judges an argument offered as Math.min()'s ceiling, which
-  // Infinity is not.
-  const judge = (ref, bind, seen, ceiling = false) => {
+  const MEMBER = /^\s*(?:\?\.|\.)\s*([\w$]+)/;
+  const judge = (ref, bind, seen) => {
+    if (ref.refuse) return [ref.refuse];
     const hide = ref.skel.split("");
     const reasons = [];
     const part = (p) => ({ ...ref, skel: p.skel, code: p.code });
@@ -543,17 +659,29 @@ function tracer(mods, resolve, spawner) {
       const args = pieces(ref.skel, ref.code, open);
       if (m[1] === "ghBudget") {
         if (!isGhBudget(ref.mod)) continue;
-        if (args.length > 0) reasons.push(...judge(part(args[0]), bind, seen, ceiling));
-      } else if (!args.some((a) => judge(part(a), bind, seen, true).length === 0)) continue;
+        if (args.length > 0) reasons.push(...judge(part(args[0]), bind, seen));
+      } else {
+        const parts = args.map(part);
+        const per = parts.map((p) => judge(p, bind, seen));
+        const env = parts.filter((_, k) => per[k].length > 0);
+        if (env.length > 0) {
+          const ceiling = parts.some((p, k) => per[k].length === 0 && inRange(numbers(p, bind, seen)));
+          const unfloored = env.filter((p) => !floored(p, bind, seen));
+          if (!ceiling) reasons.push(`Math.min(…) has no ceiling clear of the environment that works out to a number from 1 to ${CEILING_CAP}`);
+          for (const p of unfloored) reasons.push(`Math.min(…) takes ${p.code.replace(/\s+/g, " ")}, which the environment reaches, with no Math.max(…) floor of at least 1`);
+          if (!ceiling || unfloored.length > 0) continue;
+        }
+      }
       for (let k = m.index; k <= closing(ref.skel, open); k++) hide[k] = " ";
     }
     const rest = hide.join("");
-    const shadowed = (id) => ref.mod.encl(ref.at).some((fn) => paramBinding(fn, id) !== null);
+    let skipTo = 0;
     for (const m of rest.matchAll(/(?<![\w$.])[A-Za-z_$][\w$]*/g)) {
+      if (m.index < skipTo) continue;
       const id = m[0];
       let after = m.index + id.length;
       if (/[{,]\s*$/.test(rest.slice(0, m.index)) && /^\s*:/.test(rest.slice(after))) continue;
-      let reads = id === "process" ? "process" : shadowed(id) ? undefined : ref.mod.processAliases.get(id);
+      let reads = id === "process" ? "process" : shadowedBy(ref, id) ? undefined : ref.mod.processAliases.get(id);
       if (id === "globalThis") {
         const via = rest.slice(after).match(/^\s*(?:\?\.|\.)\s*process\b/);
         if (via === null) continue;
@@ -561,14 +689,40 @@ function tracer(mods, resolve, spawner) {
         reads = "process";
       }
       if (reads === undefined) {
-        const member = rest.slice(after).match(/^\s*(?:\?\.|\.)\s*([\w$]+)/);
-        const visit = (r) => (member !== null && r.skel.startsWith("{")
-          ? keyValues(r, member[1], bind, seen).flatMap((v) => judge(v, bind, seen, ceiling))
-          : judge(r, bind, seen, ceiling));
-        const unknown = () => (!GLOBALS.has(id) ? [`reaches ${id}, which this sweep cannot resolve`]
-          : ceiling && id === "Infinity" ? ["offers Infinity as a ceiling"] : []);
-        reasons.push(...viaId(ref, id, bind, seen, visit, unknown));
-        if (member !== null) reasons.push(...writes(ref, id, member[1], bind, seen).flatMap((v) => judge(v, bind, seen, ceiling)));
+        const follow = rest.slice(after);
+        // A member read on a `new` expression or an Object.create() call.
+        const create = id === "Object" ? follow.match(/^\s*\.\s*create\s*\(/) : null;
+        const made = id === "new" ? follow.match(/^\s*[\w$.]+\s*/) : create;
+        if (made !== null) {
+          let end = after + made[0].length;
+          if (id === "new" && rest[end] === "(") end = closing(rest, end) + 1;
+          else if (id === "Object") end = closing(rest, end - 1) + 1;
+          const mem = rest.slice(end).match(MEMBER);
+          if (mem !== null) {
+            const label = `${ref.code.slice(m.index, end).replace(/\s+/g, " ")}.${mem[1]}`;
+            reasons.push(`reads ${label}: it is ${id === "new" ? "a new expression" : "an Object.create(…) object"}, whose members this sweep does not follow`);
+            skipTo = end + mem[0].length;
+            continue;
+          }
+        }
+        let member = follow.match(MEMBER);
+        let end = after;
+        if (member === null && !GLOBALS.has(id)) {
+          const open = follow.match(/^\s*\(/);
+          if (open !== null) {
+            const close = closing(rest, after + open[0].length - 1);
+            const mem = rest.slice(close + 1).match(MEMBER);
+            if (mem !== null) { member = mem; end = close + 1; }
+          }
+        }
+        if (member !== null && !GLOBALS.has(id)) {
+          const label = end === after ? `${id}.${member[1]}` : `${id}(…).${member[1]}`;
+          const receiver = { ...ref, skel: ref.skel.slice(m.index, end), code: ref.code.slice(m.index, end) };
+          for (const v of keyValues(receiver, member[1], bind, seen, false, label)) reasons.push(...judge(v, bind, seen));
+          continue;
+        }
+        const unknown = () => (GLOBALS.has(id) ? [] : [`reaches ${id}, which this sweep cannot resolve`]);
+        reasons.push(...viaId(ref, id, bind, seen, (r) => judge(r, bind, seen), unknown));
         continue;
       }
       if (reads === "process") {
@@ -581,6 +735,117 @@ function tracer(mods, resolve, spawner) {
       reasons.push(`reads ${ref.code.slice(m.index, after)}${ref.code.slice(after).match(tail)[0]}`);
     }
     return reasons;
+  };
+  const inRange = (n) => n !== null && Math.max(...n) >= 1 && Math.max(...n) <= CEILING_CAP;
+  // The numbers `ref` can work out to, from literals, unary + and -, + - * /
+  // **, parentheses, and names and member reads resolved as the tracer
+  // resolves them; null when any value of it does not work out, or it is
+  // written by a compound assignment.
+  const NUMBER = /^(?:0[xX][\da-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+|(?:\d[\d_]*(?:\.[\d_]*)?|\.\d[\d_]*)(?:[eE][+-]?\d[\d_]*)?)/;
+  const MAX_VALUES = 64;
+  const numbers = (ref, bind, seen) => {
+    if (ref.refuse || ref.compound || ref.destructured) return null;
+    const s = ref.skel;
+    let i = 0;
+    const ws = () => { while (i < s.length && /\s/.test(s[i])) i++; };
+    const fail = () => { i = s.length + 1; return null; };
+    const lift = (a, b, f) => {
+      if (a === null || b === null) return null;
+      const out = [...new Set(a.flatMap((x) => b.map((y) => f(x, y))))];
+      return out.length > MAX_VALUES ? null : out;
+    };
+    const sum = () => {
+      let v = prod();
+      for (;;) {
+        ws();
+        if (s[i] !== "+" && s[i] !== "-") return v;
+        const op = s[i++];
+        v = lift(v, prod(), op === "+" ? (a, b) => a + b : (a, b) => a - b);
+      }
+    };
+    const prod = () => {
+      let v = pow();
+      for (;;) {
+        ws();
+        if (s[i] !== "*" && s[i] !== "/") return v;
+        const op = s[i++];
+        v = lift(v, pow(), op === "*" ? (a, b) => a * b : (a, b) => a / b);
+      }
+    };
+    const pow = () => {
+      const base = unary();
+      ws();
+      if (s[i] === "*" && s[i + 1] === "*") { i += 2; return lift(base, pow(), (a, b) => a ** b); }
+      return base;
+    };
+    const unary = () => {
+      ws();
+      if (s[i] !== "+" && s[i] !== "-") return primary();
+      if (s[i + 1] === s[i]) return fail();
+      const negate = s[i++] === "-";
+      const v = unary();
+      return v !== null && negate ? v.map((x) => -x) : v;
+    };
+    const primary = () => {
+      ws();
+      if (s[i] === "(") {
+        i++;
+        const v = sum();
+        ws();
+        if (s[i] !== ")") return fail();
+        i++;
+        return v;
+      }
+      const num = s.slice(i).match(NUMBER);
+      if (num !== null) { i += num[0].length; return [Number(num[0].replace(/_/g, ""))]; }
+      const name = s.slice(i).match(/^[A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$]*)*/);
+      if (name === null) return fail();
+      i += name[0].length;
+      ws();
+      if (s[i] === "(" || s[i] === "[") return fail();
+      return named(ref, name[0].split(".").map((x) => x.trim()), bind, seen);
+    };
+    const v = sum();
+    ws();
+    return i === s.length && v !== null && v.length > 0 ? v : null;
+  };
+  // The numbers a name, or a member read `a.b.c`, can hold.
+  const named = (ref, [id, ...keys], bind, seen) => {
+    const all = (vals) => (vals.length === 0 || vals.includes(null) ? null : [...new Set(vals)]);
+    if (keys.length === 0) {
+      const e = escape(id);
+      if (!shadowedBy(ref, id) && (isClass(ref.mod, id) || resolve(ref.mod, id) !== null)) return null;
+      if (new RegExp(`(?<![\\w$.])${e}\\s*(?:\\+\\+|--)|(?:\\+\\+|--)\\s*${e}\\b`).test(ref.mod.skel)) return null;
+      return all(viaId(ref, id, bind, seen, (r) => numbers(r, bind, seen) ?? [null], () => [null]));
+    }
+    let objects = [{ ...ref, skel: id, code: id }];
+    let label = id;
+    for (const key of keys) {
+      label += `.${key}`;
+      objects = objects.flatMap((o) => keyValues(o, key, bind, seen, false, label));
+      if (objects.length === 0) return null;
+    }
+    return all(objects.flatMap((o) => numbers(o, bind, seen) ?? [null]));
+  };
+  // Whether every value `ref` can take is a Math.max(…) call with an argument
+  // clear of the environment that is at least 1 at its smallest.
+  const floored = (ref, bind, seen) => {
+    if (ref.refuse) return false;
+    const s = ref.skel;
+    const max = s.match(/^Math\s*\.\s*max\s*\(/);
+    if (max !== null) {
+      const open = max[0].length - 1;
+      return closing(s, open) === s.length - 1 && pieces(s, ref.code, open).some((a) => {
+        const arg = { ...ref, skel: a.skel, code: a.code };
+        const n = judge(arg, bind, seen).length === 0 ? numbers(arg, bind, seen) : null;
+        return n !== null && Math.min(...n) >= 1;
+      });
+    }
+    const alternatives = branches(ref);
+    if (alternatives !== null) return alternatives.every((r) => floored(r, bind, seen));
+    if (!/^[\w$]+$/.test(s)) return false;
+    const each = viaId(ref, s, bind, seen, (r) => [floored(r, bind, seen)], () => [false]);
+    return each.length > 0 && each.every(Boolean);
   };
   // Every reason the environment reaches the timeout of the spawn call `c`
   // whose command is argument `cmdAt`: its own `timeout` (and, to a funnel,
@@ -808,6 +1073,14 @@ const FUNNEL = `function run(cmd, args, timeoutMs) { return spawnSync(cmd, args,
 const ENV_MS = "Number(process.env.TICKETLESS_TIMEOUT ?? 60) * 1000";
 // arg.mjs's ghBudget() as a script imports it; the sweep exempts no other.
 const GH_BUDGET = `import { ghBudget } from "./arg.mjs";\n`;
+// #4460. A gh spawn timed by `Math.min(ceiling, env)`, and one timed by the
+// expression `expr`; `decls` are the lines written before the spawn.
+const FLOORED = "Math.max(1, Number(process.env.X))";
+const MIN = (ceiling, env = FLOORED, decls = "") => MOD(`${GH_BUDGET}${decls}spawnSync("gh", ["x"], { timeout: Math.min(${ceiling}, ${env}) });`);
+const READ = (expr, decls = "") => MOD(`${decls}spawnSync("gh", ["x"], { timeout: ${expr} });`);
+const ENV_GETTER = "get ms() { return Number(process.env.X); }";
+const ENV_PROTO = "function B() {}\nB.prototype.ms = function () { return Number(process.env.X); };\n";
+const imports = (decls, line) => ({ "common.mjs": decls, "x.mjs": line });
 
 test("the sweep refuses a gh spawn whose timeout the environment can reach", () => {
   const refused = {
@@ -872,6 +1145,78 @@ test("the sweep refuses a gh spawn whose timeout the environment can reach", () 
   for (const [name, src] of Object.entries(refused)) {
     assert.deepEqual(reaching(typeof src === "string" ? { "x.mjs": src } : src), [true], name);
   }
+  // #4460. Each shape below is refused for one rule, and says so: its reason
+  // holds `why`. A ceiling case floors its environment argument, a floor case
+  // has the ceiling 20_000, so the other rule cannot be what refuses it.
+  const reasoned = [
+    // Rule 1: the ceiling.
+    ["ceiling 1e12 written inline", MIN("1e12"), "ceiling"],
+    ["ceiling 1e12 as a const", MIN("C", FLOORED, "const C = 1e12;\n"), "ceiling"],
+    ["ceiling 1e12 imported", imports("export const C = 1e12;\n", MIN("C", FLOORED, `import { C } from "./common.mjs";\n`)), "ceiling"],
+    ["Number.MAX_SAFE_INTEGER as the ceiling", MIN("Number.MAX_SAFE_INTEGER"), "ceiling"],
+    ["Number.MAX_VALUE as the ceiling", MIN("Number.MAX_VALUE"), "ceiling"],
+    ["Number.POSITIVE_INFINITY as the ceiling", MIN("Number.POSITIVE_INFINITY"), "ceiling"],
+    ["2 ** 40 as the ceiling", MIN("2 ** 40"), "ceiling"],
+    ["1e6 * 1e6 as the ceiling", MIN("1e6 * 1e6"), "ceiling"],
+    ["Date.now() as the ceiling", MIN("Date.now()"), "ceiling"],
+    ["a let set to 20_000 and later to 1e12", MIN("C", FLOORED, "let C = 20_000;\nC = 1e12;\n"), "ceiling"],
+    ["a ceiling a compound assignment writes", MIN("C", FLOORED, "let C = 20_000;\nC += 1;\n"), "ceiling"],
+    ["a funnel parameter one caller hands 1e12", MOD(`function ceil(cap) { return Math.min(cap, ${FLOORED}); }\nspawnSync("gh", ["a"], { timeout: ceil(20_000) });\nspawnSync("gh", ["b"], { timeout: ceil(1e12) });`), "ceiling"],
+    ["ghBudget(20, process.env.Y) as the ceiling", MIN("ghBudget(20, process.env.Y)"), "ceiling"],
+    ["ceiling 0", MIN("0"), "ceiling"],
+    ["ceiling -1", MIN("-1"), "ceiling"],
+    ["ceiling 300_001", MIN("300_001"), "ceiling"],
+    // Rule 2: the floor.
+    ["Math.min of a literal ceiling and an env read", MIN("20_000", "Number(process.env.X)"), "floor"],
+    ["ghBudget inside a Math.min ceiling", MIN("20_000", "ghBudget(Number(process.env.X), process.env.Y)"), "floor"],
+    ["a Math.max(0, …) floor", MIN("20_000", "Math.max(0, Number(process.env.X))"), "floor"],
+    ["a floor the environment feeds", MIN("20_000", "Math.max(F, Number(process.env.X))", "const F = Number(process.env.F);\n"), "floor"],
+    ["a floor that is 0 at its smallest value", MIN("20_000", "Math.max(F, Number(process.env.X))", "let F = 1;\nF = 0;\n"), "floor"],
+    ["a floor written around the Math.min", READ("Math.max(1, Math.min(20_000, Number(process.env.X)))"), "floor"],
+    // Rule 3: member reads.
+    ["this.ms() in an object literal's method", MOD(`const CFG = { ms() { return 20_000; }, run() { return spawnSync("gh", ["x"], { timeout: this.ms() }); } };`), "this.ms"],
+    ["this.ms() in a class method", MOD(`class C { ms() { return 20_000; } run() { return spawnSync("gh", ["x"], { timeout: this.ms() }); } }`), "this.ms"],
+    ["a getter on an object literal", READ("CFG.ms", `const CFG = { ${ENV_GETTER} };\n`), "CFG.ms"],
+    ["a getter on an imported object literal", imports(`export const CFG = { ${ENV_GETTER} };\n`, READ("CFG.ms", `import { CFG } from "./common.mjs";\n`)), "CFG.ms"],
+    ["a getter added by Object.defineProperty", READ("CFG.ms", `const CFG = {};\nObject.defineProperty(CFG, "ms", { get() { return Number(process.env.X); } });\n`), "Object.defineProperty"],
+    ["a prototype method, as new B().ms()", READ("new B().ms()", ENV_PROTO), "new B().ms"],
+    ["a prototype method, through a name holding new B()", READ("b.ms()", `${ENV_PROTO}const b = new B();\n`), "b.ms"],
+    ["Object.create(B.prototype).ms()", READ("Object.create(B.prototype).ms()", ENV_PROTO), "Object.create"],
+    ["a name holding Object.create(B.prototype)", READ("o.ms()", `${ENV_PROTO}const o = Object.create(B.prototype);\n`), "o.ms"],
+    ["an object literal's method beside an outer const of its name", READ("CFG.ms()", `const ms = 20_000;\nconst CFG = { ms() { return 1; } };\n`), "CFG.ms"],
+    ["an imported object's method", imports(`export const CFG = { ms() { return 20_000; } };\n`, READ("CFG.ms()", `import { CFG } from "./common.mjs";\n`)), "CFG.ms"],
+    ["a class's static method", READ("C.ms()", `class C { static ms() { return 20_000; } }\n`), "C.ms"],
+    ["a class's instance method", READ("new C().ms()", `class C { ms() { return 20_000; } }\n`), "new C().ms"],
+    ["a class's getter", READ("new C().ms", `class C { get ms() { return 20_000; } }\n`), "new C().ms"],
+    ["a class's static getter", READ("C.ms", `class C { static get ms() { return 20_000; } }\n`), "C.ms"],
+    ["a function's property", READ("f.ms", `function f() {}\nf.ms = 20_000;\n`), "f.ms"],
+    ["a call result the sweep cannot open", READ("load().ms"), "load(…).ms"],
+    // Rule 4: object entries, on a member read.
+    ["a computed key", READ("CFG.ms", `const K = "ms";\nconst CFG = { [K]: Number(process.env.X) };\n`), "computed key"],
+    ["a computed string key", READ("CFG.ms", `const CFG = { ["ms"]: Number(process.env.X) };\n`), "computed key"],
+    ["a computed key after a plain one", READ("CFG.ms", `const CFG = { ms: 20_000, ["ms"]: Number(process.env.X) };\n`), "computed key"],
+    ["a __proto__ entry", READ("CFG.ms", `const P = { ${ENV_GETTER} };\nconst CFG = { __proto__: P };\n`), "__proto__"],
+    ["Object.setPrototypeOf", READ("CFG.ms", `const P = { ${ENV_GETTER} };\nconst CFG = {};\nObject.setPrototypeOf(CFG, P);\n`), "Object.setPrototypeOf"],
+    ["CFG.__proto__ written", READ("CFG.ms", `const P = { ${ENV_GETTER} };\nconst CFG = { ms: 20_000 };\nCFG.__proto__ = P;\n`), "__proto__"],
+    ["Object.defineProperty with a value", READ("CFG.ms", `const CFG = { ms: 20_000 };\nObject.defineProperty(CFG, "ms", { value: Number(process.env.X) });\n`), "Object.defineProperty"],
+    ["Object.defineProperties", READ("CFG.ms", `const CFG = { ms: 20_000 };\nObject.defineProperties(CFG, { ms: { value: Number(process.env.X) } });\n`), "Object.defineProperties"],
+    ["Reflect.defineProperty", READ("CFG.ms", `const CFG = { ms: 20_000 };\nReflect.defineProperty(CFG, "ms", { value: Number(process.env.X) });\n`), "Reflect.defineProperty"],
+    ["Reflect.set", READ("CFG.ms", `const CFG = { ms: 20_000 };\nReflect.set(CFG, "ms", Number(process.env.X));\n`), "Reflect.set"],
+    ["CFG.__defineGetter__", READ("CFG.ms", `const CFG = { ms: 20_000 };\nCFG.__defineGetter__("ms", () => Number(process.env.X));\n`), "__defineGetter__"],
+    ["Object.assign of a getter", READ("CFG.ms", `const CFG = { ms: 20_000 };\nObject.assign(CFG, { ${ENV_GETTER} });\n`), "getter, setter or method"],
+    // Rule 4: object entries, in a gh spawn's own options.
+    ["options holding a timeout and a getter of it", MOD(`spawnSync("gh", ["x"], { timeout: 20_000, get timeout() { return Number(process.env.X); } });`), "getter, setter or method"],
+    ["options holding only a getter", MOD(`spawnSync("gh", ["x"], { get timeout() { return Number(process.env.X); } });`), "getter, setter or method"],
+    ["options holding a timeout and a computed key", MOD(`spawnSync("gh", ["x"], { timeout: 20_000, ["timeout"]: Number(process.env.X) });`), "computed key"],
+    ["options given a getter by Object.defineProperty", MOD(`const opts = { timeout: 20_000 };\nObject.defineProperty(opts, "timeout", { get() { return Number(process.env.X); } });\nspawnSync("gh", ["x"], opts);`), "Object.defineProperty"],
+  ];
+  for (const [name, src, why] of reasoned) {
+    const { spawns } = sweep(typeof src === "string" ? { "x.mjs": src } : src);
+    assert.ok(spawns.length > 0, name);
+    for (const s of spawns) assert.ok(s.reaches.some((r) => r.includes(why)), `${name}: ${JSON.stringify(s.reaches)}`);
+    // One rule per case: a ceiling case is no floor case, nor the reverse.
+    for (const s of spawns) for (const other of ["ceiling", "floor"]) if (why !== other) assert.ok(!s.reaches.some((r) => r.includes(other)), `${name}: ${JSON.stringify(s.reaches)}`);
+  }
   // A script that bounds one spawn through ghBudget() and another through a
   // differently named variable: only the second is refused.
   const beside = MOD(`${GH_BUDGET}const GH_TIMEOUT_MS = ghBudget(20, process.env.X_GH_TIMEOUT);\nspawnSync("gh", ["a"], { timeout: GH_TIMEOUT_MS });\nspawnSync("gh", ["b"], { timeout: Number(process.env.OTHER) * 1000 });`);
@@ -893,13 +1238,11 @@ test("the sweep accepts a gh timeout the environment can only shorten, and env r
     "ghBudget with its env override": MOD(`${GH_BUDGET}const GH_TIMEOUT_MS = ghBudget(20, process.env.X_GH_TIMEOUT);\nspawnSync("gh", ["x"], { timeout: GH_TIMEOUT_MS });`),
     "ghBudget under any variable name": MOD(`${GH_BUDGET}const T = ghBudget(20, process.env.ANYTHING);\nspawnSync("gh", ["x"], { timeout: T });`),
     "ghBudget inline": MOD(`${GH_BUDGET}spawnSync("gh", ["x"], { timeout: ghBudget(20, process.env["X"]) });`),
-    "ghBudget inside a Math.min ceiling": MOD(`${GH_BUDGET}spawnSync("gh", ["x"], { timeout: Math.min(20_000, ghBudget(Number(process.env.X), process.env.Y)) });`),
     "a helper that calls itself": MOD(`function s() { return s() + 1; }\nspawnSync("gh", ["x"], { timeout: s() });`),
     "a same-named env read in another function": MOD(`function wait() { const ms = Number(process.env.POLL_MS); return ms; }\nfunction read() { const ms = 20_000; return spawnSync("gh", ["x"], { timeout: ms }); }`),
     "an env read beside the bound in one object": MOD(`const CFG = { home: process.env.HOME, timeoutMs: 20_000 };\nspawnSync("gh", ["x"], { timeout: CFG.timeoutMs });`),
     "an options key the env feeds, other than the timeout": MOD(`const opts = { timeout: 20_000 };\nopts.cwd = process.env.HOME;\nspawnSync("gh", ["x"], opts);`),
     "a spread choosing an env-fed cwd": MOD(`function f(dir) { return spawnSync("gh", ["x"], { timeout: 20_000, ...(dir === null ? {} : { cwd: dir }) }); }\nf(process.env.HOME);`),
-    "Math.min of a literal ceiling and an env read": MOD(`spawnSync("gh", ["x"], { timeout: Math.min(20_000, Number(process.env.X)) });`),
     "Math.min of a constant ceiling and an env deadline": MOD([
       `const NETWORK_TIMEOUT_MS = 120_000;`,
       `const deadline = Date.now() + Number(process.env.CALL_MS ?? 600_000);`,
@@ -921,6 +1264,21 @@ test("the sweep accepts a gh timeout the environment can only shorten, and env r
       "common.mjs": `export const T = 20_000;\n`,
       "x.mjs": MOD(`import { T } from "./common.mjs";\nspawnSync("gh", ["x"], { timeout: T });`),
     },
+    // #4460.
+    "Math.min of a ceiling and a floored env read": MIN("20_000"),
+    "Math.min of a ceiling and a floored ghBudget": MIN("20_000", "Math.max(1, ghBudget(Number(process.env.X), process.env.Y))"),
+    "Math.min of a ceiling and a ghBudget": MOD(`${GH_BUDGET}spawnSync("gh", ["x"], { timeout: Math.min(20_000, ghBudget(20, process.env.Y)) });`),
+    "Math.min with a huge ceiling beside an in-range one": MIN("1e12, 20_000"),
+    "Math.min with its ceiling exactly at the cap": MIN("300_000"),
+    "a floor with several values, each at least 1": MIN("20_000", "Math.max(F, Number(process.env.X))", "let F = 1;\nF = 5;\n"),
+    "a ceiling given as arithmetic on literals": MIN("CEIL", FLOORED, "const CEIL = 2 * 60_000;\n"),
+    "a ceiling imported": imports("export const CEIL = 2 * 60_000;\n", MIN("CEIL", FLOORED, `import { CEIL } from "./common.mjs";\n`)),
+    "a ceiling an object literal holds": MIN("LIMITS.gh", FLOORED, "const LIMITS = { gh: 20_000 };\n"),
+    "a member read through a funnel parameter": MOD(`function f(o) { return spawnSync("gh", ["x"], { timeout: o.t }); }\nf({ t: 20_000 });`),
+    "a member read of a helper's returned literal": READ("cfg().ms", `const cfg = () => ({ ms: 20_000 });\n`),
+    "Object.assign with the options only a source": MOD(`const opts = { timeout: 20_000 };\nconst copy = Object.assign({}, opts);\nspawnSync("gh", ["x"], opts);`),
+    "a getter on another key of the object read": READ("CFG.ms", `const CFG = { ms: 20_000, get other() { return Number(process.env.X); } };\n`),
+    "an unrelated object handed to Object.freeze": READ("CFG.ms", `const OTHER = { a: 1 };\nObject.freeze(OTHER);\nconst CFG = { ms: 20_000 };\n`),
   };
   for (const [name, src] of Object.entries(accepted)) {
     assert.deepEqual(reaching(typeof src === "string" ? { "x.mjs": src } : src), [false], name);
