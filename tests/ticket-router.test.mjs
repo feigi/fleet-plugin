@@ -677,7 +677,7 @@ test("route: a table still carrying the retired commit field is valid and routes
   const leftover = { ...without, fitted_commit: "a".repeat(40) };
   assert.equal(validateTable(leftover), leftover);
   const plain = routeIn({ table: without, arm: "A" });
-  assert.equal(plain.line.includes("CELL=smol-high"), true, plain.line);
+  assert.match(plain.line, /CELL=smol-high/);
   assert.deepEqual(routeIn({ table: leftover, arm: "A" }), plain);
 });
 
