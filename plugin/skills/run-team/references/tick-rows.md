@@ -174,8 +174,10 @@ The full text of each row `fleet-tick.mjs` prints and what it asks of the contro
   still counts toward the In-flight bound until then, a `CONFLICT PR#<M> …`
   line still reaches a fix-applier, and `tick --apply` reaps, reclaims and
   evicts once after each PR the run tracks that gh reads MERGED. A draining
-  run is over with only `ready-to-merge` PRs open; one that GitHub reads
-  CONFLICTING, or that a conflict hold stands on, still holds it.
+  run is over with only `ready-to-merge` PRs open; one that GitHub has not
+  read MERGEABLE (CONFLICTING, or UNKNOWN until it answers), one a conflict
+  hold stands on, and one a finisher, fix-applier or review is still at work
+  on each still hold it.
 - `MAIN-CHECKOUT-DIRTY <paths> …`, printed above the rows, with every
   dispatching row (implementers, reviewers, merge-bot) reading
   `HOLD (main checkout dirty)` — the main checkout changed since the Phase 0

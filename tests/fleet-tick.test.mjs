@@ -4339,16 +4339,20 @@ test("CLI --apply: merge false — a PR the run has not seen merged owes nothing
   // An unanswered probe leaves it unread, and the next tick asks again.
   const unread = applyTicks(HAND([TICKET_7], ["impl-6=PR#7"], { prStates: {} }), [APPLY, { ...APPLY, before: mergedPrs({ 7: "MERGED" }) }]);
   assert.deepEqual(unread.ticks[0].calls, []);
-  assert.match(unread.ticks[0].stderr, /gave no answer for PR#7/);
+  // PR#7 is keyed and tracked both, so the disclosure names both what stands and the reap that waits.
+  assert.match(unread.ticks[0].stderr, /gave no answer for PR#7 \(.*\) — #6's PR#7 unconfirmed closed, printed as pr-unchecked; PR#7 unconfirmed merged, its reap waits$/m);
   assert.equal(unread.ticks[1].calls.length, 3, "the merge read on the next tick owes its reap");
   assert.deepEqual(unread.ticks[1].applied, { run: CONTROLLER_AT, reapAfter: [], reapAfterPrs: [7] });
 });
 
-test("CLI --apply: merge false — a merge by hand of a PR the run did not open (a fold-in row) owes the reap too, and only --apply asks gh about it", () => {
+test("CLI --apply: merge false — a merge by hand of a PR the run did not open (a fold-in row) owes the reap too, only --apply asks gh about it, and never while the open list carries it", () => {
   const fold = HAND(["#11 PR#11 · inherited (closes no issue)"], [], { prStates: { 11: "MERGED" } });
   const plain = runCli([], fold);
   assert.equal(plain.status, 0, plain.stderr);
   assert.deepEqual(plain.graphqlCalls, [], "a tick without --apply asked gh about a PR no row keys");
+  const open = runCli(["--apply"], HAND(["#11 PR#11 · inherited (closes no issue)"], [], { prs: [pr(11, ["ready-to-merge"], [])], prStates: { 11: "OPEN" } }));
+  assert.equal(open.status, 0, open.stderr);
+  assert.deepEqual(open.graphqlCalls, [], "--apply asked gh about a PR the open list carries");
   const { ticks: [one, two] } = applyTicks(fold, [APPLY, APPLY]);
   assert.equal(one.status, 0, one.stderr);
   assert.match(one.stdout, /^APPLIED reap after PR#11: /m);
@@ -5143,7 +5147,7 @@ test("CLI: receipt merge false, bound reached — the implementer row reads HOLD
   assert.match(on.stdout, /^implementers 2\/2 → HOLD \(in-flight 2\/2\) {3}\(/m);
 });
 
-test("CLI: receipt merge false — a draining run with only ready-to-merge PRs open is over; any other open PR holds it, and so does a labelled one in conflict", () => {
+test("CLI: receipt merge false — a draining run with only ready-to-merge PRs open is over; any other open PR holds it, and so does a labelled one in conflict, not yet read MERGEABLE, or still worked", () => {
   const settled = { rows: ["#5 impl-5=PR#9 · tier-ok=impl-5:fleet-implementer"], dispatched: ["impl-5=PR#9"] };
   const drained = { ...IDLE, ledger: { ...settled, drain: "budget" } };
   const last = (r) => r.stdout.trimEnd().split("\n").at(-1);
@@ -5156,13 +5160,18 @@ test("CLI: receipt merge false — a draining run with only ready-to-merge PRs o
   };
   const off = { phase0: withMerge(false) };
   assert.equal(last(tick({ ...off, prs: [labelled] })), OVER);
-  assert.equal(last(tick({ ...off, prs: [labelled, pr(10, ["ready-to-merge"])] })), OVER, "every PR labelled");
+  assert.equal(last(tick({ ...off, prs: [labelled], ledger: { rows: [`${settled.rows[0]} · finisher-pr-9=labelled`], dispatched: [...settled.dispatched, "finisher-pr-9=labelled"], drain: "budget" } })), OVER, "a finisher settled on it");
+  const worked = (token) => ({ ...off, prs: [labelled], ledger: { rows: [`${settled.rows[0]} · ${token}`], dispatched: token.startsWith("review=") ? settled.dispatched : [...settled.dispatched, token], drain: "budget" } });
   const holds = {
     "an unlabelled PR beside it": { ...off, prs: [labelled, pr(10)] },
     "an unlabelled PR alone": { ...off, prs: [pr(9)] },
     "a PR carrying some other label": { ...off, prs: [pr(9, ["bug"])] },
     "a labelled PR GitHub reads CONFLICTING": { ...off, prs: [pr(9, ["ready-to-merge"], undefined, HEAD_B, "CONFLICTING")] },
     "a labelled PR on a conflict hold": { ...off, prs: [labelled], ledger: { ...settled, rows: [`${settled.rows[0]} conflict-hold:#9`], drain: "budget" } },
+    "a labelled PR GitHub has not read yet (UNKNOWN)": { ...off, prs: [pr(9, ["ready-to-merge"], undefined, HEAD_B, "UNKNOWN")] },
+    "a finisher live on the labelled PR": worked("finisher-pr-9"),
+    "a fix-applier live on the labelled PR": worked("fix-pr-9"),
+    "a review in flight on the labelled PR": worked("review=member:review-pr-9"),
     "a live implementer": { ...off, prs: [labelled], ledger: { rows: ["#5 impl-5 · tier-ok=impl-5:fleet-implementer"], dispatched: ["impl-5"], drain: "budget" } },
     "no drain marker": { ...off, prs: [labelled], ledger: settled },
     "the Label map's other string for the role": { ...off, prs: [labelled], labelMap: { roles: { "ready-to-merge": "queue-ok" } } },

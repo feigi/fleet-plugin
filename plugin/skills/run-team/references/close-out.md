@@ -19,8 +19,10 @@ Label names in this file are roles; the Label map gives the string to type; a me
   2. Act on the review, fix-applier and merge rows until the tick prints
      `ACTION: run over → fleet-heartbeat.mjs --stop "<reason>"`, which it does
      once the run is draining with no open PR and no live implementer.
-     Under `no-merge` a PR carrying `ready-to-merge` holds nothing, unless it conflicts: those
-     PRs stay open for the maintainer, or for a later run's phase 0 to fold in.
+     Under `no-merge` a PR carrying `ready-to-merge` holds nothing once GitHub reads it
+     MERGEABLE, no conflict hold stands on it and no finisher, fix-applier or review is
+     still at work on it: those PRs stay open for the maintainer, or for a later run's
+     phase 0 to fold in.
   3. `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run closeout.mjs finish --reason "<reason>"` — scrapes
      the run's member facts, checks the tier-outcomes rows, refreshes the
      metrics, gathers the earlier runs' records and the review evidence,

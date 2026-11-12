@@ -92,8 +92,9 @@
 //             merge-bot row prints `IDLE (merging off)` whatever the queue
 //             holds, the in-flight hold reads `HOLD (in-flight n/B, awaiting
 //             human merge)`, a draining run is over with only
-//             `ready-to-merge` PRs open (one conflicting, or on a conflict
-//             hold, still holds it), and `--apply` reaps after each PR the
+//             `ready-to-merge` PRs open (one GitHub has not read MERGEABLE,
+//             one on a conflict hold, and one a member is still at work on
+//             each still hold it), and `--apply` reaps after each PR the
 //             ledger tracks that gh reads MERGED.
 //   guard     `.fleet/cost-guard.json` beside the shortlist, pr-cost.mjs
 //             --guard's verdict on the implementer cells. Printed as the
@@ -1280,6 +1281,7 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, queued
   const finished = (n) => prStates.get(n) === "MERGED" || prStates.get(n) === "CLOSED";
   const liveReviews = reviewing.filter(([n]) => open.has(n) || !finished(n));
   const unsettled = all.filter((m) => m.outcome === null).map((m) => m.name);
+  const prTracked = [...byPr.keys()].filter((n) => !open.has(n)).sort(asc);
   return {
     implLive: live("impl"),
     inFlight: inFlightImpl + prsIn.length,
@@ -1301,8 +1303,8 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, queued
     // beside the keyed ones, since the maintainer merges them. `prMerged` is
     // those the probe read MERGED: each is a merge `--apply` reaps, reclaims
     // and evicts after, once (reapDuePrs).
-    prTracked: [...byPr.keys()].filter((n) => !open.has(n)).sort(asc),
-    prMerged: [...byPr.keys()].filter((n) => !open.has(n) && prStates.get(n) === "MERGED").sort(asc),
+    prTracked,
+    prMerged: prTracked.filter((n) => prStates.get(n) === "MERGED"),
     fixLive: live("fix-pr"),
     mergeBotLive,
     // The number of every merge bot settled `done`: each is a merge pass
@@ -1316,6 +1318,12 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, queued
     // The in-flight reviews of PRs the open list does not carry: the ones
     // the probe could retire, so the caller asks gh about these and no others.
     reviewsOffList: reviewing.filter(([n]) => !open.has(n)).map(([n]) => n).sort(asc),
+    // Every PR a member is still at work on, ascending: an unsettled
+    // fix-applier or finisher bound to it, or an in-flight review of it.
+    prsWorked: [...new Set([
+      ...all.filter((m) => m.outcome === null && (m.family === "fix-pr" || m.family === "finisher-pr")).map((m) => m.number),
+      ...liveReviews.map(([n]) => n),
+    ])].sort(asc),
     // Each PR a fix-applier is owed on (`fixOwed`), unless two fix-appliers
     // have settled `failed` on it since its latest review with none landed
     // after them — that PR is `fixEscalate`'s instead — or it is itself owed
@@ -2118,8 +2126,8 @@ function prStates(reviews, keyed, tracked = []) {
     const unconfirmed = [
       ...(reviewed.has(number) ? [`review on PR#${number} unconfirmed finished, its unit stands`] : []),
       ...(ticketsOf.get(number) ?? []).map((n) => `#${n}'s PR#${number} unconfirmed closed, printed as pr-unchecked`),
+      ...(tracked.includes(number) ? [`PR#${number} unconfirmed merged, its reap waits`] : []),
     ];
-    if (unconfirmed.length === 0) unconfirmed.push(`PR#${number} unconfirmed merged, its reap waits`);
     const why = r.unreachable === "ETIMEDOUT" ? TIMED_OUT : r.unreachable ?? (r.notFound ? "no such pull request" : "no PR state");
     console.error(`${NAME}: gh api graphql gave no answer for PR#${number} (${why}) — ${unconfirmed.join("; ")}`);
   }
@@ -2632,13 +2640,17 @@ function main() {
   const rowLines = formatLines(rows);
   // The run is over once it is draining and nothing is left in flight: no
   // open PR and no implementer still holding a claim. With merging off a PR
-  // carrying `ready-to-merge` is the maintainer's to merge and holds nothing,
-  // unless GitHub reads it CONFLICTING or a conflict hold stands on it: that
-  // one is owed a fix-applier first. Every other open PR, unreviewed or
-  // unlabelled, still holds it. Printed last and read as actionable, so it
-  // never folds away: the stop it names is the run's last act, and only the
-  // controller can write it.
-  const awaitsMaintainer = (p) => hasLabel(p, labels["ready-to-merge"]) && p.mergeable !== "CONFLICTING" && !run.conflictHeld.includes(p.number);
+  // carrying `ready-to-merge` is the maintainer's to merge and holds nothing
+  // once GitHub reads it MERGEABLE, no conflict hold stands on it and no
+  // member is at work on it. One GitHub reads CONFLICTING, or that a conflict
+  // hold stands on, is owed a fix-applier first; one GitHub has not read yet
+  // (UNKNOWN) is read again next tick; and a finisher, fix-applier or review
+  // still live on one has not finished with it. Every other open PR,
+  // unreviewed or unlabelled, still holds it. Printed last and read as
+  // actionable, so it never folds away: the stop it names is the run's last
+  // act, and only the controller can write it.
+  const awaitsMaintainer = (p) => hasLabel(p, labels["ready-to-merge"]) && p.mergeable === "MERGEABLE"
+    && !run.conflictHeld.includes(p.number) && !run.prsWorked.includes(p.number);
   const holding = merging ? prs : prs.filter((p) => !awaitsMaintainer(p));
   const over = run.draining !== null && holding.length === 0 && run.implLive === 0;
   if (over) rowLines.push(RUN_OVER);

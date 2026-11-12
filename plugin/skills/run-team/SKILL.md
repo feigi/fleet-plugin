@@ -193,7 +193,7 @@ owes beyond its call:
      release the rest by hand and run `begin` again.
   2. Act on the review, fix-applier and merge rows until the tick prints
      `ACTION: run over → fleet-heartbeat.mjs --stop "<reason>"`, which it does
-     once the run is draining with no open PR and no live implementer.
+     once a draining run has no PR holding it and no live implementer.
   3. `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run closeout.mjs finish --reason "<reason>"`, which
      records `fleet-heartbeat.mjs --stop` and then merges the Close-out PR. On `NEED merge-wait PR #<n>`,
      run `finish` again at once. A PR it names `left open` is the next run's: you never label or merge it.

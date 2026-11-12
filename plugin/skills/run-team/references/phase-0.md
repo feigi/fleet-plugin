@@ -27,7 +27,7 @@ recording anything other than `cost` or `speed` exits 3 naming the value.
 records in its receipt as `merge: true` or `merge: false`, `true` when neither
 is given; both together exit 2. With `no-merge` the fleet takes each PR as far
 as `ready-to-merge` and the maintainer merges it: the tick dispatches no merge
-bot, a draining run is over with only `ready-to-merge` PRs open, and it reaps
+bot, a draining run can be over with `ready-to-merge` PRs still open, and it reaps
 after each PR it reads merged. It is fixed for the run: a resumed receipt keeps
 the one it records — `merge` when it records none — and a resume that names the
 other exits 2 naming both, leaving the receipt as it was. A resumed receipt

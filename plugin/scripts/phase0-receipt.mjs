@@ -172,12 +172,14 @@ export function objectiveFromReceipt(opts) {
 export const MERGE_DEFAULT = true;
 
 /**
- * Whether the merge bot of the run `read` (readRunReceipt()'s `read`) belongs
- * to merges: the receipt's `merge`, the default when there is no receipt or it
- * records none. The tick reads this every pass, so it meets what a hand left
- * in the file, and only `true` reads as on: a bot dispatched on a value
- * nobody can read is the failure the switch exists to prevent, while a merge
- * not made waits for the maintainer or a later run.
+ * Whether the run's merge bot merges, read off `read` (readRunReceipt()'s
+ * `read`): the receipt's `merge`, and the default (on) when there is no
+ * receipt, it cannot be read, or it records none. With no usable receipt
+ * phase0Gate holds every dispatching row, so that default dispatches no bot.
+ * The tick reads this every pass, so it meets what a hand left in the file:
+ * a `merge` present but not a boolean reads as off, since a bot dispatched on
+ * a value nobody can read is the failure the switch exists to prevent, while
+ * a merge not made waits for the maintainer or a later run.
  */
 export function mergingOf(read) {
   if (read.state !== "ok" || read.receipt.merge === undefined) return MERGE_DEFAULT;
