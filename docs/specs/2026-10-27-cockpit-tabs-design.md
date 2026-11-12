@@ -277,6 +277,13 @@ and any trust labels for that side.
   counts while the starting table routes, and a starting Cell whose role's
   model changed shows a notice that burn-in restarted
   (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.8).*
+  *Amended (#4462): the starting Cells counted are those the Fit recorded
+  counting while a Fit routes and those the cockpit's own install read runs
+  while the starting table does, and the line says which set it used ("2 of 2
+  runnable starting Cells … ; smol-high unrunnable"). Beside the tripped Cells
+  the view lists each unrunnable Cell with its role, the model the role
+  resolves to and the levels that model runs, kept apart from the tripped
+  ones.*
 - K counts the Cells the draw uses under the workspace's guard, the same
   count each row's dispatch uses.
   *Amended (#4247): each group's line names the Cells its draw is over, and no
@@ -308,6 +315,9 @@ evidence favours on the right.
   alike ("drawn over 3 Cells: slow-high, task-high, smol-high"), and shows on
   a row only where that row differs, such as a tripped row Cell replaced by
   `slow-high`.
+  *Amended (#4462): dispatch also leaves a Cell the install does not run: a row
+  naming one, or the exploration centre, goes to the default Cell as a tripped
+  one does (`table-cell-unrunnable`), and the draw leaves it out.*
 - **A Stratum with no row of its own on either side** collapses to one line
   under its Objective: "unknown: no row on either side, follows *". A Stratum
   only one side lacks keeps its row, and that side reads "no row of its own:
@@ -617,6 +627,8 @@ row for that group. Where the Stratum read `unknown`, the line gives the
 group's path with `no brief read` for a Routing whose issue could not be read
 and with `no sizing` for an arm B Pull that got no label
 (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.8).*
+*Amended (#4462): `table-cell-unrunnable` reads "cost row's task-xhigh unrunnable
+here: default Cell", without the colon and the default Cell on a drawn Pull.*
 
 `REASON` keeps only the first thing that went wrong, and the card never
 guesses the rest. The card shows the Routing as recorded and never re-checks
@@ -718,6 +730,13 @@ today's board.
   are the Cells a draw would pick from (the tripped left out, and on an
   every-5th draw the `cost` row's Cell as well). `route` calls it for its row,
   so the tab and routing cannot disagree. `rowFor` is exported beside it.
+  *Amended (#4462): `rowDispatch` also takes `install`, and treats a Cell the
+  install does not run as a tripped one: `reason` also takes
+  `table-cell-unrunnable`, the row's Cell and the exploration centre become the
+  default Cell, which is `slow-high` while `slow` runs `high` and else the
+  nearest level of `slow` the install runs and defines, and an unrunnable Cell
+  is left out of every draw. The tab's policy rows pass it the cockpit's own
+  install read, so they cannot disagree with `route`.*
 - **`route` prints everything the Routing holds** (§ 10.2), on one line in the
   existing `KEY=VALUE` form:
   `POLICY=<cell> CELL=<cell> DRAW=<k/K|-> BY=<burn-in|every-5th|-> STRATUM=<light|heavy|unknown> BRIEF=<chars|-> CRITERIA=<n|-> SIZED=<light|heavy|-> OBJECTIVE=<cost|speed> TRIPPED=<cell,…|-> REASON=<reason>`.
@@ -728,6 +747,10 @@ today's board.
   or `unknown`, and `REASON` also takes `fit-missing`, `fit-unreadable` and
   `fit-invalid` (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.3,
   § 2.4).*
+  *Amended (#4462): the line holds `UNRUNNABLE=<cell,…|->` right after `TRIPPED`
+  — every Cell with an implementer definition that the install does not run,
+  sorted — and `REASON` also takes `table-cell-unrunnable`. A `## Routed` entry
+  written before the key carries none and reads as `UNRUNNABLE=-`.*
 - **The Stratum thresholds are exported** (`HEAVY_BRIEF_CHARS`,
   `HEAVY_CRITERIA`), for the card's "(past 3,483)".
   *Amended (#4247): retired: a group is named by its rule path, so no Stratum

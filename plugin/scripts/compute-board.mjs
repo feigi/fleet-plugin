@@ -366,6 +366,14 @@ function reasonWords(r, table) {
       const named = r.tripped.length === 1 ? `${row}'s ${r.tripped[0]}` : `${row}'s Cell (one of ${r.tripped.join(", ")})`;
       return [part(`${named} tripped${drawn ? "" : ": default Cell"}`, { href: rowHref(r, table) })];
     }
+    case "table-cell-unrunnable": {
+      // The Routing keeps the Cells the install does not run, not which of them the row named: the installed table's
+      // row for the group says, when it names one of them.
+      const rowCell = table === null ? undefined : (table.rows[r.objective][r.stratum] ?? table.rows[r.objective]["*"]);
+      const cell = r.unrunnable.includes(rowCell) ? rowCell : r.unrunnable.length === 1 ? r.unrunnable[0] : null;
+      const named = cell === null ? `${row}'s Cell (one of ${r.unrunnable.join(", ")})` : `${row}'s ${cell}`;
+      return [part(`${named} unrunnable here${drawn ? "" : ": default Cell"}`, { href: rowHref(r, table) })];
+    }
     case "guard-tripped":
       return [part(drawn ? `left out as tripped: ${r.tripped.join(", ")}` : "every other Cell tripped: no draw")];
     case "guard-missing": return [part("no cost guard yet: default Cell only")];

@@ -718,7 +718,7 @@ test("ledgerSection reads a section's entries unescaped, and none for a section 
 
 // The Routing: one line `ticket-router.mjs route` prints, `pull.mjs` reads,
 // `ledger.mjs` validates and files in `## Routed`, and the cockpit's board card reads (compute-board.mjs's cellLine).
-const SPEC_ROUTING = "POLICY=slow-high CELL=smol-high DRAW=2/3 BY=burn-in STRATUM=heavy BRIEF=9658 CRITERIA=8 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok";
+const SPEC_ROUTING = "POLICY=slow-high CELL=smol-high DRAW=2/3 BY=burn-in STRATUM=heavy BRIEF=9658 CRITERIA=8 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- UNRUNNABLE=- REASON=ok";
 const routingWith = (over) => SPEC_ROUTING.split(" ").map((w) => {
   const key = w.slice(0, w.indexOf("="));
   return key in over ? `${key}=${over[key]}` : w;
@@ -727,12 +727,13 @@ const routingWith = (over) => SPEC_ROUTING.split(" ").map((w) => {
 test("parseRouting reads every part of a Routing line, and formatRouting writes the same line back", () => {
   assert.deepEqual(parseRouting(SPEC_ROUTING), {
     policy: "slow-high", cell: "smol-high", draw: { k: 2, K: 3 }, by: "burn-in", stratum: "heavy", brief: 9658, criteria: 8,
-    parent: null, sized: null, objective: "cost", tripped: [], reason: "ok",
+    parent: null, sized: null, objective: "cost", tripped: [], unrunnable: [], reason: "ok",
   });
   const valid = [
     SPEC_ROUTING,
     routingWith({ DRAW: "1/1", BY: "every-5th", TRIPPED: "smol-high", REASON: "guard-tripped" }),
     routingWith({ DRAW: "-", BY: "-", CELL: "slow-high", TRIPPED: "smol-high,task-high", REASON: "table-cell-tripped" }),
+    routingWith({ DRAW: "-", BY: "-", CELL: "slow-medium", UNRUNNABLE: "slow-high,smol-max", REASON: "table-cell-unrunnable" }),
     routingWith({ DRAW: "-", BY: "-", STRATUM: "unknown", BRIEF: "-", CRITERIA: "-", REASON: "no-issue-json" }),
     routingWith({ DRAW: "-", BY: "-", STRATUM: "unknown", SIZED: "-", REASON: "no-sizing" }),
     routingWith({ DRAW: "-", BY: "-", STRATUM: "light", SIZED: "light", OBJECTIVE: "speed" }),
@@ -786,13 +787,38 @@ test("parseRouting refuses a STRATUM that is neither a rule path nor a word file
 test("a Routing written before PARENT was a part still parses, as PARENT=-", () => {
   const old = "POLICY=slow-high CELL=smol-high DRAW=2/3 BY=burn-in STRATUM=heavy BRIEF=9658 CRITERIA=8 SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok";
   assert.deepEqual(parseRouting(old), parseRouting(SPEC_ROUTING));
-  assert.equal(formatRouting(parseRouting(old)), SPEC_ROUTING, "written again, it names PARENT=-");
+  assert.equal(formatRouting(parseRouting(old)), SPEC_ROUTING, "written again, it names PARENT=- and UNRUNNABLE=-");
   const noIssue = "POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=unknown BRIEF=- CRITERIA=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=no-issue-json";
   assert.equal(parseRouting(noIssue)?.parent, null);
   assert.deepEqual(parseRoutedEntry(`impl-3747 ${old}`), { member: "impl-3747", routing: parseRouting(SPEC_ROUTING) }, "a ## Routed entry written without PARENT= still reads");
   // Short a word other than PARENT, it is no Routing.
   assert.equal(parseRouting(old.replace(" SIZED=-", "")), null);
   assert.equal(parseRouting(SPEC_ROUTING.replace(" SIZED=-", "")), null);
+});
+
+test("a Routing written before UNRUNNABLE was a part still parses, as UNRUNNABLE=-", () => {
+  const old = SPEC_ROUTING.replace(" UNRUNNABLE=-", "");
+  assert.equal(old.split(" ").length, 12, "today's 12-word form");
+  assert.deepEqual(parseRouting(old)?.unrunnable, []);
+  assert.deepEqual(parseRouting(old), parseRouting(SPEC_ROUTING));
+  assert.equal(formatRouting(parseRouting(old)), SPEC_ROUTING, "written again, it names UNRUNNABLE=-");
+  assert.deepEqual(parseRoutedEntry(`impl-3747 ${old}`), { member: "impl-3747", routing: parseRouting(SPEC_ROUTING) }, "a ## Routed entry written without UNRUNNABLE= still reads");
+  // The old form with a parent still carries it.
+  assert.equal(parseRouting(routingWith({ PARENT: "3177" }).replace(" UNRUNNABLE=-", ""))?.parent, 3177);
+  // Short a word other than UNRUNNABLE, it is no Routing.
+  assert.equal(parseRouting(old.replace(" TRIPPED=-", "")), null);
+  assert.equal(parseRouting(old.replace(" PARENT=-", "")).parent, null, "the 11-word form reads as both keys absent");
+});
+
+test("UNRUNNABLE names Cells right after TRIPPED, and refuses what is no Cell", () => {
+  const line = routingWith({ UNRUNNABLE: "slow-xhigh,task-max" });
+  assert.deepEqual(parseRouting(line)?.unrunnable, ["slow-xhigh", "task-max"]);
+  assert.equal(formatRouting(parseRouting(line)), line);
+  assert.ok(line.indexOf("TRIPPED=") < line.indexOf("UNRUNNABLE=") && line.indexOf("UNRUNNABLE=") < line.indexOf("REASON="), "it sits right after TRIPPED");
+  for (const bad of ["", "slow-ultra", "slow-high,", "slow-high,,task-max", "slow high"]) {
+    assert.equal(parseRouting(routingWith({ UNRUNNABLE: bad })), null, JSON.stringify(bad));
+  }
+  assert.throws(() => formatRouting({ ...parseRouting(SPEC_ROUTING), unrunnable: ["nope"] }), /not a Routing/);
 });
 
 test("parseRouting refuses a line that is not a Routing, and formatRouting refuses to write one", () => {

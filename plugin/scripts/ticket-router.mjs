@@ -13,7 +13,7 @@
 //     grammar): `POLICY=<cell> CELL=<cell> DRAW=<k/K|-> BY=<burn-in|every-5th|->
 //     STRATUM=<rule path> BRIEF=<chars|-> CRITERIA=<n|-> PARENT=<N|->
 //     SIZED=<light|heavy|-> OBJECTIVE=<cost|speed> TRIPPED=<cell,…|->
-//     REASON=<reason>`,
+//     UNRUNNABLE=<cell,…|-> REASON=<reason>`,
 //     routing by the objective's row set, and appends the Pull's
 //     ticket-features row to the pending TSV (by default
 //     `ticket-features.pending.tsv` beside `--guard`, in the run's `.fleet/`).
@@ -30,16 +30,25 @@
 //     an unreadable/invalid table: the caller does not dispatch then. With no
 //     `--session`, the session is the one the phase-0 receipt
 //     `.fleet/phase0.json` records, and with no `--objective` the objective
-//     is; a receipt that records none is exit 2. A Pull past burn-in that is
-//     no chain head reads what the install runs, for its group's exploration
-//     Cells: `modelRoles` (`omp config get modelRoles --json`, or the file
+//     is; a receipt that records none is exit 2. Every Pull reads what the
+//     install runs, burn-in, chain head and a missing guard included:
+//     `modelRoles` (`omp config get modelRoles --json`, or the file
 //     `--model-roles` names, holding that record), omp's model catalog
 //     (`omp models --json`, or the file `--catalog` names) and the
 //     implementer definitions in the agents directory beside the script
-//     (or `--agents`). A read that fails, or that `omp` does not answer
-//     within OMP_READ_TIMEOUT_MS, warns and leaves the Pull no Cell to draw;
-//     a read that leaves a role no level to run at, or finds no implementer
-//     definition, warns too.
+//     (or `--agents`). A Cell whose level its role's model does not run is
+//     unrunnable (installOf, unrunnableCells): it is worked out from that read
+//     on each Pull and kept in neither the guard nor the table, and `route`
+//     routes around it — a row naming one routes the default Cell (REASON
+//     `table-cell-unrunnable`), it is drawn in no draw, and the Pull's
+//     `UNRUNNABLE` lists every defined Cell the install does not run. omp
+//     lowers a level its model does not run silently, so a Pull dispatched at
+//     one would run at another level.
+//     A read that fails, or that `omp` does not answer within
+//     OMP_READ_TIMEOUT_MS, warns and checks no Cell against the install: the
+//     Pull's policy and burn-in Cells go out unchecked, an every-5th draw has
+//     none to draw, and `UNRUNNABLE` is `-`; a read that leaves a role no
+//     level to run at, or finds no implementer definition, warns too.
 // The script never touches the network: the issue, the sizing verdict and
 // the guard are files the caller wrote, and the install reads ask the local `omp`.
 
@@ -61,6 +70,8 @@ import { catalogEntry, implementerCell, readOmpConfigValue, readOmpModelCatalog,
 const NAME = "ticket-router";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_TABLE = join(SCRIPT_DIR, "router-table.json");
+// The implementer definitions the install ships: the directory an install read names the Cells of unless told another.
+export const AGENTS_DIR = join(SCRIPT_DIR, "..", "agents");
 // The install's own package.json, whose `version` names the plugin a Pull was routed by.
 export const INSTALL_PACKAGE = join(SCRIPT_DIR, "..", "package.json");
 
@@ -73,9 +84,10 @@ const OMP_READ_TIMEOUT_MS = 10_000;
 export const MIN_N = 20;
 const ADOPT_RATIO = 0.75;
 // The starting Cells short of MIN_N merged PRs in a guard's `n`, each with its
-// count, in their order: burn-in holds while any is. A Cell the guard has no
-// count for has 0.
-const shortStartingCells = (n) => STARTING_CELLS.map((c) => [c, n[c] ?? 0]).filter(([, k]) => k < MIN_N);
+// count, in their order: burn-in holds while any is. `cells` are the starting
+// Cells the install runs (startingCellsOf); a Cell the guard has no count for
+// has 0.
+const shortStartingCells = (n, cells) => cells.map((c) => [c, n[c] ?? 0]).filter(([, k]) => k < MIN_N);
 const KINDS = new Set(["bug", "enhancement", "documentation"]);
 const DAY_MS = 86_400_000;
 
@@ -384,18 +396,53 @@ const LEVELS = Object.freeze(CELL.source.match(/\)-\(([^)]*)\)/)[1].split("|"));
 const rank = (level) => LEVELS.indexOf(level);
 
 /**
- * What this install can run, for the exploration draw: `ladders`, per role, the levels its `modelRoles` target runs
- * at in omp's model catalog, by effort, lowest first ([] for a role that resolves to no model or to one the catalog
- * does not list); `defined`, the Cells an implementer definition exists for. `definitions` is the agents
- * directory's file names.
+ * What this install can run: `ladders`, per role, the levels its `modelRoles` target runs at in omp's model catalog,
+ * by effort, lowest first ([] for a role that resolves to no model or to one the catalog does not list); `models`,
+ * per role, the model it resolves to (null for a role that resolves to none); `defined`, the Cells an implementer
+ * definition exists for. `definitions` is the agents directory's file names. A Cell whose level its role's ladder
+ * lacks is unrunnable here (isRunnable): omp would lower the level silently.
  */
 export function installOf({ modelRoles, catalog, definitions }) {
+  const models = Object.fromEntries(ROLES_BY_PRICE.map((role) => [role, resolveRole(role, modelRoles)]));
   const ladders = Object.fromEntries(ROLES_BY_PRICE.map((role) => {
-    const model = resolveRole(role, modelRoles);
-    const thinking = model === null ? null : catalogEntry(model, catalog)?.thinking;
+    const thinking = models[role] === null ? null : catalogEntry(models[role], catalog)?.thinking;
     return [role, Array.isArray(thinking) ? LEVELS.filter((l) => thinking.includes(l)) : []];
   }));
-  return { ladders, defined: new Set(definitions.map(implementerCell).filter((c) => c !== null)) };
+  return { ladders, models, defined: new Set(definitions.map(implementerCell).filter((c) => c !== null)) };
+}
+
+/**
+ * Whether `install` (installOf's, or null where it was not read) runs `cell`: its level is on its role's ladder. An
+ * install that was not read holds nothing unrunnable, so every Cell is runnable there.
+ */
+export function isRunnable(install, cell) {
+  const parsed = CELL.exec(cell);
+  return install === null || parsed === null || install.ladders[parsed[1]].includes(parsed[2]);
+}
+
+/** Every Cell `install` has an implementer definition for and does not run, sorted; none where it was not read. */
+export const unrunnableCells = (install) => (install === null ? [] : [...install.defined].filter((c) => !isRunnable(install, c)).sort());
+
+/**
+ * The starting Cells `install` runs, in their order: the Cells burn-in counts and draws. All three where the install
+ * was not read, and where it runs none of them, so that an install that cannot run them is no reason to end burn-in.
+ */
+export function startingCellsOf(install) {
+  const runs = STARTING_CELLS.filter((c) => isRunnable(install, c));
+  return runs.length > 0 ? runs : [...STARTING_CELLS];
+}
+
+/**
+ * The Cell a Pull runs where the router holds no row's Cell back: POLICY_CELL while `install` (installOf's, or null)
+ * runs it, else the nearest level of its role that the install runs and has an implementer definition for — downward
+ * first, the direction omp lowers to, then upward. POLICY_CELL again when its role has no such level.
+ */
+export function defaultCellOf(install) {
+  if (isRunnable(install, POLICY_CELL)) return POLICY_CELL;
+  const [, role, level] = CELL.exec(POLICY_CELL);
+  const usable = install.ladders[role].filter((l) => install.defined.has(`${role}-${l}`));
+  const at = usable.findLast((l) => rank(l) < rank(level)) ?? usable.find((l) => rank(l) > rank(level));
+  return at === undefined ? POLICY_CELL : `${role}-${at}`;
 }
 
 /**
@@ -418,10 +465,11 @@ export function explorationCells(centre, ladders) {
 }
 
 /**
- * The Cells an exploring Pull may draw, before the guard's tripped Cells leave any out: burn-in draws the starting
- * Cells, whatever `cells` the table holds; a draw after it the exploration Cells around `centre`, the group's `cost`
- * row Cell, that `install` (installOf's) can run — none when the install was not read (null). The fit judges
- * `burn_in` over the same starting Cells, so the Cells that end burn-in are the Cells it draws.
+ * The Cells an exploring Pull may draw, before the guard's tripped Cells and the install's unrunnable ones leave any
+ * out: burn-in draws the starting Cells, whatever `cells` the table holds; a draw after it the exploration Cells
+ * around `centre`, the group's `cost` row Cell, that `install` (installOf's) can run — none when the install was not
+ * read (null). The fit judges `burn_in` over the starting Cells the install runs, so the Cells that end burn-in are
+ * the Cells it draws.
  */
 const drawPool = (table, centre, install) => {
   if (table.burn_in) return STARTING_CELLS;
@@ -431,27 +479,33 @@ const drawPool = (table, centre, install) => {
 
 /**
  * What `route` does with one row under one guard, with no per-Pull input.
- * `guard` is readGuard's answer or null. `policy` is the row's Cell, or the
- * default cell when there is no guard or the row's Cell is tripped; `reason`
- * is `guard-missing`, `table-cell-tripped` or `ok`. `draw` is what an
+ * `guard` is readGuard's answer or null. `install` is installOf's answer, or
+ * null where it was not read: no Cell is unrunnable there, and an every-5th
+ * draw has no Cell. `policy` is the row's Cell, or the default cell
+ * (defaultCellOf) when there is no guard, the row's Cell is tripped or the
+ * row's Cell is unrunnable; `reason` is `guard-missing`,
+ * `table-cell-unrunnable`, `table-cell-tripped` or `ok`, a Cell both
+ * unrunnable and tripped being `table-cell-unrunnable`. `draw` is what an
  * exploring Pull picks from — `by` `burn-in` (every Pull) or `every-5th` —
- * over `cells`: drawPool()'s Cells less the tripped, centred on the `cost`
- * row's Cell for the stratum as the guard leaves it (the default cell when
- * that row's Cell is tripped), whichever objective routes the row. `install`
- * is installOf's answer, or null where it was not read: an every-5th draw
- * then has no Cell. `draw` is null with no guard and when no Cell is left.
- * @returns {{ policy: string, reason: "guard-missing"|"table-cell-tripped"|"ok", draw: null | { by: "burn-in"|"every-5th", cells: string[] } }}
+ * over `cells`: drawPool()'s Cells less the tripped and the unrunnable,
+ * centred on the `cost` row's Cell for the stratum as the guard and the
+ * install leave it (the default cell when that row's Cell is tripped or
+ * unrunnable), whichever objective routes the row. `draw` is null with no
+ * guard and when no Cell is left.
+ * @returns {{ policy: string, reason: "guard-missing"|"table-cell-unrunnable"|"table-cell-tripped"|"ok", draw: null | { by: "burn-in"|"every-5th", cells: string[] } }}
  */
 export function rowDispatch({ table, guard, objective, stratum, install = null }) {
-  if (guard === null) return { policy: POLICY_CELL, reason: "guard-missing", draw: null };
+  const fallback = defaultCellOf(install);
+  if (guard === null) return { policy: fallback, reason: "guard-missing", draw: null };
   const tripped = new Set(guard.tripped);
-  const adjust = (cell) => (tripped.has(cell) ? POLICY_CELL : cell);
+  const unrunnable = (cell) => !isRunnable(install, cell);
+  const adjust = (cell) => (tripped.has(cell) || unrunnable(cell) ? fallback : cell);
   const row = rowFor(table.rows[objective], stratum);
   const by = table.burn_in ? "burn-in" : "every-5th";
-  const cells = drawPool(table, adjust(rowFor(table.rows.cost, stratum)), install).filter((c) => !tripped.has(c));
+  const cells = drawPool(table, adjust(rowFor(table.rows.cost, stratum)), install).filter((c) => !tripped.has(c) && !unrunnable(c));
   return {
     policy: adjust(row),
-    reason: tripped.has(row) ? "table-cell-tripped" : "ok",
+    reason: unrunnable(row) ? "table-cell-unrunnable" : tripped.has(row) ? "table-cell-tripped" : "ok",
     draw: cells.length > 0 ? { by, cells } : null,
   };
 }
@@ -561,8 +615,9 @@ export function assignmentProb({ burnIn, chainHead, cell, policy, cells }) {
  * set's row for it routes the Pull. The exploration draw ignores the objective:
  * it is centred on the cell the `cost` set routes the group to, whichever set
  * routes the Pull, so a Pull draws the same cell under both. `install` is
- * installOf's answer, or null where it was not read, which leaves an every-5th
- * Pull nothing to draw. A live B Pull
+ * installOf's answer, or null where it was not read, which checks no Cell
+ * against the install and leaves an every-5th Pull nothing to draw. The
+ * Routing's `UNRUNNABLE` is unrunnableCells(install). A live B Pull
  * records its sizing verdict and routes as an A Pull does: a label names no
  * group of the tree. `fallback` is readFitBeside's REASON when `table` is the
  * starting table standing in for a Fit, else null: it is the first thing that
@@ -636,7 +691,7 @@ export function route({
     policy, cell, draw, by, stratum,
     brief: metrics === null ? null : Number(metrics.brief_chars), criteria: metrics === null ? null : Number(metrics.criteria),
     parent: m.parent === "" ? null : Number(m.parent),
-    sized: sizingPre === "" ? null : sizingPre, objective, tripped: guard?.tripped ?? [], reason,
+    sized: sizingPre === "" ? null : sizingPre, objective, tripped: guard?.tripped ?? [], unrunnable: unrunnableCells(install), reason,
   });
   return { line, row };
 }
@@ -883,17 +938,20 @@ function judgeSpeedRow(pulls, cells, tripped, costCell) {
  * row of its own (the root always has one), from that row's cell, the base when
  * the record has no cell; a node with none holds its parent's `speed` row and
  * an `unjudged` record. `cells` is the prior's: the fit adds no Cell. `burn_in`
- * holds until every starting Cell has MIN_N merged PRs on its newest generation
- * (`guard.n`, which starts again at 0 when a role's model changes): no other
- * Cell the table holds ends it or holds it, whatever its merged PRs.
+ * holds until every Cell of `startingCells` has MIN_N merged PRs on its newest
+ * generation (`guard.n`, which starts again at 0 when a role's model changes):
+ * no other Cell the table holds ends it or holds it, whatever its merged PRs.
+ * `startingCells` are the starting Cells the install runs (startingCellsOf) —
+ * all three when absent — and the table records them as `starting_cells`, so
+ * the records, the guard, the prior and that set fit the same table again.
  */
-export function fitTable({ prior, features, members, verdicts, guard }) {
+export function fitTable({ prior, features, members, verdicts, guard, startingCells = STARTING_CELLS }) {
   const window = guard.window_start ?? prior.window_start ?? null;
-  return tableOver({ prior, ...fitPulls({ features, members, verdicts, window }), guard, window });
+  return tableOver({ prior, ...fitPulls({ features, members, verdicts, window }), guard, window, startingCells });
 }
 
 // The table over the tree `prior.splits` holds, from the fit's Pulls (fitPulls') booked to its groups.
-function tableOver({ prior, units: unbooked, order, guard, window }) {
+function tableOver({ prior, units: unbooked, order, guard, window, startingCells }) {
   const nodes = treeNodes(prior.splits);
   const units = book(unbooked, prior);
   const { estimates, pulls } = estimate(units, order, nodes);
@@ -918,7 +976,8 @@ function tableOver({ prior, units: unbooked, order, guard, window }) {
     window_start: window,
     n_rows: units.length,
     cells: prior.cells,
-    burn_in: shortStartingCells(guard.n).length > 0,
+    burn_in: shortStartingCells(guard.n, startingCells).length > 0,
+    starting_cells: [...startingCells],
     splits: prior.splits,
     rows,
     classifier: prior.classifier,
@@ -1026,14 +1085,41 @@ function growTree({ prior, units, order, tripped, previous }) {
  * of the last Fit that computed, or null where there is none; the rest is fitTable's. A split stands in the table
  * once it has passed the gate at two consecutive Fits on the same input or inputs, over other records each time — a
  * Fit over the records the last one searched is no look, and keeps what that one found — and is gone from it at the
- * first Fit it fails; that Fit's `gate` is the whole of what the next one reads of this.
+ * first Fit it fails; that Fit's `gate` is the whole of what the next one reads of this. `startingCells` is
+ * fitTable's.
  * @returns {{ table: object, gate: { records: string, scored: number, left_out: number, best: object|null, passed: string[], stands: string[] } }}
  */
-export function fitTree({ prior, features, members, verdicts, guard, previous = null }) {
+export function fitTree({ prior, features, members, verdicts, guard, previous = null, startingCells = STARTING_CELLS }) {
   const window = guard.window_start ?? prior.window_start ?? null;
   const fitted = fitPulls({ features, members, verdicts, window });
   const { gate, splits } = growTree({ prior, ...fitted, tripped: new Set(guard.tripped), previous });
-  return { table: tableOver({ prior: { ...prior, splits }, ...fitted, guard, window }), gate };
+  return { table: tableOver({ prior: { ...prior, splits }, ...fitted, guard, window, startingCells }), gate };
+}
+
+/**
+ * What the install runs, off `modelRoles` (`omp config get modelRoles --json`, or the JSON file `modelRoles` names),
+ * omp's model catalog (`omp models --json`, or the JSON file `catalog` names) and the implementer definitions in the
+ * `agents` directory: `{ install, why: null }` with installOf's answer, or `{ install: null, why }` where a read fails
+ * or does not answer in OMP_READ_TIMEOUT_MS, `modelRoles` is no record or the catalog has no `models` list. Never
+ * throws.
+ */
+export function readInstall({ modelRoles: modelRolesPath = null, catalog: catalogPath = null, agents = AGENTS_DIR } = {}) {
+  const kind = (v) => (v === undefined ? "absent" : v === null ? "null" : Array.isArray(v) ? "an array" : `a ${typeof v}`);
+  try {
+    const modelRoles = modelRolesPath === null
+      ? readOmpConfigValue("modelRoles", { timeout: OMP_READ_TIMEOUT_MS })
+      : JSON.parse(readFileSync(modelRolesPath, "utf8"));
+    const catalog = catalogPath === null
+      ? readOmpModelCatalog({ timeout: OMP_READ_TIMEOUT_MS })
+      : JSON.parse(readFileSync(catalogPath, "utf8"));
+    if (typeof modelRoles !== "object" || modelRoles === null || Array.isArray(modelRoles)) {
+      throw new Error(`modelRoles is ${kind(modelRoles)}, not a record of role to model`);
+    }
+    if (!Array.isArray(catalog?.models)) throw new Error(`omp's model catalog has no models list (models: ${kind(catalog?.models)})`);
+    return { install: installOf({ modelRoles, catalog, definitions: readdirSync(agents) }), why: null };
+  } catch (e) {
+    return { install: null, why: e.message };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1096,36 +1182,24 @@ function main() {
   if (version === null) process.stderr.write(`${NAME}: WARNING ${INSTALL_PACKAGE} names no readable version — plugin_version is blank\n`);
   const guard = readGuard(readJson(guardPath));
   const chainHead = F.has("chain-head");
-  // Only a Pull past burn-in that may explore reads what the install runs: its draw, or the share it ran at, needs
-  // the group's exploration Cells. A read that fails or does not answer in OMP_READ_TIMEOUT_MS, a `modelRoles` that
-  // is no record and a catalog with no `models` list leave the Pull no Cell to draw, and warn, never the exit; so
-  // does a read that holds nothing to draw: a role that runs at no level, or no implementer definition.
-  let install = null;
-  if (guard !== null && !table.burn_in && !chainHead) {
-    const warn = (what) => process.stderr.write(`${NAME}: WARNING ${what}\n`);
-    const agents = F.arg("agents") ?? join(SCRIPT_DIR, "..", "agents");
-    const kind = (v) => (v === undefined ? "absent" : v === null ? "null" : Array.isArray(v) ? "an array" : `a ${typeof v}`);
-    try {
-      const modelRoles = F.arg("model-roles") === null
-        ? readOmpConfigValue("modelRoles", { timeout: OMP_READ_TIMEOUT_MS })
-        : JSON.parse(readFileSync(F.arg("model-roles"), "utf8"));
-      const catalog = F.arg("catalog") === null
-        ? readOmpModelCatalog({ timeout: OMP_READ_TIMEOUT_MS })
-        : JSON.parse(readFileSync(F.arg("catalog"), "utf8"));
-      if (typeof modelRoles !== "object" || modelRoles === null || Array.isArray(modelRoles)) {
-        throw new Error(`modelRoles is ${kind(modelRoles)}, not a record of role to model`);
-      }
-      if (!Array.isArray(catalog?.models)) throw new Error(`omp's model catalog has no models list (models: ${kind(catalog?.models)})`);
-      install = installOf({ modelRoles, catalog, definitions: readdirSync(agents) });
-    } catch (e) {
-      warn(`cannot read what this install runs: ${e.message} — no exploration Cell is drawn`);
+  // Every Pull reads what the install runs: which Cells it runs gates the row's Cell and each draw, and the Cells it
+  // draws after burn-in are the group's exploration Cells. A read that fails or does not answer in OMP_READ_TIMEOUT_MS,
+  // a `modelRoles` that is no record and a catalog with no `models` list leave the Pull's Cells unchecked and its
+  // every-5th draw empty, and warn, never the exit; so does a read that holds nothing to run: a role that runs at no
+  // level, no implementer definition, or no level of the default Cell's role that is both run and defined.
+  const warn = (what) => process.stderr.write(`${NAME}: WARNING ${what}\n`);
+  const agents = F.arg("agents") ?? AGENTS_DIR;
+  const { install, why } = readInstall({ modelRoles: F.arg("model-roles"), catalog: F.arg("catalog"), agents });
+  if (install === null) {
+    warn(`cannot read what this install runs: ${why} — no Cell is checked against it and no exploration Cell is drawn`);
+  } else {
+    const unrun = ROLES_BY_PRICE.filter((role) => install.ladders[role].length === 0);
+    if (unrun.length > 0) {
+      warn(`this install runs ${unrun.join(", ")} at no level (modelRoles names no model for it, or one omp's catalog lists at none) — no Cell of ${unrun.length === 1 ? "that role" : "those roles"} is routed or drawn`);
     }
-    if (install !== null) {
-      const unrun = ROLES_BY_PRICE.filter((role) => install.ladders[role].length === 0);
-      if (unrun.length > 0) {
-        warn(`this install runs ${unrun.join(", ")} at no level (modelRoles names no model for it, or one omp's catalog lists at none) — no exploration Cell of ${unrun.length === 1 ? "that role" : "those roles"} is drawn`);
-      }
-      if (install.defined.size === 0) warn(`${agents} holds no implementer definition — no exploration Cell is drawn`);
+    if (install.defined.size === 0) warn(`${agents} holds no implementer definition — no exploration Cell is drawn`);
+    if (!isRunnable(install, POLICY_CELL) && defaultCellOf(install) === POLICY_CELL) {
+      warn(`no level of ${POLICY_CELL}'s role runs here with an implementer definition — ${POLICY_CELL} stays the default Cell`);
     }
   }
   const { line, row } = route({

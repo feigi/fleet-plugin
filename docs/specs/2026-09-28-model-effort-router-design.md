@@ -196,6 +196,11 @@ row would be inadmissible. Rule: adding a
 `fleet-implementer-<cell>.agent.md` file requires the level to be in the
 target's `thinking.efforts`; the phase-0 drift notice (below) also fires
 when a role's *new* target no longer supports an existing cell's level.
+*Amended (#4462): an implementer definition whose level its role's model does not run
+is a phase-0 notice, not a refusal: the Cell is unrunnable, `route` works that out
+live on each Pull and routes around it, and the Fit's burn-in counts only the starting
+Cells the install runs. Phase 0 still refuses an install whose `slow` runs no level,
+and a definition that is not an implementer one keeps the refusal.*
 
 **Exploration Pull.** Unchanged counter: count the `impl-` rows in
 `.fleet/ledger.md` at Pull time; the Pull that creates row 5, 10, 15 … is
@@ -835,6 +840,17 @@ rows by blank metrics. The controller holds no copy of the defaulting logic.
 names a table directly. The stratum is the group the tree's walk ends at, and
 `STRATUM` is its rule path, not `light`, `heavy` or `unknown`
 (`docs/specs/2026-11-01-self-refining-router-design.md` § 2.3, § 2.4).*
+*Amended (#4462): the line holds `UNRUNNABLE=<cell,…|->` right after `TRIPPED`: every
+Cell with an implementer definition that the install does not run, sorted, `-` for
+none and where the install could not be read; `REASON` gains
+`table-cell-unrunnable`. A Cell is unrunnable when the `installOf` ladder for its
+role lacks its level — a role that is unset, a model the catalog does not list,
+`thinking: null`, or a `thinking` list without the level. `route` reads the install
+(`modelRoles`, `omp models --json`) on every Pull, burn-in, chain head and a missing
+guard included, never writes the result to a record, and prints a WARNING and routes
+as before when the read fails. Where the order above says a row's Cell is
+substituted by `slow-high` when tripped, an unrunnable row's Cell is substituted by
+the default Cell, and `table-cell-unrunnable` takes the REASON when both hold.*
 
 **Amended (#3893, 2026-10-28): the line is the Pull's whole Routing.** `BY`
 says what made the draw, `BRIEF` and `CRITERIA` are the numbers the `rule`
@@ -875,6 +891,17 @@ tripped and the `cost` row's. `route` calls it twice, for the row of the run's
 Objective and for the `cost` row its draw is centred on; there is no base row,
 since a live arm B Pull records its sizing verdict and routes as an A Pull does
 (R2; `docs/specs/2026-11-01-self-refining-router-design.md` § 2.6).*
+*Amended (#4462): `rowDispatch` treats a Cell `install` does not run as it treats a
+tripped one. `install.ladders` lacking the Cell's level makes it unrunnable: a row
+naming one, under either Objective, routes the default Cell with `reason`
+`table-cell-unrunnable` (also for a Cell that is tripped as well), the `cost` row
+Cell the draw is centred on becomes the default Cell too, and an unrunnable Cell is
+left out of the burn-in draw and the every-5th draw. The default Cell is `slow-high`
+while `slow` runs `high`, else the nearest level of `slow` that `install` runs and
+holds a definition for — downward first, then upward — and `slow-high` again where
+there is none; it replaces `slow-high` for a missing guard, a tripped row, an
+unrunnable row and the exploration centre alike. An `install` that was not read
+(null) has no unrunnable Cell and keeps `slow-high`.*
 
 Guard/table asymmetry, stated on purpose: the guard is pooled, the table
 per-stratum; a cell evicted pooled cannot win a stratum. Conservative by

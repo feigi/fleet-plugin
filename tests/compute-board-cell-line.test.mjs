@@ -17,7 +17,7 @@ const RULE = "brief_chars>4047";
 // A Routing line; every part `route` prints, defaulted to a not-drawn cost Pull in the group above the cut.
 const routing = (o = {}) => formatRouting({
   policy: "slow-high", cell: "slow-high", draw: null, by: null, stratum: RULE, brief: 9658, criteria: 8, parent: null,
-  sized: null, objective: "cost", tripped: [], reason: "ok", ...o,
+  sized: null, objective: "cost", tripped: [], unrunnable: [], reason: "ok", ...o,
 });
 // An implementer's member record, as gather() keeps it.
 const rec = (cell, { model = "claude-haiku-5-5", thinking = cell.split("-")[1], last = model, definition = `fleet-implementer-${cell}` } = {}) => ({
@@ -86,6 +86,22 @@ test("cellLine: the policy row's Cell tripped reads the default Cell, naming the
     "drawn: the draw, then the reason, and no default Cell");
 });
 
+test("cellLine: the policy row's Cell unrunnable reads the default Cell, naming the Cell its row held when the table says", () => {
+  const table = { rows: { cost: { "*": "slow-high", [RULE]: "task-xhigh" }, speed: { "*": "slow-high" } } };
+  assert.equal(lines(undrawn({ reason: "table-cell-unrunnable", unrunnable: ["smol-max", "task-xhigh"] }, table))[0],
+    `slow-high<#cells/slow-high@claude-haiku-5-5> · cost row's task-xhigh unrunnable here: default Cell<#cells/row/cost/${RULE}>`,
+    "the installed table's row is one of the Cells the Routing lists");
+  assert.equal(lines(undrawn({ reason: "table-cell-unrunnable", unrunnable: ["task-xhigh"] }))[0],
+    `slow-high<#cells/slow-high@claude-haiku-5-5> · cost row's task-xhigh unrunnable here: default Cell<#cells/row/cost/${RULE}>`,
+    "one unrunnable Cell, no table read: that one");
+  assert.equal(lines(undrawn({ reason: "table-cell-unrunnable", unrunnable: ["smol-max", "task-xhigh"] }))[0],
+    `slow-high<#cells/slow-high@claude-haiku-5-5> · cost row's Cell (one of smol-max, task-xhigh) unrunnable here: default Cell<#cells/row/cost/${RULE}>`,
+    "several, and the row's is not on record: none is named as it");
+  assert.equal(lines(drawn({ reason: "table-cell-unrunnable", unrunnable: ["task-xhigh"] }))[0],
+    `smol-high<#cells/smol-high@claude-haiku-5-5> · drawn 2 of 3: burn-in · cost row's task-xhigh unrunnable here<#cells/row/cost/${RULE}>`,
+    "drawn: the draw, then the reason, and no default Cell");
+});
+
 test("cellLine: no guard, and no Cell left to draw", () => {
   assert.equal(lines(undrawn({ reason: "guard-missing" }))[0], "slow-high<#cells/slow-high@claude-haiku-5-5> · no cost guard yet: default Cell only");
   assert.equal(lines(undrawn({ reason: "guard-tripped", tripped: ["task-high", "smol-high"] }))[0],
@@ -137,7 +153,7 @@ test("cellLine: under arm B the Stratum reads its sizing label, ahead of a brief
 test("cellLine: a Slice's line names its parent after the Stratum, and arm B's label still stands for its Pull", () => {
   assert.equal(lines(undrawn({ stratum: "*", brief: 400, criteria: 1, parent: 3177 }))[1], "*: Slice of #3177 · claude-haiku-5-5 · high");
   assert.equal(lines(undrawn({ stratum: "parent>0", brief: 400, criteria: 1, sized: "light", parent: 3177 }))[1], "parent>0: sized light · claude-haiku-5-5 · high", "arm B's label still stands for its Pull");
-  const old = `impl-9 ${routing({ stratum: "*", brief: 400, criteria: 1 }).replace(" PARENT=-", "")}`;
+  const old = `impl-9 ${routing({ stratum: "*", brief: 400, criteria: 1 }).replace(" PARENT=-", "").replace(" UNRUNNABLE=-", "")}`;
   assert.equal(lines(cellLine({ row: "#9 impl-9", issue: 9, routed: [old], members: members({ "impl-9": rec("slow-high") }) }))[1],
     "* · claude-haiku-5-5 · high", "an entry written before PARENT reads the same");
 });

@@ -461,8 +461,8 @@ function ceEntry(e) {
 
 // The heading of the view of the Fit: its failed-Fit flag first, then its
 // source line, the check it could not make, how a Pull is dispatched, its
-// labels and model-change notices, burn-in progress, the tripped Cells and the
-// model-name line, where each is set.
+// labels and model-change notices, burn-in progress, the tripped Cells, the
+// Cells the install does not run and the model-name line, where each is set.
 function ceFitHeading(p) {
   const box = el("div");
   if (p.flag) { const flag = el("div", "ce-alert"); flag.append(el("div", "ce-verdict", p.flag)); box.append(flag); }
@@ -476,6 +476,10 @@ function ceFitHeading(p) {
     for (const c of p.burnIn.cells) box.append(el("div", "ce-cand", `${c.cell} · ${c.n} of ${c.of} merged PRs`));
   }
   if (p.tripped) box.append(el("div", "ce-note", p.tripped));
+  if (p.unrunnable) {
+    box.append(el("div", "ce-note", p.unrunnable.heading));
+    for (const c of p.unrunnable.cells) box.append(el("div", "ce-cand", c.text));
+  }
   if (p.modelLine) box.append(el("div", "ce-note ce-amber", p.modelLine));
   return box;
 }

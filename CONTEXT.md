@@ -663,6 +663,21 @@ name in any cell token, definition, or prose. Which model a Cell ran on is
 data, kept per Cell generation.
 _Avoid_: tier (bare), alt-tier, model
 
+**Unrunnable Cell**:
+A Cell whose level its role's model does not run: `omp models --json` lists no
+such effort for the model `modelRoles.<role>` resolves to, or the role is unset,
+the model unlisted or its `thinking` null. omp lowers an unsupported level
+silently, so a Pull dispatched at one would run at another and every row it
+produced would be inadmissible. The Router works it out afresh on each Pull
+from `modelRoles` and the catalog and keeps it in neither the cost guard nor
+the table; only the Pull's Routing names the Cells it found unrunnable then. A
+row naming one routes the default Cell, it is drawn in no draw, and burn-in
+counts only the starting Cells the install runs. It lifts by itself once the
+role resolves to a model that runs the level. Not a tripped Cell — that is the
+cost guard's judgement from evidence, kept in its record; a Cell can be both,
+and the Routing then says unrunnable.
+_Avoid_: disabled, unsupported, clamped
+
 **Cell generation**:
 One Cell on one model: the Pulls whose first Admissible row's Resolved tier
 names that model. The model is fixed at dispatch, so a fallback later in the
@@ -684,7 +699,8 @@ _Avoid_: fleet-router, sizer
 The Router's decision for one Pull at its route step: the policy Cell and the
 Pull's Cell, the draw and what made it (burn-in or every 5th Pull), the Stratum
 and the numbers that set it, a Slice's parent, the Objective, the Cells the
-guard had tripped, and the reason. `ticket-router.mjs route` prints it. The Pull's row step keeps
+guard had tripped, the Cells the install did not run, and the reason.
+`ticket-router.mjs route` prints it. The Pull's row step keeps
 it in the run ledger's `## Routed` section, and the Pull's board card shows it
 (compute-board.mjs's cellLine).
 _Avoid_: route (bare: the Tier route is the `modelRoles` mapping), routing
@@ -717,7 +733,9 @@ exists)
 What the cockpit's Cell evidence tab shows about why each implementer Cell is
 used: one view of the Fit that routes the run — the tree of Strata, each row's
 Cell with every candidate's verdict and interval, burn-in progress, what each
-Stratum is exploring, the Cells the cost guard has tripped, a notice when a
+Stratum is exploring, the Cells the cost guard has tripped, the Cells the
+install does not run (**Unrunnable Cell**: each with its role, the model the
+role resolves to and the levels that model runs), a notice when a
 role's model changed and burn-in restarted, and a flag when the Fit failed and
 the last good one routes; per Cell, what the cost guard holds it to; and,
 through each board card, every live Pull's Routing. Every figure is read from a

@@ -86,7 +86,14 @@ function write(root, rel, text) {
   writeFileSync(join(root, rel), text);
 }
 
-function fixture({ rows = corpus(), pending = null, guardBefore = null, prs = [] } = {}) {
+// The install the fixtures read in place of omp's own: every role's model runs low to max but smol's, which stops at xhigh.
+const INSTALL_ROLES = { slow: "anthropic/claude-opus-5-5", task: "anthropic/claude-sonnet-5-5", smol: "anthropic/claude-haiku-4-5" };
+const installCatalog = (thinking = {}) => {
+  const ladder = { slow: ["low", "medium", "high", "xhigh", "max"], task: ["low", "medium", "high", "xhigh", "max"], smol: ["minimal", "low", "medium", "high", "xhigh"], ...thinking };
+  return { models: Object.entries(INSTALL_ROLES).map(([role, selector]) => ({ selector, thinking: ladder[role] })) };
+};
+
+function fixture({ rows = corpus(), pending = null, guardBefore = null, prs = [], catalog = installCatalog() } = {}) {
   const root = tempDir("metrics-refresh-");
   const repo = join(root, "repo");
   git(root, ["init", "--quiet", "-b", "main", repo]);
@@ -101,11 +108,15 @@ function fixture({ rows = corpus(), pending = null, guardBefore = null, prs = []
   mkdirSync(join(root, "bin"));
   writeExecStub(join(root, "bin", "gh"), GH_STUB);
   writeFileSync(join(root, "gh.json"), JSON.stringify({ prs }));
+  // Pinned, so no run reads omp live: an argument naming either file first overrides it.
+  writeFileSync(join(root, "model-roles.json"), JSON.stringify(INSTALL_ROLES));
+  writeFileSync(join(root, "catalog.json"), JSON.stringify(catalog));
+  const installArgs = ["--model-roles", join(root, "model-roles.json"), "--catalog", join(root, "catalog.json")];
   const log = join(root, "gh.log");
   return {
     root, repo,
     run({ cwd = repo, args = ["--repo", repo] } = {}) {
-      return spawnSync(process.execPath, [SCRIPT, ...args], {
+      return spawnSync(process.execPath, [SCRIPT, ...args, ...installArgs], {
         cwd, encoding: "utf8",
         env: { ...ENV, PATH: `${join(root, "bin")}:${process.env.PATH}`, GH_FIXTURE: join(root, "gh.json"), GH_LOG: log },
       });
@@ -329,11 +340,9 @@ function routeIn(f, table = null, labels = ["bug"]) {
     writeFileSync(path, JSON.stringify(table));
     tableArgs.push("--table", path);
   }
-  // A fixed install, so a Pull past burn-in reads no live omp.
+  // The fixture's install, so a Pull past burn-in reads no live omp.
   const roles = join(f.root, "model-roles.json");
   const catalog = join(f.root, "catalog.json");
-  writeFileSync(roles, JSON.stringify({ slow: "anthropic/claude-opus-5-5", task: "anthropic/claude-sonnet-5-5", smol: "anthropic/claude-haiku-4-5" }));
-  writeFileSync(catalog, JSON.stringify({ models: ["opus-5-5", "sonnet-5-5", "haiku-4-5"].map((m) => ({ selector: `anthropic/claude-${m}`, thinking: ["low", "medium", "high", "xhigh"] })) }));
   const r = spawnSync(process.execPath, [ROUTER, "route", "--session", SESSION, "--objective", "cost", "--ticket", "42", "--arm", "A", "--impl-row", "3",
     "--issue", issue, "--guard", join(f.repo, GUARD), "--pending", join(f.root, "pending.tsv"), "--model-roles", roles, "--catalog", catalog, ...tableArgs],
   { cwd: f.repo, encoding: "utf8", env: ENV });
@@ -365,7 +374,8 @@ test("a phase 0 over fixture records writes router-fit.json beside the fresh gua
     classifier: SHIPPED.classifier, splits: SHIPPED.splits, window_start: SHIPPED.window_start,
   });
   assert.equal(validateTable(fit.table) instanceof Error, false, "route reads it through validateTable");
-  assert.deepEqual(Object.keys(fit.table).sort(), ["burn_in", "cells", "classifier", "estimates", "guard", "n_rows", "reasons", "rows", "splits", "window_start"], "the table carries no commit field");
+  assert.deepEqual(Object.keys(fit.table).sort(), ["burn_in", "cells", "classifier", "estimates", "guard", "n_rows", "reasons", "rows", "splits", "starting_cells", "window_start"], "the table carries no commit field");
+  assert.deepEqual(fit.table.starting_cells, ["slow-high", "task-high", "smol-high"], "the Fit records the starting Cells it counted");
   assert.equal(fit.table.n_rows, 2);
   assert.equal(fit.table.window_start, guard.window_start);
   assert.match(r.stdout, /metrics-refresh: fit: fitted 2 Pulls, in burn-in; \.fleet\/router-fit\.json computed /);
@@ -399,7 +409,7 @@ test("the next route call routes by the Fit phase 0 wrote", () => {
   // A Fit that routes otherwise than the starting table does, so the line says which one routed.
   const moved = { ...fit, table: { ...fit.table, burn_in: false, rows: { cost: { "*": "task-high" }, speed: { "*": "task-high" } } } };
   writeFileSync(join(f.repo, FIT), JSON.stringify(moved));
-  assert.equal(routeIn(f), "POLICY=task-high CELL=task-high DRAW=- BY=- STRATUM=* BRIEF=21 CRITERIA=1 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok\n");
+  assert.equal(routeIn(f), "POLICY=task-high CELL=task-high DRAW=- BY=- STRATUM=* BRIEF=21 CRITERIA=1 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- UNRUNNABLE=smol-max REASON=ok\n");
 });
 
 test("a first run with no records computes a Fit that routes as the starting table does", () => {
@@ -486,21 +496,71 @@ test("the recorded blob ids, guard and prior recompute the same Fit once the row
   ruled(rows, { ticket: 1 });
   ruled(rows, { ticket: 2, cell: "task-high" });
   ruled(rows, { ticket: 3, cell: "smol-high", fail: true });
-  const f = fixture({ rows });
+  // A smol model that runs no level: the Fit counts two starting Cells, and records which.
+  const f = fixture({ rows, catalog: installCatalog({ smol: null }) });
   assert.equal(f.run().status, 0);
   const fit = JSON.parse(readFileSync(join(f.repo, FIT), "utf8"));
+  assert.deepEqual(fit.table.starting_cells, ["slow-high", "task-high"]);
   const at = (path, parse) => {
     assert.equal(fit.tsv_blobs[path], git(f.repo, ["rev-parse", `HEAD:${path}`]), `${path}: the blob the Fit read is the one on the commit`);
     return parse(execFileSync("git", ["-C", f.repo, "cat-file", "blob", fit.tsv_blobs[path]], { env: ENV, encoding: "utf8" }));
   };
   const again = fitTree({
-    prior: fit.prior, guard: fit.guard, commit: null, previous: null,
+    prior: fit.prior, guard: fit.guard, commit: null, previous: null, startingCells: fit.table.starting_cells,
     members: at("docs/metrics/member-outcomes.tsv", parseMemberTsv),
     verdicts: at("docs/metrics/tier-outcomes.tsv", parseTierOutcomes),
     features: at(FEATURES, parseFeatures),
   });
   assert.equal(fit.table.n_rows, 3);
   assert.deepEqual(again, { table: fit.table, gate: fit.gate });
+});
+
+// Pulls of each Cell named at MIN_N merged PRs: each Pull's PR is merged on GitHub.
+function mergedAt(cells) {
+  const rows = corpus();
+  const prs = [];
+  let first = 1000;
+  for (const cell of cells) {
+    for (let i = 0; i < MIN_N; i++) {
+      ruled(rows, { ticket: first + i, cell });
+      prs.push({ number: first + 5000 + i, state: "MERGED", mergedAt: `${DAY}T12:00:00Z` });
+    }
+    first += 1000;
+  }
+  return { rows, prs };
+}
+
+test("a Fit counts only the starting Cells the install runs: smol-high at nothing, on a smol model that runs no level, is out of burn-in", () => {
+  const { rows, prs } = mergedAt(["slow-high", "task-high"]);
+  const f = fixture({ rows, prs, catalog: installCatalog({ smol: null }) });
+  const r = f.run();
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stderr, "", "an install that reads warns nothing");
+  const { table } = JSON.parse(readFileSync(join(f.repo, FIT), "utf8"));
+  assert.deepEqual([table.burn_in, table.starting_cells], [false, ["slow-high", "task-high"]]);
+  // The same records under an install that runs smol-high leave it in burn-in: it has none.
+  const all = fixture({ rows, prs });
+  assert.equal(all.run().status, 0);
+  const full = JSON.parse(readFileSync(join(all.repo, FIT), "utf8")).table;
+  assert.deepEqual([full.burn_in, full.starting_cells], [true, ["slow-high", "task-high", "smol-high"]]);
+});
+
+test("a Fit whose install cannot be read warns and counts all three starting Cells", () => {
+  const { rows, prs } = mergedAt(["slow-high", "task-high"]);
+  const f = fixture({ rows, prs, catalog: installCatalog({ smol: null }) });
+  const r = f.run({ args: ["--repo", f.repo, "--catalog", join(f.root, "no-such-catalog.json")] });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /metrics-refresh: WARNING cannot read what this install runs: .*no-such-catalog\.json.* — burn-in counts all three starting Cells/);
+  const { table } = JSON.parse(readFileSync(join(f.repo, FIT), "utf8"));
+  assert.deepEqual([table.burn_in, table.starting_cells], [true, ["slow-high", "task-high", "smol-high"]]);
+});
+
+test("--no-fit reads no install: a run that names files that are not there warns of nothing", () => {
+  const f = fixture();
+  const gone = ["--model-roles", join(f.root, "none.json"), "--catalog", join(f.root, "none.json")];
+  const noFit = f.run({ args: ["--repo", f.repo, "--no-fit", ...gone] });
+  assert.equal(noFit.status, 0, noFit.stderr);
+  assert.equal(noFit.stderr, "", "no Fit, no install read, no warning");
 });
 
 // A corpus whose `kind` splits the Cells' prices: task-high $1 on an enhancement and $14 on a bug, slow-high $10 on both. Pooled

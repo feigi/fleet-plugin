@@ -934,3 +934,75 @@ test("a step whose at is no time has not run, so its failed line raises no flag 
     assert.equal(fitted({ receipts: { phase0: dated, closeout: untimed } }).flag, LAST_GOOD, `untimed close-out at ${JSON.stringify(at)}`);
   }
 });
+
+// -- Cells this install does not run ------------------------------------------------------------
+
+const SMOL_NONE = { ...CATALOG, value: { models: CATALOG.value.models.map((m) => (m.selector === "anthropic/claude-haiku-5-5" ? { ...m, thinking: null } : m)) } };
+
+test("the Cells the install does not run are listed with their role, model and levels, apart from the tripped Cells", () => {
+  const p = policy({ guard: guardOk(TODAY().guard.cells, { verdict: "tripped", tripped: ["task-high"] }) });
+  assert.equal(p.tripped, "tripped by the cost guard: task-high");
+  assert.deepEqual(p.unrunnable, {
+    heading: "not run by this install: smol-max",
+    cells: [{
+      cell: "smol-max", role: "smol", model: "anthropic/claude-haiku-5-5", levels: ["low", "medium", "high", "xhigh"],
+      text: "smol-max · modelRoles.smol → anthropic/claude-haiku-5-5 runs low, medium, high, xhigh",
+    }],
+  });
+  assert.equal(JSON.stringify(p.tripped).includes("smol-max"), false, "an unrunnable Cell is not a tripped one");
+  const none = policy({ catalog: SMOL_NONE }).unrunnable;
+  assert.equal(none.heading, "not run by this install: smol-high, smol-low, smol-max, smol-medium and smol-xhigh");
+  assert.equal(none.cells[0].text, "smol-high · modelRoles.smol → anthropic/claude-haiku-5-5 runs none");
+  const unset = policy({ modelRoles: { ...ROLES, value: { ...ROLES.value, task: undefined } } }).unrunnable;
+  assert.equal(unset.cells.find((c) => c.cell === "task-high").text, "task-high · modelRoles.task → no model runs none");
+  const clear = policy({ catalog: { ...CATALOG, value: { models: CATALOG.value.models.map((m) => ({ ...m, thinking: LADDER })) } } }).unrunnable;
+  assert.deepEqual(clear, { heading: "the install runs every Cell it has a definition for", cells: [] });
+  const unread = policy({ catalog: null }).unrunnable;
+  assert.deepEqual(unread, { heading: "unrunnable Cells: not checked: omp's model catalog not read yet", cells: [] });
+});
+
+test("a policy row naming a Cell the install does not run shows the default Cell, held, as route does", () => {
+  const rows = { "*": "smol-max", [ABOVE]: "smol-max", [BELOW]: "task-high" };
+  const p = fitted({ fit: FIT_READ({ table: FIT({ rows: { cost: rows, speed: rows } }) }) });
+  for (const o of ["cost", "speed"]) {
+    const unrunnable = lineOf(p, o, "*").entry;
+    assert.deepEqual([unrunnable.cell, unrunnable.held], ["slow-high", "smol-max unrunnable here"], o);
+    assert.deepEqual([lineOf(p, o, BELOW).entry.cell, lineOf(p, o, BELOW).entry.held], ["task-high", null], o);
+  }
+  // The same table on an install that runs smol-max leaves the row alone: the view reads the install, as route does.
+  const runs = fitted({ fit: FIT_READ({ table: FIT({ rows: { cost: rows, speed: rows } }) }), catalog: { ...CATALOG, value: { models: CATALOG.value.models.map((m) => ({ ...m, thinking: LADDER })) } } });
+  assert.deepEqual([lineOf(runs, "cost", "*").entry.cell, lineOf(runs, "cost", "*").entry.held], ["smol-max", null]);
+  // With the install unread nothing is checked, as route does with an unread install.
+  assert.equal(lineOf(fitted({ fit: FIT_READ({ table: FIT({ rows: { cost: rows, speed: rows } }) }), catalog: null }), "cost", "*").entry.cell, "smol-max");
+});
+
+test("a derived default Cell replaces slow-high in the view where the install does not run it", () => {
+  const slowNoHigh = { ...CATALOG, value: { models: CATALOG.value.models.map((m) => (m.selector === "anthropic/claude-opus-5" ? { ...m, thinking: ["low", "medium", "xhigh", "max"] } : m)) } };
+  const p = policy({ catalog: slowNoHigh });
+  assert.equal(lineOf(p, "cost", "*").entry.cell, "slow-medium");
+  assert.equal(lineOf(p, "cost", "*").entry.held, "slow-high unrunnable here");
+});
+
+test("burn-in progress counts the starting Cells the Fit recorded, and says which it left out", () => {
+  const two = FIT({ burn_in: true, starting_cells: ["slow-high", "task-high"], guard: { tripped: [], n: { "slow-high": 69, "task-high": 12 } } });
+  assert.deepEqual(fitted({ fit: FIT_READ({ table: two }) }).burnIn, {
+    heading: "burn-in: 1 of 2 runnable starting Cells has the 20 merged PRs each needs; smol-high unrunnable",
+    cells: [{ cell: "slow-high", n: 69, of: 20 }, { cell: "task-high", n: 12, of: 20 }],
+  });
+  const ended = FIT({ burn_in: false, starting_cells: ["slow-high", "task-high"], guard: { tripped: [], n: { "slow-high": 69, "task-high": 69 } } });
+  assert.equal(fitted({ fit: FIT_READ({ table: ended }) }).burnIn.heading, "burn-in ended: every runnable starting Cell has its 20 merged PRs; smol-high unrunnable");
+  // A Fit that records no set counted all three, so the cockpit's own install read decides nothing for it.
+  assert.equal(fitted({ fit: FIT_READ({ table: FIT({ burn_in: true, guard: { tripped: [], n: {} } }) }), catalog: SMOL_NONE }).burnIn.heading, "burn-in: 0 of 3 starting Cells have the 20 merged PRs each needs");
+  assert.equal(fitted({ fit: FIT_READ({ table: FIT({ burn_in: true, starting_cells: ["nope"], guard: { tripped: [], n: {} } }) }) }).burnIn.cells.length, 3, "a record that names no starting Cell is none");
+});
+
+test("while the starting table routes, burn-in progress counts the starting Cells the cockpit's own install read runs", () => {
+  const p = policy({ catalog: SMOL_NONE });
+  assert.deepEqual(p.burnIn, {
+    heading: "burn-in: 2 of 2 runnable starting Cells have the 20 merged PRs each needs; smol-high unrunnable",
+    cells: [{ cell: "slow-high", n: 69, of: 20 }, { cell: "task-high", n: 69, of: 20 }],
+  });
+  assert.equal(p.burnIn.cells.length, 2);
+  assert.equal(policy({ catalog: null }).burnIn.heading, "burn-in: 3 of 3 starting Cells have the 20 merged PRs each needs", "an unread install counts all three");
+  assert.equal(lineOf(policy({ catalog: SMOL_NONE }), "cost", "*").exploring, "drawn over slow-high and task-high");
+});

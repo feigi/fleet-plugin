@@ -28,8 +28,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkFields, parseAllowlist, parseFrontmatter } from "../plugin/scripts/frontmatter-check.mjs";
-import { checkRoutes, parseModelRoute, routableCells } from "../plugin/scripts/tier-roles.mjs";
-import { DAY_ONE_TABLE } from "./support/day-one-router-table.mjs";
+import { checkRoutes, parseModelRoute } from "../plugin/scripts/tier-roles.mjs";
 
 const PLUGIN = fileURLToPath(new URL("../plugin/", import.meta.url));
 const AGENTS = join(PLUGIN, "agents");
@@ -82,8 +81,8 @@ test("fleet-fix-applier: model is a @<role>:<level> route, and tier-roles accept
   assert.equal(fm.error, undefined);
   const model = fm.fields.find((f) => f.key === "model")?.value;
   assert.deepEqual(parseModelRoute(model), { role: "slow", level: "high" });
-  // The starting table's routable Cells, as `--check` reads its table: the smol-max Cell, which this catalog's smol target cannot run, is a notice there.
-  const r = checkRoutes({ agentsDir: AGENTS, modelRoles: ROLES, overrides: {}, catalog: CATALOG, routable: routableCells(DAY_ONE_TABLE) });
+  // The smol-max Cell, which this catalog's smol target cannot run, is a notice, never a violation.
+  const r = checkRoutes({ agentsDir: AGENTS, modelRoles: ROLES, overrides: {}, catalog: CATALOG });
   assert.deepEqual(r.violations, []);
 });
 
