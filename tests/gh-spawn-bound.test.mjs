@@ -37,21 +37,26 @@
 //      ceiling: an argument clear of the environment that works out, from
 //      literals, + - * / ** and the names the tracer resolves, to a number
 //      from 1 to CEILING_CAP (at its largest, when it has several values).
+//      A name, or a name's key (`x.key`, `x["key"]`), that a compound
+//      assignment, `++` or `--` writes works out to no number.
 //   2. Every argument of that Math.min() the environment reaches is floored:
 //      each value it can take is a Math.max() with an argument clear of the
 //      environment that is at least 1 (at its smallest), since a timeout of
-//      0 is no timeout. A floor written around the Math.min() is no floor.
-//   3. A member read (x.key, x.key(), f().key) is followed only into a plain
-//      value of the object literals that x, or f's return, resolves to.
-//      `this`, a `new` expression, Object.create(), a class, a function and
-//      a call the tracer cannot open are refused as receivers; a getter, a
-//      setter and a method are refused as the key.
+//      0 is no timeout. A floor written around the Math.min() is no floor,
+//      and neither is a name that a compound assignment, `++` or `--` writes.
+//   3. A member read (x.key, x["key"], x.a.b, x.key(), f().key) is followed,
+//      key by key, only into a plain value of the object literals that x, or
+//      f's return, resolves to. `this`, a `new` expression, Object.create(),
+//      a class, a function and a call the tracer cannot open are refused as
+//      receivers; a getter, a setter and a method are refused as the key, and
+//      so is a `[…]` holding anything but a string or integer literal.
 //   4. Wherever a key is read out of an object (a member read, a gh spawn's
 //      own options, an Object.assign() source), the read is refused when the
-//      literal holds a computed key, a `__proto__` entry, or a getter, setter
-//      or method of that key; or the object is handed to an Object.* or
-//      Reflect.* call other than Object.assign(); or `__proto__`,
-//      `__defineGetter__` or `__defineSetter__` is written or called on it.
+//      literal holds a computed key, a `__proto__:` entry, or a getter, setter
+//      or method of that key; or the object is handed, in parentheses or not,
+//      to an Object.* or Reflect.* call other than Object.assign(), the call
+//      written as a member or computed; or `__proto__`, `__defineGetter__` or
+//      `__defineSetter__` is written or called on it.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
@@ -389,33 +394,41 @@ function tracer(mods, resolve, spawner) {
   };
   // Every expression this file gives `id` where a read at `at` can see it:
   // `id = …` or a compound `id += …` (a declaration, a reassignment, a
-  // destructuring default) and `const { id } = …`. A declaration binds `id`
-  // in the innermost named function holding it, or else in the module, so the
-  // read sees the binding of the innermost such scope around it, and an
-  // assignment counts where it lands on that binding. `at` of -1 reads at
-  // module scope.
-  const ASSIGN = "(?:[-+*/%&|^]|\\*\\*|<<|>>>?|&&|\\|\\||\\?\\?)?=(?![=>])";
+  // destructuring default) and `const { id } = …`; beside one of those, an
+  // `id++` or `--id` is a compound write with nothing to read. A declaration
+  // binds `id` in the innermost named function holding it, or else in the
+  // module, so the read sees the binding of the innermost such scope around
+  // it, and an assignment counts where it lands on that binding. `at` of -1
+  // reads at module scope.
+  const OPERATOR = "(?:[-+*/%&|^]|\\*\\*|<<|>>>?|&&|\\|\\||\\?\\?)";
+  const ASSIGN = `${OPERATOR}?=(?![=>])`;
   // What a match of ASSIGN ends in, when it is a compound assignment.
   const COMPOUND = /[-+*/%&|^<>?]=\s*$/;
+  // `id++`, `id--`, `++id` or `--id` of the escaped name `e`, never of a
+  // member of it.
+  const UPDATE = (e) => `(?<![\\w$.])${e}\\s*(?:\\+\\+|--)|(?:\\+\\+|--)\\s*${e}(?![\\w$]|\\s*(?:\\?\\.|\\.|\\[))`;
   const declRefs = (mod, id, at) => {
     const e = escape(id);
     const found = [];
     const forms = [
-      [`(?<![\\w$.])${e}\\s*${ASSIGN}\\s*`, false],
-      [`\\b(?:const|let|var)\\s*(?:\\{[^{}]*(?<![\\w$.])${e}\\b[^{}]*\\}|\\[[^\\[\\]]*(?<![\\w$.])${e}\\b[^\\[\\]]*\\])\\s*=(?![=>])\\s*`, true],
+      [`(?<![\\w$.])${e}\\s*${ASSIGN}\\s*`, "assign"],
+      [`\\b(?:const|let|var)\\s*(?:\\{[^{}]*(?<![\\w$.])${e}\\b[^{}]*\\}|\\[[^\\[\\]]*(?<![\\w$.])${e}\\b[^\\[\\]]*\\])\\s*=(?![=>])\\s*`, "destructuring"],
+      [UPDATE(e), "update"],
     ];
-    for (const [form, destructuring] of forms) {
+    for (const [form, kind] of forms) {
       for (const m of mod.skel.matchAll(new RegExp(form, "g"))) {
-        const declares = destructuring || /\b(?:const|let|var)\s*$/.test(mod.skel.slice(Math.max(0, m.index - 8), m.index));
-        found.push({ m, declares, destructuring });
+        const declares = kind === "destructuring" || (kind === "assign" && /\b(?:const|let|var)\s*$/.test(mod.skel.slice(Math.max(0, m.index - 8), m.index)));
+        found.push({ m, declares, kind });
       }
     }
     const scopes = new Set(found.filter((f) => f.declares).map((f) => mod.encl(f.m.index)[0] ?? null));
     const scopeOf = (pos) => mod.encl(pos).find((fn) => scopes.has(fn)) ?? null;
     const scope = scopeOf(at);
-    const refs = found.filter((f) => scopeOf(f.m.index) === scope).map(({ m, destructuring }) => {
+    const visible = found.filter((f) => scopeOf(f.m.index) === scope);
+    const refs = visible.every((f) => f.kind === "update") ? [] : visible.map(({ m, kind }) => {
+      if (kind === "update") return { ...refOf(mod, m.index, m.index), compound: true };
       const a = m.index + m[0].length;
-      return { ...refOf(mod, a, exprEnd(mod.skel, a, true)), compound: !destructuring && COMPOUND.test(m[0]), destructured: destructuring };
+      return { ...refOf(mod, a, exprEnd(mod.skel, a, true)), compound: kind === "assign" && COMPOUND.test(m[0]), destructured: kind === "destructuring" };
     });
     return { refs, key: `${mod.file}=${id}@${scope?.start ?? 0}` };
   };
@@ -468,7 +481,8 @@ function tracer(mods, resolve, spawner) {
   };
   // Every expression an assignment after its declaration writes to `key` of
   // the object `id` names: `id.key = …`, `id["key"] = …`, and each source of
-  // an `Object.assign(id, …)`.
+  // an `Object.assign(id, …)`. An `id.key++` or `--id.key` is a compound
+  // write with nothing to read.
   const writes = (ref, id, key, bind, seen) => {
     const { mod } = ref;
     const once = `${mod.file}#${id}.${key}=`;
@@ -477,11 +491,15 @@ function tracer(mods, resolve, spawner) {
     try {
       const e = escape(id);
       const out = [];
-      const target = `(?<![\\w$.])${e}\\s*(?:\\.\\s*${escape(key)}\\b|\\[\\s*(["'\`])${escape(key)}\\1\\s*\\])\\s*${ASSIGN}\\s*`;
-      for (const m of mod.code.matchAll(new RegExp(target, "g"))) {
-        if (mod.skel[m.index] !== mod.code[m.index]) continue;
+      const member = (group) => `${e}\\s*(?:\\.\\s*${escape(key)}\\b|\\[\\s*(["'\`])${escape(key)}\\${group}\\s*\\])`;
+      const visible = (m) => mod.skel[m.index] === mod.code[m.index];
+      for (const m of mod.code.matchAll(new RegExp(`(?<![\\w$.])${member(1)}\\s*${ASSIGN}\\s*`, "g"))) {
+        if (!visible(m)) continue;
         const a = m.index + m[0].length;
         out.push({ ...refOf(mod, a, exprEnd(mod.skel, a, true)), compound: COMPOUND.test(m[0]) });
+      }
+      for (const m of mod.code.matchAll(new RegExp(`(?<![\\w$.])${member(1)}\\s*(?:\\+\\+|--)|(?:\\+\\+|--)\\s*${member(2)}`, "g"))) {
+        if (visible(m)) out.push({ ...refOf(mod, m.index, m.index), compound: true });
       }
       for (const m of mod.skel.matchAll(/(?<![\w$.])Object\s*\.\s*assign\s*\(/g)) {
         const [first, ...sources] = pieces(mod.skel, mod.code, m.index + m[0].length - 1);
@@ -530,19 +548,21 @@ function tracer(mods, resolve, spawner) {
     return mod.classes.has(id) || (imp !== undefined && (mods.get(imp.module.slice(2))?.classes.has(imp.name) ?? false));
   };
   // Why the object `id` names, read at `where`, may have a key this sweep
-  // does not see: it is handed to an Object.* or Reflect.* call other than
-  // Object.assign() (whose target writes() follows), or `__proto__`,
-  // `__defineGetter__` or `__defineSetter__` is written or called on it, in
-  // the file that reads it or the one it is imported from.
+  // does not see: it is handed, in parentheses or not, to an Object.* or
+  // Reflect.* call other than Object.assign() (whose target writes()
+  // follows), the call's name written as a member or computed, or
+  // `__proto__`, `__defineGetter__` or `__defineSetter__` is written or called
+  // on it, in the file that reads it or the one it is imported from.
+  const unwrapped = (s) => (s.startsWith("(") && closing(s, 0) === s.length - 1 ? unwrapped(s.slice(1, -1).trim()) : s);
   const reshapes = (ref, id, where) => {
     const imp = ref.mod.imports.get(id);
     const from = imp && mods.get(imp.module.slice(2));
     const out = [];
     for (const [mod, name] of from ? [[ref.mod, id], [from, imp.name]] : [[ref.mod, id]]) {
-      for (const m of mod.skel.matchAll(/(?<![\w$.])(Object|Reflect)\s*\.\s*([\w$]+)\s*\(/g)) {
+      for (const m of mod.skel.matchAll(/(?<![\w$.])(Object|Reflect)\s*(?:\.\s*([\w$]+)|\[[^\]]*\])\s*\(/g)) {
         if (m[1] === "Object" && m[2] === "assign") continue;
-        if (pieces(mod.skel, mod.code, m.index + m[0].length - 1).some((p) => p.skel === name)) {
-          out.push(`reads ${where}: ${name} is handed to ${m[1]}.${m[2]}(…), which this sweep does not follow`);
+        if (pieces(mod.skel, mod.code, m.index + m[0].length - 1).some((p) => unwrapped(p.skel) === name)) {
+          out.push(`reads ${where}: ${name} is handed to ${m[1]}${m[2] === undefined ? "[…]" : `.${m[2]}`}(…), which this sweep does not follow`);
         }
       }
       const e = escape(name);
@@ -558,7 +578,8 @@ function tracer(mods, resolve, spawner) {
   };
   // One entry of an object literal, read off its source text `c`: its kind
   // (`plain`, `shorthand`, `accessor`, `method`, or `computed` for any key
-  // not spelled out), its key, and for a plain entry where its value starts.
+  // not spelled out), its key (a number literal's as the number it is), and
+  // for a plain entry where its value starts.
   const MODIFIER = /^(?:(async|get|set)\s+(?=[\w$"'[*])|\*\s*(?=[\w$"'[]))/;
   const entryOf = (c) => {
     let rest = c;
@@ -571,9 +592,10 @@ function tracer(mods, resolve, spawner) {
       rest = rest.slice(m[0].length);
       at += m[0].length;
     }
-    const k = rest.startsWith("[") ? null : rest.match(/^(?:(["'])((?:\\.|(?!\1)[^\\])*)\1|([\w$]+))/);
+    const number = rest.match(NUMBER);
+    const k = number ?? (rest.startsWith("[") ? null : rest.match(/^(?:(["'])((?:\\.|(?!\1)[^\\])*)\1|([\w$]+))/));
     if (k === null) return { kind: "computed" };
-    const key = k[2] ?? k[3];
+    const key = number !== null ? String(Number(number[0].replace(/_/g, ""))) : k[2] ?? k[3];
     const tail = rest.slice(k[0].length);
     if (accessor) return { kind: "accessor", key };
     if (method || /^\s*\(/.test(tail)) return { kind: "method", key };
@@ -613,7 +635,7 @@ function tracer(mods, resolve, spawner) {
         }
         const e = entryOf(p.code);
         if (e.kind === "computed") out.push(refuse(ref, `reads ${where}: its object holds a computed key, which can be ${key}`));
-        else if (e.key === "__proto__") out.push(refuse(ref, `reads ${where}: its object holds a __proto__ entry, a prototype this sweep does not follow`));
+        else if (e.key === "__proto__" && e.kind === "plain") out.push(refuse(ref, `reads ${where}: its object holds a __proto__ entry, a prototype this sweep does not follow`));
         else if (e.key !== key) continue;
         else if (e.kind === "accessor" || e.kind === "method") out.push(refuse(ref, `reads ${where}: its object holds ${key} as a getter, setter or method, not a plain value`));
         else out.push(e.kind === "shorthand" ? { ...ref, skel: key, code: key } : { ...ref, skel: p.skel.slice(e.at).trim(), code: p.code.slice(e.at).trim() });
@@ -646,8 +668,32 @@ function tracer(mods, resolve, spawner) {
   // declares no ghBudget of its own.
   const isGhBudget = (mod) => !mod.fns.has("ghBudget") && mod.imports.get("ghBudget")?.module === "./arg.mjs"
     && mod.imports.get("ghBudget").name === "ghBudget";
+  // The member reads written in `text` from offset `at` on, one after
+  // another: `.key`, `?.key`, and a `[…]` or `?.[…]` whose key is a string
+  // or an integer literal, read off `code`, `text` with its strings in place.
+  // Each comes with the offset just past it and its text as written. A `[…]`
+  // holding anything else ends them, as a read whose key is null.
+  const DOT = /^\s*(?:\?\.|\.)\s*([\w$]+)/;
+  const BRACKET = /^\s*(?:\?\.\s*)?\[/;
+  const members = (text, code, at) => {
+    const out = [];
+    for (;;) {
+      const dot = text.slice(at).match(DOT);
+      if (dot !== null) {
+        at += dot[0].length;
+        out.push({ key: dot[1], end: at, written: `.${dot[1]}` });
+        continue;
+      }
+      const open = text.slice(at).match(BRACKET);
+      if (open === null) return out;
+      const from = at + open[0].length - 1;
+      at = closing(text, from) + 1;
+      const literal = code.slice(from, at).match(/^\[\s*(?:(["'`])((?:(?!\1)[^\\$])*)\1|(\d+))\s*\]$/);
+      out.push({ key: literal === null ? null : literal[2] ?? literal[3], end: at, written: code.slice(from, at).replace(/\s+/g, "") });
+      if (literal === null) return out;
+    }
+  };
   // How the environment reaches the value `ref` reads: one reason per read.
-  const MEMBER = /^\s*(?:\?\.|\.)\s*([\w$]+)/;
   const judge = (ref, bind, seen) => {
     if (ref.refuse) return [ref.refuse];
     const hide = ref.skel.split("");
@@ -697,28 +743,33 @@ function tracer(mods, resolve, spawner) {
           let end = after + made[0].length;
           if (id === "new" && rest[end] === "(") end = closing(rest, end) + 1;
           else if (id === "Object") end = closing(rest, end - 1) + 1;
-          const mem = rest.slice(end).match(MEMBER);
-          if (mem !== null) {
-            const label = `${ref.code.slice(m.index, end).replace(/\s+/g, " ")}.${mem[1]}`;
+          const [mem] = members(rest, ref.code, end);
+          if (mem !== undefined) {
+            const label = `${ref.code.slice(m.index, end).replace(/\s+/g, " ")}${mem.written}`;
             reasons.push(`reads ${label}: it is ${id === "new" ? "a new expression" : "an Object.create(…) object"}, whose members this sweep does not follow`);
-            skipTo = end + mem[0].length;
+            skipTo = mem.end;
             continue;
           }
         }
-        let member = follow.match(MEMBER);
+        // A member read, `x.a.b` or `x["a"]` or `f(…).a`: each key is read out
+        // of the values the one before it holds.
         let end = after;
-        if (member === null && !GLOBALS.has(id)) {
-          const open = follow.match(/^\s*\(/);
-          if (open !== null) {
-            const close = closing(rest, after + open[0].length - 1);
-            const mem = rest.slice(close + 1).match(MEMBER);
-            if (mem !== null) { member = mem; end = close + 1; }
-          }
+        let chain = GLOBALS.has(id) ? [] : members(rest, ref.code, end);
+        const open = follow.match(/^\s*\(/);
+        if (chain.length === 0 && open !== null && !GLOBALS.has(id)) {
+          end = closing(rest, after + open[0].length - 1) + 1;
+          chain = members(rest, ref.code, end);
         }
-        if (member !== null && !GLOBALS.has(id)) {
-          const label = end === after ? `${id}.${member[1]}` : `${id}(…).${member[1]}`;
-          const receiver = { ...ref, skel: ref.skel.slice(m.index, end), code: ref.code.slice(m.index, end) };
-          for (const v of keyValues(receiver, member[1], bind, seen, false, label)) reasons.push(...judge(v, bind, seen));
+        if (chain.length > 0) {
+          let label = end === after ? id : `${id}(…)`;
+          let values = [{ ...ref, skel: ref.skel.slice(m.index, end), code: ref.code.slice(m.index, end) }];
+          for (const { key, written } of chain) {
+            label += written;
+            values = key === null
+              ? [refuse(ref, `reads ${label}: its key is computed, which this sweep does not follow`)]
+              : values.flatMap((v) => keyValues(v, key, bind, seen, false, label));
+          }
+          for (const v of values) reasons.push(...judge(v, bind, seen));
           continue;
         }
         const unknown = () => (GLOBALS.has(id) ? [] : [`reaches ${id}, which this sweep cannot resolve`]);
@@ -740,7 +791,7 @@ function tracer(mods, resolve, spawner) {
   // The numbers `ref` can work out to, from literals, unary + and -, + - * /
   // **, parentheses, and names and member reads resolved as the tracer
   // resolves them; null when any value of it does not work out, or it is
-  // written by a compound assignment.
+  // written by a compound assignment or a `++` or `--`.
   const NUMBER = /^(?:0[xX][\da-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+|(?:\d[\d_]*(?:\.[\d_]*)?|\.\d[\d_]*)(?:[eE][+-]?\d[\d_]*)?)/;
   const MAX_VALUES = 64;
   const numbers = (ref, bind, seen) => {
@@ -809,13 +860,18 @@ function tracer(mods, resolve, spawner) {
     ws();
     return i === s.length && v !== null && v.length > 0 ? v : null;
   };
+  // Whether a compound assignment, `++` or `--` writes the name `id` anywhere
+  // in its module, a parameter of that name included.
+  const updated = (mod, id) => {
+    const e = escape(id);
+    return new RegExp(`${UPDATE(e)}|(?<![\\w$.])${e}\\s*${OPERATOR}=(?![=>])`).test(mod.skel);
+  };
   // The numbers a name, or a member read `a.b.c`, can hold.
   const named = (ref, [id, ...keys], bind, seen) => {
     const all = (vals) => (vals.length === 0 || vals.includes(null) ? null : [...new Set(vals)]);
     if (keys.length === 0) {
-      const e = escape(id);
       if (!shadowedBy(ref, id) && (isClass(ref.mod, id) || resolve(ref.mod, id) !== null)) return null;
-      if (new RegExp(`(?<![\\w$.])${e}\\s*(?:\\+\\+|--)|(?:\\+\\+|--)\\s*${e}\\b`).test(ref.mod.skel)) return null;
+      if (updated(ref.mod, id)) return null;
       return all(viaId(ref, id, bind, seen, (r) => numbers(r, bind, seen) ?? [null], () => [null]));
     }
     let objects = [{ ...ref, skel: id, code: id }];
@@ -828,9 +884,10 @@ function tracer(mods, resolve, spawner) {
     return all(objects.flatMap((o) => numbers(o, bind, seen) ?? [null]));
   };
   // Whether every value `ref` can take is a Math.max(…) call with an argument
-  // clear of the environment that is at least 1 at its smallest.
+  // clear of the environment that is at least 1 at its smallest. A name a
+  // compound assignment, `++` or `--` writes is no floor.
   const floored = (ref, bind, seen) => {
-    if (ref.refuse) return false;
+    if (ref.refuse || ref.compound) return false;
     const s = ref.skel;
     const max = s.match(/^Math\s*\.\s*max\s*\(/);
     if (max !== null) {
@@ -843,7 +900,7 @@ function tracer(mods, resolve, spawner) {
     }
     const alternatives = branches(ref);
     if (alternatives !== null) return alternatives.every((r) => floored(r, bind, seen));
-    if (!/^[\w$]+$/.test(s)) return false;
+    if (!/^[\w$]+$/.test(s) || updated(ref.mod, s)) return false;
     const each = viaId(ref, s, bind, seen, (r) => [floored(r, bind, seen)], () => [false]);
     return each.length > 0 && each.every(Boolean);
   };
@@ -1081,6 +1138,11 @@ const READ = (expr, decls = "") => MOD(`${decls}spawnSync("gh", ["x"], { timeout
 const ENV_GETTER = "get ms() { return Number(process.env.X); }";
 const ENV_PROTO = "function B() {}\nB.prototype.ms = function () { return Number(process.env.X); };\n";
 const imports = (decls, line) => ({ "common.mjs": decls, "x.mjs": line });
+// `lets(name, n)` sets `name` to each of 1 to `n` in turn, so the ceiling
+// COMBINED, under `combinations(a)`, takes a × 4 × 4 distinct values.
+const lets = (name, n) => Array.from({ length: n }, (_, k) => (k === 0 ? `let ${name} = 1;\n` : `${name} = ${k + 1};\n`)).join("");
+const COMBINED = "A + B * 10 + C * 100";
+const combinations = (a) => `${lets("A", a)}${lets("B", 4)}${lets("C", 4)}`;
 
 test("the sweep refuses a gh spawn whose timeout the environment can reach", () => {
   const refused = {
@@ -1166,12 +1228,23 @@ test("the sweep refuses a gh spawn whose timeout the environment can reach", () 
     ["ceiling 0", MIN("0"), "ceiling"],
     ["ceiling -1", MIN("-1"), "ceiling"],
     ["ceiling 300_001", MIN("300_001"), "ceiling"],
+    ["a ceiling of more than 64 values", MIN(COMBINED, FLOORED, combinations(5)), "ceiling"],
+    ["a ceiling key a ++ writes", MIN("L.gh", FLOORED, "const L = { gh: 60_000 };\nfor (let i = 0; i < 1e9; i++) L.gh++;\n"), "ceiling"],
+    ["a ceiling key a prefix -- writes in bracket form", MIN("L.gh", FLOORED, "const L = { gh: 60_000 };\n--L[\"gh\"];\n"), "ceiling"],
     // Rule 2: the floor.
     ["Math.min of a literal ceiling and an env read", MIN("20_000", "Number(process.env.X)"), "floor"],
     ["ghBudget inside a Math.min ceiling", MIN("20_000", "ghBudget(Number(process.env.X), process.env.Y)"), "floor"],
     ["a Math.max(0, …) floor", MIN("20_000", "Math.max(0, Number(process.env.X))"), "floor"],
     ["a floor the environment feeds", MIN("20_000", "Math.max(F, Number(process.env.X))", "const F = Number(process.env.F);\n"), "floor"],
     ["a floor that is 0 at its smallest value", MIN("20_000", "Math.max(F, Number(process.env.X))", "let F = 1;\nF = 0;\n"), "floor"],
+    ["a floor reassigned after its Math.max", MIN("20_000", "G", "let G = Math.max(1, Number(process.env.X));\nG = 0;\n"), "floor"],
+    ["a ternary with one unfloored branch", MIN("20_000", "(process.env.Z ? Math.max(1, Number(process.env.X)) : Number(process.env.X))"), "floor"],
+    ["a floor a -- writes", MIN("20_000", "F", "let F = Math.max(1, Number(process.env.X));\nF--;\n"), "floor"],
+    ["a floor a compound assignment writes", MIN("20_000", "F", "let F = Math.max(1, Number(process.env.X));\nF -= Math.max(1, 2);\n"), "floor"],
+    ["a floored parameter a -- writes", MOD(`function f(t) { t--; return spawnSync("gh", ["x"], { timeout: Math.min(20_000, t) }); }\nf(${FLOORED});`), "floor"],
+    ["an imported floor a ++ writes", imports("export let F = Math.max(1, Number(process.env.X));\nexport function bump() { F++; }\n", MIN("20_000", "F", `import { F } from "./common.mjs";\n`)), "floor"],
+    ["a floored parameter a compound assignment writes", MOD(`function f(t) { t -= 5; return spawnSync("gh", ["x"], { timeout: Math.min(20_000, t) }); }\nf(${FLOORED});`), "floor"],
+    ["an imported floor a compound assignment writes", imports("export let F = Math.max(1, Number(process.env.X));\nconst G = Math.max(1, 2);\nexport function cut() { F -= G; }\n", MIN("20_000", "F", `import { F } from "./common.mjs";\n`)), "floor"],
     ["a floor written around the Math.min", READ("Math.max(1, Math.min(20_000, Number(process.env.X)))"), "floor"],
     // Rule 3: member reads.
     ["this.ms() in an object literal's method", MOD(`const CFG = { ms() { return 20_000; }, run() { return spawnSync("gh", ["x"], { timeout: this.ms() }); } };`), "this.ms"],
@@ -1191,6 +1264,12 @@ test("the sweep refuses a gh spawn whose timeout the environment can reach", () 
     ["a class's static getter", READ("C.ms", `class C { static get ms() { return 20_000; } }\n`), "C.ms"],
     ["a function's property", READ("f.ms", `function f() {}\nf.ms = 20_000;\n`), "f.ms"],
     ["a call result the sweep cannot open", READ("load().ms"), "load(…).ms"],
+    ["a class expression handed to a parameter", MOD(`function f(C) { return spawnSync("gh", ["x"], { timeout: C.ms }); }\nf(class { static get ms() { return Number(process.env.X); } });`), "is a class"],
+    ["a getter two keys down", READ("CFG.inner.ms", `const CFG = { inner: { ${ENV_GETTER} } };\n`), "CFG.inner.ms"],
+    ["a getter added by Object.defineProperty two keys down", READ("CFG.inner.ms", `const IN = {};\nObject.defineProperty(IN, "ms", { get() { return Number(process.env.X); } });\nconst CFG = { inner: IN };\n`), "Object.defineProperty"],
+    ["a getter read in bracket form", READ(`CFG["ms"]`, `const CFG = { ${ENV_GETTER} };\n`), `CFG["ms"]`],
+    ["a prototype read in bracket form", READ(`CFG["ms"]`, `const P = { ${ENV_GETTER} };\nconst CFG = {};\nObject.setPrototypeOf(CFG, P);\n`), "Object.setPrototypeOf"],
+    ["a bracket read of a computed key", READ("CFG[K]", `const K = "ms";\nconst CFG = { ms: 20_000 };\n`), "its key is computed"],
     // Rule 4: object entries, on a member read.
     ["a computed key", READ("CFG.ms", `const K = "ms";\nconst CFG = { [K]: Number(process.env.X) };\n`), "computed key"],
     ["a computed string key", READ("CFG.ms", `const CFG = { ["ms"]: Number(process.env.X) };\n`), "computed key"],
@@ -1204,6 +1283,9 @@ test("the sweep refuses a gh spawn whose timeout the environment can reach", () 
     ["Reflect.set", READ("CFG.ms", `const CFG = { ms: 20_000 };\nReflect.set(CFG, "ms", Number(process.env.X));\n`), "Reflect.set"],
     ["CFG.__defineGetter__", READ("CFG.ms", `const CFG = { ms: 20_000 };\nCFG.__defineGetter__("ms", () => Number(process.env.X));\n`), "__defineGetter__"],
     ["Object.assign of a getter", READ("CFG.ms", `const CFG = { ms: 20_000 };\nObject.assign(CFG, { ${ENV_GETTER} });\n`), "getter, setter or method"],
+    ["Object.defineProperty on a parenthesised target", READ("CFG.ms", `const CFG = { ms: 20_000 };\nObject.defineProperty((CFG), "ms", { value: Number(process.env.X) });\n`), "Object.defineProperty"],
+    ["Object.defineProperty called computed", READ("CFG.ms", `const CFG = { ms: 20_000 };\nObject["defineProperty"](CFG, "ms", { value: Number(process.env.X) });\n`), "Object[…]"],
+    ["Reflect.set called computed", READ("CFG.ms", `const CFG = { ms: 20_000 };\nReflect["set"](CFG, "ms", Number(process.env.X));\n`), "Reflect[…]"],
     // Rule 4: object entries, in a gh spawn's own options.
     ["options holding a timeout and a getter of it", MOD(`spawnSync("gh", ["x"], { timeout: 20_000, get timeout() { return Number(process.env.X); } });`), "getter, setter or method"],
     ["options holding only a getter", MOD(`spawnSync("gh", ["x"], { get timeout() { return Number(process.env.X); } });`), "getter, setter or method"],
@@ -1279,6 +1361,14 @@ test("the sweep accepts a gh timeout the environment can only shorten, and env r
     "Object.assign with the options only a source": MOD(`const opts = { timeout: 20_000 };\nconst copy = Object.assign({}, opts);\nspawnSync("gh", ["x"], opts);`),
     "a getter on another key of the object read": READ("CFG.ms", `const CFG = { ms: 20_000, get other() { return Number(process.env.X); } };\n`),
     "an unrelated object handed to Object.freeze": READ("CFG.ms", `const OTHER = { a: 1 };\nObject.freeze(OTHER);\nconst CFG = { ms: 20_000 };\n`),
+    "a ceiling of exactly 64 values": MIN(COMBINED, FLOORED, combinations(4)),
+    "a ceiling holding 0 and 20_000, at its largest 20_000": MIN("CEIL", FLOORED, "let CEIL = 0;\nCEIL = 20_000;\n"),
+    "a ++ on another key of the ceiling's object": MIN("L.gh", FLOORED, "const L = { gh: 60_000, n: 0 };\nL.n++;\n"),
+    "a -- on another name than the floor": MIN("20_000", "F", "let F = Math.max(1, Number(process.env.X));\nlet G = 1;\nG--;\n"),
+    "a getter two keys down beside the plain value read": READ("CFG.inner.ms", `const CFG = { inner: { ms: 20_000 }, other: { ${ENV_GETTER} } };\n`),
+    "a plain value read in bracket form": READ(`CFG["ms"]`, `const CFG = { ms: 20_000 };\n`),
+    "a number-literal key beside the one read": READ("CFG.ms", `const CFG = { 1.5: 2, ms: 20_000 };\n`),
+    "a shorthand __proto__, an own key and no prototype": READ("CFG.ms", `const __proto__ = { a: 1 };\nconst CFG = { __proto__, ms: 20_000 };\n`),
   };
   for (const [name, src] of Object.entries(accepted)) {
     assert.deepEqual(reaching(typeof src === "string" ? { "x.mjs": src } : src), [false], name);
