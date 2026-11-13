@@ -175,7 +175,7 @@ about *which* divergence exists (shell#67–92, tracker#41–48):
 - macOS `/tmp` → `/private/tmp` (`realpath` before compare); macOS `ps` truncates `args` without `-ww`; shebang read is 512 bytes on macOS, 255 on Linux.
 - `Atomics.wait` on a `SharedArrayBuffer` blocks the thread; `writeSync` to a full pipe throws `EAGAIN` (retry ≤ 200).
 - Node `RegExp.escape` is v24+, above the `>=20.11` floor, so `prose-pin.mjs`, `ledger.mjs` and `node-floor-sweep.test.mjs` hand-roll it; `readdirSync({recursive:true})` needs ≥ 20.
-- `.nvmrc` (26.5.0) and `engines.node` (>=20.11.0) drift; Renovate manages only `nvm`. — harness#104–106
+- `.nvmrc` (26.5.0) and `engines.node` (>=20.11.0) drift; Renovate manages `nvm`, `github-actions` and `custom.regex` (ADR 0039) but not `engines.node`. — harness#104–106
 
 ## 8. Time, concurrency, network
 
