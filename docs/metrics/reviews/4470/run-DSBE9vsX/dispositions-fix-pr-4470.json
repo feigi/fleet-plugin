@@ -1,0 +1,163 @@
+{
+  "head": "45850f5fb50d0718a56d6556fa02113aca106da7",
+  "run": "run-DSBE9vsX",
+  "entries": [
+    {
+      "bucket": "survived",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "charge": "none",
+      "chargeReason": "defect-outside-acceptance"
+    },
+    {
+      "bucket": "survived",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "charge": "none",
+      "chargeReason": "defect-outside-acceptance"
+    },
+    {
+      "bucket": "survived",
+      "index": 2,
+      "scope": "out",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "out of ticket scope: #4468's ticket leaves ADR edits to #4469 and 'does not edit either'",
+      "issue": 4472,
+      "remedyFiles": [
+        "docs/adr/0010-the-node-pin-stays-exact-and-a-bot-moves-it.md"
+      ],
+      "charge": "none",
+      "chargeReason": "not-the-implementers-text"
+    },
+    {
+      "bucket": "survived",
+      "index": 3,
+      "scope": "out",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "out of ticket scope: research catalogue not named by #4468's Docs section; dated-record rule noted in the issue",
+      "issue": 4473,
+      "remedyFiles": [
+        "docs/research/external-assumptions/shell.md"
+      ],
+      "charge": "none",
+      "chargeReason": "not-the-implementers-text"
+    },
+    {
+      "bucket": "survived",
+      "index": 4,
+      "scope": "out",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "out of ticket scope: research catalogue not named by #4468's Docs section; dated-record rule noted in the issue",
+      "issue": 4474,
+      "remedyFiles": [
+        "docs/research/external-assumptions/harness-node.md"
+      ],
+      "charge": "none",
+      "chargeReason": "not-the-implementers-text"
+    },
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "crashed refuters: refutersDispatched 2, refutersInconclusive 0, no vote; the review's in-run re-dispatch crashed again",
+      "issue": 4475
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "crashed refuters: refutersDispatched 2, refutersInconclusive 0, no vote; the review's in-run re-dispatch crashed again",
+      "issue": 4476
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "crashed refuters: refutersDispatched 2, refutersInconclusive 0, no vote; the review's in-run re-dispatch crashed again",
+      "issue": 4477
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4470/fix-y0WCo0eT/u3/verdict.json",
+      "remedyFiles": [
+        "tests/workflow-action-pins.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "out",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted: catalogues are dated records; filed on the suggestion-band record",
+      "issue": 4478,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4470/fix-y0WCo0eT/u4/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 5,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4470/fix-y0WCo0eT/u5/verdict.json",
+      "remedyFiles": [
+        "tests/workflow-action-pins.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 6,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted: forms absent from tree and Renovate output; suggested cases kill one mutant only",
+      "issue": 4478,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4470/fix-y0WCo0eT/u6/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 7,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted: forward-pointing citation to the ADR #4469 lands",
+      "issue": 4478,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4470/fix-y0WCo0eT/u7/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 8,
+      "scope": "out",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted: text and version mismatch predate the PR; both schema versions list the same ten types",
+      "issue": 4478,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4470/fix-y0WCo0eT/u8/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 9,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4470/fix-y0WCo0eT/u9/verdict.json"
+    }
+  ]
+}

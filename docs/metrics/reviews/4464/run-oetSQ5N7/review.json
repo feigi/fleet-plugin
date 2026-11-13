@@ -1,0 +1,173 @@
+{
+  "pr": 4464,
+  "head": "49d5b8ffbc0e3bfdc64fafbdca358abb22a35822",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: Verify branch is rebased on base (needs pull-request context and full git history, not the worktree); Validate renovate.json (fetches renovate from the npm registry via npx on every run); smoke-omp (needs bun and a globally installed pinned omp binary); install-and-smoke (needs bun and a globally installed pinned omp binary).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ?? docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version} (not created by me; I ran only read-only commands and git status)."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — untracked docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version}; these were not made by this pass, which only read and ran node in the snapshot."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ?? docs/metrics/runs/2026-11-11T172901Z/closeout.json, ?? docs/metrics/runs/2026-11-11T172901Z/ledger.md, ?? docs/metrics/runs/2026-11-11T172901Z/phase0.json, ?? docs/metrics/runs/2026-11-11T172901Z/plugin-version (a run-ledger directory that appeared in the controller's checkout; I wrote nothing there and only read it with git status)."
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ?? docs/metrics/runs/2026-11-11T172901Z/closeout.json, ?? docs/metrics/runs/2026-11-11T172901Z/ledger.md, ?? docs/metrics/runs/2026-11-11T172901Z/phase0.json, ?? docs/metrics/runs/2026-11-11T172901Z/plugin-version (not written by this pass: every command here chained its own cd into the snapshot or simplify/, and the only file writes were in simplify/copy)"
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ?? docs/metrics/runs/2026-11-11T172901Z/closeout.json, ?? docs/metrics/runs/2026-11-11T172901Z/ledger.md, ?? docs/metrics/runs/2026-11-11T172901Z/phase0.json, ?? docs/metrics/runs/2026-11-11T172901Z/plugin-version (controller run artifacts, not written by this review: every command here chained a cd into the snapshot or scratch, and the one /tmp/x stderr redirect failed because /tmp/x is a directory, so nothing was written there)"
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ?? docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version} (untracked, produced by the controller's own session, not by my commands; I wrote only inside my scratch copy)."
+    }
+  ],
+  "counts": {
+    "survived": 1,
+    "refuted": 0,
+    "unverified": 7,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4464/run-oetSQ5N7/snapshot-49d5b8ff",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 1034,
+      "claim": "The `prior.window_start` fallback in fitTree's `const window = guard.window_start ?? prior.window_start ?? null` (and the identical line in fitTable, line 891) is not killed by any test, so a regression that drops it would not be caught.",
+      "evidence": "Mutant: replaced `guard.window_start ?? prior.window_start ?? null` with `guard.window_start ?? null` in fitTree. Full suite on mutant: `node --test tests/*.test.mjs` → exit 0, tests 9194 pass 9194 fail 0 (survives). Same mutation in fitTable survived the narrowed run (216/216 pass). Unmutated tree: baseline narrowed run exit 0, 216 pass; shared full run exit 0, 9194 pass. Before this PR the fit's window came through the same guard/prior chain, and the PR removed the --check re-fit comparison that exercised it, which likely removed the only coverage.",
+      "suggested_fix": "Add a fitTree/fitTable test where `guard.window_start` is null and `prior.window_start` is a date, asserting `table.window_start` equals the prior's and that Pulls before that date are windowed out.",
+      "dimension": "tests",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "I built my own copy of the reviewed head (measure-copy exit 0). I replaced `guard.window_start ?? prior.window_start ?? null` with `guard.window_start ?? null` on both lines, 891 (fitTable) and 1034 (fitTree). A grep for `guard.window_start ?? null` returned 2 matches, so the mutation did reach both lines. I then ran `env -u FORCE_COLOR node --test tests/*.test.mjs` on the mutant: it completed with tests 9194, pass 9194, fail 0. The mutant survives, so no test covers the `prior.window_start` fallback. This is the full suite, not a narrowed run, and I did not rerun the unmutated tree myself. The claim's own baseline run was the same suite at exit 0 with 9194 passing. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — untracked docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version}. These are not from my runs; I wrote only under the scratch copy."
+        },
+        {
+          "refuted": false,
+          "reason": "Reproduced the claim: I applied the mutation `guard.window_start ?? prior.window_start ?? null` → `guard.window_start ?? null` at both lines (891 fitTable, 1034 fitTree) in my own measuring copy (receipt exit 0, tree matches pin). Narrowed run `node --test tests/ticket-router.test.mjs tests/split-fit.test.mjs tests/pull-attribution.test.mjs tests/metrics-refresh.test.mjs tests/cockpit-tabs.test.mjs` on the mutant → exit 0, tests 372 pass 372 fail 0 (mutant survives). I did not run a separate unmutated baseline or the full suite, since the claim is that the mutant survives, and no kill or red is claimed. Not handled elsewhere: every fitTable/fitTree call in tests passes an explicit guard.window_start, and metrics-refresh passes guard.window_start directly. The test 'Fit records the prior's window_start' only checks the recorded prior and never calls the fit with a null guard window. Caveat: the diff's removed `--check` re-fit comparison as the lost coverage is inference. The mutation itself is observed. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — untracked docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version} (not from me; I wrote nothing there)."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 919,
+      "claim": "`fitted_commit` is now vestigial: `tableOver` always writes null, `validateTable` accepts any value for it, and nothing reads it. A table carrying a non-null sha is accepted and a re-fit rewrites it to null with no signal.",
+      "evidence": "In the copy, `validateTable` returned the table as valid after I set `fitted_commit=\"abc\"`, and `fitTable({prior: t, features:[], members:[], verdicts:[], guard})` returned `fitted_commit: null`. `grep fitted_commit plugin/scripts/*.mjs` finds only the writer at ticket-router.mjs:919 and the copy of `prior.fitted_commit` at metrics-refresh.mjs:354. This is not a swallowed fault: metrics-refresh already passed `commit: null`, and the fit's own `record.prior.fitted_commit` still preserves the old value. It is only a dead field.",
+      "suggested_fix": "Optional: drop the field from the table and its writers in a later slice, or leave it and document it as always null. No action is needed for silent-failure.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 1050,
+      "claim": "No error path was hidden or widened. The removed `--check` mode and its git helpers have no remaining callers, and removed flags now fail loudly with exit 2.",
+      "evidence": "In the copy, `--check`, `--check --table T`, `route --check --table T` and `route --features f --table T` each printed `ticket-router: unknown flag --… — accepted: …` and exited 2. No args printed `usage: ticket-router.mjs route …` and exited 2. `route --table` with no value printed `--table needs a value` and exited 2. The grep for removed identifiers in ticket-router.mjs returned nothing, so no dangling ReferenceError path remains. `AttributionError` is still imported and used. No call site outside tests and docs references resolveCommit or showAt, and nothing under .github, .omp or plugin invokes `ticket-router --check`. The one try/catch moved in the diff is the pending-features append, which keeps the same body and warning text, so no new dereference entered a catch. The re-indented `main` route body keeps the same catches: `sessionFromReceipt` and `objectiveFromReceipt` still `die(e.message)`, the install read still warns, and `process.cwd()` still warns.",
+      "suggested_fix": "None.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 919,
+      "claim": "After the PR `fitted_commit` is always hard-coded null in every table tableOver emits, yet it remains a field of the table shape, while validateTable has no check on it, so the field is vestigial rather than an invariant the type enforces.",
+      "evidence": "grep in snapshot: ticket-router.mjs only mentions fitted_commit at line 919 (`fitted_commit: null`); validateTable has no reference. metrics-refresh.mjs:354 still copies `prior.fitted_commit` into the Fit record, and tests/ticket-router.test.mjs:1423 asserts `table.fitted_commit === null`. Previously the SHA regex plus commitOf enforced it in --check; now a table with any fitted_commit value passes validateTable.",
+      "suggested_fix": "Optionally drop the field from table/fit record (and the tests/docs naming it) in a follow-up, or have validateTable require null. Not a defect in this diff.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 1053,
+      "claim": "The mode check is now `process.argv.slice(2).includes(\"route\")` instead of the positional parsed by defineFlags, so a flag value equal to \"route\" (e.g. `--session route`) satisfies the guard without the positional.",
+      "evidence": "Read diff lines 179-196: the old code used the same argv.find for mode but also had F.stray(); the new line keeps that pattern. Not executed, so inferred only.",
+      "suggested_fix": "Use the positional result from defineFlags if it exposes one.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "No type-erasing casts, new types or invariants were introduced; the change removes the `commit` parameter from fitTable/fitTree/tableOver and updates every in-tree caller (metrics-refresh.mjs writeFit).",
+      "evidence": "Grepped plugin/scripts for fitTable/fitTree/commit: callers match the new signatures; no stale `--check`, resolveCommit or showAt references remain outside historical docs/specs.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/ticket-router.test.mjs",
+      "line": 1415,
+      "claim": "Five fit tests call `refit(p)` and then re-read the table it just wrote with `JSON.parse(readFileSync(p.table, \"utf8\"))`. `refit` already returns that table, so the re-read is a needless round-trip and duplicate state, and it does not match the sibling tests that use the return value (`const withThem = refit(p)`, `assert.equal(refit(p).n_rows, 1)`).",
+      "evidence": "Ran `grep -n -A2 '^  refit(p);' tests/ticket-router.test.mjs` in the snapshot, which shows the pattern at 1415-1416, 1463-1464, 1478-1479, 1550-1551 and 1555-1556. In my measure-copy (simplify/copy, receipt exit 0) a Python script replaced exactly those 5 pairs, asserting that each pattern occurs once (`git diff --stat`: 1 file, 5 insertions, 10 deletions). Then `node --test tests/ticket-router.test.mjs` printed `ℹ tests 172 / ℹ pass 172 / ℹ fail 0 / ℹ cancelled 0`. At 1551-1554 the `before` object is mutated and then written back; that is still safe with the returned object, because refit writes the file before it returns.",
+      "suggested_fix": "`const table = refit(p);` (1415), `const { \"task-high\": task, \"smol-high\": smol } = refit(p).estimates[\"*\"];` (1463), `const task = refit(p).estimates[\"*\"][\"task-high\"];` (1478), `const before = refit(p);` (1550), `const after = refit(p).estimates[\"*\"][\"task-high\"];` (1555).",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 890,
+      "claim": "With `--check` gone, the exported `fitTable` has no production caller left: only tests import it. It repeats fitTree's window line (`guard.window_start ?? prior.window_start ?? null`) and its fitPulls-to-tableOver pipeline, so the two definitions can drift.",
+      "evidence": "Ran `grep -rn 'fitTable\\|fitTree\\b' --include=*.mjs --include=*.sh --include=*.md plugin tests .github .omp` in the snapshot. Outside ticket-router.mjs itself, every fitTable hit is in tests/ (pull-attribution.test.mjs and ticket-router.test.mjs). metrics-refresh.mjs:117/344 imports and calls only fitTree. `sed -n 890,893p` and `sed -n 1033,1038p` show the same `const window = guard.window_start ?? prior.window_start ?? null;` line followed by `fitPulls({ features, members, verdicts, window })` in both functions. I did not mutate or run anything for this one, so treat it as a reasoned observation.",
+      "suggested_fix": "Keep fitTable as the fixed-tree test seam, but say so in its doc comment ('the tree as `prior.splits` holds it; production fits go through fitTree'). Then let both functions share the derivation, e.g. a module-local `const windowOf = (guard, prior) => guard.window_start ?? prior.window_start ?? null;` used in fitTable and fitTree, so the one window rule has one definition. Removing fitTable outright is not behavior-neutral for the roughly 40 test call sites, because fitTree grows the tree.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

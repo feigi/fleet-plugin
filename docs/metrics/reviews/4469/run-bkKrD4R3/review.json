@@ -1,0 +1,146 @@
+{
+  "pr": 4469,
+  "head": "930758a603587b15c933a3e1ae196ab5720edc2e",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: Verify branch is rebased on base (needs pull-request context and full git history, not the worktree); Validate renovate.json (fetches renovate from the npm registry via npx on every run); smoke-omp (needs bun and a globally installed pinned omp binary); install-and-smoke (needs bun and a globally installed pinned omp binary).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv` and untracked docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version}. I did not write any of these; they look like controller run-metrics output."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version}`. None of these came from this review: every command here was read-only, cd'd into the snapshot or scratch dir, or a `gh api`/`gh issue view`/`gh pr view` call. The dirt predates this dispatch (run stamp 2026-11-11)."
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 2,
+    "unverified": 5,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4469/run-bkKrD4R3/snapshot-930758a6",
+  "survived": [],
+  "refuted": [
+    {
+      "severity": "important",
+      "file": "docs/adr/0039-renovate-moves-every-pinned-ci-dependency-actions-are-pinned-by-commit.md",
+      "line": 22,
+      "claim": "The Context bullet 'Three workflows run no bumped action before the merge' says setup-node is that case 'today' because ci.yml is on v5. At the reviewed head ci.yml's setup-node is already a SHA pin commented v6.5.0, the same as release.yml, so the sentence is false against the merged tree.",
+      "evidence": "grep of .github/workflows in the snapshot: ci.yml:122, :281 and :343 read `actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0`, the same SHA as release.yml:143. The ADR line reads 'a `v6` patch would change `release.yml` alone, because `ci.yml` is on `v5`'.",
+      "suggested_fix": "Mark the Context as the pre-implementation measurement at 24913363 (for example 'at that commit, setup-node was that case') or rewrite the bullet in the past tense.",
+      "dimension": "comments",
+      "verdict": "refuted",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Grep of snapshot .github/workflows: ci.yml:122,281,343 use actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0, the same SHA as release.yml:143, which is commented only `# v6`. ADR line 19 (the claim says 22, but it is the same sentence) reads 'a `v6` patch would change `release.yml` alone, because `ci.yml` is on `v5`'. ci.yml is not on v5, so the sentence is false. No test run; this is a static grep check. My grep covered only setup-node in .github/workflows and the ADR file. CWD-AUDIT: not run (read-only commands only in /Users/chris/dev/fleet-plugin)"
+        },
+        {
+          "refuted": true,
+          "reason": "Line 22 is in the Context section, which describes the pre-implementation state, as line 13 does: 'all major tags... setup-node@v5 (ci.yml ×3) and @v6 (release.yml)'. Decision 5 (line 27) says 'setup-node in ci.yml moves to release.yml's v6 in the implementing PR'. The v5 statement is therefore historical context for the ruling, not a claim about the merged tree. The evidence (grep of ci.yml:122/281/343 showing a v6.5.0 SHA pin) only shows the implementing change landed, which the ADR itself says would happen. Checked by grep of the snapshot's workflows and ADR; no tests run. CWD-AUDIT: not run; only read-only grep/sed used in /Users/chris/dev/fleet-plugin."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "docs/adr/0039-renovate-moves-every-pinned-ci-dependency-actions-are-pinned-by-commit.md",
+      "line": 12,
+      "claim": "The Context says CI runs on major-tag refs (checkout@v5, setup-node@v5/@v6, setup-go@v6, setup-bun@v2) and that the existing refs are pinned 'in the implementing PR'. At the reviewed head every `uses:` is already SHA-pinned, so a reader will take the present-tense Context as the current state.",
+      "evidence": "grep -rnE 'uses:' .github/workflows in the snapshot lists 15 refs, all `@<40-hex SHA> # vX.Y.Z` (checkout v5.1.0, setup-node v6.5.0, setup-go v6.5.0, setup-bun v2.2.0). No `@v5` ref remains. renovate.json already has enabledManagers [nvm, github-actions, custom.regex] and pinDigests. tests/workflow-action-pins.test.mjs already cites ADR 0039. The ADR pins its measurement only to `origin/main` at `24913363`, which is not an ancestry claim I could check in the snapshot.",
+      "suggested_fix": "State plainly in the Context that the measurement predates the implementing change. The same applies to the PR body's 'Docs only' framing if the implementation is already in the base.",
+      "dimension": "comments",
+      "verdict": "refuted",
+      "votes": [
+        {
+          "refuted": true,
+          "reason": "The ADR's Context is explicitly scoped to \"Measured on origin/main at 24913363\", which is the base before this PR, and the Decision says the refs are pinned \"in the implementing PR\" (this one). I confirmed all `uses:` refs in the snapshot are SHA-pinned, but that matches the ADR's design and does not contradict it. An ADR's Context is a historical record, so describing the pre-change state is correct. I only read and grepped the snapshot and ran no tests. The base-commit ancestry was not checked. CWD-AUDIT: not run (no files written; cwd /Users/chris/dev/fleet-plugin)"
+        },
+        {
+          "refuted": true,
+          "reason": "Context is explicitly dated to a named baseline: 'Measured on origin/main at 24913363'. It says the refs are pinned 'in the implementing PR', which is the ADR's own convention for describing pre-decision state. The ADR is a new file in this PR (pr.diff). The snapshot's SHA-pins (15 `uses:` lines, all `@<sha> # vX.Y.Z`) are the result of that implementing change, so they do not contradict the Context. The evidence shows only that the PR already includes the pinning, which is weaker than the claim that the Context misleads. I ran only grep and read here, with no test run, and the abstain rule's valid-red/green requirements do not apply to this documentation-wording claim. CWD-AUDIT: not run, since I wrote nothing; cwd was /Users/chris/dev/fleet-plugin (its own pwd output was not captured in the compacted result, so the path is unconfirmed)."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "docs/adr/0039-renovate-moves-every-pinned-ci-dependency-actions-are-pinned-by-commit.md",
+      "line": 43,
+      "claim": "Decision 3 names bun's regex datasource as `github-releases` `oven-sh/bun` but omits the `extractVersion=^bun-v(?<version>.+)$` that ticket #4468 says is required, because bun's tags read `bun-v1.4.0`. A reader who annotated bun under the regex manager from the ADR alone would get a lookup that matches no version.",
+      "evidence": "`gh issue view 4468` body: '`bun-version`: `github-releases` `oven-sh/bun`, `extractVersion=^bun-v(?<version>.+)$` (tags read `bun-v1.4.0`)'. pr.diff line 43 (ADR Decision 3) gives only 'bun (`github-releases` `oven-sh/bun`)'. Today this is moot: snapshot ci.yml lines 307-309 carry no `# renovate:` line above `bun-version`, so the github-actions manager owns it, as the Decision's conditional allows.",
+      "suggested_fix": "Append 'with `extractVersion=^bun-v(?<version>.+)$`' to the bun datasource in Decision 3, or state that bun is owned by the github-actions manager, as implemented.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/adr/0039-renovate-moves-every-pinned-ci-dependency-actions-are-pinned-by-commit.md",
+      "line": 50,
+      "claim": "Decision 6's 'Unchanged' list leaves out `timezone` and `automerge`, which ticket #4468 lists as unchanged. Both still hold in renovate.json.",
+      "evidence": "pr.diff line 50: 'Unchanged: schedule, `minimumReleaseAge`, `internalChecksFilter`, `platformAutomerge`, `rebaseWhen`, `dependencyDashboard: false`.' Ticket: 'Unchanged: `schedule`, `timezone`, `minimumReleaseAge`, `internalChecksFilter`, `automerge` + `platformAutomerge`, `rebaseWhen`…'. Snapshot renovate.json has \"timezone\": \"UTC\" and \"automerge\": true.",
+      "suggested_fix": "Add `timezone` and `automerge` to the Unchanged list so the record matches the ticket and the config.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/adr/0010-the-node-pin-stays-exact-and-a-bot-moves-it.md",
+      "line": 161,
+      "claim": "The Consequences bullet 'Node currency for GitHub Actions is explicitly out of scope: `enabledManagers` excludes it' is left verbatim. The new Status amendment supersedes it, but the bullet itself carries no marker, so a reader of the body sees a claim that renovate.json falsifies.",
+      "evidence": "docs/adr/0010 line 161 reads 'enabledManagers excludes it'. renovate.json has enabledManagers [\"nvm\",\"github-actions\",\"custom.regex\"]. The added Status line (line 5) says 'the Consequences bullet that puts GitHub Actions out of scope is superseded'.",
+      "suggested_fix": "Optionally add an inline '(superseded by ADR 0039)' at the bullet. The Status-line pointer is already adequate under the repo's amendment convention.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/adr/0039-renovate-moves-every-pinned-ci-dependency-actions-are-pinned-by-commit.md",
+      "line": 26,
+      "claim": "Decision 3 and the 'eight managed today' count treat bun's `bun-version` literal as an annotated, Renovate-moved pin. No `# renovate:` annotation sits above either `bun-version: \"1.4.0\"` in ci.yml.",
+      "evidence": "grep -n 'renovate:' .github/workflows/*.yml finds annotations only at ci.yml:213 (renovate) and :315 and :352 (@oh-my-pi/pi-coding-agent). The `bun-version` lines are 309 and 349, and lines 305-311 and 345-350 show no comment. The ADR's escape clause ('if the github-actions manager already extracts setup-bun's bun-version, that manager owns it instead') makes this defensible, but the count of three literals counts bun without saying which manager moves it.",
+      "suggested_fix": "Say explicitly in the Consequences count that bun's literal is owned by the github-actions manager, or add the annotation.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body: the body's factual assertions hold. The only change to an existing file is the added Status line on ADR 0010, and the ruling's #4468 pointer matches the ADR's 'ticketed as #4468'. The body, which says 'Docs only', does not mention that the tree already contains the implementing change.",
+      "evidence": "pr.diff touches only docs/adr/0010-*.md and the new docs/adr/0039-*.md. pr-messages.md has one commit, 930758a6, titled 'docs(adr): 0039 - Renovate moves every pinned CI dependency, actions ...pinned by commit (#4468)'. The commit headline and body make no other checkable claims.",
+      "suggested_fix": "None required.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

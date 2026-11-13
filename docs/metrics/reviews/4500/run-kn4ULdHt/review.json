@@ -1,0 +1,260 @@
+{
+  "pr": 4500,
+  "head": "93c3d56a48ccbe1237004cc231ea6a71afb0462c",
+  "resume": "Findings in `unverified` with `refutersDispatched` above `refutersInconclusive` lost a refuter to a crash — a pair whose every vote died was re-dispatched once in-run and died again — and no refuter that ran decided them. Defer them as crashed — reported, not acted on: omp's eval has no cached-replay mechanism, so a fresh review re-dispatches every agent() live rather than only the crashed legs, and the in-run retry was this review's one re-dispatch. Re-run nothing for them.",
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: Verify branch is rebased on base (needs pull-request context and full git history, not the worktree); Validate renovate.json (fetches renovate from the npm registry via npx on every run); smoke-omp (needs bun and a globally installed pinned omp binary); install-and-smoke (needs bun and a globally installed pinned omp binary).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "tests",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv` and untracked docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version} (not made by me; I wrote nothing there)"
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin —  M docs/metrics/tier-outcomes.tsv; ?? docs/metrics/runs/2026-11-11T172901Z/closeout.json; ?? docs/metrics/runs/2026-11-11T172901Z/ledger.md; ?? docs/metrics/runs/2026-11-11T172901Z/phase0.json; ?? docs/metrics/runs/2026-11-11T172901Z/plugin-version. I wrote none of these: every command I ran after `pwd` either cd'd into the scratch dir first or was a read-only wc/sed/grep on scratch paths."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/tier-outcomes.tsv; ?? docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version}. I did not touch these."
+    }
+  ],
+  "counts": {
+    "survived": 4,
+    "refuted": 0,
+    "unverified": 11,
+    "crashed": 1
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4500/run-kn4ULdHt/snapshot-93c3d56a",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 540,
+      "claim": "Since this PR, the sweep throws `unbalanced bracket at offset 0` on valid JS `for ([x]of y)` or `for ({…}of y)` (no space before `of`) in any module where a traced variable makes shape() run. On base the same source returns a result.",
+      "evidence": "In a PROBE3 test appended to the head file, sweep({\"x.mjs\": MOD(`let T = 20_000;\\nfor ([T]of [[1]]);\\nspawnSync(\"gh\", [\"x\"], { timeout: T });`)}) threw `Error: unbalanced bracket at offset 0 at closing → pieces → walk → shape`. The same source run against the base file (reverse-applied diff, zz-base2.test.mjs) returned `[[null,true,[],0]]`, and so did `for ({ a: T }of …)`. Cause: topLevel() turns nested brackets into spaces, so `/\\s(?:of|in)\\s/` matches one character early and the lhs becomes `[T` with no closing bracket.",
+      "suggested_fix": "Locate `of`/`in` with a word-boundary match on the unblanked top-level text, for example `/(?<![\\w$])(?:of|in)(?![\\w$])/` checked against the depth-1 positions. Or slice the lhs at the start of the keyword, not at the whitespace before it.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "The throw reproduces on the reviewed head. I appended a probe to tests/gh-spawn-bound.test.mjs in my own measure-copy and ran `env -u FORCE_COLOR node --test --test-name-pattern=PROBE3 tests/gh-spawn-bound.test.mjs` (exit 0, tests 1, pass 1, the probe only logs). `for ([T]of [[1]])` and `for ({ a: T }of [{}])` both threw `unbalanced bracket at offset 0`. The spaced control `for ([T] of [[1]])` returned a normal result, so the missing space before `of` is what triggers it. I did not re-run the base-side comparison. The claim says base returned a result, and that part rests on the finding's own run. This is not a kill or red of a named test, so no red/baseline line applies. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv` and untracked files under docs/metrics/runs/2026-11-11T172901Z/ (closeout.json, ledger.md, phase0.json, plugin-version). I did not write to that directory; these came from the controller's own metrics."
+        },
+        {
+          "refuted": false,
+          "reason": "Reproduced on the reviewed head. I appended a probe to a copy of tests/gh-spawn-bound.test.mjs and ran `env -u FORCE_COLOR node --test tests/zz.test.mjs`. `sweep` threw `unbalanced bracket at offset 0` for `for ([T]of [[1]]);` and for `for ({ a: T }of [{}]);`. The spaced form `for ([T] of [[1]]);` returned a normal result, so the no-space `of` is the trigger. The for-loop handler that does the `\\s(?:of|in)\\s` match is added by this PR (line 200 of the diff, a `+` line). I did not run the base file, so the 'base returns a result' half rests on that diff reading. A valid-JS crash on head is real either way. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — `M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-11T172901Z/closeout.json`, `?? docs/metrics/runs/2026-11-11T172901Z/ledger.md`. I did not write there. I only ran `git status` in that directory, and these entries were already present when I looked.",
+          "counter_evidence": "PROBE for ([T]of [[1]]); THROW unbalanced bracket at offset 0"
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 184,
+      "claim": "Rule 5 misses a destructuring assignment that directly follows `)` or a keyword: `if (c) [T] = [env];`, `else [T] = [env];` and `return [T] = [env];` are accepted with no refusal. shape() treats a `[` after `[\\w$)\\]]` as an index access.",
+      "evidence": "PROBE output at head: `if-head then array pattern => [[null,true,[],0]]`, `else then array pattern => [[null,true,[],0]]`, `return array pattern => [[null,true,[],0]]`. The control `[T] = [env]` gives `[\"T is a destructuring target…\"]`, and `void ([T] = [env])` is also refused. `for (const x of [1]) [T] = [env];` is accepted as well (PROBE2 `for-of body array pattern => [[null,true,[],0]]`).",
+      "suggested_fix": "Before taking `[` as an index, check whether the `)` closes an if/while/for/with head (parenKind), and whether the word before `[` is a keyword (the PREFIXED list: return/else/do/case/…).",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Confirmed. In my own copy at the reviewed head I appended a probe test that calls the test file's own sweep() and MOD() helpers. The control `[T] = [process.env.MS];` is refused: reaches=[[\"T is a destructuring target, which this sweep does not follow\"]]. `if (c) [T] = [process.env.MS];`, `if (c) {} else [T] = ...;` and `function g(){ return [T] = ...; }` all produce reaches=[[]], so none is refused. This is a run of the helpers, not a failing-test red, so no kill line applies. I did not run the `for…of` body case. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv` and untracked files under docs/metrics/runs/2026-11-11T172901Z/ (closeout.json, ledger.md, phase0.json, plugin-version). I wrote nothing there; the output was cut at 5 lines (head), so more untracked files may exist."
+        },
+        {
+          "refuted": false,
+          "inconclusive": false,
+          "reason": "I did not build a copy or run a probe. The finding is confirmed by reading the snapshot, which is weaker than running it. In tests/gh-spawn-bound.test.mjs, shape() at lines 508-531 skips any `[` whose preceding text matches /[\\w$)\\]]$/ unless it follows const, let or var (line 520). A `[` after `)`, after `else` or after `return` (ending in a word character) is therefore treated as index access and never enters the pattern list. `if (c) [T] = [env];`, `else [T] = [env];`, `return [T] = [env];` and `for (...) [T] = [env];` are all skipped by that line. I found no other path in the lines I read (505-590) that catches them. I did not check the later rule code at lines 668-800 and 914-1075. The claim's probe output was not reproduced. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv` and untracked files under docs/metrics/runs/2026-11-11T172901Z/ (closeout.json, ledger.md, phase0.json, plugin-version). I ran only read-only commands there, so these were already present."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 918,
+      "claim": "The return value of Object.assign() is the target object, but handingAt() returns null for any Object.assign argument. So `const o2 = Object.assign(opts, {}); o2.timeout = env;` and `Object.assign(opts, {}).timeout = env;` lengthen the gh timeout and are accepted.",
+      "evidence": "PROBE at head: `Object.assign source bound` (WITH_OPTS-style source `const o2 = Object.assign(opts, {});\\no2.timeout = ENV_MS;` then spawnSync(\"gh\", [\"x\"], opts)) => [[null,true,[],0]]. PROBE2 `Object.assign result member write` => [[null,true,[],0]].",
+      "suggested_fix": "For the first argument, return null only when the Object.assign call is an expression statement. Otherwise, judge the call's own position (bound/returned/passed) the way a bare name is judged.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Claim confirmed. Probe appended to the test file in my own measure-copy, using the test's own sweep() and WITH_OPTS. Both `const o2 = Object.assign(opts, {}); o2.timeout = ENV_MS;` and `Object.assign(opts, {}).timeout = ENV_MS;` gave reaches [[]] with 0 problems, so the gh spawn is accepted. The positive control `opts.timeout = ENV_MS;` gave [\"reads process.env.TICKETLESS_TIMEOUT\"], so the sweep does detect the env read when the write is direct. Probe run: node --test --test-name-pattern=PROBE tests/gh-spawn-bound.test.mjs → exit 0, tests 1, pass 1. This is a probe, not a red test. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/tier-outcomes.tsv' plus untracked docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version}. These are docs/metrics files from the controller's own run; I did not touch that directory."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 919,
+      "claim": "A name passed to a funnel or spawn call counts as followed whatever argument position it fills, but the tracer only follows the options argument. An object passed as a funnel's non-options parameter and mutated there is accepted.",
+      "evidence": "PROBE at head, source: `const opts = { timeout: 20_000 };\\nfunction run(cmd, args, o, extra) { extra.timeout = ENV; return spawnSync(cmd, args, o); }\\nrun(\"gh\", [\"y\"], { timeout: 1 }, opts);\\nspawnSync(\"gh\", [\"x\"], opts);` => `[[null,true,[],0],[null,true,[],0]]`. Neither spawn is refused.",
+      "suggested_fix": "When c is a funnel/spawn, return null only if the occurrence sits in the argument index that spawner(mod, c) actually traces (the options position), or the param that reaches it. Otherwise report \"passed to X(…)\".",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Reproduced in my own measure-copy (exit 0, head a814c3e). Probe appended to a copy of the test file, calling sweep() with MOD() fixtures. A: a funnel run(cmd,args,o,extra) that does `extra.timeout = process.env.X`, called with `opts` as the extra param, then `spawnSync(\"gh\",[\"x\"],opts)`, gave spawns x.mjs:4 and x.mjs:5 both with reaches [] (neither refused). Positive control C: `opts.timeout = process.env.X; spawnSync(\"gh\",[\"x\"],opts)` gave reaches [\"reads process.env.X\"], so the tracer does catch a direct mutation. The same mutation through a funnel's non-options parameter is missed. Probe test passed, 1 test, 0 fail. This is a probe of the claim, not a red/green test kill. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/tier-outcomes.tsv and untracked docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version}. These are not mine: I wrote nothing there, only in the scratch copy."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "important",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 395,
+      "claim": "Rule 7 claims writes are looked for in every module that imports the object, but a third module that takes it through a namespace destructure (`const { CFG } = ns; CFG.ms = env;`) or through a plain re-export of an import (`import { CFG } from \"./common.mjs\"; export { CFG };`, imported elsewhere) can write it unseen.",
+      "evidence": "PROBE at head: `namespace destructured` (y.mjs: `import * as ns from \"./common.mjs\";\\nconst { CFG } = ns;\\nCFG.ms = ENV;`, x.mjs reads CFG.ms) => [[null,true,[],0]]. PROBE2 `plain re-export of an import` (y.mjs: `import { CFG } from \"./common.mjs\"; export { CFG };`, z.mjs: `import { CFG } from \"./y.mjs\"; CFG.ms = ENV;`) => [[null,true,[],0]]. places() only follows imports resolving to the home module, and handingAt() returns null for `export { CFG }` and never looks at bare `ns` occurrences.",
+      "suggested_fix": "Treat `ns` as a handed-on name when it appears other than as `ns.X` (destructure, bind, or call argument). In elsewhere(), refuse a module that both imports the name and lists it in `export { … }`, or follow re-exports transitively in places().",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 471,
+      "claim": "handingAt() returns null for any name whose innermost bracket is a pattern, so a name inside a pattern default expression is missed: `const [a = c ? 1 : opts] = []; a.timeout = env;` binds `a` to opts and is accepted.",
+      "evidence": "PROBE at head: `pattern default with ternary hands on` => [[null,true,[],0]].",
+      "suggested_fix": "In the pattern-entry branch, require that the occurrence be the entry's target (before any top-level `=` of the entry). Do not exempt names in its default.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "claim": "Some writes through another name remain unseen. A method of the literal writing `this.timeout` (`opts.widen()`) is accepted, as is handing the namespace object itself to a function (`widen(ns)` with `n.CFG.ms = env`). Both are also accepted on base, so they are not regressions, and the header documents longer paths as unfollowed.",
+      "evidence": "PROBE at head: `method on object writes this => [[null,true,[],0]]`, `namespace handed to function => [[null,true,[],0]]`. The base run of the same probes gave identical output.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 511,
+      "claim": "Several uses that the header says are not handed on are refused anyway (fail-closed false positives that could fail the plugin/scripts sweep on future code): an unparenthesised arrow parameter of the object's name, a function-local `const opts` shadowing a module one, and a spread written with a space (`{ ... opts }`).",
+      "evidence": "PROBE at head: `[1].map(opts => 1)` => reaches [\"…opts is passed to .map(…)…\"], while the parenthesised form is in the PR's accepted list. `function f() { const opts = {}; log(opts); }` => [\"…passed to log(…)…\"]. `log({ ... opts })` => [\"…passed to log(…)…\"], while `...opts` is skipped by occurrences()' lookbehind.",
+      "suggested_fix": "Recognise `name =>` as params, skip occurrences under a nearer `const/let/var` binding of the name (as declRefs scopes do), and allow whitespace after `...` in occurrences().",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "No scope creep found: the diff touches only tests/gh-spawn-bound.test.mjs, which is the file the Agent Brief names. Moving splitDefault() to module level is needed so shape()/walk() can use it outside tracer().",
+      "evidence": "`grep -c '^diff --git' pr.diff` → 1; `grep -E '^diff --git' pr.diff` → `diff --git a/tests/gh-spawn-bound.test.mjs b/tests/gh-spawn-bound.test.mjs`.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 1085,
+      "claim": "The new handed-on regex `/^(?:new\\b|Object\\s*\\.\\s*(?:assign|create|fromEntries)\\s*\\()/` is only partly pinned: removing the `new\\b` alternative, or the `create` alternative, leaves every test green.",
+      "evidence": "Mutants applied in the copy: `new\\b|` removed, and `create|` removed. `node --test tests/gh-spawn-bound.test.mjs` → exit 0, no failing test, both times (baseline: exit 0, tests 25 pass 25). Removing the whole Object.assign/create/fromEntries alternative or the handedOn() call does turn 'the sweep refuses a gh timeout an object it reads is handed on' red. Inconclusive for a kill; no valid red exists for these two mutants.",
+      "suggested_fix": "Add refused cases for `new X({...opts})` in a value position and for `Object.create(...)`/`Object.fromEntries(...)` carrying the object, or drop the unneeded alternatives.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 1,
+      "claim": "The new `t.kind === \"declaration\" ||` guard in writesTo's shape loop cannot be killed by any test: the mutant that drops it stays green.",
+      "evidence": "Mutant: removed `t.kind === \"declaration\" ||` from `if (t.kind === \"declaration\" || (t.lvalue !== `${id}.${key}` ...`. `node --test tests/gh-spawn-bound.test.mjs` → exit 0, 0 failures. A declaration lvalue is a bare name and can never equal `id.key`. The mutation did not change behaviour at all, so the guard looks dead. [INFERENCE]",
+      "suggested_fix": "Delete the dead clause.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The new tests discriminate for the mutations that matter. For the main refusal paths, a valid red appears on a named new test.",
+      "evidence": "red: node --test tests/gh-spawn-bound.test.mjs --test-name-pattern='gh timeout' (with `kind === \"pattern\" || kind === \"for\"` cut to `kind === \"for\"`) → exit 1, fail 2 incl 'the sweep refuses a gh timeout a destructuring pattern or a for…of / for…in head writes'; baseline: node --test tests/gh-spawn-bound.test.mjs --test-name-pattern='gh timeout' → exit 0, tests 25 pass 25. Likewise `dynamicAny` removed → 'written in the module that declares an object…' red; `if (how !== null)` → `if (false)` → 'an object it reads is handed on' red; `wide: false`→`true` → same test red. The same single-file runs were red for the other mutations listed in scope_searched. The 'accepts … beside writes it need not' test went red under `if (true) out.push(` (always refuse), which confirms it guards over-refusal, but the always-handedOn mutant was killed only by older tests.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 862,
+      "claim": "The comment on exported() says it tests `export const name` or `export { name }`, but the code also accepts let/var/function/function*/class/async function declarations, and `export { x as y }` matches on the local name x, not the exported name.",
+      "evidence": "Read snapshot lines 862-864: regex `export\\s+(?:async\\s+)?(?:const|let|var|function\\s*\\*?|class)\\s+name` and `spec.split(/\\s+as\\s+/)[0] === name`.",
+      "suggested_fix": "Reword: 'Whether `mod` exports a declaration of `name` (const/let/var/function/class) or lists it, by its local name, in `export { … }`.'",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body: says the handed-on check runs once the walk reaches an object literal 'or `new`, `Object.assign(`', but the code also runs it for `Object.create(` and `Object.fromEntries(`.",
+      "evidence": "Snapshot line 1085: `/^(?:new\\b|Object\\s*\\.\\s*(?:assign|create|fromEntries)\\s*\\()/.test(s) ? [...handedOn(), ...opaque] : opaque`; the comment at line 1084 is generic ('A new object a call makes').",
+      "suggested_fix": "List all of new, Object.assign(, Object.create(, Object.fromEntries( in the body.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 668,
+      "claim": "The reworded declRefs comment wraps raggedly ('...`id++` or `--id` is a compound write with / nothing to read.'), a leftover of the in-place edit; wording is accurate but the break is odd.",
+      "evidence": "Diff lines 253-262 (snapshot 668-676).",
+      "suggested_fix": "Re-wrap the paragraph.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

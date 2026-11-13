@@ -1,0 +1,65 @@
+{
+  "head": "930758a603587b15c933a3e1ae196ab5720edc2e",
+  "run": "run-bkKrD4R3",
+  "entries": [
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted: bun is owned by the github-actions manager (npm datasource, package bun), per PR #4470 lookup and Decision 3 conditional; extractVersion never applies",
+      "issue": 4490,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4469/fix-JB8v7B2V/u0/verdict.json",
+      "remedyFiles": [
+        "docs/adr/0039-renovate-moves-every-pinned-ci-dependency-actions-are-pinned-by-commit.md"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4469/fix-JB8v7B2V/u1/verdict.json",
+      "remedyFiles": [
+        "docs/adr/0039-renovate-moves-every-pinned-ci-dependency-actions-are-pinned-by-commit.md"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "refuted: AGENTS.md ADR-amendments rule keeps an accepted ADR body as ruled and records supersession on the Status line, which the PR already does",
+      "issue": 4490,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4469/fix-JB8v7B2V/u2/verdict.json",
+      "remedyFiles": [
+        "docs/adr/0010-the-node-pin-stays-exact-and-a-bot-moves-it.md"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "reason": "refuted: the eight-pin count holds under github-actions ownership of bun and never claims the literals are annotated; annotating would double-manage bun",
+      "issue": 4490,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4469/fix-JB8v7B2V/u3/verdict.json",
+      "remedyFiles": [
+        "docs/adr/0039-renovate-moves-every-pinned-ci-dependency-actions-are-pinned-by-commit.md"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "reason": "applied via gh pr edit: removed the false Draft sentence (PR is not a draft) and stated that PR #4470 already merged the implementation",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4469/fix-JB8v7B2V/u4/verdict.json"
+    }
+  ]
+}

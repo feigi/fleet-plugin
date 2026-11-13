@@ -1,0 +1,57 @@
+{
+  "head": "6e96a95b604f3377f0f9a0e3f8249d1f1817bf1e",
+  "run": "run-aPxWuEhS",
+  "entries": [
+    {
+      "bucket": "survived",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "reason": "The section 7 summary bullet repeated the false 'Renovate manages only `nvm`' claim that ticket #4474 exists to fix. It is rewritten to match row 105: Renovate manages `nvm`, `github-actions` and `custom.regex` (ADR 0039) but not `engines.node`.",
+      "remedyFiles": ["docs/research/external-assumptions.md"],
+      "charge": "none",
+      "chargeReason": "not-the-implementers-text"
+    },
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "Refuted: the Agent Brief comment on #4474 names all three rows (harness-node.md row 105, shell.md row 25, prose.md row 86), so the PR does not widen its ticket.",
+      "issue": 4495,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4493/fix-JAuAWzZh/u0/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "reason": "Survived its refuter: `ci.yml`'s `proc-macos` job runs on `macos-latest`. Row 25 now names that job as the exception and cites the `runs-on:` lines.",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4493/fix-JAuAWzZh/u1/verdict.json",
+      "remedyFiles": ["docs/research/external-assumptions/shell.md"]
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "reason": "Survived its refuter. It makes the same claim as unverified[1], and the same row-25 rewrite applies both.",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4493/fix-JAuAWzZh/u2/verdict.json",
+      "remedyFiles": ["docs/research/external-assumptions/shell.md"]
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "out",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "Refuted under the census's 'Reading a cite' rule: the row 26 and row 27 cites held at the commits that last changed those rows (379691d6, 0cbd5b0d), so their miss at HEAD is expected drift. Filed on the suggestion-band record.",
+      "issue": 4495,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4493/fix-JAuAWzZh/u3/verdict.json"
+    }
+  ]
+}

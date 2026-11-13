@@ -1,0 +1,166 @@
+{
+ "head": "93c3d56a48ccbe1237004cc231ea6a71afb0462c",
+ "run": "run-kn4ULdHt",
+ "entries": [
+  {
+   "bucket": "survived",
+   "index": 0,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "remedyFiles": [
+    "tests/gh-spawn-bound.test.mjs"
+   ],
+   "charge": "false-claim"
+  },
+  {
+   "bucket": "survived",
+   "index": 1,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "remedyFiles": [
+    "tests/gh-spawn-bound.test.mjs"
+   ],
+   "charge": "false-claim"
+  },
+  {
+   "bucket": "survived",
+   "index": 2,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "remedyFiles": [
+    "tests/gh-spawn-bound.test.mjs"
+   ],
+   "charge": "false-claim"
+  },
+  {
+   "bucket": "survived",
+   "index": 3,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "remedyFiles": [
+    "tests/gh-spawn-bound.test.mjs"
+   ],
+   "charge": "false-claim"
+  },
+  {
+   "bucket": "unverified",
+   "index": 0,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "reason": "refuters crashed: refutersDispatched 2, refutersInconclusive 0; the review re-dispatched the crashed pair once in-run and every vote died again",
+   "issue": 4501,
+   "remedyFiles": [
+    "tests/gh-spawn-bound.test.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 1,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4500/fix-yXAQxR6F/u1/verdict.json",
+   "remedyFiles": [
+    "tests/gh-spawn-bound.test.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 2,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4500/fix-yXAQxR6F/u2/verdict.json",
+   "remedyFiles": [
+    "tests/gh-spawn-bound.test.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 3,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4500/fix-yXAQxR6F/u3/verdict.json",
+   "remedyFiles": [
+    "tests/gh-spawn-bound.test.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 4,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4500/fix-yXAQxR6F/u4/verdict.json",
+   "remedyFiles": []
+  },
+  {
+   "bucket": "unverified",
+   "index": 5,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4500/fix-yXAQxR6F/u5/verdict.json",
+   "remedyFiles": [
+    "tests/gh-spawn-bound.test.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 6,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4500/fix-yXAQxR6F/u6/verdict.json",
+   "remedyFiles": [
+    "tests/gh-spawn-bound.test.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 7,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4500/fix-yXAQxR6F/u7/verdict.json",
+   "remedyFiles": []
+  },
+  {
+   "bucket": "unverified",
+   "index": 8,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4500/fix-yXAQxR6F/u8/verdict.json",
+   "remedyFiles": [
+    "tests/gh-spawn-bound.test.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 9,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4500/fix-yXAQxR6F/u9/verdict.json",
+   "remedyFiles": []
+  },
+  {
+   "bucket": "unverified",
+   "index": 10,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4500/fix-yXAQxR6F/u10/verdict.json",
+   "remedyFiles": [
+    "tests/gh-spawn-bound.test.mjs"
+   ]
+  }
+ ]
+}

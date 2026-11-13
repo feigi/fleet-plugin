@@ -1,0 +1,133 @@
+{
+  "head": "5a01d932d5e18c9c9dc18fee37df8f0356dff5b0",
+  "run": "run-LwpakGhx",
+  "entries": [
+    {
+      "bucket": "survived",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ],
+      "charge": "none",
+      "chargeReason": "defect-outside-acceptance"
+    },
+    {
+      "bucket": "survived",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ],
+      "charge": "none",
+      "chargeReason": "defect-outside-acceptance"
+    },
+    {
+      "bucket": "survived",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ],
+      "charge": "none",
+      "chargeReason": "defect-outside-acceptance"
+    },
+    {
+      "bucket": "survived",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ],
+      "charge": "none",
+      "chargeReason": "defect-outside-acceptance"
+    },
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4487/fix-aIIysDa0/u0/verdict.json",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ],
+      "disposition": "apply"
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4487/fix-aIIysDa0/u1/verdict.json",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ],
+      "disposition": "defer",
+      "issue": 4488,
+      "reason": "refuted by its refuter: the suggested shadowedBy() guard does not catch the claim's own module-level `const Math`; the tracer trusts every GLOBALS name by design, and the shape was accepted before this PR too"
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4487/fix-aIIysDa0/u2/verdict.json",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ],
+      "disposition": "apply"
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4487/fix-aIIysDa0/u3/verdict.json",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ],
+      "disposition": "apply"
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4487/fix-aIIysDa0/u4/verdict.json",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ],
+      "disposition": "apply"
+    },
+    {
+      "bucket": "unverified",
+      "index": 5,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4487/fix-aIIysDa0/u5/verdict.json",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ],
+      "disposition": "apply"
+    },
+    {
+      "bucket": "unverified",
+      "index": 6,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4487/fix-aIIysDa0/u6/verdict.json",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ],
+      "disposition": "apply"
+    }
+  ]
+}

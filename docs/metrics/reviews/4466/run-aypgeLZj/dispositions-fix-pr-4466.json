@@ -1,0 +1,64 @@
+{
+ "head": "5b9991d3beeef62ec00055dc6b76f549cbcecbb1",
+ "run": "run-aypgeLZj",
+ "entries": [
+  {
+   "bucket": "unverified",
+   "index": 0,
+   "scope": "out",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "issue": 4467,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4466/fix-N6K0l8mP/u0/verdict.json",
+   "reason": "out-of-scope (tests in files the PR does not change); refuter wrote refuted:true by its no-abstain default after no run decided (hung/interrupted under host load) \u2014 filed on the suggestion-band record with a re-open trigger"
+  },
+  {
+   "bucket": "unverified",
+   "index": 1,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "defer",
+   "issue": 4467,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4466/fix-N6K0l8mP/u1/verdict.json",
+   "reason": "confirmation claim (alleges no wrong behavior, no remedy); refuter's mutant runs decided nothing under host load, verdict refuted:true by default \u2014 suggestion-band record"
+  },
+  {
+   "bucket": "unverified",
+   "index": 2,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "defer",
+   "issue": 4467,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4466/fix-N6K0l8mP/u2/verdict.json",
+   "reason": "confirmation claim (validateTable leniency is ticket Desired behavior 4); refuter confirmed it and killed two mutants with the new test; nothing to change \u2014 below the claim bar, suggestion-band record"
+  },
+  {
+   "bucket": "unverified",
+   "index": 3,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "defer",
+   "issue": 4467,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4466/fix-N6K0l8mP/u3/verdict.json",
+   "reason": "refuted: a non-enumerable fitted_through passes the key-set deepEqual and fails line 1431, so the assertion is not redundant"
+  },
+  {
+   "bucket": "unverified",
+   "index": 4,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4466/fix-N6K0l8mP/u4/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 5,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "defer",
+   "issue": 4467,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4466/fix-N6K0l8mP/u5/verdict.json",
+   "reason": "refuted: each #4370 note follows a different in-force passage stating fitted_commit (ticket Desired behavior 6 requires a note at every one), and other amendments repeat per file"
+  }
+ ]
+}

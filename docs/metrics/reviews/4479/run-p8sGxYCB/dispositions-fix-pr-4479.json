@@ -1,0 +1,210 @@
+{
+ "head": "5dca73ac8066716b4869ee0089de560bdd51278b",
+ "run": "run-p8sGxYCB",
+ "entries": [
+  {
+   "bucket": "unverified",
+   "index": 0,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4479/fix-6oxRaQ3t/f0/verdict.json",
+   "issue": 4482,
+   "reason": "refuted by its refuter: the ticket pins the derived default with no skip-tripped clause; band record #4482"
+  },
+  {
+   "bucket": "unverified",
+   "index": 1,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4479/fix-6oxRaQ3t/f1/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 2,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4479/fix-6oxRaQ3t/f2/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 3,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4479/fix-6oxRaQ3t/f3/verdict.json",
+   "reason": "a confirmation that survived its refuter; its remedy is 'None needed', so applying it changes nothing"
+  },
+  {
+   "bucket": "unverified",
+   "index": 4,
+   "scope": "out",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4479/fix-6oxRaQ3t/f4/verdict.json",
+   "issue": 4482,
+   "reason": "out of scope (the ticket pins rule (d)'s violation to slow at no level); refuter refuted: the remedy contradicts the ticket and reddens tier-roles.test.mjs; band record #4482"
+  },
+  {
+   "bucket": "unverified",
+   "index": 5,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4479/fix-6oxRaQ3t/f5/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 6,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4479/fix-6oxRaQ3t/f6/verdict.json",
+   "issue": 4482,
+   "reason": "refuted by its refuter: installOf throws on no reachable input and readInstall is documented never-throws; band record #4482"
+  },
+  {
+   "bucket": "unverified",
+   "index": 7,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4479/fix-6oxRaQ3t/f7/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 8,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4479/fix-6oxRaQ3t/f8/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 9,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4479/fix-6oxRaQ3t/f9/verdict.json",
+   "issue": 4482,
+   "reason": "refuted by its refuter: a surviving ' or unrunnable' mutant contradicts 'no gap'; the PR adds a test killing it; band record #4482"
+  },
+  {
+   "bucket": "unverified",
+   "index": 10,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4479/fix-6oxRaQ3t/f10/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 11,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4479/fix-6oxRaQ3t/f11/verdict.json",
+   "reason": "applied the validateTable check (landed once, shared with unverified[5]); its optional 'cockpit could then drop its own re-check' was not taken: it conflicts with unverified[7]'s tests and reddens the existing burn-in progress test (mutual-exclusion scan)"
+  },
+  {
+   "bucket": "unverified",
+   "index": 12,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4479/fix-6oxRaQ3t/f12/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 13,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4479/fix-6oxRaQ3t/f13/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 14,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4479/fix-6oxRaQ3t/f14/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 15,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "defer",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4479/fix-6oxRaQ3t/f15/verdict.json",
+   "issue": 4482,
+   "reason": "refuted by its refuter: readInstall's {install, why} is exclusive on every probed case; design preference only; band record #4482"
+  },
+  {
+   "bucket": "unverified",
+   "index": 16,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4479/fix-6oxRaQ3t/f16/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 17,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4479/fix-6oxRaQ3t/f17/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 18,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4479/fix-6oxRaQ3t/f18/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 19,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4479/fix-6oxRaQ3t/f19/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 20,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4479/fix-6oxRaQ3t/f20/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 21,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4479/fix-6oxRaQ3t/f21/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 22,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4479/fix-6oxRaQ3t/f22/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 23,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4479/fix-6oxRaQ3t/f23/verdict.json"
+  }
+ ]
+}
