@@ -35,8 +35,10 @@
 // not looked at. Four rules say what the environment may still do:
 //   1. A Math.min() the environment reaches keeps its exemption only with a
 //      ceiling: an argument clear of the environment that works out, from
-//      literals, + - * / ** and the names the tracer resolves, to a number
-//      from 1 to CEILING_CAP (at its largest, when it has several values).
+//      literals, + - * / **, the names the tracer resolves and the three
+//      calls numbers() reduces (ghBudget(), Math.min() and a local helper
+//      handed nothing), to a number from 1 to CEILING_CAP (at its largest,
+//      when it has several values).
 //      A name, or a name's key (`x.key`, `x["key"]`), that a compound
 //      assignment, `++` or `--` writes works out to no number.
 //   2. Every argument of that Math.min() the environment reaches is floored:
@@ -321,7 +323,9 @@ function analyse(src, file) {
   return { file, code, skel, primitives, imports, processAliases, fns, classes, calls, carries, within, encl, loopLiterals, problems };
 }
 
-// The longest, in ms, a Math.min() ceiling may be: rule 1 of the file header.
+// The largest number, in ms, a Math.min() ceiling may work out to (rule 1 of
+// the file header) and, by the header's #4484 paragraph, any value a gh
+// spawn's timeout can take.
 const CEILING_CAP = 300_000;
 
 // Whether the environment can reach a gh spawn's timeout, decided on the
@@ -899,16 +903,25 @@ function tracer(mods, resolve, spawner) {
     };
     // The three calls that work out to a number: arg.mjs's ghBudget(), a
     // Math.min(), and a local helper handed nothing. Any other call does not.
+    // ghBudget is the import only while no parameter around the call shadows
+    // it, and Math the global only while the module writes `Math` nowhere but
+    // before a `.`. The helper takes no parameters, nothing but its
+    // declaration writes its name, and a block body ends in a `return` of its
+    // own, so it cannot fall off its end into undefined. A `return` inside a
+    // callback in its body still counts as one of its values, which only
+    // refuses more.
     const call = (id) => {
       const open = i;
       const args = pieces(s, ref.code, open).map((p) => ({ ...ref, skel: p.skel, code: p.code }));
       i = closing(s, open) + 1;
       if (args.some((a) => a.skel.startsWith("..."))) return null;
-      if (id === "ghBudget" && isGhBudget(ref.mod)) return ghBudgetOf(args, bind, seen);
-      if (id === "Math.min") return minOf(args, bind, seen);
+      if (id === "ghBudget" && isGhBudget(ref.mod) && !shadowedBy(ref, id)) return ghBudgetOf(args, bind, seen);
+      if (id === "Math.min" && !/(?<![\w$.])Math\b(?!\s*\.)/.test(ref.mod.skel)) return minOf(args, bind, seen);
       if (args.length > 0 || !/^[\w$]+$/.test(id) || shadowedBy(ref, id)) return null;
       const helper = resolve(ref.mod, id);
-      if (helper === null || helper.mod.fns.get(helper.name).params.length > 0) return null;
+      if (helper === null) return null;
+      const fn = helper.mod.fns.get(helper.name);
+      if (fn.params.length > 0 || !endsInReturn(helper.mod, fn) || rewritten(helper.mod, helper.name)) return null;
       const each = viaId(ref, id, bind, seen, (r) => numbers(r, bind, seen) ?? [null], () => [null]);
       return each.length === 0 || each.includes(null) ? null : [...new Set(each)];
     };
@@ -921,6 +934,22 @@ function tracer(mods, resolve, spawner) {
   const updated = (mod, id) => {
     const e = escape(id);
     return new RegExp(`${UPDATE(e)}|(?<![\\w$.])${e}\\s*${OPERATOR}=(?![=>])`).test(mod.skel);
+  };
+  // Whether anything but its declaration writes the name `id` in `mod`: a
+  // reassignment, a compound assignment, `++` or `--`.
+  const rewritten = (mod, id) => updated(mod, id)
+    || [...mod.skel.matchAll(new RegExp(`(?<![\\w$.])${escape(id)}\\s*${ASSIGN}`, "g"))]
+      .some((m) => !/\b(?:const|let|var)\s*$/.test(mod.skel.slice(Math.max(0, m.index - 8), m.index)));
+  // Whether the function `fn` of `mod` cannot fall off its end: an expression
+  // body, or a block body whose last `return` starts a statement and is
+  // followed by nothing but its expression and a `;`, so no bracket around it
+  // closes after it and it is the body's own last statement.
+  const endsInReturn = (mod, fn) => {
+    if (mod.skel[fn.start] !== "{") return true;
+    const body = mod.skel.slice(fn.start + 1, fn.end);
+    const last = [...body.matchAll(/(?<![\w$.])return\b/g)].at(-1);
+    if (last === undefined || !/(?:^|[;}])\s*$/.test(body.slice(0, last.index))) return false;
+    return /^;?\s*$/.test(body.slice(exprEnd(body, last.index + last[0].length)));
   };
   // The numbers a name, or a member read `a.b.c`, can hold.
   const named = (ref, [id, ...keys], bind, seen) => {
@@ -1456,6 +1485,7 @@ test("the sweep accepts a gh timeout the environment can only shorten, and env r
     "Math.min of two literals": READ("Math.min(20_000, 5_000)"),
     "Math.min with a value above the cap beside a ceiling": READ("Math.min(1e12, 20_000)"),
     "Math.min of a Math.min": READ("Math.min(Math.min(20_000, 5_000), 30_000)"),
+    "Math.min with spaces around its dot": READ("Math . min(20_000, 5_000)"),
     "a helper handed nothing": READ("ms()", "const ms = () => 20_000;\n"),
     "a helper with a return in each branch": READ("ms()", "function ms() { if (process.platform === \"win32\") { return 60_000; } return 20_000; }\n"),
     "a helper in another file": imports("export const ms = () => 20_000;\n", READ("ms()", `import { ms } from "./common.mjs";\n`)),
@@ -1536,6 +1566,15 @@ test("the sweep refuses a gh timeout that works out to no number from 1 to the c
     "a helper handed an argument": READ("ms(20_000)", "const ms = (n) => n;\n"),
     "a helper with a parameter, handed nothing": READ("ms()", "const ms = (n = 20_000) => n;\n"),
     "a helper that returns nothing": READ("ms()", "function ms() {}\n"),
+    "a helper with no parameters, handed an argument": READ("ms(1)", "function ms() { return 20_000; }\n"),
+    "a helper whose return works out to nothing, in a sum": READ("ms() + 20_000", "function ms() { return Date.now(); }\n"),
+    "a helper that can fall off its end": READ("ms()", "function ms() { if (process.platform === \"win32\") { return 20_000; } }\n"),
+    "a helper whose return is the branch of an if": READ("ms()", "function ms() { if (process.platform === \"win32\") return 20_000; }\n"),
+    "a helper whose only return is in a callback": READ("ms()", "function ms() { [1].forEach(() => { Date.now(); return 20_000; }); }\n"),
+    "a helper reassigned after its declaration": READ("ms()", "let ms = () => 20_000;\nms = () => 0;\n"),
+    "Math.min of a Math the module declares": READ("Math.min(20_000, 5_000)", "const Math = { min: () => 0 };\n"),
+    "Math.min of a Math parameter": MOD(`function f(Math) { return spawnSync("gh", ["x"], { timeout: Math.min(20_000, 5_000) }); }\nf({ min: () => 0 });`),
+    "ghBudget shadowed by a parameter": MOD(`${GH_BUDGET}function f(ghBudget) { return spawnSync("gh", ["x"], { timeout: ghBudget(20) }); }\nf(() => 0);`),
     "funnel handed 0": MOD(`${FUNNEL}\nrun("gh", ["x"], 0);`),
     "funnel handed null": MOD(`${FUNNEL}\nrun("gh", ["x"], null);`),
     "funnel handed undefined": MOD(`${FUNNEL}\nrun("gh", ["x"], undefined);`),
@@ -1571,6 +1610,7 @@ test("the sweep refuses a gh timeout that works out to no number from 1 to the c
   const why = (src) => sweep({ "x.mjs": src }).spawns[0].range;
   assert.deepEqual(why(refused["timeout 1e12"]), [`takes a timeout that can be 1000000000000, outside 1 to ${CEILING_CAP}`]);
   assert.deepEqual(why(refused["timeout 0"]), [`takes a timeout that can be 0, outside 1 to ${CEILING_CAP}`]);
+  assert.deepEqual(why(refused["a helper that returns 20_000 or 0"]), [`takes a timeout that can be 0, outside 1 to ${CEILING_CAP}`]);
   assert.deepEqual(why(refused["Math.min(20_000, 0)"]), ["takes a timeout that does not work out to a number: Math.min(20_000, 0)"]);
   assert.deepEqual(why(refused["funnel opts without a timeout"]), ["takes no timeout value"]);
 });
