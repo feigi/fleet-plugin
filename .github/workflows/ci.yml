@@ -104,9 +104,10 @@ jobs:
   check:
     runs-on: ubuntu-latest
     # The suite spawns git/python3 subprocesses per test and one case builds a
-    # `git archive` snapshot (~25s locally); cap the run so a wedged subprocess
-    # can't hold a runner open indefinitely.
-    timeout-minutes: 15
+    # `git archive` snapshot (~25s locally). The cap exists only to bound a
+    # wedged subprocess so it can't hold a runner open indefinitely; it sits
+    # well above the suite's normal runtime so a slow run is not cut short.
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
