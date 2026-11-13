@@ -17,8 +17,12 @@
 // it, or as `super.exec(…)` from the latter. That is the whole of what is
 // followed: a call through any other receiver (`obj.m(…)`, `C.m(…)`,
 // `new C(…)`), a getter, a setter, a function a class holds in a field and a
-// method of an object literal are not. A spawn whose command or argument is a
-// shell line that runs gh is one too — `execSync("gh
+// method of an object literal are not. So a method's unbounded spawn of its
+// own parameter is left to its callers only while every `.m` the swept files
+// write is a `this.m(…)` or `super.m(…)` call followed to a method, and the
+// method is no constructor; otherwise that parameter is a command the sweep
+// cannot tell from gh. A spawn whose command or argument is a shell line that
+// runs gh is one too — `execSync("gh
 // pr view 1")`, `spawnSync("sh", ["-c", "gh pr view 1"])`. The spawn is bounded
 // when its own arguments carry a `timeout` key at the top level of an options
 // object — written inline, as a shorthand, or in an object declared in the same
@@ -251,7 +255,7 @@ function analyse(src, file) {
     }
   }
 
-  // Every named function: `function f(…) {…}` and `const f = (…) =>…`, and
+  // Every named function: `function f(…) {…}` and `const f = (…) => …`, and
   // below, the methods of every class.
   const fns = new Map();
   const add = (name, paramsOpen, bodyFrom, extra = {}) => {
@@ -283,17 +287,26 @@ function analyse(src, file) {
   const defs = new Set();
   const HEAD = /(?:static\s+)?(?:(async|get|set)\s+(?=[\w$#*]))?(?:\*\s*)?(#?)([\w$]+)\s*\(/yd;
   // The members of the class body that opens at `open` whose head is a name
-  // and a parameter list, then a block.
+  // and a parameter list, then a block. A member starts after the body's `{`,
+  // a `;` or a member's block, or on a new line, where a field written without
+  // its `;` ends when the line opens a method.
   const membersOf = (open, close) => {
     const out = [];
     let head = true;
+    let fresh = false;
     for (let k = open + 1; k < close; k++) {
-      if (/\s/.test(skel[k])) continue;
-      if (head) {
+      if (/\s/.test(skel[k])) {
+        if (skel[k] === "\n") fresh = true;
+        continue;
+      }
+      if (head || fresh) {
+        const strict = head;
         head = false;
+        fresh = false;
         HEAD.lastIndex = k;
         const h = HEAD.exec(skel);
-        if (h !== null) {
+        // Off a new line, `function (…) {` is a field's value, not a method.
+        if (h !== null && (strict || h[3] !== "function")) {
           const paren = h.index + h[0].length - 1;
           const after = closing(skel, paren) + 1;
           let block = after;
@@ -328,7 +341,7 @@ function analyse(src, file) {
       defs.add(nameAt);
       if (accessor) continue;
       if (fns.has(`${name}.${key}`)) problems.push(`${file}:${lineOf(nameAt)} declares ${name}.${key} more than once, which this sweep cannot tell apart`);
-      else add(`${name}.${key}`, paren, after, { handed: `this\\s*\\.\\s*${key.replace(/\$/g, "\\$")}` });
+      else add(`${name}.${key}`, paren, after, { key, handed: `this\\s*\\.\\s*${key.replace(/\$/g, "\\$")}` });
     }
   }
   const byName = new Map(bodies.map((b) => [b.name, b]));
@@ -344,8 +357,10 @@ function analyse(src, file) {
   };
   // Every call whose callee is named: offset, callee, its arguments. A
   // `this.name(…)` or `super.name(…)` names the method of the class around it
-  // by the key it is declared under.
+  // by the key it is declared under; `followed` holds where each such call's
+  // `this` or `super` is written.
   const calls = [];
+  const followed = new Set();
   for (const m of skel.matchAll(/(?<![\w$.#])([\w$]+)\s*\(/g)) {
     if (defs.has(m.index) || /\bfunction\s*$/.test(skel.slice(Math.max(0, m.index - 12), m.index))) continue;
     const open = m.index + m[0].length - 1;
@@ -355,6 +370,7 @@ function analyse(src, file) {
     const around = classAt(m.index);
     const callee = methodOf(m[1] === "this" ? around : byName.get(around?.parent), m[2]);
     if (callee === null) continue;
+    followed.add(m.index);
     const open = m.index + m[0].length - 1;
     calls.push({ at: m.index, callee, args: pieces(skel, code, open), line: lineOf(m.index) });
   }
@@ -404,7 +420,7 @@ function analyse(src, file) {
   // The named functions whose body holds `at`, innermost first.
   const encl = (at) => [...fns.values()].filter((f) => f.start <= at && at <= f.end).sort((x, y) => y.start - x.start);
 
-  return { file, code, skel, primitives, imports, processAliases, fns, classes, calls, carries, within, encl, loopLiterals, problems };
+  return { file, code, skel, primitives, imports, processAliases, fns, classes, calls, followed, carries, within, encl, loopLiterals, problems };
 }
 
 // The largest number, in ms, a Math.min() ceiling may work out to (rule 1 of
@@ -1149,6 +1165,15 @@ const runsGh = (c, cmdAt) => c.args.some(({ code }, i) => [...code.matchAll(STRI
 // environment reaches its bound.
 function sweep(sources) {
   const mods = new Map(Object.entries(sources).map(([file, src]) => [file, analyse(src, file)]));
+  // Whether the sweep follows every call that can reach `fn`: true of a
+  // function; of a method, only when it is no constructor and every `.key` the
+  // swept files write is a `this.key(…)` or `super.key(…)` call followed to a
+  // method.
+  const followable = (fn) => fn.key === undefined || (fn.key !== "constructor" && [...mods.values()].every((m) =>
+    [...m.skel.matchAll(new RegExp(`\\.\\s*${fn.key.replace(/\$/g, "\\$")}(?![\\w$])`, "g"))].every((r) => {
+      const via = m.skel.slice(0, r.index).match(/(?<![\w$.])(?:this|super)\s*$/);
+      return via !== null && m.followed.has(via.index);
+    })));
   const problems = [...mods.values()].flatMap((m) => m.problems);
   const resolve = (mod, name) => {
     if (mod.fns.has(name)) return { mod, name };
@@ -1199,10 +1224,12 @@ function sweep(sources) {
         continue;
       } else {
         // Any other command is bounded here whatever it names, or is a
-        // funnel's own parameter, whose callers are what is swept, or is drawn
-        // from a loop over string literals none of which is gh.
+        // funnel's own parameter, whose callers are what is swept when every
+        // one can be followed, or is drawn from a loop over string literals
+        // none of which is gh.
         if (spawn.bounded) continue;
-        if (mod.within(c.at)?.params.includes(cmd)) continue;
+        const host = mod.within(c.at);
+        if (host?.params.includes(cmd) && followable(host)) continue;
         const values = /^[\w$]+$/.test(cmd) ? mod.loopLiterals(cmd) : null;
         if (values !== null && !values.includes("gh")) continue;
         problems.push(`${where} spawns \`${cmd}\`, a command this sweep cannot tell from gh, with no bound`);
@@ -1783,8 +1810,32 @@ test("the sweep refuses a gh call routed through a class method that bounds noth
     "method inherited from two classes up": MOD(`class A {\n${UNBOUNDED}\n}\nclass B extends A {}\nclass P extends B {\n${GO('["x"]')}\n}`),
     "method overridden, called through super": MOD(`class A {\n${UNBOUNDED}\n}\nclass P extends A {\nrun(cmd, args) { return spawnSync(cmd, args, { timeout: 5_000 }); }\ngo() { return super.run("gh", ["x"]); }\n}`),
     "method after fields, a static block and a computed method": CLASS(`field = { a: 1 };\nother = (x) => { return x; };\nstatic count = 0;\nstatic { P.count = 1; }\n[Symbol.iterator]() { return 1; }\n${UNBOUNDED}\n${GO('["x"]')}`),
+    "method after a field's `;` on one line": CLASS(`limit = 3; ${UNBOUNDED}\n${GO('["x"]')}`),
+    "method after a field with no `;`": CLASS(`limit = 3\n${UNBOUNDED}\n${GO('["x"]')}`),
+    "method inherited from a class expression": MOD(`const A = class {\n${UNBOUNDED}\n};\nclass P extends A {\n${GO('["x"]')}\n}`),
   };
   for (const [name, src] of Object.entries(refused)) assert.deepEqual(verdicts({ "x.mjs": src }), [false], name);
+});
+
+test("the sweep names an unbounded method's command when a call it does not follow can reach the method", () => {
+  const problems = ["x.mjs:3 spawns `cmd`, a command this sweep cannot tell from gh, with no bound"];
+  const P = `export class P {\n${UNBOUNDED}\n}`;
+  const unfollowed = {
+    "called through an instance": { "x.mjs": MOD(`${P}\nconst p = new P();\np.run("gh", ["x"]);`) },
+    "called on a new instance": { "x.mjs": MOD(`${P}\nnew P().run("gh", ["x"]);`) },
+    "static, called through its class": { "x.mjs": MOD(`class P {\nstatic run(cmd, args) { return spawnSync(cmd, args, {}); }\n}\nP.run("gh", ["x"]);`) },
+    "handed on through this": { "x.mjs": CLASS(`${UNBOUNDED}\ngo() { return ["gh"].map(this.run); }`) },
+    "a constructor": { "x.mjs": MOD(`class P {\nconstructor(cmd) { spawnSync(cmd, [], {}); }\n}\nnew P("gh");`) },
+    "called from another module": { "x.mjs": MOD(P), "y.mjs": `import { P } from "./x.mjs";\nnew P().run("gh", ["x"]);\n` },
+    "extended in another module": { "x.mjs": MOD(P), "y.mjs": `import { P } from "./x.mjs";\nclass Q extends P {\ngo() { return this.run("gh", ["x"]); }\n}\n` },
+  };
+  for (const [name, sources] of Object.entries(unfollowed)) assert.deepEqual(sweep(sources), { spawns: [], problems }, name);
+  // Off a new line, a function a field holds is no method, so its command is
+  // named too.
+  assert.deepEqual(sweep({ "x.mjs": CLASS("handler =\nfunction (cmd) { return spawnSync(cmd, [], {}); };") }),
+    { spawns: [], problems: ["x.mjs:4 spawns `cmd`, a command this sweep cannot tell from gh, with no bound"] });
+  // An unbounded method every call to which is followed is judged at each call.
+  assert.deepEqual(sweep({ "x.mjs": MOD(`${P}\nclass Q extends P {\n${GO('["x"]')}\n}`) }), { spawns: [{ where: "x.mjs:6", bounded: false, reaches: [], range: ["takes no timeout value"] }], problems: [] });
 });
 
 test("the sweep refuses a class method's gh timeout that the environment can reach", () => {
@@ -1795,6 +1846,7 @@ test("the sweep refuses a class method's gh timeout that the environment can rea
     "env read handed to an inherited method": MOD(`class A {\n${TIMED}\n}\nclass P extends A {\n${GO('["x"]', ENV_MS)}\n}`),
     "timeout read off this": CLASS(`run(cmd, args) { return spawnSync(cmd, args, { timeout: this.ms }); }\n${GO('["x"]')}`),
     "method handed on as a callback": CLASS(`go(t) { return spawnSync("gh", ["x"], { timeout: t }); }\na() { return this.go(5_000); }\nb() { return [1].map(this.go); }`),
+    "env read handed to a method after a field with no `;`": CLASS(`limit = 3\n${TIMED}\n${GO('["x"]', ENV_MS)}`),
   };
   for (const [name, src] of Object.entries(refused)) assert.deepEqual(reaching({ "x.mjs": src }), [true], name);
 });
