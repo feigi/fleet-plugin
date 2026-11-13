@@ -35,8 +35,10 @@
 // not looked at. Four rules say what the environment may still do:
 //   1. A Math.min() the environment reaches keeps its exemption only with a
 //      ceiling: an argument clear of the environment that works out, from
-//      literals, + - * / ** and the names the tracer resolves, to a number
-//      from 1 to CEILING_CAP (at its largest, when it has several values).
+//      literals, + - * / **, the names the tracer resolves and the three
+//      calls numbers() reduces (ghBudget(), Math.min() and a local helper
+//      handed nothing), to a number from 1 to CEILING_CAP (at its largest,
+//      when it has several values).
 //      A name, or a name's key (`x.key`, `x["key"]`), that a compound
 //      assignment, `++` or `--` writes works out to no number.
 //   2. Every argument of that Math.min() the environment reaches is floored:
@@ -57,6 +59,16 @@
 //      to an Object.* or Reflect.* call other than Object.assign(), the call
 //      written as a member or computed; or `__proto__`, `__defineGetter__` or
 //      `__defineSetter__` is written or called on it.
+//
+// #4484. Whatever the environment does, each gh spawn's timeout must also work
+// out to a number from 1 to CEILING_CAP: Node reads a timeout of 0 as none,
+// and one of 1e12 ms never fires. numbers() is run on every value the
+// child_process call's `timeout` can take, once the funnels around it have
+// bound their arguments, and the spawn is refused when any value is below 1 or
+// above the cap, when a value does not work out to a number, and when there is
+// no value at all: a `timeout` left out, or a funnel parameter no call hands
+// one. Failing closed, as rule 1 does for a ceiling, refuses a value
+// numbers() cannot reduce, such as a ternary, whatever it chooses between.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
@@ -311,7 +323,9 @@ function analyse(src, file) {
   return { file, code, skel, primitives, imports, processAliases, fns, classes, calls, carries, within, encl, loopLiterals, problems };
 }
 
-// The longest, in ms, a Math.min() ceiling may be: rule 1 of the file header.
+// The largest number, in ms, a Math.min() ceiling may work out to (rule 1 of
+// the file header) and, by the header's #4484 paragraph, any value a gh
+// spawn's timeout can take.
 const CEILING_CAP = 300_000;
 
 // Whether the environment can reach a gh spawn's timeout, decided on the
@@ -789,11 +803,40 @@ function tracer(mods, resolve, spawner) {
   };
   const inRange = (n) => n !== null && Math.max(...n) >= 1 && Math.max(...n) <= CEILING_CAP;
   // The numbers `ref` can work out to, from literals, unary + and -, + - * /
-  // **, parentheses, and names and member reads resolved as the tracer
-  // resolves them; null when any value of it does not work out, or it is
-  // written by a compound assignment or a `++` or `--`.
+  // **, parentheses, names and member reads resolved as the tracer resolves
+  // them, and three calls: arg.mjs's ghBudget(), a Math.min() and a local
+  // helper handed nothing, each as the functions below say; null when any
+  // value of it does not work out, or it is written by a compound assignment
+  // or a `++` or `--`.
   const NUMBER = /^(?:0[xX][\da-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+|(?:\d[\d_]*(?:\.[\d_]*)?|\.\d[\d_]*)(?:[eE][+-]?\d[\d_]*)?)/;
   const MAX_VALUES = 64;
+  // ghBudget(seconds, override) in ms: at least a second, and at most
+  // `seconds` seconds, which is why `seconds` must work out to at least 1. The
+  // override is never read: it can only pick a number of seconds from 1 to
+  // `seconds`, which is no lengthening.
+  const ghBudgetOf = (args, bind, seen) => {
+    if (args.length < 1 || args.length > 2) return null;
+    const seconds = numbers(args[0], bind, seen);
+    return seconds !== null && Math.min(...seconds) >= 1 ? [1000, Math.max(...seconds) * 1000] : null;
+  };
+  // Math.min(…) in ms, from 1 to its ceiling: the least of the largest values
+  // its arguments work out to, which must be at most CEILING_CAP. Every
+  // argument must be at least 1: it works out to numbers none of which is
+  // below 1 (above CEILING_CAP is no matter, another argument is the
+  // ceiling), or it is floored(), as the arguments the environment reaches
+  // are. An argument that is neither, `0` among them, works out to nothing.
+  const minOf = (args, bind, seen) => {
+    if (args.length === 0) return null;
+    let ceiling = Infinity;
+    for (const arg of args) {
+      const n = numbers(arg, bind, seen);
+      if (n === null) {
+        if (!floored(arg, bind, seen)) return null;
+      } else if (Math.min(...n) < 1) return null;
+      else ceiling = Math.min(ceiling, Math.max(...n));
+    }
+    return ceiling <= CEILING_CAP ? [1, ceiling] : null;
+  };
   const numbers = (ref, bind, seen) => {
     if (ref.refuse || ref.compound || ref.destructured) return null;
     const s = ref.skel;
@@ -853,8 +896,34 @@ function tracer(mods, resolve, spawner) {
       if (name === null) return fail();
       i += name[0].length;
       ws();
-      if (s[i] === "(" || s[i] === "[") return fail();
-      return named(ref, name[0].split(".").map((x) => x.trim()), bind, seen);
+      const id = name[0].replace(/\s+/g, "");
+      if (s[i] === "(") return call(id);
+      if (s[i] === "[") return fail();
+      return named(ref, id.split("."), bind, seen);
+    };
+    // The three calls that work out to a number: arg.mjs's ghBudget(), a
+    // Math.min(), and a local helper handed nothing. Any other call does not.
+    // ghBudget is the import only while no parameter around the call shadows
+    // it, and Math the global only while the module writes `Math` nowhere but
+    // before a `.`. The helper takes no parameters, nothing but its
+    // declaration writes its name, and a block body ends in a `return` of its
+    // own, so it cannot fall off its end into undefined. A `return` inside a
+    // callback in its body still counts as one of its values, which only
+    // refuses more.
+    const call = (id) => {
+      const open = i;
+      const args = pieces(s, ref.code, open).map((p) => ({ ...ref, skel: p.skel, code: p.code }));
+      i = closing(s, open) + 1;
+      if (args.some((a) => a.skel.startsWith("..."))) return null;
+      if (id === "ghBudget" && isGhBudget(ref.mod) && !shadowedBy(ref, id)) return ghBudgetOf(args, bind, seen);
+      if (id === "Math.min" && !/(?<![\w$.])Math\b(?!\s*\.)/.test(ref.mod.skel)) return minOf(args, bind, seen);
+      if (args.length > 0 || !/^[\w$]+$/.test(id) || shadowedBy(ref, id)) return null;
+      const helper = resolve(ref.mod, id);
+      if (helper === null) return null;
+      const fn = helper.mod.fns.get(helper.name);
+      if (fn.params.length > 0 || !endsInReturn(helper.mod, fn) || rewritten(helper.mod, helper.name)) return null;
+      const each = viaId(ref, id, bind, seen, (r) => numbers(r, bind, seen) ?? [null], () => [null]);
+      return each.length === 0 || each.includes(null) ? null : [...new Set(each)];
     };
     const v = sum();
     ws();
@@ -865,6 +934,22 @@ function tracer(mods, resolve, spawner) {
   const updated = (mod, id) => {
     const e = escape(id);
     return new RegExp(`${UPDATE(e)}|(?<![\\w$.])${e}\\s*${OPERATOR}=(?![=>])`).test(mod.skel);
+  };
+  // Whether anything but its declaration writes the name `id` in `mod`: a
+  // reassignment, a compound assignment, `++` or `--`.
+  const rewritten = (mod, id) => updated(mod, id)
+    || [...mod.skel.matchAll(new RegExp(`(?<![\\w$.])${escape(id)}\\s*${ASSIGN}`, "g"))]
+      .some((m) => !/\b(?:const|let|var)\s*$/.test(mod.skel.slice(Math.max(0, m.index - 8), m.index)));
+  // Whether the function `fn` of `mod` cannot fall off its end: an expression
+  // body, or a block body whose last `return` starts a statement and is
+  // followed by nothing but its expression and a `;`, so no bracket around it
+  // closes after it and it is the body's own last statement.
+  const endsInReturn = (mod, fn) => {
+    if (mod.skel[fn.start] !== "{") return true;
+    const body = mod.skel.slice(fn.start + 1, fn.end);
+    const last = [...body.matchAll(/(?<![\w$.])return\b/g)].at(-1);
+    if (last === undefined || !/(?:^|[;}])\s*$/.test(body.slice(0, last.index))) return false;
+    return /^;?\s*$/.test(body.slice(exprEnd(body, last.index + last[0].length)));
   };
   // The numbers a name, or a member read `a.b.c`, can hold.
   const named = (ref, [id, ...keys], bind, seen) => {
@@ -904,21 +989,43 @@ function tracer(mods, resolve, spawner) {
     const each = viaId(ref, s, bind, seen, (r) => [floored(r, bind, seen)], () => [false]);
     return each.length > 0 && each.every(Boolean);
   };
+  // Every way the timeouts of a child_process call, the refs `timeouts`, are
+  // no number from 1 to CEILING_CAP: none at all, or one that works out to no
+  // number, or to one outside that range, 0 and 1e12 among them. `bind` is
+  // what the funnels around the call were handed.
+  const sizes = (timeouts, bind) => {
+    if (timeouts.length === 0) return ["takes no timeout value"];
+    return timeouts.flatMap((v) => {
+      const n = numbers(v, bind, new Set());
+      if (n === null) return [`takes a timeout that does not work out to a number: ${v.refuse ?? v.code.replace(/\s+/g, " ")}`];
+      const [least, most] = [Math.min(...n), Math.max(...n)];
+      return least >= 1 && most <= CEILING_CAP ? [] : [`takes a timeout that can be ${least < 1 ? least : most}, outside 1 to ${CEILING_CAP}`];
+    });
+  };
   // Every reason the environment reaches the timeout of the spawn call `c`
   // whose command is argument `cmdAt`: its own `timeout` (and, to a funnel,
   // `timeoutMs`), then the calls the funnel makes in turn, each with the
-  // funnel's parameters bound to what `c` handed it.
-  const walk = (mod, c, cmdAt, bind) => {
+  // funnel's parameters bound to what `c` handed it; and, at the child_process
+  // call itself, every way its timeout works out to no number from 1 to
+  // CEILING_CAP, in `range`.
+  const walk = (mod, c, cmdAt, bind, range) => {
     const reasons = [];
     const primitive = mod.primitives.has(c.callee);
+    const timeouts = [];
     c.args.forEach((_, i) => {
       const arg = argRef(mod, c, i);
       if (i === cmdAt || arg === null) return;
       for (const key of primitive ? ["timeout"] : ["timeout", "timeoutMs"]) {
-        for (const v of keyValues(arg, key, bind, new Set())) reasons.push(...judge(v, bind, new Set()));
+        for (const v of keyValues(arg, key, bind, new Set())) {
+          reasons.push(...judge(v, bind, new Set()));
+          if (primitive) timeouts.push(v);
+        }
       }
     });
-    if (primitive) return reasons;
+    if (primitive) {
+      range.push(...sizes(timeouts, bind));
+      return reasons;
+    }
     const target = resolve(mod, c.callee);
     const fn = target.mod.fns.get(target.name);
     if (bind.has(fn)) return reasons;
@@ -934,11 +1041,15 @@ function tracer(mods, resolve, spawner) {
       if (ic.at < fn.start || ic.at > fn.end) continue;
       const inner = spawner(target.mod, ic);
       if (inner === null || fn.params.indexOf(ic.args[inner.index]?.code) !== cmdAt) continue;
-      reasons.push(...walk(target.mod, ic, inner.index, inside));
+      reasons.push(...walk(target.mod, ic, inner.index, inside, range));
     }
     return reasons;
   };
-  return (mod, c, cmdAt) => [...new Set(walk(mod, c, cmdAt, new Map()))];
+  return (mod, c, cmdAt) => {
+    const range = [];
+    const reasons = walk(mod, c, cmdAt, new Map(), range);
+    return { reaches: [...new Set(reasons)], range: [...new Set(range)] };
+  };
 }
 
 // A shell line that runs gh: gh heading the line, or heading a command after
@@ -999,7 +1110,7 @@ function sweep(sources) {
       const cmd = c.args[spawn.index]?.code ?? "";
       const where = `${mod.file}:${c.line}`;
       if (/^["']gh["']$/.test(cmd) || runsGh(c, spawn.index)) {
-        spawns.push({ where, bounded: spawn.bounded, reaches: reaches(mod, c, spawn.index) });
+        spawns.push({ where, bounded: spawn.bounded, ...reaches(mod, c, spawn.index) });
       } else if (/^(["'])[^"']*\1$/.test(cmd) || cmd === "process.execPath" || /^join\(/.test(cmd)) {
         continue;
       } else {
@@ -1067,6 +1178,7 @@ test("no environment variable can lengthen a script's gh bound", () => {
 const MOD = (body, imports = "spawnSync, execFileSync") => `import { ${imports} } from "node:child_process";\n${body}\n`;
 const verdicts = (sources) => sweep(sources).spawns.map((s) => s.bounded);
 const reaching = (sources) => sweep(sources).spawns.map((s) => s.reaches.length > 0);
+const outside = (sources) => sweep(sources).spawns.map((s) => s.range.length > 0);
 
 test("the sweep refuses an unbounded gh spawn in each shape it follows", () => {
   const refused = {
@@ -1109,8 +1221,8 @@ test("the sweep accepts the bound shapes already in the repository", () => {
   const accepted = {
     "named constant": MOD(`const GH_TIMEOUT_MS = 20_000;\nspawnSync("gh", ["x"], { encoding: "utf8", timeout: GH_TIMEOUT_MS });`),
     literal: MOD(`execFileSync("gh", ["x"], { encoding: "utf8", timeout: 60_000 });`),
-    "timeoutMs parameter": MOD(`export function read(n, { timeoutMs }) { return spawnSync("gh", ["x"], { timeout: timeoutMs }); }`),
-    shorthand: MOD(`function f(timeout) { return spawnSync("gh", ["x"], { encoding: "utf8", timeout }); }`),
+    "timeoutMs parameter": MOD(`export function read(n, { timeoutMs }) { return spawnSync("gh", ["x"], { timeout: timeoutMs }); }\nread(1, { timeoutMs: 20_000 });`),
+    shorthand: MOD(`function f(timeout) { return spawnSync("gh", ["x"], { encoding: "utf8", timeout }); }\nf(20_000);`),
     "options object with one": MOD(`const READ_TIMEOUT_MS = 60_000;\nfunction f() { const opts = { encoding: "utf8", timeout: READ_TIMEOUT_MS };\nreturn execFileSync("gh", ["x"], opts); }`),
     "spread plus a bound": MOD(`const CHILD = { encoding: "utf8" };\nspawnSync("gh", ["x"], { ...CHILD, timeout: 30_000 });`),
     "bounded funnel": MOD(`const T = 20_000;\nfunction spawn(cmd, args) { return execFileSync(cmd, args, { timeout: T }); }\nfunction run(cmd, args) { return spawn(cmd, args); }\nrun(\n  "gh",\n  ["x"],\n);`),
@@ -1118,6 +1230,7 @@ test("the sweep accepts the bound shapes already in the repository", () => {
   };
   for (const [name, src] of Object.entries(accepted)) assert.deepEqual(verdicts({ "x.mjs": src }), [true], name);
   for (const [name, src] of Object.entries(accepted)) assert.deepEqual(reaching({ "x.mjs": src }), [false], name);
+  for (const [name, src] of Object.entries(accepted)) assert.deepEqual(outside({ "x.mjs": src }), [false], name);
   // Not gh, so nothing to bound: a sibling script, node itself, git, a funnel
   // only ever handed another command.
   const notGh = MOD(`spawnSync(process.execPath, [join(SCRIPT_DIR, "x.mjs")]);\nspawnSync("git", ["status"]);\nspawnSync("git", ["log", "--author", "gh"]);\nspawnSync(join(SCRIPT_DIR, "x.sh"));\nfunction run(cmd, a) { return spawnSync(cmd, a); }\nrun("sh", ["y"]);`);
@@ -1224,7 +1337,6 @@ test("the sweep refuses a gh spawn whose timeout the environment can reach", () 
     ["a let set to 20_000 and later to 1e12", MIN("C", FLOORED, "let C = 20_000;\nC = 1e12;\n"), "ceiling"],
     ["a ceiling a compound assignment writes", MIN("C", FLOORED, "let C = 20_000;\nC += 1;\n"), "ceiling"],
     ["a funnel parameter one caller hands 1e12", MOD(`function ceil(cap) { return Math.min(cap, ${FLOORED}); }\nspawnSync("gh", ["a"], { timeout: ceil(20_000) });\nspawnSync("gh", ["b"], { timeout: ceil(1e12) });`), "ceiling"],
-    ["ghBudget(20, process.env.Y) as the ceiling", MIN("ghBudget(20, process.env.Y)"), "ceiling"],
     ["ceiling 0", MIN("0"), "ceiling"],
     ["ceiling -1", MIN("-1"), "ceiling"],
     ["ceiling 300_001", MIN("300_001"), "ceiling"],
@@ -1320,7 +1432,6 @@ test("the sweep accepts a gh timeout the environment can only shorten, and env r
     "ghBudget with its env override": MOD(`${GH_BUDGET}const GH_TIMEOUT_MS = ghBudget(20, process.env.X_GH_TIMEOUT);\nspawnSync("gh", ["x"], { timeout: GH_TIMEOUT_MS });`),
     "ghBudget under any variable name": MOD(`${GH_BUDGET}const T = ghBudget(20, process.env.ANYTHING);\nspawnSync("gh", ["x"], { timeout: T });`),
     "ghBudget inline": MOD(`${GH_BUDGET}spawnSync("gh", ["x"], { timeout: ghBudget(20, process.env["X"]) });`),
-    "a helper that calls itself": MOD(`function s() { return s() + 1; }\nspawnSync("gh", ["x"], { timeout: s() });`),
     "a same-named env read in another function": MOD(`function wait() { const ms = Number(process.env.POLL_MS); return ms; }\nfunction read() { const ms = 20_000; return spawnSync("gh", ["x"], { timeout: ms }); }`),
     "an env read beside the bound in one object": MOD(`const CFG = { home: process.env.HOME, timeoutMs: 20_000 };\nspawnSync("gh", ["x"], { timeout: CFG.timeoutMs });`),
     "an options key the env feeds, other than the timeout": MOD(`const opts = { timeout: 20_000 };\nopts.cwd = process.env.HOME;\nspawnSync("gh", ["x"], opts);`),
@@ -1334,8 +1445,6 @@ test("the sweep accepts a gh timeout the environment can only shorten, and env r
     ].join("\n")),
     "env spread next to a literal timeout": MOD(`spawnSync("gh", ["x"], { env: { ...process.env, GH_REPO: "" }, timeout: 20_000 });`),
     "env reads that feed nothing the timeout reads": MOD(`const home = process.env.HOME;\nconst repo = process.env["GH_REPO"];\nspawnSync("gh", ["x"], { cwd: home, env: process.env, timeout: 20_000 });`),
-    "process members that are not the env": MOD(`spawnSync("gh", ["x"], { timeout: process.platform === "win32" ? 60_000 : 20_000 });`),
-    "imported process members that are not the env": MOD(`import proc from "node:process";\nspawnSync("gh", ["x"], { timeout: proc.platform === "win32" ? 60_000 : 20_000 });`),
     "funnel handed a literal": MOD(`${FUNNEL}\nrun("gh", ["x"], 20_000);`),
     "funnel handed a ghBudget": MOD(`${GH_BUDGET}${FUNNEL}\nrun("gh", ["x"], ghBudget(20, process.env.X_GH_TIMEOUT));`),
     "funnel timeoutMs key, literal": MOD(`function run(cmd, args, { timeoutMs } = {}) { return spawnSync(cmd, args, { timeout: timeoutMs }); }\nrun("gh", ["x"], { timeoutMs: 20_000 });`),
@@ -1357,28 +1466,173 @@ test("the sweep accepts a gh timeout the environment can only shorten, and env r
     "a ceiling imported": imports("export const CEIL = 2 * 60_000;\n", MIN("CEIL", FLOORED, `import { CEIL } from "./common.mjs";\n`)),
     "a ceiling an object literal holds": MIN("LIMITS.gh", FLOORED, "const LIMITS = { gh: 20_000 };\n"),
     "a member read through a funnel parameter": MOD(`function f(o) { return spawnSync("gh", ["x"], { timeout: o.t }); }\nf({ t: 20_000 });`),
-    "a member read of a helper's returned literal": READ("cfg().ms", `const cfg = () => ({ ms: 20_000 });\n`),
     "Object.assign with the options only a source": MOD(`const opts = { timeout: 20_000 };\nconst copy = Object.assign({}, opts);\nspawnSync("gh", ["x"], opts);`),
     "a getter on another key of the object read": READ("CFG.ms", `const CFG = { ms: 20_000, get other() { return Number(process.env.X); } };\n`),
     "an unrelated object handed to Object.freeze": READ("CFG.ms", `const OTHER = { a: 1 };\nObject.freeze(OTHER);\nconst CFG = { ms: 20_000 };\n`),
     "a ceiling of exactly 64 values": MIN(COMBINED, FLOORED, combinations(4)),
-    "a ceiling holding 0 and 20_000, at its largest 20_000": MIN("CEIL", FLOORED, "let CEIL = 0;\nCEIL = 20_000;\n"),
     "a ++ on another key of the ceiling's object": MIN("L.gh", FLOORED, "const L = { gh: 60_000, n: 0 };\nL.n++;\n"),
     "a -- on another name than the floor": MIN("20_000", "F", "let F = Math.max(1, Number(process.env.X));\nlet G = 1;\nG--;\n"),
     "a getter two keys down beside the plain value read": READ("CFG.inner.ms", `const CFG = { inner: { ms: 20_000 }, other: { ${ENV_GETTER} } };\n`),
-    "a plain value read in bracket form": READ(`CFG["ms"]`, `const CFG = { ms: 20_000 };\n`),
     "a number-literal key beside the one read": READ("CFG.ms", `const CFG = { 1.5: 2, ms: 20_000 };\n`),
     "a shorthand __proto__, an own key and no prototype": READ("CFG.ms", `const __proto__ = { a: 1 };\nconst CFG = { __proto__, ms: 20_000 };\n`),
+    // #4484: each works out to a number from 1 to the cap.
+    "ghBudget(30, env)": MOD(`${GH_BUDGET}spawnSync("gh", ["x"], { timeout: ghBudget(30, process.env.X_GH_TIMEOUT) });`),
+    "ghBudget at the cap": MOD(`${GH_BUDGET}spawnSync("gh", ["x"], { timeout: ghBudget(300, process.env.X) });`),
+    "ghBudget seconds from a constant": MOD(`${GH_BUDGET}const SECONDS = 2 * 15;\nconst T = ghBudget(SECONDS, process.env.X);\nspawnSync("gh", ["x"], { timeout: T });`),
+    "ghBudget with arithmetic beside it": MOD(`${GH_BUDGET}spawnSync("gh", ["x"], { timeout: ghBudget(20, process.env.X) + 500 });`),
+    "ghBudget with no override": MOD(`${GH_BUDGET}spawnSync("gh", ["x"], { timeout: ghBudget(20) });`),
+    "ghBudget as a Math.min ceiling": MIN("ghBudget(20, process.env.Y)"),
+    "Math.min of two literals": READ("Math.min(20_000, 5_000)"),
+    "Math.min with a value above the cap beside a ceiling": READ("Math.min(1e12, 20_000)"),
+    "Math.min of a Math.min": READ("Math.min(Math.min(20_000, 5_000), 30_000)"),
+    "Math.min with spaces around its dot": READ("Math . min(20_000, 5_000)"),
+    "a helper handed nothing": READ("ms()", "const ms = () => 20_000;\n"),
+    "a helper with a return in each branch": READ("ms()", "function ms() { if (process.platform === \"win32\") { return 60_000; } return 20_000; }\n"),
+    "a helper in another file": imports("export const ms = () => 20_000;\n", READ("ms()", `import { ms } from "./common.mjs";\n`)),
+    "a helper returning a ghBudget": READ("ms()", `${GH_BUDGET}const ms = () => ghBudget(20, process.env.X);\n`),
+    "a helper returning a closeout-style budget": MOD([
+      `const CEIL = 120_000;`,
+      `const deadline = Date.now() + Number(process.env.CALL_MS ?? 600_000);`,
+      `const budget = () => Math.min(CEIL, Math.max(1, Math.floor(deadline - Date.now())));`,
+      `spawnSync("gh", ["x"], { timeout: budget() });`,
+    ].join("\n")),
   };
   for (const [name, src] of Object.entries(accepted)) {
-    assert.deepEqual(reaching(typeof src === "string" ? { "x.mjs": src } : src), [false], name);
+    const sources = typeof src === "string" ? { "x.mjs": src } : src;
+    assert.deepEqual(reaching(sources), [false], name);
+    assert.deepEqual(outside(sources), [false], name);
   }
+  // A funnel handed a ghBudget at one call and a literal at another.
+  const funnelled = MOD(`${GH_BUDGET}${FUNNEL}\nrun("gh", ["a"], ghBudget(30, process.env.X));\nrun("gh", ["b"], 20_000);`);
+  assert.deepEqual(outside({ "x.mjs": funnelled }), [false, false]);
   // An env-fed bound on a git call, through the funnel a literal-bound gh call
   // shares, is no gh bound.
   const git = MOD(`${FUNNEL}\nrun("git", ["x"], ${ENV_MS});\nrun("gh", ["x"], 20_000);`);
   assert.deepEqual(reaching({ "x.mjs": git }), [false]);
   const ledger = MOD(`const LEDGER_LOCK_TIMEOUT_MS = ${ENV_MS};\nspawnSync("git", ["x"], { timeout: LEDGER_LOCK_TIMEOUT_MS });\nspawnSync("gh", ["x"], { timeout: 20_000 });`);
   assert.deepEqual(reaching({ "x.mjs": ledger }), [false]);
+});
+
+// #4484. A gh timeout works out to a number from 1 to CEILING_CAP even where
+// the environment plays no part: Node reads a timeout of 0 as none, and one of
+// 1e12 ms never fires. A value the evaluator cannot work out is refused, as is
+// a spawn with no timeout value at all.
+test("every gh spawn's timeout works out to a number from 1 to the cap", () => {
+  const { spawns } = sweep(readScripts());
+  assert.ok(spawns.length > 0);
+  assert.deepEqual(spawns.flatMap((s) => s.range.map((why) => `${s.where} ${why}`)), []);
+});
+
+test("a gh timeout of 1e12 or 0 in a script turns the sweep red", () => {
+  const scripts = readScripts();
+  const decl = "const READ_TIMEOUT_MS = 60_000;";
+  assert.ok(scripts["ticketless.mjs"].includes(decl), "ticketless.mjs no longer declares READ_TIMEOUT_MS as 60_000");
+  // Every other test here sweeps the script as it stands; this one sweeps it
+  // changed.
+  const ours = (files) => sweep(files).spawns.filter((s) => s.where.startsWith("ticketless.mjs:"));
+  for (const ms of ["1e12", "0"]) {
+    const changed = { ...scripts, "ticketless.mjs": scripts["ticketless.mjs"].replace(decl, `const READ_TIMEOUT_MS = ${ms};`) };
+    assert.ok(ours(changed).some((s) => s.range.length > 0), `READ_TIMEOUT_MS = ${ms}`);
+  }
+});
+
+test("the sweep refuses a gh timeout that works out to no number from 1 to the cap, the environment aside", () => {
+  const refused = {
+    "timeout 1e12": READ("1e12"),
+    "timeout one above the cap": READ("300_001"),
+    "timeout 0": READ("0"),
+    "timeout -1": READ("-1"),
+    "timeout null": READ("null"),
+    "timeout undefined": READ("undefined"),
+    "timeout Infinity": READ("Infinity"),
+    "a constant of 1e12": READ("T", "const T = 1e12;\n"),
+    "a constant of 0": READ("T", "const T = 0;\n"),
+    "a constant imported as 1e12": imports("export const T = 1e12;\n", READ("T", `import { T } from "./common.mjs";\n`)),
+    "a timeout of 0 chosen by a condition": READ(`process.platform === "win32" ? 20_000 : 0`),
+    "ghBudget(1e9, env), a default of 1e9 s": MOD(`${GH_BUDGET}spawnSync("gh", ["x"], { timeout: ghBudget(1e9, process.env.X) });`),
+    "ghBudget(301, env), one second above the cap": MOD(`${GH_BUDGET}spawnSync("gh", ["x"], { timeout: ghBudget(301, process.env.X) });`),
+    "ghBudget(0, env)": MOD(`${GH_BUDGET}spawnSync("gh", ["x"], { timeout: ghBudget(0, process.env.X) });`),
+    "ghBudget seconds that can be 0": MOD(`${GH_BUDGET}let S = 0;\nS = 20;\nspawnSync("gh", ["x"], { timeout: ghBudget(S, process.env.X) });`),
+    "ghBudget handed no seconds": MOD(`${GH_BUDGET}spawnSync("gh", ["x"], { timeout: ghBudget() });`),
+    "ghBudget the script declares itself": MOD(`function ghBudget(s) { return 0; }\nspawnSync("gh", ["x"], { timeout: ghBudget(20) });`),
+    "Math.min(20_000, 0)": READ("Math.min(20_000, 0)"),
+    "Math.min(20_000, -1)": READ("Math.min(20_000, -1)"),
+    "Math.min of two values above the cap": READ("Math.min(1e12, 2e12)"),
+    "Math.min of no arguments": READ("Math.min()"),
+    "Math.min beside a value that works out to nothing": READ("Math.min(20_000, Date.now())"),
+    "a helper that returns 0": READ("ms()", "const ms = () => 0;\n"),
+    "a helper that returns 20_000 or 0": READ("ms()", "function ms() { if (process.platform === \"win32\") { return 20_000; } return 0; }\n"),
+    "a helper that returns 1e12": READ("ms()", "function ms() { return 1e12; }\n"),
+    "a helper handed an argument": READ("ms(20_000)", "const ms = (n) => n;\n"),
+    "a helper with a parameter, handed nothing": READ("ms()", "const ms = (n = 20_000) => n;\n"),
+    "a helper that returns nothing": READ("ms()", "function ms() {}\n"),
+    "a helper with no parameters, handed an argument": READ("ms(1)", "function ms() { return 20_000; }\n"),
+    "a helper whose return works out to nothing, in a sum": READ("ms() + 20_000", "function ms() { return Date.now(); }\n"),
+    "a helper that can fall off its end": READ("ms()", "function ms() { if (process.platform === \"win32\") { return 20_000; } }\n"),
+    "a helper whose return is the branch of an if": READ("ms()", "function ms() { if (process.platform === \"win32\") return 20_000; }\n"),
+    "a helper whose only return is in a callback": READ("ms()", "function ms() { [1].forEach(() => { Date.now(); return 20_000; }); }\n"),
+    "a helper reassigned after its declaration": READ("ms()", "let ms = () => 20_000;\nms = () => 0;\n"),
+    "Math.min of a Math the module declares": READ("Math.min(20_000, 5_000)", "const Math = { min: () => 0 };\n"),
+    "Math.min of a Math parameter": MOD(`function f(Math) { return spawnSync("gh", ["x"], { timeout: Math.min(20_000, 5_000) }); }\nf({ min: () => 0 });`),
+    "ghBudget shadowed by a parameter": MOD(`${GH_BUDGET}function f(ghBudget) { return spawnSync("gh", ["x"], { timeout: ghBudget(20) }); }\nf(() => 0);`),
+    "funnel handed 0": MOD(`${FUNNEL}\nrun("gh", ["x"], 0);`),
+    "funnel handed null": MOD(`${FUNNEL}\nrun("gh", ["x"], null);`),
+    "funnel handed undefined": MOD(`${FUNNEL}\nrun("gh", ["x"], undefined);`),
+    "funnel handed Infinity": MOD(`${FUNNEL}\nrun("gh", ["x"], Infinity);`),
+    "funnel handed 1e12": MOD(`${FUNNEL}\nrun("gh", ["x"], 1e12);`),
+    "funnel handed no timeout": MOD(`${FUNNEL}\nrun("gh", ["x"]);`),
+    "funnel of a funnel handed 0": MOD(`${FUNNEL}\nfunction go(cmd, args, t) { return run(cmd, args, t); }\ngo("gh", ["x"], 0);`),
+    "funnel whose default is 1e12": MOD(`function run(cmd, args, timeoutMs = 1e12) { return spawnSync(cmd, args, { timeout: timeoutMs }); }\nrun("gh", ["x"]);`),
+    "funnel whose default is 0": MOD(`function run(cmd, args, timeoutMs = 0) { return spawnSync(cmd, args, { timeout: timeoutMs }); }\nrun("gh", ["x"]);`),
+    "funnel options without a timeoutMs key": MOD(`function run(cmd, args, { timeoutMs } = {}) { return spawnSync(cmd, args, { timeout: timeoutMs }); }\nrun("gh", ["x"], { cwd: "/" });`),
+    "funnel options left out": MOD(`function run(cmd, args, { timeoutMs } = {}) { return spawnSync(cmd, args, { timeout: timeoutMs }); }\nrun("gh", ["x"]);`),
+    "funnel timeoutMs key of 0": MOD(`function run(cmd, args, { timeoutMs } = {}) { return spawnSync(cmd, args, { timeout: timeoutMs }); }\nrun("gh", ["x"], { timeoutMs: 0 });`),
+    "funnel opts without a timeout": MOD(`async function tryRun(cmd, args, opts = {}) { return execFile(cmd, args, { ...opts }); }\nawait tryRun("gh", ["x"], { encoding: "utf8" });`, "execFile"),
+    "funnel opts with a timeout of 1e12": MOD(`async function tryRun(cmd, args, opts = {}) { return execFile(cmd, args, { ...opts }); }\nawait tryRun("gh", ["x"], { timeout: 1e12 });`, "execFile"),
+    "funnel imported from another file, handed 0": {
+      "common.mjs": MOD(FUNNEL).replace("function run", "export function run"),
+      "x.mjs": `import { run } from "./common.mjs";\nrun("gh", ["x"], 0);\n`,
+    },
+  };
+  for (const [name, src] of Object.entries(refused)) {
+    const sources = typeof src === "string" ? { "x.mjs": src } : src;
+    assert.deepEqual(reaching(sources), [false], `${name}: the environment plays no part`);
+    assert.deepEqual(outside(sources), [true], name);
+  }
+  // Every value is refused, not only the first: one caller handing 0 is
+  // refused beside another handing 20_000, the other call is not.
+  const two = MOD(`${FUNNEL}\nrun("gh", ["a"], 20_000);\nrun("gh", ["b"], 0);`);
+  assert.deepEqual(outside({ "x.mjs": two }), [false, true]);
+  const one = MOD(`function f(t) { return spawnSync("gh", ["x"], { timeout: t }); }\nf(20_000);\nf(0);`);
+  assert.deepEqual(outside({ "x.mjs": one }), [true]);
+  // The refusal says which: no value, one that works out to nothing, or one
+  // outside the range, the value named.
+  const why = (src) => sweep({ "x.mjs": src }).spawns[0].range;
+  assert.deepEqual(why(refused["timeout 1e12"]), [`takes a timeout that can be 1000000000000, outside 1 to ${CEILING_CAP}`]);
+  assert.deepEqual(why(refused["timeout 0"]), [`takes a timeout that can be 0, outside 1 to ${CEILING_CAP}`]);
+  assert.deepEqual(why(refused["a helper that returns 20_000 or 0"]), [`takes a timeout that can be 0, outside 1 to ${CEILING_CAP}`]);
+  assert.deepEqual(why(refused["Math.min(20_000, 0)"]), ["takes a timeout that does not work out to a number: Math.min(20_000, 0)"]);
+  assert.deepEqual(why(refused["funnel opts without a timeout"]), ["takes no timeout value"]);
+});
+
+// A value the evaluator cannot reduce counts as no number: the sweep fails
+// closed, as #4460 ruled for a ceiling. Each shape below is in range whatever
+// it chooses, and refused all the same until numbers() learns it.
+test("the sweep refuses a gh timeout it cannot work out to a number, though every value of it is in range", () => {
+  const unreduced = {
+    "a ternary of two numbers in range": MOD(`spawnSync("gh", ["x"], { timeout: process.platform === "win32" ? 60_000 : 20_000 });`),
+    "a ternary on an imported process": MOD(`import proc from "node:process";\nspawnSync("gh", ["x"], { timeout: proc.platform === "win32" ? 60_000 : 20_000 });`),
+    "a helper that calls itself": MOD(`function s() { return s() + 1; }\nspawnSync("gh", ["x"], { timeout: s() });`),
+    "a member read of a helper's returned literal": READ("cfg().ms", `const cfg = () => ({ ms: 20_000 });\n`),
+    "a plain value read in bracket form": READ(`CFG["ms"]`, `const CFG = { ms: 20_000 };\n`),
+    "a ceiling that is 0 in one of its values": MIN("CEIL", FLOORED, "let CEIL = 0;\nCEIL = 20_000;\n"),
+    "a parameter nobody hands a value": MOD(`export function read(n, { timeoutMs }) { return spawnSync("gh", ["x"], { timeout: timeoutMs }); }`),
+    "a shorthand parameter nobody hands a value": MOD(`function f(timeout) { return spawnSync("gh", ["x"], { encoding: "utf8", timeout }); }`),
+  };
+  for (const [name, src] of Object.entries(unreduced)) {
+    assert.deepEqual(reaching({ "x.mjs": src }), [false], `${name}: the environment plays no part`);
+    assert.deepEqual(outside({ "x.mjs": src }), [true], name);
+  }
 });
 
 test("the sweep names a child_process reach it cannot follow", () => {
