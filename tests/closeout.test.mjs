@@ -425,6 +425,20 @@ test("finish: the tick runs with the In-flight bound phase0.json records, and wi
   assert.deepEqual(bad.order(), []);
 });
 
+test("finish: merges the Close-out PR whatever the receipt's merge reads — a run whose merge bot is off closes out as any other", () => {
+  const orders = [];
+  for (const merge of [true, false]) {
+    const f = fixture();
+    writeFileSync(join(f.fleet, "phase0.json"), JSON.stringify({ inFlight: 4, merge }));
+    const r = f.run("finish", ["--reason", "wrap up"]);
+    assert.equal(r.status, 0, `merge ${merge}: ${r.err}${r.stdout}`);
+    assert.equal(f.calls("gh-merge").length, 1, `merge ${merge}: finish merges its own PR`);
+    assert.deepEqual(stepLines(r.out), FINISH_STEPS.map((n) => `closeout: ${n}: ok`), `merge ${merge}`);
+    orders.push(f.order());
+  }
+  assert.deepEqual(orders[1], orders[0], "the same calls in the same order");
+});
+
 test("finish: exits 3 and runs nothing after it unless the tick's last line is `ACTION: run over`", () => {
   for (const out of ["ACTION: dispatch\nACTION: HOLD (draining)\n", "ACTION: run over\nACTION: dispatch\n", ""]) {
     const f = fixture();

@@ -56,9 +56,9 @@ test("the tick block names the script and only the flags it still takes", () => 
 
 // The frontmatter is what a user sees when invoking the skill: its hint is the
 // invocation shape and its description must not state the retired sizing.
-test("the run-team frontmatter hints the in-flight and objective arguments and states no retired default", () => {
+test("the run-team frontmatter hints the in-flight, objective and merging arguments and states no retired default", () => {
   const front = RUN_TEAM.text.split("\n---\n")[0];
-  assert.match(front, /^argument-hint: "\[in-flight\] \[cost\|speed\]"$/m);
+  assert.match(front, /^argument-hint: "\[in-flight\] \[cost\|speed\] \[merge\|no-merge\]"$/m);
   assert.doesNotMatch(front, /default 2 and 6/);
 });
 
@@ -351,7 +351,7 @@ test("End of run follows the drain bullet and ends with finish, which records --
   assert.deepEqual(steps, [1, 2, 3], "End of run is one ordered list: begin, the loop, finish");
   assert.match(b, Pin.phrase("1. `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run fleet-event.mjs drain --reason \"<reason>\"` — runs `closeout.mjs begin --reason \"<reason>\"`"));
   assert.match(EVENT_HEADER, Pin.phrase("`closeout.mjs begin` drains (`ledger.mjs drain`), then releases every claim that never became a PR and settles each `impl-<N>=released`"));
-  assert.match(b, Pin.phrase("2. Act on the review, fix-applier and merge rows until the tick prints `ACTION: run over → fleet-heartbeat.mjs --stop \"<reason>\"`, which it does once the run is draining with no open PR and no live implementer."));
+  assert.match(b, Pin.phrase("2. Act on the review, fix-applier and merge rows until the tick prints `ACTION: run over → fleet-heartbeat.mjs --stop \"<reason>\"`, which it does once a draining run has no PR holding it and no live implementer."));
   assert.match(b, Pin.phrase("3. `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run closeout.mjs finish --reason \"<reason>\"`"));
   assert.match(b, Pin.phrase("which records `fleet-heartbeat.mjs --stop` and then merges the Close-out PR."));
   assert.match(b, Pin.phrase("On `NEED merge-wait PR #<n>`, run `finish` again at once. A PR it names `left open` is the next run's: you never label or merge it."));

@@ -163,7 +163,21 @@ The full text of each row `fleet-tick.mjs` prints and what it asks of the contro
   caller's. `transcript`/`session` resolve relative to `--repo` (defaults to
   the plugin's own root), and the check reads and writes the run's own ledger
   unless `--ledger` names another.
+  With merging off the In-flight hold reads `HOLD (in-flight <n>/<B>, awaiting
+  human merge)`: the merge that brings n below B is the maintainer's, and
+  a replacement the detail names is still yours to dispatch.
 - `AT CAP`, `IDLE OK` — nothing to do on that row.
+- `IDLE (merging off)` — the run's merge bot is off (`--no-merge`, which phase
+  0 records in its receipt as `merge: false`), so the merge-bot row prints it
+  whatever the queue holds and never `DISPATCH merge-bot`. Nothing to do on
+  that row: the maintainer merges what carries `ready-to-merge`. Such a PR
+  still counts toward the In-flight bound until then, a `CONFLICT PR#<M> …`
+  line still reaches a fix-applier, and `tick --apply` reaps, reclaims and
+  evicts once after each PR the run tracks that gh reads MERGED. A draining
+  run is over with only `ready-to-merge` PRs open; one that GitHub has not
+  read MERGEABLE (CONFLICTING, or UNKNOWN until it answers), one a conflict
+  hold stands on, and one a finisher, fix-applier or review is still at work
+  on each still hold it.
 - `MAIN-CHECKOUT-DIRTY <paths> …`, printed above the rows, with every
   dispatching row (implementers, reviewers, merge-bot) reading
   `HOLD (main checkout dirty)` — the main checkout changed since the Phase 0
@@ -299,6 +313,8 @@ a guess is the over- or under-dispatch it exists to prevent — so correct that
 row with `ledger.mjs row` and tick again. The In-flight bound defaults to 5
 and is fixed for the run: pass `--in-flight` on every tick when `$ARGUMENTS`
 set it, and never otherwise.
+Whether the merge bot merges is the phase-0 receipt's `merge`, `true` when it
+records none, and never a flag of the tick's.
 
 ## Refresh is the tick's
 

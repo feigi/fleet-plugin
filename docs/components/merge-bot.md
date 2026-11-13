@@ -11,7 +11,8 @@ lifetime is one **Pass**.
    *first* `ready-to-merge` label appears on any open PR — never
    waiting for the [Finisher](finisher.md)'s own report — to run
    [`plugin/commands/run-merge-bot.md`](../../plugin/commands/run-merge-bot.md)
-   for one Pass.
+   for one Pass. A run started with `no-merge` dispatches none: the
+   tick's merge-bot row reads `IDLE (merging off)` and the maintainer merges.
 2. **Drain the queue**, lowest PR# first, re-evaluating from the top
    after every merge (a merge invalidates every other open PR's CI
    currency).

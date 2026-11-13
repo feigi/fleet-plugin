@@ -2,9 +2,11 @@
 // after every step (its header gives the shape); this module is its readers'
 // half: the tick's dispatch gate, the session directory tier-check.mjs
 // and ticket-router.mjs take when their own flag is omitted, the Objective
-// ticket-router.mjs takes likewise, with its default, and the In-flight
-// bound the drivers hand the tick, with its default. One reading of the file,
-// so the gate and the session readers cannot disagree about what a receipt is.
+// ticket-router.mjs takes likewise, with its default, the In-flight
+// bound the drivers hand the tick, with its default, and whether the run's
+// merge bot merges, which the tick reads from the receipt alone. One reading
+// of the file, so the gate and the session readers cannot disagree about what
+// a receipt is.
 //
 // Zero deps: node builtins and sibling modules only.
 
@@ -162,6 +164,26 @@ export function objectiveFromReceipt(opts) {
     : read.state === "unreadable" ? `unreadable: ${read.why}`
     : "it records no objective";
   throw new Error(`no objective given and none in the phase-0 receipt ${path} (${why}) — give one (${OBJECTIVES.join(" or ")}), or run ${phase0Command(null)} first`);
+}
+
+// Whether a run's merge bot merges when nobody says: phase0.mjs records the
+// run's choice in its receipt as `merge`, and a receipt written before it
+// recorded one is read as the default when phase 0 resumes it.
+export const MERGE_DEFAULT = true;
+
+/**
+ * Whether the run's merge bot merges, read off `read` (readRunReceipt()'s
+ * `read`): the receipt's `merge`, and the default (on) when there is no
+ * receipt, it cannot be read, or it records none. With no usable receipt
+ * phase0Gate holds every dispatching row, so that default dispatches no bot.
+ * The tick reads this every pass, so it meets what a hand left in the file:
+ * a `merge` present but not a boolean reads as off, since a bot dispatched on
+ * a value nobody can read is the failure the switch exists to prevent, while
+ * a merge not made waits for the maintainer or a later run.
+ */
+export function mergingOf(read) {
+  if (read.state !== "ok" || read.receipt.merge === undefined) return MERGE_DEFAULT;
+  return read.receipt.merge === true;
 }
 
 // The In-flight bound a run takes when nobody gives one: the most tickets

@@ -20,7 +20,7 @@ const state = (over = {}) => ({
   heads: [], supply: 0, shortlistStatus: "ok", refresh: null, dropped: [], pulls: new Map(),
   reviewsLive: 0, fixLive: 0, fixDue: [], fixEscalate: [], reviewDue: [], unlabelled: [], conflicts: [], conflictEscalate: [],
   prClosed: [], prUnchecked: [],
-  mergeBotLive: 0, mergeQueue: 0, mergeHeld: 0, mergeParked: [],
+  mergeBotLive: 0, mergeQueue: 0, mergeHeld: 0, mergeParked: [], merging: true,
   mainCheckout: { state: "clean" }, phase0: { held: false, line: null, session: null },
   ...over,
 });
@@ -91,6 +91,23 @@ test("implementers: HOLD (in-flight n/B) whenever n ≥ B — the wording, n/B o
   assert.equal(row(state({ bound: 5, inFlight: 4, heads: [1] }), "implementers").action, "PULL #1 — pull.mjs next --head 1", "one below the bound still pulls");
   assert.equal(formatLines(reconcile(state({ inFlight: 7, inFlightImpl: 2, inFlightPrs: 5, heads: [4, 5, 6], supply: 57 })))[0],
     "implementers 7/5 → HOLD (in-flight 7/5)   (implementers=2 prs=5 unclaimed=3 supply=57)");
+});
+
+test("implementers: with merging off the in-flight hold says it awaits the maintainer's merge, quiet or owing a replacement, and below the bound it still pulls", () => {
+  for (const [bound, inFlight] of [[1, 1], [5, 5], [5, 7]]) {
+    const r = row(state({ bound, inFlight, heads: [1], merging: false }), "implementers");
+    assert.equal(r.action, `HOLD (in-flight ${inFlight}/${bound}, awaiting human merge)`);
+    assert.equal(r.acts, false);
+  }
+  const owed = row(state({ inFlight: 5, owedCounted: ["impl-7"], implNames: ["impl-7"], merging: false }), "implementers");
+  assert.equal(owed.action, "HOLD (in-flight 5/5, awaiting human merge)");
+  assert.equal(owed.acts, true, "a replacement owed is still the controller's move");
+  assert.match(owed.detail, / — dispatch impl-7-b at its row's tier$/);
+  assert.equal(row(state({ inFlight: 4, heads: [1], merging: false }), "implementers").action, "PULL #1 — pull.mjs next --head 1");
+  // Another hold's wording is not changed by the switch.
+  assert.equal(row(state({ inFlight: 5, heads: [1], draining: "x", merging: false }), "implementers").action, "HOLD (draining)");
+  // With merging on, the hold reads as it always did.
+  assert.equal(row(state({ inFlight: 5, heads: [1], merging: true }), "implementers").action, "HOLD (in-flight 5/5)");
 });
 
 test("implementers: the in-flight hold ranks below the overlays, draining and both tier holds — and the tier holds stay actionable", () => {
@@ -355,6 +372,30 @@ test("merge-bot: never a second bot, an empty queue is idle, a fully held queue 
   assert.equal(held.action, "HOLD");
   assert.equal(held.acts, false);
   assert.equal(row(state({ mergeQueue: 3, mergeHeld: 2 }), "merge-bot").action, "DISPATCH merge-bot");
+});
+
+test("merge-bot: with merging off the row is IDLE (merging off) whatever the queue holds, and never dispatches", () => {
+  for (const queue of [{}, { mergeQueue: 3 }, { mergeQueue: 2, mergeHeld: 2 }, { mergeQueue: 1, mergeParked: [{ pr: 40, reason: "main-gain-removed:tests/gate.test.mjs" }] }, { mergeQueue: 9, mergeBotLive: 1 }]) {
+    const r = row(state({ ...queue, merging: false }), "merge-bot");
+    assert.equal(r.action, "IDLE (merging off)", JSON.stringify(queue));
+    assert.equal(r.acts, false);
+    assert.equal(`${r.actual}/${r.target}`, `${queue.mergeBotLive ?? 0}/1`);
+  }
+  // The same queues with merging on read as they always did.
+  assert.equal(row(state({ mergeQueue: 3, merging: true }), "merge-bot").action, "DISPATCH merge-bot");
+  assert.equal(row(state({ mergeQueue: 0, merging: true }), "merge-bot").action, "IDLE OK");
+  assert.equal(row(state({ mergeQueue: 2, mergeHeld: 2, merging: true }), "merge-bot").action, "HOLD");
+});
+
+test("merge-bot: a state that names no merging reads as off, so a caller that forgot it never dispatches a bot", () => {
+  const { merging, ...forgot } = state({ mergeQueue: 3 });
+  assert.equal(merging, true);
+  assert.equal(row(forgot, "merge-bot").action, "IDLE (merging off)");
+});
+
+test("merge-bot: the dispatch holds outrank the merging-off idle, as they outrank every row", () => {
+  const r = row(state({ mergeQueue: 3, merging: false, phase0: { held: true, line: "x", session: null } }), "merge-bot");
+  assert.equal(r.action, "HOLD (phase 0 incomplete)");
 });
 
 // #3608: a PR the merge bot refused on a main-gain hit is parked until a human
@@ -4254,6 +4295,93 @@ test("CLI --apply: only a merge bot settled `done` is a merge pass to reap after
   assert.doesNotMatch(none.stdout, /APPLIED/);
 });
 
+// A run whose merge bot is off: the receipt's `merge`, which the tick reads from
+// there and from no flag of its own.
+const withMerge = (merge) => (receipt) => ({ ...receipt, merge });
+// The maintainer merges such a run's PRs, so a PR its ledger tracks that gh reads
+// MERGED owes the reap, reclaim and evict a merge pass owes otherwise.
+const HAND = (rows, dispatched, extra = {}) => ({
+  ledger: { rows, dispatched }, shortlist: shortlistText([7, 8]), beforeRun: controllerRecord(), phase0: withMerge(false), ...extra,
+});
+const TICKET_7 = "#6 impl-6=PR#7 → PR#7 · tier-ok=impl-6:fleet-implementer";
+const TICKET_8 = "#9 impl-9=PR#8 → PR#8 · tier-ok=impl-9:fleet-implementer";
+const mergedPrs = (states) => (repo) => writeFileSync(join(repo, "..", "pr-states.json"), JSON.stringify(states));
+
+test("CLI --apply: merge false — a tracked PR newly MERGED runs reap, reclaim and evict once, and each later merge once more", () => {
+  const { ticks: [one, two, three, four] } = applyTicks(HAND([TICKET_7], ["impl-6=PR#7"], { prStates: { 7: "MERGED" } }), [APPLY, APPLY, {
+    ...APPLY,
+    before: (repo) => {
+      writeFileSync(join(repo, ".fleet", "ledger.md"), ledgerText({ rows: [TICKET_7, TICKET_8], dispatched: ["impl-6=PR#7", "impl-9=PR#8"] }));
+      mergedPrs({ 7: "MERGED", 8: "MERGED" })(repo);
+    },
+  }, APPLY]);
+  for (const t of [one, two, three, four]) assert.equal(t.status, 0, t.stderr);
+  assert.deepEqual(one.calls.map((c) => (isReclaim(c) ? "reclaim" : c)), [REAP_CALL, "reclaim", EVICT_CALL]);
+  assert.match(one.stdout, /^APPLIED reap after PR#7: reaped 2, kept 1, worktreesRemoved 1$/m);
+  assert.deepEqual(one.applied, { run: CONTROLLER_AT, reapAfter: [], reapAfterPrs: [7] });
+  assert.deepEqual(two.calls, [], "the next tick ran them again for a merge it had reaped after");
+  assert.doesNotMatch(two.stdout, /APPLIED/);
+  assert.deepEqual(two.applied, { run: CONTROLLER_AT, reapAfter: [], reapAfterPrs: [7] });
+  assert.match(three.stdout, /^APPLIED reap after PR#8: /m, "only the merge not yet reaped after");
+  assert.equal(three.calls.length, 3, JSON.stringify(three.calls));
+  assert.deepEqual(three.applied, { run: CONTROLLER_AT, reapAfter: [], reapAfterPrs: [7, 8] });
+  assert.deepEqual(four.calls, []);
+});
+
+test("CLI --apply: merge false — a PR the run has not seen merged owes nothing: open, CLOSED, or the state unread", () => {
+  const open = applyTicks(HAND([TICKET_7], ["impl-6=PR#7"], { prs: [pr(7, ["ready-to-merge"], [6]) ], prStates: { 7: "OPEN" } }), [APPLY]).ticks[0];
+  assert.equal(open.status, 0, open.stderr);
+  assert.deepEqual(open.calls, [], "an open PR");
+  const closed = applyTicks(HAND([TICKET_7], ["impl-6=PR#7"], { prStates: { 7: "CLOSED" } }), [APPLY]).ticks[0];
+  assert.equal(closed.status, 0, closed.stderr);
+  assert.deepEqual(closed.calls, [], "a PR closed unmerged");
+  assert.equal(closed.applied, undefined);
+  // An unanswered probe leaves it unread, and the next tick asks again.
+  const unread = applyTicks(HAND([TICKET_7], ["impl-6=PR#7"], { prStates: {} }), [APPLY, { ...APPLY, before: mergedPrs({ 7: "MERGED" }) }]);
+  assert.deepEqual(unread.ticks[0].calls, []);
+  // PR#7 is keyed and tracked both, so the disclosure names both what stands and the reap that waits.
+  assert.match(unread.ticks[0].stderr, /gave no answer for PR#7 \(.*\) — #6's PR#7 unconfirmed closed, printed as pr-unchecked; PR#7 unconfirmed merged, its reap waits$/m);
+  assert.equal(unread.ticks[1].calls.length, 3, "the merge read on the next tick owes its reap");
+  assert.deepEqual(unread.ticks[1].applied, { run: CONTROLLER_AT, reapAfter: [], reapAfterPrs: [7] });
+});
+
+test("CLI --apply: merge false — a merge by hand of a PR the run did not open (a fold-in row) owes the reap too, only --apply asks gh about it, and never while the open list carries it", () => {
+  const fold = HAND(["#11 PR#11 · inherited (closes no issue)"], [], { prStates: { 11: "MERGED" } });
+  const plain = runCli([], fold);
+  assert.equal(plain.status, 0, plain.stderr);
+  assert.deepEqual(plain.graphqlCalls, [], "a tick without --apply asked gh about a PR no row keys");
+  const open = runCli(["--apply"], HAND(["#11 PR#11 · inherited (closes no issue)"], [], { prs: [pr(11, ["ready-to-merge"], [])], prStates: { 11: "OPEN" } }));
+  assert.equal(open.status, 0, open.stderr);
+  assert.deepEqual(open.graphqlCalls, [], "--apply asked gh about a PR the open list carries");
+  const { ticks: [one, two] } = applyTicks(fold, [APPLY, APPLY]);
+  assert.equal(one.status, 0, one.stderr);
+  assert.match(one.stdout, /^APPLIED reap after PR#11: /m);
+  assert.deepEqual(one.applied, { run: CONTROLLER_AT, reapAfter: [], reapAfterPrs: [11] });
+  assert.deepEqual(two.calls, []);
+});
+
+test("CLI --apply: merge true or no merge recorded — a PR merged by hand owes no reap, as before", () => {
+  for (const [what, phase0] of [["merge true", withMerge(true)], ["no merge recorded", (receipt) => receipt]]) {
+    const r = applyTicks(HAND([TICKET_7, "#11 PR#11 · inherited (closes no issue)"], ["impl-6=PR#7"], { phase0, prStates: { 7: "MERGED", 11: "MERGED" } }), [APPLY]).ticks[0];
+    assert.equal(r.status, 0, `${what}: ${r.stderr}`);
+    assert.deepEqual(r.calls, [], what);
+    assert.equal(r.applied, undefined, what);
+  }
+});
+
+test("CLI --apply: merge false — a failed reap, reclaim or evict records no PR and the next tick retries; a list of another run's names nothing", () => {
+  const { ticks: [one, two] } = applyTicks(HAND([TICKET_7], ["impl-6=PR#7"], { prStates: { 7: "MERGED" } }), [{ ...APPLY, env: { REAP_FAIL: "1" } }, APPLY]);
+  assert.match(one.stdout, /^APPLY FAILED reap: /m);
+  assert.equal(one.applied, undefined, "a failed reap recorded PR#7");
+  assert.equal(two.calls.length, 3, JSON.stringify(two.calls));
+  assert.deepEqual(two.applied, { run: CONTROLLER_AT, reapAfter: [], reapAfterPrs: [7] });
+  const other = applyTicks(HAND([TICKET_7], ["impl-6=PR#7"], { prStates: { 7: "MERGED" }, beforeRun: withApplied({ run: 1_700_000_000_000, reapAfter: [], reapAfterPrs: [7] }) }), [APPLY]).ticks[0];
+  assert.equal(other.calls.length, 3, "another run's PR#7 stood in for this run's");
+  const same = applyTicks(HAND([TICKET_7], ["impl-6=PR#7"], { prStates: { 7: "MERGED" }, beforeRun: withApplied({ run: CONTROLLER_AT, reapAfter: [], reapAfterPrs: [7] }) }), [APPLY]).ticks[0];
+  assert.deepEqual(same.calls, []);
+  assert.deepEqual(same.applied, { run: CONTROLLER_AT, reapAfter: [], reapAfterPrs: [7] });
+});
+
 test("CLI --apply: a state file the reap left unreadable is not written over", () => {
   const { ticks: [one] } = applyTicks(MERGED(["merge-bot-1=done"]), [{ ...APPLY, env: { REAP_CORRUPT: "1" } }]);
   assert.equal(one.status, 0, one.stderr);
@@ -4979,6 +5107,81 @@ test("CLI: a draining run with no open PR and no live implementer ends on the ru
     assert.equal(last(r), `ACTION: run over → fleet-heartbeat.mjs --stop "<reason>"`);
   }
   assert.equal(JSON.parse(readFileSync(path, "utf8")).quiet, 0);
+});
+
+test("CLI: receipt merge false — the merge-bot row is IDLE (merging off) with a PR labelled, and a true or silent receipt dispatches as ever", () => {
+  const labelled = { ...IDLE, prs: [pr(60, ["ready-to-merge"])] };
+  const off = runCli([], { ...labelled, phase0: withMerge(false) });
+  assert.equal(off.status, 0, off.stderr);
+  assert.match(off.stdout, /^merge-bot {4}0\/1 → IDLE \(merging off\) {3}\(merge-queue=1 held=0\)$/m);
+  assert.doesNotMatch(off.stdout, /DISPATCH merge-bot/);
+  for (const [what, phase0] of [["merge true", withMerge(true)], ["a receipt that records no merge", (receipt) => receipt]]) {
+    const on = runCli([], { ...labelled, phase0 });
+    assert.equal(on.status, 0, `${what}: ${on.stderr}`);
+    assert.match(on.stdout, /^merge-bot {4}0\/1 → DISPATCH merge-bot {3}\(merge-queue=1 held=0\)$/m, what);
+  }
+  // A merge that is not a boolean is never read as on.
+  for (const merge of ["true", "no-merge", 1, null]) {
+    const r = runCli([], { ...labelled, phase0: withMerge(merge) });
+    assert.equal(r.status, 0, `${JSON.stringify(merge)}: ${r.stderr}`);
+    assert.match(r.stdout, /^merge-bot {4}0\/1 → IDLE \(merging off\)/m, JSON.stringify(merge));
+  }
+});
+
+test("CLI: the tick takes no merging flag — a forgotten argument can never be what turns the bot on or off", () => {
+  for (const flag of ["--merge", "--no-merge"]) {
+    const r = runCli([flag], { ...IDLE, prs: [pr(60, ["ready-to-merge"])], phase0: withMerge(false) });
+    assert.equal(r.status, 2, `${flag}: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, new RegExp(`${flag}`));
+    assert.doesNotMatch(r.stdout, /DISPATCH merge-bot/);
+  }
+});
+
+test("CLI: receipt merge false, bound reached — the implementer row reads HOLD (in-flight n/B, awaiting human merge), and a merge true receipt keeps the old wording", () => {
+  const full = { ...IDLE, shortlist: shortlistText([7, 8]), prs: [pr(61, ["ready-to-merge"]), pr(62, ["ready-to-merge"])] };
+  const off = runCli(["--in-flight", "2"], { ...full, phase0: withMerge(false) });
+  assert.equal(off.status, 0, off.stderr);
+  assert.match(off.stdout, /^implementers 2\/2 → HOLD \(in-flight 2\/2, awaiting human merge\) {3}\(/m);
+  assert.doesNotMatch(off.stdout, /PULL/);
+  const on = runCli(["--in-flight", "2"], { ...full, phase0: withMerge(true) });
+  assert.match(on.stdout, /^implementers 2\/2 → HOLD \(in-flight 2\/2\) {3}\(/m);
+});
+
+test("CLI: receipt merge false — a draining run with only ready-to-merge PRs open is over; any other open PR holds it, and so does a labelled one in conflict, not yet read MERGEABLE, or still worked", () => {
+  const settled = { rows: ["#5 impl-5=PR#9 · tier-ok=impl-5:fleet-implementer"], dispatched: ["impl-5=PR#9"] };
+  const drained = { ...IDLE, ledger: { ...settled, drain: "budget" } };
+  const last = (r) => r.stdout.trimEnd().split("\n").at(-1);
+  const OVER = `ACTION: run over → fleet-heartbeat.mjs --stop "<reason>"`;
+  const labelled = pr(9, ["ready-to-merge"]);
+  const tick = (opts) => {
+    const r = runCli([], { ...drained, ...opts });
+    assert.equal(r.status, 0, r.stderr);
+    return r;
+  };
+  const off = { phase0: withMerge(false) };
+  assert.equal(last(tick({ ...off, prs: [labelled] })), OVER);
+  assert.equal(last(tick({ ...off, prs: [labelled], ledger: { rows: [`${settled.rows[0]} · finisher-pr-9=labelled`], dispatched: [...settled.dispatched, "finisher-pr-9=labelled"], drain: "budget" } })), OVER, "a finisher settled on it");
+  const worked = (token) => ({ ...off, prs: [labelled], ledger: { rows: [`${settled.rows[0]} · ${token}`], dispatched: token.startsWith("review=") ? settled.dispatched : [...settled.dispatched, token], drain: "budget" } });
+  const holds = {
+    "an unlabelled PR beside it": { ...off, prs: [labelled, pr(10)] },
+    "an unlabelled PR alone": { ...off, prs: [pr(9)] },
+    "a PR carrying some other label": { ...off, prs: [pr(9, ["bug"])] },
+    "a labelled PR GitHub reads CONFLICTING": { ...off, prs: [pr(9, ["ready-to-merge"], undefined, HEAD_B, "CONFLICTING")] },
+    "a labelled PR on a conflict hold": { ...off, prs: [labelled], ledger: { ...settled, rows: [`${settled.rows[0]} conflict-hold:#9`], drain: "budget" } },
+    "a labelled PR GitHub has not read yet (UNKNOWN)": { ...off, prs: [pr(9, ["ready-to-merge"], undefined, HEAD_B, "UNKNOWN")] },
+    "a finisher live on the labelled PR": worked("finisher-pr-9"),
+    "a fix-applier live on the labelled PR": worked("fix-pr-9"),
+    "a review in flight on the labelled PR": worked("review=member:review-pr-9"),
+    "a live implementer": { ...off, prs: [labelled], ledger: { rows: ["#5 impl-5 · tier-ok=impl-5:fleet-implementer"], dispatched: ["impl-5"], drain: "budget" } },
+    "no drain marker": { ...off, prs: [labelled], ledger: settled },
+    "the Label map's other string for the role": { ...off, prs: [labelled], labelMap: { roles: { "ready-to-merge": "queue-ok" } } },
+  };
+  for (const [what, opts] of Object.entries(holds)) assert.doesNotMatch(tick(opts).stdout, /run over/, what);
+  assert.equal(last(tick({ ...off, prs: [pr(9, ["queue-ok"])], labelMap: { roles: { "ready-to-merge": "queue-ok" } } })), OVER, "the role's string, as the Label map gives it");
+  // With merging on, or no word on it, the labelled PR alone still holds the run open.
+  for (const [what, phase0] of [["merge true", withMerge(true)], ["no merge recorded", (receipt) => receipt], ["no receipt", false]]) {
+    assert.doesNotMatch(tick({ prs: [labelled], phase0 }).stdout, /run over/, what);
+  }
 });
 
 test("CLI: a record whose controller cannot be judged keeps today's wording and says why on stderr", (t) => {

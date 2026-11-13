@@ -545,8 +545,17 @@ _Avoid_: WIP, open work, backlog
 **In-flight bound**:
 The most tickets a run lets be In flight at once — fixed for the run, set by
 `/run-team`'s in-flight argument. Reaching it holds every Pull until a merge brings the
-count below it; reviewers, finishers and the merge bot never slow for it.
+count below it; reviewers, finishers and the merge bot never slow for it. Under
+`no-merge` the merge that frees a slot is the maintainer's.
 _Avoid_: WIP limit, PR cap, throttle, backpressure, implementer cap, reviewer cap
+
+**Merging**:
+Whether a run's merge bot merges: set by `/run-team`'s `merge|no-merge` argument,
+`merge` by default, and fixed for the run. With `no-merge` the fleet takes each PR as far
+as `ready-to-merge` and the maintainer merges it; the merge bot is the only thing it
+switches off — `closeout.mjs finish` still merges the Close-out PR, and a
+`/run-merge-bot` the maintainer invokes still merges.
+_Avoid_: auto-merge (GitHub's `--auto`, which the plugin never uses)
 
 **Pass**:
 One merge bot's lifetime: dispatched on the first `ready-to-merge` label, it merges

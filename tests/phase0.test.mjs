@@ -1285,6 +1285,75 @@ test("a resumed receipt recording a value that is not an objective exits 3 namin
   }
 });
 
+test("merging: --no-merge records merge false, --merge and no argument record merge true", () => {
+  for (const [args, merge] of [[["--no-merge"], false], [["--merge"], true], [[], true]]) {
+    const f = fixture();
+    const r = f.run(["--session", f.session, ...args]);
+    assert.equal(r.status, 0, `${args.join(" ")}: ${r.stdout}${r.err}`);
+    assert.strictEqual(f.receipt().merge, merge, args.join(" "));
+  }
+});
+
+test("merging: --merge and --no-merge together are refused as alternatives, before a step runs", () => {
+  const f = fixture();
+  refuses(f, ["--session", f.session, "--merge", "--no-merge"], /--merge and --no-merge are alternatives, not a pair/);
+  refuses(f, ["--session", f.session, "--no-merge=1"], /boolean flag/);
+});
+
+test("a resume keeps the receipt's merge, takes a receipt that records none as merge, and refuses the other value, naming both", () => {
+  const resumed = (merge, args = []) => {
+    const f = fixture();
+    f.setRecord(RUN_AT);
+    f.setReceipt(stale(f, merge === undefined ? {} : { merge }));
+    return { f, r: f.run(["--session", f.session, ...args]) };
+  };
+  for (const [merge, args, kept] of [
+    [false, [], false], [false, ["--no-merge"], false],
+    [true, [], true], [true, ["--merge"], true],
+    [undefined, [], true], [undefined, ["--merge"], true],
+  ]) {
+    const { f, r } = resumed(merge, args);
+    assert.equal(r.status, 0, `${merge} ${args.join(" ")}: ${r.stdout}${r.err}`);
+    assert.strictEqual(f.receipt().merge, kept, `${merge} ${args.join(" ")}`);
+    assert.equal(f.calls("rotate").length, 0, "it resumed");
+  }
+  for (const [merge, args, flag, recorded, other] of [
+    [false, ["--merge"], "--merge", "no-merge", "--no-merge"],
+    [true, ["--no-merge"], "--no-merge", "merge", "--merge"],
+    [undefined, ["--no-merge"], "--no-merge", "merge", "--merge"],
+  ]) {
+    const { f, r } = resumed(merge, args);
+    const before = JSON.stringify(stale(f, merge === undefined ? {} : { merge }));
+    assert.equal(r.status, 2, r.stdout + r.err);
+    assert.match(r.err, new RegExp(`${flag}: this run's receipt \\S+ records ${recorded}, fixed for the run — run phase 0 again without ${flag}, or with ${other}`));
+    assert.equal(readFileSync(f.receiptPath, "utf8"), before, "the receipt is left as it was");
+    assert.equal(f.calls("rotate").length, 0);
+  }
+  // A receipt that does not resume is the previous run's: its merge binds nothing.
+  const f = fixture();
+  f.setRecord(RUN_AT);
+  f.setReceipt(stale(f, { run: RUN_AT - 5, merge: false }));
+  assert.equal(f.run(["--session", f.session, "--merge"]).status, 0);
+  assert.strictEqual(f.receipt().merge, true);
+});
+
+test("a resumed receipt recording a merge that is not a boolean exits 3 naming it, and is never read as merge", () => {
+  for (const merge of ["no-merge", "false", 0, null]) {
+    for (const args of [[], ["--merge"], ["--no-merge"]]) {
+      const f = fixture();
+      f.setRecord(RUN_AT);
+      f.setReceipt(stale(f, { merge }));
+      const before = readFileSync(f.receiptPath, "utf8");
+      const r = f.run(["--session", f.session, ...args]);
+      const label = `${JSON.stringify(merge)} ${args.join(" ")}`;
+      assert.equal(r.status, 3, `${label}: ${r.stdout}${r.err}`);
+      assert.ok(r.err.includes(`records merge ${JSON.stringify(merge)}, which is not true or false`), `${label}: ${r.err}`);
+      assert.equal(readFileSync(f.receiptPath, "utf8"), before, `${label}: the receipt is left as it was`);
+      assert.equal(f.calls("rotate").length, 0, label);
+    }
+  }
+});
+
 test("a same-session run after `closeout.mjs finish` starts at alarm and rotates again, and skips nothing as done earlier", () => {
   const f = fixture({ spec: true });
   assert.equal(f.run().status, 0);

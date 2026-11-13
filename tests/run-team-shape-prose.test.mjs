@@ -319,6 +319,7 @@ const ROW_NAMES = [
   "`ESCALATE pr-closed #<N> PR#<M>`, `… pr-unchecked …`",
   "`HOLD (…)`",
   "`AT CAP`, `IDLE OK`",
+  "`IDLE (merging off)`",
   "`MAIN-CHECKOUT-DIRTY …`",
   "`MAIN-CHECKOUT-UNKNOWN …`",
   "`MAIN-CHECKOUT-NO-BASELINE …`",
@@ -644,18 +645,24 @@ const CHANGED = [
     "The beat leaves a dated mark on every call, so a run that dies abruptly (a crashed harness, a closed terminal, an OOM kill) is detected by its mark going stale."
   ],
   // `/run-team` takes a second optional argument, the run's Objective, which
-  // phase 0 takes as `--objective`.
+  // phase 0 takes as `--objective`, and a third, Merging, which it takes as
+  // `--merge` or `--no-merge`: the merge bot is at most one, and none under
+  // `no-merge`.
   [
     "argument-hint: \"[in-flight]\" disable-model-invocation: true ---",
-    "argument-hint: \"[in-flight] [cost|speed]\" disable-model-invocation: true ---",
+    "argument-hint: \"[in-flight] [cost|speed] [merge|no-merge]\" disable-model-invocation: true ---",
   ],
   [
     "`$ARGUMENTS` = `[in-flight]`, optional, one positive integer, default 5: the In-flight bound, the most tickets between Claim and merge at once.",
-    "`$ARGUMENTS` = `[in-flight] [cost|speed]`, both optional: the In-flight bound, a positive integer, default 5, and the Objective, default `cost`.",
+    "`$ARGUMENTS` = `[in-flight] [cost|speed] [merge|no-merge]`, all optional: the In-flight bound, a positive integer, default 5, the Objective, default `cost`, and Merging, default `merge`.",
+  ],
+  [
+    "Merge bot is at most one, not configurable.",
+    "Merge bot is at most one, none under `no-merge`.",
   ],
   [
     "Add `--in-flight <n>` when `$ARGUMENTS` gave one, `--plugin-checkout <dir>` when this workspace tracks no `plugin/…` of its own, `--spend-dir <dir>` to name the directory the cockpit's spend panel reads, and `--workflow <name>` or `--declare-no-ci` when the repository has no workflow named CI.",
-    "Add `--in-flight <n>` and `--objective <o>` as `$ARGUMENTS` gave them, `--spend-dir <dir>` for the spend panel, and `--workflow <name>` or `--declare-no-ci` when the repository has no workflow named CI.",
+    "Add `--in-flight <n>`, `--objective <o>` and `--merge` or `--no-merge` as `$ARGUMENTS` gave them, `--spend-dir <dir>` for the spend panel, and `--workflow <name>` or `--declare-no-ci` when the repository has no workflow named CI.",
   ],
   // The instrument pin certifies the Install root, and phase 0 lost its
   // `--plugin-checkout` flag with the `--audit` it passed through (#3845).

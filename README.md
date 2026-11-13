@@ -66,11 +66,13 @@ Before a repository's first run, set it up as
 labels (§2.4), its `.gitignore` (§2.5) and its GitHub settings (§2.6).
 
 Start a fleet run over the `ready-for-agent` queue — implementers and reviewers
-(one optional argument, the In-flight bound, default 5), plus one
-non-configurable merge bot:
+(optional arguments: the In-flight bound, default 5; the Objective, `cost` or
+`speed`, default `cost`; and Merging, `merge` or `no-merge`, default `merge`),
+plus one merge bot, which `no-merge` leaves out so that the maintainer merges
+each PR the fleet takes as far as `ready-to-merge`:
 
 ```
-/skill:run-team [in-flight]
+/skill:run-team [in-flight] [cost|speed] [merge|no-merge]
 ```
 
 `run-team` is invoke-only: the model never starts it. In the `/` picker, type

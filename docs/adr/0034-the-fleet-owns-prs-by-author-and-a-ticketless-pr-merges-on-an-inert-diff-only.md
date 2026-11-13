@@ -1,6 +1,6 @@
 # 0034 — The fleet owns the PRs its login authored; a Ticketless PR merges unattended only on an Inert diff
 
-**Status:** Accepted. Ruled 2026-10-25 on #3748 by the maintainer, in a grilling session over three rounds, against anchors measured on origin/main `41f96f6c`. Sequenced after #3747, whose Inert diff verdict it consumes.
+**Status:** Accepted. Ruled 2026-10-25 on #3748 by the maintainer, in a grilling session over three rounds, against anchors measured on origin/main `41f96f6c`. Sequenced after #3747, whose Inert diff verdict it consumes. Amended by #4471: under no-merge a ready-to-merge PR no longer holds a draining run open (decision 5).
 
 ## Context
 

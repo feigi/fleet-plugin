@@ -1,7 +1,7 @@
 ---
 name: run-team
 description: Run an agent fleet — implementers, reviewers, one merge bot — over the ready-for-agent queue. Invoke-only; the fleet writes to a live repo and must never start unasked.
-argument-hint: "[in-flight] [cost|speed]"
+argument-hint: "[in-flight] [cost|speed] [merge|no-merge]"
 disable-model-invocation: true
 ---
 
@@ -10,9 +10,8 @@ Label names in this file are roles; the Label map gives the string to type; a me
 Run `next-ticket`, `review-and-fix`, `run-merge-bot` as one fleet. You are the
 **controller**, in the main thread, never a member.
 
-`$ARGUMENTS` = `[in-flight] [cost|speed]`, both optional: the In-flight bound,
-a positive integer, default 5, and the Objective, default `cost`.
-Merge bot is at most one, not configurable.
+`$ARGUMENTS` = `[in-flight] [cost|speed] [merge|no-merge]`, all optional: the In-flight bound, a positive integer, default 5, the Objective, default `cost`, and Merging, default `merge`.
+Merge bot is at most one, none under `no-merge`.
 
 A rule ending `See references/<file>` keeps its war story there, read only for the *why*; a rule without that line carries its reasoning inline.
 
@@ -40,8 +39,8 @@ Nothing in this phase, or in any later one, asks the maintainer which tickets to
 0. **Once per run, before anything else.** Run phase 0 from a Python eval
    cell in this main checkout, without `--session`:
    `subprocess.run([os.path.expanduser("~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run"),
-   "phase0.mjs", …], stderr=subprocess.STDOUT)`. Add `--in-flight <n>` and
-   `--objective <o>` as `$ARGUMENTS` gave them, `--spend-dir <dir>` for the
+   "phase0.mjs", …], stderr=subprocess.STDOUT)`. Add `--in-flight <n>`,
+   `--objective <o>` and `--merge` or `--no-merge` as `$ARGUMENTS` gave them, `--spend-dir <dir>` for the
    spend panel, and `--workflow <name>` or `--declare-no-ci`
    when the repository has no workflow named CI. Its steps and receipt: See
    references/phase-0.md. Dispatch nothing before it exits 0. Exit 4 is a
@@ -167,8 +166,7 @@ owes beyond its call:
   on `DISPATCH merge-bot` dispatch the next `merge-bot-<n>` (**The merge bot**).
   **You own the watcher, not the bot.** Arm one yourself,
   `persistent: true`, seeded before the loop so handled PRs do not re-fire.
-  **One rebase per PR, at merge time.** Any behind-count you hand a bot is
-  expired on arrival; say so. See references/ci-and-staleness.md.
+  Under `no-merge` arm none. See references/ci-and-staleness.md.
 - **Merge-bot pass reports done** → `fleet-event.mjs merge-bot-report merge-bot-<n>`. A label that
   landed at the last moment reads `DISPATCH
   merge-bot` again: dispatch the next bot straight away. A conflict needs no
@@ -195,7 +193,7 @@ owes beyond its call:
      release the rest by hand and run `begin` again.
   2. Act on the review, fix-applier and merge rows until the tick prints
      `ACTION: run over → fleet-heartbeat.mjs --stop "<reason>"`, which it does
-     once the run is draining with no open PR and no live implementer.
+     once a draining run has no PR holding it and no live implementer.
   3. `~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run closeout.mjs finish --reason "<reason>"`, which
      records `fleet-heartbeat.mjs --stop` and then merges the Close-out PR. On `NEED merge-wait PR #<n>`,
      run `finish` again at once. A PR it names `left open` is the next run's: you never label or merge it.
@@ -381,7 +379,7 @@ It prints `actual/target` and a named ACTION per role. Act on each line as it re
 - `specs-dropped=#<N> …` — never actionable: log those tickets as specs awaiting to-tickets, not as no work.
 - `DISPATCH fix-pr PR#<M> …` — a fix-applier for that PR (review findings, a dispositions mismatch no retry has answered, or a conflict hold): render its brief with `dispatch-prompt.mjs render fix-applier --kind <kind>`, `ledger.mjs dispatch <M> fix-pr-<M>` (the next suffix when that name is already on record), then the `task` call.
 - `DISPATCH review PR#<M> …` — a review per PR, oldest first, off your turn: record `review=member:review-pr-<M>` with `ledger.mjs review <M> …`, then dispatch `review-pr-<M>`.
-- `DISPATCH merge-bot` — the next `merge-bot-<n>`: render its brief with `dispatch-prompt.mjs render merge-bot --member merge-bot-<n> …`, `ledger.mjs dispatch merge-bot`, then the `task` call.
+- `DISPATCH merge-bot` — the next `merge-bot-<n>` (**The merge bot**).
 - `DISPATCH finisher PR#<M> …` — a finisher settled `labelled` with no label on the PR and no `label-off=` to account for it: apply the finisher gate, render the next-suffix finisher's brief with `dispatch-prompt.mjs render finisher --kind repair --member finisher-pr-<M>-<x> …`, `ledger.mjs dispatch <M> finisher-pr-<M>-<x>`, and never add the label yourself.
 - `ESCALATE unlabelled PR#<M> …` — a second finisher settled `labelled` and the label is still off: not actionable, the maintainer's.
 - `CONFLICT PR#<M> …` — record the hold with `fleet-event.mjs conflict <M>`, never with the `ledger.mjs row` form; the tick then prints `DISPATCH fix-pr`.
@@ -390,6 +388,7 @@ It prints `actual/target` and a named ACTION per role. Act on each line as it re
 - `ESCALATE pr-closed #<N> PR#<M>`, `… pr-unchecked …` — the maintainer's: tell them once per ticket per run; no dispatch or comment for #N. Reopening M or closing #N clears it. Only `replace #N` (`NEED resume`, same row) or `release #N` (closed-PR `release-ticket.sh --apply`, settle `released`) acts, once no live member names M.
 - `HOLD (…)` — the row is held and its detail names the clearing step: dispatch nothing on that row until it clears; a tier mismatch is yours to clear by dispatching the replacement.
 - `AT CAP`, `IDLE OK` — nothing to do on that row.
+- `IDLE (merging off)` — nothing to do on that row: the maintainer merges.
 - `MAIN-CHECKOUT-DIRTY …` — dispatch nothing new and tell the maintainer; once they have resolved the paths, `main-checkout.mjs --record`; never revert the paths or re-baseline over them yourself.
 - `MAIN-CHECKOUT-UNKNOWN …` — the tick could not look: fix what the line names and tick again, and never `--record` over it unless the line itself says re-record (an older-format baseline, or a baseline commit missing from this repository), and then only after resolving the stray paths.
 - `MAIN-CHECKOUT-NO-BASELINE …` — yours: run `main-checkout.mjs --record`, after reporting a baseline that vanished mid-run.
@@ -751,7 +750,7 @@ decides the rest — two resolve automatically, every other one escalates:
 | `rebase` | **Escalate** — comment and flag, nothing more. The report's `evidence.replay` reads `pure` only when `git range-diff origin/main <pin> HEAD` pairs every pinned commit with an unchanged one; `changed` (a commit dropped, edited or added, or a stale `origin/main`) or `unknown` means read `evidence.rangeDiff` before acting, and `evidence.remote.state` says whether that head is on the PR. No automatic rule until a live halt shows the case recurring. |
 | `stray` | **Escalate** — comment and flag; nothing pushes it automatically. Read `evidence.cherry`, `.content` and `.remote`. Push or discard is yours, or the maintainer's if they cannot settle it. A pushed stray is unreviewed: `ledger.mjs review <M>` first. |
 | `unreadable`, `missing`, `absent`, `other` | **Escalate** — comment and flag, no automatic retry. |
-| `human` | **Escalate** — no retry. A Ticketless PR whose diff is not inert: the maintainer labels it (references/finisher.md). |
+| `human` | **Escalate** — no retry. A Ticketless PR whose diff is not inert: the maintainer labels it (references/finisher.md), or under `no-merge` merges it by hand. |
 
 ### Resolving a finisher that died
 

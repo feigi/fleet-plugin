@@ -189,3 +189,4 @@ worktree has to happen first. **You own the watcher, not the bot.** Arm one
 yourself, `persistent: true`, seeded before the loop so handled PRs do not
 re-fire. **One rebase per PR, at merge time.** Any behind-count you hand a bot
 is expired on arrival; say so.
+Under `no-merge` there is no bot, so arm no watcher.

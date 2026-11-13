@@ -5,9 +5,11 @@
 The `run-team` controller is the orchestrator: a single, long-running
 session — never a dispatched subagent — that owns the main checkout and
 drives every other role over one repo's `ready-for-agent` queue until it
-drains. Invoked as `/skill:run-team [in-flight]`
-(one optional argument, the In-flight bound, default 5; the merge bot is always at most 1,
-ADR 0031, [`docs/adr/`](../adr/)).
+drains. Invoked as `/skill:run-team [in-flight] [cost|speed] [merge|no-merge]`
+(optional arguments: the In-flight bound, default 5; the Objective, default `cost`;
+Merging, default `merge`, whose `no-merge` leaves each PR at `ready-to-merge` for the
+maintainer to merge; the merge bot is always at most 1, ADR 0031,
+[`docs/adr/`](../adr/)).
 Follows [`plugin/skills/run-team/SKILL.md`](../../plugin/skills/run-team/SKILL.md).
 
 ## How it works
