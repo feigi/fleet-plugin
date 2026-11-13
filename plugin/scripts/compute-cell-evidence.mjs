@@ -17,7 +17,9 @@
 // lays out the Cell the table plus the workspace's guard route to and why
 // (ticket-router.mjs's rowDispatch, the function `route` itself calls), with
 // every candidate's verdict and range, and for each group the Cells it draws
-// over; above them, burn-in progress, the Cells the guard has tripped, a notice
+// over; above them, burn-in progress, the Cells the guard has tripped and,
+// apart from them, the Cells the install does not run (each with its role, the
+// model the role resolves to and the levels that model runs), a notice
 // for each starting Cell whose model changed and restarted burn-in, and a flag
 // while the newest refit failed and an older Fit, or the starting table, routes.
 // The receipts' newest `metrics` step is what the guard section quotes when there
@@ -35,7 +37,7 @@
 import { isDeepStrictEqual } from "node:util";
 import { CELL, OBJECTIVES, POLICY_CELL, STARTING_CELLS } from "./ledger-grammar.mjs";
 import { costGuardFault } from "./fleet-tick.mjs";
-import { MIN_N, installOf, parseGuard, readGuard, rowDispatch } from "./ticket-router.mjs";
+import { MIN_N, defaultCellOf, installOf, parseGuard, readGuard, rowDispatch, startingCellsOf, unrunnableCells } from "./ticket-router.mjs";
 import { implementerCell, modelsEqual, parseModelRoute, resolveRole } from "./tier-roles.mjs";
 
 // The implementer Cells, in the order the guard section draws them: one per
@@ -487,29 +489,38 @@ function failedFitFlag(step, p) {
   return `this run's Fit failed at ${when(step.at)}: ${why}; ${routes}`;
 }
 
-// How a Pull is dispatched, for every group alike: what `route` does under the guard.
-function dispatchHeading(table, guard) {
-  if (guard === null) return `no cost guard: every Pull runs at ${POLICY_CELL}, the default Cell`;
+// How a Pull is dispatched, for every group alike: what `route` does under the guard and the install
+// (installOf's, or null where it was not read).
+function dispatchHeading(table, guard, install) {
+  if (guard === null) return `no cost guard: every Pull runs at ${defaultCellOf(install)}, the default Cell`;
   if (table === null) return null;
   if (table.burn_in) return "burn-in: every Pull is drawn over the starting Cells the guard has not tripped";
   return "every 5th Pull that is no chain head is drawn over its group's exploration Cells; the rest run the group's Cell";
 }
 
-// Merged PRs per starting Cell, against MIN_N: the counts burn-in is judged on —
+// Merged PRs per counted starting Cell, against MIN_N: the counts burn-in is judged on —
 // the Fit's own guard counts while the Fit routes, the cost guard's while the
-// starting table does. Null with neither to count from. The heading follows the
+// starting table does. Null with neither to count from. The Cells counted are
+// the ones the Fit recorded, or the install this cockpit reads runs while the
+// starting table routes (countedStartingCells); the heading says which set it
+// counted and which starting Cells it left out as unrunnable. It follows the
 // routing table's `burn_in`, and says "ended" only of counts that all reach
 // MIN_N: a Fit sets its flag off its own counts, but the starting table's flag
 // is its own, whatever the cost guard counts since.
-function burnInProgress(p, guard, table) {
+function burnInProgress(p, guard, table, inst) {
   const n = p !== null ? p.table.guard.n : guard?.n;
   if (!isRecord(n)) return null;
-  const cells = STARTING_CELLS.map((cell) => ({ cell, n: count(n[cell]) ?? 0, of: MIN_N }));
+  const counted = countedStartingCells(p, inst);
+  const left = STARTING_CELLS.filter((c) => !counted.includes(c));
+  const subset = left.length > 0;
+  const cells = counted.map((cell) => ({ cell, n: count(n[cell]) ?? 0, of: MIN_N }));
   const done = cells.filter((c) => c.n >= MIN_N).length;
-  const tally = `${done} of ${cells.length} starting Cells ${done === 1 ? "has" : "have"} the ${MIN_N} merged PRs each needs`;
+  const kind = subset ? "runnable starting" : "starting";
+  const out = subset ? `; ${list(left)} unrunnable` : "";
+  const tally = `${done} of ${cells.length} ${kind} Cells ${done === 1 ? "has" : "have"} the ${MIN_N} merged PRs each needs${out}`;
   if (table === null || table.burn_in) return { heading: `burn-in: ${tally}`, cells };
   const heading = done === cells.length
-    ? `burn-in ended: every starting Cell has its ${MIN_N} merged PRs`
+    ? `burn-in ended: every ${kind} Cell has its ${MIN_N} merged PRs${out}`
     : `no burn-in: the starting table routes without it, though only ${tally}`;
   return { heading, cells };
 }
@@ -520,14 +531,29 @@ function trippedWords(guard) {
   return guard.tripped.length === 0 ? "the cost guard has tripped no Cell" : `tripped by the cost guard: ${list(guard.tripped)}`;
 }
 
-// A notice for each starting Cell whose role's model changed and so restarted
+// The starting Cells burn-in counts, in their order: the set the Fit recorded
+// while a Fit routes — every starting Cell for a Fit that records none, as
+// every Fit did — else those the cockpit's own install read runs, all three
+// while it has none.
+function countedStartingCells(p, inst) {
+  return p === null ? startingCellsOf(inst.install) : fitStartingCells(p.table);
+}
+
+// The starting Cells a Fit's table records, in their order: all three for a table that records none, or none usable.
+function fitStartingCells(table) {
+  const recorded = table.starting_cells;
+  const valid = Array.isArray(recorded) && recorded.length > 0 && recorded.every((c) => STARTING_CELLS.includes(c));
+  return valid ? STARTING_CELLS.filter((c) => recorded.includes(c)) : [...STARTING_CELLS];
+}
+
+// A notice for each counted starting Cell whose role's model changed and so restarted
 // burn-in: the Fit holds an older generation of it in the root group, and its
 // newest generation is short of MIN_N merged PRs in the counts the Fit judged
 // burn-in on. None while the starting table routes, which holds no estimates.
 function modelChanges(p) {
   if (p === null || !p.table.burn_in) return [];
   const root = isRecord(p.table.estimates?.["*"]) ? p.table.estimates["*"] : {};
-  return STARTING_CELLS.flatMap((cell) => {
+  return fitStartingCells(p.table).flatMap((cell) => {
     const e = root[cell];
     const older = isRecord(e?.older) ? Object.keys(e.older) : [];
     const k = count(p.table.guard.n[cell]) ?? 0;
@@ -550,6 +576,21 @@ function installFrom(modelRoles, catalog, agents) {
   return { install: installOf({ modelRoles: modelRoles.value, catalog: catalog.value, definitions: agents.list.map((a) => a.file) }), why: null, note };
 }
 
+// The Cells this install does not run, apart from the tripped ones, each with its role, the model the role resolves
+// to and the levels that model runs: `{ heading, cells: [{ cell, role, model, levels, text }] }`. While the install
+// has not been read the heading says so, and no Cell is named.
+function unrunnableView(inst) {
+  if (inst.install === null) return { heading: `unrunnable Cells: not checked: ${inst.why}`, cells: [] };
+  const cells = unrunnableCells(inst.install).map((cell) => {
+    const role = CELL.exec(cell)[1];
+    const model = inst.install.models[role];
+    const levels = inst.install.ladders[role];
+    return { cell, role, model, levels, text: `${cell} · modelRoles.${role} → ${model ?? "no model"} runs ${levels.join(", ") || "none"}` };
+  });
+  const heading = cells.length === 0 ? "the install runs every Cell it has a definition for" : `not run by this install: ${list(cells.map((c) => c.cell))}`;
+  return { heading, cells };
+}
+
 // The Cells a group draws over, in words: rowDispatch's draw, which is centred on
 // the group's `cost` row Cell whichever Objective routes the Pull. Null with no
 // guard, when nothing is drawn.
@@ -557,7 +598,11 @@ function exploringWords(table, guard, stratum, inst) {
   if (guard === null) return null;
   if (!table.burn_in && inst.install === null) return `exploring: not checked: ${inst.why}`;
   const rd = rowDispatch({ table, guard, objective: "cost", stratum, install: inst.install });
-  if (table.burn_in) return rd.draw === null ? "draws nothing: every starting Cell is tripped" : `drawn over ${list(rd.draw.cells)}`;
+  if (table.burn_in) {
+    if (rd.draw !== null) return `drawn over ${list(rd.draw.cells)}`;
+    const orUnrunnable = unrunnableCells(inst.install).some((c) => STARTING_CELLS.includes(c)) ? " or unrunnable" : "";
+    return `draws nothing: every starting Cell is tripped${orUnrunnable}`;
+  }
   const words = rd.draw === null ? "exploring nothing: no exploration Cell this install runs is left untripped" : `exploring ${list(rd.draw.cells)}`;
   return inst.note === null ? words : `${words}; ${inst.note}`;
 }
@@ -584,16 +629,19 @@ function intervalWords(range, objective) {
   return `95% interval [${one(range[0])}, ${one(range[1])}]`;
 }
 
-// One row of the routing table under the guard: the Cell it routes to and why,
-// the row's own Cell where the guard holds it back, and each candidate's n (null
-// where the table carries no count), verdict and interval.
-function rowEntry(table, guard, modelRoles, objective, stratum) {
-  const rd = rowDispatch({ table, guard, objective, stratum });
+// One row of the routing table under the guard and the install: the Cell it
+// routes to and why, the row's own Cell where the guard holds it back or the
+// install does not run it (`install` is installOf's answer, null where the
+// cockpit has not read one), and each candidate's n (null where the table
+// carries no count), verdict and interval.
+function rowEntry(table, guard, modelRoles, objective, stratum, install) {
+  const rd = rowDispatch({ table, guard, objective, stratum, install });
   const row = table.rows[objective][stratum];
   const record = isRecord(table.reasons?.[objective]?.[stratum]) ? table.reasons[objective][stratum] : null;
   const estimates = isRecord(table.estimates?.[stratum]) ? table.estimates[stratum] : {};
-  const held = row === rd.policy ? null
-    : rd.reason === "guard-missing" ? `${row} held: no cost guard` : `${row} tripped`;
+  const held = rd.reason === "table-cell-unrunnable" ? `${row} unrunnable here`
+    : row === rd.policy ? null
+      : rd.reason === "guard-missing" ? `${row} held: no cost guard` : `${row} tripped`;
   return {
     cell: rd.policy,
     held,
@@ -647,7 +695,9 @@ function groupOf(stratum) {
  * readCostGuard's answer and `routed` readGuard's for the same file, null when
  * the router reads none; `step` the receipts' newest `metrics` step that tried
  * a refit; `agents`, `modelRoles` and `catalog` the cockpit's own reads, which
- * say what this install runs for each group's exploration Cells; `objective`
+ * say what this install runs: each group's exploration Cells, the Cells it
+ * does not run, and the starting Cells burn-in counts while the starting table
+ * routes; `objective`
  * the live run's, or null. Each Objective's lines are the table's groups in
  * the table's order, the tree's root first; every line has an anchor the
  * `#cells/row/<objective>/<stratum>` link lands on. A candidate's generation
@@ -668,7 +718,7 @@ function fitView({ fit, starting, guard, routed, modelRoles, catalog, agents, st
   const mark = "¹";
   const inst = installFrom(modelRoles, catalog, agents);
   const entry = (o, s) => {
-    const e = rowEntry(table, routed, modelRoles, o, s);
+    const e = rowEntry(table, routed, modelRoles, o, s, inst.install);
     return { ...e, candidates: e.candidates.map((c) => ({ ...c, nMark: s === "*" && differ.includes(c.cell) ? mark : null })) };
   };
   // A group's exploration Cells are centred on its `cost` row whichever
@@ -698,11 +748,12 @@ function fitView({ fit, starting, guard, routed, modelRoles, catalog, agents, st
     title: "The Fit that routes this run",
     flag: failedFitFlag(step, p),
     source,
-    heading: dispatchHeading(table, routed),
+    heading: dispatchHeading(table, routed, inst.install),
     labels,
     notices: modelChanges(p),
-    burnIn: burnInProgress(p, routed, table),
+    burnIn: burnInProgress(p, routed, table, inst),
     tripped: trippedWords(routed),
+    unrunnable: unrunnableView(inst),
     modelLine,
     footnotes: differ.length === 0 ? [] : [{ mark, text: `${list(differ)}: the guard counts merges by GitHub's state, the Fit by Rulings, and the Fit admits only drawn or rule-sized Pulls` }],
     objectives,

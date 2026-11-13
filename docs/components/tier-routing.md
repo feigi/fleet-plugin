@@ -29,7 +29,9 @@ layer underneath the [Implementer](implementer.md) role.
    [`tier-roles.mjs`](../../plugin/scripts/tier-roles.mjs) `--check`
    validates that every role a definition uses resolves to a
    `modelRoles.<role>` entry, that each definition's level is one the
-   role's target runs at (omp's model catalog), with no leftover
+   role's target runs at (omp's model catalog) — except an implementer
+   definition, which the router routes around and `--check` reports as a
+   notice unless `slow` runs at no level — with no leftover
    per-agent override.
 4. **Verify at dispatch.**
    [`tier-check.mjs`](../../plugin/scripts/tier-check.mjs) reads back

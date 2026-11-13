@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import {
-  DEFAULT_TABLE, assignmentProb, bArmLive, explorationCells, installOf, installVersion, issueMetrics, route, rowDispatch, rowFor, fitTable, fitTree, readGuard, stratumOf, validateTable, formatFeatureRow, sliceParent,
+  DEFAULT_TABLE, assignmentProb, bArmLive, defaultCellOf, explorationCells, installOf, installVersion, isRunnable, issueMetrics, route, rowDispatch, rowFor, fitTable, fitTree, readGuard, startingCellsOf, stratumOf, unrunnableCells, validateTable, formatFeatureRow, sliceParent,
 } from "../plugin/scripts/ticket-router.mjs";
 import { AttributionError, FEATURE_COLUMNS as COLUMNS, parseFeatures } from "../plugin/scripts/pull-attribution.mjs";
 import { drawCell, CELL, STARTING_CELLS, formatRouting, parseRouting } from "../plugin/scripts/ledger-grammar.mjs";
@@ -105,7 +105,7 @@ test("route: a clean non-exploration Pull prints the full line, REASON=ok, and r
   const p = world(t);
   const r = routeCli(p);
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout, "POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=* BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok\n");
+  assert.equal(r.stdout, "POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=* BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- UNRUNNABLE=smol-max REASON=ok\n");
   const lines = readFileSync(p.pending, "utf8").replace(/\n$/, "").split("\n");
   assert.equal(lines[0], COLUMNS.join("\t"), "a new pending file starts with the header");
   assert.equal(COLUMNS.length, 26);
@@ -203,7 +203,7 @@ test("route: no-issue-json — a missing or unparseable issue file blanks the me
     const r = routeCli(p);
     assert.equal(r.status, 0, r.stderr);
     assert.deepEqual(parseLine(r.stdout), {
-      POLICY: "slow-high", CELL: "slow-high", DRAW: "-", BY: "-", STRATUM: "*", BRIEF: "-", CRITERIA: "-", PARENT: "-", SIZED: "-", OBJECTIVE: "cost", TRIPPED: "-", REASON: "no-issue-json",
+      POLICY: "slow-high", CELL: "slow-high", DRAW: "-", BY: "-", STRATUM: "*", BRIEF: "-", CRITERIA: "-", PARENT: "-", SIZED: "-", OBJECTIVE: "cost", TRIPPED: "-", UNRUNNABLE: "smol-max", REASON: "no-issue-json",
     });
     const [row] = parseFeatures(readFileSync(p.pending, "utf8"));
     for (const c of ["brief_chars", "criteria", "comments", "age_days", "paths", "test_paths", "xrefs", "kind", "named_paths", "named_lines", "dirs", "title"]) assert.equal(row[c], "", c);
@@ -217,7 +217,7 @@ test("route: no-sizing — a live B Pull without a usable sizing file says so an
   const r = routeCli(p, { arm: "B" });
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(parseLine(r.stdout), {
-    POLICY: "task-high", CELL: "task-high", DRAW: "-", BY: "-", STRATUM: BELOW, BRIEF: "31", CRITERIA: "2", PARENT: "-", SIZED: "-", OBJECTIVE: "cost", TRIPPED: "-", REASON: "no-sizing",
+    POLICY: "task-high", CELL: "task-high", DRAW: "-", BY: "-", STRATUM: BELOW, BRIEF: "31", CRITERIA: "2", PARENT: "-", SIZED: "-", OBJECTIVE: "cost", TRIPPED: "-", UNRUNNABLE: "smol-max", REASON: "no-sizing",
   });
   assert.equal(parseFeatures(readFileSync(p.pending, "utf8"))[0].sizing_src, "", "no verdict: no sizing source");
 });
@@ -229,7 +229,7 @@ test("route: a live B Pull WITH a sizing verdict records its label and picks no 
   assert.equal(r.status, 0, r.stderr);
   // The brief is short, so the walk ends below the cut whatever the label says: the label is recorded and moves nothing.
   assert.deepEqual(parseLine(r.stdout), {
-    POLICY: "smol-high", CELL: "smol-high", DRAW: "-", BY: "-", STRATUM: BELOW, BRIEF: "31", CRITERIA: "2", PARENT: "-", SIZED: "heavy", OBJECTIVE: "cost", TRIPPED: "-", REASON: "ok",
+    POLICY: "smol-high", CELL: "smol-high", DRAW: "-", BY: "-", STRATUM: BELOW, BRIEF: "31", CRITERIA: "2", PARENT: "-", SIZED: "heavy", OBJECTIVE: "cost", TRIPPED: "-", UNRUNNABLE: "smol-max", REASON: "ok",
   });
   const [row] = parseFeatures(readFileSync(p.pending, "utf8"));
   assert.equal(row.sizing_src, "haiku");
@@ -241,7 +241,7 @@ test("route: arm B on a table whose B gate is closed routes exactly as arm A and
   const p = world(t);
   const r = routeCli(p, { arm: "B" });
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout, "POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=* BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok\n");
+  assert.equal(r.stdout, "POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=* BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- UNRUNNABLE=smol-max REASON=ok\n");
   assert.equal(parseFeatures(readFileSync(p.pending, "utf8"))[0].sizing_src, "rule");
 });
 
@@ -251,7 +251,7 @@ test("route: guard-missing — no guard (or an unparseable one) dispatches the d
     const r = routeCli(p, { implRow: 5 });
     assert.equal(r.status, 0, r.stderr);
     assert.deepEqual(parseLine(r.stdout), {
-      POLICY: "slow-high", CELL: "slow-high", DRAW: "-", BY: "-", STRATUM: "*", BRIEF: "31", CRITERIA: "2", PARENT: "-", SIZED: "-", OBJECTIVE: "cost", TRIPPED: "-", REASON: "guard-missing",
+      POLICY: "slow-high", CELL: "slow-high", DRAW: "-", BY: "-", STRATUM: "*", BRIEF: "31", CRITERIA: "2", PARENT: "-", SIZED: "-", OBJECTIVE: "cost", TRIPPED: "-", UNRUNNABLE: "smol-max", REASON: "guard-missing",
     });
   }
 });
@@ -267,7 +267,7 @@ test("route: with no --table, the Fit beside --guard routes the Pull", (t) => {
   writeFit(p, baseTable({ rows: both({ "*": "task-high" }) }));
   const r = routeByFit(p);
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout, "POLICY=task-high CELL=task-high DRAW=- BY=- STRATUM=* BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok\n");
+  assert.equal(r.stdout, "POLICY=task-high CELL=task-high DRAW=- BY=- STRATUM=* BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- UNRUNNABLE=smol-max REASON=ok\n");
 });
 
 test("route: a Fit that is absent, unreadable, unparseable or invalid routes by the starting table, and REASON names which", (t) => {
@@ -316,7 +316,7 @@ test("route: a deleted guard still routes slow-high with no draw, whatever the F
       const r = routeByFit(p, { implRow });
       assert.equal(r.status, 0, `${fit}: ${r.stderr}`);
       assert.deepEqual(parseLine(r.stdout), {
-        POLICY: "slow-high", CELL: "slow-high", DRAW: "-", BY: "-", STRATUM: "*", BRIEF: "31", CRITERIA: "2", PARENT: "-", SIZED: "-", OBJECTIVE: "cost", TRIPPED: "-", REASON: "guard-missing",
+        POLICY: "slow-high", CELL: "slow-high", DRAW: "-", BY: "-", STRATUM: "*", BRIEF: "31", CRITERIA: "2", PARENT: "-", SIZED: "-", OBJECTIVE: "cost", TRIPPED: "-", UNRUNNABLE: "smol-max", REASON: "guard-missing",
       }, `${fit} Fit, impl row ${implRow}`);
     }
   }
@@ -348,7 +348,7 @@ test("route: an every-5th draw with a tripped Cell left out prints the draw, BY=
   const r = routeCli(p, { implRow: 5 });
   assert.equal(r.status, 0, r.stderr);
   const d = drawCell({ session: SESSION, ticket: 42, policyCell: null, cells: ["slow-medium", "task-xhigh"] });
-  assert.equal(r.stdout, `POLICY=slow-high CELL=${d.cell} DRAW=${d.k}/2 BY=every-5th STRATUM=* BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=slow-xhigh REASON=guard-tripped\n`);
+  assert.equal(r.stdout, `POLICY=slow-high CELL=${d.cell} DRAW=${d.k}/2 BY=every-5th STRATUM=* BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=slow-xhigh UNRUNNABLE=smol-max REASON=guard-tripped\n`);
   assert.equal(parseFeatures(readFileSync(p.pending, "utf8"))[0].assignment_prob, "1/10", "1 in 5 explores, then 1 in the 2 Cells left");
 });
 
@@ -357,7 +357,7 @@ test("route: a drawn burn-in Pull prints the whole Routing, BY=burn-in", (t) => 
   const r = routeCli(p);
   assert.equal(r.status, 0, r.stderr);
   const d = drawCell({ session: SESSION, ticket: 42, policyCell: null, cells: STARTING });
-  assert.equal(r.stdout, `POLICY=slow-high CELL=${d.cell} DRAW=${d.k}/3 BY=burn-in STRATUM=* BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok\n`);
+  assert.equal(r.stdout, `POLICY=slow-high CELL=${d.cell} DRAW=${d.k}/3 BY=burn-in STRATUM=* BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- UNRUNNABLE=smol-max REASON=ok\n`);
   assert.equal(parseFeatures(readFileSync(p.pending, "utf8"))[0].assignment_prob, "1/3", "1 over the untripped starting Cells");
 });
 
@@ -366,14 +366,14 @@ test("route: table-cell-tripped — a table row naming a tripped cell is replace
   const r = routeCli(p);
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(parseLine(r.stdout), {
-    POLICY: "slow-high", CELL: "slow-high", DRAW: "-", BY: "-", STRATUM: "*", BRIEF: "31", CRITERIA: "2", PARENT: "-", SIZED: "-", OBJECTIVE: "cost", TRIPPED: "task-high", REASON: "table-cell-tripped",
+    POLICY: "slow-high", CELL: "slow-high", DRAW: "-", BY: "-", STRATUM: "*", BRIEF: "31", CRITERIA: "2", PARENT: "-", SIZED: "-", OBJECTIVE: "cost", TRIPPED: "task-high", UNRUNNABLE: "smol-max", REASON: "table-cell-tripped",
   });
 });
 
 test("route: a non-default table row is dispatched when its cell is not tripped", (t) => {
   const p = world(t, { table: twoLeaf({ "*": "slow-high", [ABOVE]: "slow-high", [BELOW]: "task-high" }) });
   const r = routeCli(p);
-  assert.equal(r.stdout, `POLICY=task-high CELL=task-high DRAW=- BY=- STRATUM=${BELOW} BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok\n`);
+  assert.equal(r.stdout, `POLICY=task-high CELL=task-high DRAW=- BY=- STRATUM=${BELOW} BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- UNRUNNABLE=smol-max REASON=ok\n`);
 });
 
 test("route: burn-in draws on EVERY Pull, uniformly over the starting Cells, the default included", (t) => {
@@ -450,7 +450,7 @@ test("route: a group whose every exploration Cell the install cannot run has no 
   writeFileSync(join(agents, "fleet-implementer-slow-high.agent.md"), "");
   const r = routeCli(p, { implRow: 5, extra: ["--agents", agents] });
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout, "POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=* BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok\n", "no draw, so no BY");
+  assert.equal(r.stdout, "POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=* BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- UNRUNNABLE=- REASON=ok\n", "no draw, so no BY");
   const [row] = parseFeatures(readFileSync(p.pending, "utf8"));
   assert.deepEqual([row.exploration_draw, row.assignment_prob], ["", "1"]);
 });
@@ -462,7 +462,8 @@ test("route: an install it cannot read warns, draws nothing and still routes, ex
     "--model-roles", join(INSTALL_DIR, "model-roles.json"), "--catalog", join(p.dir, "no-catalog.json"), "--agents", AGENTS]);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(parseLine(r.stdout).DRAW, "-");
-  assert.match(r.stderr, /WARNING cannot read what this install runs: .*no-catalog\.json.* — no exploration Cell is drawn/);
+  assert.match(r.stderr, /WARNING cannot read what this install runs: .*no-catalog\.json.* — no Cell is checked against it and no exploration Cell is drawn/);
+  assert.equal(parseLine(r.stdout).UNRUNNABLE, "-", "an unread install names no Cell unrunnable");
   assert.equal(parseFeatures(readFileSync(p.pending, "utf8"))[0].assignment_prob, "1");
 });
 
@@ -472,13 +473,13 @@ test("route: an install read that parses but holds nothing to draw warns, and th
   const noAgents = join(p.dir, "no-agents");
   mkdirSync(noAgents);
   const cases = [
-    [["--model-roles", file("null-roles.json", null)], /WARNING cannot read what this install runs: modelRoles is null, not a record of role to model — no exploration Cell is drawn/],
+    [["--model-roles", file("null-roles.json", null)], /WARNING cannot read what this install runs: modelRoles is null, not a record of role to model — no Cell is checked against it/],
     [["--model-roles", file("list-roles.json", [])], /WARNING cannot read what this install runs: modelRoles is an array, not a record/],
     [["--catalog", file("no-models.json", {})], /WARNING cannot read what this install runs: omp's model catalog has no models list \(models: absent\)/],
-    [["--model-roles", file("empty-roles.json", {})], /WARNING this install runs smol, task, slow at no level .* no exploration Cell of those roles is drawn/],
+    [["--model-roles", file("empty-roles.json", {})], /WARNING this install runs smol, task, slow at no level .* no Cell of those roles is routed or drawn/],
     [["--model-roles", file("wrapped-roles.json", { value: MODEL_ROLES })], /WARNING this install runs smol, task, slow at no level/],
     [["--catalog", file("empty-catalog.json", { models: [] })], /WARNING this install runs smol, task, slow at no level/],
-    [["--model-roles", file("no-smol.json", { ...MODEL_ROLES, smol: undefined })], /WARNING this install runs smol at no level .* no exploration Cell of that role is drawn/],
+    [["--model-roles", file("no-smol.json", { ...MODEL_ROLES, smol: undefined })], /WARNING this install runs smol at no level .* no Cell of that role is routed or drawn/],
     [["--agents", noAgents], /WARNING .*no-agents holds no implementer definition — no exploration Cell is drawn/],
   ];
   for (const [extra, warning] of cases) {
@@ -499,17 +500,27 @@ test("route: an omp that does not answer is killed and warns, and the Pull still
   { encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` }, timeout: 40_000 });
   assert.equal(r.signal, null, "the router returned on its own, before this test's own deadline");
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stderr, /WARNING cannot read what this install runs: omp config get modelRoles --json did not answer in \d+ ms — no exploration Cell is drawn/);
+  assert.match(r.stderr, /WARNING cannot read what this install runs: omp config get modelRoles --json did not answer in \d+ ms — no Cell is checked against it and no exploration Cell is drawn/);
   assert.equal(parseLine(r.stdout).DRAW, "-");
 });
 
-test("route: a burn-in Pull and a chain head read nothing of the install", (t) => {
-  // An unreadable install would warn: neither of these reads it.
+test("route: a burn-in Pull and a chain head read the install, and an unreadable one warns on each and checks no Cell", (t) => {
   const missing = ["--model-roles", "/nonexistent/m.json", "--catalog", "/nonexistent/c.json", "--agents", "/nonexistent"];
+  const warning = /WARNING cannot read what this install runs: .*\/nonexistent\/m\.json.* — no Cell is checked against it and no exploration Cell is drawn/;
   const b = world(t, { table: baseTable({ burn_in: true }) });
-  assert.equal(routeCli(b, { implRow: 5, extra: missing }).stderr, "");
+  const burnIn = routeCli(b, { implRow: 5, extra: missing });
+  assert.equal(burnIn.status, 0, burnIn.stderr);
+  assert.match(burnIn.stderr, warning);
+  assert.equal(parseLine(burnIn.stdout).UNRUNNABLE, "-");
+  assert.notEqual(parseLine(burnIn.stdout).DRAW, "-", "an unread install leaves the burn-in draw over the three starting Cells");
   const p = world(t);
-  assert.equal(routeCli(p, { implRow: 5, extra: ["--chain-head", ...missing] }).stderr, "");
+  const head = routeCli(p, { implRow: 5, extra: ["--chain-head", ...missing] });
+  assert.equal(head.status, 0, head.stderr);
+  assert.match(head.stderr, warning);
+  assert.equal(parseLine(head.stdout).UNRUNNABLE, "-");
+  // The same Pulls under an install that reads warn nothing, and name what it does not run.
+  assert.equal(routeCli(b, { implRow: 5 }).stderr, "");
+  assert.equal(parseLine(routeCli(p, { implRow: 5, extra: ["--chain-head"] }).stdout).UNRUNNABLE, "smol-max");
 });
 
 test("route: exit 2 only on usage errors and an unreadable or invalid table — and nothing is recorded", (t) => {
@@ -641,7 +652,7 @@ test("route: pure — the same inputs give the same line, and the line names eve
   const args = { session: SESSION, ticket: 9, arm: "A", implRow: 10, issue: issue(), guard: readGuard(guardFile()), table: baseTable(), objective: "cost" };
   const a = route(args);
   assert.deepEqual(route(args), a);
-  assert.match(a.line, /^POLICY=\S+ CELL=\S+ DRAW=\S+ BY=\S+ STRATUM=\* BRIEF=\S+ CRITERIA=\S+ PARENT=\S+ SIZED=\S+ OBJECTIVE=cost TRIPPED=\S+ REASON=\S+$/);
+  assert.match(a.line, /^POLICY=\S+ CELL=\S+ DRAW=\S+ BY=\S+ STRATUM=\* BRIEF=\S+ CRITERIA=\S+ PARENT=\S+ SIZED=\S+ OBJECTIVE=cost TRIPPED=\S+ UNRUNNABLE=\S+ REASON=\S+$/);
   assert.equal(formatRouting(parseRouting(a.line)), a.line, "the line is one the ledger's grammar reads back whole");
   assert.equal(formatFeatureRow(a.row).split("\t").length, COLUMNS.length);
 });
@@ -652,7 +663,7 @@ const routeIn = (over) => route({ session: SESSION, ticket: 42, arm: "B", implRo
 // issue (31 chars) is below the cut and routes to its default row; a long brief routes above the cut, to task-high.
 const liveB = (over = {}) => twoLeaf({ "*": "slow-high", [ABOVE]: "task-high", [BELOW]: "slow-high" }, undefined, { classifier: { b: "haiku", tau: null }, ...over });
 const haikuSizing = { source: "haiku", model: "m", label: "heavy", confidence: 1, usd: 0.5 };
-const BELOW_LINE = `POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=${BELOW} BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok`;
+const BELOW_LINE = `POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=${BELOW} BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- UNRUNNABLE=smol-max REASON=ok`;
 
 test("route: arm B is live only on arm B, with a classifier set and some row not the default", () => {
   const cases = [
@@ -695,7 +706,7 @@ test("route: a live B sizing is read only when its source is the table's classif
   for (const label of ["medium", "Heavy", "", null, undefined, 1, ["heavy"]]) refused(liveB(), { ...haikuSizing, label }, `label ${JSON.stringify(label)}`);
   // The label picks no group: a light label on a brief above the cut is still routed to the group above it.
   const light = routeIn({ table: liveB(), issue: issueOf(5000), sizing: { ...haikuSizing, label: "light" } });
-  assert.equal(light.line, `POLICY=task-high CELL=task-high DRAW=- BY=- STRATUM=${ABOVE} BRIEF=5000 CRITERIA=0 PARENT=- SIZED=light OBJECTIVE=cost TRIPPED=- REASON=ok`);
+  assert.equal(light.line, `POLICY=task-high CELL=task-high DRAW=- BY=- STRATUM=${ABOVE} BRIEF=5000 CRITERIA=0 PARENT=- SIZED=light OBJECTIVE=cost TRIPPED=- UNRUNNABLE=smol-max REASON=ok`);
   assert.equal(light.row.sizing_pre, "light");
 });
 
@@ -724,7 +735,7 @@ test("route: a tripped token that is not a cell makes the guard unreadable — d
     const r = routeCli(p, { implRow: 5 });
     assert.equal(r.status, 0, r.stderr);
     assert.deepEqual(parseLine(r.stdout), {
-      POLICY: "slow-high", CELL: "slow-high", DRAW: "-", BY: "-", STRATUM: "*", BRIEF: "31", CRITERIA: "2", PARENT: "-", SIZED: "-", OBJECTIVE: "cost", TRIPPED: "-", REASON: "guard-missing",
+      POLICY: "slow-high", CELL: "slow-high", DRAW: "-", BY: "-", STRATUM: "*", BRIEF: "31", CRITERIA: "2", PARENT: "-", SIZED: "-", OBJECTIVE: "cost", TRIPPED: "-", UNRUNNABLE: "smol-max", REASON: "guard-missing",
     }, JSON.stringify(tripped));
   }
   const real = world(t, { table, guard: guardFile({ tripped: [{ cell: "smol-high" }], verdict: "tripped" }) });
@@ -829,6 +840,7 @@ test("validateTable: each malformed router table is refused for its own reason, 
     [/`guard` is not/, bad({ guard: { tripped: [] } })],
     [/`guard` is not/, bad({ guard: { tripped: [], n: null } })],
     [/`guard` is not/, bad({ guard: { tripped: [], n: "x" } })],
+    ...["x", 5, null, [], ["nope"], ["slow-high", "slow-high"], ["slow-medium"]].map((starting_cells) => [/`starting_cells` is not/, bad({ starting_cells })]),
   ];
   for (const [why, table] of cases) {
     const r = validateTable(table);
@@ -844,6 +856,8 @@ test("validateTable: each malformed router table is refused for its own reason, 
     bad({ classifier: { b: "jev", tau: 0.8 } }),
     bad({ classifier: { b: null, tau: 0 } }),
     bad({ guard: { tripped: ["task-high"], n: { "slow-high": 3 } } }),
+    bad({ starting_cells: ["slow-high"] }),
+    bad({ starting_cells: [...STARTING] }),
   ];
   for (const table of valid) assert.equal(validateTable(table), table, JSON.stringify(table));
 });
@@ -1152,9 +1166,9 @@ test("route: a Slice names its parent on the line and the features row, by eithe
 test("route: a table that splits on parent puts a Slice in its own group, any other ticket in the other, and an unread issue at the root", () => {
   const table = treeOf({ "*": { input: "parent", cut: 0 } }, { "*": "slow-high", "parent>0": "task-high", "parent<=0": "smol-high" });
   const lineOf = (issueJson) => route({ session: SESSION, ticket: 42, arm: "A", implRow: 3, issue: issueJson, guard: readGuard(guardFile()), table, objective: "cost" }).line;
-  assert.equal(lineOf(issue({ body: "Spec: #3177 § D1." })), "POLICY=task-high CELL=task-high DRAW=- BY=- STRATUM=parent>0 BRIEF=17 CRITERIA=0 PARENT=3177 SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok");
-  assert.equal(lineOf(issue()), "POLICY=smol-high CELL=smol-high DRAW=- BY=- STRATUM=parent<=0 BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok");
-  assert.equal(lineOf(null), "POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=* BRIEF=- CRITERIA=- PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=no-issue-json");
+  assert.equal(lineOf(issue({ body: "Spec: #3177 § D1." })), "POLICY=task-high CELL=task-high DRAW=- BY=- STRATUM=parent>0 BRIEF=17 CRITERIA=0 PARENT=3177 SIZED=- OBJECTIVE=cost TRIPPED=- UNRUNNABLE=- REASON=ok");
+  assert.equal(lineOf(issue()), "POLICY=smol-high CELL=smol-high DRAW=- BY=- STRATUM=parent<=0 BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- UNRUNNABLE=- REASON=ok");
+  assert.equal(lineOf(null), "POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=* BRIEF=- CRITERIA=- PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- UNRUNNABLE=- REASON=no-issue-json");
 });
 
 test("route: a pending file begun before the parent column, the named-path columns or the assignment column keeps its width", (t) => {
@@ -1426,7 +1440,7 @@ test("fit: a day-one three-TSV fixture fitted is an estimates-only table over it
   assert.deepEqual(table.splits, SPLITS, "the fit makes no split and takes none away");
   assert.equal(table.burn_in, true);
   assert.deepEqual(table.cells, STARTING);
-  assert.deepEqual(Object.keys(table).sort(), ["burn_in", "cells", "classifier", "estimates", "guard", "n_rows", "reasons", "rows", "splits", "window_start"], "the fit writes these fields and no others");
+  assert.deepEqual(Object.keys(table).sort(), ["burn_in", "cells", "classifier", "estimates", "guard", "n_rows", "reasons", "rows", "splits", "starting_cells", "window_start"], "the fit writes these fields and no others");
   assert.equal(table.n_rows, 3);
   assert.equal("fitted_through" in table, false, "no date field is written");
   assert.equal(table.window_start, "2026-09-01", "the window comes from the guard; the fit never moves it");
@@ -1543,10 +1557,10 @@ test("fit: a member scrape that re-sorts or rewrites rows after a fit leaves the
   assert.deepEqual(refit(p), fitted);
 });
 
-test("fit: a day-one table is the fit of an empty corpus", () => {
+test("fit: a day-one table is the fit of an empty corpus, once it records the starting Cells the fit counted", () => {
   const prior = structuredClone(DAY_ONE_TABLE);
   const next = fitTable({ prior, features: [], members: [], verdicts: [], guard: { ...prior.guard, window_start: prior.window_start } });
-  assert.deepEqual(next, prior);
+  assert.deepEqual(next, { ...prior, starting_cells: STARTING });
 });
 
 test("a table fitted before work time, its estimates lacking minutes_per_merged and untimed, is valid and is the next fit's prior", (t) => {
@@ -2216,9 +2230,9 @@ test("fit: with every starting Cell at MIN_N, burn-in is over whether the speed 
 
 test("route: a speed run routes by the speed rows and a cost run by the cost rows; the exploration draw is the same under both", () => {
   const table = baseTable({ rows: both({ "*": "task-high" }, { "*": "smol-high" }) });
-  assert.equal(routeIn({ arm: "A", table, objective: "cost" }).line, "POLICY=task-high CELL=task-high DRAW=- BY=- STRATUM=* BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok");
+  assert.equal(routeIn({ arm: "A", table, objective: "cost" }).line, "POLICY=task-high CELL=task-high DRAW=- BY=- STRATUM=* BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- UNRUNNABLE=smol-max REASON=ok");
   const speed = routeIn({ arm: "A", table, objective: "speed" });
-  assert.equal(speed.line, "POLICY=smol-high CELL=smol-high DRAW=- BY=- STRATUM=* BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=speed TRIPPED=- REASON=ok");
+  assert.equal(speed.line, "POLICY=smol-high CELL=smol-high DRAW=- BY=- STRATUM=* BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=speed TRIPPED=- UNRUNNABLE=smol-max REASON=ok");
   assert.equal(speed.row.objective, "speed");
   const draws = (objective, over = {}) => Array.from({ length: 30 }, (_, i) => {
     const { line } = routeIn({ arm: "A", ticket: i + 1, implRow: 5, table: { ...table, ...over }, objective });
@@ -2259,13 +2273,13 @@ test("route: a two-leaf tree routes each side by its own row under both Objectiv
   ];
   for (const [objective, chars, stratum, cell] of cases) {
     assert.equal(routeIn({ arm: "A", table, objective, issue: issueOf(chars) }).line,
-      `POLICY=${cell} CELL=${cell} DRAW=- BY=- STRATUM=${stratum} BRIEF=${chars} CRITERIA=0 PARENT=- SIZED=- OBJECTIVE=${objective} TRIPPED=- REASON=ok`, `${objective} ${chars}`);
+      `POLICY=${cell} CELL=${cell} DRAW=- BY=- STRATUM=${stratum} BRIEF=${chars} CRITERIA=0 PARENT=- SIZED=- OBJECTIVE=${objective} TRIPPED=- UNRUNNABLE=smol-max REASON=ok`, `${objective} ${chars}`);
   }
 });
 
 test("route: a ticket missing the input a split reads follows the node's own row — an unread issue at the root, a blank column at the split's node", () => {
   const unread = routeIn({ arm: "A", table: twoLeaf({ "*": "slow-high", [ABOVE]: "task-high", [BELOW]: "smol-high" }), issue: null });
-  assert.equal(unread.line, "POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=* BRIEF=- CRITERIA=- PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=no-issue-json");
+  assert.equal(unread.line, "POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=* BRIEF=- CRITERIA=- PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- UNRUNNABLE=smol-max REASON=no-issue-json");
   // A blank column on an issue that was read: its created date is no date, so the split on age_days cannot place it.
   const age = treeOf({ "*": { input: "age_days", cut: 3 } }, { "*": "slow-high", "age_days>3": "task-high", "age_days<=3": "smol-high" });
   const dated = parseRouting(routeIn({ arm: "A", table: age, issue: issue() }).line);
@@ -2315,7 +2329,7 @@ test("route: arm B reads the run's own row set — not live when that set is all
   assert.equal(bArmLive(table, "speed"), true);
   assert.equal(routeIn({ table, objective: "cost", sizing: haikuSizing }).row.sizing_src, "rule");
   assert.equal(routeIn({ table, objective: "speed", sizing: haikuSizing, issue: issueOf(5000) }).line,
-    `POLICY=task-high CELL=task-high DRAW=- BY=- STRATUM=${ABOVE} BRIEF=5000 CRITERIA=0 PARENT=- SIZED=heavy OBJECTIVE=speed TRIPPED=- REASON=ok`);
+    `POLICY=task-high CELL=task-high DRAW=- BY=- STRATUM=${ABOVE} BRIEF=5000 CRITERIA=0 PARENT=- SIZED=heavy OBJECTIVE=speed TRIPPED=- UNRUNNABLE=smol-max REASON=ok`);
 });
 
 test("route: the features row and the line carry the objective, and a features file written before the column reads it blank", (t) => {
@@ -2755,4 +2769,189 @@ test("fit: a cell's older generation is reported beside the newest and is never 
   assert.equal(both.estimates["*"]["smol-high"].older["model-a"].n, 25, "reported beside the newest");
   assert.deepEqual([both.rows, both.reasons], [alone.rows, alone.reasons], "and pooled into nothing");
   assert.equal(both.rows.cost["*"], "smol-high");
+});
+
+// ---------------------------------------------------------------------------
+// unrunnable Cells: a level its role's model does not run
+// ---------------------------------------------------------------------------
+
+// The fixed install and its catalog with `role`'s model running `thinking` instead (null: no level at all). `definitions`
+// are the agents directory's file names.
+const installWith = (role, thinking, definitions = readdirSync(AGENTS)) => {
+  const target = MODEL_ROLES[role].replace(/:[^:/]*$/, "");
+  const catalog = { models: CATALOG.models.map((m) => (m.selector === target ? { ...m, thinking } : m)) };
+  return { catalog, install: installOf({ modelRoles: MODEL_ROLES, catalog, definitions }) };
+};
+const NO_XHIGH = ["low", "medium", "high", "max"];
+const writeJson = (p, name, value) => { const f = join(p.dir, name); writeFileSync(f, JSON.stringify(value)); return f; };
+const routeOn = (p, extra, { implRow = 3, ticket = 42 } = {}) => cli(["route", "--session", SESSION, "--objective", "cost", "--ticket", String(ticket), "--arm", "A",
+  "--impl-row", String(implRow), "--issue", p.issue, "--guard", p.guard, "--pending", p.pending, ...extra]);
+
+test("installOf: it names the model each role resolves to, and a Cell its role's ladder lacks is unrunnable", () => {
+  assert.deepEqual(INSTALL.models, { smol: "anthropic/claude-haiku-4-5", task: "anthropic/claude-sonnet-5-5", slow: "anthropic/claude-opus-5-5" });
+  assert.deepEqual(unrunnableCells(INSTALL), ["smol-max"], "haiku tops out at xhigh, and no other defined Cell is short of its level");
+  assert.equal(isRunnable(INSTALL, "smol-max"), false);
+  assert.equal(isRunnable(INSTALL, "task-max"), true);
+  assert.equal(isRunnable(null, "smol-max"), true, "an install that was not read holds nothing unrunnable");
+  assert.deepEqual(unrunnableCells(null), []);
+  const definitions = readdirSync(AGENTS);
+  const unset = installOf({ modelRoles: { ...MODEL_ROLES, task: undefined }, catalog: CATALOG, definitions });
+  const unlisted = installOf({ modelRoles: { ...MODEL_ROLES, task: "anthropic/not-in-the-catalog" }, catalog: CATALOG, definitions });
+  const everyTask = ["smol-max", "task-high", "task-low", "task-max", "task-medium", "task-xhigh"];
+  assert.deepEqual([unset.models.task, unrunnableCells(unset)], [null, everyTask], "a role that is unset");
+  assert.deepEqual([unlisted.models.task, unrunnableCells(unlisted)], ["anthropic/not-in-the-catalog", everyTask], "a model the catalog does not list");
+  assert.deepEqual(unrunnableCells(installWith("smol", null).install), ["smol-high", "smol-low", "smol-max", "smol-medium", "smol-xhigh"], "thinking: null");
+  assert.deepEqual(unrunnableCells(installWith("task", NO_XHIGH).install), ["smol-max", "task-xhigh"], "a thinking list without the level");
+  assert.deepEqual(unrunnableCells({ ...INSTALL, defined: new Set(["slow-high", "smol-max"]) }), ["smol-max"], "only a Cell with a definition is listed");
+});
+
+test("isRunnable: a string that is no Cell throws, whether or not the install was read", () => {
+  for (const install of [INSTALL, null]) {
+    assert.throws(() => isRunnable(install, "bogus"), { name: "TypeError", message: 'isRunnable: "bogus" is not a Cell' });
+    assert.throws(() => isRunnable(install, "huge-high"), { name: "TypeError", message: 'isRunnable: "huge-high" is not a Cell' });
+  }
+});
+
+test("defaultCellOf: slow-high while it runs, else the nearest runnable defined level of slow — downward first, then upward", () => {
+  assert.equal(defaultCellOf(null), "slow-high");
+  assert.equal(defaultCellOf(INSTALL), "slow-high");
+  const slowRuns = (levels, definitions) => defaultCellOf(installWith("slow", levels, definitions).install);
+  assert.equal(slowRuns(["low", "medium", "xhigh", "max"]), "slow-medium", "downward first, though xhigh is as near");
+  assert.equal(slowRuns(["low", "xhigh", "max"]), "slow-low");
+  assert.equal(slowRuns(["xhigh", "max"]), "slow-xhigh", "then upward");
+  const noMedium = readdirSync(AGENTS).filter((f) => f !== "fleet-implementer-slow-medium.agent.md");
+  assert.equal(slowRuns(["low", "medium", "xhigh"], noMedium), "slow-low", "a level with no implementer definition is skipped");
+  assert.equal(slowRuns(["minimal"]), "slow-high", "no level both run and defined keeps the default");
+  assert.equal(slowRuns(null), "slow-high", "a model that runs no level keeps it too");
+});
+
+test("startingCellsOf: the starting Cells the install runs, all three when it was not read or runs none", () => {
+  assert.deepEqual(startingCellsOf(null), STARTING);
+  assert.deepEqual(startingCellsOf(INSTALL), STARTING);
+  assert.deepEqual(startingCellsOf(installWith("smol", null).install), ["slow-high", "task-high"]);
+  assert.deepEqual(startingCellsOf(installWith("task", ["low", "medium", "max"]).install), ["slow-high", "smol-high"]);
+  assert.deepEqual(startingCellsOf(installOf({ modelRoles: {}, catalog: CATALOG, definitions: readdirSync(AGENTS) })), STARTING);
+});
+
+test("rowDispatch: a row naming an unrunnable Cell routes the default, with its own reason, and the exploration centre moves to the default", () => {
+  const { install } = installWith("task", NO_XHIGH);
+  const table = baseTable({ rows: both({ "*": "task-xhigh" }) });
+  const dispatch = (over) => rowDispatch({ table, guard: row5({}), objective: "cost", stratum: "*", install, ...over });
+  // Centred on task-xhigh the draw would hold slow-high and task-max; centred on the default, slow-high's own neighbours.
+  const expected = { policy: "slow-high", reason: "table-cell-unrunnable", draw: { by: "every-5th", cells: ["slow-xhigh", "slow-medium", "task-max"] } };
+  assert.deepEqual(dispatch({}), expected);
+  assert.deepEqual(dispatch({ objective: "speed" }).policy, "slow-high", "the speed set's row the same");
+  assert.deepEqual(dispatch({ guard: row5({ tripped: ["task-xhigh"] }) }), expected, "a Cell both tripped and unrunnable is unrunnable");
+  // An install that runs it leaves the row alone.
+  assert.deepEqual(dispatch({ install: INSTALL }).policy, "task-xhigh");
+  assert.equal(dispatch({ install: INSTALL }).reason, "ok");
+  // An install that was not read checks nothing.
+  assert.deepEqual(dispatch({ install: null }), { policy: "task-xhigh", reason: "ok", draw: null });
+});
+
+test("rowDispatch: the derived default replaces slow-high for a missing guard, a tripped row, an unrunnable row and the exploration centre", () => {
+  const { install } = installWith("slow", ["low", "medium", "xhigh", "max"]);
+  const table = baseTable({ rows: both({ "*": "task-high" }) });
+  const dispatch = (guard, over) => rowDispatch({ table, guard, objective: "cost", stratum: "*", install, ...over });
+  assert.deepEqual(dispatch(null), { policy: "slow-medium", reason: "guard-missing", draw: null });
+  const tripped = dispatch(row5({ tripped: ["task-high"] }));
+  assert.deepEqual([tripped.policy, tripped.reason], ["slow-medium", "table-cell-tripped"]);
+  assert.deepEqual(tripped.draw.cells, ["slow-xhigh", "slow-low"], "centred on slow-medium, less the tripped task-high");
+  const unrunnable = dispatch(row5({}), { table: baseTable({ rows: both({ "*": "slow-high" }) }) });
+  assert.deepEqual([unrunnable.policy, unrunnable.reason], ["slow-medium", "table-cell-unrunnable"]);
+});
+
+test("rowDispatch: burn-in draws the starting Cells the install runs", () => {
+  const { install } = installWith("smol", null);
+  const dispatch = (over) => rowDispatch({ table: baseTable({ burn_in: true }), guard: row5({}), objective: "cost", stratum: "*", install, ...over });
+  assert.deepEqual(dispatch({}).draw, { by: "burn-in", cells: ["slow-high", "task-high"] });
+  assert.deepEqual(dispatch({ install: null }).draw.cells, STARTING, "an install that was not read draws all three");
+  const drawn = new Set(Array.from({ length: 60 }, (_, i) => parseRouting(route({
+    session: SESSION, ticket: i + 1, arm: "A", implRow: i + 1, issue: issue(), guard: readGuard(guardFile()), table: baseTable({ burn_in: true }), objective: "cost", install,
+  }).line).cell));
+  assert.deepEqual([...drawn].sort(), ["slow-high", "task-high"], "a burn-in Pull never draws smol-high");
+});
+
+test("route: the Routing names every defined Cell the install does not run, sorted, and a Cell both tripped and unrunnable reads unrunnable", () => {
+  const { install } = installWith("task", NO_XHIGH);
+  const table = baseTable({ rows: both({ "*": "task-xhigh" }) });
+  const r = parseRouting(route({ session: SESSION, ticket: 1, arm: "A", implRow: 3, issue: issue(), guard: readGuard(guardFile({ tripped: ["task-xhigh"], verdict: "tripped" })), table, objective: "cost", install }).line);
+  assert.deepEqual([r.policy, r.cell, r.reason, r.unrunnable, r.tripped], ["slow-high", "slow-high", "table-cell-unrunnable", ["smol-max", "task-xhigh"], ["task-xhigh"]]);
+  const unread = parseRouting(route({ session: SESSION, ticket: 1, arm: "A", implRow: 3, issue: issue(), guard: readGuard(guardFile()), table, objective: "cost", install: null }).line);
+  assert.deepEqual([unread.policy, unread.reason, unread.unrunnable], ["task-xhigh", "ok", []]);
+  // A guard-missing Pull runs the derived default, and names what is unrunnable too.
+  const slow = installWith("slow", ["low", "medium", "xhigh"]).install;
+  const missing = parseRouting(route({ session: SESSION, ticket: 1, arm: "A", implRow: 3, issue: issue(), guard: null, table: baseTable(), objective: "cost", install: slow }).line);
+  assert.deepEqual([missing.policy, missing.cell, missing.reason], ["slow-medium", "slow-medium", "guard-missing"]);
+  assert.ok(missing.unrunnable.includes("slow-high") && missing.unrunnable.includes("slow-max"));
+});
+
+test("route: a Fit row naming task-xhigh, on an install whose task model lacks xhigh, routes the default Cell and the draw is centred on it", (t) => {
+  const p = world(t);
+  writeFit(p, baseTable({ rows: both({ "*": "task-xhigh" }) }));
+  const catalog = writeJson(p, "task-no-xhigh.json", installWith("task", NO_XHIGH).catalog);
+  const r = routeOn(p, ["--catalog", catalog]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, "POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=* BRIEF=31 CRITERIA=2 PARENT=- SIZED=- OBJECTIVE=cost TRIPPED=- UNRUNNABLE=smol-max,task-xhigh REASON=table-cell-unrunnable\n");
+  assert.equal(parseFeatures(readFileSync(p.pending, "utf8"))[0].policy_cell, "slow-high");
+  const drawn = parseLine(routeOn(p, ["--catalog", catalog], { implRow: 5 }).stdout);
+  assert.deepEqual([drawn.BY, drawn.DRAW.endsWith("/3"), ["slow-xhigh", "slow-medium", "task-max"].includes(drawn.CELL)], ["every-5th", true, true], "the draw is slow-high's neighbours, not task-xhigh's");
+  assert.equal(drawn.REASON, "table-cell-unrunnable");
+});
+
+test("route: an install whose smol model has thinking null never draws smol-high in burn-in, and runs every starting Cell it can", (t) => {
+  const p = world(t, { table: baseTable({ burn_in: true }) });
+  const catalog = writeJson(p, "smol-null.json", installWith("smol", null).catalog);
+  const seen = new Set();
+  for (let i = 1; i <= 12; i++) {
+    const r = routeOn(p, ["--table", p.table, "--catalog", catalog], { ticket: i, implRow: i });
+    assert.equal(r.status, 0, r.stderr);
+    const out = parseLine(r.stdout);
+    seen.add(out.CELL);
+    assert.equal(out.UNRUNNABLE, "smol-high,smol-low,smol-max,smol-medium,smol-xhigh");
+    assert.match(r.stderr, /WARNING this install runs smol at no level/);
+  }
+  assert.deepEqual([...seen].sort(), ["slow-high", "task-high"]);
+});
+
+test("route: when slow lacks high but runs medium the default is slow-medium, with a guard or without one", (t) => {
+  const p = world(t);
+  const catalog = writeJson(p, "slow-medium.json", installWith("slow", ["low", "medium", "xhigh", "max"]).catalog);
+  const withGuard = parseLine(routeOn(p, ["--table", p.table, "--catalog", catalog]).stdout);
+  assert.deepEqual([withGuard.POLICY, withGuard.CELL, withGuard.REASON], ["slow-medium", "slow-medium", "table-cell-unrunnable"]);
+  const q = world(t, { guard: null });
+  const r = cli(["route", "--session", SESSION, "--objective", "cost", "--ticket", "42", "--arm", "A", "--impl-row", "3", "--issue", q.issue,
+    "--guard", q.guard, "--table", q.table, "--pending", q.pending, "--catalog", catalog]);
+  assert.equal(r.status, 0, r.stderr);
+  const out = parseLine(r.stdout);
+  assert.deepEqual([out.POLICY, out.CELL, out.DRAW, out.REASON], ["slow-medium", "slow-medium", "-", "guard-missing"]);
+});
+
+test("route: with no level of slow run and defined, the default stays slow-high and the router warns, never refuses", (t) => {
+  const p = world(t);
+  const catalog = writeJson(p, "slow-null.json", installWith("slow", null).catalog);
+  const r = routeOn(p, ["--table", p.table, "--catalog", catalog]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /WARNING this install runs slow at no level/);
+  assert.match(r.stderr, /WARNING no level of slow-high's role runs here with an implementer definition — slow-high stays the default Cell/);
+  const out = parseLine(r.stdout);
+  assert.deepEqual([out.POLICY, out.CELL, out.REASON], ["slow-high", "slow-high", "table-cell-unrunnable"]);
+});
+
+test("fit: burn-in ends over the starting Cells the install runs, the Fit records the set it counted, and that set recomputes the same table", () => {
+  const input = cellInput([["slow-high", 10], ["smol-high", 2]]);
+  const prior = baseTable({ burn_in: true });
+  const guard = { tripped: [], n: { "slow-high": 20, "task-high": 20, "smol-high": 0 }, window_start: null };
+  const counted = startingCellsOf(installWith("smol", null).install);
+  const fitted = fitTable({ prior, ...direct(input), guard, startingCells: counted });
+  assert.deepEqual([fitted.burn_in, fitted.starting_cells], [false, ["slow-high", "task-high"]]);
+  assert.deepEqual(fitTable({ prior, ...direct(input), guard, startingCells: fitted.starting_cells }), fitted, "the recorded set and the same inputs fit the same table");
+  assert.equal(fitTable({ prior, ...direct(input), guard, startingCells: startingCellsOf(null) }).burn_in, true, "the same counts with an unreadable install leave it in burn-in");
+  const all = fitTable({ prior, ...direct(input), guard });
+  assert.deepEqual([all.burn_in, all.starting_cells], [true, STARTING], "with no set named all three count");
+  assert.deepEqual(fitTree({ prior, ...direct(input), guard, startingCells: counted }).table, fitted, "the tree's fit counts the same set");
+  assert.equal(fitTree({ prior, ...direct(input), guard }).table.burn_in, true);
+  for (const startingCells of [[], ["slow-medium"]]) {
+    assert.throws(() => fitTable({ prior, ...direct(input), guard, startingCells }), /startingCells is not a non-empty list of starting Cells/, JSON.stringify(startingCells));
+  }
 });

@@ -4,13 +4,17 @@
 // corpus written before its latest columns, refresh the cost guard over it, then
 // write the Fit beside that guard.
 //
-//   metrics-refresh.mjs [--repo <dir>] [--no-fit]
+//   metrics-refresh.mjs [--repo <dir>] [--no-fit] [--model-roles <path>] [--catalog <path>]
 //
 //   --repo   the workspace whose `.fleet/` and `docs/metrics/` the duties read
 //            and write; default the main checkout of the repository the cwd is
 //            in, where the router script appends its pending rows
 //   --no-fit the duties only, no Fit: close-out passes it, so a run computes
 //            one Fit, at its phase 0, and each close-out's rows route the next run
+//   --model-roles, --catalog
+//            the files holding `modelRoles` and omp's model catalog, read in
+//            place of omp's own, as for `ticket-router.mjs route`; the Fit
+//            reads them to count the starting Cells the install runs
 //
 // DRAIN. `ticket-router.mjs route` appends one row per Pull to
 // `.fleet/ticket-features.pending.tsv`; this moves them into
@@ -81,13 +85,18 @@
 // file. A split stands in the `table` once it has passed at two consecutive
 // Fits on the same input or inputs, and is gone at the first Fit it fails;
 // the next Fit reads the previous one's `gate` from the file this one
-// replaces, which is all it carries forward. The Fit is a pure function of
-// the records, the guard, the prior and that `gate`: the TSVs at the recorded
-// blob ids, the guard and the prior fit to the same table again. So a Fit
-// whose `records` are the previous one's is no look at the gate: it keeps
-// that one's `passed` and `stands`, and a phase 0 run again over records that
-// have not changed neither advances a split's count nor resets it. With no
-// records it is the starting table's fit, as any other. It is called
+// replaces, which is all it carries forward. Burn-in holds until every
+// starting Cell the install runs has its merged PRs, and the `table` records
+// that set as `starting_cells`: the install is read as `ticket-router.mjs
+// route` reads it — live, or from the files `--model-roles <path>` and
+// `--catalog <path>` name — and a read that fails warns on stderr and counts
+// all three starting Cells. The Fit is a pure function of the records, the
+// guard, the prior, that set and that `gate`: the TSVs at the recorded blob
+// ids, the guard, the prior and the recorded set fit to the same table again.
+// So a Fit whose `records` are the previous one's is no look at the gate: it
+// keeps that one's `passed` and `stands`, and a phase 0 run again over records
+// that have not changed neither advances a split's count nor resets it. With
+// no records it is the starting table's fit, as any other. It is called
 // in-process because a fit has no verdict for an exit status to carry. It
 // never fails the run: an error prints `metrics-refresh: fit: failed — <why>`,
 // leaves the old file in place, so the run routes by the last Fit that
@@ -114,7 +123,7 @@ import { COLUMNS as MEMBER_COLUMNS, ENDINGS, isImplementer, parseTsv as parseMem
 import { blobId } from "./pr-cost.mjs";
 import { FEATURE_COLUMNS, parseFeatures } from "./pull-attribution.mjs";
 import { REPORT_STATUSES } from "./report-files.mjs";
-import { DEFAULT_TABLE, FIT_FILE, INSTALL_PACKAGE, fitTree, installVersion, readGuard, validateTable } from "./ticket-router.mjs";
+import { DEFAULT_TABLE, FIT_FILE, INSTALL_PACKAGE, fitTree, installVersion, readGuard, readInstall, startingCellsOf, validateTable } from "./ticket-router.mjs";
 import { parseTierOutcomes } from "./tier-outcomes.mjs";
 
 const NAME = "metrics-refresh";
@@ -317,10 +326,12 @@ function previousGate(repo) {
 // The Fit over `repo`'s working-tree TSVs and `written`, the guard file the
 // guard duty just wrote (parsed), with the router table at `tablePath` as its
 // prior, written to `.fleet/router-fit.json` through a temp file and a rename.
-// Throws on anything it cannot read, fit or write, before the rename, so the
+// Burn-in counts `startingCells`, the starting Cells the install runs — all
+// three when none is named — which the Fit's `table` records. Throws on anything
+// it cannot read, fit or write, before the rename, so the
 // old file stays as it was: a Fit that throws is no look at the split gate,
 // and the next one reads the gate the old file holds.
-export function writeFit(repo, written, { tablePath = DEFAULT_TABLE, packagePath = INSTALL_PACKAGE, now = new Date() } = {}) {
+export function writeFit(repo, written, { tablePath = DEFAULT_TABLE, packagePath = INSTALL_PACKAGE, now = new Date(), startingCells } = {}) {
   const guard = readGuard(written);
   if (guard === null) throw new Error(`${GUARD} is not a guard the router reads`);
   let prior;
@@ -341,7 +352,7 @@ export function writeFit(repo, written, { tablePath = DEFAULT_TABLE, packagePath
   const members = read(MEMBERS, parseMemberTsv);
   const verdicts = read(TIERS, parseTierOutcomes);
   const features = read(FEATURES, parseFeatures);
-  const { table, gate } = fitTree({ prior, features, members, verdicts, guard, previous });
+  const { table, gate } = fitTree({ prior, features, members, verdicts, guard, previous, startingCells });
   // The tree the gate grew is the one `route` will read it through.
   const valid = validateTable(table);
   if (valid instanceof Error) throw valid;
@@ -368,11 +379,17 @@ export function writeFit(repo, written, { tablePath = DEFAULT_TABLE, packagePath
 
 // The Fit as the run calls it: only beside a guard the guard duty wrote, and
 // never a failure of the run — its error is a line, and the exit stays as it was.
-function fit(repo, written) {
+// `sources` name the files the install read takes in place of omp's own (ticket-router.mjs's
+// readInstall): burn-in counts the starting Cells that install runs, all three when it cannot be read.
+function fit(repo, written, sources) {
   if (written === null) return say(`fit: skipped, no guard written — ${FIT} left as it is`);
+  const { install, why } = readInstall(sources);
+  if (install === null) {
+    process.stderr.write(`${NAME}: WARNING cannot read what this install runs: ${why} — burn-in counts all three starting Cells\n`);
+  }
   let p;
   try {
-    p = writeFit(repo, written);
+    p = writeFit(repo, written, { startingCells: startingCellsOf(install) });
   } catch (e) {
     return say(`fit: failed — ${e.message}`);
   }
@@ -381,7 +398,7 @@ function fit(repo, written) {
 
 function main() {
   const die = makeDie(NAME);
-  const F = defineFlags(die, { flags: { repo: "value", "no-fit": "bool" } });
+  const F = defineFlags(die, { flags: { repo: "value", "no-fit": "bool", "model-roles": "value", catalog: "value" } });
   F.sweep();
   F.stray();
   let repo = F.arg("repo") === null ? null : resolve(F.arg("repo"));
@@ -404,7 +421,7 @@ function main() {
       return;
     }
   }
-  if (!F.has("no-fit")) fit(repo, written);
+  if (!F.has("no-fit")) fit(repo, written, { modelRoles: F.arg("model-roles"), catalog: F.arg("catalog") });
 }
 
 if (isCLI(import.meta.url)) main();

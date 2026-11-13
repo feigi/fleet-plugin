@@ -71,6 +71,7 @@ The shipped `plugin/scripts/router-table.json` **reduces to the starting table**
 That is the literal already kept at `tests/support/day-one-router-table.mjs:30-47` (`DAY_ONE_TABLE`). It changes only when the starting point itself changes, through an ordinary change, never by a Fit and never by a re-fit PR. Nothing from this repository's rows, trips or estimates routes, excludes or seeds anything at a consumer (#4124).
 
 **Burn-in** draws uniformly over the starting Cells less those the repository's own guard has tripped (`ticket-router.mjs:213-226`, `:330`). It starts at run 2: run 1 has no cost guard, so every Pull is `slow-high`, and `pr-cost.mjs` writes a guard even at verdict `none` (`plugin/scripts/pr-cost.mjs:441-442`), so run 2 has one (`docs/research/consumer-burn-in.md` § 2). It ends once every starting Cell has 20 merged PRs (`MIN_N`) on its newest generation. A role's model change starts the Cell's new generation at zero merged PRs, which re-enters burn-in (unchanged; the cockpit says so, § 2.8).
+*Amended (#4462): burn-in ends once every starting Cell the install runs has its 20 merged PRs, not every starting Cell: a starting Cell whose level its role's model does not run (an unrunnable Cell, `CONTEXT.md`) is left out of the draw like a tripped one and out of the count, and the Fit's `table` records the set it counted as `starting_cells`. Where the install cannot be read all three starting Cells count.*
 
 **No stages.** ADR 0016's stage 2 (`STAGE2`, `ticket-router.mjs:78`; the branch at `:604-611`) retires: `slow-medium` and `task-max` are exploration candidates like any other Cell (§ 2.6). **A Cell that exploration adds does not re-enter burn-in:** `burn_in` is judged over the starting Cells only, where today it is `!cells.every(atN)` over the table's whole set (`:618`), so adding a Cell switches burn-in back on and draws uniformly over every Cell (`:330`), which is the opposite of a walk. This follows from the exploration decision and was not put to the maintainer on its own, so it **reopens on a word** (#4161).
 
@@ -291,6 +292,7 @@ Filed as `needs-triage` issues, each with a `Part of #4118` line, ordered by nat
 **S4 (#4240). Burn-in over the starting Cells, with no stages.**
 - *Scope:* `STAGE2` and the `stage` field retire; `burn_in` is judged over the starting Cells only; a Cell added by exploration does not re-enter it; a role's model change re-enters it (unchanged).
 - *Acceptance:* a Fit with the three starting Cells at 20 merged each has `burn_in: false` whatever Cells exploration has added; `slow-medium` and `task-max` are never drawn by burn-in; a model change on a role restores burn-in for that Cell.
+  *Amended (#4462): a Fit with every starting Cell the install runs at 20 merged each has `burn_in: false`; a starting Cell whose level its role's model does not run is neither drawn by burn-in nor counted by it, and the Fit records the set it counted as `starting_cells`.*
 - *Blocked by:* S1.
 
 **S5 (#4241). Exploration in each group, and the assignment probability.**

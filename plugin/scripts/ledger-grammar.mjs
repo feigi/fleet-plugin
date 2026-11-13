@@ -1036,10 +1036,16 @@ export function drawCell({ session, ticket, policyCell, cells }) {
 //   STRATUM   the group's rule path        BRIEF     the brief's chars
 //   CRITERIA  the criteria count           PARENT    a Slice's parent issue
 //   SIZED     arm B's sizing label         OBJECTIVE cost | speed
-//   TRIPPED   the guard's tripped Cells    REASON    the first thing that went wrong
+//   TRIPPED   the guard's tripped Cells    UNRUNNABLE the Cells the install does not run
+//   REASON    the first thing that went wrong
 // DRAW and BY are `-` together (no draw); so are BRIEF and CRITERIA (no issue
-// read), and PARENT is `-` with them. A line written before PARENT was a part
-// carries none, and reads as `PARENT=-`.
+// read), and PARENT is `-` with them. UNRUNNABLE lists every Cell with an
+// implementer definition whose level its role's model does not run, sorted and
+// each once — a list out of that order is no Routing — `-` for none; it is
+// worked out when the Pull is routed and is no guard verdict. A
+// line written before PARENT was a part carries none, and reads as `PARENT=-`;
+// one written before UNRUNNABLE was a part carries none, and reads as
+// `UNRUNNABLE=-`.
 //
 // STRATUM names the group the Pull was routed to — the router table's node the
 // walk ended at — by its rule path. `*` is the root, the group of every ticket
@@ -1062,11 +1068,12 @@ export const isRulePath = (x) => typeof x === "string" && RULE_PATH.test(x);
 export const OBJECTIVES = Object.freeze(["cost", "speed"]);
 const DRAWN_BY = Object.freeze(["burn-in", "every-5th"]);
 export const ROUTING_REASONS = Object.freeze([
-  "ok", "no-issue-json", "no-sizing", "guard-missing", "guard-tripped", "table-cell-tripped", "fit-missing", "fit-unreadable", "fit-invalid",
+  "ok", "no-issue-json", "no-sizing", "guard-missing", "guard-tripped", "table-cell-tripped", "table-cell-unrunnable", "fit-missing", "fit-unreadable", "fit-invalid",
 ]);
 const SIZINGS = Object.freeze(["light", "heavy"]);
-const ROUTING_KEYS = Object.freeze(["POLICY", "CELL", "DRAW", "BY", "STRATUM", "BRIEF", "CRITERIA", "PARENT", "SIZED", "OBJECTIVE", "TRIPPED", "REASON"]);
+const ROUTING_KEYS = Object.freeze(["POLICY", "CELL", "DRAW", "BY", "STRATUM", "BRIEF", "CRITERIA", "PARENT", "SIZED", "OBJECTIVE", "TRIPPED", "UNRUNNABLE", "REASON"]);
 const PARENT_AT = ROUTING_KEYS.indexOf("PARENT");
+const UNRUNNABLE_AT = ROUTING_KEYS.indexOf("UNRUNNABLE");
 const ISSUE = /^[1-9][0-9]*$/;
 const COUNT = /^(?:0|[1-9][0-9]*)$/;
 const DRAW = /^([1-9][0-9]*)\/([1-9][0-9]*)$/;
@@ -1075,14 +1082,16 @@ const DRAW = /^([1-9][0-9]*)\/([1-9][0-9]*)$/;
  * A Routing line read into its parts, or null when it is not one.
  * @returns {null | { policy: string, cell: string, draw: null | { k: number, K: number }, by: null | string,
  *   stratum: string, brief: null | number, criteria: null | number, parent: null | number, sized: null | string,
- *   objective: string, tripped: string[], reason: string }}
+ *   objective: string, tripped: string[], unrunnable: string[], reason: string }}
  */
 export function parseRouting(line) {
   if (typeof line !== "string") return null;
   const words = line.split(" ");
-  // A line written before PARENT was a part is one word short; one that holds
-  // PARENT= and lacks another key instead fails the per-key check.
-  if (words.length === ROUTING_KEYS.length - 1) words.splice(PARENT_AT, 0, "PARENT=-");
+  // A line written before UNRUNNABLE was a part is one word short of the keys, and one written before PARENT
+  // too is two short; each reads with the key it lacks as `-`. A line that holds PARENT= and lacks another
+  // key instead fails the per-key check.
+  if (words.length === ROUTING_KEYS.length - 2) words.splice(PARENT_AT, 0, "PARENT=-");
+  if (words.length === ROUTING_KEYS.length - 1) words.splice(UNRUNNABLE_AT, 0, "UNRUNNABLE=-");
   if (words.length !== ROUTING_KEYS.length) return null;
   const v = {};
   for (const [i, key] of ROUTING_KEYS.entries()) {
@@ -1091,7 +1100,9 @@ export function parseRouting(line) {
   }
   const opt = (x, ok) => (x === "-" ? null : ok(x) ? x : undefined);
   const count = (x) => (x === "-" ? null : COUNT.test(x) ? Number(x) : undefined);
-  const tripped = v.TRIPPED === "-" ? [] : v.TRIPPED.split(",");
+  const cellList = (x) => (x === "-" ? [] : x.split(","));
+  const tripped = cellList(v.TRIPPED);
+  const unrunnable = cellList(v.UNRUNNABLE);
   const d = DRAW.exec(v.DRAW);
   const r = {
     policy: CELL.test(v.POLICY) ? v.POLICY : undefined,
@@ -1105,6 +1116,7 @@ export function parseRouting(line) {
     sized: opt(v.SIZED, (x) => SIZINGS.includes(x)),
     objective: OBJECTIVES.includes(v.OBJECTIVE) ? v.OBJECTIVE : undefined,
     tripped: tripped.every((c) => CELL.test(c)) ? tripped : undefined,
+    unrunnable: unrunnable.every((c, i) => CELL.test(c) && (i === 0 || unrunnable[i - 1] < c)) ? unrunnable : undefined,
     reason: ROUTING_REASONS.includes(v.REASON) ? v.REASON : undefined,
   };
   if (Object.values(r).includes(undefined)) return null;
@@ -1115,12 +1127,13 @@ export function parseRouting(line) {
 }
 
 /** The Routing line for parsed parts; throws on parts no Routing line can carry, so nothing writes one parseRouting refuses. */
-export function formatRouting({ policy, cell, draw, by, stratum, brief, criteria, parent, sized, objective, tripped, reason }) {
+export function formatRouting({ policy, cell, draw, by, stratum, brief, criteria, parent, sized, objective, tripped, unrunnable, reason }) {
   const none = (x) => (x === null ? "-" : String(x));
+  const cells = (xs) => (xs.length === 0 ? "-" : xs.join(","));
   const line = [
     `POLICY=${policy}`, `CELL=${cell}`, `DRAW=${draw === null ? "-" : `${draw.k}/${draw.K}`}`, `BY=${none(by)}`,
     `STRATUM=${stratum}`, `BRIEF=${none(brief)}`, `CRITERIA=${none(criteria)}`, `PARENT=${none(parent)}`, `SIZED=${none(sized)}`,
-    `OBJECTIVE=${objective}`, `TRIPPED=${tripped.length === 0 ? "-" : tripped.join(",")}`, `REASON=${reason}`,
+    `OBJECTIVE=${objective}`, `TRIPPED=${cells(tripped)}`, `UNRUNNABLE=${cells(unrunnable)}`, `REASON=${reason}`,
   ].join(" ");
   if (parseRouting(line) === null) throw new Error(`not a Routing: ${line}`);
   return line;

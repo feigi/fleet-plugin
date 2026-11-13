@@ -730,7 +730,7 @@ const ABOVE = RULE;
 const BELOW = "brief_chars<=4047";
 const routed = (member, o) => `${member} ${formatRouting({
   policy: "slow-high", cell: "slow-high", draw: null, by: null, stratum: "*", brief: 9658, criteria: 8, parent: null,
-  sized: null, objective: "cost", tripped: [], reason: "ok", ...o,
+  sized: null, objective: "cost", tripped: [], unrunnable: [], reason: "ok", ...o,
 })}`;
 const implRec = (member, cell, model) => ({ member, model, resolvedModelIdentity: `anthropic/${model}`, thinking: cell.split("-")[1], subagent_type: `fleet-implementer-${cell}` });
 
