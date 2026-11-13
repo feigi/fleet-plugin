@@ -1,0 +1,413 @@
+{
+  "pr": 4479,
+  "head": "5dca73ac8066716b4869ee0089de560bdd51278b",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: Verify branch is rebased on base (needs pull-request context and full git history, not the worktree); Validate renovate.json (fetches renovate from the npm registry via npx on every run); smoke-omp (needs bun and a globally installed pinned omp binary); install-and-smoke (needs bun and a globally installed pinned omp binary).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/tier-outcomes.tsv; ?? docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version}. I only ran read-only commands there and never wrote to it, so these paths were not made by me."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version}` (not from this review; I wrote nothing there, only read)"
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/tier-outcomes.tsv' and '?? docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version}'. These are the controller's own run-metrics files; I never wrote to this directory."
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-11T172901Z/closeout.json`, `?? docs/metrics/runs/2026-11-11T172901Z/ledger.md`, `?? docs/metrics/runs/2026-11-11T172901Z/phase0.json`, `?? docs/metrics/runs/2026-11-11T172901Z/plugin-version` (this pass ran only `pwd` and this `git status` there; all writes went to simplify/ and simplify/copy)"
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-11T172901Z/closeout.json`, `?? docs/metrics/runs/2026-11-11T172901Z/ledger.md`, `?? docs/metrics/runs/2026-11-11T172901Z/phase0.json`, `?? docs/metrics/runs/2026-11-11T172901Z/plugin-version` (this review wrote nothing there; every write went under correctness/; the run directory is dated 2026-11-11, before this session)"
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/tier-outcomes.tsv' and '?? docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version}'. I wrote nothing there, so this likely comes from another agent, not from me."
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 2,
+    "unverified": 24,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4479/run-p8sGxYCB/snapshot-5dca73ac",
+  "survived": [],
+  "refuted": [
+    {
+      "severity": "important",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 1182,
+      "claim": "When the install read fails, `route` dispatches a Cell the install does not run, with REASON=ok and UNRUNNABLE=-. That is the silent level clamp this PR exists to prevent, and the ledger line cannot tell 'not checked' from 'checked, nothing unrunnable'. The only signal is a stderr WARNING, and the exit stays 0.",
+      "evidence": "Probe: catalog where every model runs only low/medium, then route. Readable install: `POLICY=slow-medium CELL=slow-low DRAW=1/1 BY=every-5th ... UNRUNNABLE=slow-high,slow-max,...,task-xhigh REASON=table-cell-unrunnable`. Same table with --catalog pointing at a missing file: `POLICY=slow-high CELL=slow-high DRAW=- BY=- ... UNRUNNABLE=- REASON=ok`, status 0, stderr `WARNING cannot read what this install runs: ENOENT ... — no Cell is checked against it`. The existing test 'an install it cannot read warns...' asserts UNRUNNABLE is `-` for this case.",
+      "suggested_fix": "Make the unread state visible in the Routing line, for example UNRUNNABLE=? or a REASON such as `install-unread`, so the ledger and cockpit can show the Pull was dispatched unchecked. If a spare token is too invasive, fail the Pull when the read fails and the table names a Cell.",
+      "dimension": "silent-failure",
+      "verdict": "refuted",
+      "votes": [
+        {
+          "refuted": true,
+          "reason": "The behaviour the claim describes is real, but it is intended and not silent. I read plugin/scripts/ticket-router.mjs (the route command's install read) and tests/ticket-router.test.mjs in the snapshot. I did not run the suite or the probe, so there is no red or green run.\n\n- When `readInstall` returns null, the code calls `warn('cannot read what this install runs: ... - no Cell is checked against it and no exploration Cell is drawn')`. It then routes with `install` null.\n- A code comment in the same block states the design: a read that fails or does not answer in OMP_READ_TIMEOUT_MS leaves the Pull's Cells unchecked and its every-5th draw empty, and 'warns, never the exit'.\n- Several tests assert this, including 'route: an omp that does not answer is killed and warns, the Pull still routes, exit 0', and a missing-files case for a burn-in Pull and a chain head. The test the claim cites, 'an install it cannot read warns...', asserts UNRUNNABLE is '-' for this case.\n- The claim reports a stderr WARNING and exit 0. That matches the stated design and does not show a silent level clamp.\n- The suggestion that the ledger line cannot tell 'not checked' from 'checked, nothing unrunnable' is a design preference. It is not a defect in the merged code.\n\nCWD-AUDIT: not run; I made no writes in /Users/chris/dev/fleet-plugin."
+        },
+        {
+          "refuted": true,
+          "reason": "Not silent and not unhandled: the snapshot comment at ticket-router.mjs:1175-1180 documents and implements that an unreadable install leaves Cells unchecked, draws nothing, and warns (stderr WARNING) without changing the exit. An existing test asserts exactly this (UNRUNNABLE `-`). The claim shows only that the ledger row can't distinguish 'unchecked' from 'nothing unrunnable'. That is a design tradeoff the PR chose explicitly, not a clamp that goes unreported. I did not run the probe; this verdict rests on reading the source. No red or green was produced, so no evidence line applies. CWD-AUDIT: not run (no files written; cwd /Users/chris/dev/fleet-plugin untouched)."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/metrics-refresh.mjs",
+      "line": 397,
+      "claim": "A failed install read in `metrics-refresh` silently reopens an already-ended burn-in and persists it. Only stderr warns; the `fit:` stdout line and `router-fit.json` carry no sign that the read failed. An install that runs no level at all is not even warned about here, although `ticket-router route` warns for it.",
+      "evidence": "Fixture with smol on a no-level model, run 1: stderr empty, `burn_in:false, starting_cells:[slow-high,task-high]`. Run 2, same corpus with --catalog missing: exit 0, stderr WARNING, stdout `fit: fitted 40 Pulls, in burn-in; ...`, router-fit.json now `burn_in:true, starting_cells:[slow-high,task-high,smol-high]`. Run 3, model-roles `{}`: exit 0, stderr `\"\"`, again burn_in:true with all three Cells. A single 10s omp timeout in close-out therefore moves the router from every-5th exploration back to burn-in draws.",
+      "suggested_fix": "Carry the failed read into the Fit or the `fit:` stdout line, e.g. `fit: ... (install unread: counting all three starting Cells)`. Alternatively keep the previous Fit's starting_cells when the read fails. Emit the same 'runs at no level' warning that ticket-router emits.",
+      "dimension": "silent-failure",
+      "verdict": "refuted",
+      "votes": [
+        {
+          "refuted": true,
+          "reason": "Not run; I read the code at the snapshot's metrics-refresh.mjs:386-397 and ticket-router.mjs:430 and 1106. A failed install read does warn on stderr (\"WARNING cannot read what this install runs ... burn-in counts all three starting Cells\"), so the 'silent' part is overstated. Falling back to all three starting Cells is documented as intended in the startingCellsOf doc: 'so that an install that cannot run them is no reason to end burn-in'. A no-level install returning all three Cells without a warning is real in the code, but it is the same designed fallback. I found no defect beyond what the PR documents. CWD-AUDIT: not run, no files written to /Users/chris/dev/fleet-plugin (nothing applied there)."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 501,
+      "claim": "rowDispatch's `adjust` swaps a tripped or unrunnable row Cell for the derived default (defaultCellOf) without checking whether that default is itself tripped. When slow lacks `high` and the guard has tripped `slow-medium`, the Pull is dispatched to the tripped `slow-medium` with REASON=table-cell-unrunnable.",
+      "evidence": "probes/p1.mjs: installOf with slow thinking [low,medium,xhigh] and the shipped agents dir, then rowDispatch({table: burn_in false, rows *=slow-high, guard:{tripped:['slow-medium']}, objective:'cost', stratum:'*'}) printed `P1 default slow-medium` and `{\"policy\":\"slow-medium\",\"reason\":\"table-cell-unrunnable\",\"draw\":{...}}`. Before this PR the fallback was always POLICY_CELL, the guard's baseline, which pr-cost.mjs:250 never trips (`t.cell === BASELINE_CELL` is skipped). Reach is narrow: phase 0 refuses any install where slow lacks high, because 3 non-implementer definitions use @slow:high (counted with grep/awk over copy/plugin/agents). So this only happens if the install changes mid-run.",
+      "suggested_fix": "Make defaultCellOf skip tripped levels (pass guard.tripped in), or document that a tripped derived default is still dispatched.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/compute-cell-evidence.mjs",
+      "line": 494,
+      "claim": "With no cost guard and an install whose slow model lacks `high`, the cockpit's dispatch heading says every Pull runs at slow-high. The same tab's root row shows slow-medium and labels slow-high 'held: no cost guard' rather than unrunnable. The tab therefore disagrees with route, which the ticket says it must not.",
+      "evidence": "A temporary test in copy/tests reused the fixtures from compute-cell-evidence.test.mjs:1-575 and called policy({ guard:{status:'missing'}, catalog: opus-5 thinking [low,medium,xhigh,max] }). It printed `PROBE {\"heading\":\"no cost guard: every Pull runs at slow-high, the default Cell\",\"cell\":\"slow-medium\",\"held\":\"slow-high held: no cost guard\"}`. dispatchHeading(table, guard) is not given the install and hard-codes POLICY_CELL. Same narrow reach as the first finding.",
+      "suggested_fix": "Pass inst.install into dispatchHeading and word it with defaultCellOf(install). In rowEntry, check unrunnability before the guard-missing wording.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/compute-board.mjs",
+      "line": 369,
+      "claim": "A Routing with REASON=table-cell-unrunnable and UNRUNNABLE=- is possible because rowDispatch tests ladders only while unrunnableCells lists only defined Cells. The board card then renders `cost row's Cell (one of ) unrunnable here: default Cell`.",
+      "evidence": "probes/p1.mjs P2 called route() with an install that has no definitions and a task ladder without xhigh, against rows *=task-xhigh. It printed `POLICY=slow-high CELL=slow-high ... TRIPPED=- UNRUNNABLE=- REASON=table-cell-unrunnable`. probes/p3.mjs passed that line to cellLine({row:'#5 impl-5', issue:5, routed:[...]}) and got `[\"slow-high\",\"cost row's Cell (one of ) unrunnable here: default Cell\"]`. It is reachable only when a row names a Cell that has no definition, or when the agents dir is empty (route already warns about the latter).",
+      "suggested_fix": "In reasonWords, when r.unrunnable is empty and rowCell is undefined, fall back to `${row}'s Cell unrunnable here`. Alternatively, have rowDispatch's unrunnable test agree with unrunnableCells.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 440,
+      "claim": "With the install unreadable, behaviour matches the ticket. Run against the ticket's smoke fixture, the readable case shows the every-5th draw re-centred on the default Cell, with task-max (next task level above high on a ladder without xhigh) among the candidates.",
+      "evidence": "probes/smoke.mjs ran the CLI with a Fit whose * rows are task-xhigh, task thinking [low,medium,high,max], smol thinking null, impl-row 5. It exited 0 with `POLICY=slow-high CELL=task-max DRAW=3/3 BY=every-5th ... UNRUNNABLE=smol-high,smol-low,smol-max,smol-medium,smol-xhigh,task-xhigh REASON=table-cell-unrunnable` and a WARNING that smol runs at no level. Pointing --catalog at a missing file also exited 0, printing `POLICY=task-xhigh CELL=task-xhigh DRAW=- ... UNRUNNABLE=- REASON=ok` and the 'cannot read what this install runs' WARNING. This is a confirmation, not a defect.",
+      "suggested_fix": "None needed.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/tier-roles.mjs",
+      "line": 301,
+      "claim": "Removing `routable` weakens the tier-check gate. A role whose model runs some levels but none that any defined implementer Cell uses now passes with a notice only, although the router then still dispatches the unrunnable default Cell.",
+      "evidence": "checkRoutes with only fleet-implementer-slow-high defined and every role on a model whose catalog thinking is [low, medium]: violations [] and notices include `cell slow-high unrunnable: modelRoles.slow → p/m runs low, medium`. `defaultCellOf` on the same install returns `slow-high` (POLICY_CELL), so route dispatches it with only a stderr warning. The old code made POLICY_CELL always routable, so this was a violation.",
+      "suggested_fix": "Keep the violation when no Cell of the policy role is both runnable and defined, not only when slow runs at no level: the condition in main's `defaultCellOf(install) === POLICY_CELL` warning.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/compute-cell-evidence.mjs",
+      "line": 539,
+      "claim": "A Fit whose `starting_cells` is malformed (a string, an empty list, or unknown Cell names) is accepted by validateTable. The cockpit falls back to all three starting Cells with no signal, so burn-in progress is judged over a different set than the one that set `burn_in`.",
+      "evidence": "validateTable on the starting table with starting_cells 'x', [], ['nope'] and undefined returns valid for every one. The test at compute-cell-evidence.test.mjs:996 asserts that `['nope']` gives 3 cells. countedStartingCells has no flag or heading for the substitution.",
+      "suggested_fix": "Validate `starting_cells` in validateTable, or have the cockpit say the recorded set is unusable.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 1099,
+      "claim": "readInstall's try covers installOf and readdirSync as well as the reads. A bug or an odd modelRoles value thrown from installOf or resolveRole is reported as 'cannot read what this install runs: <message>' and treated as an unread install.",
+      "evidence": "Read only: the catch returns `{ install: null, why: e.message }` for every exception in the block. A probe with number or object role values did not throw: models became null, so every Cell was unrunnable and starting Cells fell back to all three silently. No installOf throw was triggered.",
+      "suggested_fix": "Wrap only the three reads. Let installOf failures surface as themselves, or label them differently.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/compute-cell-evidence.mjs",
+      "line": 537,
+      "claim": "countedStartingCells' validation of a recorded `starting_cells` is only partly tested: dropping the `recorded.length > 0` check, changing `.every` to `.some`, and returning `[...recorded]` instead of `STARTING_CELLS.filter(...)` (which loses canonical order) each leave all tests green.",
+      "evidence": "Mutants (a) `recorded.length > 0 && recorded.every` -> `recorded.every`, (b) `recorded.every((c) => STARTING_CELLS` -> `recorded.some((c) => STARTING_CELLS`, (c) `STARTING_CELLS.filter((c) => recorded.includes(c))` -> `[...recorded]`. Each run: node --test over the 8 files above → exit 0, fail 0 (survived). Baseline same command → exit 0, tests 644 pass 644. The existing test at compute-cell-evidence.test.mjs:996 only passes `[\"nope\"]`, so no case has an empty array, a mix of valid and invalid cells, or a reordered set.",
+      "suggested_fix": "Add cases to the compute-cell-evidence test: `starting_cells: []` → all three; `[\"slow-high\",\"bogus\"]` → all three; `[\"task-high\",\"slow-high\"]` → canonical order slow-high, task-high.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 418,
+      "claim": "The `parsed === null` guard in isRunnable is untested: removing it leaves every test green. It is unreachable for valid Cells, so it is probably an equivalent mutant.",
+      "evidence": "Mutant `install === null || parsed === null ||` -> `install === null ||` → node --test over the 8 files → exit 0, fail 0. Baseline exit 0, 644/644.",
+      "suggested_fix": "Either add a test of isRunnable with a non-Cell string, or drop the dead guard.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "No discrimination gap found in the rest of the diff: the other 28 mutants were each caught by a test whose name matches the changed behaviour.",
+      "evidence": "red: node --test over the 8 files with fitTree dropping startingCells → exit 1, fail 19 incl 'gather: reads the Fit in the state directory every tick, and the board lays it out as the Fit that routes'. Other kills: default-direction mutant → fail 5 incl 'defaultCellOf: slow-high while it runs, else the nearest runnable defined level of slow — downward first, then upward'; reason-order swap → fail 2 incl 'route: the Routing names every defined Cell the install does not run, sorted, and a Cell both tripped and unrunnable reads unrunnable'; splice off by one → fail 1 incl 'a Routing written before UNRUNNABLE was a part still parses, as UNRUNNABLE=-'. baseline: same 8-file command → exit 0, 644 pass. The per-test baseline is the whole-set green, not a separate green for each named test.",
+      "suggested_fix": "None.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/components/tier-routing.md",
+      "line": 29,
+      "claim": "Untouched doc step 3 says `tier-roles.mjs --check` validates that each definition's level is one its role's target runs at, with no qualification, but this diff makes that a notice (not a violation) for implementer definitions unless `slow` runs at no level.",
+      "evidence": "docs/components/tier-routing.md:29-33 in the snapshot reads 'validates ... that each definition's level is one the role's target runs at (omp's model catalog)'; tier-roles.mjs:305 now pushes `cell ... unrunnable: ...` to notices for implementer definitions and only violates for `slow` with no levels.",
+      "suggested_fix": "Add 'except an implementer definition, which the router routes around and --check reports as a notice' to that step.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 976,
+      "claim": "The new `starting_cells` field on the Fit table is recorded but never checked by validateTable. Nothing stops a non-empty, STARTING_CELLS-only set from being the only thing that holds. A non-array or empty value passes validation, and only compute-cell-evidence re-checks it at read time.",
+      "evidence": "`grep -n starting_cells plugin/scripts/*.mjs` finds only the writer (ticket-router.mjs:980), the cockpit reader (compute-cell-evidence.mjs:539, which defensively re-validates with Array.isArray / length>0 / every in STARTING_CELLS) and comments. validateTable's checks (lines ~322-324) cover `cells` and not `starting_cells`. The invariant is held by the producer plus a defensive reader, not by validateTable.",
+      "suggested_fix": "Validate `starting_cells` in validateTable as an optional, non-empty, duplicate-free subset of STARTING_CELLS. The cockpit could then drop its own re-check.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 90,
+      "claim": "fitTable, fitTree and writeFit accept any `startingCells` array. An empty array makes `shortStartingCells` empty and so sets `burn_in` false immediately. The non-empty invariant lives only in startingCellsOf's fallback, not at the Fit entry points.",
+      "evidence": "The diff shows `startingCells = STARTING_CELLS` as an unvalidated default parameter in fitTable, fitTree and writeFit. `shortStartingCells = (n, cells) => cells.map(...).filter(...)` has no empty check. startingCellsOf returns `runs.length > 0 ? runs : [...STARTING_CELLS]`, which is the only place non-emptiness is enforced.",
+      "suggested_fix": "Throw in tableOver (or fitTable) when startingCells is empty or holds a Cell outside STARTING_CELLS.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 404,
+      "claim": "`isRunnable(install, cell)` treats a cell that does not match CELL as runnable (`parsed === null`). A malformed Cell therefore passes the install check instead of being rejected. `install.ladders[parsed[1]]` also assumes the parsed role is a key of `ladders`. That is true only because CELL's role alternation (slow|task|smol) and ROLES_BY_PRICE (smol, task, slow) are kept in sync by hand.",
+      "evidence": "The diff body of isRunnable is `install === null || parsed === null || install.ladders[parsed[1]].includes(parsed[2])`. ledger-grammar.mjs:993 defines CELL as /^(slow|task|smol)-.../ and ticket-router.mjs:393 defines ROLES_BY_PRICE separately. validateTable ensures table cells match CELL, so this is unreachable for table rows today.",
+      "suggested_fix": "Derive ROLES_BY_PRICE or the ladders keys from the same source as CELL, or assert at module load that they match. Throw on a non-CELL string instead of answering true.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger-grammar.mjs",
+      "line": 1121,
+      "claim": "The Routing UNRUNNABLE field is documented as 'sorted', but parseRouting and formatRouting only check that each item matches CELL. Unsorted or duplicated lists parse and round-trip, so the stated invariant is documented and not enforced. The same goes for `unrunnable` and `tripped` being disjoint from nothing.",
+      "evidence": "The diff line `unrunnable: unrunnable.every((c) => CELL.test(c)) ? unrunnable : undefined` is the only check. The header comment says 'lists every Cell ... sorted'. formatRouting's round-trip via parseRouting does not compare order. unrunnableCells does sort at the producer.",
+      "suggested_fix": "Either drop 'sorted' from the grammar doc, or reject unsorted and duplicate lists in parseRouting, as is done for other fields.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 499,
+      "claim": "rowDispatch's `install = null` conflates 'install not read' with 'no install information', so 'nothing is unrunnable' is a runtime convention and not something the types force. The three-valued shape, install-or-null plus a `why` string, is split across readInstall's return and the caller. A caller can pass `install` without handling the null warning path.",
+      "evidence": "readInstall returns `{ install, why }` where the two are meant to be mutually exclusive (`{install, why:null}` or `{install:null, why}`), but it is a plain object with no tagged union. compute-cell-evidence's installFrom builds a parallel `{ install, why, note }` shape by hand.",
+      "suggested_fix": "Optional: return a tagged result (e.g. `{ ok: true, install }` | `{ ok: false, why }`) so the two cannot be inconsistent.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger-grammar.mjs",
+      "line": 1092,
+      "claim": "parseRouting's legacy-line padding uses an if/else-if with an off-by-one splice (`UNRUNNABLE_AT - 1`) for the two-short case; two sequential single-purpose pads, PARENT first, give the same result with no index arithmetic.",
+      "evidence": "Replaced lines 1092-1097 in simplify/copy with the two-line form below, then ran simplify/probe-routing.mjs, which compares snapshot parseRouting against copy parseRouting over 390 lines (the full 13-key line with every combination of 0-3 words dropped, plus each adjacent-word swap): `{ lines: 390, parsedSame: 3, diff: 0 }` (the 3 that parse: full, minus UNRUNNABLE, minus PARENT+UNRUNNABLE). `node --test` over ledger-grammar, compute-cell-evidence, ticket-router, metrics-refresh, compute-board-cell-line, board-cell-evidence-gather, tier-roles, cockpit-tabs and member-bodies-split test files in the copy: tests 659, pass 659, fail 0.",
+      "suggested_fix": "if (words.length === ROUTING_KEYS.length - 2) words.splice(PARENT_AT, 0, \"PARENT=-\");\nif (words.length === ROUTING_KEYS.length - 1) words.splice(UNRUNNABLE_AT, 0, \"UNRUNNABLE=-\");",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/compute-cell-evidence.mjs",
+      "line": 513,
+      "claim": "In burnInProgress, `subset` (counted.length < STARTING_CELLS.length) is the same fact as `left.length > 0`, because countedStartingCells always returns a duplicate-free filter or copy of STARTING_CELLS; keeping both lets them drift apart.",
+      "evidence": "simplify/probe-eq.mjs enumerates all 8 subsets of STARTING_CELLS and checks `(counted.length < 3) === (left.length > 0)`: part of `{ cases: 41, bad: 0 }`. In the copy I dropped `subset` and used `left.length > 0` in `kind`/`out`; the 659-test run above passes, including the burn-in heading tests at tests/compute-cell-evidence.test.mjs:986-997.",
+      "suggested_fix": "Delete `const subset = …` and use `left.length > 0` (or `const subset = left.length > 0` placed after `left`) for `kind` and `out`.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/compute-cell-evidence.mjs",
+      "line": 547,
+      "claim": "modelChanges takes `inst` only to forward it to countedStartingCells, which reads `inst` only when `p === null`, and modelChanges has already returned [] for `p === null`. So the parameter (and the fitView argument) does nothing.",
+      "evidence": "In the copy I changed the signature to `modelChanges(p)`, passed `null` to countedStartingCells at line 550, and changed fitView to call `modelChanges(p)`. The 659-test run passes, including the notices assertions in compute-cell-evidence.test.mjs. From the code: countedStartingCells' only `inst` use is `if (p === null) return startingCellsOf(inst.install)` (snapshot line 538).",
+      "suggested_fix": "Split the Fit-record branch out, e.g. `const fitStartingCells = (table) => …recorded/valid logic…`, and have countedStartingCells(p, inst) return `p === null ? startingCellsOf(inst.install) : fitStartingCells(p.table)`. modelChanges(p) then calls fitStartingCells(p.table) and fitView passes `modelChanges(p)`.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 90,
+      "claim": "shortStartingCells builds [cell, count] pairs that its only caller (tableOver, line 979) throws away by testing `.length > 0`. A boolean `some` says the same thing directly.",
+      "evidence": "Searched the snapshot's ticket-router.mjs for `shortStartingCells`: the only uses are the definition (line 90) and line 979. simplify/probe-eq.mjs compares `map/filter(...).length > 0` with `some(...)` over 8 subsets × 4 count vectors (absent counts included): part of `{ cases: 41, bad: 0 }`. In the copy I replaced the helper with `startingCellsShort = (n, cells) => cells.some((c) => (n[c] ?? 0) < MIN_N)` and set `burn_in: startingCellsShort(guard.n, startingCells)`; the 659-test run passes, including ticket-router.test.mjs:2936-2943 and the metrics-refresh burn_in/starting_cells tests.",
+      "suggested_fix": "const anyStartingCellShort = (n, cells) => cells.some((c) => (n[c] ?? 0) < MIN_N);  …  burn_in: anyStartingCellShort(guard.n, startingCells),",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/metrics-refresh.mjs",
+      "line": 335,
+      "claim": "writeFit's `startingCells = STARTING_CELLS` default, and the STARTING_CELLS import added only for it, repeat fitTree's own identical default. A destructured `undefined` forwarded to fitTree triggers that default anyway.",
+      "evidence": "Searched the snapshot's metrics-refresh.mjs for STARTING_CELLS: only the import (line 124) and this default (line 335). simplify/probe-eq.mjs checks that forwarding an undefined destructured value reaches the callee's default (`g({}) === S && g() === S`): part of `{ cases: 41, bad: 0 }`. In the copy I removed the import line and the default; the 659-test run passes, including tests/metrics-refresh.test.mjs:377-378 (the Fit records all three starting Cells when none is named).",
+      "suggested_fix": "export function writeFit(repo, written, { tablePath = DEFAULT_TABLE, packagePath = INSTALL_PACKAGE, now = new Date(), startingCells } = {}) — and drop `import { STARTING_CELLS } from \"./ledger-grammar.mjs\";`.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/compute-cell-evidence.mjs",
+      "line": 596,
+      "claim": "exploringWords' burn-in return now nests a ternary plus an `.some(...)` call inside a template literal inside another ternary, all on one line. Early returns read more clearly and keep the same output.",
+      "evidence": "In the copy I replaced the one-liner with the block below; the 659-test run passes, including the exploring/draw-words tests in compute-cell-evidence.test.mjs.",
+      "suggested_fix": "if (table.burn_in) {\n  if (rd.draw !== null) return `drawn over ${list(rd.draw.cells)}`;\n  const orUnrunnable = unrunnableCells(inst.install).some((c) => STARTING_CELLS.includes(c)) ? \" or unrunnable\" : \"\";\n  return `draws nothing: every starting Cell is tripped${orUnrunnable}`;\n}",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ledger-grammar.mjs",
+      "line": 1133,
+      "claim": "formatRouting and parseRouting each now repeat their Cell-list encoding (`xs.length === 0 ? \"-\" : xs.join(\",\")` and `x === \"-\" ? [] : x.split(\",\")`) for TRIPPED and UNRUNNABLE. One local helper on each side, like the existing `none`/`count` helpers, removes the copy-paste.",
+      "evidence": "In the copy I added `const cells = (xs) => (xs.length === 0 ? \"-\" : xs.join(\",\"))` to formatRouting and `const cellList = (x) => (x === \"-\" ? [] : x.split(\",\"))` to parseRouting and used them for both keys. probe-routing.mjs still reports `diff: 0` over 390 lines, and the 659-test run passes, including the ledger-grammar round-trip tests.",
+      "suggested_fix": "formatRouting: `const cells = (xs) => (xs.length === 0 ? \"-\" : xs.join(\",\"));` … `TRIPPED=${cells(tripped)}`, `UNRUNNABLE=${cells(unrunnable)}`; parseRouting: `const cellList = (x) => (x === \"-\" ? [] : x.split(\",\"));` … `const tripped = cellList(v.TRIPPED); const unrunnable = cellList(v.UNRUNNABLE);`",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/tier-roles.mjs",
+      "line": 305,
+      "claim": "checkRoutes now computes `efforts.join(\", \") || \"none\"` twice, once in each branch, inside the per-definition loop. The removed `mismatch` hoist used to share it; computing it once per role keeps one spelling.",
+      "evidence": "In the copy I added `const runs = efforts.join(\", \") || \"none\";` after `const efforts = …` (line 298) and used `${runs}` in both the notice and the violation. tests/tier-roles.test.mjs, part of the 659-test run, passes, so the notice and violation texts are unchanged.",
+      "suggested_fix": "const efforts = entry.thinking ?? [];\nconst runs = efforts.join(\", \") || \"none\";\n… notices.push(`cell ${cell} unrunnable: modelRoles.${role} → ${model} runs ${runs}`) … violations.push(`${file}: level ${level} is not one modelRoles.${role}'s target ${model} runs at (thinking: ${runs}) — omp would clamp it silently`);",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

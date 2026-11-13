@@ -1,0 +1,354 @@
+{
+  "pr": 4480,
+  "head": "084733914ce67bcdb125c50bc7d7e6b2dcfa07b4",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: Verify branch is rebased on base (needs pull-request context and full git history, not the worktree); Validate renovate.json (fetches renovate from the npm registry via npx on every run); smoke-omp (needs bun and a globally installed pinned omp binary); install-and-smoke (needs bun and a globally installed pinned omp binary).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`, untracked docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version}. I only ran `pwd`, read-only `grep`, and `git status` in that checkout, so I did not write these files. They are not from this review."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version}`. These are run-metrics files from another run (2026-11-11). My commands there were `pwd` and this one `git status`, so none of them is mine."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv` and untracked `docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version}`. I wrote nothing there; these look like another member's or run's close-out output."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin —  M docs/metrics/tier-outcomes.tsv; ?? docs/metrics/runs/2026-11-11T172901Z/closeout.json; ?? docs/metrics/runs/2026-11-11T172901Z/ledger.md; ?? docs/metrics/runs/2026-11-11T172901Z/phase0.json; ?? docs/metrics/runs/2026-11-11T172901Z/plugin-version (none written by this pass: my only commands there were `pwd` and this status; every other command cd'd into the snapshot, my copy or the run scratch dir)"
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin —  M docs/metrics/tier-outcomes.tsv; ?? docs/metrics/runs/2026-11-11T172901Z/closeout.json; ?? docs/metrics/runs/2026-11-11T172901Z/ledger.md; ?? docs/metrics/runs/2026-11-11T172901Z/phase0.json; ?? docs/metrics/runs/2026-11-11T172901Z/plugin-version (this pass ran no write command in that directory; every command chained a cd into the snapshot, the scratch dir or the copy)"
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/tier-outcomes.tsv; ?? docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version} (list cut at five lines by `head`, so it may be incomplete). I wrote nothing there; my only command that ran in that checkout, `cd /tmp` then the copy script, wrote only to scratch."
+    }
+  ],
+  "counts": {
+    "survived": 4,
+    "refuted": 0,
+    "unverified": 16,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4480/run-6kfNZyjh/snapshot-08473391",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "plugin/scripts/fleet-tick.mjs",
+      "line": 2641,
+      "claim": "Under merge:false the run-over check exempts every ready-to-merge PR that is not CONFLICTING/conflict-held, without checking for a live member on it, so a draining run prints `ACTION: run over` while a finisher or fix-applier is still live on a labelled PR — a state the old `prs.length === 0` check could never reach, and one the finisher's own flow produces (it adds the label before it reports; docs/components/merge-bot.md: the bot fires on the label 'never waiting for the Finisher's own report').",
+      "evidence": "In my copy, appended a probe test using the file's own helpers (runCli, IDLE, pr, withMerge) and ran `node --test --test-name-pattern='PROBE live member' tests/fleet-tick.test.mjs`. Ledger drain=budget, prs=[pr(9,[\"ready-to-merge\"])], phase0 withMerge(false):\n- dispatched [\"impl-5=PR#9\",\"finisher-pr-9\"] (live finisher) → last line `ACTION: run over → fleet-heartbeat.mjs --stop \"<reason>\"`\n- dispatched [\"impl-5=PR#9\",\"fix-pr-9\"] (live fix-applier; reviewers row reads `reviewers 1/2 … fix-pr=1`) → last line `ACTION: run over → …`\nclosesout.mjs has no live-member guard beyond impl- claims (grep 'live' in closeout.mjs: only lines 18/21 release step and tier-outcomes --live), so the controller would stop the heartbeat and run close-out with that member still working.",
+      "suggested_fix": "Make `awaitsMaintainer` also require that no member is live on the PR (e.g. `!run.live`/`liveOn(p.number)`-style check from deriveRun, which already computes per-PR liveness for prClosed), and add the live-finisher / live-fix-pr cases to the 'holds' table of the run-over test.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Read fleet-tick.mjs:2641-2643 in the snapshot. Under merge:false, `holding` drops every ready-to-merge PR that is not CONFLICTING or conflict-held, and `over` only also requires `run.implLive === 0`. `implLive` is `live(\"impl\")` (line 1284), and no other live-member count (finisher, fix-applier) gates `over`. So a live finisher or fix-applier on a labelled, non-conflicting PR does not stop `ACTION: run over`. The old `prs.length === 0` check could not reach that state. I did not run the probe test or build a measuring copy; this verdict rests on code reading alone. CWD-AUDIT: not run, no files were written in /Users/chris/dev/fleet-plugin."
+        },
+        {
+          "refuted": false,
+          "reason": "I read the code and did not run the probe. fleet-tick.mjs:2641-2643 computes `over` from `holding.length === 0 && run.implLive === 0`. With merge:false, `holding` drops every ready-to-merge PR that is not CONFLICTING or conflict-held. `implLive` is only `live(\"impl\")` (line 1284), and a grep of fleet-tick.mjs for implLive shows no other live-member count in that condition. So a live finisher or fix-applier on a labelled PR does not block `ACTION: run over`. The old `prs.length === 0` check would have kept that PR in `holding`. I found no guard elsewhere in the check. That matches the claimant's probe result, which I did not rerun. The finisher adding the label before it reports is from the claim and docs/components/merge-bot.md, which I did not open. CWD-AUDIT: not run; I only read files and ran grep and sed in /Users/chris/dev/fleet-plugin and the snapshot, and wrote nothing."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/fleet-tick.mjs",
+      "line": 2641,
+      "claim": "With merging off, the `over` check treats any `ready-to-merge` PR that is not CONFLICTING and has no conflict hold as holding nothing, even while a fix-applier is live on it. A draining run then prints `ACTION: run over → fleet-heartbeat.mjs --stop`. With merging on, the same state does not print it.",
+      "evidence": "Probe test (draining ledger, `merge:false` receipt, open PR#9 labelled ready-to-merge, row `… · fix-pr-9`, dispatched `fix-pr-9` with no outcome). The reviewers row read `1/2 … (fix-pr=1 …)` (one fix-applier live), yet the last line was `ACTION: run over → fleet-heartbeat.mjs --stop \"<reason>\"`. The same ledger with `merge:true` printed no run-over line (tail: reviewers…fix-pr=1, merge-bot DISPATCH merge-bot, router).",
+      "suggested_fix": "Hold the run open while any member is live on the PR (run.fixLive, reviewsLive or a live finisher naming it), not only for implLive and conflict state. Or make awaitsMaintainer require that no live member names p.number.",
+      "dimension": "silent-failure",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Read snapshot fleet-tick.mjs:2630-2643: with merging off, holding = prs.filter(!awaitsMaintainer), awaitsMaintainer is only label+not CONFLICTING+no conflict hold; over = draining && holding.length===0 && run.implLive===0. implLive is live(\"impl\") only (line 1284), so live fix-pr members are not counted; with merging on holding=prs so over is false. Claim matches the code; I did not run the probe. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/tier-outcomes.tsv' and untracked docs/metrics/runs/2026-11-11T172901Z/* (not from me; I wrote nothing)."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/fleet-tick.mjs",
+      "line": 2641,
+      "claim": "`awaitsMaintainer` only excludes `mergeable === \"CONFLICTING\"`, so a labelled PR whose mergeable is UNKNOWN (GitHub has not computed it yet, e.g. right after the maintainer merges a sibling PR) counts as awaiting merge. The run is declared over, even though the conflict fix path elsewhere deliberately waits for UNKNOWN to resolve (comment at line 1209: 'UNKNOWN is read again next tick').",
+      "evidence": "Probe: draining ledger, `merge:false` receipt, PR#9 labelled ready-to-merge with mergeable=\"UNKNOWN\" → `0 err=[] last=ACTION: run over → fleet-heartbeat.mjs --stop \"<reason>\"`.",
+      "suggested_fix": "Treat UNKNOWN as holding (`p.mergeable === \"MERGEABLE\"` only), so the run is not declared over until GitHub has answered.",
+      "dimension": "silent-failure",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "I read the code but did not run a probe or the test suite, and I built no measuring copy. The claim holds on the snapshot. At plugin/scripts/fleet-tick.mjs:2641, `awaitsMaintainer` is `hasLabel(p, ready-to-merge) && p.mergeable !== \"CONFLICTING\" && !run.conflictHeld.includes(p.number)`. A labelled PR with mergeable UNKNOWN therefore counts as awaiting the maintainer. With merging off it leaves `holding`, so `over` becomes true once draining, no PRs hold and no implementer is live. The comment at line 1209 says UNKNOWN is read again next tick, so the conflict fix path deliberately waits for it, while the over-check does not. The comment above the predicate describes only CONFLICTING and a conflict hold, so the UNKNOWN case looks like an unhandled gap and not a documented choice. `grep -n UNKNOWN` found no UNKNOWN handling beyond line 1209, the MERGEABLE_STATES list (1755) and the row-shape text (1872). CWD-AUDIT: not run, my only commands were read-only (`pwd`, `sed`, `grep`). The cwd was /Users/chris/dev/fleet-plugin.",
+          "inconclusive": false
+        },
+        {
+          "refuted": false,
+          "reason": "I did not build a copy or run a probe. I read the snapshot source. At plugin/scripts/fleet-tick.mjs:2641, awaitsMaintainer is `hasLabel(p, labels[\"ready-to-merge\"]) && p.mergeable !== \"CONFLICTING\" && !run.conflictHeld.includes(p.number)`. With merging off, a labelled PR whose mergeable is UNKNOWN therefore leaves `holding` empty, so `over` is true once the run is draining with no implementer live. The code comment above awaitsMaintainer names only CONFLICTING as the exception. The conflict fix path at ~line 1209 says 'UNKNOWN is read again next tick', so the two paths treat UNKNOWN differently, as claimed. I found no other handling of UNKNOWN in the code I read, but I did not grep for any. The finding's evidence is a probe, and its ACTION output is consistent with this logic. The impact is conditional: the run is declared over while GitHub may still resolve the PR to CONFLICTING. I did not check whether the ACTION line stops the run irreversibly. CWD-AUDIT: not run — I only read files and ran `sed`, and I wrote nothing in /Users/chris/dev/fleet-plugin."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "claim": "SKILL.md's End-of-run step 2 still says the tick prints `run over` 'once the run is draining with no open PR and no live implementer'. Under `no-merge` the tick now prints it with `ready-to-merge` PRs still open, so the controller's main instruction file contradicts the new behaviour. The diff fixed the same sentence in references/close-out.md and left this copy.",
+      "file": "plugin/skills/run-team/SKILL.md",
+      "line": 196,
+      "evidence": "grep -n 'no open PR' plugin/skills/run-team/SKILL.md → line 196 unchanged; the diff touches SKILL.md only at argument-hint, $ARGUMENTS, phase 0 flags, the monitor bullet, the DISPATCH merge-bot bullet, a new IDLE row and the `human` row. The code that makes it false is `const holding = merging ? prs : prs.filter((p) => !awaitsMaintainer(p))` at fleet-tick.mjs:2641-2468 in the diff.",
+      "suggested_fix": "Add a short 'with merging off, only ready-to-merge PRs open' clause to SKILL.md:196, paid for from nearby text since the file sits at its byte ceiling. Alternatively replace the sentence with 'See references/close-out.md'.",
+      "dimension": "comments",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Ran grep and read the snapshot, but ran no test or mutation. SKILL.md:196 still reads 'once the run is draining with no open PR and no live implementer', with no caveat. fleet-tick.mjs:2641-2642 has `holding = merging ? prs : prs.filter((p) => !awaitsMaintainer(p))`. The tick comment says that with merging off a `ready-to-merge` PR holds nothing unless it is CONFLICTING or conflict-held. So under no-merge the tick prints `run over` with such PRs open, and SKILL.md's sentence contradicts it. One detail in the claim is off: the diff did not reword the sentence in references/close-out.md, which still says 'no open PR' at line 21. It added a caveat line under it ('Under `no-merge` a PR carrying `ready-to-merge` holds nothing, unless it conflicts'). SKILL.md got no such caveat, which is the inconsistency. Scope: grep for 'no open PR' in SKILL.md and close-out.md, and the pr.diff hunk for close-out.md. The grep would miss other phrasings of the same idea. CWD-AUDIT: not run; I made no writes and no copy in /Users/chris/dev/fleet-plugin."
+        },
+        {
+          "refuted": false,
+          "reason": "I ran no test; this is a read-only check of the snapshot and the diff. SKILL.md:196-197 still says the tick prints `run over` 'once the run is draining with no open PR and no live implementer', with no no-merge qualifier. The diff adds a qualifier only in references/close-out.md: 'Under `no-merge` a PR carrying `ready-to-merge` holds nothing, unless it conflicts'. fleet-tick.mjs:2642-2643 (`const holding = merging ? prs : prs.filter((p) => !awaitsMaintainer(p)); const over = ... holding.length === 0 ...`) confirms the behaviour change. The SKILL.md sentence therefore contradicts it for `ready-to-merge` PRs under no-merge. My grep covered only the two files named above, and the pattern 'no open PR' would miss other paraphrases elsewhere. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/tier-outcomes.tsv', '?? docs/metrics/runs/2026-11-11T172901Z/closeout.json', '?? docs/metrics/runs/2026-11-11T172901Z/ledger.md'. I wrote none of these; they were already in the checkout, and I only read from it."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/fleet-tick.mjs",
+      "line": 2641,
+      "claim": "[INFERENCE, not executed] A labelled PR owed a re-review (finisher halted past-pin with `reviewed=` behind the current head, or a fix-applier that landed after the label) is also exempted from run-over under merge:false, so the run can end while the tick still prints `DISPATCH review PR#<M>` for it; the ruling's 'label still means audited' holds only while the head equals the label's head.",
+      "evidence": "Read only: awaitsMaintainer checks label, mergeable and conflictHeld; it does not consult reviewDue/pastPinHalt. My probe's past-pin fixture did not reach review-due=1 (reviewers row read `review-due=0`), so this case is unproven.",
+      "suggested_fix": "Exempt a labelled PR only when the tick owes it nothing (no review due, no fix due, no finisher due), not just when it is not in conflict.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/fleet-tick.mjs",
+      "line": 1305,
+      "claim": "[INFERENCE] Under merge:false every --apply tick re-probes the state of every ledger-tracked PR that is off the open list, including PRs already recorded in reapAfterPrs, so the graphql read grows with the run's history instead of with outstanding work.",
+      "evidence": "Read: readOpts `{ trackMerged: apply && !merging }` passes run.prTracked (all byPr keys not open) to prStates; nothing filters out reapedAfterPrs(priorState.applied, run0) before the probe. Not measured.",
+      "suggested_fix": "Pass `notIn(run.prTracked, reapedAfterPrs(priorState.applied, run0))` (plus keyed/review PRs as today) to the probe.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/skills/run-team/SKILL.md",
+      "line": 166,
+      "claim": "Scope creep: the PR deletes the rule '**One rebase per PR, at merge time.** Any behind-count you hand a bot is expired on arrival; say so.' from SKILL.md's Monitor bullet and shortens the `DISPATCH merge-bot` row bullet; neither is in the ticket's doc list, and the rebase rule now lives only in references/ci-and-staleness.md, which SKILL.md says is read 'only for the why'.",
+      "evidence": "pr.diff lines ~653-660 and ~668-669 show the removals; `grep -n 'One rebase per PR' plugin/skills/run-team/SKILL.md plugin/skills/run-team/references/*.md` in the snapshot finds it only at references/ci-and-staleness.md:190. The render/dispatch steps survive at SKILL.md:228 (**The merge bot**), so that half is a dedup only.",
+      "suggested_fix": "Keep the one-rebase rule in SKILL.md (it governs merge runs, which this PR leaves unchanged), or record why it moved.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "README.md",
+      "line": 33,
+      "claim": "Minor scope creep beyond the ticket: README and docs/components/controller.md now also document the Objective (`cost|speed`) argument, and references/close-out.md gains an unrelated 'Label names in this file are roles' preamble; harmless corrections, but not part of #4471's doc list.",
+      "evidence": "pr.diff lines 25-45 (README), 58-75 (controller.md), 691-698 (close-out.md preamble).",
+      "suggested_fix": "Fine to keep if intended; otherwise split into its own docs change.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/phase0-receipt.mjs",
+      "line": 508,
+      "claim": "A receipt whose `merge` is not a boolean (`\"true\"`, `null`, `\"no-merge\"`) silently reads as merging-off in the tick: the merge-bot row prints `IDLE (merging off)` and the implementer hold says 'awaiting human merge'. There is no stderr or advice line saying the receipt value is invalid. phase0.mjs treats the same value as a refusal (exit 3 naming it), so the two readers of one receipt disagree. The switch is thus silently turned off by a corrupt value.",
+      "evidence": "Probe with `phase0: withMerge(v)` for v in \"true\", null, \"no-merge\" and a ready-to-merge PR: status 0, stderr=[] for all three, and `merge-bot    0/1 → IDLE (merging off)`; stdout had no PHASE0 line.",
+      "suggested_fix": "Have mergingOf (or the tick) return a disclosure when `merge` is present and not a boolean, and print it on stderr or above the rows, as phase0 does. The off result for an unreadable value is deliberate and safe; only the missing signal is the gap.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/fleet-tick.mjs",
+      "line": 2118,
+      "claim": "When a tracked-PR state probe fails for a PR that is also a keyed ticket PR, the stderr line lists only '#N's PR#M unconfirmed closed, printed as pr-unchecked'. The 'unconfirmed merged, its reap waits' text is pushed only when no other reason exists, so in no-merge `--apply` the disclosure omits that the reap is delayed.",
+      "evidence": "Diff lines 2118-2122: `if (unconfirmed.length === 0) unconfirmed.push(\"… unconfirmed merged, its reap waits\")`. Read from the diff only; not executed.",
+      "suggested_fix": "Push the reap-waits clause whenever `tracked.includes(number)`, alongside the other reasons.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "Changed behaviour in `prTracked` (fleet-tick.mjs:1304), which excludes PRs the open list carries, has no test that discriminates it: dropping the `!open.has(n)` filter leaves all existing tests green.",
+      "evidence": "Mutant: `prTracked: [...byPr.keys()].filter((n) => !open.has(n)).sort(asc)` → `[...byPr.keys()].sort(asc)`. Run: node --test --test-name-pattern=\"merge false|merging|merge-bot|--apply|receipt merge|implementers|resume|resumed|merge|readState|applied\" tests/fleet-tick.test.mjs (same command as the baseline). Over the full `tests/closeout`, `fleet-state`, `fleet-tick`, `phase0-receipt` and `phase0` test files the mutated tree exited 0. Baseline: fleet-tick narrowed tests 99, pass 99, fail 0, exit 0. No red, so no kill. The mutant's likely effect is only an extra gh state query for already-open PRs, so it may be near-equivalent in outcome.",
+      "file": "plugin/scripts/fleet-tick.mjs",
+      "line": 1304,
+      "suggested_fix": "Add a CLI --apply case with merge false and an open, ready-to-merge PR that is also ledger-tracked. Assert it adds no extra graphql read, or that its state is not read as MERGED.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "ADR 0034 decision 5 still reads 'any open PR, owned or not, still holds a draining run open'. The Status line says it was amended by #4471 and points at 'decision 5', but decision 5's own text carries no caveat, so a reader of the decision list gets the old rule.",
+      "file": "docs/adr/0034-the-fleet-owns-prs-by-author-and-a-ticketless-pr-merges-on-an-inert-diff-only.md",
+      "line": 19,
+      "evidence": "sed of ADR line 19 shows decision 5 ends '…and any open PR, owned or not, still holds a draining run open.' The diff changes only the Status line (diff lines 46-56).",
+      "suggested_fix": "Add '(except, under no-merge, a ready-to-merge PR that is not in conflict — Amended by #4471)' to decision 5.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The prStates header comment says `tracked` is 'asked only in a run whose merge bot is off'. The code asks only when `--apply` is also set (`trackMerged: apply && !merging`), and the PR body states the `--apply` limit itself. So the comment overstates when the probe runs.",
+      "file": "plugin/scripts/fleet-tick.mjs",
+      "evidence": "diff: comment 'asked only in a run whose merge bot is off (`prTracked`)' vs `const readOpts = { trackMerged: apply && !merging };` in main() and readRun's `trackMerged ? run.prTracked : []`.",
+      "suggested_fix": "Write 'asked only under --apply in a run whose merge bot is off'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The `mergingOf` doc comment says 'Whether the merge bot of the run … belongs to merges', which is garbled wording. It also says only `true` reads as on, but a non-boolean `merge` in a receipt reads as off while a missing, unreadable or absent receipt reads as on. That asymmetry is stated only in the test title.",
+      "file": "plugin/scripts/phase0-receipt.mjs",
+      "evidence": "diff lines 500-511: `if (read.state !== \"ok\" || read.receipt.merge === undefined) return MERGE_DEFAULT; return read.receipt.merge === true;` The test 'mergingOf: … only a true is read as merging' pins missing/unreadable → true.",
+      "suggested_fix": "Reword the first sentence as 'Whether the run's merge bot merges', and say that a missing or unreadable receipt reads as the default (on) while a present non-boolean reads as off.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/phase0-receipt.mjs",
+      "line": 508,
+      "claim": "The merge switch has two defaults. `mergingOf` and phase0.mjs read an absent `merge` as true (MERGE_DEFAULT). `mergeBot` and `implementers` in fleet-tick.mjs read an absent or undefined `s.merging` as off, because they test `=== true` or `!== true`. Only `mergingOf` gets `merging` from the receipt, so nothing breaks in the tick today. Any future `reconcile()` caller that leaves `merging` out gets merging off silently.",
+      "evidence": "Read of the diff and snapshot: `mergingOf` returns MERGE_DEFAULT (true) when `merge === undefined`; fleet-tick.mjs:484 `if (s.merging !== true) return row(\"IDLE (merging off)\")`; fleet-tick.mjs:396 `s.merging === true ? \"\" : \", awaiting human merge\"`. The only two `reconcile({...})` call sites (2539, 2600) both pass `merging`. The `mergingOf` JSDoc says 'only `true` reads as on'. That sentence is about a present non-boolean value and does not cover this absent-value default.",
+      "suggested_fix": "Make `merging` a required, documented field of `reconcile`'s input, or set the fail-closed rule in one place. Do not let the `=== true` tests in `mergeBot` and `implementers` act as a second, undeclared default.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/phase0-receipt.mjs",
+      "line": 508,
+      "claim": "`mergingOf` returns true (the bot is on) whenever the receipt is missing or unreadable. Its doc comment argues that a bot dispatched on a value nobody can read is the failure the switch exists to prevent. The comment justifies off-by-default only for a present, unreadable value. For a missing or unreadable file the result is on, and the rule is only enforced because phase0Gate holds dispatch in those same states.",
+      "evidence": "phase0-receipt.mjs:112-113 `phase0Gate` returns `held` for state `missing` or any state other than `ok`. `mergingOf` returns MERGE_DEFAULT for `read.state !== \"ok\"`. With the receipt missing or unreadable, `merging` is true but the dispatching rows are held. Only that separate hold keeps this from dispatching a bot. The invariant lives in two functions, not in the value.",
+      "suggested_fix": "Return false when `read.state !== \"ok\"`, or say in the comment that the gate is what prevents dispatch in that case.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/fleet-state.mjs",
+      "line": 265,
+      "claim": "`applied.reapAfterPrs` is sanitized when read (`Number.isInteger(n) && n > 0`). The nearby `sweptAfter` keeps only non-empty strings. Nothing ties either list to the run's mode or to the `reapAfter` list. The shape `{run, reapAfter, reapAfterPrs?, sweptAfter?}` is enforced only by runtime filters and a header comment. A hand-edited `reapAfterPrs` naming a PR number is trusted as already reaped.",
+      "evidence": "The readState diff hunk @@ -259,7 +263,11 @@ builds the object with spreads that drop empty arrays. `reapedAfterPrs` returns `ofThisRun(applied, controllerAt)?.reapAfterPrs ?? []`. The filter uses the same predicate as `reapAfter`, so it is consistent with the existing pattern. This is a note, not a defect.",
+      "suggested_fix": "None required. Optionally centralise the positive-integer-list filter, which now appears twice in the readState hunk.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/fleet-tick.mjs",
+      "line": 1305,
+      "claim": "In deriveRun, `prMerged` runs the same `[...byPr.keys()].filter((n) => !open.has(n))…sort(asc)` scan that `prTracked` runs on the line above it, so the not-open filter and the sort are written twice and could drift apart; `prMerged` is just `prTracked` narrowed to MERGED.",
+      "evidence": "In my copy I hoisted `const prTracked = [...byPr.keys()].filter((n) => !open.has(n)).sort(asc);` above `return {` and replaced the two fields with `prTracked,` and `prMerged: prTracked.filter((n) => prStates.get(n) === \"MERGED\"),`. Then, in the copy: `node --test tests/fleet-tick.test.mjs tests/compute-board.test.mjs tests/ledger-dispatch.test.mjs tests/ledger-dispositions.test.mjs tests/ledger-row-review.test.mjs tests/tier-check.test.mjs` printed exit=0, ℹ tests 936, pass 936, fail 0, cancelled 0, skipped 0. That run includes the five new 'CLI --apply: merge false' tests that check reapAfterPrs. Filtering an already sorted array keeps the order, so the result is the same.",
+      "suggested_fix": "const prTracked = [...byPr.keys()].filter((n) => !open.has(n)).sort(asc);  // before `return {`\n…\n    prTracked,\n    prMerged: prTracked.filter((n) => prStates.get(n) === \"MERGED\"),",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/fleet-tick.mjs",
+      "line": 1653,
+      "claim": "`reapedAfterPrs` and `reapDuePrs` are exported, but nothing outside fleet-tick.mjs imports them. Their siblings `reapDue`/`reapedAfter`/`sweepDue`/`sweptAfter` are exported because tests/fleet-tick.test.mjs imports them, and these two are not, so the `export` keyword adds module surface that nothing uses.",
+      "evidence": "grep `prTracked|prMerged|reapedAfterPrs|reapDuePrs|mergingOf|MERGE_DEFAULT` over snapshot plugin/ and tests/ finds reapedAfterPrs/reapDuePrs only in plugin/scripts/fleet-tick.mjs, at 1653/1659/1660/2514/2525. The import line in tests/fleet-tick.test.mjs:11 lists reapDue, reapedAfter, sweepDue and sweptAfter, but not the two new functions. In my copy I removed `export` from both, alongside the probe above, and the same six-file node --test run passed: 936/936, fail 0.",
+      "suggested_fix": "Drop `export` from `reapedAfterPrs` and `reapDuePrs`. Or, to match the siblings' pattern on purpose, import them in tests/fleet-tick.test.mjs and give them a unit test like reapDue's. Either way the export gets a reason to exist.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/fleet-state.mjs",
+      "line": 266,
+      "claim": "readState's `done` parser now writes the positive-integer predicate `(n) => Number.isInteger(n) && n > 0` twice inline (reapAfterPrs at 266, reapAfter at 268), plus the same test on `v.run` at 264 and on `at` at 253. A named predicate would state it once.",
+      "evidence": "grep `Number\\.isInteger\\(\\w+\\) && \\w+ > 0` over snapshot plugin/scripts/fleet-state.mjs matched lines 253, 266 and 268. Line 264 has the same test in the form `Number.isInteger(v.run) && v.run > 0`. This change does not affect behavior: it renames an identical arrow function. Not executed; this finding rests on the grep alone.",
+      "suggested_fix": "const positive = (n) => Number.isInteger(n) && n > 0;\n…\nconst prs = Array.isArray(v.reapAfterPrs) ? v.reapAfterPrs.filter(positive) : [];\nreturn { run: v.run, reapAfter: v.reapAfter.filter(positive), … };",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

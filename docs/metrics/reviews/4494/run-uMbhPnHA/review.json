@@ -1,0 +1,233 @@
+{
+  "pr": 4494,
+  "head": "6f4839449a771e901e30810d8aa003b5ac8a36d5",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: Verify branch is rebased on base (needs pull-request context and full git history, not the worktree); Validate renovate.json (fetches renovate from the npm registry via npx on every run); smoke-omp (needs bun and a globally installed pinned omp binary); install-and-smoke (needs bun and a globally installed pinned omp binary).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "tests",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/tier-outcomes.tsv' and '?? docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version}'. These were not made by me; I wrote nothing in that checkout."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv` and untracked `docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version}`. I did not write to that checkout; these are the controller's own metrics files."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin —  M docs/metrics/tier-outcomes.tsv; ?? docs/metrics/runs/2026-11-11T172901Z/closeout.json; ?? docs/metrics/runs/2026-11-11T172901Z/ledger.md; ?? docs/metrics/runs/2026-11-11T172901Z/phase0.json; ?? docs/metrics/runs/2026-11-11T172901Z/plugin-version (I made none of these: my only command there was `pwd`, and every other command changed into the scratch copy or the snapshot first)"
+    }
+  ],
+  "counts": {
+    "survived": 4,
+    "refuted": 0,
+    "unverified": 8,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4494/run-uMbhPnHA/snapshot-6f483944",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 912,
+      "claim": "The new rule that a local helper handed nothing works out to what it returns fails open on a helper that can return undefined, so a gh spawn whose timeout is undefined (no timeout at all) passes the range check. This happens when the helper can fall off its end, or when its only `return` is inside a nested callback, because returnsOf() collects every `return` in the body text and ignores fall-through.",
+      "evidence": "PROBE in my copy, sweep() on READ(\"ms()\", decls):\n- decls `function ms() { if (process.platform === \"win32\") { return 20_000; } }` → `PROBE fallthrough {\"problems\":[],\"spawns\":[{\"b\":true,\"reaches\":[],\"range\":[]}]}`\n- decls `function ms() { [1].forEach(() => { return 20_000; }); }` → `PROBE nestedReturn {...\"range\":[]}`\nRunning the same fall-through helper in Node: `node -e '...spawnSync(\"sleep\",[\"0.3\"],{timeout:ms()})'` printed `fallthrough timeout undefined status 0 signal null err undefined`, so the spawn runs with no timeout. By contrast, the PR's own refused cases `function ms() {}`, `return;` and `return void 0` are refused (range 'does not work out to a number: ms()'). The PR header says the sweep fails closed, and the ticket names undefined as a value to refuse.",
+      "suggested_fix": "In call(), add an undefined value whenever a block-bodied helper's last statement is not a `return`, and skip `return`s inside nested functions (for example, only take `return`s whose innermost enclosing function in mod.encl() is the helper). Add 'a helper that can fall off its end' and 'a return only inside a callback' to the refused table.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "inconclusive": false,
+          "reason": "I confirmed this by reading the code. I did not run the sweep itself or build a measuring copy. In the snapshot, `tests/gh-spawn-bound.test.mjs:398-404` has `returnsOf` return, for a brace-bodied helper, one ref per `\\breturn\\b` match in the body text. It does not check for fall-through or for nesting. A helper with no reachable `return` to undefined therefore yields only its numeric returns, so a `function ms(){ if(...){return 20_000;} }` or a `return` inside a nested callback passes the range check. The empty-body, `return;` and `return void 0` cases do produce refs and are refused, as the claim says. Node itself returns undefined from a fall-through helper (a `timeout: undefined` spawn has no timeout), which matches the claim's evidence. CWD-AUDIT: clean /Users/chris/dev/fleet-plugin (I only read files and wrote nothing, so the `git status --porcelain -uall` audit was not run)."
+        },
+        {
+          "refuted": false,
+          "reason": "I did not build a measuring copy or run the test suite. I confirmed the claim by reading the snapshot's tests/gh-spawn-bound.test.mjs. returnsOf() (line 398) collects only `return` keywords in a braced body. The local-helper branch (lines 481 and 914-920) uses that list directly, with no fall-through check. A helper such as `function ms(){ if(c){return 20_000;} }` therefore yields only [20_000] and passes the range check, although it can return undefined. I found no other check that covers this case. The behaviour of such a spawn (timeout undefined, so no timeout) comes from the claimant's own Node run, which I did not repeat. The weaker `return;` and empty-body cases are refused, as the claim itself notes. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/tier-outcomes.tsv', '?? docs/metrics/runs/2026-11-11T172901Z/closeout.json', '?? docs/metrics/runs/2026-11-11T172901Z/ledger.md'. I ran no mutation and wrote nothing there; I truncated the audit output at 3 lines, so more entries may exist. These changes were already present."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 910,
+      "claim": "A helper bound with `let` and later reassigned is evaluated only from its first declaration, so `let ms = () => 20_000; ms = () => 0;` is accepted. numbers() refuses the same pattern for a plain value (`let C = 20_000; C = 1e12;`).",
+      "evidence": "PROBE helperReassigned, MOD(`let ms = () => 20_000;\\nms = () => 0;\\nspawnSync(\"gh\", [\"x\"], { timeout: ms() });`) → `{\"problems\":[],\"spawns\":[{\"b\":true,\"reaches\":[],\"range\":[]}]}`. call() resolves the name with resolve()/mod.fns and viaId's helper branch (returnsOf on the first function), and never consults writes or declRefs for later assignments to the binding.",
+      "suggested_fix": "In call(), refuse (return null) when the helper's binding is assigned anywhere after its declaration: reuse declRefs or the `assign`-kind matching that numbers() already applies to names. Add the shape to the refused table.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Claim reproduced in my copy at the reviewed head. I added a temporary test to the copy's tests/gh-spawn-bound.test.mjs that calls sweep() on three sources. `let ms = () => 20_000; ms = () => 0; spawnSync(\"gh\",[\"x\"],{timeout: ms()})` gives bounded:true, reaches:[], range:[] and no problems, so it is accepted. The same with `ms = () => 1e12` is also accepted. The control `let C = 20_000; C = 0; … timeout: C` is flagged with range [\"takes a timeout that can be 0, outside 1 to 300000\"]. So the plain-value path refuses reassignment and the helper path doesn't. I ran `node --test --test-name-pattern=ZZPROBE tests/gh-spawn-bound.test.mjs` (tests 1, fail 0). This is a probe, not a mutation kill, so no baseline pair applies. CWD-AUDIT: not run. pwd was /Users/chris/dev/fleet-plugin and I wrote nothing there, only in the scratch copy.",
+          "counter_evidence": "PROBE1 {\"spawns\":[{\"bounded\":true,\"reaches\":[],\"range\":[]}],\"problems\":[]}; PROBE3 range:[\"takes a timeout that can be 0, outside 1 to 300000\"]"
+        },
+        {
+          "refuted": false,
+          "reason": "Ran the sweep on a scratch copy of tests/gh-spawn-bound.test.mjs with the probe appended. `let ms = () => 20_000; ms = () => 0; spawnSync(\"gh\",[\"x\"],{timeout: ms()})` returned bounded:true, reaches:[], range:[], problems:[]. The plain-value control `let C = 20_000; C = 0;` was flagged: range:[\"takes a timeout that can be 0, outside 1 to 300000\"]. So the reassigned helper is accepted and the plain value is refused. Appending the probe did not break the test file: 13 tests passed, 0 failed. CWD-AUDIT: not run; I wrote only under the scratch dir and never checked /Users/chris/dev/fleet-plugin."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 905,
+      "claim": "No test kills removing the `args.length > 0` check in call(): a local helper that takes no parameters but is called with an argument (`h(1)`) is then accepted as bounded, and the PR's helper cases all call with no arguments.",
+      "evidence": "Mutant: drop `args.length > 0 ||` in call(). Full file `node --test tests/gh-spawn-bound.test.mjs` → exit 0, 13 pass, 0 fail (baseline: exit 0, 13 pass). Probe source `function h() { return 20_000; }\\nspawnSync(\"gh\", [\"x\"], { timeout: h(1) });` gives outside()==[true] (refused) on the real tree and [false] (accepted) on the mutant. No existing test covers that shape. No valid red exists, so this is a surviving mutant. Baseline: node --test tests/gh-spawn-bound.test.mjs → exit 0, tests 13, pass 13, cancelled 0.",
+      "suggested_fix": "Add to the refusal table of 'the sweep refuses a gh timeout it cannot work out to a number...' a case such as MOD(`function h() { return 20_000; }\\nspawnSync(\"gh\", [\"x\"], { timeout: h(1) });`).",
+      "dimension": "tests",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Mutant survives. In my own copy (built via measure-copy, exit 0, head 545ff79, tree matches), I dropped `args.length > 0 ||` at tests/gh-spawn-bound.test.mjs:909 (it is line 909 in the snapshot, not 905). `env -u FORCE_COLOR node --test tests/gh-spawn-bound.test.mjs` then gave tests 13, pass 13, fail 0, cancelled 0, so no test goes red. I did not run the unmutated baseline myself, so there is no kill and no valid red. The claim cites a 13-pass baseline, and the mutant's run is the same 13/13, so nothing here contradicts it. I also did not re-run the claim's `h(1)` probe. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv` and untracked files under docs/metrics/runs/2026-11-11T172901Z/ (closeout.json, ledger.md, phase0.json, plugin-version). I wrote nothing there; these look like pre-existing controller metrics output, and the output was cut at 5 lines."
+        },
+        {
+          "refuted": false,
+          "reason": "Mutant (drop `args.length > 0 ||` in call(), tests/gh-spawn-bound.test.mjs:909) survives. Measured in my own copy. Narrowed: `env -u FORCE_COLOR node --test tests/gh-spawn-bound.test.mjs` → tests 13, pass 13, fail 0. Full suite `node --test tests/*.test.mjs` with the mutant → exit 0, tests 9248, pass 9248, fail 0, cancelled 0. So no test elsewhere kills it either. The mutation was reverted with git checkout. I did not rerun the claim's `h(1)` probe. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv` and untracked docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version}. I never wrote to that directory, and my mutation ran only in the scratch copy. These look like other agents' metrics output."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 909,
+      "claim": "No test kills removing `each.includes(null)` in call(): a helper whose return does not work out to a number (e.g. `process.env.X`) is then accepted inside arithmetic (`h() + 20_000`), so the fail-closed rule for unreduced helper results is unguarded.",
+      "evidence": "Mutant: `each.length === 0 || each.includes(null)` → `each.length === 0`. `node --test tests/gh-spawn-bound.test.mjs` → exit 0, 13 pass, 0 fail. Probe `function h() { return process.env.X; }\\nspawnSync(\"gh\",[\"x\"],{timeout: h() + 20_000})` gives outside()==[true] on the real tree and [false] on the mutant (null coerces to 0, the sum lands in range). Baseline: node --test tests/gh-spawn-bound.test.mjs → exit 0, tests 13, pass 13, cancelled 0.",
+      "suggested_fix": "Add a refusal case where an unreduced helper return is combined with an in-range literal, e.g. `h() + 20_000`.",
+      "dimension": "tests",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Mutant survives. In my copy of the snapshot, the line at tests/gh-spawn-bound.test.mjs:913 was `each.length === 0 || each.includes(null) ? null : ...`. I changed it to `each.length === 0 ? null : ...`. Baseline and mutant both ran `env -u FORCE_COLOR node --test tests/gh-spawn-bound.test.mjs` and reported tests 13, pass 13, fail 0, cancelled 0. The mutant run's own exit code was not captured (the printed 0 is grep's). The `git diff --stat` output showed the edit applied, so the mutation reached the file. I did not re-run the claim's `h() + 20_000` probe. This was run only on the one narrowed test file, not the full `node --test tests/*.test.mjs`. CWD-AUDIT: not run; I only ran `pwd` in /Users/chris/dev/fleet-plugin and made no edits there. All mutation happened in the scratch copy."
+        },
+        {
+          "refuted": false,
+          "reason": "Mutant `each.length === 0 || each.includes(null) ?` -> `each.length === 0 ?` (line 913 of tests/gh-spawn-bound.test.mjs in my own measure-copy, built exit 0) survives. red: none (survived); mutant run: env -u FORCE_COLOR node --test tests/gh-spawn-bound.test.mjs -> tests 13, pass 13, fail 0, cancelled 0. Baseline unmutated run was not repeated by me; the claim's baseline is also 13/13. I did not rerun the h()+20_000 probe. Survival of the mutant under the existing suite is confirmed, and I found no other test guarding it. The mutation edited the test file itself, so the survival shows the test file's own checker lacks a case for it. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — pre-existing changes from other work: M docs/metrics/tier-outcomes.tsv, ?? docs/metrics/runs/2026-11-11T172901Z/* (not touched by me; I mutated only my copy)."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 908,
+      "claim": "`Math.min` and `ghBudget` are matched by name without checking whether a local binding shadows them, so a parameter or const named `Math` or `ghBudget` that returns 0 is accepted. ghBudget only checks isGhBudget(ref.mod) at module level, and Math.min has no check at all. The plain-helper branch does call shadowedBy(ref, id).",
+      "evidence": "PROBE results, each `\"range\":[]` (accepted):\n- shadowMath: `const Math = { min: () => 0 }` with timeout `Math.min(20_000, 5_000)`\n- shadowMathParam: `function f(Math) {...timeout: Math.min(20_000, 5_000)} f({ min: () => 0 })`\n- shadowGhBudgetParam: GH_BUDGET imported, `function f(ghBudget) {...timeout: ghBudget(20)} f(() => 0)`\nThese shapes are contrived and none is on main (COUNT probe: 42 spawns, 0 refused).",
+      "suggested_fix": "Guard with `!shadowedBy(ref, \"ghBudget\")` in the ghBudget branch and `!shadowedBy(ref, \"Math\")` with no module-level `Math` declaration in the Math.min branch, or return null when shadowed.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 912,
+      "claim": "An `async` helper is accepted as working out to its returned number, but at runtime it returns a Promise. spawnSync then throws ERR_INVALID_ARG_TYPE instead of running unbounded, so this is a wrong verdict, not an unbounded spawn.",
+      "evidence": "PROBE asyncHelper, READ(\"ms()\", \"async function ms() { return 20_000; }\\n\") → `\"range\":[]`. `node -e` spawnSync with `{timeout: am()}` (am is async) printed `async throws ERR_INVALID_ARG_TYPE`. A generator helper (`function* ms`) is refused: range 'does not work out to a number: ms()'.",
+      "suggested_fix": "Refuse async helpers in call(), or leave as is and record that the sweep relies on spawnSync's own type check.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 1308,
+      "claim": "Teaching numbers() about ghBudget() also changes #4460's environment-reach verdict, which the brief does not list. judge()'s Math.min ceiling test is `per[k].length === 0 && inRange(numbers(p))`, and that now holds for `ghBudget(20, process.env.Y)`. So the PR deletes the refused case 'ghBudget(20, process.env.Y) as the ceiling' and adds it as accepted ('ghBudget as a Math.min ceiling'). The new verdict looks sound: arg.mjs:327-328 lets the override only shorten, to a value from 1000 to d*1000. It is still a reversal of an existing ruling, made as a side effect.",
+      "evidence": "Diff hunk @@ -1224,7: the line `-    [\"ghBudget(20, process.env.Y) as the ceiling\", MIN(\"ghBudget(20, process.env.Y)\"), \"ceiling\"],` is removed from the env-reach refused table. Hunk @@ -1357: `+    \"ghBudget as a Math.min ceiling\": MIN(\"ghBudget(20, process.env.Y)\"),` is added to accepted. judge at snapshot lines 712-724 calls inRange(numbers(p, …)) for the ceiling. The test log shows both tables pass (log lines 3560-3564 ✔).",
+      "suggested_fix": "Name the reversal in the PR body or the file header (#4460's ceiling rule now admits a ghBudget() ceiling), so the change to the env rule is a recorded decision and not an unnoticed side effect.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 971,
+      "claim": "The size message `least < 1 ? least : most` is never discriminated: every test case where the least value is below 1 also has most equal to least, so swapping in `most` stays green. No test needs a value set like {0, 20000}.",
+      "evidence": "Mutant `least < 1 ? least : most` → `most` in sizes(): `node --test tests/gh-spawn-bound.test.mjs` → exit 0, 13 pass, 0 fail. Baseline: node --test tests/gh-spawn-bound.test.mjs → exit 0, tests 13, pass 13, cancelled 0.",
+      "suggested_fix": "Assert the message for a helper with two returns, 0 and 20_000: expect 'can be 0'.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 895,
+      "claim": "Whitespace inside call names (`Math . min(...)`) is accepted by the real code, which strips it. Removing the strip makes the code stricter and stays green, so no test pins the stripping. A `ghBudget (…)` space-before-paren probe is accepted both with and without the strip. The minOf empty-args guard, the minOf cap check and the ghBudget >2 arity check are likewise green when removed, but sizes() or the 1-to-2 arity check covers them, so they look equivalent.",
+      "evidence": "Mutant `name[0].replace(/\\s+/g, \"\")` → `name[0]`: `node --test tests/gh-spawn-bound.test.mjs` → exit 0, 13 pass. The probe `READ(\"Math . min(20_000, 5_000)\")` gives outside()==[false] on the real tree and [true] on the mutant; a mutant that becomes stricter is not a gap. Baseline: node --test tests/gh-spawn-bound.test.mjs → exit 0, tests 13, pass 13, cancelled 0.",
+      "suggested_fix": "Optional: add `Math . min(20_000, 5_000)` to the accepted table if the spaced form is meant to be supported.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body: says 'the changed-script test sweeps three times', but the changed-script test, 'a gh timeout of 1e12 or 0 in a script turns the sweep red', calls sweep() only twice, once per value in [\"1e12\",\"0\"]. It has no baseline sweep.",
+      "evidence": "Read of the new test body in pr.diff lines 284-295. The loop `for (const ms of [\"1e12\", \"0\"])` calls `ours(changed)` once per iteration, and `ours` is `sweep(files)...`. `scripts` comes from readScripts() but is never swept unchanged. That is 2 sweeps, not 3.",
+      "suggested_fix": "Change the PR body to 'sweeps twice'. Or, if the 912 ms to 1201 ms change is meant to be explained, count the other new test, which sweeps once, separately.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The comment above CEILING_CAP in tests/gh-spawn-bound.test.mjs, which the diff does not touch, says it is 'The longest, in ms, a Math.min() ceiling may be: rule 1 of the file header'. After this diff the same constant also caps every gh spawn timeout, the ghBudget seconds, and the helper and funnel values via sizes().",
+      "evidence": "Snapshot line 324 holds that comment and line 325 `const CEILING_CAP = 300_000;`. The diff adds uses in sizes() (`most <= CEILING_CAP`), in ghBudgetOf and minOf, and the header text 'each gh spawn's timeout must also work out to a number from 1 to CEILING_CAP'. Grep of CEILING_CAP shows these uses.",
+      "suggested_fix": "Reword to 'The longest, in ms, a gh timeout may be (rule 1's Math.min() ceiling, and #4484's every timeout)'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The header's 'Four rules say what the environment may still do' and rule 1's list of what a ceiling 'works out, from literals, + - * / ** and the names the tracer resolves' are now incomplete. numbers() also reduces ghBudget(), Math.min() and a no-parameter local helper call, and a ceiling can be one of those.",
+      "evidence": "Snapshot header lines 36-40 (rule 1) are untouched by the diff. The diff's new comment at lines 802-806 and the call() function at pr.diff 77-91 add the three calls. The new accepted case 'ghBudget as a Math.min ceiling' uses `MIN(\"ghBudget(20, process.env.Y)\")`.",
+      "suggested_fix": "Add 'and the three calls numbers() reduces (see #4484 below)' to rule 1, or point rule 1 at the #4484 paragraph.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

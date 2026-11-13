@@ -1,0 +1,25 @@
+{
+ "head": "b09175d7602b373d5b6bc959bec449fad8765d96",
+ "run": "run-1pF2hyVc",
+ "entries": [
+  {
+   "bucket": "unverified",
+   "index": 0,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "reason": "refuted by its refuter: the comment wording is the ticket-mandated text; 30 min is ~2x the measured 13-15 min CI runtime; the suggested remedy would contradict the acceptance criterion against implying the runtime sits near the cap",
+   "issue": 4492,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4491/fix-7DNp06U5/f1/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 1,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "reason": "survived its refuter; the claim confirms the PR as written, so applying it changes nothing in the tree",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4491/fix-7DNp06U5/f2/verdict.json"
+  }
+ ]
+}

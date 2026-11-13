@@ -1,0 +1,116 @@
+{
+  "pr": 4480,
+  "head": "084733914ce67bcdb125c50bc7d7e6b2dcfa07b4",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: Verify branch is rebased on base (needs pull-request context and full git history, not the worktree); Validate renovate.json (fetches renovate from the npm registry via npx on every run); smoke-omp (needs bun and a globally installed pinned omp binary); install-and-smoke (needs bun and a globally installed pinned omp binary).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [
+    {
+      "dimension": "correctness",
+      "reason": "the reviewer returned nothing — spend limit, timeout, or terminal error"
+    },
+    {
+      "dimension": "silent-failure",
+      "reason": "the reviewer returned nothing — spend limit, timeout, or terminal error"
+    },
+    {
+      "dimension": "tests",
+      "reason": "the reviewer returned nothing — spend limit, timeout, or terminal error"
+    },
+    {
+      "dimension": "types",
+      "reason": "the reviewer returned nothing — spend limit, timeout, or terminal error"
+    },
+    {
+      "dimension": "simplify",
+      "reason": "the reviewer returned nothing — spend limit, timeout, or terminal error"
+    }
+  ],
+  "cwdAudit": [
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/tier-outcomes.tsv; ?? docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version}. I ran only `pwd` and read-only commands there, so these are not mine (another member's close-out output)."
+    }
+  ],
+  "counts": {
+    "survived": 1,
+    "refuted": 0,
+    "unverified": 3,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4480/run-isdZNHfM/snapshot-08473391",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "plugin/skills/run-team/SKILL.md",
+      "line": 194,
+      "claim": "SKILL.md End of run step 2 still says the tick prints `run over` 'once the run is draining with no open PR and no live implementer', which this diff falsifies under no-merge; the same sentence in references/close-out.md was updated and SKILL.md's was not.",
+      "evidence": "sed -n 192,198p SKILL.md shows line 195-196 unchanged. close-out.md:19-22 now adds 'Under `no-merge` a PR carrying `ready-to-merge` holds nothing, unless it conflicts'. The diff's fleet-tick.mjs main() now computes `over` from `holding` (prs minus labelled, non-conflicting PRs) when merging is off. The PR body says SKILL.md was paid for by trimming other text, and the diff does touch SKILL.md elsewhere.",
+      "suggested_fix": "Add 'or, under `no-merge`, only `ready-to-merge` PRs open' to SKILL.md:196, or point to references/close-out.md, trimming elsewhere to stay under the 75,000-byte ceiling.",
+      "dimension": "comments",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Read snapshot: SKILL.md:194-196 says run over prints 'once the run is draining with no open PR and no live implementer' with no no-merge qualifier. close-out.md:19-23 has the same sentence plus an added 'Under `no-merge` a PR carrying `ready-to-merge` holds nothing, unless it conflicts' sentence. The claim is accurate in substance. The close-out.md base sentence itself was not reworded; a qualifier was appended. No test was run; this is a prose-presence check. CWD-AUDIT: not run, nothing written in /Users/chris/dev/fleet-plugin"
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/skills/run-team/references/close-out.md",
+      "line": 10,
+      "claim": "close-out.md's drain paragraph (and SKILL.md:194) says the drain 'keeps the review, fix-applier and merge rows firing until the open PRs merge'; under no-merge the merge-bot row never fires (IDLE (merging off)) and the run ends with ready-to-merge PRs still open.",
+      "evidence": "Lines 10-11 of close-out.md are untouched by the diff. The diff makes mergeBot() return `IDLE (merging off)` before any dispatch, and `over` ignores labelled PRs. SKILL.md:194 'Act on the review, fix-applier and merge rows' has the same issue.",
+      "suggested_fix": "Qualify with 'merge row (merge-mode runs)' or 'until the open PRs merge or, under no-merge, reach ready-to-merge'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/phase0-receipt.mjs",
+      "line": 179,
+      "claim": "The mergingOf docstring says 'only `true` reads as on: a bot dispatched on a value nobody can read is the failure the switch exists to prevent', but an unreadable receipt (state 'unreadable') returns MERGE_DEFAULT = true, i.e. on.",
+      "evidence": "mergingOf at lines 182-185: `if (read.state !== \"ok\" || read.receipt.merge === undefined) return MERGE_DEFAULT;`. readRunReceipt (lines 46-73) yields state 'unreadable' for non-JSON or invalid receipts. PR body point 3 limits the claim to a non-boolean `merge` field. The tick's phase0 gate presumably holds dispatching rows on an unreadable receipt, but I did not verify that.",
+      "suggested_fix": "State that missing and unreadable receipts read as the default (on) and that the phase-0 gate, not mergingOf, holds dispatch then; or return false for 'unreadable'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/fleet-tick.mjs",
+      "line": 2095,
+      "claim": "The prStates header comment says `tracked` PRs are 'asked only in a run whose merge bot is off', but main() passes them only when `apply && !merging` (readOpts.trackMerged).",
+      "evidence": "Diff: `const readOpts = { trackMerged: apply && !merging };` and `trackMerged ? run.prTracked : []`. The PR body says correctly 'only under --apply with merging off'.",
+      "suggested_fix": "Say 'asked only under --apply in a run whose merge bot is off'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

@@ -1,0 +1,266 @@
+{
+  "pr": 4470,
+  "head": "45850f5fb50d0718a56d6556fa02113aca106da7",
+  "resume": "Findings in `unverified` with `refutersDispatched` above `refutersInconclusive` lost a refuter to a crash — a pair whose every vote died was re-dispatched once in-run and died again — and no refuter that ran decided them. Defer them as crashed — reported, not acted on: omp's eval has no cached-replay mechanism, so a fresh review re-dispatches every agent() live rather than only the crashed legs, and the in-run retry was this review's one re-dispatch. Re-run nothing for them.",
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: Verify branch is rebased on base (needs pull-request context and full git history, not the worktree); Validate renovate.json (fetches renovate from the npm registry via npx on every run); smoke-omp (needs bun and a globally installed pinned omp binary); install-and-smoke (needs bun and a globally installed pinned omp binary).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "tests",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — it printed ' M docs/metrics/tier-outcomes.tsv' and untracked docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version}. I made none of these changes; they appear to be the controller's own run artifacts."
+    },
+    {
+      "dimension": "tests",
+      "state": "missing",
+      "line": null
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-11T172901Z/closeout.json`, `?? docs/metrics/runs/2026-11-11T172901Z/ledger.md`, `?? docs/metrics/runs/2026-11-11T172901Z/phase0.json`, `?? docs/metrics/runs/2026-11-11T172901Z/plugin-version`. None was written by this review: every command chained `cd` into the scratch dir, the snapshot or the copy. These are a controller metrics run dated 2026-11-11."
+    }
+  ],
+  "counts": {
+    "survived": 5,
+    "refuted": 0,
+    "unverified": 10,
+    "crashed": 3
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4470/run-DSBE9vsX/snapshot-45850f5f",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "tests/renovate-release-contract.test.mjs",
+      "line": 171,
+      "claim": "The PR makes resolveBot read top-level `cfg.digest` and `cfg.pinDigest` (via emittableTypes), but botShapeProblem still shape-checks only `[...Object.keys(SEGMENT_OF), \"rollback\"]`. A non-object top-level `\"digest\"` or `\"pinDigest\"` override therefore crashes every test with a raw TypeError instead of producing the problem naming renovate.json, which is the contract the shape guard exists to keep.",
+      "evidence": "In the copy: `node -e '…c.digest=\"x\"…' && node --test tests/renovate-release-contract.test.mjs` gave `ℹ fail 12` and `TypeError [Error]: Cannot use 'in' operator to search for 'labels' in x` ×9. Control with `c.minor=\"x\"` gave `ℹ fail 12` with `renovate.json: top-level \\`minor\\` override must be an object, got \"x\"`. renovate.json was restored with git checkout and `git status --porcelain -uall` was empty.",
+      "suggested_fix": "In botShapeProblem, iterate `[...Object.keys(SEGMENT_OF), ...DIGEST_TYPES, \"rollback\"]` (or emittableTypes' full vocabulary) so every type resolveBot reads as `cfg[type]` is shape-checked.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "red: env -u FORCE_COLOR node --test tests/renovate-release-contract.test.mjs (renovate.json digest=\"x\") → exit nonzero, fail 12 of 12, TypeError \"Cannot use 'in' operator to search for 'labels' in x\" ×12, no renovate.json shape problem; baseline (unmutated copy): same cmd → tests 12, pass 12, fail 0. Mutation reverted with git checkout. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/tier-outcomes.tsv and ?? docs/metrics/runs/2026-11-11T172901Z/* (closeout.json, ledger.md, phase0.json, plugin-version); I did not touch these (pre-existing controller metrics)."
+        },
+        {
+          "refuted": false,
+          "reason": "Reproduced in my own copy at the reviewed head. Setting top-level `digest` or `pinDigest` to \"x\" gave `tests 12, fail 12`, with `TypeError: Cannot use 'in' operator to search for 'labels' in x` on all 12 failing tests. The control, `minor` set to \"x\", also gave `fail 12`, but with the intended `renovate.json: top-level \\`minor\\` override must be an object` problem. So the shape guard covers `minor` but not `digest` or `pinDigest`. I did not search for another guard elsewhere that would catch these. `renovate.json` was restored in the copy afterwards. red: node --test tests/renovate-release-contract.test.mjs (digest=\"x\") → exit non-zero (not captured), fail 12 incl all 12 tests; baseline: not run on the unmutated tree, so this is not a formal kill. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv` and untracked docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version}. I made no edits there, and these appear to belong to the controller's own run."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "tests/workflow-action-pins.test.mjs",
+      "line": 91,
+      "claim": "ciRefs accumulates every ref ci.yml uses per action, but no test has ci.yml using one action at two refs; replacing the union with last-ref-wins survives. The `if (file === CI) continue` self-exemption and the optional `-` in the USES regex (non-list `uses:` after a `name:` key) are also unmutation-tested.",
+      "evidence": "red: node --test --test-reporter=tap tests/workflow-action-pins.test.mjs → exit 0, fail 0 for ciRefs-overwrite (`new Set([...(ciRefs.get(action) ?? []), ref])` → `new Set([ref])`), ci-skip-off, and dash-opt-off (`(?:-\\s+)?uses:` → `- uses:`), all survived; baseline: same cmd → exit 0, tests 7 fail 0. No kill.",
+      "suggested_fix": "Add a case where ci.yml has two refs of one action and release.yml uses the older one (expect green), and a `name: x\\n  uses: owner/x@v5` step form expecting red.",
+      "dimension": "tests",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "In my own copy of the snapshot, three mutants of tests/workflow-action-pins.test.mjs each survived. The copy was built with measure-copy.mjs, which exited 0. The ciRefs-overwrite mutant (`new Set([...(ciRefs.get(action) ?? []), ref])` -> `new Set([ref])`) survived. So did removing `if (file === CI) continue;`, and so did making the dash required (`(?:-\\s+)?uses:` -> `-\\s+uses:`). Each run reported tests 7, fail 0. Positive control: a `cmp` against the saved original showed each file differed from it, so the sed edits did apply. Baseline unmutated run: tests 7, fail 0. Each mutant was reverted after its run. No kill on any of the three; the claim holds. I did not check whether other tests in the full suite catch these mutants; I ran only this test file. CWD-AUDIT: clean /Users/chris/dev/fleet-plugin (the `git status --porcelain -uall` I ran printed nothing, but it ran in the copy, not in the pwd checkout)."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "claim": "docs/adr/0010 line 102-103 states Renovate runs with `enabledManagers: [\"nvm\"]`, and line 160 says GitHub Actions currency is out of scope because `enabledManagers` excludes it. Both are false once this diff sets enabledManagers to [\"nvm\",\"github-actions\",\"custom.regex\"]. The PR body defers only the ADR's Status line to #4469, and this test and the workflow comments still cite ADR 0010 as authority.",
+      "evidence": "sed -n 100,106p and 156,164p of docs/adr/0010-*.md in the snapshot show the `[\"nvm\"]` text and 'enabledManagers excludes it'. The diff changes renovate.json line 4 to [\"nvm\",\"github-actions\",\"custom.regex\"].",
+      "file": "docs/adr/0010-the-node-pin-stays-exact-and-a-bot-moves-it.md",
+      "line": 102,
+      "suggested_fix": "Update lines 102-103 and 160 in this PR, or state in the PR body that #4469 rewrites them.",
+      "dimension": "comments",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "I read the snapshot ADR and the diff, but ran no test, because this is a doc-staleness claim. ADR 0010 lines 102-103 say `enabledManagers: [\"nvm\"]`. Line 160 says GitHub Actions currency is out of scope because `enabledManagers` excludes it. The diff changes renovate.json to [\"nvm\",\"github-actions\",\"custom.regex\"] (diff line 179). The diff touches only ci.yml, pin-drift.yml, release.yml, renovate.json and two tests, so it does not edit the ADR. The PR body defers only 'ADR 0039 and ADR 0010's Status line' to #4469. That leaves the body text stale unless #4469 also rewrites it, and the body does not say it will. Scope: the diff file list, the PR body, and ADR lines 98-106 and 156-164. I did not check #4469 itself. The remaining weakness is severity (docs only), not accuracy. CWD-AUDIT: not run; I made no writes. The starting directory was /Users/chris/dev/fleet-plugin.",
+          "counter_evidence": ""
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "claim": "docs/research/external-assumptions/shell.md row 25 asserts that third-party Actions are pinned to major-version tags, not SHAs (`actions/checkout@v5`, `setup-node@v5`, `setup-go@v6`, `setup-bun@v2`), with ci.yml line citations. The diff falsifies this: every `uses:` is now a 40-hex SHA with a `# vX.Y.Z` comment, and the cited line numbers have shifted.",
+      "evidence": "grep '^| 25 ' docs/research/external-assumptions/shell.md prints the claim. grep of ci.yml shows all uses: lines are `@<sha> # vX.Y.Z`.",
+      "file": "docs/research/external-assumptions/shell.md",
+      "line": 43,
+      "suggested_fix": "Re-state row 25 as SHA-pinned with version comments, and refresh the line citations.",
+      "dimension": "comments",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Snapshot shell.md line 43 row 25 still says Actions are pinned to major-version tags, not SHAs (checkout@v5, setup-node@v5, setup-go@v6, setup-bun@v2). Every `uses:` line in ci.yml is `@<40-hex sha> # vX.Y.Z` (lines 70,112,122,227,278,281,300,307,337,343,347). The cited ci.yml line numbers (68,70,105,...) no longer match. Scope: grep of snapshot ci.yml `uses:` lines only; I did not check the other workflows. No test run was needed (docs claim). CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/tier-outcomes.tsv', '?? docs/metrics/runs/2026-11-11T172901Z/closeout.json', '?? docs/metrics/runs/2026-11-11T172901Z/ledger.md' (pre-existing; I only ran read-only greps)."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "claim": "docs/research/external-assumptions/harness-node.md row 105 asserts Renovate manages ONLY the `nvm` manager and cites `renovate.json:4` `\"enabledManagers\": [\"nvm\"]`. Line 4 now reads [\"nvm\",\"github-actions\",\"custom.regex\"], so both the claim and the quoted evidence are false.",
+      "evidence": "grep '^| 105 ' docs/research/external-assumptions/harness-node.md prints the row. The snapshot's renovate.json:4 is `\"enabledManagers\": [\"nvm\", \"github-actions\", \"custom.regex\"],`.",
+      "file": "docs/research/external-assumptions/harness-node.md",
+      "line": 152,
+      "suggested_fix": "Rewrite row 105 for the three managers. It must still say that engines.node is not managed, which the PR body lists as out of scope.",
+      "dimension": "comments",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Ran grep on snapshot: renovate.json:4 is [\"nvm\", \"github-actions\", \"custom.regex\"]; row 105 at harness-node.md:152 says 'only the nvm manager' and quotes [\"nvm\"]. Doc is added by the PR itself and not corrected elsewhere (line 192 only notes reading renovate.json at a7cb31d0, an older commit, which doesn't make the row's claim about the current file true). Claim and quote are stale/false against the snapshot. Not a test-based kill; no mutation needed. CWD-AUDIT: clean /Users/chris/dev/fleet-plugin"
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "important",
+      "file": "tests/workflow-action-pins.test.mjs",
+      "line": 43,
+      "claim": "The quoted-ref branch of USES is not discriminated: removing quote support makes quoted `uses: \"owner/x@v5\"` lines silently unmatched (skipped), yet the suite stays green, and the 'quoted ref' case in the accept test passes vacuously because an unmatched line yields no problem.",
+      "evidence": "red: node --test --test-reporter=tap tests/workflow-action-pins.test.mjs → exit 0, fail 0 incl none (mutant `([\"']?)([^\\s\"'#]+)\\1` → `()([^\\s\"'#]+)` survived); baseline: same cmd → exit 0, tests 7 fail 0. No kill.",
+      "suggested_fix": "Add a reds-case with a quoted tag ref (`uses: \"owner/x@v5\"`) and a quoted unpinned ref in a workflow, asserting not-pinned.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "tests/workflow-action-pins.test.mjs",
+      "line": 78,
+      "claim": "No test covers a `uses:` with no `@` (docker:// or a bare reusable ref); mutating `ref` for the no-@ case to a valid 40-hex SHA survives, though the header says such references must red on rule (a).",
+      "evidence": "red: node --test --test-reporter=tap tests/workflow-action-pins.test.mjs → exit 0, fail 0 (mutant `ref: at === -1 ? \"\" :` → `\"0\".repeat(40)` survived); baseline: same cmd → exit 0, tests 7 fail 0. No kill.",
+      "suggested_fix": "Add a case `- uses: docker://alpine` / `owner/repo/.github/workflows/x.yml` expecting a not-pinned problem.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "tests/workflow-action-pins.test.mjs",
+      "line": 75,
+      "claim": "SHA and version-comment strictness is under-tested: loosening SHA to {7,40}, dropping the SHA anchors, or dropping either end anchor of VERSION_COMMENT (accepting `v1.2.3-rc`, `v1.2.3 junk`) all survive, because the only negative cases are `v5` and a missing comment.",
+      "evidence": "red: node --test --test-reporter=tap tests/workflow-action-pins.test.mjs → exit 0, fail 0 for each of sha-loose `{7,40}`, sha-unanchored, VERSION_COMMENT without `^`, and without `$` (all survived); baseline: same cmd → exit 0, tests 7 fail 0. No kill.",
+      "suggested_fix": "Add a short-SHA (7-hex) / 41-hex / uppercase-SHA tag case and `# v1.2.3-rc` / `# v1.2.3 extra` comment cases.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/workflow-action-pins.test.mjs",
+      "line": 152,
+      "claim": "The pin contract reads only `*.yml` (`.filter((name) => name.endsWith(\".yml\"))`). A `.github/workflows/*.yaml` workflow with unpinned tag refs, which GitHub Actions runs and Renovate's github-actions manager also covers, passes the suite green. The custom regex manager's managerFilePatterns has the same `.yml`-only scope.",
+      "evidence": "In the copy: writing `.github/workflows/extra.yaml` containing `- uses: actions/checkout@v5` and `- uses: owner/unpinned@main`, then `node --test tests/workflow-action-pins.test.mjs`, gave `ℹ pass 7 ℹ fail 0`. The same content as `extra.yml` gave `ℹ fail 2` with `.github/workflows/extra.yml: \\`uses: actions/checkout@v5\\` is not pinned to a 40-hex commit SHA (ref \\`v5\\`)`. A JS probe of managerFilePatterns gives `.github/workflows/x.yaml false`. No `.yaml` workflow exists today, and the ticket words the rule over `*.yml`.",
+      "suggested_fix": "Filter with `/\\.ya?ml$/` in the test (and optionally in managerFilePatterns), or add an assertion that no `.yaml` workflow exists, so the scope cannot be bypassed silently.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/research/external-assumptions/shell.md",
+      "line": 43,
+      "claim": "Two research-assumption rows now contradict the tree: shell.md row 25 (\"Third-party Actions are pinned to major-version tags, not SHAs (`actions/checkout@v5`…)\") and harness-node.md row 105 (\"Renovate is configured to manage **only** the `nvm` manager … `\\\"enabledManagers\\\": [\\\"nvm\\\"]`\"). prose.md row 86 says the same about `enabledManagers: [\"nvm\"]`. The ticket's Docs section names only the ADRs and the ci.yml comments, so this may be out of scope if these files are dated snapshots.",
+      "evidence": "A grep for `pinned to major-version tags|configured to manage \\*\\*only\\*\\*|enabledManagers: \\[\"nvm\"\\]` over the snapshot's docs, plugin and README.md (adr excluded) hit shell.md:43, harness-node.md:152 and prose.md:126.",
+      "suggested_fix": "If these catalogues are meant to stay current, update the three rows in this PR or a follow-up. If they are point-in-time research, leave them.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/workflow-action-pins.test.mjs",
+      "line": 34,
+      "claim": "The `code()` helper that blanks whole-line `#` comments is dead: USES is anchored `^\\s*(?:-\\s+)?uses:`, so a commented-out `# - uses: …@v5` never matches even without blanking, and the 'commented-out tag ref' accept case does not exercise code().",
+      "evidence": "red: node --test --test-reporter=tap tests/workflow-action-pins.test.mjs → exit 0, fail 0 (mutant replacing the blanking with `line` survived); baseline: same cmd → exit 0, tests 7 fail 0. No kill; behaviour is equivalent.",
+      "suggested_fix": "Delete code() or drop the claim that the accept case tests it.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/workflow-action-pins.test.mjs",
+      "line": 43,
+      "claim": "Trailing-comment parsing forms are only weakly covered: dropping trailing-whitespace trimming of the comment, or requiring exactly one space after `#`, survives, so `# v1.2.3 ` and `#v1.2.3` handling is unpinned.",
+      "evidence": "red: node --test --test-reporter=tap tests/workflow-action-pins.test.mjs → exit 0, fail 0 for comment-trailing-ws and comment-nospace mutants (both survived); baseline: same cmd → exit 0, tests 7 fail 0. No kill.",
+      "suggested_fix": "Add accept cases for `#v1.2.3` and `# v1.2.3   ` if they are meant to be accepted, or red cases if not.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The header of tests/workflow-action-pins.test.mjs opens with 'ADR 0039', and tests/renovate-release-contract.test.mjs cites '(ADR 0010, ADR 0039)'. No ADR 0039 exists in this tree, so both references dangle until #4469 lands. The PR body admits ADR 0039 lands in #4469.",
+      "evidence": "ls docs/adr | tail -3 ends at 0038-a-gate-verdict-is-written-only-by-the-verb-that-derives-it.md. grep -rn 0039 docs/adr returned nothing.",
+      "file": "tests/workflow-action-pins.test.mjs",
+      "line": 1,
+      "suggested_fix": "Land the ADR with this PR, or reword the comment so it does not cite a nonexistent document.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The contract-test header still cites Renovate's schema as '44.115.6, fetched 2026-09-25', while ci.yml pins the validator at renovate@44.115.7 and the PR body's lookup run used 44.115.7. The line is unchanged by this diff but sits inside the header the diff rewrote.",
+      "evidence": "The diff context in tests/renovate-release-contract.test.mjs shows '(44.115.6, fetched'. ci.yml line 214 shows renovate@44.115.7.",
+      "file": "tests/renovate-release-contract.test.mjs",
+      "line": 32,
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body: the 'Contract tests red on each' table was checked against the diff and every test name matches. The `digest`/`pinDigest` rows say 'update' where the tests are in the contract file, which is accurate. The 'every action used outside ci.yml is used in ci.yml at the identical SHA' claim holds for release.yml and pin-drift.yml (checkout and setup-node SHAs identical). No factual error found in the PR body or the commit message about the diff itself; the body's own 'Not covered' list is accurate (ADR 0039 absent, per the finding above).",
+      "evidence": "grep for 're-enabling major automerge' hits tests/renovate-release-contract.test.mjs:334. The new test titles in the diff match the body's table. The diff shows the same checkout SHA fbc6f399… and setup-node SHA 24997072… in ci.yml, pin-drift.yml and release.yml.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

@@ -1,0 +1,135 @@
+{
+  "head": "6f4839449a771e901e30810d8aa003b5ac8a36d5",
+  "run": "run-uMbhPnHA",
+  "entries": [
+    {
+      "bucket": "survived",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "charge": "both",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ]
+    },
+    {
+      "bucket": "survived",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "charge": "both",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ]
+    },
+    {
+      "bucket": "survived",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "charge": "none",
+      "chargeReason": "defect-outside-acceptance",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ]
+    },
+    {
+      "bucket": "survived",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "charge": "none",
+      "chargeReason": "defect-outside-acceptance",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4494/fix-v50Tr3rE/u0/verdict.json",
+      "disposition": "apply",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4494/fix-v50Tr3rE/u1/verdict.json",
+      "disposition": "defer",
+      "issue": 4496,
+      "reason": "refuted: an async helper's Promise makes every child_process call throw ERR_INVALID_ARG_TYPE before a child starts, so no unbounded spawn follows"
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4494/fix-v50Tr3rE/u2/verdict.json",
+      "disposition": "defer",
+      "issue": 4496,
+      "reason": "refuted: the PR body already names the reversal of the ghBudget ceiling case, and #4484 asks for ghBudget() to be reduced"
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4494/fix-v50Tr3rE/u3/verdict.json",
+      "disposition": "apply",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4494/fix-v50Tr3rE/u4/verdict.json",
+      "disposition": "apply",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 5,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4494/fix-v50Tr3rE/u5/verdict.json",
+      "disposition": "apply"
+    },
+    {
+      "bucket": "unverified",
+      "index": 6,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4494/fix-v50Tr3rE/u6/verdict.json",
+      "disposition": "apply",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 7,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4494/fix-v50Tr3rE/u7/verdict.json",
+      "disposition": "apply",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ]
+    }
+  ]
+}

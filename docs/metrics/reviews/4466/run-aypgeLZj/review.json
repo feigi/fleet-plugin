@@ -1,0 +1,136 @@
+{
+  "pr": 4466,
+  "head": "5b9991d3beeef62ec00055dc6b76f549cbcecbb1",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: Verify branch is rebased on base (needs pull-request context and full git history, not the worktree); Validate renovate.json (fetches renovate from the npm registry via npx on every run); smoke-omp (needs bun and a globally installed pinned omp binary); install-and-smoke (needs bun and a globally installed pinned omp binary).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/tier-outcomes.tsv' and untracked docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version}; I did not write these, they predate or come from other activity in that checkout."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version}`. These are controller run artifacts, not written by this review pass: my only commands there were `pwd` and `git status`."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/tier-outcomes.tsv', '?? docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version}'. I did not write these; they look like the controller's own run artifacts."
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-11T172901Z/closeout.json`, `?? docs/metrics/runs/2026-11-11T172901Z/ledger.md`, `?? docs/metrics/runs/2026-11-11T172901Z/phase0.json`, `?? docs/metrics/runs/2026-11-11T172901Z/plugin-version`. Their mtimes are 2026-11-11 18:29 and 21:13, before this review. In that directory I ran only `pwd` and this status command."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin —  M docs/metrics/tier-outcomes.tsv; ?? docs/metrics/runs/2026-11-11T172901Z/closeout.json; ?? docs/metrics/runs/2026-11-11T172901Z/ledger.md; ?? docs/metrics/runs/2026-11-11T172901Z/phase0.json; ?? docs/metrics/runs/2026-11-11T172901Z/plugin-version (not written by this reviewer: the only commands run there were `pwd` and this `git status`; every other command chained a cd into the snapshot, the run dir or the copy — these look like a prior run's close-out metrics artifacts)."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/tier-outcomes.tsv' and untracked docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version}; none were produced by this review (I only ran pwd and a read-only grep/git status there), pre-existing before my work."
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 6,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4466/run-aypgeLZj/snapshot-5b9991d3",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "tests/agent-test.test.mjs",
+      "line": 1811,
+      "claim": "The 5 failures in the shared full-suite run — 'runner: a bare invocation waits for a suite slot, and a narrowed one does not' (agent-test.test.mjs:1811), 'CLI: an exhausted derived range exits non-zero and names the ports it tried' (board-server.test.mjs:1375), 'CLI: launched while the record names a dead controller, it serves on, then arms on a live one' (cockpit-lifetime.test.mjs:216), 'CLI: an unreadable heartbeat file or process table is not a death' (cockpit-lifetime.test.mjs:257) and 'CLI: a gh that answers slowly, inside the bound, is read as usual' (diff-stats.test.mjs:318) — do not reproduce in a narrowed run and touch no file this PR changes, so they read as load/timing environment failures, not defects of this PR.",
+      "evidence": "red: node --test tests/*.test.mjs → exit 1, fail 5 incl the five named tests (shared run, test-run.log:10427-10600; durations 70-354 s, failures are timing-shaped: 'suite-slot: waiting up to 1s… 143 !== 75', 'no answer from port 8457 within 2000ms… null !== 2', '3 ticks did not happen', 'diff-stats: gh failed: ETIMEDOUT 2 !== 0'). Narrowed rerun in own copy: node --test --test-name-pattern='a bare invocation waits for a suite slot|an exhausted derived range exits non-zero|launched while the record names a dead controller|an unreadable heartbeat file or process table|a gh that answers slowly, inside the bound' tests/agent-test.test.mjs tests/board-server.test.mjs tests/cockpit-lifetime.test.mjs tests/diff-stats.test.mjs → exit 0, tests 5 pass 5 fail 0, each of the five named ✔. Cannot be separated from environment load of the shared run; reproduce in the worktree before acting.",
+      "suggested_fix": "No change in this PR; if the reds recur under suite load, widen those tests' timing bounds in a separate ticket.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The retired-field removal is discriminated by the changed tests: re-adding `fitted_commit` to tableOver, to writeFit's prior, or to router-table.json each turns a named test red.",
+      "evidence": "red: node --test tests/metrics-refresh.test.mjs tests/ticket-router.test.mjs tests/compute-cell-evidence.test.mjs tests/pull-attribution.test.mjs tests/cockpit-tabs.test.mjs (M1) → exit 1, fail 3 incl 'fit: a day-one table is the fit of an empty corpus'; baseline: same cmd → exit 0, 438 pass. M2 → exit 1, fail 1 incl 'a phase 0 over fixture records writes router-fit.json beside the fresh guard...'; M3 → exit 1, fail 1 incl 'route: the shipped table is the starting table, the day-one literal'; baseline pass in the same command. The runs were whole-file narrowing, not single-test narrowing, so the claimed tests were read from the output.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 306,
+      "claim": "Removing fitted_commit leaves the table shape unenforced by a type: validateTable accepts any extra top-level key, so a stale router-fit.json carrying fitted_commit stays valid; this is deliberate and the new test pins it.",
+      "evidence": "Read validateTable lines 306-330 (no unknown-key rejection at top level); grep of plugin/ tests/ .github/ shows no remaining reader of fitted_commit; new test at tests/ticket-router.test.mjs:676 asserts validateTable(leftover)===leftover and identical routing. No invariant is lost, no cast involved.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/ticket-router.test.mjs",
+      "line": 1431,
+      "claim": "Nothing can make the assertion `\"fitted_through\" in table` false that the exact key-set deepEqual two lines above (1429) has not already failed on, so it is redundant and can be deleted with no change in what the test catches.",
+      "evidence": "In my measure-copy I deleted line 1431. `node --test --test-name-pattern='...day-one three-TSV fixture fitted' tests/ticket-router.test.mjs` printed `✔ fit: a day-one three-TSV fixture fitted …` (pass 2, fail 0, run together with the other test). Then I injected `fitted_through: \"2026-09-01\",` into tableOver's return in plugin/scripts/ticket-router.mjs and re-ran: `✖ fit: a day-one three-TSV fixture fitted …`, `AssertionError [ERR_ASSERTION]: the fit writes these fields and no others … ticket-router.test.mjs:1429:10`. Line 1429 already catches the field, and since it runs before 1431, line 1431 can never be the assertion that fails.",
+      "suggested_fix": "Delete line 1431 (`assert.equal(\"fitted_through\" in table, false, \"no date field is written\");`). The deepEqual on `Object.keys(table).sort()` at 1429 already pins the exact field set.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/ticket-router.test.mjs",
+      "line": 680,
+      "claim": "`assert.equal(plain.line.includes(\"CELL=smol-high\"), true, plain.line)` hand-rolls `assert.match`. It is the only `line.includes(…)` assertion in the file; everywhere else the file uses `assert.match` on `.line`.",
+      "evidence": "grep `line.includes(` in tests/ticket-router.test.mjs → only :680. Probe `node -e` over [\"POLICY=x CELL=smol-high DRAW=-\",\"CELL=task-high\",\"CELL=smol-highX\",\"xCELL=smol-high\",\"\"] printed identical `includes` vs `/CELL=smol-high/.test` results (true/false/true/true/false), so both forms pass and fail on the same inputs. I replaced line 680 with `assert.match(plain.line, /CELL=smol-high/);` in my copy and the test passed: `✔ route: a table still carrying the retired commit field is valid …`.",
+      "suggested_fix": "`assert.match(plain.line, /CELL=smol-high/);` — it passes and fails on the same inputs, and on failure it prints the actual line without the hand-passed message argument.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/specs/2026-09-28-model-effort-router-design.md",
+      "line": 629,
+      "claim": "The same one-sentence `*Amended (#4370): …*` note appears 8 times across 3 specs: 4 times in model-effort-router-design.md (629, 664, 680, 937), 3 times in self-refining-router-design.md (69, 88, 319) and once in cockpit-tabs-design.md (823). Elsewhere in docs/specs/ an amendment for one issue appears at most once per file, so the copies are redundant.",
+      "evidence": "`grep -n 'Amended (#4370)' docs/specs/*.md` in the snapshot → model-effort 629/664/680/937, cockpit-tabs 823, self-refining 69/88/319. A per-file count of `Amended (#NNNN)` gives #4327 → 1 1 1 and #2573 → 1 1, so no other issue's amendment repeats within a file. This is a docs-only change and does not affect behavior.",
+      "suggested_fix": "Keep one #4370 amendment per spec, at the passage that defines `fitted_commit`. In model-effort-router-design.md that is next to the `**Amended (#2573 …)**` block that introduced it (line ~680); in self-refining-router-design.md, the starting-table bullet (line 69); in cockpit-tabs-design.md, the existing note. Delete the other copies, or replace them with a short pointer if a cross-reference is wanted.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

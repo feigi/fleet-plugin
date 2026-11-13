@@ -1,0 +1,212 @@
+{
+  "pr": 4487,
+  "head": "5a01d932d5e18c9c9dc18fee37df8f0356dff5b0",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: Verify branch is rebased on base (needs pull-request context and full git history, not the worktree); Validate renovate.json (fetches renovate from the npm registry via npx on every run); smoke-omp (needs bun and a globally installed pinned omp binary); install-and-smoke (needs bun and a globally installed pinned omp binary).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "tests",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version}`. I did not touch any of these. They look like metrics output from the controller's own runs."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv` and `?? docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version}`. I ran nothing that writes there (all my commands used /tmp or the scratch copy), so these are the controller checkout's own pre-existing files."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin —  M docs/metrics/tier-outcomes.tsv; ?? docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version} (dated 2026-11-11; every command I ran cd'd into scratch, so these are not from this review)"
+    }
+  ],
+  "counts": {
+    "survived": 4,
+    "refuted": 0,
+    "unverified": 7,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4487/run-LwpakGhx/snapshot-5a01d932",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "claim": "Rule 2 (floor) can be bypassed with `--`: floored() accepts `let F = Math.max(1, Number(process.env.X)); F--;` as floored. With X=1, Math.min(60_000, F) is 0, and Node treats a timeout of 0 as no timeout.",
+      "evidence": "In the copy I replaced ticketless.mjs:56 with `let F = Math.max(1, Number(process.env.X));\\nF--;\\nconst READ_TIMEOUT_MS = Math.min(60_000, F);` and ran `node --test --test-reporter=tap tests/gh-spawn-bound.test.mjs`: `# pass 9 # fail 0`. probe2.mjs gave `floor --T prefix: reaches=[[]]` and `floor T-- inside a loop: reaches=[[]]`. At runtime, `spawnSync(\"sleep\",[\"1.5\"],{timeout:Math.min(20000,(()=>{let T=Math.max(1,Number(\"1\"));T--;return T})())})` printed `ms 1510 signal null status 0`, so the process was never killed.",
+      "suggested_fix": "In floored(), when the ref is a bare name, return false if the name is updated with ++ or -- anywhere in the module. named() already runs that check for ceilings (`(?<![\\w$.])${e}\\s*(?:\\+\\+|--)|(?:\\+\\+|--)\\s*${e}\\b`). Also return false for refs marked `compound`, the same way numbers() does.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Reproduced in my own copy. Baseline: `node --test --test-reporter=tap tests/gh-spawn-bound.test.mjs` → # tests 9, pass 9, fail 0. I then replaced plugin/scripts/ticketless.mjs line 56 with `let F = Math.max(1, Number(process.env.X)); F--; const READ_TIMEOUT_MS = Math.min(60_000, F);`. The same command still gave # tests 9, pass 9, fail 0, so the floor rule accepts the decremented value. With X=1 that value is 0, and Node treats a spawn timeout of 0 as no timeout (the claim's runtime probe, which I did not rerun). I did not check that READ_TIMEOUT_MS reaches a spawn in the mutant; the claim is a gap in the floor check, not a mutant test kill. CWD-AUDIT: not run on /Users/chris/dev/fleet-plugin; my only command there was `pwd`. The mutation was applied only inside the scratch copy.",
+          "counter_evidence": ""
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "claim": "Rule 1 (ceiling) can be bypassed by updating a member with ++: `const L = { gh: 60_000 }; for (...) L.gh++;` keeps Math.min(L.gh, floored env) exempt. named() checks ++/-- only for plain names, and the target regex in writes() requires an `=` assignment, so the ceiling can grow without limit.",
+      "evidence": "ticketless.mjs:56 mutant `const L = { gh: 60_000 };\\nfor (let i = 0; i < 1e9; i++) L.gh++;\\nconst READ_TIMEOUT_MS = Math.min(L.gh, Math.max(1, Number(process.env.X)));` gave `# pass 9 # fail 0`. probe2.mjs gave `ceiling member ++ in a loop: reaches=[[]]`, while the plain-name control `C++` in a loop was refused (`Math.min(…) has no ceiling clear …`). probe.mjs gave `ceiling member ++: reaches=[[]]` and `ceiling member ++ prefix: reaches=[[]]`.",
+      "suggested_fix": "In named(), for a member chain (keys.length>0), return null when `id.key++`, `id.key--`, `++id.key` or `--id.key` appears in the module, in dot or bracket form. Alternatively, teach writes() to treat update expressions as compound writes.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Confirmed. In my own copy at the reviewed head I applied the claim's mutant to plugin/scripts/ticketless.mjs, replacing `const READ_TIMEOUT_MS = 60_000;` with `const L = { gh: 60_000 }; for (let i = 0; i < 1e9; i++) L.gh++; const READ_TIMEOUT_MS = Math.min(L.gh, Math.max(1, Number(process.env.X)));`. I confirmed the mutation landed with grep on `L.gh`. `env -u FORCE_COLOR node --test tests/gh-spawn-bound.test.mjs` then returned exit 0 with tests 9, pass 9, fail 0, cancelled 0. So the sweep accepts a ceiling that grows through a member `++`. I did not run the unmutated baseline or the plain-name `C++` control myself, so the unmutated and control halves rest on the claim's own probes. CWD-AUDIT: not run; I never wrote in /Users/chris/dev/fleet-plugin.",
+          "inconclusive": false
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "claim": "Rules 3 and 4 apply only to the first member in a chain. For `CFG.inner.ms`, judge() runs keyValues in read mode for `inner` only and never looks up `ms` on that value. So when `inner` names an object given an env getter by Object.defineProperty (or set up through Object.create of such an object), the spawn is accepted.",
+      "evidence": "ticketless.mjs:56 mutant `const IN = {};\\nObject.defineProperty(IN, \"ms\", { get() { return Number(process.env.X); } });\\nconst CFG = { inner: IN };\\nconst READ_TIMEOUT_MS = CFG.inner.ms;` gave `# pass 9 # fail 0`. probe.mjs gave `two-level through named inner w/ defineProperty: reaches=[[]]` and `two-level inner Object.create: reaches=[[]]`. The one-level `CFG.ms` form of the same getter is refused by the PR's own self-test 'a getter added by Object.defineProperty'.",
+      "suggested_fix": "After matching MEMBER, keep reading further `.key` segments and feed each segment's keyValues results into the next read-mode keyValues call, as named() already does for numbers. Then judge the values at the end of the chain.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Confirmed. In my own copy, the two-level mutant (inner = defineProperty getter, CFG.inner.ms) ran tests 9 / pass 9 / fail 0 with exit 0, so the spawn is accepted. The positive control, the one-level CFG.ms with the same getter, ran tests 9 / pass 8 / fail 1 with exit 1, so the injection reached the code and the one-level form is refused. Command for both: `node --test tests/gh-spawn-bound.test.mjs` with the mutation applied to plugin/scripts/ticketless.mjs line 56. I did not run a baseline on the unmutated tree, so I make no claim of a kill. This is a missed refusal rather than a test going red; the claim names no failing test. The file path is plugin/scripts/ticketless.mjs, not scripts/. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/tier-outcomes.tsv and untracked docs/metrics/runs/2026-11-11T172901Z/* (closeout.json, ledger.md, phase0.json, plugin-version). I did not write them: I wrote only in my scratch copy.",
+          "inconclusive": false
+        },
+        {
+          "refuted": false,
+          "reason": "Confirmed. I added a self-test case `CFG.inner.ms`, where `inner` is an object given an env getter by Object.defineProperty. The snapshot's judge accepts it: the case expects a refusal and fails with `ZZ two-level defineProperty: []`. The one-level case of the same getter is refused by the existing self-test. Only the defineProperty form was run, not the Object.create form. red: node --test tests/gh-spawn-bound.test.mjs → exit non-zero, fail 1 incl 'ZZ two-level defineProperty' (9 tests); baseline (mutation stashed): same command → pass 9, fail 0, cancelled 0. The injected case reached the test, since it is named in the failure output. CWD-AUDIT: clean /Users/chris/dev/fleet-plugin (not run; I never ran git status there, only edited my own copy)"
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "claim": "Bracket member reads skip rules 3 and 4 because MEMBER (`^\\s*(?:\\?\\.|\\.)\\s*([\\w$]+)`) matches dot reads only. `CFG[\"ms\"]` on an object given an env getter through Object.setPrototypeOf or Object.defineProperty is accepted, while the same shape written `CFG.ms` is refused.",
+      "evidence": "ticketless.mjs:56 mutant `const P = { get ms() { return Number(process.env.X); } };\\nconst CFG = {};\\nObject.setPrototypeOf(CFG, P);\\nconst READ_TIMEOUT_MS = CFG[\"ms\"];` gave `# pass 9 # fail 0`. probe2.mjs gave `bracket on setPrototypeOf: reaches=[[]]` against `dot on setPrototypeOf (control): reaches=[[\"reads CFG.ms: CFG is handed to Object.setPrototypeOf(…), …\"]]`. probe.mjs gave `bracket read with defineProperty getter: reaches=[[]]`.",
+      "suggested_fix": "Extend MEMBER to also match `[\"key\"]`, `['key']` and `?.[\"key\"]`, the forms writes() already matches for writes. Refuse a bracket read whose key is not a string literal.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Claim holds: bracket reads are accepted where dot reads are refused. red: node --test tests/gh-spawn-bound.test.mjs (mutant: READ(\"CFG.ms\") changed to READ(\"CFG[\\\"ms\\\"]\") at lines 1181 and 1199) → exit 1, fail 1 incl 'the sweep refuses a gh spawn whose timeout the environment can reach' (\"a getter added by Object.defineProperty: []\", i.e. accepted); baseline: same cmd, unmutated → exit 0, tests 9 pass 9 fail 0 cancelled 0. The setPrototypeOf case was not separately observed, because the defineProperty assertion fires first. The claim's own probes showed it. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/tier-outcomes.tsv', '?? docs/metrics/runs/2026-11-11T172901Z/closeout.json', '?? docs/metrics/runs/2026-11-11T172901Z/ledger.md'. I did not write these; they come from the controller's run."
+        },
+        {
+          "refuted": false,
+          "reason": "Claim reproduced. I added a row to the rule-3 table in my own copy: READ(`CFG[\"ms\"]`) on an object given an env getter through Object.setPrototypeOf, expected to be refused. The sweep accepted it ('BRACKET setPrototypeOf: []'). The dot form `CFG.ms` is already in the suite and refused. Caveat: the suite's own 9 tests only cover dot reads, so no existing test is mutated here; the gap is in the checker, which my added row exposes. red: node --test tests/gh-spawn-bound.test.mjs (copy + bracket row) → exit non-zero, fail 1 incl 'BRACKET setPrototypeOf'; baseline: same command, row removed → tests 9, pass 9, fail 0, cancelled 0. I did not check whether another rule refuses the bracket form elsewhere. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — the status output was ' M docs/metrics/tier-outcomes.tsv' and '?? docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version}'. I ran nothing in that checkout; my commands only read it, and the dirt looks like the controller's own metrics files."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "claim": "reshapes() detects Object.*/Reflect.* only by exact text: the call must be written `Object.defineProperty` with the object passed as a bare name. A parenthesised target `(CFG)`, the computed form `Object[\"defineProperty\"]`, and a call in a third module that imports CFG all go unseen. The last is outside the rule as the comment states it ('the file that reads it or the one it is imported from').",
+      "evidence": "probe.mjs: `defineProperty with parenthesised target: reaches=[[]]`, `Object['defineProperty']: reaches=[[]]`, `third module defineProperty: reaches=[[]]`. All three were also accepted before this PR (probe-base.mjs).",
+      "suggested_fix": "Strip parentheses from each argument before comparing it to the name. Refuse `Object[` and `Reflect[` computed member calls. Any widening to third modules can go to #4485.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "claim": "The new Math.max floor, like the existing Math.min exemption, trusts `Math` by name without checking for a local binding. With `const Math = { min: (a, b) => b, max: (a, b) => b };` in the file, an env read passes as both ceiling-bounded and floored.",
+      "evidence": "probe.mjs: `Math shadowed: reaches=[[]]`, accepted both before and after this PR (probe-base.mjs), so not a regression.",
+      "suggested_fix": "Before treating Math.min or Math.max as the built-in, check shadowedBy(ref, \"Math\") and whether the module declares or imports `Math`.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "claim": "This is a new false positive. entryOf() calls a decimal numeric key such as `{ 1.5: 2, ms: 20_000 }` a computed key, so `CFG.ms` is refused even though its object holds only plain keys. The pre-PR sweep accepted it. A shorthand `{ __proto__ }`, which creates an own property and not a prototype, is also refused.",
+      "evidence": "probe.mjs (PR): `numeric key literal: reaches=[[\"reads CFG.ms: its object holds a computed key, which can be ms\"]]` and `shorthand __proto__ own prop: reaches=[[\"…__proto__ entry…\"]]`. probe-base.mjs (pre-PR): both `reaches=[[]]`. `{ 1e3: 1, … }` and `{ \"a-b\": 1, … }` are still accepted.",
+      "suggested_fix": "Allow a numeric-literal key (reuse NUMBER) in entryOf's key match. Refuse `__proto__` only for the `__proto__:` plain form.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 845,
+      "claim": "floored() combines a variable's several values with every(); no test distinguishes every from some, so a floor name holding both a Math.max(...) and an unfloored value would be wrongly accepted.",
+      "evidence": "Mutants at line 845 `alternatives.every(...)`->`.some(...)` and line 848 `each.every(Boolean)`->`each.some(Boolean)`: `node --test tests/gh-spawn-bound.test.mjs` → exit 0, pass 9 fail 0 (same as baseline exit 0, 9 pass). Survived.",
+      "suggested_fix": "Add a refused rule-2 case where the floor is a ternary or a `let` reassigned to one Math.max(...) value and one unfloored value, e.g. `let F = Math.max(1, Number(process.env.X)); F = 0;`.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 595,
+      "claim": "The `class` receiver refusal in keyValues has no discriminating test: removing the `^class\\b` guard changes no result.",
+      "evidence": "Mutant: `if (/^class\\b/.test(s)) return not(`→`if (false) return not(`; `node --test tests/gh-spawn-bound.test.mjs` → exit 0, 9 pass. Baseline exit 0, 9 pass. The 'class static method/getter' cases are refused by another path, likely isClass().",
+      "suggested_fix": "Add a case where a class expression is read inline (e.g. `(class { static get ms(){...} }).ms`), or delete the dead guard.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 745,
+      "claim": "The MAX_VALUES=64 blow-up guard in numbers() is untested: raising it to 1e9, or lowering it to 1, changes no outcome.",
+      "evidence": "Mutants `MAX_VALUES = 64`→`1e9` and `out.length > MAX_VALUES`→`out.length > 1`: `node --test tests/gh-spawn-bound.test.mjs` → exit 0, 9 pass each, same as the unmutated baseline.",
+      "suggested_fix": "Add a ceiling expression with more than 64 combinations (several reassigned names multiplied) expecting refusal. Also add one with two combinations expecting acceptance, to pin the limit from below.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 668,
+      "claim": "Three tracer lines are not discriminated by any case, and may be equivalent mutants: the lower-bound `Math.max(...n) >= 1` (as `Math.min`), the `per[k].length === 0 &&` clause of the ceiling test, and the `|| unfloored.length > 0` continue. The `judge()===0` precondition in floored() also survives.",
+      "evidence": "Mutants: `Math.max(...n) >= 1 &&`→`Math.min(...n) >= 1 &&`; `per[k].length === 0 && inRange(`→`inRange(`; `if (!ceiling || unfloored.length > 0) continue;`→`if (!ceiling) continue;`; `judge(arg,...).length === 0 ? numbers(...) : null`→`numbers(...)`. Each: `node --test tests/gh-spawn-bound.test.mjs` → exit 0, 9 pass (baseline exit 0, 9 pass). I did not prove equivalence. Reasons are already pushed before the continue, so the third is probably equivalent.",
+      "suggested_fix": "Add a ceiling holding `{0, 20000}` as two values for the lower-bound case. For the others, remove the redundant code if it is equivalent.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

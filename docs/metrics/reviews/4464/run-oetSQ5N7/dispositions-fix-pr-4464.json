@@ -1,0 +1,101 @@
+{
+  "head": "49d5b8ffbc0e3bfdc64fafbdca358abb22a35822",
+  "run": "run-oetSQ5N7",
+  "entries": [
+    {
+      "bucket": "survived",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "remedyFiles": [
+        "tests/ticket-router.test.mjs"
+      ],
+      "reason": "Applied: test 'fit: a guard with no window fits over the prior's window_start' calls fitTable and fitTree with a null guard window over a prior holding window_start.",
+      "charge": "none",
+      "chargeReason": "defect-outside-acceptance"
+    },
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "issue": 4465,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4464/fix-Y276u8Lv/u0/verdict.json",
+      "remedyFiles": [
+        "plugin/scripts/ticket-router.mjs"
+      ],
+      "reason": "Refuter returned refuted=true (no valid Test-entrypoint run of the remedy). Dropping fitted_commit is #4370's work per #4321's ruling. Recorded on #4465."
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4464/fix-Y276u8Lv/u1/verdict.json",
+      "reason": "Refuter let the claim survive; the finding reports no defect and proposes no change, so applying it changes nothing."
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "issue": 4465,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4464/fix-Y276u8Lv/u2/verdict.json",
+      "remedyFiles": [
+        "plugin/scripts/ticket-router.mjs"
+      ],
+      "reason": "Refuter returned refuted=true: requiring a null fitted_commit in validateTable reddened an existing route test whose fixture table carries a SHA. Recorded on #4465."
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "issue": 4465,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4464/fix-Y276u8Lv/u3/verdict.json",
+      "remedyFiles": [
+        "plugin/scripts/ticket-router.mjs"
+      ],
+      "reason": "Refuter returned refuted=true: defineFlags exposes no positional, so the suggested remedy cannot be applied as written, and the pattern predates the PR. Recorded on #4465."
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4464/fix-Y276u8Lv/u4/verdict.json",
+      "reason": "Refuter let the claim survive; the finding reports no defect and proposes no change, so applying it changes nothing."
+    },
+    {
+      "bucket": "unverified",
+      "index": 5,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4464/fix-Y276u8Lv/u5/verdict.json",
+      "remedyFiles": [
+        "tests/ticket-router.test.mjs"
+      ],
+      "reason": "Refuter returned refuted=false with a completed entrypoint run at exit 0; applied: the fit tests use refit's returned table."
+    },
+    {
+      "bucket": "unverified",
+      "index": 6,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "issue": 4465,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4464/fix-Y276u8Lv/u6/verdict.json",
+      "remedyFiles": [
+        "plugin/scripts/ticket-router.mjs"
+      ],
+      "reason": "Refuter returned refuted=true: no clean green for the remedy, and the claim that only tests import fitTable is false (docs/research derive scripts call it). Recorded on #4465."
+    }
+  ]
+}

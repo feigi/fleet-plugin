@@ -1,0 +1,113 @@
+{
+  "pr": 4493,
+  "head": "6e96a95b604f3377f0f9a0e3f8249d1f1817bf1e",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: Verify branch is rebased on base (needs pull-request context and full git history, not the worktree); Validate renovate.json (fetches renovate from the npm registry via npx on every run); smoke-omp (needs bun and a globally installed pinned omp binary); install-and-smoke (needs bun and a globally installed pinned omp binary).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv` and untracked `docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version,...}` (output cut at 5 lines by `head`). I ran only a read-only `git status`, so I did not make these changes. They are most likely another agent's metrics output, but I did not trace them."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin —  M docs/metrics/tier-outcomes.tsv; ?? docs/metrics/runs/2026-11-11T172901Z/closeout.json; ?? docs/metrics/runs/2026-11-11T172901Z/ledger.md; ?? docs/metrics/runs/2026-11-11T172901Z/phase0.json; ?? docs/metrics/runs/2026-11-11T172901Z/plugin-version (this run did not write these: the only commands run in that directory were `pwd` and the read-only `gh issue view 4474` / `gh pr view 4493`. They look like a prior controller run's metrics artifacts)"
+    }
+  ],
+  "counts": {
+    "survived": 1,
+    "refuted": 0,
+    "unverified": 4,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4493/run-aPxWuEhS/snapshot-6e96a95b",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "docs/research/external-assumptions.md",
+      "line": 178,
+      "claim": "The catalogue's §7 summary bullet for the same rows (harness#104–106) still says \"Renovate manages only `nvm`\". After this PR it contradicts the row 105 it summarises, so the exact false statement ticket #4474 exists to fix survives one file over.",
+      "evidence": "`grep -rn --exclude-dir=.git --exclude-dir=node_modules -E '\\[\"nvm\"\\]|manages only|only the `?nvm' .` in snapshot-6e96a95b → `./docs/research/external-assumptions.md:178:- `.nvmrc` (26.5.0) and `engines.node` (>=20.11.0) drift; Renovate manages only `nvm`. — harness#104–106` (the only other hits are ADR 0010:104, a historical decision now amended by its own Status line). `sed -n 152p docs/research/external-assumptions/harness-node.md` → row 105 now reads 'Renovate manages the `nvm`, `github-actions` and `custom.regex` managers … `engines.node` stays unmanaged'. The PR diff touches only the 3 slice files (`grep -n '^diff --git' pr.diff` → harness-node.md, prose.md, shell.md). The index's 'dated record' rule (external-assumptions.md:21-27) covers slice rows' `path:N` cites, not this summary prose.",
+      "suggested_fix": "Rewrite external-assumptions.md:178 to match row 105. For example: '`.nvmrc` (26.5.0) and `engines.node` (>=20.11.0) drift; Renovate manages `nvm`, `github-actions` and `custom.regex` (ADR 0039) but not `engines.node`. — harness#104–106'.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Observed in snapshot: external-assumptions.md:178 still says 'Renovate manages only `nvm`. — harness#104–106', while harness-node.md row 105 now says Renovate manages nvm, github-actions, custom.regex. pr.diff touches only harness-node.md, prose.md, shell.md. The index's dated-record rule covers path:N cites, not this summary prose. Check was a read/grep, not a test run; no mutant applicable. CWD-AUDIT: not run (read-only; nothing written in /Users/chris/dev/fleet-plugin)."
+        },
+        {
+          "refuted": false,
+          "reason": "Not refuted. I read external-assumptions.md in the snapshot. Line 178 still reads 'Renovate manages only `nvm`. — harness#104–106'. The diff touches only harness-node.md, prose.md and shell.md (grep of '^diff --git' on pr.diff). The dated-record rule at lines 21-27 covers slice rows' `path:N` cites, not this summary prose, so it does not excuse the line. I did not re-read row 105 myself. Its new wording comes from the claim, and I took it as given. This was a read-only check, so I ran no test and made no mutant. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/tier-outcomes.tsv', '?? docs/metrics/runs/2026-11-11T172901Z/closeout.json', '?? docs/metrics/runs/2026-11-11T172901Z/ledger.md'. These were already there; I wrote nothing in that directory. The status output was cut to its first 3 lines (`| head -3`), so it may list more."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "docs/research/external-assumptions/shell.md",
+      "line": 43,
+      "claim": "Scope: ticket #4474 names only harness-node.md row 105, but the PR also rewrites shell.md row 25 and prose.md row 86. Both had gone stale for the same reason (ADR 0039), the PR body discloses the change, and it is docs-only, so the creep is small and justified. It still widens the ticket, and the index header (external-assumptions.md:21-27) calls row drift expected and not a ticket class.",
+      "evidence": "`gh issue view 4474` body: 'Location: docs/research/external-assumptions/harness-node.md:152 … Rewrite row 105 for the three managers'. No mention of shell.md or prose.md. `grep -n '^diff --git' pr.diff` → 3 files, including shell.md (row 25) and prose.md (row 86). Before the PR, both rows asserted major-tag pins / `enabledManagers: [\"nvm\"]`, and both are false against `grep -rn 'uses:' .github/workflows` (all `@<40-hex> # vX.Y.Z`) and renovate.json:4.",
+      "suggested_fix": "None needed beyond a note in the ticket/PR that the two extra rows were included deliberately as the same-cause supersession.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "docs/research/external-assumptions/shell.md",
+      "line": 43,
+      "claim": "Rewritten row 25 still says 'CI runs on `ubuntu-latest` for all four workflows' (wording carried over from the old row), but ci.yml has a `macos-latest` job. The new cite column (ADR 0039 + `uses:` lines) no longer cites any `runs-on:` line that would bound that claim.",
+      "evidence": "`grep -rn -E 'uses:|runs-on|…' .github/workflows` → `.github/workflows/ci.yml:276:    runs-on: macos-latest`, and every other runs-on is ubuntu-latest (release.yml:20, pin-drift.yml:46, release-label.yml:42,71, ci.yml:68,105,298,335). `sed -n 43p docs/research/external-assumptions/shell.md` shows the cite column as `docs/adr/0039-… §Decision 2, §Decision 5; .github/workflows/*.yml uses: lines`.",
+      "suggested_fix": "Reword to 'every workflow runs on `ubuntu-latest` (ci.yml's proc-macos job aside, see prose#84)', or leave as is, since the 'all four workflows' reading is technically true.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "shell.md row 25, rewritten by this diff, still says CI runs on `ubuntu-latest` for all four workflows, but ci.yml's proc-macos job uses `runs-on: macos-latest`.",
+      "evidence": "`grep -n runs-on .github/workflows/*.yml | grep -v ubuntu` prints `ci.yml:276: runs-on: macos-latest`. The wording is carried over unchanged from the old row, and prose.md row 84 already documents the macOS job.",
+      "file": "docs/research/external-assumptions/shell.md",
+      "line": 43,
+      "suggested_fix": "Say 'ubuntu-latest for every job except ci.yml's proc-macos (macos-latest)', or drop the all-four-workflows phrasing.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "Untouched rows 26 and 27 in shell.md cite ci.yml line numbers and 'Pinned via…' comment positions that no longer match the tree. They are stale, but because ADR 0039's implementation changed ci.yml, not because of this diff.",
+      "evidence": "Row 26 cites `ci.yml:204-210,212-217,228-234,257` for the renovate validator, but the pinned `renovate@44.115.7` step is at ci.yml:215 after the `# renovate:` annotation at ci.yml:214. Row 27 cites `ci.yml:284-289` and `:325` for `bun install -g @oh-my-pi/pi-coding-agent@18.4.4`, which is now at ci.yml:317 and ci.yml:354.",
+      "file": "docs/research/external-assumptions/shell.md",
+      "line": 44,
+      "suggested_fix": "Refresh the line cites in rows 26 and 27 in a follow-up if cite accuracy matters. This is not caused by this PR.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

@@ -1,0 +1,67 @@
+{
+  "pr": 4491,
+  "head": "b09175d7602b373d5b6bc959bec449fad8765d96",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: Verify branch is rebased on base (needs pull-request context and full git history, not the worktree); Validate renovate.json (fetches renovate from the npm registry via npx on every run); smoke-omp (needs bun and a globally installed pinned omp binary); install-and-smoke (needs bun and a globally installed pinned omp binary).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-11T172901Z/closeout.json`, `?? docs/metrics/runs/2026-11-11T172901Z/ledger.md`, `?? docs/metrics/runs/2026-11-11T172901Z/phase0.json`, `?? docs/metrics/runs/2026-11-11T172901Z/plugin-version` (I only ran pwd, cat of the diff, a grep and this status; none of these writes are mine, so they come from the controller's own run metrics)."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version}` (not made by me; I wrote nothing there)."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-11T172901Z/closeout.json`, `?? docs/metrics/runs/2026-11-11T172901Z/ledger.md`, `?? docs/metrics/runs/2026-11-11T172901Z/phase0.json`, `?? docs/metrics/runs/2026-11-11T172901Z/plugin-version` (these come from a 2026-11-11 run's metrics; none of my commands wrote there — every shell command after `pwd` cd'd into the snapshot or my scratch dir, and read/grep are read-only)"
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 2,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4491/run-1pF2hyVc/snapshot-b09175d7",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": ".github/workflows/ci.yml",
+      "line": 109,
+      "claim": "The new comment says the 30-minute cap sits \"well above the suite's normal runtime\", but repo evidence puts the suite at roughly 10 minutes locally and up to the old 15-minute limit on CI, so 30 is about 2-3x rather than clearly far above.",
+      "evidence": "test-run.log: duration_ms 606987 (~10.1 min) for this PR's suite. docs/metrics/runs/2026-11-06T080041Z/ledger.md:127 records the check job cancelled at its 15-minute limit on #4353 (twice). ci.yml line 110 is now 30. The wording is defensible, but the 15-minute observation shows normal CI runtime can approach the old cap.",
+      "suggested_fix": "Optional: state the measured runtime, e.g. \"suite runs ~10 min locally; CI has hit 15\", instead of the unquantified \"well above\".",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body and commit b09175d7: all assertions check out — timeout 15 to 30 on the check job only (diff confirms one hunk), the comment rewritten as described, and other jobs' caps unchanged (10 and 5 minutes in the snapshot).",
+      "evidence": "grep -n timeout-minutes .github/workflows/*.yml: ci.yml:110=30, :277/:299/:336=10, pin-drift 5, release-label 5/5, release 10. No other file or comment references the check job's 15-minute cap; the only other \"15-minute\" hits concern the merge-bot grace period, which is unrelated.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

@@ -1,0 +1,188 @@
+{
+  "pr": 4497,
+  "head": "8437f8d058700ed5a7b5e0641de08e3dce300efa",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: Verify branch is rebased on base (needs pull-request context and full git history, not the worktree); Validate renovate.json (fetches renovate from the npm registry via npx on every run); smoke-omp (needs bun and a globally installed pinned omp binary); install-and-smoke (needs bun and a globally installed pinned omp binary).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "tests",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version}`. I did not write those; they look like controller run-metrics output."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/tier-outcomes.tsv; ?? docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version}. I wrote nothing there, and these paths came from other agents or the controller."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-11T172901Z/closeout.json`, `?? docs/metrics/runs/2026-11-11T172901Z/ledger.md`, `?? docs/metrics/runs/2026-11-11T172901Z/phase0.json`, `?? docs/metrics/runs/2026-11-11T172901Z/plugin-version`. These are not from this review: after the first `pwd`, every command I ran cd'd into the scratch copy or used absolute scratch paths, and the run directory is dated 2026-11-11."
+    }
+  ],
+  "counts": {
+    "survived": 3,
+    "refuted": 0,
+    "unverified": 6,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4497/run-6wyMtOhs/snapshot-8437f8d0",
+  "survived": [
+    {
+      "severity": "critical",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 1205,
+      "claim": "Since this PR, an unbounded class method that hands its parameter on as the command passes the sweep silently when it is called through any receiver other than this/super. That covers `obj.run(\"gh\")`, `new P().run(\"gh\")`, static `P.run(\"gh\")`, an exported class used from another module, a subclass declared in another module, and `new P(\"gh\")` with a spawning constructor. Before the PR each of these failed by name as \"spawns `cmd`, a command this sweep cannot tell from gh, with no bound\".",
+      "evidence": "Ran sweep() from the pre-PR file and from the PR file on the same sources, each built with MOD(`class P {\\nrun(cmd, args) { return spawnSync(cmd, args, {}); }\\n}…`). Old output: {\"n\":\"outside receiver obj.run\",\"spawns\":[],\"problems\":[\"x.mjs:3 spawns `cmd`, a command this sweep cannot tell from gh, with no bound\"]}, and the same problem for \"new P().run\", \"static P.run\", \"exported class used elsewhere\" (a.mjs:3), \"subclass in other module\" (a.mjs:3) and \"constructor funnel via new\". New output for all six: \"spawns\":[],\"problems\":[]. Cause: methods now enter `fns` with their params, so `mod.within(c.at)?.params.includes(cmd)` at line 1205 now skips the method's own spawnSync(cmd). Its callers, though, are collected only from this./super. calls in the same file (lines 354-360). Nothing in the current plugin/scripts tree hits this: the suite passes under both versions. But it breaks the header's promise (lines 33-35) that a reach the sweep cannot follow fails by name rather than passing unread, and it removes coverage that existed before.",
+      "suggested_fix": "Only exempt a method's parameter-command spawn at line 1205 when its callers can all be followed. Concretely: push a problem whenever a method funnel's key appears as `.key(`, `.key` handed on, or `new C(` (for a constructor) through any receiver other than this/super, in its own module or any other module. Alternatively, leave methods out of the `within(...).params` exemption unless the class is unexported and every `.key` reference in the file is a this/super call. Pin `obj.run(\"gh\")` and `new P().run(\"gh\")` with an unbounded method as refused fixtures.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Ran the PR's own sweep() (a probe appended to a copy of tests/gh-spawn-bound.test.mjs in my measure-copy, which built with exit 0). For `class P { run(cmd,args){return spawnSync(cmd,args,{})} }` called as `obj.run(\"gh\",[\"x\"])` and as `new P().run(\"gh\",[\"x\"])`, the output was {\"spawns\":[],\"problems\":[]} both times. The unbounded gh spawn passes silently. The pre-PR behaviour is not rerun by me. The diff shows `fns.set(..., ...extra)` now registering methods with params, which fits the `within(c.at)?.params.includes(cmd)` skip at line 1205. I did not run the other four cases (static, cross-module, subclass, constructor). This is a probe of sweep(), not a test red or kill, so no evidence line applies. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-11T172901Z/closeout.json`, `?? docs/metrics/runs/2026-11-11T172901Z/ledger.md` (I did not write to this directory; these entries were already there)."
+        },
+        {
+          "refuted": false,
+          "reason": "I ran sweep() from the PR snapshot's test file, copied to scratch, on `class P { run(cmd,args){spawnSync(cmd,args,{})} }; const o=new P(); o.run(\"gh\");`. It returned {\"spawns\":[],\"problems\":[]}, so the sweep stays silent. The code at line 1205 (`mod.within(c.at)?.params.includes(cmd)` → continue) plus the this./super.-only caller collection (lines 354-360) matches the claim. I did not run the pre-PR file, so the claim that the old version failed by name is taken from the finding. I probed only the `obj.run` receiver, not the other five. Nothing elsewhere in the code handles this case. red: n/a (no failing test is claimed). CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/tier-outcomes.tsv, ?? docs/metrics/runs/2026-11-11T172901Z/closeout.json, ?? docs/metrics/runs/2026-11-11T172901Z/ledger.md (I did not create these; I wrote nothing there)."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 287,
+      "claim": "membersOf() loses every method that follows a class field written without a semicolon, such as `limit = 3` followed by `run(cmd, args, t) {…}` on the next line. A `this.run(\"gh\", …, Number(process.env.X))` call to that method is then never swept, so an environment-fed gh timeout passes. The same class with `limit = 3;` is refused.",
+      "evidence": "Probe on the PR's sweep(). With MOD(`class P {\\nlimit = 3\\nrun(cmd, args, t) { return spawnSync(cmd, args, { timeout: t }); }\\ngo() { return this.run(\"gh\", [\"x\"], Number(process.env.X)); }\\n}`) the output was {\"spawns\":[],\"problems\":[]}. With `limit = 3;` the output was {\"spawns\":[{\"where\":\"x.mjs:5\",\"bounded\":true,\"reaches\":[\"reads process.env.X\"],\"range\":[\"takes a timeout that does not work out to a number: t\"]}],\"problems\":[]}. In membersOf, `head` is reset only on `;` or after a `{…}` block, so the line after an ASI-terminated field is not read as a member head. This is not a regression, since the old sweep was blind to the whole class, but it is a gap in the class reading the PR introduces. No linter in the repo enforces semicolons.",
+      "suggested_fix": "Reset `head` on a newline at depth 0 when the previous token cannot continue an expression. Or fail closed: push a problem when a class body holds `name(…) {` text at member depth that membersOf did not record as a member.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Claim reproduced in my own copy (measure-copy exit 0). Probing sweep() with a class where `limit = 3` has no semicolon gives {\"spawns\":[],\"problems\":[]}, so the method after it is lost and the env-fed call is never swept. With `limit = 3;` it gives one spawn with range problem \"takes a timeout that does not work out to a number: t\". Mechanism confirmed in membersOf (lines 287-315): after an unterminated field, head stays false, so the next line is not read as a member head. This is a real gap, though not a regression. No test-suite red or baseline was run, so there is no red/baseline evidence line. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/tier-outcomes.tsv' and untracked docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version}; I wrote nothing there, so these were already present."
+        },
+        {
+          "refuted": false,
+          "inconclusive": false,
+          "reason": "I did not run a probe. I read membersOf at tests/gh-spawn-bound.test.mjs:287-313 in the snapshot, and the code matches the claim. `head` is set to false once the first token of a member is consumed (`limit`). It returns to true only after a `;` or a `{…}` block. With `limit = 3` and no semicolon, the next line's `run(` is therefore not tried as a member head, and `run` is never recorded. I found no other handling of ASI-terminated fields in that function. The gap is in the class reading the PR adds. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/tier-outcomes.tsv' and '?? docs/metrics/runs/2026-11-11T172901Z/{closeout.json,ledger.md,phase0.json,plugin-version}'. I wrote nothing there, and those entries look like the controller's own metrics output."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "claim": "PR body: says `P.run(\"gh\")`, `new P(\"gh\")` and `p.run(\"gh\")` were \"settled on fixtures\" to leave the sweep with no spawn and no problem, but the diff has no such fixture.",
+      "evidence": "grep -n 'P.run\\|new P' pr.diff matched only line 305 (the duplicate-key `declares P.run more than once` expectation) and no `new P(` or `p.run(`. The `quiet` table (diff lines 308-315) holds six cases: a function sharing a name, a child_process-named method, a bare call, `this.name` with no such method, a getter/setter pair and a method handed another command. None calls through `P.`, `new P` or `p.`.",
+      "suggested_fix": "Add fixtures for `P.run(\"gh\")`, `new P(\"gh\")` and `p.run(\"gh\")` to the `quiet` table, or reword the PR body to say they were probed ad hoc and not pinned.",
+      "dimension": "comments",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Read pr.diff and pr-messages.md (no run needed). Line 13 of pr-messages.md says `P.run(\"gh\")`, `new P(\"gh\")` and `p.run(\"gh\")` were \"Settled on fixtures\". In pr.diff, grep for `P\\.run(`, `new P(` and `p\\.run(` finds no call. The only `P.run` hit is the duplicate-key expectation at line 305. The `quiet` table at lines 308-315 has the six cases the claim lists, and none calls through `P.`, `new P` or `p.`. Scope: pr.diff only. A fixture added in a file outside the diff would not show, but the PR adds none. The `p.run(` hits in the snapshot's tests are in ticket-router.test.mjs and ledger.test.mjs, which are unrelated. CWD-AUDIT: not run (no files written; read-only greps)"
+        },
+        {
+          "refuted": false,
+          "reason": "Not refuted. Searched pr.diff and pr-messages.md with grep for `P.run`, `new P`, `p.run`, `new C`, `C.m`, `obj.m` and `receiver`. This only shows the diff has no fixture for `P.run(\"gh\")`, `new P(\"gh\")` or `p.run(\"gh\")`. The PR body line 13 claims these were \"Settled on fixtures\" with no spawn and no problem. The diff's only `P.run` match is the duplicate-key problem string at line 305. The `quiet` table at diff lines 308-315 has six cases and none calls through `P.`, `new P` or `p.`. The only mentions of other receivers are the header comment at diff lines 23-24. I did not run the test suite, so I found no counter-evidence and made no kill claim. CWD-AUDIT: not run, no files written in /Users/chris/dev/fleet-plugin"
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 355,
+      "claim": "classAt() resolves `this.run(…)` inside a non-arrow `function` nested in a method to the enclosing class's method, although `this` there is not the instance.",
+      "evidence": "Probe on the PR's sweep(): MOD(`class P {\\nrun(cmd, args) { return spawnSync(cmd, args, {timeout: 5000}); }\\ngo() { return [1].map(function () { return this.run(\"gh\", [\"x\"]); }); }\\n}`) gave spawns [{\"where\":\"x.mjs:4\",\"bounded\":true,…}]. The sweep treats the call as bounded through P.run, while at runtime `this` is undefined or whatever `.call()` supplies. I did not build a case where this hides an unbounded spawn on its own; that would need another class's method funnel, which is the first finding.",
+      "suggested_fix": "Do not resolve `this.` or `super.` when a `function` keyword body sits between the call and the class body. Skip the call in that case, or report it as unfollowable.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 330,
+      "claim": "No test covers `const P = class {…}` as a parent class: deleting the `bound` name binding (`const bound = undefined;`) leaves every test green, so inheritance through a class-expression name is untested.",
+      "evidence": "Mutant: replaced the `const bound = skel.slice(0, m.index).match(...)` line with `const bound = undefined;`. Run: `node --test tests/gh-spawn-bound.test.mjs` → exit 0, pass 20, fail 0. Baseline: same command → exit 0, pass 20. This is a survivor, not a kill. The 'method of a class expression' fixture never has a subclass extend the const-bound class.",
+      "suggested_fix": "Add a fixture such as `const A = class { run(cmd,args){ return spawnSync(cmd,args,{}); } }; class P extends A { go(){ return this.run(\"gh\",[\"x\"]); } }` to the refused set.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 322,
+      "claim": "The `seen` cycle guard in methodOf is untested: removing `&& !seen.has(cls)` keeps every test green, so a cyclic or self `extends` would hang the sweep (infinite loop) without any test noticing.",
+      "evidence": "Mutant: replaced `&& !seen.has(cls);` with `;`. Run: `node --test tests/gh-spawn-bound.test.mjs` → exit 0, pass 20, fail 0. Baseline: exit 0, pass 20. This is a survivor, not a kill.",
+      "suggested_fix": "Add a fixture `class A extends B {}\\nclass B extends A { go(){ return this.missing(); } }` and assert that the sweep terminates and returns no spawns.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 297,
+      "claim": "Resetting `head` after a `;` in membersOf is not pinned: deleting `else if (skel[k] === \";\") head = true;` survives, so a method declared right after a field terminator is not shown to be needed.",
+      "evidence": "Mutant: removed that `else if` clause. Run: `node --test tests/gh-spawn-bound.test.mjs` → exit 0, pass 20, fail 0. Baseline: exit 0, pass 20. Survivor. The 'method after fields, a static block…' fixture still passes, probably because the `}` of the static block or the field's own braces re-arm `head`.",
+      "suggested_fix": "Add a fixture where a method follows a plain `field = 1;` with no intervening braces (`class P { a = 1; run(cmd,args){...} go(){...} }`).",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 352,
+      "claim": "The `if (callee === null) continue;` guard for `this.x()` or `super.x()` calls to an unknown method is not pinned: removing it leaves every test green.",
+      "evidence": "Mutant: removed that line. Run: `node --test tests/gh-spawn-bound.test.mjs` → exit 0, pass 20, fail 0. Baseline: exit 0, pass 20. Survivor. The 'this.name in a class with no such method' quiet fixture still passes with a null callee call recorded. The mutant may be behaviourally equivalent, since a null-callee call matches no funnel; I did not prove this either way.",
+      "suggested_fix": "Either drop the guard if it is dead, or add an assertion that observes the difference (for example, no call entry or no problems for a callee-less `this.x()`).",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The new comment in analyse() above `const fns` reads `const f = (…) =>…` with the space after `=>` removed, while the original had `=> …`.",
+      "evidence": "pr.diff line 35: `+  // Every named function: `function f(…) {…}` and `const f = (…) =>…`, and`; the replaced line 34 was `…) => …`.",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 254,
+      "suggested_fix": "Restore `=> …` so the elision marker is not run into the arrow.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}
