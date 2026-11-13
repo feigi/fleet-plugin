@@ -6,11 +6,19 @@
 // that sleeps past it; this sweep pins the next spawn, the one no suite drives.
 //
 // A `gh` spawn is a call that names "gh" as its command, to a node:child_process
-// function or to a FUNNEL: a function, here or in a module it imports, that
-// hands one of its own parameters on as the command of another such call
-// (ci-state.mjs's spawn()/run()/runJson()/tryRun(), board-common.mjs's
-// execRead(), board-gather.mjs's tryRun(), diff-stats.mjs's run()). So is a
-// spawn whose command or argument is a shell line that runs gh — `execSync("gh
+// function or to a FUNNEL: a function, here or in a module it imports, or a
+// method of a class its own file declares, that hands one of its own
+// parameters on as the command of another such call (ci-state.mjs's
+// spawn()/run()/runJson()/tryRun(), board-common.mjs's execRead(),
+// board-gather.mjs's tryRun(), diff-stats.mjs's run(), pull.mjs's Pull.exec()).
+// A method is keyed by its class and name, `Pull.exec`, so it never clashes
+// with a function of the module that shares its name, and is called as
+// `this.exec(…)` from its class or from one this file declares that extends
+// it, or as `super.exec(…)` from the latter. That is the whole of what is
+// followed: a call through any other receiver (`obj.m(…)`, `C.m(…)`,
+// `new C(…)`), a getter, a setter, a function a class holds in a field and a
+// method of an object literal are not. A spawn whose command or argument is a
+// shell line that runs gh is one too — `execSync("gh
 // pr view 1")`, `spawnSync("sh", ["-c", "gh pr view 1"])`. The spawn is bounded
 // when its own arguments carry a `timeout` key at the top level of an options
 // object — written inline, as a shorthand, or in an object declared in the same
@@ -243,15 +251,16 @@ function analyse(src, file) {
     }
   }
 
-  // Every named function: `function f(…) {…}` and `const f = (…) => …`.
+  // Every named function: `function f(…) {…}` and `const f = (…) =>…`, and
+  // below, the methods of every class.
   const fns = new Map();
-  const add = (name, paramsOpen, bodyFrom) => {
+  const add = (name, paramsOpen, bodyFrom, extra = {}) => {
     const paramPieces = pieces(skel, code, paramsOpen);
     const params = paramPieces.map((p) => p.code.replace(/=.*$/s, "").trim());
     let start = bodyFrom;
     while (/\s/.test(skel[start])) start++;
     const end = skel[start] === "{" ? closing(skel, start) : exprEnd(skel, start);
-    fns.set(name, { name, params, paramPieces, start, end });
+    fns.set(name, { name, params, paramPieces, start, end, ...extra });
   };
   for (const m of skel.matchAll(/\bfunction\s+([\w$]+)\s*\(/g)) {
     const open = m.index + m[0].length - 1;
@@ -264,13 +273,92 @@ function analyse(src, file) {
     if (arrow) add(m[1], open, after + arrow[0].length);
   }
 
-  // Every call whose callee is named: offset, callee, its arguments.
+  // The classes this file declares, `class C` and `const C = class`, and each
+  // one's methods, keyed `C.name`: `static`, `async`, `*` and `#private` ones
+  // too, never a getter or a setter. A class named by neither form is keyed by
+  // where it opens. `defs` holds where each member's name is written, so that
+  // a definition, `gh(step, args, shown) {`, is read as no call.
+  const classes = new Set();
+  const bodies = [];
+  const defs = new Set();
+  const HEAD = /(?:static\s+)?(?:(async|get|set)\s+(?=[\w$#*]))?(?:\*\s*)?(#?)([\w$]+)\s*\(/yd;
+  // The members of the class body that opens at `open` whose head is a name
+  // and a parameter list, then a block.
+  const membersOf = (open, close) => {
+    const out = [];
+    let head = true;
+    for (let k = open + 1; k < close; k++) {
+      if (/\s/.test(skel[k])) continue;
+      if (head) {
+        head = false;
+        HEAD.lastIndex = k;
+        const h = HEAD.exec(skel);
+        if (h !== null) {
+          const paren = h.index + h[0].length - 1;
+          const after = closing(skel, paren) + 1;
+          let block = after;
+          while (/\s/.test(skel[block])) block++;
+          if (skel[block] === "{") {
+            out.push({ accessor: h[1] === "get" || h[1] === "set", key: h[2] + h[3], nameAt: h.indices[3][0], paren, after });
+            k = closing(skel, block);
+            head = true;
+            continue;
+          }
+        }
+      }
+      if (OPEN.includes(skel[k])) {
+        if (skel[k] === "{") head = true;
+        k = closing(skel, k);
+      } else if (skel[k] === ";") head = true;
+    }
+    return out;
+  };
+  for (const m of skel.matchAll(/(?<![\w$.])class(?=\s*\{|\s+[\w$])/g)) {
+    let open = m.index + m[0].length;
+    while (open < skel.length && skel[open] !== "{") open = OPEN.includes(skel[open]) ? closing(skel, open) + 1 : open + 1;
+    if (open >= skel.length) continue;
+    const header = skel.slice(m.index + m[0].length, open);
+    const own = header.match(/^\s+(?!extends\b)([\w$]+)/)?.[1];
+    const bound = skel.slice(0, m.index).match(/\b(?:const|let|var)\s+([\w$]+)\s*=\s*$/)?.[1];
+    for (const name of [own, bound]) if (name !== undefined) classes.add(name);
+    const name = bound ?? own ?? `class@${m.index}`;
+    const close = closing(skel, open);
+    bodies.push({ name, open, close, parent: header.match(/\bextends\s+([\w$]+)\s*$/)?.[1] });
+    for (const { accessor, key, nameAt, paren, after } of membersOf(open, close)) {
+      defs.add(nameAt);
+      if (accessor) continue;
+      if (fns.has(`${name}.${key}`)) problems.push(`${file}:${lineOf(nameAt)} declares ${name}.${key} more than once, which this sweep cannot tell apart`);
+      else add(`${name}.${key}`, paren, after, { handed: `this\\s*\\.\\s*${key.replace(/\$/g, "\\$")}` });
+    }
+  }
+  const byName = new Map(bodies.map((b) => [b.name, b]));
+  const classAt = (at) => bodies.filter((b) => b.open < at && at < b.close).sort((x, y) => y.open - x.open)[0];
+  // The key of the method `key` of `cls`, or of the nearest class this file
+  // declares that `cls` extends, when one of them has it; null otherwise.
+  const methodOf = (cls, key) => {
+    for (const seen = new Set(); cls !== undefined && !seen.has(cls); cls = byName.get(cls.parent)) {
+      seen.add(cls);
+      if (fns.has(`${cls.name}.${key}`)) return `${cls.name}.${key}`;
+    }
+    return null;
+  };
+  // Every call whose callee is named: offset, callee, its arguments. A
+  // `this.name(…)` or `super.name(…)` names the method of the class around it
+  // by the key it is declared under.
   const calls = [];
-  for (const m of skel.matchAll(/(?<![\w$.])([\w$]+)\s*\(/g)) {
-    if (/\bfunction\s*$/.test(skel.slice(Math.max(0, m.index - 12), m.index))) continue;
+  for (const m of skel.matchAll(/(?<![\w$.#])([\w$]+)\s*\(/g)) {
+    if (defs.has(m.index) || /\bfunction\s*$/.test(skel.slice(Math.max(0, m.index - 12), m.index))) continue;
     const open = m.index + m[0].length - 1;
     calls.push({ at: m.index, callee: m[1], args: pieces(skel, code, open), line: lineOf(m.index) });
   }
+  for (const m of skel.matchAll(/(?<![\w$.])(this|super)\s*\.\s*(#?[\w$]+)\s*\(/g)) {
+    const around = classAt(m.index);
+    const callee = methodOf(m[1] === "this" ? around : byName.get(around?.parent), m[2]);
+    if (callee === null) continue;
+    const open = m.index + m[0].length - 1;
+    calls.push({ at: m.index, callee, args: pieces(skel, code, open), line: lineOf(m.index) });
+  }
+  calls.sort((x, y) => x.at - y.at);
 
   // A `timeout` key at the top level of `s` with a value that can bound
   // something: not an identifier this file declares as one of the four that
@@ -315,10 +403,6 @@ function analyse(src, file) {
 
   // The named functions whose body holds `at`, innermost first.
   const encl = (at) => [...fns.values()].filter((f) => f.start <= at && at <= f.end).sort((x, y) => y.start - x.start);
-
-  // The classes this file declares: `class C` and `const C = class`.
-  const classes = new Set([...skel.matchAll(/\bclass\s+([\w$]+)/g)].map((m) => m[1]));
-  for (const m of skel.matchAll(/\b(?:const|let|var)\s+([\w$]+)\s*=\s*class\b/g)) classes.add(m[1]);
 
   return { file, code, skel, primitives, imports, processAliases, fns, classes, calls, carries, within, encl, loopLiterals, problems };
 }
@@ -468,7 +552,7 @@ function tracer(mods, resolve, spawner) {
         const refs = [];
         if (provided !== undefined) refs.push(...provided);
         else {
-          handedOn = new RegExp(`(?<=[(,[]\\s*)${escape(fn.name)}(?=\\s*[,)\\]])`).test(mod.skel);
+          handedOn = new RegExp(`(?<=[(,[]\\s*)${fn.handed ?? escape(fn.name)}(?=\\s*[,)\\]])`).test(mod.skel);
           for (const { mod: m, c } of callersOf(mod, fn)) {
             const arg = argRef(m, c, b.p.index);
             if (arg !== null) refs.push(...(b.prop ? keyValues(arg, b.prop.key, bind, seen) : [arg]));
@@ -1633,6 +1717,155 @@ test("the sweep refuses a gh timeout it cannot work out to a number, though ever
     assert.deepEqual(reaching({ "x.mjs": src }), [false], `${name}: the environment plays no part`);
     assert.deepEqual(outside({ "x.mjs": src }), [true], name);
   }
+});
+
+// #4486. A gh call routed through a class method is swept as one routed through
+// a function is: the method is a funnel, keyed by its class and name, and
+// `this.name(…)` is a call to the method of the class around it. pull.mjs's
+// Pull.gh() hands "gh" to Pull.exec(), which hands it to spawn(), whose
+// spawnSync() carries the bound.
+const EXEC_LINE = 'this.exec(step, "gh", "gh"';
+const execLine = (lines) => {
+  const at = lines.flatMap((l, i) => (l.includes(EXEC_LINE) ? [i + 1] : []));
+  assert.equal(at.length, 1, `pull.mjs no longer has one line that calls ${EXEC_LINE}…) from Pull.gh()`);
+  return at[0];
+};
+
+test("pull.mjs's Pull.gh() is a gh spawn the sweep finds at its own exec line, bounded and out of the environment's reach", () => {
+  const scripts = readScripts();
+  const where = `pull.mjs:${execLine(scripts["pull.mjs"].split("\n"))}`;
+  const found = sweep(scripts).spawns.filter((s) => s.where === where);
+  assert.deepEqual(found.map(({ bounded, reaches, range }) => ({ bounded, reaches, range })), [{ bounded: true, reaches: [], range: [] }], where);
+});
+
+test("a timeoutMs at the Pull.gh() exec line that the environment sets, or that is left out, turns the sweep red", () => {
+  const scripts = readScripts();
+  const lines = scripts["pull.mjs"].split("\n");
+  const at = execLine(lines);
+  const bound = "timeoutMs: NETWORK_TIMEOUT_MS";
+  assert.ok(lines[at - 1].includes(`, ${bound} }`), `the Pull.gh() exec line no longer passes ${bound} as the last key of its options`);
+  // Every other test here sweeps the script as it stands; this one sweeps it
+  // changed.
+  const ours = (line) => sweep({ ...scripts, "pull.mjs": lines.map((l, i) => (i === at - 1 ? line : l)).join("\n") })
+    .spawns.filter((s) => s.where === `pull.mjs:${at}`);
+  const envSet = ours(lines[at - 1].replace(bound, "timeoutMs: Number(process.env.X)"));
+  assert.equal(envSet.length, 1);
+  assert.ok(envSet[0].reaches.length > 0, "timeoutMs: Number(process.env.X)");
+  const left = ours(lines[at - 1].replace(`, ${bound}`, ""));
+  assert.equal(left.length, 1);
+  assert.ok(left[0].range.length > 0, "no timeoutMs key");
+});
+
+const CLASS = (body, before = "") => MOD(`${before}class P {\n${body}\n}`);
+const UNBOUNDED = "run(cmd, args) { return spawnSync(cmd, args, { encoding: \"utf8\" }); }";
+const TIMED = "run(cmd, args, timeoutMs) { return spawnSync(cmd, args, { timeout: timeoutMs }); }";
+const GO = (...args) => `go() { return this.run("gh", ${args.join(", ")}); }`;
+// A function that takes its bound from the options it is handed, as spawn()
+// does in pull.mjs, and a method that forwards its own options to it.
+const OPTIONS = "function spawn(cmd, args, { timeoutMs } = {}) { return spawnSync(cmd, args, { timeout: timeoutMs }); }\n";
+const FORWARD = "exec(cmd, args, opts = {}) { return spawn(cmd, args, { ...opts }); }";
+
+test("the sweep refuses a gh call routed through a class method that bounds nothing", () => {
+  const refused = {
+    "unbounded method": CLASS(`${UNBOUNDED}\n${GO('["x"]')}`),
+    "async method": CLASS(`async run(cmd, args) { return spawnSync(cmd, args, {}); }\nasync go() { return await this.run("gh", ["x"]); }`),
+    "static method, called through this": CLASS(`static run(cmd, args) { return spawnSync(cmd, args, {}); }\nstatic go() { return this.run("gh", ["x"]); }`),
+    "private method": CLASS(`#run(cmd, args) { return spawnSync(cmd, args, {}); }\ngo() { return this.#run("gh", ["x"]); }`),
+    "generator method": CLASS(`*run(cmd, args) { yield spawnSync(cmd, args, {}); }\n${GO('["x"]')}`),
+    "async generator method": CLASS(`async *run(cmd, args) { yield spawnSync(cmd, args, {}); }\n${GO('["x"]')}`),
+    "method of a method": CLASS(`exec(cmd, args) { return spawnSync(cmd, args, {}); }\nrun(cmd, args) { return this.exec(cmd, args); }\n${GO('["x"]')}`),
+    "method that hands its command to a function": MOD(`function run(cmd, args) { return spawnSync(cmd, args, {}); }\nclass P {\nread(cmd) { return run(cmd, []); }\ngo() { return this.read("gh"); }\n}`),
+    "method that spawns gh itself": CLASS(`go() { return spawnSync("gh", ["x"], {}); }`),
+    "method of a class expression": MOD(`const P = class {\n${UNBOUNDED}\n${GO('["x"]')}\n};`),
+    "method of a class with no name": MOD(`export default class {\n${UNBOUNDED}\n${GO('["x"]')}\n}`),
+    "method inherited, through this": MOD(`class A {\n${UNBOUNDED}\n}\nclass P extends A {\n${GO('["x"]')}\n}`),
+    "method inherited, through super": MOD(`class A {\n${UNBOUNDED}\n}\nclass P extends A {\ngo() { return super.run("gh", ["x"]); }\n}`),
+    "method inherited from two classes up": MOD(`class A {\n${UNBOUNDED}\n}\nclass B extends A {}\nclass P extends B {\n${GO('["x"]')}\n}`),
+    "method overridden, called through super": MOD(`class A {\n${UNBOUNDED}\n}\nclass P extends A {\nrun(cmd, args) { return spawnSync(cmd, args, { timeout: 5_000 }); }\ngo() { return super.run("gh", ["x"]); }\n}`),
+    "method after fields, a static block and a computed method": CLASS(`field = { a: 1 };\nother = (x) => { return x; };\nstatic count = 0;\nstatic { P.count = 1; }\n[Symbol.iterator]() { return 1; }\n${UNBOUNDED}\n${GO('["x"]')}`),
+  };
+  for (const [name, src] of Object.entries(refused)) assert.deepEqual(verdicts({ "x.mjs": src }), [false], name);
+});
+
+test("the sweep refuses a class method's gh timeout that the environment can reach", () => {
+  const refused = {
+    "env read handed to a method": CLASS(`${TIMED}\n${GO('["x"]', ENV_MS)}`),
+    "env read in the options a method forwards": MOD(`${OPTIONS}class P {\n${FORWARD}\ngo() { return this.exec("gh", ["x"], { timeoutMs: ${ENV_MS} }); }\n}`),
+    "env read handed through two methods": CLASS(`${TIMED}\nrelay(cmd, args, t) { return this.run(cmd, args, t); }\ngo() { return this.relay("gh", ["x"], ${ENV_MS}); }`),
+    "env read handed to an inherited method": MOD(`class A {\n${TIMED}\n}\nclass P extends A {\n${GO('["x"]', ENV_MS)}\n}`),
+    "timeout read off this": CLASS(`run(cmd, args) { return spawnSync(cmd, args, { timeout: this.ms }); }\n${GO('["x"]')}`),
+    "method handed on as a callback": CLASS(`go(t) { return spawnSync("gh", ["x"], { timeout: t }); }\na() { return this.go(5_000); }\nb() { return [1].map(this.go); }`),
+  };
+  for (const [name, src] of Object.entries(refused)) assert.deepEqual(reaching({ "x.mjs": src }), [true], name);
+});
+
+test("the sweep refuses a class method's gh timeout that works out to no number from 1 to the cap", () => {
+  const refused = {
+    "method handed 0": CLASS(`${TIMED}\n${GO('["x"]', "0")}`),
+    "method handed 1e12": CLASS(`${TIMED}\n${GO('["x"]', "1e12")}`),
+    "method handed no timeout": CLASS(`${TIMED}\n${GO('["x"]')}`),
+    "method with a timeout of 1e12 of its own": CLASS(`run(cmd, args) { return spawnSync(cmd, args, { timeout: 1e12 }); }\n${GO('["x"]')}`),
+    "options without a timeoutMs key": MOD(`${OPTIONS}class P {\n${FORWARD}\ngo() { return this.exec("gh", ["x"], { cwd: "/" }); }\n}`),
+    "options with a timeoutMs key of 0": MOD(`${OPTIONS}class P {\n${FORWARD}\ngo() { return this.exec("gh", ["x"], { timeoutMs: 0 }); }\n}`),
+  };
+  for (const [name, src] of Object.entries(refused)) {
+    assert.deepEqual(reaching({ "x.mjs": src }), [false], `${name}: the environment plays no part`);
+    assert.deepEqual(outside({ "x.mjs": src }), [true], name);
+  }
+});
+
+test("the sweep accepts a gh call routed through a class method that bounds it", () => {
+  const accepted = {
+    "a literal bound in the method": CLASS(`run(cmd, args) { return spawnSync(cmd, args, { timeout: 5_000 }); }\n${GO('["x"]')}`),
+    "a bound handed to the method": CLASS(`${TIMED}\n${GO('["x"]', "20_000")}`),
+    "a bound handed through two methods": CLASS(`${TIMED}\nrelay(cmd, args, t) { return this.run(cmd, args, t); }\ngo() { return this.relay("gh", ["x"], 20_000); }`),
+    "a bound in the options a method forwards": MOD(`${OPTIONS}class P {\n${FORWARD}\ngo() { return this.exec("gh", ["x"], { timeoutMs: 20_000 }); }\n}`),
+    "a constant declared in the method": CLASS(`go() { const T = 5_000; return spawnSync("gh", ["x"], { timeout: T }); }`),
+    "ghBudget() in the method": MOD(`${GH_BUDGET}class P {\ngo() { return spawnSync("gh", ["x"], { timeout: ghBudget(20, process.env.X) }); }\n}`),
+    "a private method": CLASS(`#run(cmd, args) { return spawnSync(cmd, args, { timeout: 5_000 }); }\ngo() { return this.#run("gh", ["x"]); }`),
+    "a method of a class expression": MOD(`const P = class {\nrun(cmd, args) { return spawnSync(cmd, args, { timeout: 5_000 }); }\n${GO('["x"]')}\n};`),
+    "a method inherited, through this": MOD(`class A {\nrun(cmd, args) { return spawnSync(cmd, args, { timeout: 5_000 }); }\n}\nclass P extends A {\n${GO('["x"]')}\n}`),
+    "a method inherited, through super": MOD(`class A {\nrun(cmd, args) { return spawnSync(cmd, args, { timeout: 5_000 }); }\n}\nclass P extends A {\ngo() { return super.run("gh", ["x"]); }\n}`),
+    "a method overridden, called through this": MOD(`class A {\n${UNBOUNDED}\n}\nclass P extends A {\nrun(cmd, args) { return spawnSync(cmd, args, { timeout: 5_000 }); }\n${GO('["x"]')}\n}`),
+  };
+  for (const [name, src] of Object.entries(accepted)) {
+    assert.deepEqual(verdicts({ "x.mjs": src }), [true], name);
+    assert.deepEqual(reaching({ "x.mjs": src }), [false], name);
+    assert.deepEqual(outside({ "x.mjs": src }), [false], name);
+  }
+});
+
+test("a class method and a function that share a name are each judged by its own body", () => {
+  const timed = "run(cmd, args) { return spawnSync(cmd, args, { timeout: 5_000 }); }";
+  const bare = "run(cmd, args) { return spawnSync(cmd, args, {}); }";
+  // `this.run` is the method and the bare run the function; the verdicts come
+  // in the order the calls stand in the source.
+  const both = (fn, method) => MOD(`function ${fn}\nclass P {\n${method}\n${GO('["x"]')}\n}\nrun("gh", ["y"]);`);
+  assert.deepEqual(verdicts({ "x.mjs": both(timed, bare) }), [false, true]);
+  assert.deepEqual(verdicts({ "x.mjs": both(bare, timed) }), [true, false]);
+  // Two classes, one method name.
+  const twice = MOD(`class A {\n${timed}\n${GO('["x"]')}\n}\nclass B {\n${bare}\n${GO('["x"]')}\n}`);
+  assert.deepEqual(verdicts({ "x.mjs": twice }), [true, false]);
+  // A class declared in a method of another is the class around its own `this`.
+  const nested = MOD(`class A {\n${bare}\nmake() { return class B {\n${timed}\n${GO('["x"]')}\n}; }\n}`);
+  assert.deepEqual(verdicts({ "x.mjs": nested }), [true]);
+  // A private method is called as `this.#run(…)`, which is no call to a
+  // function named run.
+  const hidden = MOD(`function ${timed}\nclass P {\n#${bare}\ngo() { return this.#run("gh", ["x"]); }\n}`);
+  assert.deepEqual(verdicts({ "x.mjs": hidden }), [false]);
+  // A name two members of one class share is no key the sweep can tell apart.
+  assert.deepEqual(sweep({ "x.mjs": CLASS(`${bare}\nstatic ${timed}`) }).problems, ["x.mjs:4 declares P.run more than once, which this sweep cannot tell apart"]);
+  // A definition is no call, and a call is made only through the receiver that
+  // names the method: none of these spawns anything.
+  const quiet = {
+    "a method named like a function that spawns": MOD(`function ${bare}\nclass P {\nrun(cmd) { return cmd; }\n}`),
+    "a method named like a child_process function": CLASS(`execFileSync(cmd) { return cmd; }`),
+    "a bare call is no method": CLASS(`${bare}\ngo() { return run("gh", ["x"]); }`),
+    "this.name in a class with no such method": MOD(`function ${bare}\nclass P {\n${GO('["x"]')}\n}`),
+    "a getter and a setter of one name": CLASS(`get run() { return 1; }\nset run(v) {}`),
+    "a method handed another command": CLASS(`exec(cmd) { return spawnSync(cmd, [], { timeout: 5_000 }); }\ngo() { this.exec("git"); return this.exec(process.execPath); }`),
+  };
+  for (const [name, src] of Object.entries(quiet)) assert.deepEqual(sweep({ "x.mjs": src }), { spawns: [], problems: [] }, name);
 });
 
 test("the sweep names a child_process reach it cannot follow", () => {
