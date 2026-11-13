@@ -67,10 +67,12 @@
 //   4. Wherever a key is read out of an object (a member read, a gh spawn's
 //      own options, an Object.assign() source), the read is refused when the
 //      literal holds a computed key, a `__proto__:` entry, or a getter, setter
-//      or method of that key; or the object is handed, in parentheses or not,
-//      to an Object.* or Reflect.* call other than Object.assign(), the call
-//      written as a member or computed; or `__proto__`, `__defineGetter__` or
-//      `__defineSetter__` is written or called on it.
+//      or method of that key, or a getter, setter, method or `function` of any
+//      key that uses `this` (it can write the key); or the object is handed,
+//      in parentheses or not, to an Object.* or Reflect.* call other than
+//      Object.assign(), the call written as a member or computed; or
+//      `__proto__`, `__defineGetter__` or `__defineSetter__` is written or
+//      called on it.
 //
 // #4484. Whatever the environment does, each gh spawn's timeout must also work
 // out to a number from 1 to CEILING_CAP: Node reads a timeout of 0 as none,
@@ -94,21 +96,24 @@
 //      `CFG.ms`) is refused when a name it went through is handed on: bound to
 //      another name or stored in another object (`const o = opts`,
 //      `{ o: opts }`, `[opts]`), returned, or passed to a call that is neither
-//      a child_process call nor a funnel (spawner() is null), `new` included.
-//      Not handed on: a member of it read or written, a declaration,
+//      a child_process call nor a funnel (spawner() is null), `new` included,
+//      or to a funnel as an argument whose parameter reaches none of its
+//      spawns. Not handed on: a member of it read or written, a declaration,
 //      parameter, import or export of the name, an assignment to it, a spread
 //      (which copies), an object key, `typeof`, a comparison, an `if (…)`
-//      test, a pattern that copies values out of it, and Object.assign(). A
-//      name is matched in the function it is local to or a parameter of, else
-//      in the module; a function with a parameter of that name takes the name
-//      as that parameter.
+//      test, a pattern that copies values out of it, a source of
+//      Object.assign(), and its target when the call is a statement of its own
+//      (its value is the target, so `const o = Object.assign(opts, …)` binds
+//      another name). A name is matched in the function it is local to or a
+//      parameter of, else in the module; a function with a parameter of that
+//      name takes the name as that parameter.
 //   7. Rules 4 to 6, and the member writes and Object.assign() the tracer
 //      follows, look in every module that can name the object: the one that
 //      reads it, the one that declares it and each one that imports it, under
 //      the name it gives it (`import { X as Y }`, `ns.X` of a namespace
-//      import). An exported object is refused when another module reaches its
-//      module by `import()` or `export … from`, which the sweep does not
-//      follow.
+//      import, where rule 6 also judges each use of `ns` itself). An exported
+//      object is refused when another module reaches its module by `import()`
+//      or `export … from`, which the sweep does not follow.
 // Not followed: a write through a longer path (`CFG.inner.ms = …`), through a
 // computed key (`CFG[k] = …`), and a `delete`.
 import { test } from "node:test";
@@ -518,7 +523,12 @@ function analyse(src, file) {
       if (!eq.test(skel)) continue;
       const before = skel.slice(Math.max(0, at - 40), at).trimEnd();
       const declares = /(?:^|[^\w$.])(?:const|let|var)$/.test(before);
-      if (!declares && (skel[at] === "[" ? /[\w$)\]]$/.test(before) : /\$$/.test(before))) continue;
+      // A `[` after a name, `)` or `]` reads an index, unless the name is a
+      // keyword (`return [T] = …`, `else [T] = …`) or the `)` closes a
+      // statement's head (`if (c) [T] = …`, `for (…) [T] = …`).
+      const afterHead = before.endsWith(")") && ["head", "for"].includes(parenKind(openOf.get(Math.max(0, at - 40) + before.length - 1)));
+      const indexes = /[\w$)\]]$/.test(before) && !PREFIXED.test(before) && !afterHead;
+      if (!declares && (skel[at] === "[" ? indexes : /\$$/.test(before))) continue;
       if (inParams(at)) continue;
       let valueAt = eq.lastIndex;
       while (/\s/.test(skel[valueAt])) valueAt++;
@@ -532,7 +542,7 @@ function analyse(src, file) {
       const close = closeOf.get(at);
       if (close === undefined) continue;
       const top = topLevel(skel.slice(at, close + 1));
-      const word = top.includes(";") ? null : top.match(/\s(?:of|in)\s/);
+      const word = top.includes(";") ? null : top.match(/(?<![\w$.])(?:of|in)(?![\w$])/);
       if (word === null) continue;
       const lhs = { skel: skel.slice(at + 1, at + word.index).trim(), code: code.slice(at + 1, at + word.index).trim() };
       const declares = /^(?:const|let|var)\s/.test(lhs.skel);
@@ -667,14 +677,13 @@ function tracer(mods, resolve, spawner) {
   // `id = …` or a compound `id += …` (a declaration, a reassignment, a
   // destructuring default) and, for a destructuring declaration that names it
   // (`const { id } = …`, at any depth), its source; beside one of those, an
-  // `id++` or `--id` is a compound write with
-  // nothing to read. A destructuring assignment or a `for…of` or `for…in`
-  // head that names `id` as a target gives a ref that is refused, since the
-  // value it writes is not one this sweep reads off. A declaration binds `id`
-  // in the innermost named function holding it, or else in the module, so the
-  // read sees the binding of the innermost such scope around it, and an
-  // assignment counts where it lands on that binding. `at` of -1 reads at
-  // module scope.
+  // `id++` or `--id` is a compound write with nothing to read. A
+  // destructuring assignment or a `for…of` or `for…in` head that names `id`
+  // as a target gives a ref that is refused, since the value it writes is not
+  // one this sweep reads off. A declaration binds `id` in the innermost named
+  // function holding it, or else in the module, so the read sees the binding
+  // of the innermost such scope around it, and an assignment counts where it
+  // lands on that binding. `at` of -1 reads at module scope.
   const OPERATOR = "(?:[-+*/%&|^]|\\*\\*|<<|>>>?|&&|\\|\\||\\?\\?)";
   const ASSIGN = `${OPERATOR}?=(?![=>])`;
   // What a match of ASSIGN ends in, when it is a compound assignment.
@@ -793,7 +802,7 @@ function tracer(mods, resolve, spawner) {
         for (const s of sources) out.push(...keyValues({ mod, skel: s.skel, code: s.code, at: m.index }, key, bind, seen, true));
       }
       for (const t of mod.shape().list) {
-        if (t.kind === "declaration" || (t.lvalue !== `${id}.${key}` && t.lvalue !== `${id}["${key}"]`)) continue;
+        if (t.lvalue !== `${id}.${key}` && t.lvalue !== `${id}["${key}"]`) continue;
         out.push(refuse(refOf(mod, t.at, t.at), `reads ${where}: ${t.lvalue} is a ${t.kind === "for" ? "for…of or for…in" : "destructuring"} target, which this sweep does not follow`));
       }
       return out;
@@ -859,7 +868,8 @@ function tracer(mods, resolve, spawner) {
     }
     return out;
   };
-  // Whether `mod` exports `name`: `export const name`, or `export { name }`.
+  // Whether `mod` exports a declaration of `name` (`const`, `let`, `var`,
+  // `function`, `class`) or lists it, by its local name, in `export { … }`.
   const exported = (mod, name) => new RegExp(`(?<![\\w$.])export\\s+(?:async\\s+)?(?:const|let|var|function\\s*\\*?|class)\\s+${escape(name)}(?![\\w$])`).test(mod.skel)
     || [...mod.skel.matchAll(/(?<![\w$.])export\s*\{([^}]*)\}/g)].some((m) => m[1].split(",").some((spec) => spec.trim().split(/\s+as\s+/)[0] === name));
   // Why the object `id` may be reached by a module this sweep does not read
@@ -882,11 +892,11 @@ function tracer(mods, resolve, spawner) {
   };
   const occurring = new Map();
   // Every place `mod` writes the name `name`, as an offset and a length; a
-  // name after a `.`, a spread's `...` among them, is no place.
+  // name after a `.`, a spread's `...` among them (spaced or not), is no place.
   const occurrences = (mod, name) => {
     const key = `${mod.file}#${name}`;
     if (!occurring.has(key)) {
-      occurring.set(key, [...mod.skel.matchAll(new RegExp(`(?<![\\w$.#])${spell(name)}(?![\\w$])`, "g"))].map((m) => ({ index: m.index, length: m[0].length })));
+      occurring.set(key, [...mod.skel.matchAll(new RegExp(`(?<![\\w$.#])(?<!\\.\\.\\.\\s+)${spell(name)}(?![\\w$])`, "g"))].map((m) => ({ index: m.index, length: m[0].length })));
     }
     return occurring.get(key);
   };
@@ -894,17 +904,80 @@ function tracer(mods, resolve, spawner) {
   // that use leaves the object where the sweep reads it, else why not. A use
   // leaves it there when it reads or writes a member of it or calls it; binds
   // the name, as a declaration, an assignment to it, an object key, a
-  // parameter, an import, an export or a pattern's entry does; spreads it,
-  // which copies; asks what it is or compares it; reads values out of it into
-  // a pattern; or hands it to Object.assign() or to a call that spawns,
-  // whose argument the tracer follows into the child_process call or the
-  // funnel. A use that hands it to any other call, binds another name or a
-  // key of another object to it, or returns it, does not.
+  // parameter (an arrow's unparenthesised one included), an import, an export
+  // or a pattern's entry, outside the entry's default, does; spreads it, which
+  // copies; asks what it is or compares it; reads values out of it into a
+  // pattern; hands it to Object.assign() as a source, or as the target of a
+  // call that is a statement of its own; or hands it to a call that spawns,
+  // as an argument the walk reads keys off (readsArg()). A use that hands it
+  // to any other call or to a spawn as another argument, binds another name
+  // or a key of another object to it, or returns it, does not.
   const handled = new Map();
   const handing = (mod, p, len) => {
     const key = `${mod.file}@${p}`;
     if (!handled.has(key)) handled.set(key, handingAt(mod, p, len));
     return handled.get(key);
+  };
+  // Which argument of the call whose `(` is at `k` the offset `p` sits in.
+  const argAt = (s, k, p) => {
+    let d = 0;
+    let i = 0;
+    for (let j = k + 1; j < p; j++) {
+      if (OPEN.includes(s[j])) d++;
+      else if (CLOSE.includes(s[j])) d--;
+      else if (s[j] === "," && d === 0) i++;
+    }
+    return i;
+  };
+  // Whether the walk reads keys off argument `i` of the spawn call `c`, so a
+  // write to it reached there is one the tracer looks for: any argument but
+  // the command of a child_process call; of a funnel's, one whose parameter
+  // is destructured, or is named inside an argument other than the command of
+  // a spawn the funnel makes of its own command that in turn reads it.
+  const readsArg = (mod, c, i, seen = new Set()) => {
+    const spawn = spawner(mod, c);
+    if (spawn === null || i === spawn.index || c.args[i] === undefined || c.args[i].skel.startsWith("...")) return false;
+    if (mod.primitives.has(c.callee)) return true;
+    const target = resolve(mod, c.callee);
+    const fn = target.mod.fns.get(target.name);
+    const param = paramsOf(fn)[i];
+    if (param === undefined || param.rest) return false;
+    if (param.name === undefined) return true;
+    const key = `${target.mod.file}#${target.name}#${i}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    const named = new RegExp(`(?<![\\w$#])(?<!(?:^|[^.])\\.)${escape(param.name)}(?![\\w$])`);
+    return target.mod.calls.some((ic) => {
+      if (ic.at < fn.start || ic.at > fn.end) return false;
+      const inner = spawner(target.mod, ic);
+      if (inner === null || fn.params.indexOf(ic.args[inner.index]?.code) !== spawn.index) return false;
+      return ic.args.some((a, j) => named.test(a.skel) && readsArg(target.mod, ic, j, seen));
+    });
+  };
+  // Whether the expression from `from` to `to` in `mod` is a statement of its
+  // own, so nothing takes its value: it starts a statement (after `;`, a
+  // brace, `else`, `do` or a statement's head) and ends one.
+  const statement = (mod, from, to) => {
+    const s = mod.skel;
+    const before = s.slice(Math.max(0, from - 40), from).trimEnd();
+    const shut = Math.max(0, from - 40) + before.length - 1;
+    const starts = before === "" || /[;{}]$/.test(before) || /(?:^|[^\w$.])(?:else|do)$/.test(before)
+      || (before.endsWith(")") && ["head", "for"].includes(mod.parenKind(mod.openOf.get(shut))));
+    const after = s.slice(to + 1, to + 41);
+    return starts && (/^\s*(?:[;}]|$)/.test(after) || /^[^\S\n]*\n\s*(?![.[(?,+\-*/%&|^<>=`])/.test(after));
+  };
+  // Whether `pos`, inside the bracket opening at `open`, sits in the default
+  // of the entry it is in: after a top-level `=` of that entry.
+  const inDefault = (s, open, pos) => {
+    let d = 0;
+    let eq = false;
+    for (let j = open + 1; j < pos; j++) {
+      if (OPEN.includes(s[j])) d++;
+      else if (CLOSE.includes(s[j])) d--;
+      else if (d === 0 && s[j] === ",") eq = false;
+      else if (d === 0 && s[j] === "=" && !"=!<>".includes(s[j - 1]) && !"=>".includes(s[j + 1])) eq = true;
+    }
+    return eq;
   };
   const handingAt = (mod, p, len) => {
     const s = mod.skel;
@@ -913,6 +986,7 @@ function tracer(mods, resolve, spawner) {
     const g = mod.around[p];
     const { patternAt, forLhs } = mod.shape();
     if (/^\s*(?:\?\.|\.(?!\.)|\[|\()/.test(tail)) return null;
+    if (/^\s*=>/.test(tail)) return null;
     if (/(?:^|[^\w$.])(?:const|let|var)\s+$/.test(head) || new RegExp(`^\\s*${ASSIGN}`).test(tail)) return null;
     if (/[{,]\s*$/.test(head) && /^\s*:/.test(tail)) return null;
     if (/(?:^|[^\w$.])(?:typeof|in|of|instanceof)\s+$|!\s*$|(?:[!=]==?|(?<!=)[<>]=?)\s*$/.test(head)) return null;
@@ -920,12 +994,12 @@ function tracer(mods, resolve, spawner) {
     if (/(?:^|[^\w$.])(?:if|while)\s*\(\s*$/.test(head) && /^\s*\)/.test(tail)) return null;
     if (forLhs.some(([a, b]) => a <= p && p < b)) return null;
     if (/[{,[(]\s*(?:\.\.\.\s*)?$|:\s*$/.test(head) && /^\s*(?:[,}\])]|=(?![=>]))/.test(tail) && g >= 0) {
-      let k = g;
-      while (k >= 0 && (s[k] === "{" || s[k] === "[")) {
+      let [k, at] = [g, p];
+      while (k >= 0 && (s[k] === "{" || s[k] === "[") && !inDefault(s, k, at)) {
         if (patternAt.has(k)) return null;
-        k = mod.around[k];
+        [k, at] = [mod.around[k], k];
       }
-      if (k >= 0 && s[k] === "(" && ["params", "catch"].includes(mod.parenKind(k))) return null;
+      if (k >= 0 && s[k] === "(" && !inDefault(s, k, at) && ["params", "catch"].includes(mod.parenKind(k))) return null;
     }
     const eq = /([}\]])\s*=\s*$/.exec(head);
     if (eq !== null && patternAt.has(mod.openOf.get(p - head.length + eq.index))) return null;
@@ -938,30 +1012,52 @@ function tracer(mods, resolve, spawner) {
       if (kind === "group") continue;
       if (kind !== "call") break;
       const c = mod.callByOpen.get(k);
-      if (c !== undefined) return spawner(mod, c) !== null ? null : `passed to ${c.callee}(…), which spawns nothing`;
+      if (c !== undefined) {
+        if (spawner(mod, c) === null) return `passed to ${c.callee}(…), which spawns nothing`;
+        return readsArg(mod, c, argAt(s, k, p)) ? null : `passed to ${c.callee}(…) as an argument it reads no timeout from`;
+      }
       const callee = s.slice(Math.max(0, k - 40), k).trimEnd();
-      if (/(?:^|[^\w$.])Object\s*\.\s*assign$/.test(callee) && /[(,]\s*$/.test(head) && /^\s*[,)]/.test(tail)) return null;
+      if (/(?:^|[^\w$.])Object\s*\.\s*assign$/.test(callee) && /[(,]\s*$/.test(head) && /^\s*[,)]/.test(tail)) {
+        if (argAt(s, k, p) > 0) return null;
+        const from = Math.max(0, k - 40) + callee.search(/Object\s*\.\s*assign$/);
+        if (statement(mod, from, mod.closeOf.get(k))) return null;
+        return "passed to Object.assign(…), whose value is the object itself";
+      }
       return `passed to ${callee.match(/[\w$#.\s]*$/)[0].replace(/\s+/g, "") || "a call"}(…), which spawns nothing`;
     }
     if (/(?:^|[^\w$.])(?:return|yield)\s*$|=>\s*$/.test(head)) return "returned";
     return "bound to another name or stored in another object";
   };
+  // Whether a block around `p` in `mod` declares a `name` of its own, which
+  // the name at `p` then is: a `const` or `let` in a `{ … }` around it, or a
+  // `var` in a function's body around it.
+  const shadowed = (mod, name, p) => [...mod.skel.matchAll(new RegExp(`(?<![\\w$.])(const|let|var)\\s+${escape(name)}(?![\\w$])`, "g"))].some((m) => {
+    const at = m.index + m[0].length - name.length;
+    const open = m[1] === "var" ? mod.encl(at)[0]?.start ?? -1 : mod.around[at];
+    return open >= 0 && mod.skel[open] === "{" && open < p && p < mod.closeOf.get(open);
+  });
   // Why the object `id`, read at `where`, may have a key where this sweep does
   // not look: a use of it is handed on (handing()), in the module that reads
   // it, the one that declares it and every one that imports it when it binds
   // at module scope, or in the span it binds in; or `elsewhere()` can reach
   // it. A use inside a function with a parameter of its name is that
   // parameter's, which the walk reaches by its own site when it is handed the
-  // object.
+  // object; one inside a block that declares the name is that declaration's.
+  // Where a namespace import names it (`ns.X`), a use of `ns` itself that is
+  // handed on hands it on too.
   const handsOn = (ref, id, where, site) => {
     const out = [];
     for (const { mod, name } of site.wide ? places(ref, id) : [{ mod: site.mod, name: site.name }]) {
       const [from, to] = site.wide ? [0, mod.skel.length] : [site.from, site.to];
-      for (const o of occurrences(mod, name)) {
-        if (o.index < from || o.index > to) continue;
-        if (site.wide && !name.includes(".") && mod.encl(o.index).some((fn) => paramBinding(fn, name) !== null)) continue;
-        const how = handing(mod, o.index, o.length);
-        if (how !== null) out.push(`reads ${where}: ${name} is ${how}, at ${mod.file}:${mod.lineOf(o.index)}, which this sweep does not follow`);
+      const ns = site.wide && name.includes(".") ? name.slice(0, name.indexOf(".")) : null;
+      for (const n of ns === null ? [name] : [name, ns]) {
+        for (const o of occurrences(mod, n)) {
+          if (o.index < from || o.index > to) continue;
+          if (site.wide && !n.includes(".") && (mod.encl(o.index).some((fn) => paramBinding(fn, n) !== null) || shadowed(mod, n, o.index))) continue;
+          if (n === ns && /\*\s*as\s+$/.test(mod.skel.slice(Math.max(0, o.index - 40), o.index))) continue;
+          const how = handing(mod, o.index, o.length);
+          if (how !== null) out.push(`reads ${where}: ${n === ns ? `${ns}, a namespace holding ${name},` : name} is ${how}, at ${mod.file}:${mod.lineOf(o.index)}, which this sweep does not follow`);
+        }
       }
     }
     if (site.wide) out.push(...elsewhere(ref, id, where));
@@ -1056,8 +1152,10 @@ function tracer(mods, resolve, spawner) {
           continue;
         }
         const e = entryOf(p.code);
+        const callable = e.kind === "accessor" || e.kind === "method" || (e.kind === "plain" && /^(?:async\s+)?function\b/.test(p.skel.slice(e.at).trim()));
         if (e.kind === "computed") out.push(refuse(ref, `reads ${where}: its object holds a computed key, which can be ${key}`));
         else if (e.key === "__proto__" && e.kind === "plain") out.push(refuse(ref, `reads ${where}: its object holds a __proto__ entry, a prototype this sweep does not follow`));
+        else if (e.key !== key && callable && /(?<![\w$.])this\s*(?:\??\.|\[)/.test(p.skel)) out.push(refuse(ref, `reads ${where}: its object holds a method that can write ${key} through this`));
         else if (e.key !== key) continue;
         else if (e.kind === "accessor" || e.kind === "method") out.push(refuse(ref, `reads ${where}: its object holds ${key} as a getter, setter or method, not a plain value`));
         else out.push(e.kind === "shorthand" ? { ...ref, skel: key, code: key } : { ...ref, skel: p.skel.slice(e.at).trim(), code: p.code.slice(e.at).trim() });
@@ -2285,6 +2383,12 @@ test("the sweep refuses a gh timeout a destructuring pattern or a for…of / for
     ["an object pattern on an options key", WITH_OPTS(`({ a: opts.timeout } = { a: ${ENV_MS} });`), `opts.timeout ${TARGET}`],
     ["a for…of on an options key", WITH_OPTS(`for (opts.timeout of [${ENV_MS}]);`), `opts.timeout ${HEAD}`],
     ["a for…in on a member", WITH_CFG(`for (CFG.ms in { a: 1 });`), `CFG.ms ${HEAD}`],
+    ["a for…of head with no space before `of`", WITH_T(`for ([T]of [[${ENV_MS}]]);`), `T ${HEAD}`],
+    ["a for…in head with no space before `in`", WITH_T(`for ({ a: T }in { a: 1 });`), `T ${HEAD}`],
+    ["a pattern after an `if (…)` head", WITH_T(`if (process.argv[2]) [T] = [${ENV_MS}];`), `T ${TARGET}`],
+    ["a pattern after a `for (…)` head", WITH_T(`for (const x of [1]) [T] = [${ENV_MS}];`), `T ${TARGET}`],
+    ["a pattern after `else`", WITH_T(`if (process.argv[2]) log(1);\nelse [T] = [${ENV_MS}];`), `T ${TARGET}`],
+    ["a pattern a `return` writes", MOD(`let T = 20_000;\nfunction f() { return [T] = [${ENV_MS}]; }\nspawnSync("gh", ["x"], { timeout: T });`), `T ${TARGET}`],
   ]);
   // A declaration whose source is no environment read still works out to no
   // number, so the range rule refuses it.
@@ -2321,6 +2425,17 @@ test("the sweep refuses a gh timeout an object it reads is handed on", () => {
     ["a copy bound to another name", MOD(`const base = { timeout: 20_000 };\nconst o = Object.assign({}, base);\nconst o2 = o;\no2.timeout = ${ENV_MS};\nspawnSync("gh", ["x"], o);`), `o ${BOUND}`],
     ["an Object.assign target in parentheses", WITH_OPTS(`Object.assign((opts), { timeout: ${ENV_MS} });`), "reads process.env"],
     ["an object exported under another name", WITH_OPTS(`export { opts as alias };`), `opts ${BOUND}`],
+    ["an Object.assign target bound to another name", WITH_OPTS(`const o2 = Object.assign(opts, {});\no2.timeout = ${ENV_MS};`), "opts is passed to Object.assign(…), whose value is the object itself"],
+    ["an Object.assign target written through its value", WITH_OPTS(`Object.assign(opts, {}).timeout = ${ENV_MS};`), "opts is passed to Object.assign(…), whose value is the object itself"],
+    ["an object passed to a funnel where it reads no timeout", MOD(`const opts = { timeout: 20_000 };\nfunction run(cmd, args, o, extra) { extra.timeout = ${ENV_MS}; return spawnSync(cmd, args, o); }\nrun("gh", ["x"], opts, opts);`), "opts is passed to run(…) as an argument it reads no timeout from"],
+    ["a name in a pattern entry's default", WITH_OPTS(`const [a = process.argv[2] ? 1 : opts] = [];\na.timeout = ${ENV_MS};`), `opts ${BOUND}`],
+    ["a name in an array a pattern entry defaults to", WITH_OPTS(`const [b = [opts]] = [];\nb[0].timeout = ${ENV_MS};`), `opts ${BOUND}`],
+    ["a name in a parameter's default", WITH_OPTS(`function widen(o = process.argv[2] ? {} : opts) { o.timeout = ${ENV_MS}; }\nwiden();`), `opts ${BOUND}`],
+    ["an object a `new` expression makes, handed on", MOD(`const o = new Opts();\nwiden(o);\nspawnSync("gh", ["x"], o);`), "o is passed to widen(…)"],
+    ["an object Object.create() makes, handed on", MOD(`const o = Object.create(null);\nwiden(o);\nspawnSync("gh", ["x"], o);`), "o is passed to widen(…)"],
+    ["an object Object.fromEntries() makes, handed on", MOD(`const o = Object.fromEntries([]);\nwiden(o);\nspawnSync("gh", ["x"], o);`), "o is passed to widen(…)"],
+    ["a method of the options object that writes through this", MOD(`const opts = { timeout: 20_000, widen() { this.timeout = ${ENV_MS}; } };\nopts.widen();\nspawnSync("gh", ["x"], opts);`), "its object holds a method that can write timeout through this"],
+    ["a function entry of the options object that writes through this", MOD(`const opts = { timeout: 20_000, widen: function () { this["timeout"] = ${ENV_MS}; } };\nopts.widen();\nspawnSync("gh", ["x"], opts);`), "its object holds a method that can write timeout through this"],
   ]);
   // The refusal names the name, how it is handed on, and where.
   assert.deepEqual(sweep({ "x.mjs": WITH_OPTS(`const o2 = opts;\no2.timeout = ${ENV_MS};`) }).spawns[0].reaches,
@@ -2371,6 +2486,8 @@ test("the sweep refuses a gh timeout written in the module that declares an obje
       "y.mjs": `const m = await import("./x.mjs");\n`,
     }, `import("./x.mjs")`],
     ["a write through a namespace import spelled with spaces", importing(`ns . CFG . ms = ${ENV_MS};`, ns), "reads process.env"],
+    ["a namespace import handed to a call", importing(`function widen(n) { n.CFG.ms = ${ENV_MS}; }\nwiden(ns);`, ns), "ns, a namespace holding ns.CFG, is passed to widen(…)"],
+    ["a namespace import bound to another name", importing(`const n = ns;\nn.CFG.ms = ${ENV_MS};`, ns), "ns, a namespace holding ns.CFG, is bound to another name"],
     ["a destructuring target in the module that declares an imported variable", {
       "common.mjs": `export let T = 20_000;\n[T] = [${ENV_MS}];\n`,
       "x.mjs": MOD(`import { T } from "./common.mjs";\nspawnSync("gh", ["x"], { timeout: T });`),
@@ -2386,6 +2503,8 @@ test("the sweep accepts a gh timeout it can follow beside writes it need not", (
   const accepted = {
     "a pattern whose targets are other names": WITH_T(`let other = 1;\n[other] = [${ENV_MS}];\n({ a: other } = { a: ${ENV_MS} });`),
     "a for…of whose variable is another name": WITH_T(`for (const x of [${ENV_MS}]) console.log(x);\nfor (const y in { a: 1 }) console.log(y);`),
+    "a for…of with no space before `of`, on another name": WITH_T(`for ([x]of [[${ENV_MS}]]) console.log(x);`),
+    "an index of a call's value with the name as its key": WITH_T(`log(1)[T] = 1;`),
     "a for…of that declares the name in another function": MOD(`function f() { const T = 20_000; return spawnSync("gh", ["x"], { timeout: T }); }\nfunction g() { for (const T of [${ENV_MS}]) console.log(T); }`),
     "a pattern on another object's key": WITH_OPTS(`const other = { timeout: 1 };\n[other.timeout] = [${ENV_MS}];`),
     "a pattern on another key of the object": WITH_OPTS(`[opts.cwd] = ["/"];\nfor (opts.env of [{}]);`),
@@ -2415,6 +2534,8 @@ test("the sweep accepts a gh timeout it can follow beside writes it need not", (
     "a module that only reads the object": importing(`console.log(CFG.ms, Object.keys(CFG.inner ?? {}));\nif (typeof CFG === "object") log(1);`),
     "a module that imports the object under another name and reads it": importing(`console.log(C.ms);`, `import { CFG as C } from "./common.mjs";\n`),
     "a namespace import that reads another export": importing(`console.log(ns.OTHER);`, `import * as ns from "./common.mjs";\n`),
+    "a namespace import read, compared and passed by its members": importing(`console.log(ns.CFG.ms, typeof ns === "object");\nlog(ns.OTHER);`, `import * as ns from "./common.mjs";\n`),
+    "an options object whose methods do not use this, beside an arrow that does": MOD(`const opts = { timeout: 20_000, describe() { return "x"; }, label: function () { return 1; }, show: () => log(this.label) };\nspawnSync("gh", ["x"], opts);`),
     "a dynamic import of a module that declares nothing it reads": importing(`const m = await import("./elsewhere.mjs");`, ""),
     "a re-export of another module": importing(`export { Z } from "./elsewhere.mjs";`, ""),
     "an object that is not exported, in a module imported dynamically": {
@@ -2426,6 +2547,10 @@ test("the sweep accepts a gh timeout it can follow beside writes it need not", (
     "the object's name as another object's key": WITH_OPTS(`const held = { opts: 1, other: opts.timeout };\nlog(held);`),
     "an anonymous function with a parameter of the object's name": WITH_OPTS(`[1].map((opts) => 1);`),
     "a catch parameter of the object's name": WITH_OPTS(`try { log(1); } catch (opts) { log(2); }`),
+    "an arrow's unparenthesised parameter of the object's name": WITH_OPTS(`[1].map(opts => 1);\n[2].map(async opts => 2);`),
+    "a block's own declaration of the object's name": WITH_OPTS(`function f() { const opts = {}; log(opts); }\nif (process.argv[2]) { let opts = 1; log(opts); }\nfunction g() { if (1) { var opts = 2; } return opts; }`),
+    "the object spread with a space after `...`": WITH_OPTS(`const copy = { ... opts, cwd: "/" };\nlog(copy.cwd);`),
+    "an Object.assign() target after a statement's head": WITH_OPTS(`if (process.argv[2]) Object.assign(opts, { cwd: "/" });\nelse Object.assign(opts, { cwd: "." })\nlog(1);`),
     "the object declared before it is given a value": MOD(`let opts;\nopts = { timeout: 20_000 };\nspawnSync("gh", ["x"], { timeout: 20_000, ...opts });`),
     "a declaration pattern's entry of the object's name": WITH_OPTS(`function h(holder) { const { opts } = holder; return 1; }`),
     "the object tested for being there": WITH_OPTS(`if (opts) log(1);`),
