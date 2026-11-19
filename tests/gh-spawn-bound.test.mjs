@@ -99,10 +99,14 @@
 //      a child_process call nor a funnel (spawner() is null), `new` included,
 //      or to a funnel as an argument whose parameter reaches none of its
 //      spawns. Not handed on: a member of it read or written, a declaration,
-//      parameter, import or export of the name, an assignment to it, a spread
-//      (which copies), an object key, `typeof`, a comparison, an `if (…)`
-//      test, a pattern that copies values out of it, a source of
-//      Object.assign(), and its target when the call is a statement of its own
+//      parameter, import or export of the name (but an `export { X }` of a
+//      name the module imports, or of a namespace import, is handed on: it
+//      lists the object for another module to import), an assignment to it,
+//      a spread (which copies), an object key, `typeof`, a comparison, an
+//      `if (…)` test, a pattern that copies values out of it (but a pattern
+//      that destructures a namespace import copies the exported objects
+//      themselves, so it hands them on), a source of Object.assign(), and its
+//      target when the call is a statement of its own
 //      (its value is the target, so `const o = Object.assign(opts, …)` binds
 //      another name). A name is matched in the function it is local to or a
 //      parameter of, else in the module; a function with a parameter of that
@@ -111,9 +115,11 @@
 //      follows, look in every module that can name the object: the one that
 //      reads it, the one that declares it and each one that imports it, under
 //      the name it gives it (`import { X as Y }`, `ns.X` of a namespace
-//      import, where rule 6 also judges each use of `ns` itself). An exported
-//      object is refused when another module reaches its module by `import()`
-//      or `export … from`, which the sweep does not follow.
+//      import, where rule 6 also judges each use of `ns` itself, and refuses
+//      one that reads a member through `ns[…]` or `ns?.`, which is no `ns.X`
+//      to follow). An exported object is refused when another module reaches
+//      its module by `import()` or `export … from`, which the sweep does not
+//      follow.
 // Not followed: a write through a longer path (`CFG.inner.ms = …`), through a
 // computed key (`CFG[k] = …`), and a `delete`.
 import { test } from "node:test";
@@ -911,7 +917,12 @@ function tracer(mods, resolve, spawner) {
   // call that is a statement of its own; or hands it to a call that spawns,
   // as an argument the walk reads keys off (readsArg()). A use that hands it
   // to any other call or to a spawn as another argument, binds another name
-  // or a key of another object to it, or returns it, does not.
+  // or a key of another object to it, or returns it, does not. Two uses of a
+  // namespace import's name, which holds objects rather than values, differ:
+  // a pattern that destructures it hands them on, and so does a member read
+  // through `[` or `?.`, which the sweep cannot name. An export of a name
+  // the module imports (`export { X }`, no `as`) hands it on, as one of a
+  // name it declares does not.
   const handled = new Map();
   const handing = (mod, p, len) => {
     const key = `${mod.file}@${p}`;
@@ -985,6 +996,13 @@ function tracer(mods, resolve, spawner) {
     const tail = s.slice(p + len, p + len + 40);
     const g = mod.around[p];
     const { patternAt, forLhs } = mod.shape();
+    const name = s.slice(p, p + len);
+    // The name of a module's namespace import is no one object: each export is
+    // a key of it, so a member it reads through a bracket or an optional chain,
+    // or a pattern that destructures it, reaches an exported object under a
+    // name this sweep does not read.
+    const namespace = mod.namespaces.has(name);
+    if (namespace && /^\s*(?:\?\.|\[)/.test(tail)) return "read through a bracket or an optional chain";
     if (/^\s*(?:\?\.|\.(?!\.)|\[|\()/.test(tail)) return null;
     if (/^\s*=>/.test(tail)) return null;
     if (/(?:^|[^\w$.])(?:const|let|var)\s+$/.test(head) || new RegExp(`^\\s*${ASSIGN}`).test(tail)) return null;
@@ -1002,10 +1020,14 @@ function tracer(mods, resolve, spawner) {
       if (k >= 0 && s[k] === "(" && !inDefault(s, k, at) && ["params", "catch"].includes(mod.parenKind(k))) return null;
     }
     const eq = /([}\]])\s*=\s*$/.exec(head);
-    if (eq !== null && patternAt.has(mod.openOf.get(p - head.length + eq.index))) return null;
+    const open = eq === null ? undefined : mod.openOf.get(p - head.length + eq.index);
+    if (eq !== null && patternAt.has(open)) return namespace && s[open] === "{" ? "destructured, which binds the objects it exports to other names" : null;
     const brace = g >= 0 && s[g] === "{" ? s.slice(Math.max(0, g - 40), g).trimEnd() : "";
     if (/(?:^|[^\w$.])import(?:\s+[\w$]+\s*,)?$/.test(brace)) return null;
-    if (/(?:^|[^\w$.])export$/.test(brace) && !/^\s*as\b/.test(tail)) return null;
+    // `export { X }` of a name the module imports lists an object another
+    // module can now import from this one, which the sweep does not follow.
+    // The name after `as` is the exported alias, not a binding of the module.
+    if (/(?:^|[^\w$.])export$/.test(brace) && !/^\s*as\b/.test(tail) && !/\bas\s*$/.test(head)) return namespace || mod.imports.has(name) ? "re-exported" : null;
     for (let k = g; k >= 0; k = mod.around[k]) {
       if (s[k] !== "(") continue;
       const kind = mod.parenKind(k);
@@ -2338,6 +2360,7 @@ const WITH_OPTS = (lines) => MOD(`const opts = { timeout: 20_000 };\n${lines}\ns
 const WITH_CFG = (lines) => READ("CFG.ms", `const CFG = { ms: 20_000 };\n${lines}\n`);
 const SHARED = "export const CFG = { ms: 20_000 };\n";
 const FROM_COMMON = `import { CFG } from "./common.mjs";\n`;
+const ns = `import * as ns from "./common.mjs";\n`;
 // `CFG` declared in common.mjs and read in x.mjs, with `lines` written in the
 // declaring module or in a third one.
 const declaring = (lines) => ({ "common.mjs": `${SHARED}${lines}\n`, "x.mjs": READ("CFG.ms", FROM_COMMON) });
@@ -2444,7 +2467,6 @@ test("the sweep refuses a gh timeout an object it reads is handed on", () => {
 
 test("the sweep refuses a gh timeout written in the module that declares an object or in one that imports it", () => {
   const TARGET = "is a destructuring target";
-  const ns = `import * as ns from "./common.mjs";\n`;
   refusedFor([
     ["a member write in the declaring module", declaring(`CFG.ms = ${ENV_MS};`), "reads process.env"],
     ["an Object.assign in the declaring module", declaring(`Object.assign(CFG, { ms: ${ENV_MS} });`), "reads process.env"],
@@ -2488,6 +2510,23 @@ test("the sweep refuses a gh timeout written in the module that declares an obje
     ["a write through a namespace import spelled with spaces", importing(`ns . CFG . ms = ${ENV_MS};`, ns), "reads process.env"],
     ["a namespace import handed to a call", importing(`function widen(n) { n.CFG.ms = ${ENV_MS}; }\nwiden(ns);`, ns), "ns, a namespace holding ns.CFG, is passed to widen(…)"],
     ["a namespace import bound to another name", importing(`const n = ns;\nn.CFG.ms = ${ENV_MS};`, ns), "ns, a namespace holding ns.CFG, is bound to another name"],
+    ["a namespace import destructured", importing(`const { CFG } = ns;\nCFG.ms = ${ENV_MS};`, ns), "ns, a namespace holding ns.CFG, is destructured"],
+    ["a namespace import destructured into another name", importing(`const { CFG: C } = ns;\nC.ms = ${ENV_MS};`, ns), "ns, a namespace holding ns.CFG, is destructured"],
+    ["a namespace import destructured by an assignment", importing(`let C;\n({ CFG: C } = ns);\nC.ms = ${ENV_MS};`, ns), "ns, a namespace holding ns.CFG, is destructured"],
+    ["a namespace import read through a bracket key", importing(`ns["CFG"].ms = ${ENV_MS};`, ns), "ns, a namespace holding ns.CFG, is read through a bracket or an optional chain"],
+    ["a namespace import read through a bracket key in single quotes", importing(`ns['CFG'].ms = ${ENV_MS};`, ns), "ns, a namespace holding ns.CFG, is read through a bracket or an optional chain"],
+    ["a namespace import read through an optional chain", importing(`Object.assign(ns?.CFG, { ms: ${ENV_MS} });`, ns), "ns, a namespace holding ns.CFG, is read through a bracket or an optional chain"],
+    ["a namespace import read through a bracket key after a space", importing(`ns ["CFG"].ms = ${ENV_MS};`, ns), "ns, a namespace holding ns.CFG, is read through a bracket or an optional chain"],
+    ["a namespace import read through an optional chain after a space", importing(`Object.assign(ns ?.CFG, { ms: ${ENV_MS} });`, ns), "ns, a namespace holding ns.CFG, is read through a bracket or an optional chain"],
+    ["an imported object exported by name", {
+      "common.mjs": SHARED,
+      "y.mjs": `${FROM_COMMON}export { CFG };\n`,
+      "z.mjs": `import { CFG } from "./y.mjs";\nCFG.ms = ${ENV_MS};\n`,
+      "x.mjs": READ("CFG.ms", FROM_COMMON),
+    }, "CFG is re-exported, at y.mjs:2"],
+    ["an imported object exported by name beside others", importing(`const other = 1;\nexport { other, CFG };`), "CFG is re-exported"],
+    ["an object imported under another name, exported by name", importing(`export { C };`, `import { CFG as C } from "./common.mjs";\n`), "C is re-exported"],
+    ["a namespace import exported by name", importing(`export { ns };`, ns), "ns, a namespace holding ns.CFG, is re-exported"],
     ["a destructuring target in the module that declares an imported variable", {
       "common.mjs": `export let T = 20_000;\n[T] = [${ENV_MS}];\n`,
       "x.mjs": MOD(`import { T } from "./common.mjs";\nspawnSync("gh", ["x"], { timeout: T });`),
@@ -2497,6 +2536,13 @@ test("the sweep refuses a gh timeout written in the module that declares an obje
       "x.mjs": MOD(`import { T } from "./common.mjs";\nspawnSync("gh", ["x"], { timeout: T });`),
     }, "T is a for…of or for…in target"],
   ]);
+});
+
+test("the sweep refuses an imported object exported under its own name once, as bound to another name", () => {
+  // The name after `as` is the exported alias, not a binding of the module, so
+  // it is not refused a second time as a re-export.
+  assert.deepEqual(sweep(importing(`export { CFG as CFG };`)).spawns[0].reaches,
+    ["reads CFG.ms: CFG is bound to another name or stored in another object, at y.mjs:2, which this sweep does not follow"]);
 });
 
 test("the sweep accepts a gh timeout it can follow beside writes it need not", () => {
@@ -2535,6 +2581,10 @@ test("the sweep accepts a gh timeout it can follow beside writes it need not", (
     "a module that imports the object under another name and reads it": importing(`console.log(C.ms);`, `import { CFG as C } from "./common.mjs";\n`),
     "a namespace import that reads another export": importing(`console.log(ns.OTHER);`, `import * as ns from "./common.mjs";\n`),
     "a namespace import read, compared and passed by its members": importing(`console.log(ns.CFG.ms, typeof ns === "object");\nlog(ns.OTHER);`, `import * as ns from "./common.mjs";\n`),
+    "a namespace import's member destructured": importing(`const { ms } = ns.CFG;\nlog(ms);`, ns),
+    "a locally declared object exported by name": READ("CFG.ms", "const CFG = { ms: 20_000 };\nexport { CFG };\n"),
+    "another name exported by name, beside an import of the object": importing(`const other = { ms: 1 };\nexport { other };`),
+    "a name the module declares exported by name, beside a namespace import": importing(`const local = { ms: 1 };\nexport { local };`, ns),
     "an options object whose methods do not use this, beside an arrow that does": MOD(`const opts = { timeout: 20_000, describe() { return "x"; }, label: function () { return 1; }, show: () => log(this.label) };\nspawnSync("gh", ["x"], opts);`),
     "a dynamic import of a module that declares nothing it reads": importing(`const m = await import("./elsewhere.mjs");`, ""),
     "a re-export of another module": importing(`export { Z } from "./elsewhere.mjs";`, ""),
