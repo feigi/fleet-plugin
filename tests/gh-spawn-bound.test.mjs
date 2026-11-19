@@ -117,9 +117,9 @@
 //      the name it gives it (`import { X as Y }`, `ns.X` of a namespace
 //      import, where rule 6 also judges each use of `ns` itself, and refuses
 //      one that reads a member through `ns[…]` or `ns?.`, which is no `ns.X`
-//      to follow). An exported
-//      object is refused when another module reaches its module by `import()`
-//      or `export … from`, which the sweep does not follow.
+//      to follow). An exported object is refused when another module reaches
+//      its module by `import()` or `export … from`, which the sweep does not
+//      follow.
 // Not followed: a write through a longer path (`CFG.inner.ms = …`), through a
 // computed key (`CFG[k] = …`), and a `delete`.
 import { test } from "node:test";
@@ -1026,7 +1026,8 @@ function tracer(mods, resolve, spawner) {
     if (/(?:^|[^\w$.])import(?:\s+[\w$]+\s*,)?$/.test(brace)) return null;
     // `export { X }` of a name the module imports lists an object another
     // module can now import from this one, which the sweep does not follow.
-    if (/(?:^|[^\w$.])export$/.test(brace) && !/^\s*as\b/.test(tail)) return namespace || mod.imports.has(name) ? "re-exported" : null;
+    // The name after `as` is the exported alias, not a binding of the module.
+    if (/(?:^|[^\w$.])export$/.test(brace) && !/^\s*as\b/.test(tail) && !/\bas\s*$/.test(head)) return namespace || mod.imports.has(name) ? "re-exported" : null;
     for (let k = g; k >= 0; k = mod.around[k]) {
       if (s[k] !== "(") continue;
       const kind = mod.parenKind(k);
@@ -2515,6 +2516,8 @@ test("the sweep refuses a gh timeout written in the module that declares an obje
     ["a namespace import read through a bracket key", importing(`ns["CFG"].ms = ${ENV_MS};`, ns), "ns, a namespace holding ns.CFG, is read through a bracket or an optional chain"],
     ["a namespace import read through a bracket key in single quotes", importing(`ns['CFG'].ms = ${ENV_MS};`, ns), "ns, a namespace holding ns.CFG, is read through a bracket or an optional chain"],
     ["a namespace import read through an optional chain", importing(`Object.assign(ns?.CFG, { ms: ${ENV_MS} });`, ns), "ns, a namespace holding ns.CFG, is read through a bracket or an optional chain"],
+    ["a namespace import read through a bracket key after a space", importing(`ns ["CFG"].ms = ${ENV_MS};`, ns), "ns, a namespace holding ns.CFG, is read through a bracket or an optional chain"],
+    ["a namespace import read through an optional chain after a space", importing(`Object.assign(ns ?.CFG, { ms: ${ENV_MS} });`, ns), "ns, a namespace holding ns.CFG, is read through a bracket or an optional chain"],
     ["an imported object exported by name", {
       "common.mjs": SHARED,
       "y.mjs": `${FROM_COMMON}export { CFG };\n`,
@@ -2533,6 +2536,13 @@ test("the sweep refuses a gh timeout written in the module that declares an obje
       "x.mjs": MOD(`import { T } from "./common.mjs";\nspawnSync("gh", ["x"], { timeout: T });`),
     }, "T is a for…of or for…in target"],
   ]);
+});
+
+test("the sweep refuses an imported object exported under its own name once, as bound to another name", () => {
+  // The name after `as` is the exported alias, not a binding of the module, so
+  // it is not refused a second time as a re-export.
+  assert.deepEqual(sweep(importing(`export { CFG as CFG };`)).spawns[0].reaches,
+    ["reads CFG.ms: CFG is bound to another name or stored in another object, at y.mjs:2, which this sweep does not follow"]);
 });
 
 test("the sweep accepts a gh timeout it can follow beside writes it need not", () => {
