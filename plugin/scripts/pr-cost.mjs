@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // $ per merged PR, per implementer cell, and the cost guard over it.
 //
-//   pr-cost.mjs [--guard] [--json] [--member-outcomes <tsv>] [--tier-outcomes <tsv>]
+//   pr-cost.mjs [--guard] [--json] [--baseline-cell <cell>] [--member-outcomes <tsv>] [--tier-outcomes <tsv>]
 //               [--ticket-features <tsv>] [--pricing <json>] [--out <json>]
 //
 // Inputs: the three metrics TSVs (docs/metrics/ by default, relative to the
@@ -23,13 +23,26 @@
 //
 //   0  ok — no cell tripped
 //   3  at least one cell tripped; `tripped[]` names each
-//   4  no verdict — the baseline cell has fewer than MIN_N merged PRs
+//   4  no verdict — the Baseline Cell has fewer than MIN_N merged PRs
 //   2  input error — nothing is written
 //
 // The exit status is the guard's carrier: the verdict never lives only in
 // prose. The router (not in the tree yet) is to read the file, and
 // fleet-tick's `router` row prints it today; a missing or unparseable file
 // means the default cell only, so deleting it cannot evade the guard.
+//
+// THE BASELINE CELL is the Cell every other is compared with: `--baseline-cell`,
+// else the one the run's phase-0 receipt records, else the value saved in
+// `.fleet/baseline-cell.json`, else `slow-high`. "The baseline" below is it.
+//
+// WHY A CELL TRIPPED. A cell trips on `floor` (its fail rate TRIP_POINTS or
+// more points above the baseline's), on `usd` (its $ per merged PR at or above
+// the baseline's) or on `minutes` (its work time per merged PR at or above the
+// baseline's, where both sides have a minutes figure), each over the stretches
+// both were drawn in. A `tripped` entry is `{ cell, on: [<reason>, …] }`, and the
+// verdict is `tripped` when any cell trips for any reason. Each Objective applies
+// its own reasons (trip-reasons.mjs): the guard records, the router excludes. No
+// trip state is kept: every run re-judges from the record.
 //
 // BOOKING is pull-attribution.mjs's, the one the router's fit reads too: each
 // Pull in the window is a unit booked as routed to its `chosen_cell`, with
@@ -90,7 +103,10 @@
 // Pull contributes the implementer PRs that make it one. Beside `min_n` it
 // records `trip_points`, the floor's margin, `unmatched`, the report's list of
 // the cells not judged, and `tsv_blobs`: the git blob id of each TSV it read,
-// by the path it read it at.
+// by the path it read it at. Each cell's entry also records `shared_merged`,
+// `{ cell, base }`: its merged PRs and the baseline's over the stretches they
+// share, which burn-in holds until both reach MIN_N — for every cell, including
+// one under MIN_N merged PRs of its own.
 
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -103,7 +119,9 @@ import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
 import { AttributionError, TRIP_POINTS, attribute, compareCells, parseFeatures, tally } from "./pull-attribution.mjs";
-import { STARTING_CELLS } from "./ledger-grammar.mjs";
+import { CELL, DEFAULT_BASELINE_CELL, startingSetOf } from "./ledger-grammar.mjs";
+import { baselineIn } from "./phase0-receipt.mjs";
+import { excludedCells, tripWords } from "./trip-reasons.mjs";
 import { RulingError, parseTierOutcomes } from "./tier-outcomes.mjs";
 
 const NAME = "pr-cost";
@@ -114,7 +132,6 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 // guard reads; the baseline is not cumulative over it, for a cell is compared
 // with the baseline only over the stretches in which both were drawn.
 export const WINDOW_START = "2026-10-03";
-export const BASELINE_CELL = "slow-high";
 export const MIN_N = 20;
 export const EXIT = { ok: 0, tripped: 3, none: 4 };
 export const GH_PR_LIMIT = 1000;
@@ -172,28 +189,35 @@ function median(xs) {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
-// Whether `m`, `compareCells`' comparison of a cell with the baseline, has MIN_N merged PRs on each side. They are
+// Whether `m`, `compareCells`' comparison of a cell with the Baseline Cell, has MIN_N merged PRs on each side. They are
 // counted over the stretches both were drawn in, so a cell is never judged on a handful of matched Pulls because
 // it has many unmatched ones.
 const judged = (m) => m.cell.merged >= MIN_N && m.base.merged >= MIN_N;
 
-// The trip rule, over the stretches in which both cells were drawn (`cell` and `base` are the two cells' newest
-// generations' counted Pulls, as `compareCells` reads them): the cell's fail rate TRIP_POINTS or more points above
-// the baseline's, in integer counts, or its $ per merged PR at least the baseline's. The $ leg takes the unrounded
-// figures: the cent-rounded ones are for display, and a trip is sticky, so a cell cheaper by under half a cent
-// must not trip on rounding alone. A cell that shares no stretch with the baseline, or has under MIN_N merged PRs
-// on either side in those it shares, is not judged and does not trip. `tripsOn` holds the rule on a comparison,
-// `trips` on two cells' Pulls.
-const tripsOn = (m) => judged(m) && (m.underFloor || (m.cell.usd_per_merged !== null && m.cell.usd_per_merged >= m.base.usd_per_merged));
-export function trips(cell, base) {
-  return tripsOn(compareCells(cell, base));
+// Why a cell trips, over the stretches in which both cells were drawn (`m` is `compareCells`' comparison of the
+// cell's and the Baseline Cell's newest generations' counted Pulls): `floor`, its fail rate TRIP_POINTS or more
+// points above the Baseline Cell's, in integer counts; `usd`, its $ per merged PR at least the Baseline Cell's;
+// `minutes`, its work time per merged PR at least the Baseline Cell's, where both sides have a minutes figure. A
+// figure takes the unrounded values: the cent-rounded ones are for display, so a cell cheaper by under half a cent
+// must not trip on rounding alone. None where the cell shares no stretch with the Baseline Cell, or has under MIN_N
+// merged PRs on either side in those it shares: it is not judged and does not trip. A reason holds a cell back
+// under the Objectives trip-reasons.mjs says.
+const tripReasonsOn = (m) => {
+  if (!judged(m)) return [];
+  const atLeast = (key) => m.cell[key] !== null && m.base[key] !== null && m.cell[key] >= m.base[key];
+  return [m.underFloor && "floor", atLeast("usd_per_merged") && "usd", atLeast("minutes_per_merged") && "minutes"].filter(Boolean);
+};
+
+/** The reasons `cell`'s Pulls trip against `base`'s, as the guard reads them over their shared stretches; none when it does not trip. */
+export function tripReasons(cell, base) {
+  return tripReasonsOn(compareCells(cell, base));
 }
 
-export function computeReport({ members, tiers, features, prs, routerTable = null, pricing = null, windowStart = WINDOW_START }) {
+export function computeReport({ members, tiers, features, prs, routerTable = null, pricing = null, windowStart = WINDOW_START, baselineCell = DEFAULT_BASELINE_CELL }) {
   const units = attribute({ features, members, tiers, prs, windowStart });
   const tallies = new Map(tally(units).map((t) => [t.cell, t]));
   const meanUsd = (t) => (t.merged ? t.spend / t.merged : null);
-  const base = tallies.get(BASELINE_CELL) ?? null;
+  const base = tallies.get(baselineCell) ?? null;
   // The PRs behind each generation's `no_ruling` and `pending` counts, as the
   // top-level `pending` list prints them: ascending, each once.
   const behind = new Map();
@@ -218,6 +242,7 @@ export function computeReport({ members, tiers, features, prs, routerTable = nul
       n_failed: g.failed,
       fail_rate: g.claims ? round(g.failed / g.claims) : null,
       mean_usd: round(meanUsd(g), 2),
+      mean_minutes: round(g.merged ? g.workS / 60 / g.merged : null, 2),
       median_usd: round(median(g.pulls.filter((u) => u.merged).map((u) => u.spend)), 2),
       by_hand: g.by_hand,
       no_ruling: g.no_ruling,
@@ -225,39 +250,51 @@ export function computeReport({ members, tiers, features, prs, routerTable = nul
       pending: g.pending,
       pending_prs: prList(held?.pending_prs),
       router_usd: round(g.pulls.reduce((s, u) => s + routerUsd(u.pull), 0), 4),
-      usd_diff_ci95: !newest || cell === BASELINE_CELL || !base ? null : compareCells(g.pulls, base.pulls).range("usd"),
+      usd_diff_ci95: !newest || cell === baselineCell || !base ? null : compareCells(g.pulls, base.pulls).range("usd"),
       left_out: g.left_out,
       unpriced: g.unpriced,
       untimed: g.untimed,
     };
   };
+  // Each cell's newest generation's merged PRs on each side of the stretches it shares with the Baseline Cell, which
+  // the trip loop below judges it on and burn-in holds until: recorded for every cell, those the loop skips for
+  // want of merged PRs of their own included. The Baseline Cell shares every stretch with itself.
+  const sharedMerged = (t) => {
+    const m = base === null ? null : compareCells(t.pulls, base.pulls);
+    return m === null ? { cell: 0, base: 0 } : { cell: m.cell.merged, base: m.base.merged };
+  };
   const figures = [...tallies.values()].map((t) => ({
     ...figuresOf(t.cell, t, true),
+    shared_merged: sharedMerged(t),
     excluded: t.excluded,
     older: t.older.map((o) => figuresOf(t.cell, o, false)),
   }));
 
   // The guard, over each cell's newest generation alone.
-  const b = figures.find((f) => f.cell === BASELINE_CELL) ?? { generation: null, n_merged: 0, mean_usd: null, fail_rate: null };
-  const baseline = { cell: BASELINE_CELL, generation: b.generation, n: b.n_merged, mean_usd: b.mean_usd, fail_rate: b.fail_rate };
-  // Each cell is held to the baseline over the stretches in which both were drawn (`compareCells`): `judged` is
-  // whether MIN_N merged PRs a side there let the trip rule apply, and `tripsOn` the rule. A cell short of them is
-  // `unmatched`.
+  const b = figures.find((f) => f.cell === baselineCell) ?? { generation: null, n_merged: 0, mean_usd: null, mean_minutes: null, fail_rate: null };
+  const baseline = { cell: baselineCell, generation: b.generation, n: b.n_merged, mean_usd: b.mean_usd, mean_minutes: b.mean_minutes, fail_rate: b.fail_rate };
+  // Each cell is held to the Baseline Cell over the stretches in which both were drawn (`compareCells`): `judged` is
+  // whether MIN_N merged PRs a side there let the trip rule apply, and `tripReasonsOn` the rule. A cell short of them
+  // is `unmatched`. A tripped entry is `{ cell, on }`, `on` the reasons it tripped on.
   const tripped = [];
   const unmatched = [];
   if (baseline.n >= MIN_N) {
     for (const t of tallies.values()) {
-      if (t.cell === BASELINE_CELL || t.merged < MIN_N) continue;
+      if (t.cell === baselineCell || t.merged < MIN_N) continue;
       const m = compareCells(t.pulls, base.pulls);
       if (!judged(m)) unmatched.push(t.cell);
-      else if (tripsOn(m)) tripped.push(t.cell);
+      else {
+        const on = tripReasonsOn(m);
+        if (on.length > 0) tripped.push({ cell: t.cell, on });
+      }
     }
   }
   const verdict = baseline.n < MIN_N ? "none" : tripped.length ? "tripped" : "ok";
-  // Retire: every non-default starting Cell tripped before any row of either
-  // objective's set adopted one.
-  const adopted = Object.values(routerTable?.rows ?? {}).some((set) => Object.values(set).some((c) => c !== BASELINE_CELL));
-  const retire = !adopted && STARTING_CELLS.filter((c) => c !== BASELINE_CELL).every((c) => tripped.includes(c));
+  // Retire: every starting Cell but the Baseline Cell excluded under `cost` before any row of either objective's set
+  // adopted a Cell other than it.
+  const adopted = Object.values(routerTable?.rows ?? {}).some((set) => Object.values(set).some((c) => c !== null && c !== baselineCell));
+  const costOut = excludedCells(tripped, "cost");
+  const retire = !adopted && startingSetOf(baselineCell).filter((c) => c !== baselineCell).every((c) => costOut.includes(c));
 
   return {
     window_start: windowStart,
@@ -336,8 +373,8 @@ const TSV_COLUMNS = [
 // per older generation of that cell, which carries none.
 export function formatReport(report) {
   const guardOf = (f) => {
-    if (f.cell === BASELINE_CELL) return "baseline";
-    if (report.tripped.includes(f.cell)) return "tripped";
+    if (f.cell === report.baseline.cell) return "baseline";
+    if (report.tripped.some((t) => t.cell === f.cell)) return "tripped";
     if (report.unmatched.includes(f.cell)) return "unmatched";
     return f.n_merged >= MIN_N && report.verdict !== "none" ? "ok" : `n<${MIN_N}`;
   };
@@ -349,7 +386,7 @@ export function formatReport(report) {
     for (const o of f.older) lines.push(line(o, "older"));
   }
   const b = report.baseline;
-  lines.push(`# verdict: ${report.verdict} (baseline ${b.cell} n=${b.n}/${MIN_N}${report.tripped.length ? `; tripped ${report.tripped.join(" ")}` : ""})${report.retire ? " — retire: every non-default starting Cell tripped" : ""}`);
+  lines.push(`# verdict: ${report.verdict} (baseline ${b.cell} n=${b.n}/${MIN_N}${report.tripped.length ? `; tripped ${report.tripped.map(tripWords).join("; ")}` : ""})${report.retire ? " — retire: every starting Cell but the baseline tripped under cost" : ""}`);
   lines.push(`# window_start ${report.window_start}; pending PRs: ${report.pending.length ? report.pending.join(" ") : "none"}`);
   const ab = report.ab;
   lines.push(ab.status === "not-run"
@@ -407,7 +444,7 @@ function main() {
   const die = makeDie(NAME);
   const { arg, has, sweep, stray } = defineFlags(die, {
     flags: {
-      guard: "bool", json: "bool", "member-outcomes": "value", "tier-outcomes": "value",
+      guard: "bool", json: "bool", "baseline-cell": "value", "member-outcomes": "value", "tier-outcomes": "value",
       "ticket-features": "value", pricing: "value", out: "value",
     },
   });
@@ -464,8 +501,17 @@ function main() {
     throw e;
   }
 
+  // The Baseline Cell: `--baseline-cell`, else the run's own — the receipt's, the saved value, `slow-high` — read
+  // from the `.fleet/` the guard is written to.
+  let baselineCell = arg("baseline-cell");
+  if (baselineCell === null) {
+    let fleetDir = null;
+    try { fleetDir = dirname(arg("out") ?? fleetFile("cost-guard.json")); } catch (e) { if (!(e instanceof FleetDirUnresolvable)) throw e; }
+    baselineCell = fleetDir === null ? DEFAULT_BASELINE_CELL : baselineIn(fleetDir).cell;
+  } else if (!CELL.test(baselineCell)) die(`--baseline-cell ${baselineCell} is not a Cell`);
+
   let report;
-  try { report = computeReport({ members, tiers, features, prs, routerTable, pricing }); }
+  try { report = computeReport({ members, tiers, features, prs, routerTable, pricing, baselineCell }); }
   catch (e) {
     if (e instanceof RulingError) die(`${tiersPath}: ${e.message}`);
     if (e instanceof AttributionError) die(e.message);

@@ -18,12 +18,17 @@ const entry = (cell, o = {}) => ({
   mean_usd: 14.9, median_usd: 12, by_hand: 56, no_ruling: 0, pending: 0, router_usd: 0, usd_diff_ci95: null,
   left_out: 0, unpriced: 0, untimed: 0, excluded: 0, older: [], ...o,
 });
+// What each Cell shares with the baseline when the two were drawn through every stretch: its own merged PRs, and the baseline's.
+const withShared = (cells) => {
+  const base = cells.find((c) => c.cell === "slow-high")?.n ?? 0;
+  return cells.map((c) => ({ shared_merged: { cell: c.n, base }, ...c }));
+};
 const guardOk = (cells, o = {}) => ({
   status: "ok",
   guard: {
     computed_at: "2026-10-26T19:17:33.000Z", window_start: "2026-10-03",
     baseline: { cell: "slow-high", generation: "claude-opus-5", n: 69, mean_usd: 14.9, fail_rate: 0.1159 },
-    cells, tripped: [], verdict: "ok", retire: false, min_n: 20, trip_points: 15, tsv_blobs: {}, ...o,
+    cells: withShared(cells), tripped: [], verdict: "ok", retire: false, min_n: 20, trip_points: 15, tsv_blobs: {}, ...o,
   },
 });
 const TODAY = () => guardOk([
@@ -538,7 +543,7 @@ const FIT = (o = {}) => ({
     cost: { "*": TASK("qualifies"), [ABOVE]: TASK("qualifies"), [BELOW]: TASK("qualifies") },
     speed: { "*": TASK("qualifies"), [ABOVE]: TASK("qualifies"), [BELOW]: TASK("qualifies") },
   },
-  guard: { tripped: [], n: { "slow-high": 69, "smol-high": 32, "task-high": 69 } },
+  guard: { tripped: [], n: { "slow-high": 69, "smol-high": 32, "task-high": 69 }, shared: { "smol-high": { cell: 32, base: 69 }, "task-high": { cell: 69, base: 69 } } },
   ...o,
 });
 // The guard these fixtures stand beside: TODAY's, with the blob ids the Fit read.
@@ -604,7 +609,7 @@ test("no Fit yet: the starting table routes, a one-node tree in burn-in, each gr
 });
 
 test("burn-in progress: merged PRs per starting Cell against 20, from the Fit's own counts while the Fit routes", () => {
-  const short = FIT({ burn_in: true, guard: { tripped: [], n: { "slow-high": 69, "task-high": 12 } } });
+  const short = FIT({ burn_in: true, guard: { tripped: [], n: { "slow-high": 69, "task-high": 12 }, shared: { "task-high": { cell: 12, base: 69 } } } });
   assert.deepEqual(fitted({ fit: FIT_READ({ table: short }) }).burnIn, {
     heading: "burn-in: 1 of 3 starting Cells has the 20 merged PRs each needs",
     cells: [{ cell: "slow-high", n: 69, of: 20 }, { cell: "task-high", n: 12, of: 20 }, { cell: "smol-high", n: 0, of: 20 }],
@@ -614,10 +619,10 @@ test("burn-in progress: merged PRs per starting Cell against 20, from the Fit's 
 });
 
 test("burn-in progress: a Cell at exactly 20 merged PRs has them, one at 19 does not", () => {
-  const edge = FIT({ burn_in: true, guard: { tripped: [], n: { "slow-high": 20, "task-high": 19, "smol-high": 69 } } });
+  const edge = FIT({ burn_in: true, guard: { tripped: [], n: { "slow-high": 20, "task-high": 19, "smol-high": 69 }, shared: { "task-high": { cell: 19, base: 20 }, "smol-high": { cell: 69, base: 20 } } } });
   assert.deepEqual(fitted({ fit: FIT_READ({ table: edge }) }).burnIn, {
     heading: "burn-in: 2 of 3 starting Cells have the 20 merged PRs each needs",
-    cells: [{ cell: "slow-high", n: 20, of: 20 }, { cell: "task-high", n: 19, of: 20 }, { cell: "smol-high", n: 69, of: 20 }],
+    cells: [{ cell: "slow-high", n: 20, of: 20 }, { cell: "task-high", n: 19, of: 20 }, { cell: "smol-high", n: 20, of: 20 }],
   });
 });
 
@@ -629,8 +634,8 @@ test("burn-in progress under a starting table out of burn-in: 'ended' only once 
     entry("smol-high", { generation: "claude-haiku-5-5", n: 25 }),
   ]);
   assert.deepEqual(policy({ table: outOfBurnIn, guard: short }).burnIn, {
-    heading: "no burn-in: the starting table routes without it, though only 1 of 3 starting Cells has the 20 merged PRs each needs",
-    cells: [{ cell: "slow-high", n: 2, of: 20 }, { cell: "task-high", n: 0, of: 20 }, { cell: "smol-high", n: 25, of: 20 }],
+    heading: "no burn-in: the starting table routes without it, though only 0 of 3 starting Cells have the 20 merged PRs each needs",
+    cells: [{ cell: "slow-high", n: 2, of: 20 }, { cell: "task-high", n: 0, of: 20 }, { cell: "smol-high", n: 2, of: 20 }],
   }, "the cost guard's counts, never under a heading that says they are all in");
   assert.equal(policy({ table: outOfBurnIn }).burnIn.heading, "burn-in ended: every starting Cell has its 20 merged PRs");
 });
@@ -723,13 +728,13 @@ test("no cost guard: every Pull runs at slow-high whatever the table says, nothi
 const CHANGED = (n = 3) => FIT({
   burn_in: true,
   estimates: { "*": { ...FIT().estimates["*"], "slow-high": { generation: "claude-opus-5-5", merged: n, older: { "claude-opus-5": { merged: 69 } } } } },
-  guard: { tripped: [], n: { "slow-high": n, "task-high": 69, "smol-high": 32 } },
+  guard: { tripped: [], n: { "slow-high": n, "task-high": 69, "smol-high": 32 }, shared: { "task-high": { cell: 69, base: n }, "smol-high": { cell: 32, base: n } } },
 });
 
 test("a role whose model changed and whose burn-in restarted shows a notice", () => {
   const p = fitted({ fit: FIT_READ({ table: CHANGED() }) });
   assert.deepEqual(p.notices, ["slow-high's model changed to claude-opus-5-5, after claude-opus-5: burn-in restarted, at 3 of the 20 merged PRs it needs"]);
-  assert.equal(p.burnIn.heading, "burn-in: 2 of 3 starting Cells have the 20 merged PRs each needs");
+  assert.equal(p.burnIn.heading, "burn-in: 0 of 3 starting Cells have the 20 merged PRs each needs", "the Baseline Cell is short, so no Cell is judged against it");
 });
 
 test("no model-change notice once the new model has its 20 merged PRs, with no older generation, or while the starting table routes", () => {
@@ -748,7 +753,7 @@ test("no model-change notice beside an older generation when the record names no
   const unnamed = FIT({
     burn_in: true,
     estimates: { "*": { ...FIT().estimates["*"], "slow-high": { merged: 3, older: { "claude-opus-5": { merged: 69 } } } } },
-    guard: { tripped: [], n: { "slow-high": 3, "task-high": 69, "smol-high": 32 } },
+    guard: { tripped: [], n: { "slow-high": 3, "task-high": 69, "smol-high": 32 }, shared: { "task-high": { cell: 69, base: 3 }, "smol-high": { cell: 32, base: 3 } } },
   });
   assert.deepEqual(fitted({ fit: FIT_READ({ table: unnamed }) }).notices, []);
 });
@@ -994,12 +999,12 @@ test("a derived default Cell replaces slow-high in the view where the install do
 });
 
 test("burn-in progress counts the starting Cells the Fit recorded, and says which it left out", () => {
-  const two = FIT({ burn_in: true, starting_cells: ["slow-high", "task-high"], guard: { tripped: [], n: { "slow-high": 69, "task-high": 12 } } });
+  const two = FIT({ burn_in: true, starting_cells: ["slow-high", "task-high"], guard: { tripped: [], n: { "slow-high": 69, "task-high": 12 }, shared: { "task-high": { cell: 12, base: 69 } } } });
   assert.deepEqual(fitted({ fit: FIT_READ({ table: two }) }).burnIn, {
     heading: "burn-in: 1 of 2 runnable starting Cells has the 20 merged PRs each needs; smol-high unrunnable",
     cells: [{ cell: "slow-high", n: 69, of: 20 }, { cell: "task-high", n: 12, of: 20 }],
   });
-  const ended = FIT({ burn_in: false, starting_cells: ["slow-high", "task-high"], guard: { tripped: [], n: { "slow-high": 69, "task-high": 69 } } });
+  const ended = FIT({ burn_in: false, starting_cells: ["slow-high", "task-high"], guard: { tripped: [], n: { "slow-high": 69, "task-high": 69 }, shared: { "task-high": { cell: 69, base: 69 } } } });
   assert.equal(fitted({ fit: FIT_READ({ table: ended }) }).burnIn.heading, "burn-in ended: every runnable starting Cell has its 20 merged PRs; smol-high unrunnable");
   // A Fit that records no set counted all three, so the cockpit's own install read decides nothing for it.
   assert.equal(fitted({ fit: FIT_READ({ table: FIT({ burn_in: true, guard: { tripped: [], n: {} } }) }), catalog: SMOL_NONE }).burnIn.heading, "burn-in: 0 of 3 starting Cells have the 20 merged PRs each needs");

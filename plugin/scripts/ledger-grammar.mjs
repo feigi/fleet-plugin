@@ -993,17 +993,34 @@ export function replacementName(name, rows, dispatched, retired) {
 export const CELL = /^(slow|task|smol)-(minimal|low|medium|high|xhigh|max)$/;
 export const CELL_DEF = new RegExp(`^fleet-implementer-${CELL.source.slice(1)}`);
 
-// The cell a row with neither `tier=` nor `cell=` runs at: `policy_cell`,
-// `slow-high` on every Pull until the router's table picks one per stratum.
-// Exported so ticket-router.mjs defaults to the same cell this file maps a
-// bare row to.
-export const POLICY_CELL = "slow-high";
+// The Cell a row with neither `tier=` nor `cell=` runs: `slow-high`, whatever
+// Baseline Cell routed the Pull, since a Pull whose routed Cell differs from it
+// is written with `cell=<cell>`. Exported so every reader of a bare row maps it
+// to the same Cell.
+export const BARE_ROW_CELL = "slow-high";
 
-// The Cells burn-in covers: the three models at `high`. A Cell exploration adds
-// is none of them, whatever its merged PRs: burn-in neither draws it nor waits
-// for it. Exported so ticket-router.mjs's burn-in and pr-cost.mjs's retire
-// condition read one list, though neither script imports the other.
-export const STARTING_CELLS = Object.freeze(["slow-high", "task-high", "smol-high"]);
+// The Baseline Cell a repository starts from until it names its own: the Cell
+// the router starts at, the cost guard compares every other Cell with and the
+// quality floor is read against.
+export const DEFAULT_BASELINE_CELL = "slow-high";
+
+// The roles a starting set holds a Cell of, in the order its Cells are drawn
+// and counted: the three models.
+const STARTING_ROLES = Object.freeze(["slow", "task", "smol"]);
+
+/**
+ * The starting set of a Baseline Cell: its level on each of the three models,
+ * `slow` first. The Cells burn-in draws and counts, and the Cells the Fit judges.
+ * A Cell exploration adds is none of them, whatever its merged PRs. Exported so
+ * ticket-router.mjs's burn-in and pr-cost.mjs's retire condition read one rule,
+ * though neither script imports the other.
+ * @returns {string[]}
+ */
+export function startingSetOf(baseline) {
+  const level = CELL.exec(baseline)?.[2];
+  if (level === undefined) throw new TypeError(`startingSetOf: ${JSON.stringify(baseline)} is not a Cell`);
+  return STARTING_ROLES.map((role) => `${role}-${level}`);
+}
 
 // The Exploration Pull's draw: uniform over every cell but
 // `policyCell`, keyed off the row's own `session` and `ticket`, so the draw
@@ -1154,7 +1171,7 @@ export function parseRoutedEntry(entry) {
 }
 
 // The definition an implementer is dispatched under, off its ticket
-// row's cell token — none means `fleet-implementer-<POLICY_CELL>`,
+// row's cell token — none means `fleet-implementer-<BARE_ROW_CELL>`,
 // `tier=<x>` or `cell=<x>` means `fleet-implementer-<x>`. `tier=` is the
 // cell a draw picked (a row carrying one is a drawn Pull, which `implRow`
 // reads); `cell=` is the cell the router printed for a Pull it routed without
@@ -1202,7 +1219,7 @@ export function decidingCell(rowText) {
 export function expectedDefinition(rowText) {
   const { name, values: all } = decidingCell(rowText);
   const values = [...new Set(all)];
-  if (values.length === 0) return `fleet-implementer-${POLICY_CELL}`;
+  if (values.length === 0) return `fleet-implementer-${BARE_ROW_CELL}`;
   if (values.length > 1) throw new Error(`row carries conflicting ${name}= tokens (${values.map((v) => `${name}=${v}`).join(", ")}) — fix the row with \`ledger.mjs row\``);
   if (!TIER_SUFFIX.test(values[0])) throw new Error(`${name}=${values[0]} is not a definition suffix — expected [a-z0-9] words joined by '-' — fix the row with \`ledger.mjs row\``);
   return `fleet-implementer-${values[0]}`;

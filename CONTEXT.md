@@ -723,11 +723,26 @@ re-fit (a Fit changes no checked-in table), shadow table, readout
 
 **Starting table**:
 The table every repository routes by until its first Fit: one Stratum for every
-ticket, the three models at `high`, every row `slow-high`, no estimates, in
-burn-in. It ships with the plugin and changes only when the starting point
-itself does, never by a Fit; nothing from this repository's own runs is in it.
+ticket, the **Baseline Cell**'s level on each of the three models (the table
+names no Cell; they are filled in wherever it is read), every row the Baseline
+Cell, no estimates, in burn-in. It ships with the plugin and changes only when
+the starting point itself does, never by a Fit; nothing from this repository's
+own runs is in it.
 _Avoid_: default table, seed table, shipped table (it stops routing once a Fit
 exists)
+
+**Baseline Cell**:
+The Cell a repository names as the one the Router starts from, the cost guard
+compares every Cell with and the **Quality floor** reads, `slow-high` until it
+names its own (`/fleet-ctl:run-team --baseline-cell <cell>`, saved in
+`.fleet/baseline-cell.json` and binding every later run until a run names
+another). Phase 0 works it out once and records it in the receipt as
+`baselineCell`; its **Starting set** — its level on each of `slow`, `task` and
+`smol` — is what burn-in draws and counts and what the Fit judges. A Cell a
+ledger row names with neither `tier=` nor `cell=` is `slow-high` whatever the
+Baseline Cell. Changing it resets nothing: the guard and the Fit compare a Cell
+with it only over the stretches both were drawn in.
+_Avoid_: default cell, anchor
 
 **Cell evidence**:
 What the cockpit's Cell evidence tab shows about why each implementer Cell is
@@ -808,10 +823,13 @@ _Avoid_: wall time, duration, latency, elapsed time, ticket time
 What a run asks the Router to minimise: `cost`, the default, or `speed`. The
 run chooses it when it starts, and it is fixed for the run.
 Under `cost` the Router's fit chooses each row's Cell for Spend per merged PR;
-under `speed` it starts from that Cell and moves only to one reliably faster
-in Work time per merged PR — less working time, not a shorter wait for review
-or merge. The Quality floor binds both; Exploration Pulls and the cost guard
-ignore the objective.
+under `speed` it starts from the `cost` row's Cell as `speed`'s exclusions leave
+it (the Baseline Cell where `speed` excludes it) and moves only to one reliably
+faster in Work time per merged PR — less working time, not a shorter wait for
+review or merge. The Quality floor binds both. The cost guard records why a Cell
+tripped (`floor`, `usd`, `minutes`) and each Objective excludes only its own
+reasons: `cost` `floor` and `usd`, `speed` `floor` and `minutes`; Exploration
+Pulls draw what the run's Objective does not exclude.
 _Avoid_: mode, profile, priority, goal
 
 **Admissible row**:

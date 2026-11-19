@@ -144,6 +144,18 @@ if [ -f "$PH0_STUBS/gh.fail" ]; then echo "gh boom" >&2; exit 1; fi
 cat "$PH0_STUBS/gh.json"
 `;
 
+// The omp phase 0 reads what the install runs from (`omp config get modelRoles --json`, `omp models --json`): it
+// answers the files `omp.modelRoles.json` and `omp.models.json` in the case's control directory, and fails where a
+// case wrote none, which phase 0 reads as an install it cannot read.
+const OMP_STUB = `#!/bin/sh
+case "$*" in
+  "config get modelRoles --json") f="$PH0_STUBS/omp.modelRoles.json" ;;
+  "models --json") f="$PH0_STUBS/omp.models.json" ;;
+  *) echo "omp stub: unexpected: $*" >&2; exit 9 ;;
+esac
+if [ ! -f "$f" ]; then echo "omp stub: no $f" >&2; exit 1; fi
+cat "$f"
+`;
 // The omp the controller alarm is armed for. Phase 0 runs as a child of the
 // test process, and the test process runs under this omp (see `REAL_TABLE`).
 const OMP = 2_000_000_002;
@@ -183,6 +195,7 @@ function fixture({ spec = false } = {}) {
   git(repo, "commit", "-q", "-m", "root");
   git(repo, "push", "-q", "-u", "origin", "main");
   writeExecStub(join(bin, "gh"), GH_STUB);
+  writeExecStub(join(bin, "omp"), OMP_STUB);
   writeFileSync(join(stubs, "gh.json"), "[]");
   writeFileSync(join(stubs, "gh.login"), `${RUN_LOGIN}\n`);
   writeFileSync(join(stubs, "stranded.json"), JSON.stringify({ out: JSON.stringify({ prior: "dead", claims: [], carried: [] }) }));
@@ -1282,6 +1295,178 @@ test("a resumed receipt recording a value that is not an objective exits 3 namin
       assert.equal(readFileSync(f.receiptPath, "utf8"), before, `${label}: the receipt is left as it was`);
       assert.equal(f.calls("rotate").length, 0, label);
     }
+  }
+});
+
+// ── the Baseline Cell ─────────────────────────────────────────────────────────
+
+const SAVED = (f) => join(f.repo, ".fleet", "baseline-cell.json");
+const savedCell = (f) => (existsSync(SAVED(f)) ? JSON.parse(readFileSync(SAVED(f), "utf8")).cell : null);
+// A run of its own: the receipt there is a previous run's, so the run starts over and reads the saved value.
+const nextRun = (f, args = []) => {
+  f.setRecord(RUN_AT);
+  f.setReceipt(stale(f, { run: RUN_AT - 5 }));
+  return f.run(["--session", f.session, ...args]);
+};
+// The install every Cell runs at, but for the levels `role`'s model runs.
+const installRunning = (f, role, levels) => {
+  const levelsOf = { slow: ["low", "medium", "high", "xhigh", "max"], task: ["low", "medium", "high", "xhigh", "max"], smol: ["minimal", "low", "medium", "high", "xhigh"] };
+  const models = { slow: "anthropic/claude-opus-5-5", task: "anthropic/claude-sonnet-5-5", smol: "anthropic/claude-haiku-4-5" };
+  f.control("omp.modelRoles", { value: Object.fromEntries(Object.entries(models).map(([r, m]) => [r, `${m}:high`])) });
+  f.control("omp.models", { models: Object.entries(models).map(([r, selector]) => ({ selector, thinking: r === role ? levels : levelsOf[r] })) });
+};
+
+test("the Baseline Cell: --baseline-cell is saved, recorded in the receipt and printed with where it came from; a later run with no argument uses it", () => {
+  const f = fixture();
+  const r = f.run(["--session", f.session, "--baseline-cell", "task-medium"]);
+  assert.equal(r.status, 0, r.stdout + r.err);
+  assert.equal(f.receipt().baselineCell, "task-medium");
+  assert.equal(savedCell(f), "task-medium");
+  assert.ok(r.out.includes("baseline cell task-medium (from --baseline-cell)"), r.stdout);
+  const later = nextRun(f);
+  assert.equal(later.status, 0, later.stdout + later.err);
+  assert.equal(f.receipt().baselineCell, "task-medium");
+  assert.ok(later.out.includes("baseline cell task-medium (from the saved value)"), later.stdout);
+  assert.equal(later.out.some((l) => l.startsWith("notice: ")), false, "no notice when nothing is amiss");
+});
+
+test("the Baseline Cell: with none saved and none named it is slow-high, and --baseline-cell slow-high goes back to the default", () => {
+  const f = fixture();
+  const r = f.run();
+  assert.equal(r.status, 0, r.stdout + r.err);
+  assert.equal(f.receipt().baselineCell, "slow-high");
+  assert.equal(savedCell(f), null, "the default is not saved");
+  assert.ok(r.out.includes("baseline cell slow-high (from the default)"), r.stdout);
+  assert.equal(nextRun(f, ["--baseline-cell", "task-medium"]).status, 0);
+  const back = nextRun(f, ["--baseline-cell", "slow-high"]);
+  assert.equal(back.status, 0, back.stdout + back.err);
+  assert.equal(f.receipt().baselineCell, "slow-high");
+  assert.equal(savedCell(f), "slow-high", "the saved value is the default again");
+  assert.equal(nextRun(f).status, 0);
+  assert.equal(f.receipt().baselineCell, "slow-high", "and a later run reads it");
+});
+
+test("the Baseline Cell: an invalid argument is a notice, is not saved, and the run goes on to the saved value, else the default", () => {
+  for (const bad of ["task-hgih", "huge-high", "slow", "TASK-HIGH"]) {
+    const f = fixture();
+    const r = f.run(["--session", f.session, "--baseline-cell", bad]);
+    assert.equal(r.status, 0, `${JSON.stringify(bad)}: ${r.stdout}${r.err}`);
+    assert.equal(f.receipt().baselineCell, "slow-high", JSON.stringify(bad));
+    assert.equal(savedCell(f), null, `${JSON.stringify(bad)} is not saved`);
+    assert.ok(r.out.includes(`notice: --baseline-cell ${JSON.stringify(bad)} is not a Cell with an implementer definition: ignored, and not saved`), r.stdout);
+  }
+  const f = fixture();
+  assert.equal(f.run(["--session", f.session, "--baseline-cell", "task-medium"]).status, 0);
+  const r = nextRun(f, ["--baseline-cell", "task-hgih"]);
+  assert.equal(r.status, 0, r.stdout + r.err);
+  assert.equal(f.receipt().baselineCell, "task-medium", "the saved value is used");
+  assert.equal(savedCell(f), "task-medium", "and stands");
+  assert.ok(r.out.some((l) => l.startsWith("notice: --baseline-cell \"task-hgih\"")), r.stdout);
+});
+
+test("the Baseline Cell: a Cell with no implementer definition is no Baseline Cell, whatever its shape", () => {
+  const f = fixture();
+  // slow-minimal is a Cell (CELL) that no definition is shipped for.
+  const r = f.run(["--session", f.session, "--baseline-cell", "slow-minimal"]);
+  assert.equal(r.status, 0, r.stdout + r.err);
+  assert.equal(f.receipt().baselineCell, "slow-high");
+  assert.equal(savedCell(f), null);
+  assert.ok(r.out.some((l) => l.startsWith("notice: --baseline-cell \"slow-minimal\"")), r.stdout);
+});
+
+test("the Baseline Cell: an invalid saved value is a notice, the run uses slow-high and the file is left as it is", () => {
+  for (const text of ["{ not json", JSON.stringify({ cell: "nope-high" }), JSON.stringify({ cell: 7 }), JSON.stringify({ cell: "slow-minimal" }), "[]"]) {
+    const f = fixture();
+    mkdirSync(join(f.repo, ".fleet"), { recursive: true });
+    writeFileSync(SAVED(f), text);
+    const r = f.run();
+    assert.equal(r.status, 0, `${text}: ${r.stdout}${r.err}`);
+    assert.equal(f.receipt().baselineCell, "slow-high", text);
+    assert.equal(readFileSync(SAVED(f), "utf8"), text, `${text}: the file is left as it is`);
+    assert.ok(r.out.some((l) => /^notice: the saved Baseline Cell is invalid \(.*\): this run uses slow-high, and the file is left as it is$/.test(l)), `${text}: ${r.stdout}`);
+    assert.ok(r.out.includes("baseline cell slow-high (from the default)"), r.stdout);
+  }
+});
+
+test("the Baseline Cell: one the install cannot run resolves once to the nearest runnable level, a notice names both Cells, and the saved value stays as configured", () => {
+  const f = fixture();
+  installRunning(f, "task", ["low", "high", "xhigh", "max"]);       // task runs no `medium`
+  const r = f.run(["--session", f.session, "--baseline-cell", "task-medium"]);
+  assert.equal(r.status, 0, r.stdout + r.err);
+  assert.equal(f.receipt().baselineCell, "task-low", "downward first, the direction omp lowers to");
+  assert.equal(savedCell(f), "task-medium", "the saved value is what was configured");
+  assert.ok(r.out.includes("baseline cell task-low (from the substitute for task-medium, from --baseline-cell)"), r.stdout);
+  assert.ok(r.out.some((l) => l.startsWith("notice: the install does not run task-medium: this run's Baseline Cell is task-low")), r.stdout);
+  // The install runs it again: the saved value is the Baseline Cell, with no notice.
+  installRunning(f, "task", ["low", "medium", "high", "xhigh", "max"]);
+  const later = nextRun(f);
+  assert.equal(later.status, 0, later.stdout + later.err);
+  assert.equal(f.receipt().baselineCell, "task-medium");
+  assert.equal(later.out.some((l) => l.startsWith("notice: ")), false);
+  // An install that cannot be read leaves the configured Cell.
+  rmSync(join(f.stubs, "omp.models.json"));
+  assert.equal(nextRun(f).status, 0);
+  assert.equal(f.receipt().baselineCell, "task-medium", "an unreadable install is no reason to substitute");
+});
+
+test("the Baseline Cell: a role that runs no level the install can run keeps the configured Cell", () => {
+  const f = fixture();
+  installRunning(f, "task", []);
+  const r = f.run(["--session", f.session, "--baseline-cell", "task-medium"]);
+  assert.equal(r.status, 0, r.stdout + r.err);
+  assert.equal(f.receipt().baselineCell, "task-medium");
+  assert.equal(r.out.some((l) => l.startsWith("notice: the install does not run")), false);
+});
+
+test("the Baseline Cell: a run whose Baseline Cell differs from the last cost guard's says it is a switch; the same Cell says nothing", () => {
+  const f = fixture();
+  mkdirSync(join(f.repo, ".fleet"), { recursive: true });
+  writeFileSync(join(f.repo, ".fleet", "cost-guard.json"), JSON.stringify({ baseline: { cell: "slow-high" } }));
+  const same = f.run();
+  assert.equal(same.out.some((l) => l.includes("cost guard recorded")), false);
+  const switched = nextRun(f, ["--baseline-cell", "task-medium"]);
+  assert.equal(switched.status, 0, switched.stdout + switched.err);
+  const notice = switched.out.find((l) => l.startsWith("notice: the last cost guard recorded slow-high as its baseline"));
+  assert.ok(notice?.includes("this run's task-medium is a switch"), switched.stdout);
+});
+
+test("the Baseline Cell: a resume keeps the receipt's, takes a receipt that records none as slow-high, and an argument that replaces the saved value is saved with a notice and exit 0", () => {
+  const resumed = (recorded, args = []) => {
+    const f = fixture();
+    f.setRecord(RUN_AT);
+    f.setReceipt(stale(f, recorded === undefined ? {} : { baselineCell: recorded }));
+    return { f, r: f.run(["--session", f.session, ...args]) };
+  };
+  for (const [recorded, kept] of [["task-medium", "task-medium"], [undefined, "slow-high"]]) {
+    const { f, r } = resumed(recorded);
+    assert.equal(r.status, 0, r.stdout + r.err);
+    assert.equal(f.receipt().baselineCell, kept);
+    assert.equal(f.calls("rotate").length, 0, "it resumed");
+    assert.ok(r.out.includes(`baseline cell ${kept} (from this run's receipt)`), r.stdout);
+  }
+  const { f, r } = resumed("task-medium", ["--baseline-cell", "smol-low"]);
+  assert.equal(r.status, 0, "never an exit, unlike a resume that names another --objective");
+  assert.equal(f.receipt().baselineCell, "task-medium", "this run keeps the receipt's Cell");
+  assert.equal(savedCell(f), "smol-low", "the argument is saved");
+  assert.ok(r.out.some((l) => l.startsWith("notice: --baseline-cell smol-low is saved and applies from the next run: this run keeps task-medium")), r.stdout);
+  assert.equal(f.run(["--session", f.session, "--baseline-cell", "smol-low"]).out.some((l) => l.includes("applies from the next run")), false, "an argument the saved value already is says nothing");
+  // An invalid argument on a resume is a notice and nothing more.
+  const bad = resumed("task-medium", ["--baseline-cell", "nope-high"]);
+  assert.equal(bad.r.status, 0);
+  assert.equal(savedCell(bad.f), null);
+  assert.ok(bad.r.out.some((l) => l.startsWith("notice: --baseline-cell \"nope-high\"")), bad.r.stdout);
+});
+
+test("the Baseline Cell: a resumed receipt recording a value that is no Cell exits 3 naming it", () => {
+  for (const recorded of ["task-hgih", 7, null, ""]) {
+    const f = fixture();
+    f.setRecord(RUN_AT);
+    f.setReceipt(stale(f, { baselineCell: recorded }));
+    const before = readFileSync(f.receiptPath, "utf8");
+    const r = f.run();
+    assert.equal(r.status, 3, `${JSON.stringify(recorded)}: ${r.stdout}${r.err}`);
+    assert.ok(r.err.includes(`records the Baseline Cell ${JSON.stringify(recorded)}, which is not a Cell`), r.err);
+    assert.equal(readFileSync(f.receiptPath, "utf8"), before, "the receipt is left as it was");
   }
 });
 

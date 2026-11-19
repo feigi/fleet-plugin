@@ -501,7 +501,7 @@ test("router: a tripped cell is DEFAULT-ONLY, naming the cost guard and the cell
   assert.equal(r.action, "DEFAULT-ONLY");
   assert.equal(r.detail, "cost guard: smol-high $9.50 vs $31.00, fail 45% vs 29%, n=21/31; guard computed 2026-10-03T00:00:00.000Z");
   const retired = routerRowOf(guardJson({ verdict: "tripped", tripped: ["task-high"], retire: true }));
-  assert.match(retired.detail, /^cost guard: task-high .*; every non-default starting Cell tripped — the router retires; guard computed /);
+  assert.match(retired.detail, /^cost guard: task-high .*; every starting Cell but the baseline tripped under cost — the router retires; guard computed /);
 });
 
 test("router: a baseline short of its n is NO VERDICT, with the count and the n it needs", () => {
@@ -2224,7 +2224,7 @@ const SCRIPT = fileURLToPath(new URL("../plugin/scripts/fleet-tick.mjs", import.
 // or transitive — and ledger.mjs with its own, because the tick reads the
 // ledger through `ledger.mjs read`. An unlisted sibling is a module-not-found
 // at startup: exit 1, a shape no case below expects.
-const SIBLING_MODULES = ["arg.mjs", "closing-refs.mjs", "fleet-dir.mjs", "fleet-state.mjs", "gh-aliased-read.mjs", "git-env.mjs", "is-cli.mjs", "label-map.mjs", "ledger.mjs", "ledger-grammar.mjs", "main-checkout.mjs", "owned-pr.mjs", "phase0-receipt.mjs", "pid-lock.mjs", "proc.mjs", "release-labels.mjs", "report-files.mjs", "report-schema.mjs", "run-records.mjs", "ticketless.mjs"].map(
+const SIBLING_MODULES = ["arg.mjs", "baseline-cell.mjs", "closing-refs.mjs", "fleet-dir.mjs", "fleet-state.mjs", "gh-aliased-read.mjs", "git-env.mjs", "is-cli.mjs", "label-map.mjs", "ledger.mjs", "ledger-grammar.mjs", "main-checkout.mjs", "owned-pr.mjs", "phase0-receipt.mjs", "pid-lock.mjs", "proc.mjs", "release-labels.mjs", "report-files.mjs", "report-schema.mjs", "run-records.mjs", "ticketless.mjs", "trip-reasons.mjs"].map(
   (m) => [m, fileURLToPath(new URL(`../plugin/scripts/${m}`, import.meta.url))],
 );
 

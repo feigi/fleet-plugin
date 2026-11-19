@@ -662,7 +662,7 @@ const CHANGED = [
   ],
   [
     "Add `--in-flight <n>` when `$ARGUMENTS` gave one, `--plugin-checkout <dir>` when this workspace tracks no `plugin/…` of its own, `--spend-dir <dir>` to name the directory the cockpit's spend panel reads, and `--workflow <name>` or `--declare-no-ci` when the repository has no workflow named CI.",
-    "Add `--in-flight <n>`, `--objective <o>` and `--merge` or `--no-merge` as `$ARGUMENTS` gave them, `--spend-dir <dir>` for the spend panel, and `--workflow <name>` or `--declare-no-ci` when the repository has no workflow named CI.",
+    "Add `--in-flight <n>`, `--objective <o>`, `--baseline-cell <c>` and `--merge` or `--no-merge` as `$ARGUMENTS` gave them, `--spend-dir <dir>` for the spend panel, and `--workflow <name>` or `--declare-no-ci` for no CI workflow.",
   ],
   // The instrument pin certifies the Install root, and phase 0 lost its
   // `--plugin-checkout` flag with the `--audit` it passed through (#3845).
@@ -674,7 +674,7 @@ const CHANGED = [
   // what a row with neither token runs.
   [
     "The tier lives in that definition's frontmatter (`agents/fleet-implementer-<cell>.agent.md`; `slow-high`, the policy cell, for a row with no `tier=`), which is what an omitted `model` takes first — the session's tier applies only when the definition names none, and a member dispatched with `model` set does not get the declared tier back.",
-    "The tier lives in that definition's frontmatter (`agents/fleet-implementer-<cell>.agent.md`; `slow-high`, the policy cell, for a row with no `tier=` or `cell=`), which is what an omitted `model` takes first — the session's tier applies only when the definition names none, and a member dispatched with `model` set does not get the declared tier back.",
+    "The tier lives in that definition's frontmatter (`agents/fleet-implementer-<cell>.agent.md`; `slow-high`, the Cell a bare row runs, for a row with no `tier=` or `cell=`), which is what an omitted `model` takes first — the session's tier applies only when the definition names none, and a member dispatched with `model` set does not get the declared tier back.",
   ],
   // `route=` is retired (#3893): the router's whole line, REASON with it, is
   // the Pull's `## Routed` entry, written in the row step's one ledger write.

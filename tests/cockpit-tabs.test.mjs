@@ -527,7 +527,7 @@ const ceGuard = (cells = [cellEntry("slow-high"), cellEntry("task-high", { gener
   older: [{ generation: "claude-sonnet-5-4", n_merged: 8, n_claims: 8, n_failed: 1, fail_rate: 0.125, mean_usd: 9 }] })]) => ({
   status: "ok",
   guard: { computed_at: "2026-10-26T19:17:33.000Z", window_start: "2026-10-03", min_n: 20, trip_points: 15, verdict: "ok", tripped: [], retire: false,
-    baseline: { cell: "slow-high", generation: "claude-opus-5", n: 69, mean_usd: 14.9, fail_rate: 0.1159 }, cells },
+    baseline: { cell: "slow-high", generation: "claude-opus-5", n: 69, mean_usd: 14.9, fail_rate: 0.1159 }, cells: cells.map((c) => ({ shared_merged: { cell: c.n, base: 69 }, ...c })) },
 });
 const ceRoles = { value: { slow: "anthropic/claude-opus-5:high", task: "anthropic/claude-sonnet-5-5:high", smol: "anthropic/claude-haiku-5-5:auto" }, readAt: 1, error: null };
 const ceAgents = { list: [{ file: "fleet-finisher.agent.md", model: '"@slow:high"' }], error: null };
@@ -1004,7 +1004,7 @@ const fitRead = (o = {}) => ({
       rows: { cost: { "*": "task-high" }, speed: { "*": "task-high" } },
       reasons: { cost: { "*": fitReason }, speed: { "*": fitReason } },
       estimates: { "*": { "task-high": { generation: "claude-sonnet-5-5", merged: 67 } } },
-      guard: { tripped: [], n: { "slow-high": 69, "task-high": 69, "smol-high": 12 } },
+      guard: { tripped: [], n: { "slow-high": 69, "task-high": 69, "smol-high": 12 }, shared: { "task-high": { cell: 69, base: 69 }, "smol-high": { cell: 12, base: 69 } } },
     },
     ...o,
   },
@@ -1055,7 +1055,7 @@ test("a role whose model changed and restarted burn-in shows its notice in the v
   fit.fit.table = {
     ...fit.fit.table,
     estimates: { "*": { "task-high": { generation: "claude-sonnet-5-5", merged: 3, older: { "claude-sonnet-5-4": { merged: 30 } } } } },
-    guard: { tripped: [], n: { "slow-high": 69, "task-high": 3, "smol-high": 12 } },
+    guard: { tripped: [], n: { "slow-high": 69, "task-high": 3, "smol-high": 12 }, shared: { "task-high": { cell: 3, base: 69 }, "smol-high": { cell: 12, base: 69 } } },
   };
   render(model({ cellEvidence: policyEvidence({ guard: besideGuard(), fit }) }));
   assert.ok(textOf(document.getElementById("cells-rows").children[1]).includes("task-high's model changed to claude-sonnet-5-5, after claude-sonnet-5-4: burn-in restarted, at 3 of the 20 merged PRs it needs"));

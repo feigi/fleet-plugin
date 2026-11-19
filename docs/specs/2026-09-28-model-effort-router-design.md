@@ -484,6 +484,7 @@ optional); `.fleet/cost-guard.json` (gitignored — `computed_at`,
 `tripped[]`, `verdict: ok|tripped|none`, `retire` (true when every
 non-default stage-1 cell tripped before any row of either Objective's set
 adopted one), `min_n` (the n the baseline and every judged cell need),
+*Amended (#4463): `baseline.cell` is the repository's Baseline Cell (`slow-high` until it names its own); each `tripped[]` entry is `{ cell, on: [<reason>, …] }`, `on` listing `floor`, `usd` and `minutes` (Work time per merged PR at or above the Baseline Cell's); each `cells[]` entry records `shared_merged` (`{ cell, base }`, its merged PRs and the Baseline Cell's over the stretches they share) and `mean_minutes`; `retire` is true when every starting Cell but the Baseline Cell is excluded under `cost` (`floor` or `usd`) before any row of either set adopted a Cell other than the Baseline Cell.*
 `trip_points` (the fail-rate margin the floor applies, in points) and
 `tsv_blobs` (the git blob id of each TSV the guard read, keyed by the path it
 read it at, computed in-process)). Each `cells[]` entry is the cell's newest
@@ -756,6 +757,7 @@ the rest the lower fail rate, in counts, wins, then the lower $ per merged
 PR, then the name. No qualifier: `slow-high`. The fit holds the quality
 floor per row and the guard holds it pooled: a cell refused a row keeps
 its exploration draws, and only the guard's trip removes it from the draw.
+*Amended (#4463): the adoption rule's base is the Baseline Cell, not `slow-high`; a candidate is a Cell of the Baseline Cell's starting set that the run's Objective does not exclude (`cost` leaves out the Cells tripped on `floor` or `usd`, `speed` those tripped on `floor` or `minutes`), and a `speed` row starts from the `cost` row's Cell as `speed`'s exclusions leave it, the Baseline Cell where `speed` excludes it.*
 `router-table.json`'s `reasons` records, per row, its cell and why, and
 per candidate its verdict, whether it is under the floor, the floor's bar
 and its range, plus the range of each pair of qualifiers. *Amended (#3680,
@@ -827,6 +829,7 @@ rows[objective][stratum] ?? rows[objective]["*"]` → if that cell ∈ `tripped[
 `slow-high` (`table-cell-tripped`; auto-revert, the next fit drops the
 row) → guard eligibility (`tripped[]` leave E; missing/unparseable guard
 ⇒ default only, `guard-missing`) → draw (burn-in or 5k) → `chosen_cell`.
+*Amended (#4463): the substituted Cell is the Baseline Cell, and the cell a row names is replaced only when the run's own Objective excludes it (`table-cell-tripped`); `TRIPPED` names the Cells that Objective excludes, and `guard-tripped` is set only when the draw's pool held one.*
 **Always exit 0 with a full line** on every data degradation. **Exit 2
 only for usage errors** (bad args, unreadable/invalid `router-table.json`)
 — a repo bug; the controller does not dispatch and emits an event per
@@ -902,6 +905,7 @@ holds a definition for — downward first, then upward — and `slow-high` again
 there is none; it replaces `slow-high` for a missing guard, a tripped row, an
 unrunnable row and the exploration centre alike. An `install` that was not read
 (null) has no unrunnable Cell and keeps `slow-high`.*
+*Amended (#4463): the default Cell is derived from the run's Baseline Cell, not from `slow-high`: the Baseline Cell while its role runs its level, else the nearest level of its role that `install` runs and has a definition for, downward first. `slow-high` remains only the Cell a ledger row with neither `tier=` nor `cell=` runs (the bare-row Cell).*
 
 Guard/table asymmetry, stated on purpose: the guard is pooled, the table
 per-stratum; a cell evicted pooled cannot win a stratum. Conservative by

@@ -146,7 +146,7 @@ import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { LabelMapUnreadable, readLabelMap } from "./label-map.mjs";
-import { EXCLUDED_REASON, POLICY_CELL, memberTokens, parseRouting, parseToken, premisesOf, priorUse, pullEnded, readRetired, replacementName, settledMemberTokens, tierValues } from "./ledger-grammar.mjs";
+import { EXCLUDED_REASON, BARE_ROW_CELL, memberTokens, parseRouting, parseToken, premisesOf, priorUse, pullEnded, readRetired, replacementName, settledMemberTokens, tierValues } from "./ledger-grammar.mjs";
 import { sessionFromReceipt } from "./phase0-receipt.mjs";
 import { LINE_REF, briefPaths, briefText, outOfScope, strandedRuling, ticketText } from "./ticket-text.mjs";
 
@@ -1008,7 +1008,7 @@ class Pull {
     // The Routing itself goes to `## Routed` in the same write. The row's
     // settled member tokens are carried ahead of the member: a rewrite drops
     // none, and the earlier `tier=` and `cell=` words are the earlier member's.
-    const carrier = draw !== "-" ? ` · tier=${cell}` : cell !== POLICY_CELL ? ` · cell=${cell}` : "";
+    const carrier = draw !== "-" ? ` · tier=${cell}` : cell !== BARE_ROW_CELL ? ` · cell=${cell}` : "";
     const text = [...carriedTokens(this.ledgerRows(), st.ticket), `${st.member}${carrier}`].join(" · ");
     const r = this.script("row", "ledger.mjs", ["row", String(st.ticket), text, "--routing", st.route.line]);
     if (r.status !== 0) return this.stop(withText(`ledger.mjs row failed (${r.how})`, r));

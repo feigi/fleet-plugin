@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // The per-cell readout: how many within-session comparisons each implementer
-// cell has against the policy cell, and whether that is enough to read it.
+// cell has against the Baseline Cell, and whether that is enough to read it.
 //
-//   cell-readout.mjs [--ticket-features <tsv>] [--member-outcomes <tsv>]
+//   cell-readout.mjs [--baseline-cell <cell>] [--ticket-features <tsv>] [--member-outcomes <tsv>]
 //
 // Inputs default to docs/metrics/ under the working directory. A Pull is a
 // ticket-features.tsv row; what it ran is the member-outcomes.tsv row with the
@@ -20,8 +20,10 @@
 // was the role's target at dispatch is recorded in neither file; that half of
 // the tier check is the run ledger's, not this readout's.
 //
-// COMPARISON. For a cell X other than slow-high, a comparison is one session
-// holding at least one admissible X row and at least one admissible slow-high
+// COMPARISON. For a cell X other than the Baseline Cell — `--baseline-cell`,
+// else the one the run's receipt records, else the saved value, else slow-high
+// — a comparison is one session
+// holding at least one admissible X row and at least one admissible Baseline Cell
 // row whose (`dispatch_model`, `effort`) differ from that X row's. A session
 // counts once however many rows it holds, and its date is its member-outcomes
 // `run_date`; a blank `run_date` means unknown, so that session is still a
@@ -47,11 +49,14 @@
 // malformed input, with nothing on stdout.
 
 import { readFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { makeDie, defineFlags } from "./arg.mjs";
 import { isCLI } from "./is-cli.mjs";
-import { POLICY_CELL } from "./ledger-grammar.mjs";
+import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
+import { CELL, DEFAULT_BASELINE_CELL } from "./ledger-grammar.mjs";
 import { formatTsv as formatMemberTsv, parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
 import { admissibleRow, parseFeatures } from "./pull-attribution.mjs";
+import { baselineIn } from "./phase0-receipt.mjs";
 
 const NAME = "cell-readout";
 export const GATE = Object.freeze({ comparisons: 10, runDates: 5 });
@@ -96,7 +101,7 @@ function indexMembers(members) {
 }
 
 /**
- * `cells`: one entry per cell other than the policy cell that has a
+ * `cells`: one entry per cell other than the Baseline Cell (`baseline`) that has a
  * ticket-features row, `{ cell, comparisons, runDates, dates, models, gated }`,
  * sorted by cell. `dates` is the comparisons' distinct run_dates, sorted;
  * `models` maps each `dispatch_model` of the cell's admissible rows to its row
@@ -104,18 +109,18 @@ function indexMembers(members) {
  * two ticket-features rows of one session+agent naming different cells, and on
  * a member-outcomes session+agent repeated with different fields.
  */
-export function readout({ features, members }) {
+export function readout({ features, members, baseline = DEFAULT_BASELINE_CELL }) {
   const byKey = indexMembers(members);
   const pulls = pullsOf(features);
   const sessions = new Map();
   const cells = new Map();
   let unjoined = 0;
   for (const p of pulls.values()) {
-    if (p.chosen_cell !== POLICY_CELL && !cells.has(p.chosen_cell)) cells.set(p.chosen_cell, new Map());
+    if (p.chosen_cell !== baseline && !cells.has(p.chosen_cell)) cells.set(p.chosen_cell, new Map());
     if (!byKey.has(key(p.session, p.agent))) unjoined++;
     const m = admissibleMember(p, byKey);
     if (!m) continue;
-    if (p.chosen_cell !== POLICY_CELL) cells.get(p.chosen_cell).set(m.dispatchModel, (cells.get(p.chosen_cell).get(m.dispatchModel) ?? 0) + 1);
+    if (p.chosen_cell !== baseline) cells.get(p.chosen_cell).set(m.dispatchModel, (cells.get(p.chosen_cell).get(m.dispatchModel) ?? 0) + 1);
     if (!sessions.has(p.session)) sessions.set(p.session, { runDate: m.run_date, rows: [] });
     sessions.get(p.session).rows.push({ cell: p.chosen_cell, model: m.dispatchModel, effort: m.effort });
   }
@@ -124,7 +129,7 @@ export function readout({ features, members }) {
     let comparisons = 0;
     const dates = new Set();
     for (const { runDate, rows } of sessions.values()) {
-      const base = rows.filter((r) => r.cell === POLICY_CELL);
+      const base = rows.filter((r) => r.cell === baseline);
       const compared = rows.some((x) => x.cell === cell && base.some((s) => s.model !== x.model || s.effort !== x.effort));
       if (!compared) continue;
       comparisons++;
@@ -147,7 +152,7 @@ function formatModels(models) {
 function main() {
   const die = makeDie(NAME);
   const { arg, sweep, stray } = defineFlags(die, {
-    flags: { "ticket-features": "value", "member-outcomes": "value" },
+    flags: { "baseline-cell": "value", "ticket-features": "value", "member-outcomes": "value" },
   });
   sweep();
   stray();
@@ -174,13 +179,22 @@ function main() {
     return rows;
   });
 
-  const { cells, unjoined } = readout({ features, members });
+  let baseline = arg("baseline-cell");
+  if (baseline === null) {
+    try {
+      baseline = baselineIn(dirname(fleetFile("cost-guard.json"))).cell;
+    } catch (e) {
+      if (!(e instanceof FleetDirUnresolvable)) throw e;
+      baseline = DEFAULT_BASELINE_CELL;
+    }
+  } else if (!CELL.test(baseline)) die(`--baseline-cell ${baseline} is not a Cell`);
+  const { cells, unjoined } = readout({ features, members, baseline });
   const lines = [];
   const notes = [];
   if (unjoined > 0) {
     notes.push(`${unjoined} ticket-features row${unjoined === 1 ? " has" : "s have"} no member-outcomes row — never admissible`);
   }
-  if (cells.length === 0) notes.push(`no cell other than ${POLICY_CELL} has a ticket-features row`);
+  if (cells.length === 0) notes.push(`no cell other than ${baseline} has a ticket-features row`);
   for (const c of cells) {
     if (c.gated) lines.push(`${c.cell} ${c.comparisons} ${c.runDates} ${formatModels(c.models)}`);
     else notes.push(`${c.cell} below the gate: ${c.comparisons} comparisons across ${c.runDates} run_dates (needs ${GATE.comparisons} across ${GATE.runDates})`);

@@ -248,7 +248,7 @@ test("each reader's reason for refusing is the reader's own rule: every fault it
   assert.deepEqual(parseGuard({ tripped: [], cells: "x" }), { ok: false, why: "`cells` is not a list" });
   assert.deepEqual(parseGuard({ tripped: "x", cells: [] }), { ok: false, why: "`tripped` is not a list" });
   assert.deepEqual(parseGuard({ tripped: [], cells: [{ cell: "slow-high" }] }), { ok: false, why: "a `cells` entry has no string `cell` or no finite `n`" });
-  assert.deepEqual(parseGuard({ tripped: [{ cell: "slow-high" }, "slow-high"], cells: [{ cell: "slow-high", n: 1 }] }).guard, { tripped: ["slow-high"], n: { "slow-high": 1 }, window_start: null });
+  assert.deepEqual(parseGuard({ tripped: [{ cell: "slow-high" }, "slow-high"], cells: [{ cell: "slow-high", n: 1 }] }).guard, { tripped: [{ cell: "slow-high", on: null }], n: { "slow-high": 1 }, shared: {}, window_start: null });
 });
 
 // -- the alert list -------------------------------------------------------------

@@ -990,3 +990,11 @@ test("failedReviewLaunches names each reviewer runner whose launch ended =failed
   ];
   assert.deepEqual(failedReviewLaunches(rows), ["review-pr-6", "review-pr-8-b"]);
 });
+
+test("a bare row still runs slow-high, whatever Baseline Cell routed the Pull: the bare-row Cell is a constant, and a routed Cell that differs is written cell=", async () => {
+  const { BARE_ROW_CELL, DEFAULT_BASELINE_CELL } = await import("../plugin/scripts/ledger-grammar.mjs");
+  assert.equal(BARE_ROW_CELL, "slow-high");
+  assert.equal(DEFAULT_BASELINE_CELL, "slow-high");
+  assert.equal(expectedDefinition("impl-7"), "fleet-implementer-slow-high");
+  assert.equal(expectedDefinition("impl-7 · cell=task-medium"), "fleet-implementer-task-medium");
+});

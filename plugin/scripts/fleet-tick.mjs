@@ -520,8 +520,9 @@ function shortlistRows(s) {
 }
 
 // The cost guard's verdict, as pr-cost.mjs --guard wrote it: OK, DEFAULT-ONLY
-// (a cell tripped, or no readable guard file — the router then runs the
-// default cell alone), or NO VERDICT (the baseline is short of its n). The
+// (a cell tripped, or no readable guard file — the router then holds the
+// tripped Cells back, and with no guard runs the Baseline Cell alone), or NO VERDICT (the
+// Baseline Cell is short of its n). The
 // controller has nothing to do about any of them inside a run, so the row
 // never acts; it is here so the verdict is printed by code, not recalled.
 // Every verdict carries the guard's own `computed_at`: a refresh that failed
@@ -541,8 +542,15 @@ export function routerRows(s) {
   const usd = (x) => (x === null ? "n/a" : `$${x.toFixed(2)}`);
   const vs = (c) => `${c.cell} ${usd(c.mean_usd)} vs ${usd(b.mean_usd)}, fail ${pct(c.fail_rate)} vs ${pct(b.fail_rate)}, n=${c.n}/${b.n}`;
   if (verdict === "tripped") {
-    const retired = g.guard.retire ? "; every non-default starting Cell tripped — the router retires" : "";
-    return row("DEFAULT-ONLY", `cost guard: ${cells.filter((c) => tripped.includes(c.cell)).map(vs).join("; ")}${retired}; ${age}`);
+    const retired = g.guard.retire ? "; every starting Cell but the baseline tripped under cost — the router retires" : "";
+    // Each tripped Cell with the reasons it tripped on, and for a `minutes` trip its minutes per merged PR beside the baseline's.
+    const minutes = (x) => (typeof x === "number" ? `${x.toFixed(1)} min` : "n/a");
+    const why = (e) => {
+      const c = cells.find((x) => x.cell === e.cell);
+      const words = vs(c).replace(c.cell, tripWords(e));
+      return e.on !== null && e.on.includes("minutes") ? `${words}, ${minutes(c.mean_minutes)} vs ${minutes(b.mean_minutes)} work time per merged PR` : words;
+    };
+    return row("DEFAULT-ONLY", `cost guard: ${tripped.map(tripEntry).map(why).join("; ")}${retired}; ${age}`);
   }
   const others = cells.filter((c) => c.cell !== b.cell);
   return row("OK", `${others.length ? others.map(vs).join("; ") : `baseline ${b.cell} ${usd(b.mean_usd)}, n=${b.n}`}; ${age}`);
@@ -562,10 +570,10 @@ export function costGuardFault(guard) {
   if (!Array.isArray(guard.cells)) return "`cells` is not a list";
   if (!guard.cells.every(cellShaped)) return `a \`cells\` entry is not ${cellWords}`;
   if (!Number.isInteger(guard.min_n)) return "`min_n` is not an integer";
-  if (!Array.isArray(guard.tripped) || !guard.tripped.every((c) => typeof c === "string")) return "`tripped` is not a list of Cell names";
+  if (!Array.isArray(guard.tripped) || !guard.tripped.every((t) => typeof t === "string" || (t !== null && typeof t === "object" && typeof t.cell === "string"))) return "`tripped` is not a list of Cell names";
   // The verdict is "tripped" exactly when a cell is named, and only a reported cell can be named.
   if ((guard.verdict === "tripped") !== (guard.tripped.length > 0)) return "`verdict` and `tripped` disagree";
-  if (!guard.tripped.every((c) => guard.cells.some((x) => x.cell === c))) return "`tripped` names a Cell that `cells` does not report";
+  if (!guard.tripped.every((t) => guard.cells.some((x) => x.cell === tripEntry(t).cell))) return "`tripped` names a Cell that `cells` does not report";
   if (!(guard.retire === undefined || typeof guard.retire === "boolean")) return "`retire` is not a boolean";
   return null;
 }
@@ -1751,6 +1759,7 @@ import { judgeRecord, ProcUnreadable } from "./proc.mjs";
 import { reportFamily, readReport, reportPath, reportsDir } from "./report-files.mjs";
 import { ownClosingIssues } from "./closing-refs.mjs";
 import { GH_LOGIN_ARGS, isOwnedPr, loginOf, ownershipReadable } from "./owned-pr.mjs";
+import { tripEntry, tripFault, tripWords } from "./trip-reasons.mjs";
 
 const NAME = "fleet-tick";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));

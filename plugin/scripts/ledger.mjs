@@ -74,7 +74,7 @@ import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits, writeAll } from "./arg.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { readReceipt } from "./phase0-receipt.mjs";
-import { parseMember, parseToken, memberTokens, nextMergeBot, sessionMemberNames, priorUse, replacementName, liveOnLedger, settledOnLedger, retiredOnLedger, retiredName, readRetired, agentDefinition, expectedDefinition, CELL, POLICY_CELL, tierValues, cellValues, decidingCell, rowPr, rowNums, rowWriteRefusal, isReviewToken, addedReviewToken, isDispositionsWord, gateVerdictWriter, gateVerdictRefusal, settledMemberRefusal, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, HALT_CAUSES, ROWS, DISPATCHED, ROUTED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, CLOSEOUT_RECEIPT, closeoutArchiveName, BRIEFS, briefsArchiveName, memberRole, parseDispatchedEntry, dispatchedEntry, parseRouting, parseRoutedEntry, routedEntry, headerRe, escapeText, ledgerSection, nextReviewerName, isOmpSessionDirName } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, nextMergeBot, sessionMemberNames, priorUse, replacementName, liveOnLedger, settledOnLedger, retiredOnLedger, retiredName, readRetired, agentDefinition, expectedDefinition, CELL, BARE_ROW_CELL, tierValues, cellValues, decidingCell, rowPr, rowNums, rowWriteRefusal, isReviewToken, addedReviewToken, isDispositionsWord, gateVerdictWriter, gateVerdictRefusal, settledMemberRefusal, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, HALT_CAUSES, ROWS, DISPATCHED, ROUTED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, CLOSEOUT_RECEIPT, closeoutArchiveName, BRIEFS, briefsArchiveName, memberRole, parseDispatchedEntry, dispatchedEntry, parseRouting, parseRoutedEntry, routedEntry, headerRe, escapeText, ledgerSection, nextReviewerName, isOmpSessionDirName } from "./ledger-grammar.mjs";
 import { deriveRun, foldLedger, liveFixers, LedgerError, labelOffMember, CONFLICT_HOLD, PARKED } from "./fleet-tick.mjs";
 import { stateFileIn, readState, writeState, assessBeat, stallsAt } from "./fleet-state.mjs";
 import { processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "./proc.mjs";
@@ -3507,7 +3507,7 @@ function badLabelOff(words) {
 }
 
 // The cell a row's implementer runs at — its `tier=`, else its `cell=`, or
-// POLICY_CELL on a row with neither — read the way `dispatch` reads it: null
+// BARE_ROW_CELL on a row with neither — read the way `dispatch` reads it: null
 // for a row whose deciding values conflict or name no
 // agents/<definition>.agent.md, which `dispatch` refuses, so such a row has no
 // draw to bind.
@@ -3549,7 +3549,7 @@ function cellChangeRefusal(oldLine, line) {
   const cell = runnableCell(oldLine);
   if (cell === null) return null;
   const tiers = [...new Set(decidingCell(line).values)];
-  const to = tiers.length === 0 ? POLICY_CELL : tiers.join(" and ");
+  const to = tiers.length === 0 ? BARE_ROW_CELL : tiers.join(" and ");
   if (to === cell) return null;
   const member = unsettledImplementer(oldLine);
   if (member === null) return null;

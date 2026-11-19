@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Phase 0 as one command: the run's start sequence, in order, with a receipt.
 //
-//   phase0.mjs [--session <dir>] [--in-flight n] [--objective cost|speed]
+//   phase0.mjs [--session <dir>] [--in-flight n] [--objective cost|speed] [--baseline-cell <cell>]
 //              [--merge | --no-merge] [--spend-dir <dir>]
 //              [--workflow <name> | --declare-no-ci]
 //
@@ -125,7 +125,7 @@
 // THE RECEIPT is `.fleet/phase0.json` (resolved through fleet-dir.mjs, so a
 // worktree and the main checkout name one file):
 //
-//   { run, session, scratch, inFlight, objective, merge, pluginVersion,
+//   { run, session, scratch, inFlight, objective, baselineCell, merge, pluginVersion,
 //     steps: { <name>: { status, at, output } } }
 //
 // `status` is ok, pending, failed, drift or unanswered; `at` an ISO time;
@@ -142,6 +142,26 @@
 // default when it records none — and a resume whose `--objective` names the
 // other one exits 2 naming both, leaving the receipt as it was. A resumed
 // receipt recording a value that is not an Objective exits 3 naming it.
+// `baselineCell` is the run's Baseline Cell, the Cell the router starts from, the
+// cost guard compares every other Cell with and the quality floor reads, worked
+// out once, when the receipt is written: `--baseline-cell` when it is valid
+// (a Cell with an implementer definition), else the value saved in
+// `.fleet/baseline-cell.json`, else `slow-high`. A valid argument is saved and
+// binds every later run until a run names another; `--baseline-cell slow-high`
+// goes back to the default. Phase 0 never refuses and never asks about it: an
+// invalid argument is a notice, is not saved, and the run goes on to the saved
+// value; an invalid saved value is a notice, the run uses `slow-high` and the
+// file is left as it is. A Baseline Cell the install cannot run is replaced for
+// the run by the nearest level of its role the install runs and has a
+// definition for (ticket-router.mjs's defaultCellOf), a notice naming both
+// Cells, the saved value unchanged. Every phase 0 prints the Baseline Cell it
+// runs and where it came from, and a notice when it differs from the one the
+// last cost guard recorded: a switch, after which the guard and the Fit compare a Cell
+// with the Baseline Cell only over the stretches both were drawn in. A resumed
+// receipt keeps its `baselineCell` — `slow-high` when it records none — for the
+// rest of the run, since the guard and the Fit its `metrics` step computed
+// stand; a valid argument is still saved, and a notice says it applies from the
+// next run. A resumed receipt recording a value that is no Cell exits 3 naming it.
 // `merge` is whether the run's merge bot merges: `false` under `--no-merge`,
 // `true` under `--merge` or with neither (MERGE_DEFAULT in
 // phase0-receipt.mjs). `--merge` and `--no-merge` together exit 2. Like the
@@ -213,9 +233,11 @@ import { readState, stateFileIn } from "./fleet-state.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { GH_LOGIN_ARGS, isOwnedPr, loginOf, ownershipReadable } from "./owned-pr.mjs";
-import { OBJECTIVES, RECEIPT, RECEIPT_HELD, archiveStamp, receiptArchiveName, rowNums } from "./ledger-grammar.mjs";
+import { CELL, DEFAULT_BASELINE_CELL, OBJECTIVES, RECEIPT, RECEIPT_HELD, archiveStamp, receiptArchiveName, rowNums } from "./ledger-grammar.mjs";
 import { ancestry, controllerOf, processSource, ProcUnreadable } from "./proc.mjs";
 import { IN_FLIGHT_DEFAULT, MERGE_DEFAULT, OBJECTIVE_DEFAULT } from "./phase0-receipt.mjs";
+import { definedCells, isBaselineCell, readSavedBaseline, resolveBaselineCell, saveBaseline } from "./baseline-cell.mjs";
+import { defaultCellOf, readInstall } from "./ticket-router.mjs";
 import { readRecipe } from "./recipe-read.mjs";
 import { gather, recordChanges, refusedLine, unclosedRecords } from "./run-records.mjs";
 
@@ -711,11 +733,67 @@ function writeReceipt(path, receipt) {
 
 const capped = (s) => (s.length > OUTPUT_MAX ? `…${s.slice(-(OUTPUT_MAX - 1))}` : s);
 
+// The Cell the last cost guard recorded as its baseline, or null when there is no guard to read it from.
+function guardBaseline(fleetDir) {
+  try {
+    const cell = JSON.parse(readFileSync(join(fleetDir, "cost-guard.json"), "utf8"))?.baseline?.cell;
+    return typeof cell === "string" ? cell : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The run's Baseline Cell, worked out once: `{ cell, source, notices }`. A new run resolves it
+ * (baseline-cell.mjs's resolveBaselineCell) off `named`, `--baseline-cell`'s value or null, the value saved in
+ * `fleetDir` and what the install runs, and saves a valid argument. A resumed run keeps its receipt's
+ * (`slow-high` when it records none), since the guard and the Fit its `metrics` step computed stand; a valid
+ * argument is still saved, and a notice says it applies from the next run. Never refuses and never asks: what it
+ * has to say is a notice, among them that the Cell differs from the one the last cost guard recorded, a switch.
+ */
+function baselineCellOf({ resumed, previous, named, fleetDir }) {
+  const defined = definedCells();
+  const saved = readSavedBaseline(fleetDir, defined);
+  const save = (cell) => {
+    try {
+      saveBaseline(fleetDir, cell);
+      return null;
+    } catch (e) {
+      return `could not save ${cell} as the Baseline Cell (${e.code ?? e.message}): it binds this run only`;
+    }
+  };
+  let result;
+  if (resumed) {
+    const cell = previous.baselineCell ?? DEFAULT_BASELINE_CELL;
+    result = { cell, source: "this run's receipt", notices: [] };
+    if (named !== null && !isBaselineCell(named, defined)) {
+      result.notices.push(`--baseline-cell ${JSON.stringify(named)} is not a Cell with an implementer definition: ignored, and not saved`);
+    } else if (named !== null && !(saved.state === "ok" && saved.cell === named)) {
+      const failed = save(named);
+      result.notices.push(failed ?? `--baseline-cell ${named} is saved and applies from the next run: this run keeps ${cell}, as its receipt records`);
+    }
+  } else {
+    // What the install runs is read live, as `route` reads it; a read that fails leaves the configured Cell.
+    const { install } = readInstall();
+    const resolved = resolveBaselineCell({ arg: named, saved, defined, substitute: (cell) => (install === null ? cell : defaultCellOf(install, cell)) });
+    result = { cell: resolved.cell, source: resolved.source, notices: resolved.notices };
+    if (resolved.save !== null) {
+      const failed = save(resolved.save);
+      if (failed !== null) result.notices.push(failed);
+    }
+  }
+  const last = guardBaseline(fleetDir);
+  if (last !== null && last !== result.cell) {
+    result.notices.push(`the last cost guard recorded ${last} as its baseline: this run's ${result.cell} is a switch — no trip carries across it, every Cell not drawn beside ${result.cell} is unjudged, and burn-in resumes until the starting set is judged against it`);
+  }
+  return result;
+}
+
 function main() {
   const die = makeDie(NAME);
   const F = defineFlags(die, {
     flags: {
-      session: "value", "in-flight": "value", objective: "value", merge: "bool", "no-merge": "bool",
+      session: "value", "in-flight": "value", objective: "value", "baseline-cell": "value", merge: "bool", "no-merge": "bool",
       "spend-dir": "value", workflow: "value", "declare-no-ci": "bool",
     },
   });
@@ -836,6 +914,15 @@ function main() {
     die(`${flag(mergeNamed)}: this run's receipt ${receiptPath} records ${keptMerge ? "merge" : "no-merge"}, fixed for the run — run phase 0 again without ${flag(mergeNamed)}, or with ${flag(keptMerge)}`);
   }
   const merge = keptMerge ?? mergeNamed ?? MERGE_DEFAULT;
+  // The Baseline Cell is fixed for the run the same way: a resumed receipt's stands, and one that records none
+  // resumes as `slow-high`. One recording anything but a Cell is refused. It never refuses and never asks
+  // otherwise: what it has to say is a notice.
+  if (resumed && previous.baselineCell !== undefined && !(typeof previous.baselineCell === "string" && CELL.test(previous.baselineCell))) {
+    process.stderr.write(`${NAME}: this run's receipt ${receiptPath} records the Baseline Cell ${JSON.stringify(previous.baselineCell)}, which is not a Cell — set it to the Cell this run began with and re-run\n`);
+    process.exitCode = 3;
+    return;
+  }
+  const baseline = baselineCellOf({ resumed, previous, named: F.arg("baseline-cell"), fleetDir });
   if (rotated && !resumed) {
     if (existsSync(held)) {
       process.stderr.write(`${NAME}: cannot hold the previous run's receipt for the rotation: ${held} already holds another\n`);
@@ -846,7 +933,7 @@ function main() {
   }
 
   const pluginVersion = resumed && typeof previous.pluginVersion === "string" ? previous.pluginVersion : null;
-  const receipt = { run: resumed ? previous.run : null, session, scratch, inFlight, objective, merge, pluginVersion, steps: {} };
+  const receipt = { run: resumed ? previous.run : null, session, scratch, inFlight, objective, baselineCell: baseline.cell, merge, pluginVersion, steps: {} };
   for (const name of STEP_NAMES) {
     // `alarm` checks the omp running this invocation, so its `ok` is never carried.
     const was = resumed && name !== "alarm" ? previous.steps[name] : undefined;
@@ -856,6 +943,8 @@ function main() {
   const ctx = { cwd, fleetDir, held, receipt, receiptPath, scratch, spendDir, ci };
   const say = (line) => process.stdout.write(`${line}\n`);
   say(`session ${session} (from ${source})`);
+  say(`baseline cell ${baseline.cell} (from ${baseline.source})`);
+  for (const notice of baseline.notices) say(`notice: ${notice}`);
   let stop = null;
   for (const name of STEP_NAMES) {
     if (receipt.steps[name].status === "ok") {
