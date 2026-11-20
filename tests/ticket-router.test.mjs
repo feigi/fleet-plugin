@@ -871,6 +871,8 @@ test("validateTable: each malformed router table is refused for its own reason, 
     [/`starting_cells` names slow-high, which `cells` does not hold/, bad({ cells: ["task-high", "smol-high", "slow-medium"], starting_cells: ["slow-high"] })],
     [/`starting_cells` names task-high, which `cells` does not hold/, bad({ cells: ["slow-high", "smol-high"], starting_cells: [...STARTING] })],
     [/`starting_cells` names slow-high, which `cells` does not hold/, bad({ cells: ["slow-medium"], starting_cells: ["slow-high"] })],
+    // Two starting Cells missing: the error names the first in `starting_cells` order.
+    [/`starting_cells` names slow-high, which `cells` does not hold/, bad({ cells: ["slow-medium"], starting_cells: ["slow-high", "task-high"] })],
   ];
   for (const [why, table] of cases) {
     const r = validateTable(table);
