@@ -738,10 +738,12 @@ names its own (`/fleet-ctl:run-team --baseline-cell <cell>`, saved in
 `.fleet/baseline-cell.json` and binding every later run until a run names
 another). Phase 0 works it out once and records it in the receipt as
 `baselineCell`; its **Starting set** — its level on each of `slow`, `task` and
-`smol` — is what burn-in draws and counts and what the Fit judges. A Cell a
-ledger row names with neither `tier=` nor `cell=` is `slow-high` whatever the
-Baseline Cell. Changing it resets nothing: the guard and the Fit compare a Cell
-with it only over the stretches both were drawn in.
+`smol` — is what burn-in draws and counts and the Cells the Fit always judges;
+the Fit judges any other Cell beside them for as long as the records hold
+counted Pulls of its newest generation. A Cell a ledger row names with neither
+`tier=` nor `cell=` is `slow-high` whatever the Baseline Cell. Changing it
+resets nothing: the guard and the Fit compare a Cell with it only over the
+stretches both were drawn in.
 _Avoid_: default cell, anchor
 
 **Cell evidence**:

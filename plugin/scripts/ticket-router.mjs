@@ -800,15 +800,16 @@ const round4 = (x) => Math.round(x * 1e4) / 1e4;
  * puts each where a tree walks its features row. `cells` are the Cells the fit judges: the starting set of
  * `baseline` in its own order, then each other Cell that holds counted Pulls among these units on its newest generation,
  * by name. It is rebuilt from the records at every fit, so a Cell exploration has drawn is judged for as long as the
- * records hold its Pulls.
+ * records hold its Pulls. `tallies` is tally()'s of these units under `order`, which growTree searches.
  */
 function fitPulls({ features, members, verdicts, window, baseline }) {
   const all = attribute({ features, members, tiers: verdicts, windowStart: window || null });
   const units = all.filter((u) => u.pull.exploration_draw !== "" || u.pull.sizing_src === "rule");
   const order = generations(all);
   const set = startingSetOf(baseline);
-  const drawn = tally(units, order).filter((t) => t.n > 0 && !set.includes(t.cell)).map((t) => t.cell);
-  return { units, order, cells: [...set, ...drawn] };
+  const tallies = tally(units, order);
+  const drawn = tallies.filter((t) => t.n > 0 && !set.includes(t.cell)).map((t) => t.cell);
+  return { units, order, tallies, cells: [...set, ...drawn] };
 }
 
 /** `units`, each booked to the group `table`'s tree walks its features row to (stratumOf). */
@@ -1041,7 +1042,8 @@ function judgeSpeedRow(pulls, cells, excluded, base, baseline) {
  * the whole starting set when absent — and the table records them as `starting_cells`, so
  * the records, the guard, the prior and that set fit the same table again.
  * Throws on a `startingCells` that is empty, which would end burn-in on no
- * count at all, or that names a Cell that is no starting Cell of `baseline`.
+ * count at all, that names a Cell that is no starting Cell of `baseline`, or that names one twice, which
+ * validateTable would refuse in `starting_cells`.
  */
 export function fitTable({ prior, features, members, verdicts, guard, baseline = DEFAULT_BASELINE_CELL, startingCells = startingSetOf(baseline) }) {
   const window = guard.window_start ?? prior.window_start ?? null;
@@ -1051,8 +1053,8 @@ export function fitTable({ prior, features, members, verdicts, guard, baseline =
 // The table over the tree `prior.splits` holds, from the fit's Pulls (fitPulls') booked to its groups, judged over `cells`.
 function tableOver({ prior, units: unbooked, order, cells, guard, window, baseline, startingCells }) {
   const set = startingSetOf(baseline);
-  if (startingCells.length === 0 || !startingCells.every((c) => set.includes(c))) {
-    throw new Error(`startingCells is not a non-empty list of starting Cells: ${JSON.stringify(startingCells)}`);
+  if (startingCells.length === 0 || !startingCells.every((c) => set.includes(c)) || new Set(startingCells).size !== startingCells.length) {
+    throw new Error(`startingCells is not a non-empty list of starting Cells, each once: ${JSON.stringify(startingCells)}`);
   }
   const nodes = treeNodes(prior.splits);
   const units = book(unbooked, prior);
@@ -1081,7 +1083,7 @@ function tableOver({ prior, units: unbooked, order, cells, guard, window, baseli
     window_start: window,
     n_rows: units.length,
     baseline_cell: baseline,
-    cells: [...cells],
+    cells,
     burn_in: anyStartingCellShort(guard, startingCells, baseline),
     starting_cells: [...startingCells],
     splits: prior.splits,
@@ -1143,8 +1145,8 @@ function treeOf(cuts) {
 }
 
 /**
- * The tree the fit grows, and what the gate found. The group searched is every counted Pull of the Cells the fit
- * judges (`cells`, fitPulls': the run's starting set and every Cell exploration has drawn) that the guard has not
+ * The tree the fit grows, and what the gate found. The group searched is every counted Pull (`tallies`, fitPulls') of
+ * the Cells the fit judges (`cells`, fitPulls': the run's starting set and every Cell exploration has drawn) that the guard has not
  * tripped on a reason `cost` excludes (`excluded`: one tree serves both
  * Objectives and is scored on $, so a Cell tripped on `minutes` alone stays in the search), that records the
  * probability its Cell was assigned with (the rest are `left_out`): the gate
@@ -1155,11 +1157,11 @@ function treeOf(cuts) {
  * keeps that Fit's `passed` and `stands`, and a first pass cannot stand on the same records twice. `gate.passed`,
  * `gate.stands` and `gate.records` are what the next Fit reads.
  */
-function growTree({ units, order, cells: judged, excluded, previous, baseline }) {
+function growTree({ tallies, cells: judged, excluded, previous, baseline }) {
   const cells = [baseline, ...judged.filter((c) => c !== baseline && !excluded.has(c))];
   const pulls = [];
   let leftOut = 0;
-  for (const { pulls: counted } of tally(units, order).filter((t) => cells.includes(t.cell))) {
+  for (const { pulls: counted } of tallies.filter((t) => cells.includes(t.cell))) {
     for (const u of counted) {
       const prob = probabilityOf(u.pull);
       if (prob === null) {

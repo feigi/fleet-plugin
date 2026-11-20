@@ -2154,19 +2154,15 @@ test("fit: a Cell the starting table lacks is judged and can hold a row — slow
 });
 
 test("fit: a Cell exploration drew that the starting table lacks is in the table's `cells` after the starting set, by name, and in the reasons, and is dropped once the records hold none of its counted Pulls", () => {
-  const everyFifth = (spec) => {
-    const input = rowInput(spec);
-    return { ...input, features: input.features.map((f) => ({ ...f, exploration_draw: "1/5" })) };
-  };
+  // rowInput's rows already carry an exploration draw (`exploring`), so each Pull here is one exploration drew.
   const spec = [{ cell: "slow-high" }, { cell: "task-max", merged: 3 }, { cell: "slow-medium", merged: 3, usd: 5 }, { cell: "smol-xhigh", merged: 2, usd: "" }];
-  const guard = guardOf({});
-  const drawn = fitTable({ prior: baseTable(), ...direct(everyFifth(spec)), guard });
+  const drawn = fitRows(spec);
   assert.deepEqual(drawn.cells, [...STARTING, "slow-medium", "task-max"], "a Cell none of whose Pulls is counted (here unpriced) is not judged");
   assert.deepEqual(Object.keys(drawn.reasons.cost["*"].cells).sort(), ["slow-medium", "smol-high", "task-high", "task-max"]);
   assert.equal(drawn.reasons.cost["*"].cells["task-max"].verdict, "too-few");
   assert.equal(drawn.estimates["*"]["task-max"].n, 3);
   assert.equal(validateTable(drawn), drawn);
-  const gone = fitTable({ prior: drawn, ...direct(everyFifth(spec.slice(0, 1))), guard });
+  const gone = fitRows(spec.slice(0, 1), {}, drawn);
   assert.deepEqual(gone.cells, STARTING, "the judged set is rebuilt from the records at every Fit and kept nowhere else");
 });
 
@@ -3027,8 +3023,8 @@ test("fit: burn-in ends over the starting Cells the install runs, the Fit record
   assert.deepEqual([all.burn_in, all.starting_cells], [true, STARTING], "with no set named all three count");
   assert.deepEqual(fitTree({ prior, ...direct(input), guard, startingCells: counted }).table, fitted, "the tree's fit counts the same set");
   assert.equal(fitTree({ prior, ...direct(input), guard }).table.burn_in, true);
-  for (const startingCells of [[], ["slow-medium"]]) {
-    assert.throws(() => fitTable({ prior, ...direct(input), guard, startingCells }), /startingCells is not a non-empty list of starting Cells/, JSON.stringify(startingCells));
+  for (const startingCells of [[], ["slow-medium"], ["slow-high", "slow-high"]]) {
+    assert.throws(() => fitTable({ prior, ...direct(input), guard, startingCells }), /startingCells is not a non-empty list of starting Cells, each once/, JSON.stringify(startingCells));
   }
 });
 
