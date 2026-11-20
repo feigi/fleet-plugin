@@ -2492,6 +2492,15 @@ test("the sweep refuses a gh timeout written in the module that declares an obje
     ["a write to an object the declaring module imports from itself under another name", {
       "x.mjs": READ("C.ms", `import { CFG as C } from "./x.mjs";\nexport const CFG = { ms: 20_000 };\nCFG.ms = ${ENV_MS};\n`),
     }, "reads process.env"],
+    ["an Object.assign to an object the declaring module imports from itself under another name", {
+      "x.mjs": READ("C.ms", `import { CFG as C } from "./x.mjs";\nexport const CFG = { ms: 20_000 };\nObject.assign(CFG, { ms: ${ENV_MS} });\n`),
+    }, "reads process.env"],
+    ["a binding to another name of an object the declaring module imports from itself", {
+      "x.mjs": READ("C.ms", `import { CFG as C } from "./x.mjs";\nexport const CFG = { ms: 20_000 };\nconst o = CFG;\no.ms = ${ENV_MS};\n`),
+    }, "CFG is bound to another name"],
+    ["a __proto__ write to an object the declaring module imports from itself", {
+      "x.mjs": READ("C.ms", `import { CFG as C } from "./x.mjs";\nexport const CFG = { ms: 20_000 };\nCFG.__proto__ = { get ms() { return 1; } };\n`),
+    }, "__proto__"],
     ["a write through a namespace import", importing(`ns.CFG.ms = ${ENV_MS};`, ns), "reads process.env"],
     ["an Object.assign through a namespace import", importing(`Object.assign(ns.CFG, { ms: ${ENV_MS} });`, ns), "reads process.env"],
     ["an Object.defineProperty through a namespace import", importing(`Object.defineProperty(ns . CFG, "ms", { value: ${ENV_MS} });`, ns), "Object.defineProperty"],
