@@ -1,0 +1,101 @@
+{
+  "pr": 4521,
+  "head": "c8b5708bfddab25552f3818101bd5164208a63b3",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: Verify branch is rebased on base (needs pull-request context and full git history, not the worktree); Validate renovate.json (fetches renovate from the npm registry via npx on every run); smoke-omp (needs bun and a globally installed pinned omp binary); install-and-smoke (needs bun and a globally installed pinned omp binary).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ?? docs/metrics/runs/2026-11-20T085328Z/{closeout.json,ledger.md,phase0.json,plugin-version}; I created none of them (I wrote only to my scratch copy), they are other agents' output."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ?? docs/metrics/runs/2026-11-20T085328Z/closeout.json, ?? docs/metrics/runs/2026-11-20T085328Z/ledger.md, ?? docs/metrics/runs/2026-11-20T085328Z/phase0.json, ?? docs/metrics/runs/2026-11-20T085328Z/plugin-version (untracked files; I did not create them, they look like the controller's own run-metrics output)."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — untracked docs/metrics/runs/2026-11-20T085328Z/{closeout.json,ledger.md,phase0.json,plugin-version}; I did not write these (I never wrote under that tree), likely another agent's run output."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ?? docs/metrics/runs/2026-11-20T085328Z/closeout.json, ?? docs/metrics/runs/2026-11-20T085328Z/ledger.md, ?? docs/metrics/runs/2026-11-20T085328Z/phase0.json, ?? docs/metrics/runs/2026-11-20T085328Z/plugin-version (I wrote none of these. All my commands ran in the snapshot (read-only) or under correctness/. These look like the controller's own run artifacts.)"
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 4,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4521/run-PbFA8LeF/snapshot-c8b5708b",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 393,
+      "claim": "The new check enforces only the ticket's required half: every `starting_cells` entry must be in `cells`. It does not enforce the optional half the ticket floated, that the Baseline Cell's starting set is a prefix of `cells`. So a fitted table whose `starting_cells` is a strict subset still validates when `cells` drops a starting Cell that was not recorded, and tableOver never produces such a table.",
+      "evidence": "PR test (tests/ticket-router.test.mjs:893) asserts `bad({ cells: [\"slow-medium\", \"task-high\"], starting_cells: [\"task-high\"] })` is valid, and `node --test --test-name-pattern=validateTable tests/ticket-router.test.mjs` passed 4/4 in the copy. Probe: 70 tableOver outputs from fitTable/fitTree (5 baselines × all starting subsets) all validate, and every one has the full starting set first in `cells` (fitPulls' `[...set, ...drawn]`, ticket-router.mjs:815). The ticket marks the prefix check 'Optionally', and #4298 notes that a table may withdraw a starting Cell, so leaving it out is a defensible scope choice, not a bug.",
+      "suggested_fix": "None needed for this ticket. If the stricter invariant is wanted, file it separately with a decision on the K=0 withdrawal case.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 393,
+      "claim": "No swallowed error, mislabelled catch or hidden fallback found in the new `starting_cells`-vs-`cells` check. `t.cells.includes` can't throw because the `cells` non-empty-array check runs earlier in validateTable and returns before this line. `sc?.find` runs only after `sc` has passed the Array check, so the optional chain skips nothing it shouldn't. The check returns an Error value outside any try.",
+      "evidence": "Probe output: {cells:[slow-high], starting_cells:[slow-high,task-high]} -> \"`starting_cells` names task-high, which `cells` does not hold\"; starting_cells null, [] and \"x\" -> \"`starting_cells` is not a non-empty list...\"; cells null -> \"`cells` is not a non-empty array\". No TypeError in any case.",
+      "suggested_fix": "None.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 394,
+      "claim": "Fits already on disk whose `starting_cells` names a Cell absent from `cells` are now refused, which is loud rather than silent. readFitBeside returns fallback \"fit-invalid\", which is surfaced as the routing REASON and shown as \"Fit invalid: starting table\" in compute-board. board-gather returns status \"unreadable\" with the validateTable message. The `fit:` step in metrics-refresh reports \"fit: failed — <message>\" if writeFit throws. Newly written Fits can't hit this because tableOver builds `cells` as [...set, ...drawn], and the starting set always covers `startingCells`.",
+      "evidence": "Source read of readFitBeside (ticket-router.mjs ~L633-645), board-gather readRouterTable/readFit (stderr warnOnce, `why` in value), metrics-refresh fit() catch (say(`fit: failed — ${e.message}`)), and fitPulls' return of cells: [...set, ...drawn]. [INFERENCE] The tableOver/fitPulls claim is from source reading only; I did not run a fit end to end.",
+      "suggested_fix": "None.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/ticket-router.test.mjs",
+      "claim": "No case has more than one starting Cell missing from `cells`, so which missing Cell the error names (first vs last) is not pinned.",
+      "evidence": "red: n/a (survivor). Mutant `sc?.find(` → `sc?.findLast(` in plugin/scripts/ticket-router.mjs: `./agent-test --test-name-pattern=\"validateTable: each malformed\" tests/ticket-router.test.mjs` → exit 0, tests 1 pass 1 fail 0 (survives); baseline same command → exit 0, test pass. The no-check mutant is killed: exit 1, tests 1 pass 0 fail 1, so the new check itself is covered.",
+      "suggested_fix": "Add a case such as cells: [\"slow-medium\"], starting_cells: [\"slow-high\",\"task-high\"] expecting /names slow-high/.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

@@ -1,0 +1,70 @@
+{
+ "head": "9e4160423cea76cf049567400116789a6daa927d",
+ "run": "run-LbWj7aJn",
+ "entries": [
+  {
+   "bucket": "unverified",
+   "index": 0,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4519/fix-nqZGJwrW/u1/verdict.json",
+   "issue": 4522,
+   "reason": "refuted by its suggestion refuter; filed on the suggestion-band record"
+  },
+  {
+   "bucket": "unverified",
+   "index": 1,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4519/fix-nqZGJwrW/u2/verdict.json",
+   "remedyFiles": [
+    "tests/split-fit.test.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 2,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4519/fix-nqZGJwrW/u3/verdict.json",
+   "remedyFiles": [
+    "tests/split-fit.test.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 3,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4519/fix-nqZGJwrW/u4/verdict.json",
+   "remedyFiles": [
+    "tests/support/gate-corpus.mjs",
+    "tests/split-fit.test.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 4,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "defer",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4519/fix-nqZGJwrW/u5/verdict.json",
+   "issue": 4522,
+   "reason": "refuted by its suggestion refuter; filed on the suggestion-band record"
+  },
+  {
+   "bucket": "unverified",
+   "index": 5,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4519/fix-nqZGJwrW/u6/verdict.json",
+   "issue": 4522,
+   "reason": "refuted by its suggestion refuter; filed on the suggestion-band record"
+  }
+ ]
+}

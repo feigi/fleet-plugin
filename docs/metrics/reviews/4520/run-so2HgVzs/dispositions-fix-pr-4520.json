@@ -1,0 +1,87 @@
+{
+  "head": "4399e0fa6908dd63482e60e817f41da546fb7d51",
+  "run": "run-so2HgVzs",
+  "entries": [
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4520/fix-hsw8WEV9/u0/verdict.json",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4520/fix-hsw8WEV9/u1/verdict.json",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4520/fix-hsw8WEV9/u2/verdict.json",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ],
+      "reason": "false-rationale",
+      "issue": 4523
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4520/fix-hsw8WEV9/u3/verdict.json",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4520/fix-hsw8WEV9/u4/verdict.json",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 5,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4520/fix-hsw8WEV9/u5/verdict.json",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 6,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "defer",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4520/fix-hsw8WEV9/u6/verdict.json",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ],
+      "reason": "refuted: the header's lead 'any other' is the universal statement and is true; the parenthetical reads as illustration (verdict u6)",
+      "issue": 4523
+    }
+  ]
+}

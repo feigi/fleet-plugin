@@ -1,0 +1,122 @@
+{
+  "pr": 4519,
+  "head": "9e4160423cea76cf049567400116789a6daa927d",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: Verify branch is rebased on base (needs pull-request context and full git history, not the worktree); Validate renovate.json (fetches renovate from the npm registry via npx on every run); smoke-omp (needs bun and a globally installed pinned omp binary); install-and-smoke (needs bun and a globally installed pinned omp binary).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "tests",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — untracked docs/metrics/runs/2026-11-20T085328Z/{closeout.json,ledger.md,phase0.json,plugin-version} (not created by me; I wrote nothing there)."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ?? docs/metrics/runs/2026-11-20T085328Z/closeout.json, ledger.md, phase0.json, plugin-version. I did not create these; I never wrote to that checkout, and they look like the controller's run-metrics output."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ?? docs/metrics/runs/2026-11-20T085328Z/closeout.json, ?? docs/metrics/runs/2026-11-20T085328Z/ledger.md, ?? docs/metrics/runs/2026-11-20T085328Z/phase0.json, ?? docs/metrics/runs/2026-11-20T085328Z/plugin-version (these are not from this pass: the only commands I ran in that directory were `pwd` and this `git status`; every other command cd'd into the snapshot or my scratch dir)"
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 6,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4519/run-LbWj7aJn/snapshot-9e416042",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "tests/split-fit.test.mjs",
+      "line": 175,
+      "claim": "The first new test's title says \"the gate does not search it\", but its gate assertion can't tell a gate-only widening apart from the original: the gate-only mutant (tallies over all units, judged set over the Fit's own units) leaves this test green. That's because growTree searches only judged Cells, and this Cell isn't judged.",
+      "evidence": "Mutant M3 in correctness/copy: `const tallies = tally(all, order);` + `const drawn = tally(units, order).filter` → 3-file run exit 1, tests 255 pass 252 fail 3. The failing tests were 'a live classifier's undrawn Pulls in a judged Cell…', '…with no assignment probability…' and 'control: …'. The first test ('a Cell whose counted Pulls are all a live classifier's undrawn ones is not judged … and the gate does not search it') passed. The suite still kills the mutant, so this is only a title/intent mismatch, not a coverage hole.",
+      "suggested_fix": "Optional: reword the title (e.g. 'and the gate's search is unchanged'), or rely on test 2 as the gate-search pin, which it already is.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/split-fit.test.mjs",
+      "line": 175,
+      "claim": "The ticket's 'judged-set only' mutation variant is killed by exactly one test, so that acceptance criterion depends on that one test alone.",
+      "evidence": "Mutant M1 in correctness/copy: `const drawn = tally(all, order).filter` → exit 1, tests 255 pass 254 fail 1. Only 'a Cell whose counted Pulls are all a live classifier's undrawn ones is not judged…' failed, with judgedIn = [true,true,true,false]: cells and the cost/speed reasons gained slow-medium, estimates did not. For comparison: M2 (`const tallies = tally(all, order)`, judged set + gate) → fail 4, all four new tests. M4 (`const units = all`) → fail 5, the four new tests plus the existing 'fit: a non-exploration row a live B classifier routed is the A/B's test set, not fit input'. All acceptance-criterion mutants are red and the unmutated baseline is green (22/22 in split-fit; 9302/9302 in the controller's run).",
+      "suggested_fix": "None required. A second judged-set assertion, e.g. in the control test, would add redundancy.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/split-fit.test.mjs",
+      "line": 162,
+      "claim": "The `live` helper only uses sizing 'haiku', so a filter that admits any non-'haiku' sizing_src (instead of only 'rule') survives.",
+      "evidence": "red: n/a (survivor); mutant `sizing_src !== \"haiku\"` at ticket-router.mjs:807 -> ./agent-test tests/split-fit.test.mjs exit 0, 22 pass 0 fail; baseline: same cmd → exit 0, 22 pass",
+      "suggested_fix": "Add a live Pull with another sizing value (e.g. 'sonnet' or 'sonnet-fallback') alongside 'haiku' in one test.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/support/gate-corpus.mjs",
+      "line": 82,
+      "claim": "The new docblock says a Pull with a `sizing` other than \"rule\" and no `draw` is 'one a live classifier routed', but the Fit's filter also drops a blank `sizing_src` that no live classifier produced, and the same wording is repeated in the split-fit.test.mjs `live` helper comment.",
+      "evidence": "ticket-router.mjs L727-736: sizingSrc starts as \"rule\", is set to \"\" when readSizing returns null (the 'no-sizing' degrade), and otherwise takes the live classifier's src ('haiku' or 'jev:<model>'). fitPulls L807 keeps only `exploration_draw !== \"\" || sizing_src === \"rule\"`, so `sizing: \"\"` with no draw is excluded as well. The comment is accurate for \"haiku\" but not for the blank case.",
+      "suggested_fix": "Word it as 'a Pull whose sizing_src is not \"rule\" (a live classifier, or blank when the sizing was missing) and with no draw is not the Fit's'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/support/gate-corpus.mjs",
+      "line": 81,
+      "claim": "The '(the free classifier routed it)' gloss on the \"rule\" default is ambiguous. In ticket-router.mjs \"rule\" is the default sizing source, with no classifier involved, and the 'live classifier' is the other source (haiku or jev).",
+      "evidence": "ticket-router.mjs L727 `let sizingSrc = \"rule\"`; it is overwritten only when the B arm is live and sizing was read (L730-736). The comment two lines later contrasts 'a live classifier' with the Fit's own Pulls, so a reader may take 'free classifier' as one more classifier kind.",
+      "suggested_fix": "Say '\"rule\" unless given (the rule-sized default)'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/split-fit.test.mjs",
+      "line": 24,
+      "claim": "The comment '$1 a PR, cheaper than every starting Cell ... were it judged it would win the row' is a counterfactual that no assertion exercises: no test judges the live Cell and checks that it wins.",
+      "evidence": "In diff lines 21-32 the 25 live Pulls are asserted absent from the table. The only run that judges slow-medium (the control test) uses a single drawn Pull with n=1, below MIN_N (20), so it never shows the win. I did not run this counterfactual.",
+      "suggested_fix": "Soften the comment to 'would be a cheaper, MIN_N-clearing candidate', or add a control with 25 drawn Pulls that does win the row.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}
