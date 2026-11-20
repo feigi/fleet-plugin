@@ -1,0 +1,96 @@
+{
+  "head": "c1d57741b9530029572ed41708b4b26fd16c2352",
+  "run": "run-doOscQyu",
+  "entries": [
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "issue": 4509,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4506/fix-yWREzPib/u0/verdict.json",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "issue": 4509,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4506/fix-yWREzPib/u1/verdict.json",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4506/fix-yWREzPib/u2/verdict.json",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "out",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "issue": 4507,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4506/fix-yWREzPib/u3/verdict.json",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4506/fix-yWREzPib/u4/verdict.json",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 5,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "issue": 4509,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4506/fix-yWREzPib/u5/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 6,
+      "scope": "in",
+      "claimKind": "shape",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4506/fix-yWREzPib/u6/verdict.json",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ]
+    },
+    {
+      "bucket": "unverified",
+      "index": 7,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "issue": 4509,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4506/fix-yWREzPib/u7/verdict.json",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ]
+    }
+  ]
+}

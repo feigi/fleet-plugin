@@ -1,0 +1,624 @@
+{
+  "pr": 4510,
+  "head": "d4674154c9908d5301e807f3e151ac69e7ec0f27",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: Verify branch is rebased on base (needs pull-request context and full git history, not the worktree); Validate renovate.json (fetches renovate from the npm registry via npx on every run); smoke-omp (needs bun and a globally installed pinned omp binary); install-and-smoke (needs bun and a globally installed pinned omp binary).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/tier-outcomes.tsv; ?? docs/metrics/runs/2026-11-19T141220Z/{closeout.json,ledger.md,phase0.json,plugin-version} (I wrote nothing there; these are controller-run artifacts, not mine)"
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/tier-outcomes.tsv; ?? docs/metrics/runs/2026-11-19T141220Z/{closeout.json,ledger.md,phase0.json,plugin-version}. I ran nothing in that directory (every command cd'd into the scratch dir or snapshot), so these paths are not mine; the ones under docs/metrics/runs/ look like a fleet run's own output."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-19T141220Z/{closeout.json,ledger.md,phase0.json,plugin-version}`. I ran only read commands (pwd, git status, reads under the snapshot) and wrote nothing there, so I did not make these changes; they look like the controller's own run output. The PR body's claim that pull.mjs is unchanged in behaviour holds (POLICY_CELL to BARE_ROW_CELL, both 'slow-high'); that and the other body and commit claims I could check held."
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-19T141220Z/closeout.json`, `?? docs/metrics/runs/2026-11-19T141220Z/ledger.md`, `?? docs/metrics/runs/2026-11-19T141220Z/phase0.json`, `?? docs/metrics/runs/2026-11-19T141220Z/plugin-version`. I issued no write there: my only commands in that directory were `pwd` and this audit, and every other command used absolute paths into the snapshot (read-only) or simplify/. These look like a controller run's close-out artifacts."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-19T141220Z/closeout.json`, `?? docs/metrics/runs/2026-11-19T141220Z/ledger.md`, `?? docs/metrics/runs/2026-11-19T141220Z/phase0.json`, `?? docs/metrics/runs/2026-11-19T141220Z/plugin-version`. None of these came from this review: the only commands run in that directory were `pwd` and `wc -l` on an absolute path; everything else chained a cd into the scratch dir or the snapshot. They look like the controller run's close-out output."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin - M docs/metrics/tier-outcomes.tsv; ?? docs/metrics/runs/2026-11-19T141220Z/{closeout.json,ledger.md,phase0.json,plugin-version} (not written by me; likely another agent's run output)."
+    }
+  ],
+  "counts": {
+    "survived": 7,
+    "refuted": 2,
+    "unverified": 28,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4510/run-tiG8UgTn/snapshot-d4674154",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "plugin/scripts/fleet-tick.mjs",
+      "line": 573,
+      "claim": "costGuardFault's new shape check for `tripped` entries only checks for a string `cell`. Before the PR, the same input returned a fault string. Now an entry whose `on` is a number makes costGuardFault and readCostGuard throw TypeError. An `on` that is a string or names an unknown reason passes as a valid guard, though the router's parseGuard refuses that same file.",
+      "evidence": "In the copy: costGuardFault on {verdict:'tripped',…,tripped:[{cell:'task-high',on:5}]} printed `THREW number 5 is not iterable`. readCostGuard('badguard.json') on that file printed `THREW TypeError number 5 is not iterable`. probe1.mjs: [{cell:'task-high',on:'usd'}] gives tick `null` but router `{ok:false, why:'`tripped` names task-high on \"usd\", which is not a list of floor, usd, minutes'}`; on:['bogus'] gives the same split. routerRows on the on:'usd' guard printed `cost guard: task-high (u, s, d) $2.00 vs $1.00 …`. readCostGuard is called with no try at fleet-tick.mjs:2450 (tick main) and at board-gather.mjs:834, whose comment says `none of them throws`. The grep for tripFault in fleet-tick.mjs finds only the import at line 1762: it is imported and never called.",
+      "suggested_fix": "In costGuardFault, validate entries with the imported tripFault, e.g. `const fault = Array.isArray(guard.tripped) ? guard.tripped.map(tripFault).find((w) => w !== null) : \"`tripped` is not a list\"; if (fault) return fault;`, before any tripEntry call. The tick then refuses exactly what the router refuses.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Ran costGuardFault imported straight from the snapshot's plugin/scripts/fleet-tick.mjs (read-only import, probe in scratch). With a tripped entry {cell:'task-high',on:5} it THREW 'number 5 is not iterable'. With on:'usd' and on:['bogus'] it returned null, i.e. accepted as a valid guard. The shape check at line 573 only tests a string `cell`. trip-reasons.mjs tripFault, which would reject these, is imported at line 1762 but not used in costGuardFault, and the router's check is the one that refuses them. Not run: readCostGuard's callers, the pre-PR behaviour, and the test suite; the throw follows from costGuardFault, which readCostGuard calls without a try. No mutant was applied, so no red/baseline line. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/tier-outcomes.tsv' and untracked docs/metrics/runs/2026-11-19T141220Z/{closeout.json,ledger.md,phase0.json,plugin-version}; none written by me, I only ran pwd and the probe, and wrote only under scratch."
+        },
+        {
+          "refuted": false,
+          "reason": "The claim holds in the snapshot. I ran costGuardFault from plugin/scripts/fleet-tick.mjs directly on a self-consistent tripped guard. on:5 THREW \"number 5 is not iterable\"; on:\"usd\" and on:[\"bogus\"] both returned null, meaning the guard is accepted. Line 573 checks only `typeof t.cell === \"string\"` and then calls tripEntry(t), which spreads `new Set(raw.on)`. The PR diff adds tripFault in trip-reasons.mjs, and it rejects exactly these `on` values; the router uses it in parseGuard. fleet-tick.mjs imports tripFault at line 1762 and costGuardFault never calls it, so nothing else in the tick covers this. I did not rerun the router or readCostGuard call-site probes; the claim's router and call-site details rest on the diff and my reading of the code. No test-suite red/kill was used. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/tier-outcomes.tsv' and untracked docs/metrics/runs/2026-11-19T141220Z/{closeout.json,ledger.md,phase0.json,plugin-version}. I wrote nothing there; my only writes went to the scratch dir.",
+          "counter_evidence": "node p.mjs → 5 THREW number 5 is not iterable; \"usd\" tick null; [\"bogus\"] tick null"
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "docs/research/cell-grid-derive.mjs",
+      "line": 24,
+      "claim": "Renaming POLICY_CELL removed the export from ledger-grammar.mjs without updating a committed caller. docs/research/cell-grid-derive.mjs now fails at module link time, and POLICY_CELL was its only missing import.",
+      "evidence": "`node docs/research/cell-grid-derive.mjs` in the copy printed `SyntaxError: The requested module '../../plugin/scripts/ledger-grammar.mjs' does not provide an export named 'POLICY_CELL'`. An export check of that script's imports gave true for bootstrapDiffCI, parseTsv, CELL, parseMember, catalogEntry, readOmpConfigValue, readOmpModelCatalog, resolveRole and stripLevel, and false only for POLICY_CELL. The script's header says its parts C and B 'reproduce from the committed files alone'. The grep for POLICY_CELL found it also in docs/research/consumer-burn-in-derive.mjs:42, but that script was already broken before this PR (`trips` and `underFloor` are not exported either).",
+      "suggested_fix": "Import BARE_ROW_CELL, or DEFAULT_BASELINE_CELL for the '(policy)' label, in cell-grid-derive.mjs (lines 24 and 79), as part of the same cutover.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Ran `node docs/research/cell-grid-derive.mjs` in the snapshot (I did not build a separate copy): exit with SyntaxError 'The requested module ../../plugin/scripts/ledger-grammar.mjs does not provide an export named POLICY_CELL' at line 24. grep found no POLICY_CELL in snapshot ledger-grammar.mjs. pr.diff line 898 shows `-export const POLICY_CELL = \"slow-high\"`. Line 24 still imports it, and the script's header says parts C and B reproduce from committed files alone, so the claim holds. I did not re-check the other imports or the pre-existing breakage of consumer-burn-in-derive.mjs. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv` and untracked docs/metrics/runs/2026-11-19T141220Z/{closeout.json,ledger.md,phase0.json,plugin-version}; these came from other agents (my commands only read and ran node on the snapshot)."
+        },
+        {
+          "refuted": false,
+          "reason": "Ran `node docs/research/cell-grid-derive.mjs` in the snapshot (not my own copy; read-only run, nothing mutated). It exited with `SyntaxError: The requested module '../../plugin/scripts/ledger-grammar.mjs' does not provide an export named 'POLICY_CELL'` at line 24. The PR diff removes `export const POLICY_CELL`, and the diff has no hunk touching cell-grid-derive.mjs. The snapshot's only remaining POLICY_CELL uses are in cell-grid-derive.mjs (lines 24, 79) and consumer-burn-in-derive.mjs (lines 42, 342, 345). I searched only *.mjs files, so non-.mjs or non-script callers would not show up. Nothing else handles the missing export. Scope limit: I did not re-check the other imports individually or the claim that consumer-burn-in-derive.mjs was already broken. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/tier-outcomes.tsv' plus untracked docs/metrics/runs/2026-11-19T141220Z/{closeout.json,ledger.md,phase0.json,plugin-version} (output was cut at 5 lines; more may exist). I wrote nothing in that directory, and the bash tool was erroring, so I used eval."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "tests/pull.test.mjs",
+      "claim": "An acceptance criterion in the brief is not met: 'a Pull routed to task-medium writes cell=task-medium (tests/pull.test.mjs)'. pull.test.mjs is not in the diff and never runs under a non-default Baseline Cell, so the design ruling 4 rejected (a bare row meaning the run's Baseline Cell) passes the suite.",
+      "evidence": "`grep -c '^diff --git a/tests/pull.test.mjs' pr.diff` gives 0. `grep -c -i baseline tests/pull.test.mjs` gives 0. Mutant in the copy: pull.mjs:1011 `cell !== BARE_ROW_CELL` changed to `cell !== baselineCellFromReceipt().cell`, with the import added. Then `node --test --test-name-pattern='cell=<CELL> exactly when DRAW' tests/pull.test.mjs` gave rc=0, `ℹ pass 1 ℹ fail 0`. Reverted with git checkout afterwards; status clean. The PR body says this case was left out on purpose.",
+      "suggested_fix": "Add the pull.test.mjs case: with a receipt or `--baseline-cell` naming task-medium, a Pull routed without a draw to task-medium writes `· cell=task-medium`, and one routed to slow-high writes no carrier.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Not refuted. `pr.diff` has 0 `diff --git a/tests/pull.test.mjs` lines. `grep -c -i baseline tests/pull.test.mjs` gives 0 (scope: that file in the snapshot; the pattern would miss a non-baseline-named fixture, e.g. a test that sets the cell through some other name). I built a copy with measure-copy (exit 0, install true). Mutant: `pull.mjs:1011` `cell !== BARE_ROW_CELL` changed to `cell !== baselineCellFromReceipt().cell`, with the import inserted after the shebang. `node --check` passed. Narrowed run `env -u FORCE_COLOR node --test --test-name-pattern='exactly when DRAW' tests/pull.test.mjs` gave tests 1, pass 1, fail 0, cancelled 0, so the mutant survives. My first mutant put the import before the shebang and produced a SyntaxError; I discarded that run. Positive control: the mutant `cell === BARE_ROW_CELL` made the same test fail (rc=1, fail 1), so the injection reaches the code and the test can fail. Unmutated baseline: same command, rc=0, pass 1. The file was restored after each run and the copy's `git status --porcelain -uall` printed nothing. So the bare-row-means-run-baseline design passes the suite, and the 'a Pull routed to task-medium writes cell=task-medium' criterion is not tested by `pull.test.mjs`. I did not check whether another test file covers it. This is not a kill: it is a surviving mutant, and no failing test is claimed. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-19T141220Z/closeout.json` and `?? docs/metrics/runs/2026-11-19T141220Z/ledger.md` (shown by the first 3 lines of a `head -3` status; the full status was not captured). I did not touch these. They are most likely another agent's or the user's output, since my runs only wrote inside my own copy. The `bash` tool failed at startup with an extension error, so I ran everything through `eval`'s `sh`. `pwd` there printed /Users/chris/dev/fleet-plugin, and I never ran anything in it."
+        },
+        {
+          "refuted": false,
+          "reason": "I reproduced the survival. The PR diff has no tests/ file, and the existing 'exactly when DRAW' test in tests/pull.test.mjs:1800 uses only task-high, smol-high and slow-high cells. It never sets a non-default Baseline Cell and has no task-medium case. I changed pull.mjs `cell !== BARE_ROW_CELL` to `cell !== baselineCellFromReceipt().cell` in my own copy, adding the import. The narrowed run `node --test --test-name-pattern='exactly when DRAW' tests/pull.test.mjs` completed: tests 1, pass 1, fail 0, cancelled 0, rc=0. So the mutant survives and the suite would accept the rejected design. I did not run an unmutated baseline, which matters only for a kill claim, not for this survival. The mutant did reach the code: `git diff --stat` showed pull.mjs changed before the run. The run output has no positive control showing the mutant executed. The claim is slightly loose: a bare row under a non-default baseline is not tested at all, not only task-medium. CWD-AUDIT: not run on /Users/chris/dev/fleet-plugin; I never wrote there. I ran `git status --porcelain -uall` in my own copy after `git checkout` and it printed nothing."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/baseline-cell.mjs",
+      "line": 29,
+      "claim": "definedCells() swallows every readdirSync failure into an empty Set, so an unlistable agents directory makes every Cell look undefined and phase 0 blames the user's valid saved/--baseline-cell value as 'not a Cell with an implementer definition' instead of reporting the unreadable directory.",
+      "evidence": "Probe in copy: definedCells('/nonexistent/agents').size -> 0; readSavedBaseline(dirWith{\"cell\":\"slow-low\"}, thatSet) -> {state:'invalid', why:'.../baseline-cell.json names \"slow-low\", which is not a Cell with an implementer definition'}; resolveBaselineCell({arg:'slow-low', saved, defined}) -> cell 'slow-high', notices: '--baseline-cell \"slow-low\" is not a Cell with an implementer definition: ignored, and not saved' plus 'the saved Baseline Cell is invalid (...)'. With the real defined set the same file reads {state:'ok', cell:'slow-low'}. The fault is mislabelled, the valid value is dropped, and no stderr says the agents dir could not be read.",
+      "suggested_fix": "Let definedCells throw on non-ENOENT errors, or return {set, why} and have readSavedBaseline/resolveBaselineCell/phase0 say 'cannot list <agents dir>: <code>' rather than blaming the value.",
+      "dimension": "silent-failure",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Confirmed by reading the snapshot source only. I did not run anything: the bash tool failed with an extension error on every call, so there is no red/green run, no evidence line, and the claim's probe output was not reproduced. plugin/scripts/baseline-cell.mjs:26-32 has definedCells wrap readdirSync in try/catch and return new Set() on any error. Its doc comment says 'empty when the directory cannot be listed'. readSavedBaseline (line 54) then reports a saved valid cell as 'not a Cell with an implementer definition' when that set is empty. phase0.mjs:755 calls definedCells() with the default shipped agents directory and no error reporting. The behaviour is as claimed, but the trigger is a broken install (missing shipped agents dir), so the practical impact is small. CWD-AUDIT: not run, bash unavailable (pwd never printed); no files were written by me."
+        },
+        {
+          "refuted": false,
+          "reason": "Observed (node import of snapshot module, read-only, not a test run): definedCells('/nonexistent/agents').size=0 while the shipped default gives 15; source lines 26-31 show bare catch returning empty Set, so the mechanism is real and no other handler is visible in that function. Weakness: the empty-on-failure behavior is documented in the JSDoc, and the default dir is the shipped one, so the trigger is rare. Bash tool failed (extension error) so I made no copy, ran no tests, and did not verify downstream resolveBaselineCell messages. CWD-AUDIT: unrepo unchecked (bash unavailable, pwd never obtained)"
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "docs/research/cell-grid-derive.mjs",
+      "line": 24,
+      "claim": "The diff removes the exported POLICY_CELL from ledger-grammar.mjs, but docs/research/cell-grid-derive.mjs and docs/research/consumer-burn-in-derive.mjs still import it. The first script's header says 'Run from a checkout: it imports the Router's own modules beside it', which is now false, because the script fails at import.",
+      "evidence": "`node docs/research/cell-grid-derive.mjs` in the snapshot: 'SyntaxError: The requested module ../../plugin/scripts/ledger-grammar.mjs does not provide an export named POLICY_CELL'. grep -rnI 'POLICY_CELL' shows no plugin/ definition left, and live uses at cell-grid-derive.mjs:24,79 and consumer-burn-in-derive.mjs:42,342,345. docs/research/cell-grid.md:111,128,291 also still cite POLICY_CELL.",
+      "suggested_fix": "Switch both derive scripts to BARE_ROW_CELL or DEFAULT_BASELINE_CELL, whichever they mean. If they are frozen historical artifacts, say so in their headers. Update or annotate the cell-grid.md references.",
+      "dimension": "comments",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Ran `node docs/research/cell-grid-derive.mjs` in the snapshot: exit 1, SyntaxError: ledger-grammar.mjs does not provide an export named 'POLICY_CELL' (line 24 import). grep -rnI POLICY_CELL plugin shows no matches under plugin/. Claim confirmed for the first script; the consumer-burn-in-derive.mjs part was not run. CWD-AUDIT: not run (no writes made; cwd /Users/chris/dev/fleet-plugin untouched)."
+        },
+        {
+          "refuted": false,
+          "reason": "Ran `node docs/research/cell-grid-derive.mjs` in the snapshot: SyntaxError, ledger-grammar.mjs does not provide an export named 'POLICY_CELL' (cell-grid-derive.mjs:24). The diff removes the export. I did not check the other script or the cell-grid.md lines. I ran only a script, not a mutant or test, so there is no red/baseline line. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/tier-outcomes.tsv, ?? docs/metrics/runs/2026-11-19T141220Z/{closeout.json,ledger.md,phase0.json,plugin-version}. I wrote nothing there; this was the status when I looked."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "tests/support/day-one-router-table.mjs",
+      "line": 9,
+      "claim": "The rewritten header quotes the test name \"route: the shipped table is the starting table\" in ticket-router.test.mjs, but this diff renamed that test. No test has the quoted name, so the cross-reference points at nothing.",
+      "evidence": "grep -n '^test(\"route: the.*table' tests/ticket-router.test.mjs gives line 636 'route: the shipped table names no Cell, and filled in for a Baseline Cell it is the starting table, the day-one literal for `slow-high`' and line 631 'route: the checked-in table is valid, filled in for any Baseline Cell, and names only cells with a definition'. grep for 'shipped table is the starting table' in tests/*.mjs finds no test with that name.",
+      "suggested_fix": "Quote the real name, 'route: the shipped table names no Cell, and filled in for a Baseline Cell it is the starting table…', or refer to it without quoting.",
+      "dimension": "comments",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "I read the header at tests/support/day-one-router-table.mjs. It quotes \"route: the shipped table is the starting table\". I searched tests/*.mjs in the snapshot for 'starting table'. The only route test with a similar name is ticket-router.test.mjs:636, \"route: the shipped table names no Cell, and filled in for a Baseline Cell it is the starting table, the day-one literal for `slow-high`\". No test has the quoted name, so the claim holds. The quote is not even a prefix of line 636; the second quote, \"route: the checked-in table is valid\", is a prefix of the test at line 631. The pattern would have missed a test renamed outside tests/*.mjs, but a name like that would not be a ticket-router.test.mjs test anyway. I did not check whether this diff did the renaming, and I ran no tests. CWD-AUDIT: not run, because the bash tool failed on startup and the pwd result was not captured; I made no writes and applied no mutations."
+        },
+        {
+          "refuted": false,
+          "reason": "Confirmed by grep: the old test name `route: the shipped table is the starting table, the day-one literal` is removed in pr.diff (line 3683). The snapshot's ticket-router.test.mjs has 0 matches for 'shipped table is the starting', and the new header (diff line 3599) still quotes the old prefix. The test is now named 'route: the shipped table names no Cell, and filled in for a Baseline Cell it is the starting table…' at line 636, so the cross-reference is stale. I only grepped; I ran no tests. This is a comment-only issue. CWD-AUDIT: not run (no files written; cwd was /Users/chris/dev/fleet-plugin)."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/fleet-tick.mjs",
+      "line": 573,
+      "claim": "costGuardFault (the tick's validator for the guard file) checks `tripped` entries with a weaker hand-written predicate (`typeof t.cell === \"string\"` only) rather than the new `tripFault`, so entries with a malformed `on` or a non-Cell name pass validation and then crash or mis-render in tripEntry/tripWords. `tripFault` is imported in fleet-tick.mjs (line 1762) but never used there.",
+      "evidence": "node probe with costGuardFault on a guard whose tripped is `[{cell:\"slow-low\",on:X}]`: X=5 -> `THROW number 5 is not iterable`; X={a:1} -> `THROW object is not iterable` (both thrown from costGuardFault/tripEntry); X=\"floor\" -> costGuardFault returns null and tripEntry yields `on:[\"f\",\"l\",\"o\",\"r\"]` rendered as `slow-low (f, l, o, r)`; X=[\"bogus\"] -> null, rendered `slow-low (bogus)`. tripFault rejects all four. `grep -n tripFault fleet-tick.mjs` -> only the import line.",
+      "suggested_fix": "In costGuardFault replace the `every(...)` predicate with `guard.tripped.map(tripFault).find((w) => w !== null)` (as ticket-router.mjs:400/577 do) and drop the unused import or use it; one validator for the one `{cell,on}` shape.",
+      "dimension": "types",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Confirmed in the snapshot. Line 573 of fleet-tick.mjs validates `tripped` entries with only `typeof t.cell === \"string\"`. `tripFault` is imported at line 1762 and never used in that file; a grep over plugin/scripts/*.mjs found uses only in ticket-router.mjs and trip-reasons.mjs. I imported the snapshot's fleet-tick.mjs and called costGuardFault on a guard with tripped=[{cell:\"slow-low\",on:X}]: X=5 threw (\"Type error\"), X=\"floor\" returned null, X=[\"bogus\"] returned null. I did not run the suite or build a copy, and I did not run tripFault or render the entries. No mutation was applied. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv` and untracked files under docs/metrics/runs/2026-11-19T141220Z/ (closeout.json, ledger.md, phase0.json, plugin-version). I wrote nothing there; the bash tool was failing, so I ran everything through eval."
+        },
+        {
+          "refuted": false,
+          "reason": "I probed costGuardFault from the snapshot directly (`node p.mjs` in my scratch dir). Results: on=5 gives THROW 'number 5 is not iterable'; on={a:1} gives THROW 'object is not iterable'; on=\"floor\" and on=[\"bogus\"] both return null (accepted). plugin/scripts/fleet-tick.mjs line ~573 uses the weaker check `typeof t.cell === \"string\"` for `tripped` entries. `tripFault` is only imported at fleet-tick.mjs:1762, and grep shows no other use in that file. tripFault is used in ticket-router.mjs, which rejects these entries, so the tick's reader and the Router's reader disagree. The only other mitigation I found is the readersAlert in compute-cell-evidence.mjs. It reports a disagreement but does not stop the throw. I did not run the test suite or a mutant; the claim is about runtime behavior, so the direct probe is the evidence. CWD-AUDIT: not run (shell tool errored at start; pwd via eval was /Users/chris/dev/fleet-plugin, and I wrote nothing there)."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [
+    {
+      "severity": "important",
+      "file": "plugin/scripts/phase0-receipt.mjs",
+      "line": 177,
+      "claim": "baselineOf (used by baselineIn for pr-cost --guard, metrics-refresh, cell-readout, board-gather and ticket-router's receipt path) silently changes the Baseline Cell when the receipt is unreadable/corrupt, records an invalid string, or the saved file is invalid, with no notice or stderr, so the persisted cost guard is computed and written under a different baseline than the run's.",
+      "evidence": "Probe baselineIn(dir): receipt {baselineCell:'bogus'} + saved slow-low -> {cell:'slow-low', source:'the saved value'}; receipt '{corrupt' + saved slow-low -> same; both corrupt -> {cell:'slow-high', source:'the default'}. End to end with a gh stub: fleet dir with phase0.json='{corrupt' and baseline-cell.json={\"cell\":\"smol-low\"}, `pr-cost.mjs --guard --out <fleet>/cost-guard.json` wrote baseline.cell 'smol-low' with empty stderr; then baseline-cell.json='{corrupt' -> guard written with baseline.cell 'slow-high', empty stderr. readSavedBaseline's `why` and readReceipt's `why` are discarded on these paths. A resumed phase 0 exits 3 on the same bogus receipt value, so the readers are inconsistent with the writer.",
+      "suggested_fix": "Have baselineOf return its reasons (receipt/saved `why`) and have the CLI callers (pr-cost, metrics-refresh, ticket-router, cell-readout) write them to stderr, or refuse when the receipt exists but is unreadable or records a non-Cell, as phase0 does.",
+      "dimension": "silent-failure",
+      "verdict": "refuted",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "I read the code and did not run it, so there is no run evidence line. baselineOf (phase0-receipt.mjs:177-185) falls through to the saved value, then to DEFAULT_BASELINE_CELL, when the receipt is unreadable or records a non-CELL string. It does the same when the saved file is invalid. readReceipt's and readSavedBaseline's `why` are never used on those paths. Every caller I found in plugin/scripts uses only `.cell` and drops `.source`: board-gather:1342, cell-readout:185, metrics-refresh:425, pr-cost:510, and ticket-router:1251 (via baselineCellFromReceipt). Only phase0.mjs:946 prints the source, and that is the writer. So the silent fallback is as the claim describes. The doc comment says the fallthrough is deliberate (\"Never throws, and never refuses\"), which weakens it as a defect. The silence itself is not documented. I did not reproduce the end-to-end pr-cost --guard run. CWD-AUDIT: not run (the `pwd` and shell commands errored in this environment, so the working directory was never recorded)."
+        },
+        {
+          "refuted": true,
+          "reason": "The behavior is real but deliberate and documented, not a silent-failure bug. The baselineOf docstring (phase0-receipt.mjs:170-176) says the chain is receipt, then saved value, then default, and that it 'Never throws, and never refuses: a reader that cannot be told the Cell runs the default'. baselineOf also returns a `source` field ('the saved value', 'the default') so the fallback is labelled. The evidence shows the fallback chain working as written, which is weaker than the claim of a defect. One part of the claim does hold: pr-cost.mjs:510 uses only `.cell` and drops `source`, so a fallback leaves no stderr notice. That is a design choice a reviewer could debate, not a proven fault. I did not run the probes; I read the source and grepped pr-cost.mjs only. CWD-AUDIT: not run (the bash tool failed to start in this session)."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "important",
+      "file": "plugin/scripts/compute-cell-evidence.mjs",
+      "line": 535,
+      "claim": "trippedWords calls `guard.tripped.map(tripWords)` without first normalising through `tripEntry`, so a guard that still lists a bare Cell name (the legacy shape trip-reasons.mjs says every reader must accept) throws a TypeError instead of rendering. The `{cell,on}` entry type is not enforced at this use site.",
+      "evidence": "node probe: `[\"slow-high\"].map(tripWords)` -> `THROW Cannot read properties of undefined (reading 'length')`, whereas `tripWords(tripEntry(\"slow-high\"))` -> \"slow-high\". Sibling call sites (compute-cell-evidence.mjs:368, fleet-tick.mjs:553, metrics-refresh.mjs:306, pr-cost.mjs:389) all do tripEntry first; 535 is the only one that does not (grep of tripWords).",
+      "suggested_fix": "Use `guard.tripped.map(tripEntry).map(tripWords)` at :535, or make tripWords accept the raw union itself (call tripEntry inside) so a call site cannot skip the normalisation.",
+      "dimension": "types",
+      "verdict": "refuted",
+      "votes": [
+        {
+          "refuted": true,
+          "reason": "Unreachable in the merged code. trippedWords(guard) is only called with `routed` (compute-cell-evidence.mjs:942, 764), which is `readGuard(guard.guard)`. readGuard → parseGuard (ticket-router.mjs:576-594) runs every raw `tripped` entry through `tripEntry` into a byCell map. The resulting guard.tripped therefore always holds `{cell,on}` objects, never bare strings. A legacy bare-name guard is normalised before it reaches line 535, so tripWords gets entries and does not throw. The claimed `[\"slow-high\"].map(tripWords)` probe feeds raw strings that this call site never receives. The other call sites use tripEntry because they read raw guard data. I read the source only and ran no test. Searched: compute-cell-evidence.mjs trippedWords/routed callers and ticket-router.mjs parseGuard/readGuard. Not checked: other callers of the exported function, of which none exist in the grep. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — M docs/metrics/tier-outcomes.tsv; ?? docs/metrics/runs/2026-11-19T141220Z/{closeout.json,ledger.md,phase0.json,plugin-version}. I only read there and wrote nothing, so these are not mine."
+        },
+        {
+          "refuted": true,
+          "reason": "Handled upstream: trippedWords has one caller (compute-cell-evidence.mjs:764, `trippedWords(routed)`). `routed` is `readGuard(guard.guard)` (line 942). `readGuard` goes through `parseGuard` (ticket-router.mjs:573-601), which runs `raw.tripped.map(tripEntry)` and returns `tripped` as sorted `{cell,on}` entries. A bare Cell name therefore becomes `{cell, on: null}` before line 535 sees it, and `tripWords` renders it as the Cell name. A bare name, or an `on` null, reaches the use site only as an object, not as a string. The probe `[\"slow-high\"].map(tripWords)` feeds raw strings that never reach line 535 in the real flow. Line 368 differs: it takes the raw guard's `g.tripped`, so it needs its own `tripEntry`. I did not run anything: bash failed in this environment with an extension error, so the verdict rests on reading the snapshot. I did not build a measure-copy and ran no mutant or test. Scope: grep for tripWords, tripEntry and tripped in compute-cell-evidence.mjs and ticket-router.mjs, plus reads of the surrounding code. CWD-AUDIT: not run, since bash is unavailable, so the cwd was never printed or audited and nothing was written there."
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/phase0.mjs",
+      "line": 920,
+      "claim": "A resumed receipt whose `baselineCell` is not a Cell (null included) makes phase 0 exit 3. The brief says phase 0 'never refuses and never asks'. Every other reader (phase0-receipt.mjs baselineOf:177-185) silently uses the saved value or slow-high for the same receipt, so phase 0 and route/pr-cost/metrics-refresh disagree about that run's Baseline Cell.",
+      "evidence": "Read only, not executed: phase0.mjs:920-924 sets exitCode 3 for `previous.baselineCell !== undefined && !(typeof … === 'string' && CELL.test(…))`. baselineOf returns the receipt's value only when it passes CELL.test, returns the default when it is undefined, and otherwise falls through to readSavedBaseline. The refusal has its own test, tests/phase0.test.mjs:1460.",
+      "suggested_fix": "Either confirm the refusal is intended (it mirrors the objective and merge refusals) and record it in the brief or ADR, or make it a notice that resumes as slow-high, matching what baselineOf returns.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/trip-reasons.mjs",
+      "line": 27,
+      "claim": "tripFault accepts `on: []`. excludedUnder then holds that Cell back under neither Objective, while pr-cost's verdict for the same file still reads `tripped`.",
+      "evidence": "probe1.mjs: parseGuard({tripped:[{cell:'task-high',on:[]}],…}) returned ok:true with tripped [{cell:'task-high',on:[]}]. By trip-reasons.mjs:41, excludedUnder is `entry.on === null || entry.on.some(...)`, which is false for []. pr-cost never writes an empty `on` (tripped.push only when on.length > 0), so only a hand-edited file reaches this.",
+      "suggested_fix": "Make tripFault require a non-empty `on` when it is present and not null.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/skills/run-team/SKILL.md",
+      "line": 45,
+      "claim": "Unrelated wording change: 'when the repository has no workflow named CI' became 'for no CI workflow'. That drops the 'named CI' condition and is outside the ticket (probably made to fit a byte budget).",
+      "evidence": "pr.diff hunk at line 2465: `-   when the repository has no workflow named CI.` / `+   for no CI workflow.`. The matching expectation was changed in tests/run-team-shape-prose.test.mjs:665.",
+      "suggested_fix": "Keep the original wording, or shorten a part of the line this ticket owns.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/cell-readout.mjs",
+      "line": 152,
+      "claim": "cell-readout.mjs gains a new `--baseline-cell` CLI flag. The brief asks only that its comparison base read the run's Baseline Cell, so the flag is a small widening of the CLI surface beyond the ticket.",
+      "evidence": "pr.diff cell-readout hunk: `flags: { \"baseline-cell\": \"value\", …}` and the usage line `cell-readout.mjs [--baseline-cell <cell>] …`. The brief's §2 lists cell-readout (:114-127, :183) only as a reader of the run's Baseline Cell.",
+      "suggested_fix": "Drop the flag and read baselineIn(...) only, or note it in the PR as a deliberate addition.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/phase0.mjs",
+      "line": 736,
+      "claim": "guardBaseline's bare `catch { return null }` treats an unreadable or corrupt cost-guard.json the same as 'no guard', so the 'this run's X is a switch' notice is silently skipped when the last guard cannot be read.",
+      "evidence": "Read of phase0.mjs:735-742 and its use at 786-789 (`last !== null && last !== result.cell`). Not executed: the function is module-private and driving phase0 main needs the full step sequence, so this is an inference.",
+      "suggested_fix": "Return null only for ENOENT; for other read/parse errors push a notice naming the file and why.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/phase0.mjs",
+      "line": 777,
+      "claim": "`const { install } = readInstall()` discards `why`, so when the install read fails the configured Baseline Cell is kept without any notice that the runnable-substitute step did not happen.",
+      "evidence": "readInstall never throws and returns {install:null, why}; phase0.mjs:777-778 passes `install === null ? cell : defaultCellOf(...)` as substitute and never reads `why`. The comment states this intent ('a read that fails leaves the configured Cell'), so it is a documented choice. Not executed (needs omp).",
+      "suggested_fix": "Push `cannot read what the install runs (${why}): ${cell} is not checked against it` onto resolved.notices when install is null.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 400,
+      "claim": "validateTable's new guard.tripped fault check (tripFault per entry) is unpinned by ticket-router.test.mjs: replacing `if (fault !== undefined) return bad(...)` with `if (false) return bad(...)` leaves the file green.",
+      "evidence": "mutation `if (false) return bad` in ticket-router.mjs; node --test tests/ticket-router.test.mjs -> exit 0, tests 198, fail 0 (survived). No exact-set unmutated baseline run; the 11-file unmutated run was exit 0. readGuard-side checks are killed by tests; only the table-side check is uncovered.",
+      "suggested_fix": "Add a validateTable test with guard.tripped holding a non-Cell token or {cell, on:['bogus']} and assert it is rejected.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 99,
+      "claim": "No test pins the missing-count default for the Baseline Cell in burnInCount (`guard.n[cell] ?? 0`): changing it to `?? 99` survives.",
+      "evidence": "mutation `guard.n[cell] ?? 99`; node --test ticket-router+ledger-grammar+pr-cost -> exit 0, tests 343, fail 0 (survived). No exact-set baseline run.",
+      "suggested_fix": "Add a guard whose n lacks the Baseline Cell and assert burn-in holds.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 102,
+      "claim": "The rule that the Baseline Cell itself must reach MIN_N even when it is not among the install-runnable starting cells is not pinned: replacing `[baseline, ...cells.filter(c => c !== baseline)].some` with `cells.some` survives.",
+      "evidence": "mutation applied in ticket-router.mjs; node --test ticket-router+ledger-grammar+pr-cost -> exit 0, tests 343, fail 0 (survived). No exact-set baseline run.",
+      "suggested_fix": "Test a case where the install does not run the Baseline Cell and the Baseline Cell's n is below MIN_N.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 475,
+      "claim": "defaultCellOf's final fallback to the run's baseline (rather than DEFAULT_BASELINE_CELL) when its role has no usable level is untested for a non-default baseline.",
+      "evidence": "mutation `return at === undefined ? DEFAULT_BASELINE_CELL : ...`; node --test tests/ticket-router.test.mjs -> exit 0, tests 198, fail 0 (survived).",
+      "suggested_fix": "Test defaultCellOf with a non-slow-high baseline whose role has no runnable level.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/trip-reasons.mjs",
+      "line": 37,
+      "claim": "tripEntry's de-duplication of `on` ([...new Set(raw.on)]) is unpinned: removing it survives.",
+      "evidence": "mutation `raw.on == null ? null : raw.on`; node --test ticket-router+ledger-grammar+pr-cost -> exit 0, tests 343, fail 0 (survived); other test files not run.",
+      "suggested_fix": "Assert tripEntry({cell, on:['usd','usd']}).on equals ['usd'].",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/phase0-receipt.mjs",
+      "line": 177,
+      "claim": "baselineOf's three branches (CELL.test on a recorded value; saved-value fallback; undefined -> default) all survived mutation in the sets I ran; coverage may live only in phase0.test.mjs, which I did not run against these mutants (inconclusive).",
+      "evidence": "mutations `typeof recorded === \"string\"`, `return false ? {cell: saved.cell`, `recorded === undefined && false`; node --test tests/instruments.test.mjs tests/ticket-router.test.mjs -> exit 0, tests 248, fail 0 each.",
+      "suggested_fix": "Run these mutants against tests/phase0.test.mjs and add direct baselineOf unit tests (invalid recorded token, saved fallback, absent) if they still survive.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/baseline-cell.mjs",
+      "line": 5,
+      "claim": "The header says the fallback is 'DEFAULT_BASELINE_CELL (phase0-receipt.mjs)'. The constant is defined and exported in ledger-grammar.mjs:1005 (baseline-cell.mjs itself imports it from there). phase0-receipt.mjs only imports it and holds the reader that applies the fallback, so the parenthetical misleads a reader looking for the definition.",
+      "evidence": "grep -rn DEFAULT_BASELINE_CELL plugin: 'ledger-grammar.mjs:1005: export const DEFAULT_BASELINE_CELL = \"slow-high\"'; phase0-receipt.mjs:17 imports it from ./ledger-grammar.mjs.",
+      "suggested_fix": "Cite ledger-grammar.mjs for the constant, and name phase0-receipt.mjs's baselineOf for the reader.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/phase0.mjs",
+      "line": 145,
+      "claim": "The new header comment, phase-0.md and phase0.mjs's own function doc all say 'Phase 0 never refuses and never asks' about the Baseline Cell. The same header and the code at phase0.mjs:920-923 also exit 3 and refuse when a resumed receipt records a non-Cell baselineCell. The exit-3 case is stated later, but the 'never refuses' wording overstates it, and phase-0.md omits the exception.",
+      "evidence": "phase0.mjs:920-923: `if (resumed && previous.baselineCell !== undefined && !(typeof previous.baselineCell === \"string\" && CELL.test(previous.baselineCell))) { … process.exitCode = 3; return; }`. The phase-0.md added paragraph says 'Phase 0 never refuses and never asks' and says nothing of exit 3.",
+      "suggested_fix": "Say 'never refuses a Baseline Cell argument or saved value' and note the resumed-receipt exit 3 in phase-0.md.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/fleet-tick.mjs",
+      "line": 1762,
+      "claim": "The diff adds `tripFault` to fleet-tick.mjs's trip-reasons import, but the file never uses it. This is not a comment defect, but a reader will assume the tick validates trip entries with it.",
+      "evidence": "grep -c tripFault plugin/scripts/fleet-tick.mjs gives 1, the import line only. costGuardFault validates `tripped` with its own inline typeof check at fleet-tick.mjs:573.",
+      "suggested_fix": "Drop `tripFault` from the import, or use it in costGuardFault.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/trip-reasons.mjs",
+      "claim": "`tripEntry` is documented as accepting only what `tripFault` accepts, but nothing enforces it: it is an unguarded union-to-record normaliser (`[...new Set(raw.on)]` spreads strings into characters and throws on non-iterables). The invariant lives in a comment plus the discipline that every reader calls tripFault first, and several readers (compute-cell-evidence, metrics-refresh, pr-cost, fleet-tick) do not.",
+      "evidence": "Probe above: tripEntry({cell:'slow-low',on:'floor'}) -> on = ['f','l','o','r']; on:5 throws. grep shows tripFault used only in ticket-router.mjs, plus an unused import in fleet-tick.mjs.",
+      "suggested_fix": "Fold validation into a single `parseTripEntry(raw)` returning `{ok,entry}|{ok:false,why}` (or have tripEntry validate), so a validated entry is the only thing downstream code can obtain.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/baseline-cell.mjs",
+      "claim": "resolveBaselineCell returns `{cell, source, save, notices}` where `source` is a free-form prose string (e.g. 'the saved value'), so consumers cannot branch on provenance; the JSDoc type `string` documents only. A closed enum with a separate display label would make provenance checkable. Low impact: I found no consumer branching on it (not exhaustively verified).",
+      "evidence": "Read of the baseline-cell.mjs diff: source is assigned 'the saved value' / 'the default' / `the substitute for ${configured}...` / '--baseline-cell'.",
+      "suggested_fix": "Return `source: 'arg'|'saved'|'default'|'substitute'` and map to prose at the print site.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 551,
+      "claim": "poolHeldBack is needless indirection that runs poolOf a second time: route() calls rowDispatch (which calls poolOf) and then poolHeldBack with identical arguments, so defaultCellOf, excludedCells ×2 and drawPool are all computed twice per exploring Pull.",
+      "evidence": "ticket-router.mjs:741 `rowDispatch({ table, guard, objective, stratum, install, baseline })` and :752 `poolHeldBack({ table, guard, objective, stratum, install, baseline })`, where poolHeldBack (:551-553) is `poolOf(args)` + `pool.some(c => out.has(c))`. Mutant in my copy: replaced rowDispatch/poolOf/poolHeldBack with one private `dispatchRow` that returns `{ dispatch, heldBack }`. `rowDispatch(args)` became `dispatchRow(args).dispatch`, so its exported return shape is unchanged (the tests deepEqual it), and route destructures `{ dispatch: dispatched, heldBack }`. The 1469 targeted tests, ticket-router.test.mjs included, all passed.",
+      "suggested_fix": "Replace poolOf and poolHeldBack with one private `dispatchRow({...})` that returns `{ dispatch: {policy, reason, draw}, heldBack: pool.some((c) => out.has(c)) }`. Make `export const rowDispatch = (args) => dispatchRow(args).dispatch`, and have route() call dispatchRow once and use its `heldBack` for `degrade(\"guard-tripped\")`. This also removes the second `defaultCellOf(install, baseline)` (rowDispatch :525 and poolOf :541 each compute `fallback`).",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/phase0-receipt.mjs",
+      "line": 177,
+      "claim": "The `source` field that baselineOf, baselineIn and baselineCellFromReceipt return is state nobody reads, baselineOf's `fleetDir === null` branch can never be reached, and baselineOf is only ever called through baselineIn.",
+      "evidence": "`grep -rn 'baselineIn\\b|baselineCellFromReceipt|baselineOf\\b' plugin tests` lists 5 call sites, each ending `.cell` (board-gather.mjs:1342, cell-readout.mjs:185, metrics-refresh.mjs:425, pr-cost.mjs:510, ticket-router.mjs:1251), and no test imports any of the three. Every fleetDir baselineOf receives comes from `join`/`dirname` or a stateDir already checked non-null; pr-cost checks `fleetDir === null` before calling. phase0.mjs prints its own source from resolveBaselineCell and never uses these. Mutant in my copy: folded baselineOf into `baselineIn(fleetDir)` returning the Cell string, dropped the null branch, made baselineCellFromReceipt return the string, and removed `.cell` at the 5 call sites. All 1469 targeted tests passed.",
+      "suggested_fix": "Make `export function baselineIn(fleetDir)` read the receipt itself and return just the Cell string (receipt's valid `baselineCell`, DEFAULT_BASELINE_CELL when it records none, else `readSavedBaseline(fleetDir)`'s cell, else DEFAULT_BASELINE_CELL). Delete baselineOf and every `source` literal, have baselineCellFromReceipt return the string, and drop `.cell` at the five callers.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/fleet-tick.mjs",
+      "line": 1762,
+      "claim": "fleet-tick.mjs imports `tripFault` from trip-reasons.mjs but never uses it: the import is dead, and costGuardFault hand-rolls a looser shape check in its place.",
+      "evidence": "`grep -n 'tripFault\\|tripEntry\\|tripWords' plugin/scripts/fleet-tick.mjs` finds tripFault only at line 1762, the import; tripEntry and tripWords are used at :550, :553 and :576. Swapping the hand check for tripFault would make it stricter, which changes behavior; I passed that to the correctness reviewer (probe: costGuardFault throws `TypeError: number 5 is not iterable` on `tripped:[{cell:\"task-high\",on:5}]`) and do not propose it here.",
+      "suggested_fix": "Drop `tripFault` from the import, or, if correctness rules the stricter check is wanted, make costGuardFault's `tripped` check `guard.tripped.every((t) => tripFault(t) === null)` and keep the import, so trip-entry validation has one owner.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/compute-cell-evidence.mjs",
+      "line": 519,
+      "claim": "burnInProgress and modelChanges each rebuild a `{ n, shared: isRecord(shared) ? shared : {} }` guard before calling burnInCount, but the copy is redundant: burnInCount already reads `guard.shared?.[cell]?.cell ?? 0`, which gives the same count for an absent, null or non-record `shared`.",
+      "evidence": "compute-cell-evidence.mjs:519-520 `const shared = isRecord(counts.shared) ? counts.shared : {}; ... burnInCount({ n: counts.n, shared }, cell, under)`, and :562 `const counts = { n: p.table.guard.n, shared: isRecord(p.table.guard.shared) ? p.table.guard.shared : {} }`. ticket-router.mjs burnInCount: `Math.min(guard.shared?.[cell]?.cell ?? 0, guard.shared?.[cell]?.base ?? 0)`. Mutant in my copy: passed `counts` (:520) and `p.table.guard` (:562) straight in. All 1469 targeted tests passed, including compute-cell-evidence, cockpit-tabs and cell-evidence-alerts.",
+      "suggested_fix": "In burnInProgress use `burnInCount(counts, cell, under)` and delete the `shared` local. In modelChanges use `const counts = p.table.guard;` (or pass `p.table.guard` inline).",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/pr-cost.mjs",
+      "line": 521,
+      "claim": "computeReport runs `compareCells(t.pulls, base.pulls)` twice for every judged cell, once in sharedMerged and again in the trip loop, even though compareCells is pure.",
+      "evidence": "pr-cost.mjs: sharedMerged (diff +1521-1524) runs `compareCells(t.pulls, base.pulls)` for every tally, and the trip loop (:284 in the copy) runs `compareCells(t.pulls, base.pulls)` again for every cell with ≥ MIN_N merged PRs. compareCells (pull-attribution.mjs:282-301) builds pooled bootstrap units and has no side effects. Mutant in my copy: `const vsBase = new Map([...tallies.values()].map((t) => [t.cell, base === null ? null : compareCells(t.pulls, base.pulls)]))`, used in both places. pr-cost.test.mjs and the rest of the 1469 targeted tests passed.",
+      "suggested_fix": "Compute each cell's comparison with the Baseline Cell once (`vsBase` keyed by cell, null when there is no base) and read it in both sharedMerged and the trip loop. The loop only runs when `baseline.n >= MIN_N`, which already implies `base !== null`.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 102,
+      "claim": "anyStartingCellShort's `cells.filter((c) => c !== baseline)` only removes a duplicate from a short-circuiting `.some`, which cannot change the boolean.",
+      "evidence": "ticket-router.mjs:102 `[baseline, ...cells.filter((c) => c !== baseline)].some((c) => burnInCount(guard, c, baseline) < MIN_N)`. A duplicate baseline gets the same burnInCount, so `.some` returns the same value. Mutant in my copy: `[baseline, ...cells].some(...)`. All 1469 targeted tests passed, including the burn-in cases in ticket-router.test.mjs.",
+      "suggested_fix": "`const anyStartingCellShort = (guard, cells, baseline) => [baseline, ...cells].some((c) => burnInCount(guard, c, baseline) < MIN_N);`",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/board-gather.mjs",
+      "line": 1380,
+      "claim": "`baselineCell ?? DEFAULT_BASELINE_CELL` in the readFitFile call is a dead fallback: that branch only runs when stateDir !== null, and there baselineCell is always baselineIn's non-null Cell. Likewise compute-board.mjs:888 `inputs.baselineCell ?? null` is redundant, because computeCellEvidence already defaults `baselineCell = null` for undefined.",
+      "evidence": "board-gather.mjs:1342 `const baselineCell = stateDir === null ? null : baselineIn(stateDir).cell;` (baselineIn always returns a string cell) and :1380 `stateDir === null ? { status: \"missing\" } : readFitFile(stateDir, baselineCell ?? DEFAULT_BASELINE_CELL)`. compute-cell-evidence.mjs:941 destructures `baselineCell = null`. Mutant in my copy: `readFitFile(stateDir, baselineCell)` and `baselineCell: inputs.baselineCell`. board-gather, board-cell-evidence-gather, compute-board and the rest of the 1469 targeted tests passed.",
+      "suggested_fix": "board-gather.mjs:1380 → `readFitFile(stateDir, baselineCell)`; compute-board.mjs:888 → `baselineCell: inputs.baselineCell`. Keep the `?? DEFAULT_BASELINE_CELL` at :1343 (readRouterTable), which is reached when stateDir is null.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 388,
+      "claim": "validateTable spells out `t.baseline_cell ?? DEFAULT_BASELINE_CELL`, which is exactly the new `fitBaselineOf(table)` helper in the same file, leaving two copies of the rule 'a table that records none was computed under slow-high'.",
+      "evidence": "`grep -n 'baseline_cell ?? \\|fitBaselineOf\\b' plugin/scripts/*.mjs`: ticket-router.mjs:388 `startingSetOf(t.baseline_cell ?? DEFAULT_BASELINE_CELL)` and :646 `export const fitBaselineOf = (table) => table.baseline_cell ?? DEFAULT_BASELINE_CELL`. No top-level code calls validateTable at module init (`grep -n '^[a-z].*validateTable('` matched only its declaration at :330), so the `const` hoisting order is safe. Reasoned, not mutated.",
+      "suggested_fix": "`const set = startingSetOf(fitBaselineOf(t));`",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 1072,
+      "claim": "The by-cell comparator `(a, b) => (a.cell < b.cell ? -1 : a.cell > b.cell ? 1 : 0)` is written out twice in ticket-router.mjs, once inline in parseGuard and once as a local `byCell` in tableOver.",
+      "evidence": "`grep -n 'a.cell < b.cell' plugin/scripts/*.mjs` → ticket-router.mjs:593 (parseGuard `.sort((a, b) => ...)`) and :1072 (`const byCell = (a, b) => ...` in tableOver). Reasoned, not mutated; hoisting a pure comparator to module scope keeps the behavior.",
+      "suggested_fix": "Declare `const byCell = (a, b) => (a.cell < b.cell ? -1 : a.cell > b.cell ? 1 : 0);` once at module scope and use it in both parseGuard and tableOver.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/compute-cell-evidence.mjs",
+      "line": 405,
+      "claim": "guardSection's new default `baselineCell = DEFAULT_BASELINE_CELL` is dead: its only caller always passes the resolved baseline. The default also suggests a second place where the default Baseline Cell is decided.",
+      "evidence": "`grep -rn 'guardSection(' plugin/scripts tests` → the only call is compute-cell-evidence.mjs:950 `guardSection(guard, receipts, step, modelRoles, pulls, records.note, baseline)`, where `baseline` (:944) is already `baselineCell ?? guard's ?? DEFAULT_BASELINE_CELL`. Reasoned, not mutated.",
+      "suggested_fix": "Drop the default: `function guardSection(read, receipts, step, modelRoles, pulls, recordsNote, baselineCell)`. computeCellEvidence stays the one place that resolves the default.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/board-gather.mjs",
+      "line": 880,
+      "claim": "readFitFile calls `fitBaselineOf(table)` twice on one line, once in the condition and once in the message.",
+      "evidence": "Diff +405 / board-gather.mjs:880: `if (fitBaselineOf(table) !== baseline) return { status: \"unreadable\", why: `it was computed under the Baseline Cell ${fitBaselineOf(table)}, not this run's ${baseline}` };`. Reasoned: fitBaselineOf is a pure property read, so a local changes nothing.",
+      "suggested_fix": "`const under = fitBaselineOf(table); if (under !== baseline) return { status: \"unreadable\", why: `it was computed under the Baseline Cell ${under}, not this run's ${baseline}` };`",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

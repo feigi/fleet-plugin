@@ -1,0 +1,80 @@
+{
+  "pr": 4511,
+  "head": "8de6072e0a3744a0f18b48de296df20a960300ef",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: Verify branch is rebased on base (needs pull-request context and full git history, not the worktree); Validate renovate.json (fetches renovate from the npm registry via npx on every run); smoke-omp (needs bun and a globally installed pinned omp binary); install-and-smoke (needs bun and a globally installed pinned omp binary).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "tests",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/tier-outcomes.tsv' and untracked docs/metrics/runs/2026-11-19T141220Z/{closeout.json,ledger.md,phase0.json,plugin-version}. I did not write any of these; they look like controller metrics output."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-19T141220Z/{closeout.json,ledger.md,phase0.json,plugin-version}`. These are fleet metrics files I did not create; I wrote nothing there."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-19T141220Z/closeout.json`, `?? docs/metrics/runs/2026-11-19T141220Z/ledger.md`, `?? docs/metrics/runs/2026-11-19T141220Z/phase0.json`, `?? docs/metrics/runs/2026-11-19T141220Z/plugin-version`. These were not written by this reviewer: every write here went to the scratch copy, and the only command run in that directory was `pwd`."
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 3,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4511/run-rR9MEWqy/snapshot-8de6072e",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 871,
+      "claim": "The new `|| name !== id` in places() closes more self-import-under-another-name paths than the one refused case pins (member write): the old condition also missed Object.assign(CFG, …), `const o = CFG; o.ms = …` and `CFG.__proto__ = …` on a self-import read as C.ms. These three are now refused but no test pins them on their own. The mutant is still killed by the one pinned case, so this is a coverage nicety, not a defect.",
+      "evidence": "I appended a PROBE test to the copy that runs sweep() on a self-import `import { CFG as C } from \"./x.mjs\"; export const CFG = {ms:20_000};` read as C.ms. At the PR head, assignSelf gives reaches ['reads process.env.TICKETLESS_TIMEOUT'], bindSelf gives ['reads C.ms: CFG is bound to another name …'] and protoSelf gives ['reads C.ms: CFG.__proto__ is written …']. With the old condition `if (home !== ref.mod)`, assignSelf, bindSelf and protoSelf each give [true,[],[]], so all three were accepted unseen. These cases also refuse at the PR head: reverse (read CFG, write C), another module writing under the same or another name, a namespace self-import, two aliases, and a dynamic import. The in-range write stays accepted.",
+      "suggested_fix": "Optional: add `Object.assign(CFG, …)` and `const o = CFG` self-import rows to the refusedFor list next to the new member-write row.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 868,
+      "claim": "The new self-import refuse case kills three mutants of the tracer's `|| name !== id` clause (revert, `&&`, name-only). The `true` mutant survives, which the code comment itself says is equivalent.",
+      "evidence": "red: node --test tests/gh-spawn-bound.test.mjs → exit 1, fail 1 incl 'the sweep refuses a gh timeout written in the module that declares an object or in one that imports it' (revert, `&&` and name-only mutants); baseline: node --test tests/gh-spawn-bound.test.mjs → exit 0, tests 26 pass 26 fail 0 cancelled 0, that test pass. `if (true)` mutant → exit 0, 26/26 pass, so it survives. The comment says a duplicate reason is dropped, so it is equivalent.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "PR body: 'each goes red when the matching visible(m) check ... is true' was not run by me; it is only consistent with the diff. The checks exist (writesTo lines 798, 803) and the cases cover string, template and regex for assignment and decrement, but increment has only string and template cases, no regex case.",
+      "evidence": "Read pr.diff and snapshot lines 788-806. The `++` cases are string and template only. The body's 'string, template or regex' wording is a loose summary. No finding on the comment text itself.",
+      "suggested_fix": "Optional: add an 'increment inside a regex' case, or leave it.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}
