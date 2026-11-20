@@ -113,7 +113,10 @@
 //      the name it gives it (`import { X as Y }`, `ns.X` of a namespace
 //      import, where rule 6 also judges each use of `ns` itself). An exported
 //      object is refused when another module reaches its module by `import()`
-//      or `export … from`, which the sweep does not follow.
+//      or `export … from`, which the sweep does not follow. A static import of
+//      a relative module is read only as `import { … }` or `import * as ns` at
+//      the start of a line (#4507); any other (a default import, or one after
+//      other code on its line) is refused by file and line.
 // Not followed: a write through a longer path (`CFG.inner.ms = …`), through a
 // computed key (`CFG[k] = …`), and a `delete`.
 import { test } from "node:test";
@@ -292,8 +295,12 @@ function analyse(src, file) {
     for (const spec of named[1].split(",").map((s) => s.trim()).filter(Boolean)) primitives.add(spec.split(/\s+as\s+/).at(-1));
   }
 
+  // The static imports of a relative module that the two regexes below read,
+  // by where the `import` keyword stands.
+  const parsedAt = new Set();
   const imports = new Map();
   for (const m of code.matchAll(/^import\s*\{([^}]*)\}\s*from\s*["'](\.\/[^"']+\.mjs)["']/gm)) {
+    parsedAt.add(m.index);
     for (const spec of m[1].split(",").map((s) => s.trim()).filter(Boolean)) {
       const [orig, local = orig] = spec.split(/\s+as\s+/);
       imports.set(local, { module: m[2], name: orig });
@@ -304,7 +311,20 @@ function analyse(src, file) {
   // (an export is then `ns.name`), `import("./x.mjs")`, `export … from
   // "./x.mjs"`, and an `import()` of anything else, which can reach any module.
   const namespaces = new Map();
-  for (const m of code.matchAll(/^import\s*\*\s*as\s+([\w$]+)\s+from\s*["'](\.\/[^"']+\.mjs)["']/gm)) namespaces.set(m[1], m[2]);
+  for (const m of code.matchAll(/^import\s*\*\s*as\s+([\w$]+)\s+from\s*["'](\.\/[^"']+\.mjs)["']/gm)) {
+    parsedAt.add(m.index);
+    namespaces.set(m[1], m[2]);
+  }
+  // Any other static import of a relative .mjs module (a default import, one
+  // not at the start of its line) binds names the maps above never hold, so a
+  // write or re-export through it would go unseen: refused, not followed.
+  const staticImport = /import\s*([^;"'`]*?)\s*from\s*(["'])(\.\.?\/[^"'\n]*\.mjs)\2/y;
+  for (const m of skel.matchAll(/\bimport\b/g)) {
+    if (parsedAt.has(m.index)) continue;
+    staticImport.lastIndex = m.index;
+    const spec = staticImport.exec(code)?.[3];
+    if (spec !== undefined) problems.push(`${file}:${lineOf(m.index)} imports "${spec}" in a form this sweep cannot follow`);
+  }
   const dynamic = new Set();
   let dynamicAny = false;
   for (const m of skel.matchAll(/(?<![\w$.])import\s*\(/g)) {
@@ -2512,6 +2532,59 @@ test("the sweep refuses a gh timeout written in the module that declares an obje
       "x.mjs": MOD(`import { T } from "./common.mjs";\nspawnSync("gh", ["x"], { timeout: T });`),
     }, "T is a for…of or for…in target"],
   ]);
+});
+
+// #4507. Rule 7 reads a static import of a relative module in two forms, each
+// at the start of its line; any other static import of one is refused by name
+// and line, since a write or re-export in that module would go unseen.
+test("the sweep refuses a static import of a relative module that it cannot read", () => {
+  const BODY = `CFG.ms = ${ENV_MS};`;
+  const refused = {
+    "a default import beside a named one": [importing(BODY, `import D, { CFG } from "./common.mjs";\n`), "y.mjs:1"],
+    "a default import beside a namespace": [importing(`ns.CFG.ms = ${ENV_MS};`, `import D, * as ns from "./common.mjs";\n`), "y.mjs:1"],
+    "a default import alone": [importing(BODY, `import D from "./common.mjs";\n`), "y.mjs:1"],
+    "a default import beside a re-export": [importing(`export { CFG };`, `import D, { CFG } from "./common.mjs";\n`), "y.mjs:1"],
+    "an import after a statement on its line": [importing(BODY, `log(1); import { CFG } from "./common.mjs";\n`), "y.mjs:1"],
+    "an import after a closing brace on its line": [importing(BODY, `if (log) {} import { CFG } from "./common.mjs";\n`), "y.mjs:1"],
+    "an import after a closing parenthesis on its line": [importing(BODY, `log(1) import { CFG } from "./common.mjs";\n`), "y.mjs:1"],
+    "a namespace import after a statement on its line": [importing(`ns.CFG.ms = ${ENV_MS};`, `log(1); import * as ns from "./common.mjs";\n`), "y.mjs:1"],
+    "an indented import": [importing(BODY, `  import { CFG } from "./common.mjs";\n`), "y.mjs:1"],
+    "an import in a parent directory": [importing(BODY, `import { CFG } from "../common.mjs";\n`), "y.mjs:1"],
+    "a default import, on a later line": [importing(BODY, `log(1);\nimport D, { CFG } from "./common.mjs";\n`), "y.mjs:2"],
+    "a default import spread over several lines": [importing(BODY, `log(1);\nimport D,\n  { CFG }\n  from "./common.mjs";\n`), "y.mjs:2"],
+    "a default import in single quotes": [importing(BODY, `import D from './common.mjs';\n`), "y.mjs:1"],
+  };
+  for (const [name, [sources, at]] of Object.entries(refused)) {
+    const { problems } = sweep(sources);
+    assert.equal(problems.length, 1, `${name}: ${JSON.stringify(problems)}`);
+    assert.ok(problems[0].startsWith(`${at} imports "`) && problems[0].endsWith(`" in a form this sweep cannot follow`), `${name}: ${problems[0]}`);
+  }
+  // The refusal names the file, the line and the module.
+  assert.deepEqual(sweep(importing(BODY, `log(1);\nimport D from "./common.mjs";\n`)).problems,
+    [`y.mjs:2 imports "./common.mjs" in a form this sweep cannot follow`]);
+  // Each import of such a module is refused, not only the first.
+  assert.equal(sweep(importing(BODY, `import D from "./common.mjs";\nimport E from "./common.mjs";\n`)).problems.length, 2);
+  // What the sweep reads stays read, and what it has no module to follow is no
+  // import of one.
+  const read = {
+    "a named import": importing(BODY),
+    "a named import spread over several lines": importing(BODY, `import {\n  CFG,\n} from "./common.mjs";\n`),
+    "a renamed import": importing(`C.ms = ${ENV_MS};`, `import { CFG as C } from "./common.mjs";\n`),
+    "a namespace import": importing(`ns.CFG.ms = ${ENV_MS};`, `import * as ns from "./common.mjs";\n`),
+    "an import after a comment": importing(BODY, `/* a */ // b\nimport { CFG } from "./common.mjs";\n`),
+    "a node: import": importing(`log(1);`, `import { readFileSync } from "node:fs";\nimport path from "node:path";\nimport * as os from "node:os";\n`),
+    "a bare package import": importing(`log(1);`, `import D from "somewhere";\nimport { a } from "pkg/sub";\n`),
+    "an import of a file that is no .mjs": importing(`log(1);`, `import D from "./data.json";\n`),
+    "a side-effect import": importing(`log(1);`, `import "./elsewhere.mjs";\n`),
+    "a dynamic import": importing(`const m = await import("./elsewhere.mjs");`, ""),
+    "a dynamic import after a default import of another kind": importing(`const m = await import("./elsewhere.mjs");`, `import D from "node:fs";\n`),
+    "an import.meta read": importing(`const here = import.meta.url;\nconst d = import . meta;`, ""),
+    "an import in a string": importing(`log('import D from "./common.mjs"');`, ""),
+    "an import in a template": importing("log(`import D from \"./common.mjs\"`);", ""),
+    "an import in a comment": importing(`// import D from "./common.mjs"\n/* import D, { CFG } from "./common.mjs" */`, ""),
+    "an object key named import": importing(`const o = { import: 1 };\nlog(o.import);`, ""),
+  };
+  for (const [name, sources] of Object.entries(read)) assert.deepEqual(sweep(sources).problems, [], name);
 });
 
 test("the sweep accepts a gh timeout it can follow beside writes it need not", () => {
