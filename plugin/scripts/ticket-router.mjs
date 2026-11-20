@@ -389,6 +389,9 @@ export function validateTable(t) {
   if (sc !== undefined && (!Array.isArray(sc) || sc.length === 0 || new Set(sc).size !== sc.length || !sc.every((c) => set.includes(c)))) {
     return bad("`starting_cells` is not a non-empty list of starting Cells, each once");
   }
+  // A fitted table's `cells` hold every Cell its `starting_cells` names.
+  const missing = sc?.find((c) => !t.cells.includes(c));
+  if (missing !== undefined) return bad(`\`starting_cells\` names ${missing}, which \`cells\` does not hold`);
   const cl = t.classifier;
   if (cl === null || typeof cl !== "object") return bad("`classifier` is not an object");
   if (cl.b !== null && cl.b !== "haiku" && cl.b !== "jev") return bad("`classifier.b` is not null, \"haiku\" or \"jev\"");

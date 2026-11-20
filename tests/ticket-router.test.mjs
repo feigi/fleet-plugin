@@ -867,6 +867,12 @@ test("validateTable: each malformed router table is refused for its own reason, 
     [/`guard`: `tripped` names "nope", which is not a Cell/, bad({ guard: { tripped: ["nope"], n: {} } })],
     [/`guard`: `tripped` names slow-high on \["bogus"\], which is not a list of/, bad({ guard: { tripped: [{ cell: "slow-high", on: ["bogus"] }], n: {} } })],
     ...["x", 5, null, [], ["nope"], ["slow-high", "slow-high"], ["slow-medium"]].map((starting_cells) => [/`starting_cells` is not/, bad({ starting_cells })]),
+    // A fitted table's `cells` must hold every Cell its `starting_cells` names.
+    [/`starting_cells` names slow-high, which `cells` does not hold/, bad({ cells: ["task-high", "smol-high", "slow-medium"], starting_cells: ["slow-high"] })],
+    [/`starting_cells` names task-high, which `cells` does not hold/, bad({ cells: ["slow-high", "smol-high"], starting_cells: [...STARTING] })],
+    [/`starting_cells` names slow-high, which `cells` does not hold/, bad({ cells: ["slow-medium"], starting_cells: ["slow-high"] })],
+    // Two starting Cells missing: the error names the first in `starting_cells` order.
+    [/`starting_cells` names slow-high, which `cells` does not hold/, bad({ cells: ["slow-medium"], starting_cells: ["slow-high", "task-high"] })],
   ];
   for (const [why, table] of cases) {
     const r = validateTable(table);
@@ -884,6 +890,12 @@ test("validateTable: each malformed router table is refused for its own reason, 
     bad({ guard: { tripped: ["task-high"], n: { "slow-high": 3 } } }),
     bad({ starting_cells: ["slow-high"] }),
     bad({ starting_cells: [...STARTING] }),
+    // Any order and any extra Cells beside the recorded set.
+    bad({ cells: ["smol-high", "slow-medium", "slow-high", "task-high", "task-max"], starting_cells: [...STARTING] }),
+    bad({ cells: ["slow-medium", "task-high"], starting_cells: ["task-high"] }),
+    // A table that records no `starting_cells` is validated by its `cells` alone, a starting Cell left out or not.
+    bad({ cells: ["slow-medium"] }),
+    bad({ cells: ["task-high", "smol-high"] }),
   ];
   for (const table of valid) assert.equal(validateTable(table), table, JSON.stringify(table));
 });
