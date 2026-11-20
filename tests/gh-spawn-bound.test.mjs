@@ -865,7 +865,10 @@ function tracer(mods, resolve, spawner) {
     const out = [{ mod: ref.mod, name: id }];
     if (home === undefined) return out;
     const name = imp ? imp.name : id;
-    if (home !== ref.mod) out.push({ mod: home, name });
+    // `|| name !== id` also adds the declaring module's own name when it imports
+    // its own export under another one. `true` here cannot be caught: it only
+    // adds a place the list already holds, and a duplicate reason is dropped.
+    if (home !== ref.mod || name !== id) out.push({ mod: home, name });
     for (const m of mods.values()) {
       for (const [local, i] of m.imports) {
         if (i.name === name && mods.get(i.module.slice(2)) === home && !(m === ref.mod && local === id)) out.push({ mod: m, name: local });
@@ -2486,6 +2489,18 @@ test("the sweep refuses a gh timeout written in the module that declares an obje
     ["a call in another module", importing(`widen(CFG);`), "CFG is passed to widen(…)"],
     ["a write under a name an import renames", importing(`C.ms = ${ENV_MS};`, `import { CFG as C } from "./common.mjs";\n`), "reads process.env"],
     ["a binding under a name an import renames", importing(`const o = C;\no.ms = ${ENV_MS};`, `import { CFG as C } from "./common.mjs";\n`), "C is bound to another name"],
+    ["a write to an object the declaring module imports from itself under another name", {
+      "x.mjs": READ("C.ms", `import { CFG as C } from "./x.mjs";\nexport const CFG = { ms: 20_000 };\nCFG.ms = ${ENV_MS};\n`),
+    }, "reads process.env"],
+    ["an Object.assign to an object the declaring module imports from itself under another name", {
+      "x.mjs": READ("C.ms", `import { CFG as C } from "./x.mjs";\nexport const CFG = { ms: 20_000 };\nObject.assign(CFG, { ms: ${ENV_MS} });\n`),
+    }, "reads process.env"],
+    ["a binding to another name of an object the declaring module imports from itself", {
+      "x.mjs": READ("C.ms", `import { CFG as C } from "./x.mjs";\nexport const CFG = { ms: 20_000 };\nconst o = CFG;\no.ms = ${ENV_MS};\n`),
+    }, "CFG is bound to another name"],
+    ["a __proto__ write to an object the declaring module imports from itself", {
+      "x.mjs": READ("C.ms", `import { CFG as C } from "./x.mjs";\nexport const CFG = { ms: 20_000 };\nCFG.__proto__ = { get ms() { return 1; } };\n`),
+    }, "__proto__"],
     ["a write through a namespace import", importing(`ns.CFG.ms = ${ENV_MS};`, ns), "reads process.env"],
     ["an Object.assign through a namespace import", importing(`Object.assign(ns.CFG, { ms: ${ENV_MS} });`, ns), "reads process.env"],
     ["an Object.defineProperty through a namespace import", importing(`Object.defineProperty(ns . CFG, "ms", { value: ${ENV_MS} });`, ns), "Object.defineProperty"],
@@ -2592,6 +2607,15 @@ test("the sweep accepts a gh timeout it can follow beside writes it need not", (
       "y.mjs": `const m = await import("./x.mjs");\n`,
       "x.mjs": READ("CFG.ms", "const CFG = { ms: 20_000 };\n"),
     },
+    "a function-local object of the name of an exported one, in a module imported dynamically": {
+      "y.mjs": `const m = await import("./x.mjs");\n`,
+      "x.mjs": MOD(`export const opts = { timeout: 20_000 };\nfunction f() { const opts = { timeout: 20_000 }; return spawnSync("gh", ["x"], opts); }`),
+    },
+    "a parameter of the name of an exported object, in a module imported dynamically": {
+      "y.mjs": `const m = await import("./x.mjs");\n`,
+      "x.mjs": MOD(`export const opts = { timeout: 20_000 };\nfunction f(opts) { return spawnSync("gh", ["x"], opts); }\nf({ timeout: 5_000 });`),
+    },
+    "an object the declaring module imports from itself under another name, written in range": READ("C.ms", `import { CFG as C } from "./x.mjs";\nexport const CFG = { ms: 20_000 };\nCFG.ms = 5_000;\n`),
     "a name destructured as a function's parameter with a default": MOD(`const T = 20_000;\nfunction f({ T } = {}) { return T; }\nspawnSync("gh", ["x"], { timeout: T });`),
     "an index assignment with the name as its key": MOD(`const T = 20_000;\nconst table = {};\ntable[T] = 1;\nspawnSync("gh", ["x"], { timeout: T });`),
     "the object's name as another object's key": WITH_OPTS(`const held = { opts: 1, other: opts.timeout };\nlog(held);`),
@@ -2604,6 +2628,14 @@ test("the sweep accepts a gh timeout it can follow beside writes it need not", (
     "the object declared before it is given a value": MOD(`let opts;\nopts = { timeout: 20_000 };\nspawnSync("gh", ["x"], { timeout: 20_000, ...opts });`),
     "a declaration pattern's entry of the object's name": WITH_OPTS(`function h(holder) { const { opts } = holder; return 1; }`),
     "the object tested for being there": WITH_OPTS(`if (opts) log(1);`),
+    "a timeout write inside a string": WITH_OPTS(`log("opts.timeout = 1e12");`),
+    "a timeout write inside a template": WITH_OPTS("log(`opts.timeout = 1e12`);"),
+    "a timeout write inside a regex": WITH_OPTS(`log(/opts.timeout = 1e12/.test(line));`),
+    "a timeout increment inside a string": WITH_OPTS(`log("opts.timeout++");`),
+    "a timeout increment inside a template": WITH_OPTS("log(`opts.timeout++`);"),
+    "a timeout decrement inside a string": WITH_OPTS(`log("--opts.timeout");`),
+    "a timeout decrement inside a template": WITH_OPTS("log(`--opts.timeout`);"),
+    "a timeout decrement inside a regex": WITH_OPTS(`log(/--opts.timeout/.test(line));`),
     "the object in parentheses in a spawn's arguments": MOD(`const opts = { timeout: 20_000 };\nspawnSync("gh", ["x"], { timeout: 20_000, ...(opts) });`),
     "the object's name in a for head's pattern, inside a function": WITH_OPTS(`function g(h) { for (const [k, opts] of Object.entries(h)) log(k); }`),
     "the name reassigned to a copy of the object": MOD(`let opts = { timeout: 20_000 };\nopts = { ...opts, cwd: "/" };\nspawnSync("gh", ["x"], opts);`),
