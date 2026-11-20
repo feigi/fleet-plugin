@@ -1,0 +1,43 @@
+{
+  "head": "c8b5708bfddab25552f3818101bd5164208a63b3",
+  "run": "run-PbFA8LeF",
+  "entries": [
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "reason": "Refuter upheld the claim (only the required starting_cells-in-cells half is enforced; no prefix check). The finding's remedy is 'None needed for this ticket', and the ticket lists the prefix requirement as out of scope, so applying it changes nothing in the tree.",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4521/fix-XP7bZWAn/u0/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "reason": "Refuter upheld the claim (no throw, swallowed error or hidden fallback in the new check, by probe over 13 malformed inputs). The finding's remedy is 'None', so applying it changes nothing in the tree.",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4521/fix-XP7bZWAn/u1/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "reason": "Refuter upheld the claim (an on-disk Fit failing the new check routes REASON fit-invalid and board-gather reports it unreadable, measured via the route CLI and readFitFile). The finding's remedy is 'None', so applying it changes nothing in the tree.",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4521/fix-XP7bZWAn/u2/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "reason": "Refuter upheld the claim (findLast mutant survives at the reviewed head). Applied: a case with two starting Cells missing, expecting the first named. red: fleet-run suite-slot.mjs './agent-test' --test-name-pattern=\"validateTable: each malformed\" tests/ticket-router.test.mjs with sc?.findLast mutant → exit 1, fail 1 incl validateTable: each malformed router table is refused…; baseline: same command, mutant reverted → exit 0, validateTable: each malformed router table is refused… pass.",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4521/fix-XP7bZWAn/u3/verdict.json",
+      "remedyFiles": ["tests/ticket-router.test.mjs"]
+    }
+  ]
+}

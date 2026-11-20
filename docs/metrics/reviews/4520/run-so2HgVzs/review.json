@@ -1,0 +1,133 @@
+{
+  "pr": 4520,
+  "head": "4399e0fa6908dd63482e60e817f41da546fb7d51",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: Verify branch is rebased on base (needs pull-request context and full git history, not the worktree); Validate renovate.json (fetches renovate from the npm registry via npx on every run); smoke-omp (needs bun and a globally installed pinned omp binary); install-and-smoke (needs bun and a globally installed pinned omp binary).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "tests",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — untracked only: docs/metrics/runs/2026-11-20T085328Z/{closeout.json,ledger.md,phase0.json,plugin-version}. These are run-metrics files from the controller, not written by this review."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ?? docs/metrics/runs/2026-11-20T085328Z/closeout.json, ledger.md, phase0.json, plugin-version (untracked metrics files, not created by me; I wrote nothing there)."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — `?? docs/metrics/runs/2026-11-20T085328Z/closeout.json`, `?? docs/metrics/runs/2026-11-20T085328Z/ledger.md`, `?? docs/metrics/runs/2026-11-20T085328Z/phase0.json`, `?? docs/metrics/runs/2026-11-20T085328Z/plugin-version` (all with mtime 2026-11-20 09:53:28 +0100). They are not mine: every write I made went to .../correctness/copy."
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 7,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4520/run-so2HgVzs/snapshot-4399e0fa",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 321,
+      "claim": "The new `staticImport` regex takes its import clause as `[^;\"'`]*?`, which can cross newlines and non-import syntax. So in code written without semicolons, an `import.meta` read, an `import(x)` call or an `{ import: … }` key followed on a later line by any `… from \"./x.mjs\"` is falsely refused. The refusal is reported at the earlier line and named as an import of that module. This contradicts the test's claim that import.meta, dynamic import and object-key `import` are not flagged.",
+      "evidence": "A ZZPROBE test appended in my measure-copy, run with `env -u FORCE_COLOR node --test --test-name-pattern=ZZPROBE tests/gh-spawn-bound.test.mjs`, printed:\n- asi_meta_then_import (`const here = import.meta.url\\nimport { CFG } from \"./common.mjs\"`): [\"y.mjs:1 imports \\\"./common.mjs\\\" in a form this sweep cannot follow\"]\n- asi_dyn_then_reexport (`const m = await import(name)\\nexport * from \"./common.mjs\"`): the same y.mjs:1 refusal\n- asi_meta_then_reexport: the same\n- objkey_import_asi (`const o = { import: 1 }\\nimport { CFG } ...`): the same\n- control_plain: [].\nNo shipped script triggers this today: the real-tree sweep passes, and the only semicolon-less `import.meta` lines are `if (isCLI(import.meta.url)) {` in member-outcomes.mjs:421 and recipe-prove.mjs:617. The false refusal fails the safe way.",
+      "suggested_fix": "Allow only import-clause characters: `/import\\s*([\\w$\\s,{}*]*?)\\s*from\\s*([\"'])(\\.\\.?\\/[^\"'\\n]*\\.mjs)\\2/y`. Measured in my copy: with this change all 4 ASI probes print [], block_comment_same_line is still refused, and the whole file passes (`node --test tests/gh-spawn-bound.test.mjs`: tests 27, pass 27, fail 0, ZZPROBE included). Optionally, add one ASI case to the test's `read` table.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 321,
+      "claim": "The clause class excludes quotes, so a static import that uses ES2022 string-named specifiers in a shape the sweep cannot read (`import D, { \"CFG\" as C } from \"./common.mjs\"`, or the same import after other code on its line) is neither parsed nor refused. A write through it is accepted. This leaves a hole in the brief's goal that refusing 'covers every unparseable shape'.",
+      "evidence": "ZZPROBE in my measure-copy printed: `PROBE string_name_default [] [[]]` and `PROBE string_name_midline [] [[]]`. problems is empty and reaches is empty, so `C.ms = ENV_MS` is accepted. The plain-import control printed [[\"reads process.env.TICKETLESS_TIMEOUT\"]]. No script in plugin/scripts uses string-named specifiers: the grep for default, indented or mid-line imports found none.",
+      "suggested_fix": "Allow a quoted name inside the braces of the clause, e.g. `(?:[\\w$\\s,{}*]|\"[^\"\\n]*\"|'[^'\\n]*')*?`. Or accept the gap, since this syntax is exotic.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 2540,
+      "claim": "Every mutation of the new refusal I tried makes the new test fail, so the test meets the brief's mutation-check criterion.",
+      "evidence": "In my copy I ran `node --test --test-name-pattern='static import of a relative module' tests/gh-spawn-bound.test.mjs`. The baseline gave tests 1, pass 1. Each of these mutants gave pass 0, fail 1:\n- M1: drop parsedAt.add in the namespace loop\n- M2: drop parsedAt.add in the named-import loop\n- M3: `\\.\\.?\\/` changed to `\\.\\/`\n- M5: double quotes only\n- M7: iterate `code` instead of `skel`\n- M8: drop the `parsedAt.has` skip\n- M9: clause cannot cross newlines\n- M10: never push the refusal.\nThis is a confirmation, not a defect.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 317,
+      "claim": "The `[^;\"'`]*?` clause-span bound in the new staticImport regex is not discriminated: widening it to allow `;` leaves every test green, so no case checks that a `;` between `import` and a later `from \"./x.mjs\"` stops the match.",
+      "evidence": "red: n/a (survivor); baseline: ./agent-test tests/gh-spawn-bound.test.mjs → exit 0, tests 26 pass 26 fail 0; mutant (`[^\"'`]*?`) → tests 26 pass 26 fail 0, all named tests pass.",
+      "suggested_fix": "Add a case such as `import.meta.url; export const x = 1; /* from \"./common.mjs\" */`-style text where `;` precedes a `from \"./x.mjs\"` and assert it is not refused (or refused only once).",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 317,
+      "claim": "Mismatched-quote tolerance (`\\2` backreference replaced by `[\"']`), the `\\s*` vs `\\s+` after `import`, and the `.import` property lookbehind variants all survive; likely equivalent or low-risk, but no test pins quote-matching (e.g. `from \"./a.mjs'`).",
+      "evidence": "red: n/a (survivors M5, M15, M16); baseline: ./agent-test tests/gh-spawn-bound.test.mjs → exit 0, tests 26 pass 26; each mutant → exit 0, tests 26 pass 26 fail 0.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 2538,
+      "claim": "The test comment says the refusal is 'by name and line', but the problems entry names the file, the line and the module specifier, not any import name.",
+      "evidence": "Snapshot line 2538 reads 'refused by name and line'. The asserted message is `y.mjs:2 imports \"./common.mjs\" in a form this sweep cannot follow` (diff lines 82-83), and the next test comment says 'names the file, the line and the module'. The commit message also says 'naming the file and line'.",
+      "suggested_fix": "Change 'by name and line' to 'by file and line', matching the header and the commit message.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 118,
+      "claim": "The rule 7 header lists the refused forms as 'a default import, or one after other code on its line'. The refusal also covers indented imports and `../` specifiers, so the parenthetical reads as exhaustive when it is not.",
+      "evidence": "The tests 'an indented import' and 'an import in a parent directory' (diff lines 70-71) assert refusals. The parsed regexes require `^import` and `./`, and the new `staticImport` regex accepts `\\.\\.?/`. The header's lead 'any other' still makes the claim true.",
+      "suggested_fix": "Say 'e.g.' in the parenthetical, or add 'an indented one, one in a parent directory'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}
