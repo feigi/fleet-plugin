@@ -402,6 +402,20 @@ test("a Fit over every starting Cell at MIN_N merged PRs is out of burn-in, says
   assert.deepEqual(table.cells, SHIPPED.cells);
 });
 
+test("a Fit over records holding a Pull of a Cell the starting table lacks judges that Cell, and the Fit's prior keeps the starting list", () => {
+  const rows = corpus();
+  ruled(rows, { ticket: 1 });
+  ruled(rows, { ticket: 2, cell: "slow-medium" });
+  const f = fixture({ rows });
+  const r = f.run();
+  assert.equal(r.status, 0, r.stderr);
+  const fit = JSON.parse(readFileSync(join(f.repo, FIT), "utf8"));
+  assert.deepEqual(fit.table.cells, [...SHIPPED.cells, "slow-medium"]);
+  assert.deepEqual(fit.prior.cells, SHIPPED.cells);
+  assert.deepEqual(fit.table.starting_cells, SHIPPED.cells, "burn-in still counts the starting set alone");
+  assert.equal(validateTable(fit.table) instanceof Error, false);
+});
+
 test("the next route call routes by the Fit phase 0 wrote", () => {
   const f = fixture();
   assert.equal(f.run().status, 0);

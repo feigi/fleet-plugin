@@ -131,6 +131,32 @@ test("a Cell the guard has tripped is no choice, and its Pulls are not scored", 
   assert.deepEqual([gate.scored, gate.best], [80, null], "only slow-high's Pulls: the default Cell alone has nothing to choose");
 });
 
+// `n` Pulls of `cell` on the low side of `flip()`'s input, each at $1 and the probability `prob`.
+const lowSide = (cell, n, prob = "1/2") => Array.from({ length: n }, () => ({ cell, usd: 1, held: { criteria: "0" }, prob }));
+
+test("a Cell the starting table lacks is searched: its Pulls are scored, or left out with no probability, and a tripped one is not", () => {
+  const base = fit(flip()).gate;
+  const drawn = fit([...flip(), ...lowSide("slow-medium", 10)]);
+  assert.deepEqual([drawn.gate.scored, drawn.gate.left_out], [base.scored + 10, 0]);
+  assert.notEqual(drawn.gate.records, base.records, "the digest covers the Cells and Pulls searched");
+  const unscored = fit([...flip(), ...lowSide("slow-medium", 10, "")]);
+  assert.deepEqual([unscored.gate.scored, unscored.gate.left_out], [base.scored, 10], "a Pull recording no probability is counted as left out");
+  const tripped = fit([...flip(), ...lowSide("slow-medium", 10)], { guard: guardAt(40, { tripped: [{ cell: "slow-medium", on: ["usd"] }] }) });
+  assert.deepEqual([tripped.gate.scored, tripped.gate.left_out, tripped.gate.records], [base.scored, 0, base.records], "a Cell the guard has tripped on a reason `cost` excludes is not searched");
+  const minutes = fit([...flip(), ...lowSide("slow-medium", 10)], { guard: guardAt(40, { tripped: [{ cell: "slow-medium", on: ["minutes"] }] }) });
+  assert.equal(minutes.gate.scored, base.scored + 10, "one tripped on minutes alone stays in the search");
+  assert.deepEqual(drawn.table.cells, ["slow-high", "task-high", "smol-high", "slow-medium"]);
+});
+
+test("a Cell short of MIN_N merged PRs in a leaf is not that leaf's pick, though its Pulls count; at MIN_N it is", () => {
+  // slow-medium is $1 a PR against task-high's $4 on the low side and slow-high's $10: whole, it is the cheapest Cell.
+  const gain = (n) => fit([...flip(), ...lowSide("slow-medium", n)]).gate.best.gain;
+  const [short, enough] = [gain(19), gain(20)];
+  // Never picked, slow-medium only widens the share the Pulls of each leaf are of the group: 80 of 179 for the high side.
+  assert.equal(short, Math.round((80 / 179) * 4 * 1e4) / 1e4);
+  assert.notEqual(enough, short, "at MIN_N the Cell is a choice the leaf can take");
+});
+
 test("the tree reaches two inputs, each node its own row, and a ticket lacking the second input stops at the node of the first", () => {
   // Task-high is $4 on three corners of `criteria` x `paths` and $20 on the fourth; slow-high is $10 throughout.
   const corners = (each) => {
