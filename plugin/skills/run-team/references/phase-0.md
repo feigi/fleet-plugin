@@ -29,16 +29,20 @@ starts from, the cost guard compares every Cell with and the quality floor reads
 in its receipt as `baselineCell` and prints it with where it came from. A valid
 argument (a Cell with an implementer definition) is saved in
 `.fleet/baseline-cell.json` and binds every later run until a run names another;
-`--baseline-cell slow-high` goes back to the default. Phase 0 never refuses and never
-asks: an invalid argument is a notice, is not saved, and the run goes on to the saved
-value; an invalid saved value is a notice and the run uses `slow-high`; a Cell the
-install cannot run is replaced for the run by the nearest level of its role it does
-run, a notice naming both Cells. It also notices when the run's Baseline Cell differs
-from the one the last cost guard recorded: a switch, which resets nothing — a Cell is
-compared with the Baseline Cell only over the stretches both were drawn in, so trips
-judged against the old one lift and burn-in resumes until the starting set is judged.
+`--baseline-cell slow-high` goes back to the default. Phase 0 never refuses a Baseline
+Cell argument or saved value and never asks: an invalid argument is a notice, is not
+saved, and the run goes on to the saved value; an invalid saved value is a notice and
+the run uses `slow-high`; a Cell the install cannot run is replaced for the run by the
+nearest level of its role it does run, a notice naming both Cells; implementer
+definitions that cannot be listed are a notice naming that as the cause. It also
+notices when the run's Baseline Cell differs from the one the last cost guard recorded:
+a switch, which resets nothing — a Cell is compared with the Baseline Cell only over
+the stretches both were drawn in, so trips judged against the old one lift and burn-in
+resumes until the starting set is judged. A last cost guard that is there but cannot
+be read is a notice that whether the run is a switch is not known.
 A resumed receipt keeps its `baselineCell`; an argument that would replace the saved
-value is saved, and a notice says it applies from the next run.
+value is saved, and a notice says it applies from the next run. A resumed receipt
+recording a value that is no Cell exits 3 naming it.
 
 `--merge` or `--no-merge` is whether the run's merge bot merges, which phase 0
 records in its receipt as `merge: true` or `merge: false`, `true` when neither

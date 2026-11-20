@@ -864,6 +864,8 @@ test("validateTable: each malformed router table is refused for its own reason, 
     [/`guard` is not/, bad({ guard: { tripped: [] } })],
     [/`guard` is not/, bad({ guard: { tripped: [], n: null } })],
     [/`guard` is not/, bad({ guard: { tripped: [], n: "x" } })],
+    [/`guard`: `tripped` names "nope", which is not a Cell/, bad({ guard: { tripped: ["nope"], n: {} } })],
+    [/`guard`: `tripped` names slow-high on \["bogus"\], which is not a list of/, bad({ guard: { tripped: [{ cell: "slow-high", on: ["bogus"] }], n: {} } })],
     ...["x", 5, null, [], ["nope"], ["slow-high", "slow-high"], ["slow-medium"]].map((starting_cells) => [/`starting_cells` is not/, bad({ starting_cells })]),
   ];
   for (const [why, table] of cases) {
@@ -2993,6 +2995,15 @@ test("fit: burn-in ends over the starting Cells the install runs, the Fit record
   }
 });
 
+test("fit: burn-in holds until the Baseline Cell has MIN_N merged PRs, even when the install does not run it and it is no starting Cell counted", () => {
+  const input = cellInput([["slow-high", 10], ["smol-high", 2]]);
+  const prior = baseTable({ burn_in: true });
+  const shared = { "task-high": { cell: 20, base: 20 }, "smol-high": { cell: 20, base: 20 } };
+  const fit = (n) => fitTable({ prior, ...direct(input), guard: guardOf({ n: { "slow-high": n }, shared }), startingCells: ["task-high", "smol-high"] });
+  assert.equal(fit(19).burn_in, true, "the Baseline Cell one short of MIN_N");
+  assert.equal(fit(20).burn_in, false, "the Baseline Cell at MIN_N");
+});
+
 // ---------------------------------------------------------------------------
 // The Baseline Cell, and the reasons a Cell tripped that each Objective applies for itself
 // ---------------------------------------------------------------------------
@@ -3071,6 +3082,8 @@ test("defaultCellOf and startingCellsOf read the Baseline Cell they are given", 
   assert.equal(defaultCellOf(INSTALL, "task-medium"), "task-medium");
   const taskRuns = (levels) => defaultCellOf(installWith("task", levels).install, "task-xhigh");
   assert.equal(taskRuns(["low", "medium", "high"]), "task-high", "downward first: the nearest level its role runs");
+  assert.equal(taskRuns(["minimal"]), "task-xhigh", "a role with no level it runs and defines keeps the Baseline Cell, not slow-high");
+  assert.equal(defaultCellOf(installWith("smol", null).install, "smol-high"), "smol-high", "and so does a role the install runs at no level");
   assert.deepEqual(startingCellsOf(INSTALL, "smol-high"), ["slow-high", "task-high", "smol-high"]);
   assert.deepEqual(startingCellsOf(installWith("smol", ["low", "medium", "high"]).install, "slow-xhigh"), ["slow-xhigh", "task-xhigh"], "the starting Cells the install runs");
   assert.deepEqual(startingCellsOf(null, "task-low"), ["slow-low", "task-low", "smol-low"]);

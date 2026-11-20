@@ -885,7 +885,7 @@ export function computeBoard(inputs) {
       mainMetrics: inputs.mainMetrics,
       table: inputs.routerTable,
       objective: inputs.objective,
-      baselineCell: inputs.baselineCell ?? null,
+      baselineCell: inputs.baselineCell,
       pulls: tickets.filter((t) => t.cellLine).map((t) => ({ issue: t.issue, cell: t.cellLine.cell, mark: t.cellLine.mark, targets: t.cellLine.targets })),
     }),
     // The `omp config get modelRoles` read, carried tick to tick the way `ci`

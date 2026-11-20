@@ -12,7 +12,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
@@ -1428,6 +1428,38 @@ test("the Baseline Cell: a run whose Baseline Cell differs from the last cost gu
   assert.equal(switched.status, 0, switched.stdout + switched.err);
   const notice = switched.out.find((l) => l.startsWith("notice: the last cost guard recorded slow-high as its baseline"));
   assert.ok(notice?.includes("this run's task-medium is a switch"), switched.stdout);
+});
+
+test("the Baseline Cell: a last cost guard that is there but cannot be read says so and claims no switch; one that records no baseline says nothing", () => {
+  const f = fixture();
+  mkdirSync(join(f.repo, ".fleet"), { recursive: true });
+  writeFileSync(join(f.repo, ".fleet", "cost-guard.json"), "{ nope");
+  const r = f.run(["--session", f.session, "--baseline-cell", "task-medium"]);
+  assert.equal(r.status, 0, r.stdout + r.err);
+  assert.ok(r.out.some((l) => l.startsWith("notice: the last cost guard cannot be read (") && l.endsWith("is not JSON): whether this run's task-medium is a switch is not known")), r.stdout);
+  assert.equal(r.out.some((l) => l.includes("is a switch —")), false, r.stdout);
+  writeFileSync(join(f.repo, ".fleet", "cost-guard.json"), JSON.stringify({ verdict: "none" }));
+  const older = nextRun(f);
+  assert.equal(older.status, 0, older.stdout + older.err);
+  assert.equal(older.out.some((l) => l.includes("last cost guard")), false, older.stdout);
+});
+
+test("the Baseline Cell: implementer definitions that cannot be listed are named as the cause, ahead of the notice that refuses the value", () => {
+  const f = fixture();
+  const agents = join(TREE, "plugin", "agents");
+  renameSync(agents, `${agents}.off`);
+  let r;
+  try {
+    r = f.run(["--session", f.session, "--baseline-cell", "task-medium"]);
+  } finally {
+    renameSync(`${agents}.off`, agents);
+  }
+  assert.equal(r.status, 0, r.stdout + r.err);
+  const unlisted = r.out.findIndex((l) => l.startsWith("notice: the implementer definitions cannot be listed (") && l.includes("cannot be listed (ENOENT)"));
+  const refused = r.out.findIndex((l) => l.startsWith("notice: --baseline-cell \"task-medium\" is not a Cell with an implementer definition"));
+  assert.ok(unlisted !== -1 && refused !== -1 && unlisted < refused, r.stdout);
+  assert.equal(f.receipt().baselineCell, "slow-high");
+  assert.equal(savedCell(f), null);
 });
 
 test("the Baseline Cell: a resume keeps the receipt's, takes a receipt that records none as slow-high, and an argument that replaces the saved value is saved with a notice and exit 0", () => {

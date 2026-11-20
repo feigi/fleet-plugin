@@ -256,11 +256,13 @@ export function computeReport({ members, tiers, features, prs, routerTable = nul
       untimed: g.untimed,
     };
   };
+  // Each cell's newest generation held to the Baseline Cell's (`compareCells`), once: null with no Baseline Cell.
+  const vsBase = new Map([...tallies.values()].map((t) => [t.cell, base === null ? null : compareCells(t.pulls, base.pulls)]));
   // Each cell's newest generation's merged PRs on each side of the stretches it shares with the Baseline Cell, which
   // the trip loop below judges it on and burn-in holds until: recorded for every cell, those the loop skips for
   // want of merged PRs of their own included. The Baseline Cell shares every stretch with itself.
   const sharedMerged = (t) => {
-    const m = base === null ? null : compareCells(t.pulls, base.pulls);
+    const m = vsBase.get(t.cell);
     return m === null ? { cell: 0, base: 0 } : { cell: m.cell.merged, base: m.base.merged };
   };
   const figures = [...tallies.values()].map((t) => ({
@@ -281,7 +283,7 @@ export function computeReport({ members, tiers, features, prs, routerTable = nul
   if (baseline.n >= MIN_N) {
     for (const t of tallies.values()) {
       if (t.cell === baselineCell || t.merged < MIN_N) continue;
-      const m = compareCells(t.pulls, base.pulls);
+      const m = vsBase.get(t.cell);
       if (!judged(m)) unmatched.push(t.cell);
       else {
         const on = tripReasonsOn(m);

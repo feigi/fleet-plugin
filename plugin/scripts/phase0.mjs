@@ -148,17 +148,21 @@
 // (a Cell with an implementer definition), else the value saved in
 // `.fleet/baseline-cell.json`, else `slow-high`. A valid argument is saved and
 // binds every later run until a run names another; `--baseline-cell slow-high`
-// goes back to the default. Phase 0 never refuses and never asks about it: an
-// invalid argument is a notice, is not saved, and the run goes on to the saved
-// value; an invalid saved value is a notice, the run uses `slow-high` and the
-// file is left as it is. A Baseline Cell the install cannot run is replaced for
-// the run by the nearest level of its role the install runs and has a
-// definition for (ticket-router.mjs's defaultCellOf), a notice naming both
-// Cells, the saved value unchanged. Every phase 0 prints the Baseline Cell it
-// runs and where it came from, and a notice when it differs from the one the
-// last cost guard recorded: a switch, after which the guard and the Fit compare a Cell
-// with the Baseline Cell only over the stretches both were drawn in. A resumed
-// receipt keeps its `baselineCell` — `slow-high` when it records none — for the
+// goes back to the default. Phase 0 never refuses a Baseline Cell argument or
+// saved value and never asks about it: an invalid argument is a notice, is not
+// saved, and the run goes on to the saved value; an invalid saved value is a
+// notice, the run uses `slow-high` and the file is left as it is; implementer
+// definitions that cannot be listed are a notice naming that as the cause. A
+// Baseline Cell the install cannot run is replaced for the run by the nearest
+// level of its role the install runs and has a definition for
+// (ticket-router.mjs's defaultCellOf), a notice naming both Cells, the saved
+// value unchanged. Every phase 0 prints the Baseline Cell it runs and where it
+// came from, and a notice when it differs from the one the last cost guard
+// recorded: a switch, after which the guard and the Fit compare a Cell with the
+// Baseline Cell only over the stretches both were drawn in; a last cost guard
+// that is there but cannot be read is a notice that whether it is a switch is
+// not known. A resumed receipt keeps its `baselineCell` — `slow-high` when it
+// records none — for the
 // rest of the run, since the guard and the Fit its `metrics` step computed
 // stand; a valid argument is still saved, and a notice says it applies from the
 // next run. A resumed receipt recording a value that is no Cell exits 3 naming it.
@@ -733,14 +737,20 @@ function writeReceipt(path, receipt) {
 
 const capped = (s) => (s.length > OUTPUT_MAX ? `…${s.slice(-(OUTPUT_MAX - 1))}` : s);
 
-// The Cell the last cost guard recorded as its baseline, or null when there is no guard to read it from.
+// The Cell the last cost guard recorded as its baseline: `{ cell, why }`, `cell` null when there is no guard or it
+// records none, and `why` saying so when the guard is there but cannot be read or parsed.
 function guardBaseline(fleetDir) {
+  const file = join(fleetDir, "cost-guard.json");
+  let text;
   try {
-    const cell = JSON.parse(readFileSync(join(fleetDir, "cost-guard.json"), "utf8"))?.baseline?.cell;
-    return typeof cell === "string" ? cell : null;
-  } catch {
-    return null;
+    text = readFileSync(file, "utf8");
+  } catch (e) {
+    return { cell: null, why: e.code === "ENOENT" ? null : `${file} cannot be read (${e.code ?? e.message})` };
   }
+  let guard;
+  try { guard = JSON.parse(text); } catch { return { cell: null, why: `${file} is not JSON` }; }
+  const cell = guard?.baseline?.cell;
+  return { cell: typeof cell === "string" ? cell : null, why: null };
 }
 
 /**
@@ -752,7 +762,7 @@ function guardBaseline(fleetDir) {
  * has to say is a notice, among them that the Cell differs from the one the last cost guard recorded, a switch.
  */
 function baselineCellOf({ resumed, previous, named, fleetDir }) {
-  const defined = definedCells();
+  const { cells: defined, why: unlisted } = definedCells();
   const saved = readSavedBaseline(fleetDir, defined);
   const save = (cell) => {
     try {
@@ -782,9 +792,13 @@ function baselineCellOf({ resumed, previous, named, fleetDir }) {
       if (failed !== null) result.notices.push(failed);
     }
   }
+  // Listed first: the notices after it blame a value for what is the install's.
+  if (unlisted !== null) result.notices.unshift(`the implementer definitions cannot be listed (${unlisted}): no Cell counts as having one, so this run takes no --baseline-cell or saved value`);
   const last = guardBaseline(fleetDir);
-  if (last !== null && last !== result.cell) {
-    result.notices.push(`the last cost guard recorded ${last} as its baseline: this run's ${result.cell} is a switch — no trip carries across it, every Cell not drawn beside ${result.cell} is unjudged, and burn-in resumes until the starting set is judged against it`);
+  if (last.why !== null) {
+    result.notices.push(`the last cost guard cannot be read (${last.why}): whether this run's ${result.cell} is a switch is not known`);
+  } else if (last.cell !== null && last.cell !== result.cell) {
+    result.notices.push(`the last cost guard recorded ${last.cell} as its baseline: this run's ${result.cell} is a switch — no trip carries across it, every Cell not drawn beside ${result.cell} is unjudged, and burn-in resumes until the starting set is judged against it`);
   }
   return result;
 }

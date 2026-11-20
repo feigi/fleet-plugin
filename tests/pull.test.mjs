@@ -1822,6 +1822,24 @@ test("the row carries tier=<CELL> exactly when DRAW is not `-`, cell=<CELL> when
   }
 });
 
+test("under the Baseline Cell task-medium, a Pull routed to task-medium with no draw writes cell=task-medium, and one routed to slow-high writes a bare row: a bare row is slow-high whatever the run's Baseline Cell", () => {
+  const cases = [
+    ["POLICY=task-medium CELL=task-medium DRAW=- BY=- STRATUM=light BRIEF=120 CRITERIA=0 SIZED=- OBJECTIVE=cost TRIPPED=- REASON=guard-missing", "#12 impl-12 · cell=task-medium", "fleet-implementer-task-medium"],
+    ["POLICY=task-medium CELL=slow-high DRAW=- BY=- STRATUM=light BRIEF=120 CRITERIA=0 SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok", "#12 impl-12", "fleet-implementer-slow-high"],
+  ];
+  for (const [line, row, agent] of cases) {
+    const f = fixture();
+    const receipt = join(f.fleet, "phase0.json");
+    writeFileSync(receipt, JSON.stringify({ ...JSON.parse(readFileSync(receipt, "utf8")), baselineCell: "task-medium" }));
+    f.control("ticket-router", { out: `${line}\n` });
+    toCollision(f);
+    const r = f.answer(12, "collision", "clear");
+    assert.equal(r.status, 0, r.stdout + r.err);
+    assert.equal(f.ledgerRows().find((l) => l.startsWith("#12 ")).replace(/ · impl-12$/, ""), row, line);
+    assert.equal(dispatchSpec(r).agent, agent, line);
+  }
+});
+
 // ── the member's name: the next free one when this session has used `impl-<N>` ──
 
 // The ledger as `ledger.mjs` writes it, for the sections no verb writes by hand: `## Retired` is written only by a

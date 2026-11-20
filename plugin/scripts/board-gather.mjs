@@ -877,7 +877,8 @@ export function readFitFile(stateDir, baseline = DEFAULT_BASELINE_CELL) {
   if (!isJsonObject(p)) return { status: "unreadable", why: "not a JSON object" };
   const table = validateTable(p.table);
   if (table instanceof Error) return { status: "unreadable", why: table.message };
-  if (fitBaselineOf(table) !== baseline) return { status: "unreadable", why: `it was computed under the Baseline Cell ${fitBaselineOf(table)}, not this run's ${baseline}` };
+  const under = fitBaselineOf(table);
+  if (under !== baseline) return { status: "unreadable", why: `it was computed under the Baseline Cell ${under}, not this run's ${baseline}` };
   const stringOrNull = (v) => (typeof v === "string" ? v : null);
   return { status: "ok", fit: { computed_at: stringOrNull(p.computed_at), guard_computed_at: stringOrNull(p.guard_computed_at), tsv_blobs: isJsonObject(p.tsv_blobs) ? p.tsv_blobs : null, table } };
 }
@@ -1377,7 +1378,7 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, stateDir 
   // receipts, the reads carried as they were).
   const guard = stateDir === null ? { status: "missing" } : readGuardFile(stateDir);
   const guardJson = stateDir === null ? null : readGuardJson(stateDir);
-  const fit = stateDir === null ? { status: "missing" } : readFitFile(stateDir, baselineCell ?? DEFAULT_BASELINE_CELL);
+  const fit = stateDir === null ? { status: "missing" } : readFitFile(stateDir, baselineCell);
   const closeoutPr = stateDir === null ? null : readCloseoutPr(stateDir);
   const receipts = stateDir === null
     ? { phase0: null, closeout: null }

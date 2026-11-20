@@ -401,8 +401,9 @@ function booked(entry, pulls) {
 // The Cells drawn: CELLS, then any the guard holds or a card names beyond them.
 const drawOrder = (held, pulls) => [...new Set([...CELLS, ...held, ...pulls.flatMap((p) => p.targets.map((t) => t.cell)).filter((c) => CELL.test(c))])];
 
-// `step` is the receipts' newest `metrics` step, newestStep's pick.
-function guardSection(read, receipts, step, modelRoles, pulls, recordsNote = null, baselineCell = DEFAULT_BASELINE_CELL) {
+// `step` is the receipts' newest `metrics` step, newestStep's pick; `baselineCell` the run's Baseline Cell, as
+// computeCellEvidence resolves it.
+function guardSection(read, receipts, step, modelRoles, pulls, recordsNote = null, baselineCell) {
   const label = readLabel(modelRoles);
   const refresh = newestRefresh(step);
   const notes = [];

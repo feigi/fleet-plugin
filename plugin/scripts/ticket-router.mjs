@@ -385,7 +385,7 @@ export function validateTable(t) {
   }
   // The starting Cells burn-in counted, which a Fit records and the starting table does not.
   const sc = t.starting_cells;
-  const set = startingSetOf(t.baseline_cell ?? DEFAULT_BASELINE_CELL);
+  const set = startingSetOf(fitBaselineOf(t));
   if (sc !== undefined && (!Array.isArray(sc) || sc.length === 0 || new Set(sc).size !== sc.length || !sc.every((c) => set.includes(c)))) {
     return bad("`starting_cells` is not a non-empty list of starting Cells, each once");
   }
@@ -521,36 +521,32 @@ const drawPool = (table, centre, install, baseline) => {
  * null with no guard and when no Cell is left.
  * @returns {{ policy: string, reason: "guard-missing"|"table-cell-unrunnable"|"table-cell-tripped"|"ok", draw: null | { by: "burn-in"|"every-5th", cells: string[] } }}
  */
-export function rowDispatch({ table, guard, objective, stratum, install = null, baseline = DEFAULT_BASELINE_CELL }) {
-  const fallback = defaultCellOf(install, baseline);
-  if (guard === null) return { policy: fallback, reason: "guard-missing", draw: null };
-  const { out, unrunnable, adjust, pool } = poolOf({ table, guard, objective, stratum, install, baseline });
-  const row = rowFor(table.rows[objective], stratum);
-  const cells = pool.filter((c) => !out.has(c) && !unrunnable(c));
-  return {
-    policy: adjust(row, out),
-    reason: unrunnable(row) ? "table-cell-unrunnable" : out.has(row) ? "table-cell-tripped" : "ok",
-    draw: cells.length > 0 ? { by: table.burn_in ? "burn-in" : "every-5th", cells } : null,
-  };
-}
+export const rowDispatch = ({ table, guard, objective, stratum, install = null, baseline = DEFAULT_BASELINE_CELL }) =>
+  dispatchRow({ table, guard, objective, stratum, install, baseline }).dispatch;
 
-// What a row's dispatch under a guard (not null) is worked out from: `out`, the Cells `objective` excludes;
-// `unrunnable` and `adjust(cell, excluded)`, which replaces an excluded or unrunnable Cell by the default; and
-// `pool`, drawPool()'s Cells for the group, centred on its `cost` row's Cell as `cost`'s exclusions leave it.
-function poolOf({ table, guard, objective, stratum, install, baseline }) {
+// rowDispatch's answer as `dispatch`, and `heldBack`: whether the draw's pool for the group held a Cell `objective`
+// excludes, which the Routing records as `guard-tripped`. Under a guard the dispatch is worked out from `out`, the
+// Cells `objective` excludes; `unrunnable` and `adjust(cell, excluded)`, which replaces an excluded or unrunnable
+// Cell by the default; and `pool`, drawPool()'s Cells for the group, centred on its `cost` row's Cell as `cost`'s
+// exclusions leave it.
+function dispatchRow({ table, guard, objective, stratum, install, baseline }) {
   const fallback = defaultCellOf(install, baseline);
+  if (guard === null) return { dispatch: { policy: fallback, reason: "guard-missing", draw: null }, heldBack: false };
   const out = new Set(excludedCells(guard.tripped, objective));
   const costOut = new Set(excludedCells(guard.tripped, "cost"));
   const unrunnable = (cell) => !isRunnable(install, cell);
   const adjust = (cell, excluded) => (excluded.has(cell) || unrunnable(cell) ? fallback : cell);
   const pool = drawPool(table, adjust(rowFor(table.rows.cost, stratum), costOut), install, baseline);
-  return { out, unrunnable, adjust, pool };
-}
-
-/** Whether the draw's pool for a group held a Cell `objective` excludes, which the Routing records as `guard-tripped`. */
-function poolHeldBack(args) {
-  const { out, pool } = poolOf(args);
-  return pool.some((c) => out.has(c));
+  const row = rowFor(table.rows[objective], stratum);
+  const cells = pool.filter((c) => !out.has(c) && !unrunnable(c));
+  return {
+    dispatch: {
+      policy: adjust(row, out),
+      reason: unrunnable(row) ? "table-cell-unrunnable" : out.has(row) ? "table-cell-tripped" : "ok",
+      draw: cells.length > 0 ? { by: table.burn_in ? "burn-in" : "every-5th", cells } : null,
+    },
+    heldBack: pool.some((c) => out.has(c)),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -561,6 +557,9 @@ function readJson(path) {
   if (!path) return null;
   try { return JSON.parse(readFileSync(path, "utf8")); } catch { return null; }
 }
+
+// Orders `{ cell, … }` entries by their Cell's name.
+const byCellName = (a, b) => (a.cell < b.cell ? -1 : a.cell > b.cell ? 1 : 0);
 
 /**
  * `cost-guard.json` as the router reads it: `{ ok: true, guard }`, reduced to
@@ -590,7 +589,7 @@ export function parseGuard(raw) {
     n[c.cell] = c.n;
     if (count(c.shared_merged?.cell) && count(c.shared_merged?.base)) shared[c.cell] = { cell: c.shared_merged.cell, base: c.shared_merged.base };
   }
-  const tripped = [...byCell.values()].sort((a, b) => (a.cell < b.cell ? -1 : a.cell > b.cell ? 1 : 0));
+  const tripped = [...byCell.values()].sort(byCellName);
   return { ok: true, guard: { tripped, n, shared, window_start: typeof raw.window_start === "string" ? raw.window_start : null } };
 }
 
@@ -738,7 +737,7 @@ export function route({
     }
   }
 
-  const dispatched = rowDispatch({ table, guard, objective, stratum, install, baseline });
+  const { dispatch: dispatched, heldBack } = dispatchRow({ table, guard, objective, stratum, install, baseline });
   if (dispatched.reason !== "ok") degrade(dispatched.reason);
   // With no guard the default cell is the only one: the guard cannot be
   // evaded by deleting it.
@@ -749,7 +748,7 @@ export function route({
   if (guard !== null) {
     const exploring = table.burn_in || (implRow % EXPLORE_EVERY === 0 && !chainHead);
     if (exploring) {
-      if (poolHeldBack({ table, guard, objective, stratum, install, baseline })) degrade("guard-tripped");
+      if (heldBack) degrade("guard-tripped");
       if (dispatched.draw !== null) {
         // rowDispatch's `cells` never hold the `cost` row's Cell: nothing more to withhold.
         const d = drawCell({ session, ticket, policyCell: null, cells: dispatched.draw.cells });
@@ -1069,7 +1068,6 @@ function tableOver({ prior, units: unbooked, order, guard, window, baseline, sta
     reasons.cost[s] = { ...cost, cell: costCell };
     reasons.speed[s] = { ...speed, cell: speedCell };
   }
-  const byCell = (a, b) => (a.cell < b.cell ? -1 : a.cell > b.cell ? 1 : 0);
   const shared = guard.shared ?? {};
   return {
     window_start: window,
@@ -1084,7 +1082,7 @@ function tableOver({ prior, units: unbooked, order, guard, window, baseline, sta
     estimates,
     reasons,
     guard: {
-      tripped: guard.tripped.map(tripEntry).sort(byCell),
+      tripped: guard.tripped.map(tripEntry).sort(byCellName),
       n: Object.fromEntries(Object.keys(guard.n).sort().map((c) => [c, guard.n[c]])),
       shared: Object.fromEntries(Object.keys(shared).sort().map((c) => [c, shared[c]])),
     },

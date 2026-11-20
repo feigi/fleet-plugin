@@ -22,16 +22,19 @@ export const BASELINE_FILE = "baseline-cell.json";
 // The implementer definitions the install ships: the directory the Cells a Baseline Cell may name are read from.
 const SHIPPED_AGENTS = join(dirname(fileURLToPath(import.meta.url)), "..", "agents");
 
-/** The Cells an implementer definition exists for in `agents`, as a Set; empty when the directory cannot be listed. */
+/**
+ * The Cells an implementer definition exists for in `agents`: `{ cells, why }`, `cells` a Set and `why` null, or,
+ * when the directory cannot be listed, `cells` empty and `why` saying so, so that no value is blamed for it.
+ */
 export function definedCells(agents = SHIPPED_AGENTS) {
   try {
-    return new Set(readdirSync(agents).map((file) => file.replace(/\.agent\.md$/, "")).filter((name) => CELL_DEF.test(name)).map((name) => name.slice("fleet-implementer-".length)));
-  } catch {
-    return new Set();
+    return { cells: new Set(readdirSync(agents).map((file) => file.replace(/\.agent\.md$/, "")).filter((name) => CELL_DEF.test(name)).map((name) => name.slice("fleet-implementer-".length))), why: null };
+  } catch (e) {
+    return { cells: new Set(), why: `${agents} cannot be listed (${e.code ?? e.message})` };
   }
 }
 
-/** Whether `value` is a valid Baseline Cell: a Cell with an implementer definition in `defined` (definedCells's). */
+/** Whether `value` is a valid Baseline Cell: a Cell with an implementer definition in `defined` (definedCells's `cells`). */
 export const isBaselineCell = (value, defined) => typeof value === "string" && CELL.test(value) && defined.has(value);
 
 /**
@@ -39,7 +42,7 @@ export const isBaselineCell = (value, defined) => typeof value === "string" && C
  * a valid Baseline Cell, or `{ state: "invalid", why }` for a file that cannot be read or parsed, holds no string
  * `cell`, or names a Cell that is no valid Baseline Cell.
  */
-export function readSavedBaseline(fleetDir, defined = definedCells()) {
+export function readSavedBaseline(fleetDir, defined = definedCells().cells) {
   const file = join(fleetDir, BASELINE_FILE);
   let text;
   try {
@@ -66,7 +69,7 @@ export function saveBaseline(fleetDir, cell) {
 /**
  * The Baseline Cell a run starts with and where it came from, once, off the argument, the saved value and what the
  * install runs. Never refuses and never asks. `arg` is `--baseline-cell`'s value or null; `saved` is
- * readSavedBaseline's answer; `defined` is definedCells's; `substitute(cell)` is the Cell the install runs in its
+ * readSavedBaseline's answer; `defined` is definedCells's `cells`; `substitute(cell)` is the Cell the install runs in its
  * place (ticket-router.mjs's defaultCellOf over the install read), `cell` itself where it runs it.
  *
  * A valid argument is the configured Cell and is to be saved (`save`); an invalid one is a notice, is not saved, and

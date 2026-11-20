@@ -22,12 +22,13 @@ export const EXCLUDED_ON = Object.freeze({
 
 /**
  * Why `raw`, one entry of a guard's `tripped`, is no entry, or null when it is one: a Cell name, or `{ cell, on }`
- * with `cell` a Cell and `on` a list of reasons when it is present and not null.
+ * with `cell` a Cell and `on` a non-empty list of reasons when it is present and not null. An empty `on` would hold
+ * its Cell back under neither Objective while the guard's verdict still reads `tripped`.
  */
 export function tripFault(raw) {
   const cell = typeof raw === "string" ? raw : raw?.cell;
   if (typeof cell !== "string" || !CELL.test(cell)) return `\`tripped\` names ${JSON.stringify(raw)}, which is not a Cell`;
-  if (typeof raw !== "string" && raw.on != null && (!Array.isArray(raw.on) || !raw.on.every((r) => TRIP_REASONS.includes(r)))) {
+  if (typeof raw !== "string" && raw.on != null && (!Array.isArray(raw.on) || raw.on.length === 0 || !raw.on.every((r) => TRIP_REASONS.includes(r)))) {
     return `\`tripped\` names ${cell} on ${JSON.stringify(raw.on)}, which is not a list of ${TRIP_REASONS.join(", ")}`;
   }
   return null;

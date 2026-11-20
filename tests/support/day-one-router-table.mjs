@@ -7,9 +7,10 @@
 // startingTableOf). DAY_ONE_TABLE is that table filled in for the default
 // Baseline Cell, `slow-high`: the table a repository that names no Baseline
 // Cell begins from. No re-fit PR moves either: they change only by an ordinary
-// change. "route: the shipped table is the starting table" in
-// ticket-router.test.mjs holds the shipped file equal to SHIPPED_TABLE and its
-// filled form equal to DAY_ONE_TABLE, and "route: the checked-in table is valid"
+// change. "route: the shipped table names no Cell, and filled in for a Baseline
+// Cell it is the starting table" in ticket-router.test.mjs holds the shipped
+// file equal to SHIPPED_TABLE and its filled form equal to DAY_ONE_TABLE, and
+// "route: the checked-in table is valid"
 // there checks what every shipped table must satisfy. Tests that need the
 // table's contents read DAY_ONE_TABLE.
 

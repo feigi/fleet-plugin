@@ -570,7 +570,11 @@ export function costGuardFault(guard) {
   if (!Array.isArray(guard.cells)) return "`cells` is not a list";
   if (!guard.cells.every(cellShaped)) return `a \`cells\` entry is not ${cellWords}`;
   if (!Number.isInteger(guard.min_n)) return "`min_n` is not an integer";
-  if (!Array.isArray(guard.tripped) || !guard.tripped.every((t) => typeof t === "string" || (t !== null && typeof t === "object" && typeof t.cell === "string"))) return "`tripped` is not a list of Cell names";
+  if (!Array.isArray(guard.tripped)) return "`tripped` is not a list of Cell names";
+  // A bare name is read as the tick always has; any other entry must be one trip-reasons.mjs's tripFault
+  // accepts, the router's rule for it, so a malformed `on` is a fault rather than a throw further down.
+  const entryFault = guard.tripped.map((t) => (typeof t === "string" ? null : tripFault(t))).find((why) => why !== null);
+  if (entryFault !== undefined) return entryFault;
   // The verdict is "tripped" exactly when a cell is named, and only a reported cell can be named.
   if ((guard.verdict === "tripped") !== (guard.tripped.length > 0)) return "`verdict` and `tripped` disagree";
   if (!guard.tripped.every((t) => guard.cells.some((x) => x.cell === tripEntry(t).cell))) return "`tripped` names a Cell that `cells` does not report";
