@@ -114,9 +114,11 @@
 //      import, where rule 6 also judges each use of `ns` itself). An exported
 //      object is refused when another module reaches its module by `import()`
 //      or `export … from`, which the sweep does not follow. A static import of
-//      a relative module is read only as `import { … }` or `import * as ns` at
-//      the start of a line (#4507); any other (a default import, or one after
-//      other code on its line) is refused by file and line.
+//      a relative module is read only as `import { … }` (plain or renamed
+//      names, no quote in the clause) or `import * as ns` at the start of a
+//      line (#4507); any other (a default import, a string-named specifier
+//      such as `import { "X" as Y }`, or one after other code on its line) is
+//      refused by file and line.
 // Not followed: a write through a longer path (`CFG.inner.ms = …`), through a
 // computed key (`CFG[k] = …`), and a `delete`.
 import { test } from "node:test";
@@ -296,10 +298,12 @@ function analyse(src, file) {
   }
 
   // The static imports of a relative module that the two regexes below read,
-  // by where the `import` keyword stands.
+  // by where the `import` keyword stands. A named import whose clause holds a
+  // quote has a string-named specifier, whose imported name is no identifier
+  // this reader can match to an export: it is left to the refusal below.
   const parsedAt = new Set();
   const imports = new Map();
-  for (const m of code.matchAll(/^import\s*\{([^}]*)\}\s*from\s*["'](\.\/[^"']+\.mjs)["']/gm)) {
+  for (const m of code.matchAll(/^import\s*\{([^}"']*)\}\s*from\s*["'](\.\/[^"']+\.mjs)["']/gm)) {
     parsedAt.add(m.index);
     for (const spec of m[1].split(",").map((s) => s.trim()).filter(Boolean)) {
       const [orig, local = orig] = spec.split(/\s+as\s+/);
@@ -318,10 +322,11 @@ function analyse(src, file) {
   // Any other static import of a relative .mjs module (a default import, one
   // not at the start of its line) binds names the maps above never hold, so a
   // write or re-export through it would go unseen: refused, not followed. Its
-  // clause is read as names, braces, commas, `*` and a quoted name before `as`,
-  // so an `import.meta`, `import()` or `import` key whose statement has no `;`
-  // is no match for a `from` on a later line.
-  const staticImport = /import\s*((?:[\w$\s,{}*]|"[^"\n]*"(?=\s*as\b)|'[^'\n]*'(?=\s*as\b))*?)\s*from\s*(["'])(\.\.?\/[^"'\n]*\.mjs)\2/y;
+  // clause is read as names, braces, commas, `*` and a quoted name before `as`
+  // (its escapes read as one character each), so an `import.meta`, `import()`
+  // or `import` key whose statement has no `;` is no match for a `from` on a
+  // later line.
+  const staticImport = /import\s*((?:[\w$\s,{}*]|"(?:[^"\\\n]|\\.)*"(?=\s*as\b)|'(?:[^'\\\n]|\\.)*'(?=\s*as\b))*?)\s*from\s*(["'])(\.\.?\/[^"'\n]*\.mjs)\2/y;
   for (const m of skel.matchAll(/\bimport\b/g)) {
     if (parsedAt.has(m.index)) continue;
     staticImport.lastIndex = m.index;
@@ -2537,9 +2542,10 @@ test("the sweep refuses a gh timeout written in the module that declares an obje
   ]);
 });
 
-// #4507. Rule 7 reads a static import of a relative module in two forms, each
-// at the start of its line; any other static import of one is refused by file
-// and line, since a write or re-export in that module would go unseen.
+// #4507, #4524. Rule 7 reads a static import of a relative module in two forms,
+// each at the start of its line, the named one with no quote in its clause; any
+// other static import of one (a string-named specifier among them) is refused
+// by file and line, since a write or re-export in that module would go unseen.
 test("the sweep refuses a static import of a relative module that it cannot read", () => {
   const BODY = `CFG.ms = ${ENV_MS};`;
   const refused = {
@@ -2558,6 +2564,15 @@ test("the sweep refuses a static import of a relative module that it cannot read
     "a default import in single quotes": [importing(BODY, `import D from './common.mjs';\n`), "y.mjs:1"],
     "a default import beside a string-named one": [importing(`C.ms = ${ENV_MS};`, `import D, { "CFG" as C } from "./common.mjs";\n`), "y.mjs:1"],
     "an import with no space around its keywords": [importing(BODY, `log(1);import{ CFG }from"./common.mjs";\n`), "y.mjs:1"],
+    "a string-named import": [importing(`C.ms = ${ENV_MS};`, `import { "CFG" as C } from "./common.mjs";\n`), "y.mjs:1"],
+    "a string-named import in single quotes": [importing(`C.ms = ${ENV_MS};`, `import { 'CFG' as C } from "./common.mjs";\n`), "y.mjs:1"],
+    "a string-named import spread over several lines": [importing(`C.ms = ${ENV_MS};`, `import {\n  "CFG" as C,\n} from "./common.mjs";\n`), "y.mjs:1"],
+    "a plain specifier beside a string-named one": [importing(`C.ms = ${ENV_MS};`, `import { Q, "CFG" as C } from "./common.mjs";\n`), "y.mjs:1"],
+    "a string name holding punctuation and keywords": [importing(`C.ms = ${ENV_MS};`, `import { "a, b; 'c' from default" as C } from "./common.mjs";\n`), "y.mjs:1"],
+    "a string name with a unicode escape": [importing(`C.ms = ${ENV_MS};`, `import { "\\u0043FG" as C } from "./common.mjs";\n`), "y.mjs:1"],
+    "a string name with an escaped double quote": [importing(`C.ms = ${ENV_MS};`, `import { "a\\"b" as C } from "./common.mjs";\n`), "y.mjs:1"],
+    "a string name with an escaped single quote": [importing(`C.ms = ${ENV_MS};`, `import { 'a\\'b' as C } from "./common.mjs";\n`), "y.mjs:1"],
+    "a string name with an escaped backslash": [importing(`C.ms = ${ENV_MS};`, `import { "a\\\\" as C } from "./common.mjs";\n`), "y.mjs:1"],
   };
   for (const [name, [sources, at]] of Object.entries(refused)) {
     const { problems } = sweep(sources);
