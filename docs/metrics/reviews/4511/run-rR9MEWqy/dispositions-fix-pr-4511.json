@@ -1,0 +1,36 @@
+{
+  "head": "8de6072e0a3744a0f18b48de296df20a960300ef",
+  "run": "run-rR9MEWqy",
+  "entries": [
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4511/fix-YAXT5HJD/u0/verdict.json",
+      "remedyFiles": ["tests/gh-spawn-bound.test.mjs"]
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "reason": "Refuter confirmed the claim (refuted=false): the self-import row kills the revert, && and name-only mutants, and the true mutant is equivalent, as the code comment says. The finding confirms the PR as written, so applying it changes nothing; it is also noted on the suggestion-band record #4512.",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4511/fix-YAXT5HJD/u1/verdict.json",
+      "remedyFiles": []
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "Refuted: both visible(m) mutants go red in full-suite runs, so the PR body's claim holds. The suggested increment-inside-regex case adds no discrimination: /opts.timeout\\+\\+/ stays green under the ++/-- mutant, and the existing decrement-inside-a-regex case already kills it.",
+      "issue": 4512,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4511/fix-YAXT5HJD/u2/verdict.json",
+      "remedyFiles": ["tests/gh-spawn-bound.test.mjs"]
+    }
+  ]
+}

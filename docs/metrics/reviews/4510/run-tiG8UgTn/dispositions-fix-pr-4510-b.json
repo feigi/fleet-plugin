@@ -1,0 +1,339 @@
+{
+  "head": "d4674154c9908d5301e807f3e151ac69e7ec0f27",
+  "run": "run-tiG8UgTn",
+  "entries": [
+    {
+      "bucket": "survived",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "charge": "none",
+      "chargeReason": "defect-outside-acceptance"
+    },
+    {
+      "bucket": "survived",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "remedyFiles": [
+        "docs/research/cell-grid-derive.mjs"
+      ],
+      "charge": "none",
+      "chargeReason": "defect-outside-acceptance"
+    },
+    {
+      "bucket": "survived",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "charge": "unmet"
+    },
+    {
+      "bucket": "survived",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "charge": "none",
+      "chargeReason": "defect-outside-acceptance"
+    },
+    {
+      "bucket": "survived",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "remedyFiles": [
+        "docs/research/cell-grid-derive.mjs",
+        "docs/research/consumer-burn-in-derive.mjs",
+        "docs/research/cell-grid.md"
+      ],
+      "charge": "none",
+      "chargeReason": "not-the-implementers-text"
+    },
+    {
+      "bucket": "survived",
+      "index": 5,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "charge": "false-claim"
+    },
+    {
+      "bucket": "survived",
+      "index": 6,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "charge": "none",
+      "chargeReason": "defect-outside-acceptance"
+    },
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4510/fix-mZP9Xnmn/U0-U13/verdict-U0.json",
+      "disposition": "defer",
+      "issue": 4513,
+      "reason": "refuted"
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4510/fix-mZP9Xnmn/U1/verdict-U1.json",
+      "disposition": "apply",
+      "reason": "tripFault refuses an empty `on`; pinned in tests/cell-evidence-alerts.test.mjs"
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4510/fix-mZP9Xnmn/U2/verdict-U2.json",
+      "disposition": "defer",
+      "issue": 4513,
+      "reason": "refuted"
+    },
+    {
+      "bucket": "unverified",
+      "index": 3,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4510/fix-s27Nvbov/U3/verdict-U3.json",
+      "disposition": "defer",
+      "issue": 4513,
+      "reason": "refuted"
+    },
+    {
+      "bucket": "unverified",
+      "index": 4,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4510/fix-mZP9Xnmn/U4/verdict-U4.json",
+      "disposition": "apply",
+      "reason": "phase0 guardBaseline names an unreadable guard"
+    },
+    {
+      "bucket": "unverified",
+      "index": 5,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4510/fix-mZP9Xnmn/U5/verdict-U5.json",
+      "disposition": "defer",
+      "issue": 4513,
+      "reason": "refuted"
+    },
+    {
+      "bucket": "unverified",
+      "index": 6,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4510/fix-mZP9Xnmn/U6/verdict-U6.json",
+      "disposition": "apply",
+      "reason": "validateTable tripFault cases added"
+    },
+    {
+      "bucket": "unverified",
+      "index": 7,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4510/fix-mZP9Xnmn/U7/verdict-U7.json",
+      "disposition": "defer",
+      "issue": 4513,
+      "reason": "refuted"
+    },
+    {
+      "bucket": "unverified",
+      "index": 8,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4510/fix-mZP9Xnmn/U8/verdict-U8.json",
+      "disposition": "apply",
+      "reason": "burn-in Baseline Cell MIN_N test added"
+    },
+    {
+      "bucket": "unverified",
+      "index": 9,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4510/fix-mZP9Xnmn/U9/verdict-U9.json",
+      "disposition": "apply",
+      "reason": "defaultCellOf fallback test added"
+    },
+    {
+      "bucket": "unverified",
+      "index": 10,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4510/fix-mZP9Xnmn/U10/verdict-U10.json",
+      "disposition": "defer",
+      "issue": 4513,
+      "reason": "refuter undecided (refuted stays true); recorded on the suggestion-band record"
+    },
+    {
+      "bucket": "unverified",
+      "index": 11,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4510/fix-mZP9Xnmn/U11-U18/verdict-U11.json",
+      "disposition": "defer",
+      "issue": 4513,
+      "reason": "refuter undecided (refuted stays true); recorded on the suggestion-band record"
+    },
+    {
+      "bucket": "unverified",
+      "index": 12,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4510/fix-mZP9Xnmn/U12/verdict-U12.json",
+      "disposition": "defer",
+      "issue": 4513,
+      "reason": "refuted"
+    },
+    {
+      "bucket": "unverified",
+      "index": 13,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4510/fix-mZP9Xnmn/U0-U13/verdict-U13.json",
+      "disposition": "apply",
+      "reason": "phase-0.md and phase0.mjs header state the resumed-receipt exit 3"
+    },
+    {
+      "bucket": "unverified",
+      "index": 14,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4510/fix-mZP9Xnmn/U14-U19/verdict-U14.json",
+      "disposition": "apply",
+      "reason": "resolved by survived[0]: costGuardFault now uses the import"
+    },
+    {
+      "bucket": "unverified",
+      "index": 15,
+      "scope": "in",
+      "claimKind": "behavior",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4510/fix-mZP9Xnmn/U15/verdict-U15.json",
+      "disposition": "apply",
+      "reason": "remedy narrowed per its refuter: costGuardFault validates entries with tripFault (survived[0])"
+    },
+    {
+      "bucket": "unverified",
+      "index": 16,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4510/fix-mZP9Xnmn/U16/verdict-U16.json",
+      "disposition": "defer",
+      "issue": 4513,
+      "reason": "refuted"
+    },
+    {
+      "bucket": "unverified",
+      "index": 17,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4510/fix-mZP9Xnmn/U17/verdict-U17.json",
+      "disposition": "apply",
+      "reason": "dispatchRow folds poolOf/poolHeldBack, rowDispatch keeps its defaults"
+    },
+    {
+      "bucket": "unverified",
+      "index": 18,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4510/fix-mZP9Xnmn/U11-U18/verdict-U18.json",
+      "disposition": "defer",
+      "issue": 4513,
+      "reason": "refuter undecided (refuted stays true); recorded on the suggestion-band record"
+    },
+    {
+      "bucket": "unverified",
+      "index": 19,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4510/fix-mZP9Xnmn/U14-U19/verdict-U19.json",
+      "disposition": "apply",
+      "reason": "resolved by survived[0]: costGuardFault now uses tripFault, its second remedy"
+    },
+    {
+      "bucket": "unverified",
+      "index": 20,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4510/fix-mZP9Xnmn/U20/verdict-U20.json",
+      "disposition": "defer",
+      "issue": 4513,
+      "reason": "survived after the commit was staged; behavior-neutral shape claim, recorded below the claim bar on the suggestion-band record"
+    },
+    {
+      "bucket": "unverified",
+      "index": 21,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4510/fix-mZP9Xnmn/U21/verdict-U21.json",
+      "disposition": "apply",
+      "reason": "vsBase computes each comparison once"
+    },
+    {
+      "bucket": "unverified",
+      "index": 22,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4510/fix-mZP9Xnmn/U22/verdict-U22.json",
+      "disposition": "defer",
+      "issue": 4513,
+      "reason": "survived after the commit was staged; behavior-neutral shape claim, recorded below the claim bar on the suggestion-band record"
+    },
+    {
+      "bucket": "unverified",
+      "index": 23,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4510/fix-mZP9Xnmn/U23/verdict-U23.json",
+      "disposition": "apply",
+      "reason": "dead fallbacks removed"
+    },
+    {
+      "bucket": "unverified",
+      "index": 24,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4510/fix-mZP9Xnmn/U24/verdict-U24.json",
+      "disposition": "apply",
+      "reason": "validateTable uses fitBaselineOf"
+    },
+    {
+      "bucket": "unverified",
+      "index": 25,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4510/fix-mZP9Xnmn/U25/verdict-U25.json",
+      "disposition": "apply",
+      "reason": "comparator hoisted as byCellName (byCell collides with a Map)"
+    },
+    {
+      "bucket": "unverified",
+      "index": 26,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4510/fix-mZP9Xnmn/U26/verdict-U26.json",
+      "disposition": "apply",
+      "reason": "dead default dropped"
+    },
+    {
+      "bucket": "unverified",
+      "index": 27,
+      "scope": "in",
+      "claimKind": "shape",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4510/fix-mZP9Xnmn/U27/verdict-U27.json",
+      "disposition": "apply",
+      "reason": "one fitBaselineOf call"
+    }
+  ]
+}

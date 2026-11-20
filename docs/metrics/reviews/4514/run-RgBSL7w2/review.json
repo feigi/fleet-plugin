@@ -1,0 +1,212 @@
+{
+  "pr": 4514,
+  "head": "3adda593cca2f8c381d25977567b03f45a450078",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: Verify branch is rebased on base (needs pull-request context and full git history, not the worktree); Validate renovate.json (fetches renovate from the npm registry via npx on every run); smoke-omp (needs bun and a globally installed pinned omp binary); install-and-smoke (needs bun and a globally installed pinned omp binary).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "silent-failure",
+    "tests",
+    "comments",
+    "types",
+    "simplify"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "types",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`; untracked docs/metrics/runs/2026-11-19T141220Z/{closeout.json,ledger.md,phase0.json,plugin-version}. I did not write these, they are not from my commands, and they are pre-existing in the controller checkout."
+    },
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/tier-outcomes.tsv' and untracked docs/metrics/runs/2026-11-19T141220Z/{closeout.json,ledger.md,phase0.json,plugin-version}. I made none of these changes; they pre-date or sit outside this review, and I wrote nothing there."
+    },
+    {
+      "dimension": "silent-failure",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv`, `?? docs/metrics/runs/2026-11-19T141220Z/closeout.json`, `?? .../ledger.md`, `?? .../phase0.json`, `?? .../plugin-version`. I ran only read-only commands (rg, sed, git status) and never wrote under that path, so these files are not mine; they look like metrics output from another agent or the controller."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin —  M docs/metrics/tier-outcomes.tsv; ?? docs/metrics/runs/2026-11-19T141220Z/closeout.json; ?? docs/metrics/runs/2026-11-19T141220Z/ledger.md; ?? docs/metrics/runs/2026-11-19T141220Z/phase0.json; ?? docs/metrics/runs/2026-11-19T141220Z/plugin-version (none of these written by this pass: its only commands there were `pwd` and the status audit; every other command chained a cd into the scratch copies)"
+    },
+    {
+      "dimension": "simplify",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin —  M docs/metrics/tier-outcomes.tsv; ?? docs/metrics/runs/2026-11-19T141220Z/closeout.json; ?? docs/metrics/runs/2026-11-19T141220Z/ledger.md; ?? docs/metrics/runs/2026-11-19T141220Z/phase0.json; ?? docs/metrics/runs/2026-11-19T141220Z/plugin-version (already present at my first audit, before I wrote anything; I only ran pwd/git status there, and every write went to simplify/copy)"
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/tier-outcomes.tsv' and untracked docs/metrics/runs/2026-11-19T141220Z/{closeout.json,ledger.md,phase0.json,plugin-version}; not written by me (I wrote only under the scratch dir)."
+    }
+  ],
+  "counts": {
+    "survived": 1,
+    "refuted": 0,
+    "unverified": 10,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4514/run-RgBSL7w2/snapshot-3adda593",
+  "survived": [
+    {
+      "severity": "important",
+      "claim": "CONTEXT.md line 741, in the Baseline Cell entry, still says the Baseline Cell's Starting set is 'what burn-in draws and counts and what the Fit judges'. This PR makes the Fit judge the starting set plus every other Cell holding counted Pulls, so the 'what the Fit judges' clause is now false. The diff does not touch CONTEXT.md.",
+      "evidence": "sed -n 736,752p CONTEXT.md prints '`smol` — is what burn-in draws and counts and what the Fit judges.' The diff rewrites the same claim in ledger-grammar.mjs startingSetOf ('the Cells the Fit always judges ... the Fit judges it beside these once it holds counted Pulls') and in fitTable's doc comment, and leaves CONTEXT.md unchanged. fitPulls now returns cells: [...set, ...drawn].",
+      "file": "CONTEXT.md",
+      "line": 741,
+      "suggested_fix": "Reword to 'what burn-in draws and counts and the Cells the Fit always judges (it also judges any other Cell that holds counted Pulls)'.",
+      "dimension": "comments",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Static check, no test run (a doc-text claim has no runnable mutation). Snapshot CONTEXT.md:741 still reads 'what burn-in draws and counts and what the Fit judges'. The diff (read in full) touches only ledger-grammar.mjs, ticket-router.mjs and tests, never CONTEXT.md. The diff rewrites the same sentence in startingSetOf to 'the Fit always judges ... judges it beside these once it holds counted Pulls', and fitTable's doc comment now says the Fit judges the starting set plus other Cells holding counted Pulls. So the CONTEXT.md clause is now incomplete: the Fit judges more than the Starting set. Scope: CONTEXT.md lines 736-752 and the diff. I did not grep the rest of CONTEXT.md for other copies of the claim. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ' M docs/metrics/tier-outcomes.tsv' and untracked docs/metrics/runs/2026-11-19T141220Z/{closeout.json,ledger.md,phase0.json,plugin-version}; these were already there and are not from me, since I wrote nothing."
+        },
+        {
+          "refuted": false,
+          "reason": "CONTEXT.md:741 in the snapshot still says the Starting set 'is what burn-in draws and counts and what the Fit judges'. The diff touches only ledger-grammar.mjs, ticket-router.mjs and three test files, not CONTEXT.md. The diff comment now says the Fit judges other Cells beside the starting set once they hold counted Pulls. I found no other CONTEXT.md passage that qualifies the clause; grep for 'judges' hit only line 741 and an unrelated line 851. The clause is therefore stale. This was a read-only check (grep/sed over the snapshot and the diff); no tests were run. CWD-AUDIT: clean /Users/chris/dev/fleet-plugin (read-only commands only; git status not run)"
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 537,
+      "claim": "Now that a Fit row can name a non-starting Cell, dispatchRow's `unrunnable` check reads only the install's ladders (isRunnable) and not `install.defined`, so a row whose Cell the ladder allows but no implementer definition exists for (e.g. any `*-minimal`, which CELL accepts and no plugin/agents file defines) would be dispatched with reason `ok` instead of falling back.",
+      "evidence": "Code read, not executed through `route`: dispatchRow line ~537 `const unrunnable = (cell) => !isRunnable(install, cell)`; isRunnable (line 444-448) checks `install.ladders[role].includes(level)` only. `fd 'fleet-implementer-' plugin/agents` lists 15 Cells, none at `minimal`. Reach is low: drawPool (line 507) filters exploration by `install.defined`, so a Cell exploration drew had a definition at draw time, and the ticket's contract 5 explicitly accepts no install filter on the judged set; before this PR rows held only starting-set Cells.",
+      "suggested_fix": "None required by the ticket. If wanted, check `install.defined.has(cell)` alongside isRunnable in dispatchRow's `unrunnable` so a row naming an undefined Cell falls back with `table-cell-unrunnable`.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 805,
+      "claim": "fitPulls now calls startingSetOf(baseline) before tableOver's own startingSetOf/startingCells check, so a non-Cell `baseline` now throws a TypeError from fitPulls instead of from tableOver. The error text is still loud and names the baseline; no error is swallowed.",
+      "evidence": "Read the diff and source. fitPulls (line 809) and tableOver (line 1053) both call startingSetOf. Not executed. metrics-refresh.mjs fit() already turns any writeFit throw into a `fit: failed — <message>` line and leaves the previous Fit file as it is. That handler is unchanged by this PR and I did not trigger it.",
+      "suggested_fix": "None required.",
+      "dimension": "silent-failure",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/split-fit.test.mjs",
+      "claim": "No surviving mutant found: every tried mutation of the new fitPulls/tableOver/growTree cells plumbing is caught by at least one new/changed test, though n>0→n>1 and judgeSpeedRow cells→set are each caught by only a single test.",
+      "evidence": "red: node --test tests/split-fit.test.mjs tests/ticket-router.test.mjs tests/metrics-refresh.test.mjs → exit 1, fail 1 incl 'fit: a Cell the starting table lacks is judged and can hold a row' (judgeSpeedRow mutant); baseline: per-file runs exit 0 (split-fit 18/18 pass); full suite 9298 pass 0 fail",
+      "suggested_fix": "None required; optionally add a second test for the speed-row use of drawn Cells.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The other claims checked are accurate: tally() sorts Cells by name, so the 'by name' ordering holds; n counts counted Pulls on the newest generation; growTree calls searchSplits with minN: MIN_N; the tests named in the diff exist. The PR body's 'Verification' results (byte-identical Fit on starting-Cell-only rows, the docs/metrics cells listing, new tests failing on base) were not re-run. The suite run before dispatch passed 9298 of 9298.",
+      "evidence": "sed -n 638,650p plugin/scripts/pull-attribution.mjs shows '.sort(([a], [b]) => cmp(a, b))' and ranked[0] as newest; sed -n 1160,1175p plugin/scripts/ticket-router.mjs shows 'minN: MIN_N' in the searchSplits call; the diff adds the tests 'a Cell the starting table lacks is searched' and 'a Cell short of MIN_N merged PRs in a leaf' to tests/split-fit.test.mjs.",
+      "suggested_fix": "None.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 334,
+      "claim": "The new rule that a fitted table's `cells` begins with the Baseline Cell's starting set and contains every `starting_cells` entry is documented in fitPulls/tableOver comments and tests, but validateTable never enforces it; it only checks that `cells` is a non-empty list of unique cell tokens.",
+      "evidence": "Read validateTable lines 334-336 (cells: non-empty, CELL-token, unique) and 387-391 (starting_cells: subset of startingSetOf(baseline), non-empty, unique). No check ties `starting_cells` to `cells` or requires the starting set to be in `cells`. Only tableOver's construction guarantees it ([...set, ...drawn], with `drawn` excluding set members). A hand-edited or stale table passes validation with starting cells missing from `cells`. Static inspection only; no probe run.",
+      "suggested_fix": "In validateTable, when `starting_cells` is present, require every entry to be in `t.cells`. Optionally require `startingSetOf(fitBaselineOf(t))` to be a prefix of `t.cells` for fitted tables.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 1052,
+      "claim": "tableOver's `cells` and `startingCells` are bare string arrays. The only invariant it enforces at runtime is that `startingCells` is a non-empty subset of the starting set. It does not check uniqueness, and it does not check that `cells` contains the starting set. Callers are trusted through fitPulls, so the invariant is by convention.",
+      "evidence": "Read tableOver lines 1052-1057. The check is `startingCells.length === 0 || !startingCells.every(c => set.includes(c))`, and `cells` is copied unchecked into the output. validateTable rejects duplicate `starting_cells`, so a duplicate passed to fitTable would produce a table that fails validation downstream. tableOver is module-private and only fitTable and fitTree call it, both via fitPulls, so this is not reachable today. Static inspection only.",
+      "suggested_fix": "Add a duplicate check to the existing startingCells guard. Alternatively, compute `cells` inside tableOver so a caller cannot pass an inconsistent pair.",
+      "dimension": "types",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/ticket-router.test.mjs",
+      "line": 2157,
+      "claim": "The new test's `everyFifth` helper changes nothing: `rowInput` builds every feature row through `exploring()`, which already sets `exploration_draw: \"1/3\"`, and the fit reads that field only through `!== \"\"`. The two hand-written `fitTable({ prior, ...direct(everyFifth(spec)), guard: guardOf({}) })` calls are therefore exactly the existing `fitRows(spec)` / `fitRows(spec.slice(0, 1), {}, drawn)` helper.",
+      "evidence": "`grep -n \"const exploring\" tests/ticket-router.test.mjs` → 1613: `const exploring = (over) => featureRow({ exploration_draw: \"1/3\", ...over });`. rowInput at 2069 calls `exploring(...)`. `grep -n exploration_draw plugin/scripts/{ticket-router,pull-attribution}.mjs` → the only read is ticket-router.mjs:807 `u.pull.exploration_draw !== \"\"`. Probe in my copy: I rewrote the test to use `fitRows(spec)` and `fitRows(spec.slice(0,1), {}, drawn)` and added `assert.deepEqual(drawn, fitTable({prior: baseTable(), ...direct(everyFifth(spec)), guard: guardOf({})}))` plus the same check for the `gone` fit. In the 17-file run (tests 1327, pass 1327, fail 0) the test passes with every original assertion unchanged.",
+      "suggested_fix": "Delete `everyFifth` and the `guard` local, then write `const drawn = fitRows(spec);` and `const gone = fitRows(spec.slice(0, 1), {}, drawn);`. If the point is that the Pulls are exploration-drawn, a short comment saying rowInput's rows already carry a draw (via `exploring`) says that better than overwriting the field.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 810,
+      "claim": "`fitTree` now tallies the same `(units, order)` twice: once in `fitPulls` to find the drawn Cells and again in `growTree`. `fitPulls` can return its tally and `growTree` can read it, which also drops `units`/`order` from growTree's parameters.",
+      "evidence": "In the snapshot, ticket-router.mjs:810 has `tally(units, order).filter(...)` inside fitPulls, and :1162 has `tally(units, order).filter((t) => cells.includes(t.cell))` inside growTree. fitTree passes the same `fitted` object to both (:1207-1209), and fitPulls/growTree have no other callers (grep above). Probe in my copy: fitPulls computes `const tallies = tally(units, order)`, uses it for `drawn`, and returns `{ units, order, tallies, cells }`; growTree's signature becomes `({ tallies, cells: judged, excluded, previous, baseline })` and it loops over `tallies.filter(...)`. tableOver ignores the extra key because it destructures by name. 17-file run: tests 1327, pass 1327, fail 0 (this run includes split-fit's gate.records digest assertions).",
+      "suggested_fix": "In fitPulls: `const tallies = tally(units, order); const drawn = tallies.filter((t) => t.n > 0 && !set.includes(t.cell)).map((t) => t.cell); return { units, order, tallies, cells: [...set, ...drawn] };`. In growTree: `function growTree({ tallies, cells: judged, excluded, previous, baseline })` and `for (const { pulls: counted } of tallies.filter((t) => cells.includes(t.cell)))`.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "plugin/scripts/ticket-router.mjs",
+      "line": 1084,
+      "claim": "`cells: [...cells]` in tableOver copies an array that `fitPulls` built fresh (`[...set, ...drawn]`) and that nothing mutates, so the spread is an extra copy with no effect.",
+      "evidence": "fitPulls at :811 returns a new array literal. Besides tableOver, its only other reader is growTree, which only `.filter`s it (:1159). Probe in my copy: I replaced `cells: [...cells]` with `cells` (same probe edit as the tally finding) and the 17-file run passed: 1327/1327, fail 0. That covers validateTable and every table.cells deepEqual in the new and existing tests.",
+      "suggested_fix": "`cells,` in the returned table object.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/split-fit.test.mjs",
+      "line": 135,
+      "claim": "All 5 calls to the new `lowSide` helper pass `\"slow-medium\"` and spread `flip()` in front, and the two trip cases repeat the same `guardAt(40, { tripped: [{ cell: \"slow-medium\", on: [...] }] })` literal. The `cell` parameter is never varied and the `[...flip(), ...lowSide(...)]` wrapper is repeated each time.",
+      "evidence": "`grep -n \"lowSide\\|\\.\\.\\.flip()\" tests/split-fit.test.mjs` → lines 139, 142, 144, 146, 153, all `[...flip(), ...lowSide(\"slow-medium\", …)]`. Probe in my copy: I replaced it with `const withSlowMedium = (n, prob = \"1/2\") => [...flip(), ...Array.from({ length: n }, () => ({ cell: \"slow-medium\", usd: 1, held: { criteria: \"0\" }, prob }))];` and `const trippedOn = (on) => ({ guard: guardAt(40, { tripped: [{ cell: \"slow-medium\", on: [on] }] }) });`, with callers `fit(withSlowMedium(10))`, `fit(withSlowMedium(10, \"\"))`, `fit(withSlowMedium(10), trippedOn(\"usd\"))`, `fit(withSlowMedium(10), trippedOn(\"minutes\"))` and `fit(withSlowMedium(n))`. `node --test tests/split-fit.test.mjs` → tests 18, pass 18, fail 0, and both new tests pass.",
+      "suggested_fix": "Fold `flip()` and the fixed Cell into a single helper (`withSlowMedium(n, prob)`) and pull the repeated guard literal into `trippedOn(on)`, as in the probe.",
+      "dimension": "simplify",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

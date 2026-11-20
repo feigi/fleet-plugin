@@ -1,0 +1,130 @@
+{
+ "head": "3adda593cca2f8c381d25977567b03f45a450078",
+ "run": "run-RgBSL7w2",
+ "entries": [
+  {
+   "bucket": "survived",
+   "index": 0,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "remedyFiles": [
+    "CONTEXT.md"
+   ],
+   "charge": "none",
+   "chargeReason": "not-the-implementers-text"
+  },
+  {
+   "bucket": "unverified",
+   "index": 0,
+   "scope": "out",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "reason": "refuted: the behavior predates the PR (same probe output at the base commit); residual commented onto open #4481",
+   "issue": 4517,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4514/fix-iB9Bb3ly/u0/verdict.json",
+   "remedyFiles": [
+    "plugin/scripts/ticket-router.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 1,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "reason": "refuted: same TypeError and message on base and PR; no behavior change, no remedy",
+   "issue": 4517,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4514/fix-iB9Bb3ly/u1/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 2,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "reason": "refuted: a surviving mutant exists (tally(all, order) in fitPulls); residual filed open as #4516",
+   "issue": 4517,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4514/fix-iB9Bb3ly/u2/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 3,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "reason": "refuted: asserts no defect and proposes no change",
+   "issue": 4517,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4514/fix-iB9Bb3ly/u3/verdict.json"
+  },
+  {
+   "bucket": "unverified",
+   "index": 4,
+   "scope": "out",
+   "claimKind": "behavior",
+   "disposition": "defer",
+   "reason": "out of scope, refuter let it survive: filed open needs-triage",
+   "issue": 4515,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4514/fix-iB9Bb3ly/u4/verdict.json",
+   "remedyFiles": [
+    "plugin/scripts/ticket-router.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 5,
+   "scope": "in",
+   "claimKind": "behavior",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4514/fix-iB9Bb3ly/u5/verdict.json",
+   "remedyFiles": [
+    "plugin/scripts/ticket-router.mjs",
+    "tests/ticket-router.test.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 6,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4514/fix-iB9Bb3ly/u6/verdict.json",
+   "remedyFiles": [
+    "tests/ticket-router.test.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 7,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4514/fix-iB9Bb3ly/u7/verdict.json",
+   "remedyFiles": [
+    "plugin/scripts/ticket-router.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 8,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4514/fix-iB9Bb3ly/u8/verdict.json",
+   "remedyFiles": [
+    "plugin/scripts/ticket-router.mjs"
+   ]
+  },
+  {
+   "bucket": "unverified",
+   "index": 9,
+   "scope": "in",
+   "claimKind": "shape",
+   "disposition": "apply",
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4514/fix-iB9Bb3ly/u9/verdict.json",
+   "remedyFiles": [
+    "tests/split-fit.test.mjs"
+   ]
+  }
+ ]
+}

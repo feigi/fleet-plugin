@@ -1,0 +1,142 @@
+{
+  "pr": 4506,
+  "head": "c1d57741b9530029572ed41708b4b26fd16c2352",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: Verify branch is rebased on base (needs pull-request context and full git history, not the worktree); Validate renovate.json (fetches renovate from the npm registry via npx on every run); smoke-omp (needs bun and a globally installed pinned omp binary); install-and-smoke (needs bun and a globally installed pinned omp binary).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "tests",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — untracked docs/metrics/runs/2026-11-19T141220Z/{closeout.json,ledger.md,phase0.json,plugin-version} (run metrics output, not written by this review)"
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — `?? docs/metrics/runs/2026-11-19T141220Z/{closeout.json,ledger.md,phase0.json,plugin-version}`. I wrote nothing there; these are untracked run-metrics files that other agents or the controller most likely produced. My copy's git status was clean after restoring the file."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ?? docs/metrics/runs/2026-11-19T141220Z/closeout.json; ?? docs/metrics/runs/2026-11-19T141220Z/ledger.md; ?? docs/metrics/runs/2026-11-19T141220Z/phase0.json; ?? docs/metrics/runs/2026-11-19T141220Z/plugin-version (not written by this reviewer: every command I ran chained cd into the scratch copy or the run dir)"
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 8,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4506/run-doOscQyu/snapshot-c1d57741",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 1005,
+      "claim": "The new namespace branch refuses any read of a namespace through `?.` or `[`, even read-only reads of an unrelated export such as `log(ns?.OTHER)` or `log(ns[\"OTHER\"])`, though `ns?.OTHER` is statically nameable. The header calls it 'no `ns.X` to follow', but it is one.",
+      "evidence": "ZZPROBE in my copy: importing(`log(ns?.OTHER);`, nsH) => [[\"reads CFG.ms: ns, a namespace holding ns.CFG, is read through a bracket or an optional chain, at y.mjs:2, …\"]]. importing(`log(ns[\"OTHER\"]);`, nsH) gives the same. The plain-dot twin `console.log(ns.OTHER)` is in the accepted table.",
+      "suggested_fix": "Keep it conservative if that is the intent, but say so plainly in the rule 7 comment. Or fold `ns?.X` into the `ns.X` occurrence spelling, so that only computed `ns[…]` is refused.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 1024,
+      "claim": "A nested destructure that copies only a primitive out of a namespace export, `const { CFG: { ms } } = ns`, is refused as 'destructured, which binds the objects it exports to other names', though no exported object gets a new name.",
+      "evidence": "ZZPROBE: importing(`const { CFG: { ms } } = ns;\\nlog(ms);`, nsH) => [[\"reads CFG.ms: ns, a namespace holding ns.CFG, is destructured, which binds the objects it exports to other names, at y.mjs:2, …\"]].",
+      "suggested_fix": "This over-refusal is acceptable. If you keep it, add it to the refused table or note it, so the next reader doesn't take it for an accidental false positive.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 1029,
+      "claim": "`export { CFG as CFG }` now gets two refusal reasons on the same line ('bound to another name' and 're-exported'). The new re-export branch also classifies the name after `as`, because its tail ` }` has no `as`.",
+      "evidence": "ZZPROBE: importing(`export { CFG as CFG };`) => [[\"reads CFG.ms: CFG is bound to another name or stored in another object, at y.mjs:2, …\", \"reads CFG.ms: CFG is re-exported, at y.mjs:2, …\"]]. It is still refused, so this is not a correctness bug, only a redundant reason.",
+      "suggested_fix": "Skip the re-exported check when the head ends in `as\\s*`. The exported alias is not a local binding.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 300,
+      "claim": "This gap predates the PR, which leaves the parsing unchanged, and the ticket does not cover it. Rule 7 still misses a third module that imports the object through a combined default import (`import D, { CFG } from …` / `import D, * as ns from …`) or through an import that does not start its line: such a module can write CFG.ms unseen, and it can re-export CFG unseen too. The PR's new re-export and namespace refusals never run there, because places() never lists that module.",
+      "evidence": "ZZPROBE: importing(`CFG.ms = ${ENV_MS};`, `import D, { CFG } from \"./common.mjs\";\\n`) => [[]] (accepted). importing(`ns.CFG.ms = ${ENV_MS};`, `import D, * as ns from \"./common.mjs\";\\n`) => [[]]. importing(`CFG.ms = ${ENV_MS};`, `log(1); import { CFG } from \"./common.mjs\";\\n`) => [[]]. importing(`export { CFG };`, `import CFGDEF, { CFG } from \"./common.mjs\";\\n`) => [[]]. The imports regex (/^import\\s*\\{…/gm) and the namespaces regex (/^import\\s*\\*\\s*as…/gm) at lines ~300-313 are not in the diff.",
+      "suggested_fix": "File a follow-up ticket. Widen the imports and namespaces parsing to `import X, { … }` and `import X, * as ns`, or refuse an import shape the sweep cannot parse.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 1005,
+      "claim": "No test puts whitespace between a namespace name and `[` or `?.`, so the bracket/optional-chain refusal regex can lose its leading `\\s*` and every test stays green. `ns [\"CFG\"].ms = process.env…` would then fall through to the `[` pass-through and be silently accepted.",
+      "evidence": "Mutated `/^\\s*(?:\\?\\.|\\[)/` to `/^(?:\\?\\.|\\[)/`: `node --test tests/gh-spawn-bound.test.mjs` → exit 0, tests 25, fail 0 (survived). With a probe case `ns [\"CFG\"].ms = ${ENV_MS};` expecting 'read through a bracket or an optional chain' (not committed), the unmutated tree was green (tests 25, fail 0) and the mutant failed ('the sweep refuses a gh timeout written in the module that declares an object or in one that imports it', fail 1). A suggestion rather than a kill claim, because the probe test is mine and not in the PR; the mutant's survival on the committed tests is the fact reported. The existing 'spelled with spaces' case only spaces the `.` form.",
+      "suggested_fix": "Add a case to the refusal table, e.g. [\"a namespace import read through a bracket key after a space\", importing(`ns [\"CFG\"].ms = ${ENV_MS};`, ns), \"ns, a namespace holding ns.CFG, is read through a bracket or an optional chain\"], and ideally an `ns ?.CFG` variant.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "commit c1d57741b9530029572ed41708b4b26fd16c2352: the message ends with the stray line 'Ran in a copy of the busy session shell; changes here won't persist.', which is not about the change and falsely implies the work was not persisted.",
+      "evidence": "Read pr-messages.md lines 20-23: the commit body ends with that sentence after the 'Refs #4501' paragraph.",
+      "suggested_fix": "Remove the line when amending or squashing the commit message.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "Header comment rule 7 (tests/gh-spawn-bound.test.mjs ~lines 118-122) now breaks mid-sentence with a lone 'An exported' line after the inserted parenthetical, so it reads as a fragment.",
+      "evidence": "pr.diff lines 28-33 and snapshot lines 118-122: '...to follow). An exported' then '//      object is refused when...'.",
+      "suggested_fix": "Reflow so 'An exported object is refused...' sits on one wrapped line.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "claim": "The new comment at ~line 1002 says a destructure of a namespace import 'reaches an exported object under a name this sweep does not read', but the destructure branch applies to any key, including a plain `const { CFG } = ns`, where the local name is one the sweep could read; the real reason is that the pattern copies the objects out (as the rule 6 header and the PR body say).",
+      "evidence": "Snapshot lines 1000-1004 vs the branch at ~1023, which returns 'destructured' for any `{`-pattern whose source is a namespace. Tests refuse `const { CFG } = ns`, which names CFG directly. The PR body says 'whatever key it names'.",
+      "suggested_fix": "Reword to say a destructuring pattern copies the exported objects to names the sweep does not follow, and keep the 'name not read' rationale for the bracket and optional-chain case only.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

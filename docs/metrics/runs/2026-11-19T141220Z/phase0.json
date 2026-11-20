@@ -1,0 +1,105 @@
+{
+  "run": 1794418141021,
+  "session": "/Users/chris/.omp/agent/sessions/-dev-fleet-plugin/2026-11-11T17-28-37-532Z_01a1cba7-8b9c-74e8-8320-b7329656394c",
+  "scratch": "/Users/chris/.fleet/scratch/fleet-plugin-28971265",
+  "inFlight": 5,
+  "objective": "cost",
+  "pluginVersion": "3.158.33",
+  "steps": {
+    "alarm": {
+      "status": "ok",
+      "at": "2026-11-11T17:28:48.592Z",
+      "output": "controller alarm armed: pid 73865, /Users/chris/dev/fleet-plugin/.fleet"
+    },
+    "branch": {
+      "status": "ok",
+      "at": "2026-11-11T17:28:48.606Z",
+      "output": "HEAD is refs/heads/main"
+    },
+    "fast-forward": {
+      "status": "ok",
+      "at": "2026-11-11T17:28:50.497Z",
+      "output": "main is level with origin/main"
+    },
+    "pin": {
+      "status": "ok",
+      "at": "2026-11-11T17:28:50.611Z",
+      "output": "instruments pinned: npm-install /Users/chris/.omp/plugins/node_modules/@feigi/fleet-ctl (version 3.158.33)"
+    },
+    "baseline": {
+      "status": "ok",
+      "at": "2026-11-11T17:28:50.782Z",
+      "output": "main-checkout baseline recorded"
+    },
+    "labels": {
+      "status": "ok",
+      "at": "2026-11-11T17:28:51.422Z",
+      "output": "label-map.mjs ensure: {\"needs-triage\":\"needs-triage\",\"needs-info\":\"needs-info\",\"ready-for-agent\":\"ready-for-agent\",\"ready-for-human\":\"ready-for-human\",\"wontfix\":\"wontfix\",\"in-progress\":\"in-progress\",\"onhold\":\"onhold\",\"ready-to-merge\":\"ready-to-merge\"}"
+    },
+    "preflight": {
+      "status": "ok",
+      "at": "2026-11-11T17:28:51.526Z",
+      "output": "preflight.mjs passed (PREFLIGHT SKIPPED: this check set already passed (/Users/chris/dev/fleet-plugin/.fleet/preflight.json; delete it to check again))"
+    },
+    "ruleset": {
+      "status": "ok",
+      "at": "2026-11-11T17:28:52.862Z",
+      "output": "the live gate matches the ruleset spec"
+    },
+    "tier-roles": {
+      "status": "ok",
+      "at": "2026-11-11T17:28:55.173Z",
+      "output": "every tier route resolves (in-flight bound 5)\ntier-roles: every definition routes to a resolvable model at a level it runs, no shadowing override"
+    },
+    "metrics": {
+      "status": "ok",
+      "at": "2026-11-11T17:29:00.882Z",
+      "output": "metrics-refresh.mjs ran\nmetrics-refresh: drain: nothing pending in .fleet/ticket-features.pending.tsv\nmetrics-refresh: member-outcomes: already 23 columns\nmetrics-refresh: cost guard: verdict tripped (tripped: smol-high), pr-cost.mjs exit 3; .fleet/cost-guard.json computed 2026-11-11T17:29:00.680Z\nmetrics-refresh: fit: fitted 366 Pulls; .fleet/router-fit.json computed 2026-11-11T17:29:00.690Z"
+    },
+    "cockpit": {
+      "status": "ok",
+      "at": "2026-11-11T17:29:00.883Z",
+      "output": "launched board.mjs serve, pid 74507"
+    },
+    "rotate": {
+      "status": "ok",
+      "at": "2026-11-11T17:29:01.024Z",
+      "output": "ledger rotated, run 1794418141021\narchived /Users/chris/dev/fleet-plugin/.fleet/phase0.json -> /Users/chris/dev/fleet-plugin/.fleet/phase0.2026-11-11T172901Z.json\narchived /Users/chris/dev/fleet-plugin/.fleet/closeout.json -> /Users/chris/dev/fleet-plugin/.fleet/closeout.2026-11-11T172901Z.json\narchived /Users/chris/dev/fleet-plugin/.fleet/briefs -> /Users/chris/dev/fleet-plugin/.fleet/briefs.2026-11-11T172901Z\nrotated /Users/chris/dev/fleet-plugin/.fleet/ledger.md -> /Users/chris/dev/fleet-plugin/.fleet/ledger.2026-11-11T172901Z.md"
+    },
+    "catch-up": {
+      "status": "ok",
+      "at": "2026-11-11T17:29:01.322Z",
+      "output": "81 run record file(s) from /Users/chris/dev/fleet-plugin/.fleet\n4 review evidence file(s) from /Users/chris/.fleet/scratch/fleet-plugin-28971265\nnothing to catch up: every run whose records main lacks closed out, so this run's close-out commits them"
+    },
+    "reclaim": {
+      "status": "ok",
+      "at": "2026-11-11T17:29:05.002Z",
+      "output": "scratch reclaimed\nsibling keys: kept /Users/chris/.fleet/scratch/copy-cf1d2207 (no checkout file: checkout-path is missing)\nsibling keys: kept /Users/chris/.fleet/scratch/copy-f8bd892a (no checkout file: checkout-path is missing)"
+    },
+    "evict": {
+      "status": "ok",
+      "at": "2026-11-11T17:29:05.514Z",
+      "output": "idle claim trees evicted"
+    },
+    "recipe": {
+      "status": "ok",
+      "at": "2026-11-11T17:29:06.236Z",
+      "output": "withheld: the Recipe's command lines can carry environment assignments"
+    },
+    "fold-in": {
+      "status": "ok",
+      "at": "2026-11-11T17:29:07.256Z",
+      "output": "0 PR(s) queued, 0 already on a carried row"
+    },
+    "stranded": {
+      "status": "ok",
+      "at": "2026-11-11T17:29:11.364Z",
+      "output": "prior dead: 0 claim(s), 0 live token(s) carried"
+    },
+    "shortlist": {
+      "status": "ok",
+      "at": "2026-11-11T17:29:15.347Z",
+      "output": "shortlist built"
+    }
+  }
+}
