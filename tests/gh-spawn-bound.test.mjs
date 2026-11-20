@@ -323,10 +323,11 @@ function analyse(src, file) {
   // not at the start of its line) binds names the maps above never hold, so a
   // write or re-export through it would go unseen: refused, not followed. Its
   // clause is read as names, braces, commas, `*` and a quoted name before `as`
-  // (its escapes read as one character each), so an `import.meta`, `import()`
-  // or `import` key whose statement has no `;` is no match for a `from` on a
-  // later line.
-  const staticImport = /import\s*((?:[\w$\s,{}*]|"(?:[^"\\\n]|\\.)*"(?=\s*as\b)|'(?:[^'\\\n]|\\.)*'(?=\s*as\b))*?)\s*from\s*(["'])(\.\.?\/[^"'\n]*\.mjs)\2/y;
+  // (a backslash read together with the character after it, a line terminator
+  // included, so an escaped quote or a line continuation stays in the name),
+  // so an `import.meta`, `import()` or `import` key whose statement has no `;`
+  // is no match for a `from` on a later line.
+  const staticImport = /import\s*((?:[\w$\s,{}*]|"(?:[^"\\\n]|\\(?:\r\n|[\s\S]))*"(?=\s*as\b)|'(?:[^'\\\n]|\\(?:\r\n|[\s\S]))*'(?=\s*as\b))*?)\s*from\s*(["'])(\.\.?\/[^"'\n]*\.mjs)\2/y;
   for (const m of skel.matchAll(/\bimport\b/g)) {
     if (parsedAt.has(m.index)) continue;
     staticImport.lastIndex = m.index;
@@ -2573,6 +2574,9 @@ test("the sweep refuses a static import of a relative module that it cannot read
     "a string name with an escaped double quote": [importing(`C.ms = ${ENV_MS};`, `import { "a\\"b" as C } from "./common.mjs";\n`), "y.mjs:1"],
     "a string name with an escaped single quote": [importing(`C.ms = ${ENV_MS};`, `import { 'a\\'b' as C } from "./common.mjs";\n`), "y.mjs:1"],
     "a string name with an escaped backslash": [importing(`C.ms = ${ENV_MS};`, `import { "a\\\\" as C } from "./common.mjs";\n`), "y.mjs:1"],
+    "a string name with a line continuation": [importing(`C.ms = ${ENV_MS};`, `import { "C\\\nFG" as C } from "./common.mjs";\n`), "y.mjs:1"],
+    "a string name with a CRLF line continuation": [importing(`C.ms = ${ENV_MS};`, `import { 'C\\\r\nFG' as C } from "./common.mjs";\n`), "y.mjs:1"],
+    "a string name with a U+2028 line continuation": [importing(`C.ms = ${ENV_MS};`, `import { "C\\\u2028FG" as C } from "./common.mjs";\n`), "y.mjs:1"],
   };
   for (const [name, [sources, at]] of Object.entries(refused)) {
     const { problems } = sweep(sources);
