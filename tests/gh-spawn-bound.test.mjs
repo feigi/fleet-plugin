@@ -2655,6 +2655,8 @@ test("the sweep accepts a gh timeout it can follow beside writes it need not", (
     "a namespace import read, compared and passed by its members": importing(`console.log(ns.CFG.ms, typeof ns === "object");\nlog(ns.OTHER);`, `import * as ns from "./common.mjs";\n`),
     "an options object whose methods do not use this, beside an arrow that does": MOD(`const opts = { timeout: 20_000, describe() { return "x"; }, label: function () { return 1; }, show: () => log(this.label) };\nspawnSync("gh", ["x"], opts);`),
     "a dynamic import of a module that declares nothing it reads": importing(`const m = await import("./elsewhere.mjs");`, ""),
+    "a call of a property named import, whose argument is not spelled out": importing(`o.import(name);`, ""),
+    "a call of a property named import, spelling out the declaring module": importing(`o.import("./common.mjs");`, ""),
     "a re-export of another module": importing(`export { Z } from "./elsewhere.mjs";`, ""),
     "an object that is not exported, in a module imported dynamically": {
       "y.mjs": `const m = await import("./x.mjs");\n`,
