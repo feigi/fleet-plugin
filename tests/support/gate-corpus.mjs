@@ -13,9 +13,12 @@ export const SESSION = "2026-10-03T10-00-00-000Z_01a00000-0000-7000-8000-0000000
 const MODEL_OF = { slow: "claude-opus-5", task: "claude-sonnet-5", smol: "claude-haiku-4-5" };
 
 /**
- * The rows of `specs`, one Pull each: `{ cell, usd, held, prob, merged, failed, ticket, date }`. `usd` is what its
+ * The rows of `specs`, one Pull each: `{ cell, usd, held, prob, merged, failed, ticket, date, sizing, draw }`. `usd` is what its
  * implementer cost; `held` amends the features row (the inputs, as strings); `prob` is its `assignment_prob`, "1/2" unless
- * given; a Pull that did not merge ends hollow with no verdict; `failed` makes the verdict a false claim.
+ * given; a Pull that did not merge ends hollow with no verdict; `failed` makes the verdict a false claim. `sizing` is its
+ * `sizing_src`, "rule" unless given (the free classifier routed it); `draw` is its `exploration_draw`, blank unless given:
+ * a Pull whose `sizing` is not "rule" (a live classifier's, or blank when a live B Pull's sizing verdict was missing or
+ * unusable) and with no `draw` is not the Fit's.
  */
 export function corpus(specs) {
   const rows = { features: [], members: [], tiers: [] };
@@ -27,8 +30,8 @@ export function corpus(specs) {
     const merged = s.merged ?? true;
     const pr = String(Number(ticket) + 5000);
     rows.features.push({
-      run_date: date, session: SESSION, agent, ticket, policy_cell: "slow-high", chosen_cell: s.cell, exploration_draw: "",
-      sizing_src: "rule", sizing_pre: "", router_usd: "", brief_chars: "100", criteria: "1", comments: "0", age_days: "0",
+      run_date: date, session: SESSION, agent, ticket, policy_cell: "slow-high", chosen_cell: s.cell, exploration_draw: s.draw ?? "",
+      sizing_src: s.sizing ?? "rule", sizing_pre: "", router_usd: "", brief_chars: "100", criteria: "1", comments: "0", age_days: "0",
       paths: "0", test_paths: "0", xrefs: "0", kind: "enhancement", assignment_prob: s.prob ?? "1/2", ...s.held,
     });
     rows.members.push({
