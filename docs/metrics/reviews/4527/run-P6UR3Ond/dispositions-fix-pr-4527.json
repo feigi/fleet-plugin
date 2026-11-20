@@ -1,0 +1,48 @@
+{
+  "head": "330e684918abf1b4669559b8852a7945da6862fc",
+  "run": "run-P6UR3Ond",
+  "entries": [
+    {
+      "bucket": "survived",
+      "index": 0,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ],
+      "charge": "false-claim"
+    },
+    {
+      "bucket": "unverified",
+      "index": 0,
+      "scope": "out",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "out of scope: the PR changes only tests/gh-spawn-bound.test.mjs; its refuter survived it (every named test passes narrowed), filed open needs-triage",
+      "issue": 4528,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4527/fix-vLRkNMYi/unverified-0/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 1,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "defer",
+      "reason": "refuted: a mutant requiring a non-empty quoted name (* -> +) leaves the refusal test green while import { \"\" as C } goes unrefused; filed on the suggestion-band record",
+      "issue": 4529,
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4527/fix-vLRkNMYi/unverified-1/verdict.json"
+    },
+    {
+      "bucket": "unverified",
+      "index": 2,
+      "scope": "in",
+      "claimKind": "behavior",
+      "disposition": "apply",
+      "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4527/fix-vLRkNMYi/unverified-2/verdict.json",
+      "remedyFiles": [
+        "tests/gh-spawn-bound.test.mjs"
+      ]
+    }
+  ]
+}
