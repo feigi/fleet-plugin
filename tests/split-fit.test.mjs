@@ -159,6 +159,63 @@ test("a Cell short of MIN_N merged PRs in a leaf is not that leaf's pick, though
   assert.notEqual(enough, short, "at MIN_N the Cell is a choice the leaf can take");
 });
 
+// `n` Pulls of `cell` a live classifier routed (sizing source not "rule") and no exploration drew: the A/B's test set, not the Fit's.
+const live = (cell, n, over = {}) => Array.from({ length: n }, () => ({ cell, usd: 1, held: { criteria: "0" }, sizing: "haiku", ...over }));
+// `n` Pulls of `cell` an exploration drew, whoever sized them.
+const drawn = (cell, n, over = {}) => Array.from({ length: n }, () => ({ cell, usd: 1, held: { criteria: "0" }, sizing: "haiku", draw: "1/3", ...over }));
+// Every place the table names a Cell it judged.
+const judgedIn = (table, cell) => [
+  table.cells.includes(cell),
+  Object.keys(table.reasons.cost["*"].cells).includes(cell),
+  Object.keys(table.reasons.speed["*"].cells).includes(cell),
+  Object.keys(table.estimates["*"]).includes(cell),
+];
+
+test("a Cell whose counted Pulls are all a live classifier's undrawn ones is not judged: it is in no cell list, reason or estimate, and the gate does not search it", () => {
+  const base = fit(flip());
+  // $1 a PR, cheaper than every starting Cell, and 25 of them, past MIN_N: were it judged it would win the row.
+  const withLive = fit([...flip(), ...live("slow-medium", 25)]);
+  assert.deepEqual(judgedIn(base.table, "slow-medium"), [false, false, false, false], "the baseline has no such Cell");
+  assert.deepEqual(judgedIn(withLive.table, "slow-medium"), [false, false, false, false]);
+  assert.deepEqual(withLive.table.cells, base.table.cells);
+  assert.deepEqual(withLive.table.rows, base.table.rows);
+  assert.equal(withLive.table.n_rows, base.table.n_rows, "the Pulls are not among the Fit's");
+  assert.deepEqual(withLive.gate, base.gate, "the gate searched the same Cells and Pulls");
+  assert.deepEqual(withLive.table, base.table);
+});
+
+test("a live classifier's undrawn Pulls in a judged Cell are not among the Pulls the gate searched or the estimates read", () => {
+  const own = [...flip(), ...drawn("slow-medium", 10)];
+  const base = fit(own);
+  assert.equal(base.gate.scored, 170, "the 10 drawn Pulls of slow-medium are searched with the 160 of the starting Cells");
+  // Live Pulls in a Cell the Fit judges only through its drawn Pulls, and in a starting Cell; different $ and inputs, so a Pull read would move the digest.
+  const extra = [...live("slow-medium", 12, { usd: 7, held: { criteria: "5" } }), ...live("slow-high", 12, { usd: 3 }), ...live("task-high", 12, { usd: 20, held: { criteria: "5" } })];
+  const withLive = fit([...own, ...extra]);
+  assert.deepEqual([withLive.gate.records, withLive.gate.scored, withLive.gate.left_out], [base.gate.records, 170, 0], "the digest is the one the Fit without those rows computed");
+  assert.deepEqual(withLive.gate, base.gate);
+  assert.deepEqual(withLive.table.estimates, base.table.estimates);
+  assert.deepEqual(withLive.table, base.table);
+});
+
+test("a live classifier's undrawn Pulls with no assignment probability are not counted as left out either", () => {
+  const base = fit(flip());
+  const withLive = fit([...flip(), ...live("slow-high", 6, { prob: "" })]);
+  assert.deepEqual([withLive.gate.scored, withLive.gate.left_out, withLive.gate.records], [base.gate.scored, 0, base.gate.records]);
+});
+
+test("control: a Cell holding live undrawn Pulls is judged once it also holds one exploration-drawn counted Pull, and its Pulls are then searched", () => {
+  const base = fit(flip());
+  const withDrawn = fit([...flip(), ...live("slow-medium", 25), ...drawn("slow-medium", 1)]);
+  assert.deepEqual(judgedIn(withDrawn.table, "slow-medium"), [true, true, true, true]);
+  assert.deepEqual(withDrawn.table.cells, [...base.table.cells, "slow-medium"]);
+  assert.equal(withDrawn.table.estimates["*"]["slow-medium"].n, 1, "its estimate reads the drawn Pull alone");
+  assert.equal(withDrawn.table.n_rows, base.table.n_rows + 1);
+  assert.equal(withDrawn.gate.scored, base.gate.scored + 1, "the gate searches the drawn Pull alone");
+  assert.notEqual(withDrawn.gate.records, base.gate.records);
+  // Drawn by an exploration whoever sized it: a rule-sized drawn Pull counts too.
+  assert.deepEqual(judgedIn(fit([...flip(), ...drawn("slow-medium", 1, { sizing: "rule" })]).table, "slow-medium"), [true, true, true, true]);
+});
+
 test("the tree reaches two inputs, each node its own row, and a ticket lacking the second input stops at the node of the first", () => {
   // Task-high is $4 on three corners of `criteria` x `paths` and $20 on the fourth; slow-high is $10 throughout.
   const corners = (each) => {
