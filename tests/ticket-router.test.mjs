@@ -2034,7 +2034,7 @@ test("fit: burn-in holds until the guard has judged each starting Cell — MIN_N
   assert.equal(bare.burn_in, true, "a guard that records no shared counts judged nothing");
 });
 
-test("fit: the fit adds no Cell — the table's `cells` are the starting set, whatever the guard tripped or a row adopted", () => {
+test("fit: on records holding only starting-Cell Pulls the table's `cells` are the starting set, whatever the guard tripped or a row adopted", () => {
   const input = cellInput([["slow-high", 10], ["smol-high", 2]]);
   for (const tripped of [[], ["task-high"], ["slow-high"], ["smol-high"]]) {
     const next = fitDirect(input, { n: startingAtN, tripped });
@@ -2131,6 +2131,39 @@ test("fit: MIN_N counts merged PRs — slow-high with 20 counted Pulls but 19 me
   assert.deepEqual(short.reasons.cost[BELOW], { cell: "task-high", reason: "unjudged", cells: {}, pairs: [] }, "no row of its own: the root's");
   const judged = fitRows(spec({ merged: 20, hollow: 1 }), {}, TREE);
   assert.deepEqual([judged.rows.cost[BELOW], judged.reasons.cost[BELOW].reason], ["task-high", "sole-qualifier"]);
+});
+
+test("fit: a Cell the starting table lacks is judged and can hold a row — slow-medium at MIN_N merged PRs and reliably cheaper is adopted, at one fewer it is too-few and the row stays", () => {
+  const at = (merged, guard = {}) => fitRows([{ cell: "slow-high" }, { cell: "slow-medium", merged, usd: 5, work: 30 }], guard);
+  const adopted = at(20);
+  assert.deepEqual(adopted.cells, [...STARTING, "slow-medium"]);
+  assert.deepEqual([adopted.reasons.cost["*"].cells["slow-medium"].verdict, adopted.reasons.cost["*"].reason], ["qualifies", "sole-qualifier"]);
+  assert.deepEqual([adopted.rows.cost["*"], adopted.rows.speed["*"]], ["slow-medium", "slow-medium"]);
+  assert.equal(validateTable(adopted), adopted);
+  const short = at(19);
+  assert.deepEqual(short.cells, [...STARTING, "slow-medium"], "judged all the same");
+  assert.equal(short.reasons.cost["*"].cells["slow-medium"].verdict, "too-few");
+  assert.deepEqual([short.rows.cost["*"], short.rows.speed["*"]], ["slow-high", "slow-high"]);
+  const tripped = at(20, { tripped: [trip("slow-medium", "usd", "minutes")] });
+  assert.equal(tripped.reasons.cost["*"].cells["slow-medium"].verdict, "tripped");
+  assert.deepEqual([tripped.rows.cost["*"], tripped.rows.speed["*"]], ["slow-high", "slow-high"]);
+  // `speed` judges it too: the same price, a third of the time.
+  const faster = fitRows([{ cell: "slow-high", work: 100 }, { cell: "slow-medium", work: 30 }]);
+  assert.equal(faster.reasons.cost["*"].cells["slow-medium"].verdict, "too-dear");
+  assert.deepEqual([faster.rows.cost["*"], faster.rows.speed["*"]], ["slow-high", "slow-medium"]);
+});
+
+test("fit: a Cell exploration drew that the starting table lacks is in the table's `cells` after the starting set, by name, and in the reasons, and is dropped once the records hold none of its counted Pulls", () => {
+  // rowInput's rows already carry an exploration draw (`exploring`), so each Pull here is one exploration drew.
+  const spec = [{ cell: "slow-high" }, { cell: "task-max", merged: 3 }, { cell: "slow-medium", merged: 3, usd: 5 }, { cell: "smol-xhigh", merged: 2, usd: "" }];
+  const drawn = fitRows(spec);
+  assert.deepEqual(drawn.cells, [...STARTING, "slow-medium", "task-max"], "a Cell none of whose Pulls is counted (here unpriced) is not judged");
+  assert.deepEqual(Object.keys(drawn.reasons.cost["*"].cells).sort(), ["slow-medium", "smol-high", "task-high", "task-max"]);
+  assert.equal(drawn.reasons.cost["*"].cells["task-max"].verdict, "too-few");
+  assert.equal(drawn.estimates["*"]["task-max"].n, 3);
+  assert.equal(validateTable(drawn), drawn);
+  const gone = fitRows(spec.slice(0, 1), {}, drawn);
+  assert.deepEqual(gone.cells, STARTING, "the judged set is rebuilt from the records at every Fit and kept nowhere else");
 });
 
 test("fit: a candidate at or under 0.75x whose range spans zero, or whose upper end reads 0 or −0, is not adopted — the row is slow-high", () => {
@@ -2990,8 +3023,8 @@ test("fit: burn-in ends over the starting Cells the install runs, the Fit record
   assert.deepEqual([all.burn_in, all.starting_cells], [true, STARTING], "with no set named all three count");
   assert.deepEqual(fitTree({ prior, ...direct(input), guard, startingCells: counted }).table, fitted, "the tree's fit counts the same set");
   assert.equal(fitTree({ prior, ...direct(input), guard }).table.burn_in, true);
-  for (const startingCells of [[], ["slow-medium"]]) {
-    assert.throws(() => fitTable({ prior, ...direct(input), guard, startingCells }), /startingCells is not a non-empty list of starting Cells/, JSON.stringify(startingCells));
+  for (const startingCells of [[], ["slow-medium"], ["slow-high", "slow-high"]]) {
+    assert.throws(() => fitTable({ prior, ...direct(input), guard, startingCells }), /startingCells is not a non-empty list of starting Cells, each once/, JSON.stringify(startingCells));
   }
 });
 
@@ -3168,14 +3201,15 @@ test("fit: with the cost row's Cell tripped only on minutes the cost row keeps i
   assert.ok(scored([trip("task-high", "floor")]) < scored([]), "and so is one tripped on the floor");
 });
 
-test("fit: under a Baseline Cell other than slow-high the table records it, holds its starting set, and judges every row from it", () => {
+test("fit: under a Baseline Cell other than slow-high the table records it, holds its starting set, and judges every row from it, a Cell a Pull ran outside that set judged after it", () => {
   const baseline = "task-medium";
   const prior = startingTableOf(JSON.parse(readFileSync(DEFAULT_TABLE, "utf8")), baseline);
-  const input = cellInput([["task-medium", 10], ["smol-medium", 2], ["slow-high", 1]]);
+  const input = cellInput([["task-medium", 10], ["smol-medium", 2], ["slow-high", 1, 3]]);
   const members = direct({ ...input, members: input.members.map((m) => ({ ...m, effort: m.subagent_type.split("-").at(-1) })) });
   const next = fitTable({ prior, ...members, guard: guardOf({ baseline, n: { "task-medium": 20, "smol-medium": 20, "slow-medium": 20 } }), baseline });
-  assert.deepEqual([next.baseline_cell, next.cells, next.starting_cells], [baseline, ["slow-medium", "task-medium", "smol-medium"], ["slow-medium", "task-medium", "smol-medium"]]);
-  assert.deepEqual(Object.keys(next.reasons.cost["*"].cells).sort(), ["slow-medium", "smol-medium"], "the Baseline Cell's starting set is what is judged, whatever Cell a Pull ran at");
+  assert.deepEqual([next.baseline_cell, next.cells, next.starting_cells], [baseline, ["slow-medium", "task-medium", "smol-medium", "slow-high"], ["slow-medium", "task-medium", "smol-medium"]]);
+  assert.deepEqual(Object.keys(next.reasons.cost["*"].cells).sort(), ["slow-high", "slow-medium", "smol-medium"], "the starting set of the Baseline Cell and every Cell a Pull ran is judged");
+  assert.equal(next.reasons.cost["*"].cells["slow-high"].verdict, "too-few");
   assert.equal(next.reasons.cost["*"].cells["smol-medium"].verdict, "qualifies");
   assert.equal(next.rows.cost["*"], "smol-medium");
   assert.equal(next.burn_in, false, "the Baseline Cell and each other starting Cell are judged");

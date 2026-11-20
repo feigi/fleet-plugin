@@ -1010,8 +1010,9 @@ const STARTING_ROLES = Object.freeze(["slow", "task", "smol"]);
 
 /**
  * The starting set of a Baseline Cell: its level on each of the three models,
- * `slow` first. The Cells burn-in draws and counts, and the Cells the Fit judges.
- * A Cell exploration adds is none of them, whatever its merged PRs. Exported so
+ * `slow` first. The Cells burn-in draws and counts, and the Cells the Fit always judges. A Cell exploration adds
+ * does not end burn-in or hold it open, whatever its merged PRs; the Fit judges it beside these once it holds counted
+ * Pulls. Exported so
  * ticket-router.mjs's burn-in and pr-cost.mjs's retire condition read one rule,
  * though neither script imports the other.
  * @returns {string[]}
