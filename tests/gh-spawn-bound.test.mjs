@@ -317,8 +317,11 @@ function analyse(src, file) {
   }
   // Any other static import of a relative .mjs module (a default import, one
   // not at the start of its line) binds names the maps above never hold, so a
-  // write or re-export through it would go unseen: refused, not followed.
-  const staticImport = /import\s*([^;"'`]*?)\s*from\s*(["'])(\.\.?\/[^"'\n]*\.mjs)\2/y;
+  // write or re-export through it would go unseen: refused, not followed. Its
+  // clause is read as names, braces, commas, `*` and a quoted name before `as`,
+  // so an `import.meta`, `import()` or `import` key whose statement has no `;`
+  // is no match for a `from` on a later line.
+  const staticImport = /import\s*((?:[\w$\s,{}*]|"[^"\n]*"(?=\s*as\b)|'[^'\n]*'(?=\s*as\b))*?)\s*from\s*(["'])(\.\.?\/[^"'\n]*\.mjs)\2/y;
   for (const m of skel.matchAll(/\bimport\b/g)) {
     if (parsedAt.has(m.index)) continue;
     staticImport.lastIndex = m.index;
@@ -2535,7 +2538,7 @@ test("the sweep refuses a gh timeout written in the module that declares an obje
 });
 
 // #4507. Rule 7 reads a static import of a relative module in two forms, each
-// at the start of its line; any other static import of one is refused by name
+// at the start of its line; any other static import of one is refused by file
 // and line, since a write or re-export in that module would go unseen.
 test("the sweep refuses a static import of a relative module that it cannot read", () => {
   const BODY = `CFG.ms = ${ENV_MS};`;
@@ -2553,6 +2556,8 @@ test("the sweep refuses a static import of a relative module that it cannot read
     "a default import, on a later line": [importing(BODY, `log(1);\nimport D, { CFG } from "./common.mjs";\n`), "y.mjs:2"],
     "a default import spread over several lines": [importing(BODY, `log(1);\nimport D,\n  { CFG }\n  from "./common.mjs";\n`), "y.mjs:2"],
     "a default import in single quotes": [importing(BODY, `import D from './common.mjs';\n`), "y.mjs:1"],
+    "a default import beside a string-named one": [importing(`C.ms = ${ENV_MS};`, `import D, { "CFG" as C } from "./common.mjs";\n`), "y.mjs:1"],
+    "an import with no space around its keywords": [importing(BODY, `log(1);import{ CFG }from"./common.mjs";\n`), "y.mjs:1"],
   };
   for (const [name, [sources, at]] of Object.entries(refused)) {
     const { problems } = sweep(sources);
@@ -2583,6 +2588,12 @@ test("the sweep refuses a static import of a relative module that it cannot read
     "an import in a template": importing("log(`import D from \"./common.mjs\"`);", ""),
     "an import in a comment": importing(`// import D from "./common.mjs"\n/* import D, { CFG } from "./common.mjs" */`, ""),
     "an object key named import": importing(`const o = { import: 1 };\nlog(o.import);`, ""),
+    "an import.meta read before an import, with no semicolon": importing(BODY, `const here = import.meta.url\nimport { CFG } from "./common.mjs"\n`),
+    "a dynamic import before an import, with no semicolon": importing(BODY, `const m = await import(name)\nimport { CFG } from "./common.mjs"\n`),
+    "an object key named import before an import, with no semicolon": importing(BODY, `const o = { import: 1 }\nimport { CFG } from "./common.mjs"\n`),
+    "a property named import before an import": importing(BODY, `const v = o.import;\nimport { CFG } from "./common.mjs";\n`),
+    "a package import before an import, with no semicolon": importing(BODY, `import { a } from "pkg"\nimport { CFG } from "./common.mjs"\n`),
+    "an import whose quotes do not match": importing(BODY, `import D from "./common.mjs'\n`),
   };
   for (const [name, sources] of Object.entries(read)) assert.deepEqual(sweep(sources).problems, [], name);
 });
