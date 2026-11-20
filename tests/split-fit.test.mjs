@@ -159,7 +159,8 @@ test("a Cell short of MIN_N merged PRs in a leaf is not that leaf's pick, though
   assert.notEqual(enough, short, "at MIN_N the Cell is a choice the leaf can take");
 });
 
-// `n` Pulls of `cell` a live classifier routed (sizing source not "rule") and no exploration drew: the A/B's test set, not the Fit's.
+// `n` Pulls of `cell` no exploration drew, sized other than "rule": by a live classifier ("haiku" unless `over` says
+// otherwise), the A/B's test set, or blank when a live B Pull's sizing verdict was missing or unusable. Neither is the Fit's.
 const live = (cell, n, over = {}) => Array.from({ length: n }, () => ({ cell, usd: 1, held: { criteria: "0" }, sizing: "haiku", ...over }));
 // `n` Pulls of `cell` an exploration drew, whoever sized them.
 const drawn = (cell, n, over = {}) => Array.from({ length: n }, () => ({ cell, usd: 1, held: { criteria: "0" }, sizing: "haiku", draw: "1/3", ...over }));
@@ -189,7 +190,9 @@ test("a live classifier's undrawn Pulls in a judged Cell are not among the Pulls
   const base = fit(own);
   assert.equal(base.gate.scored, 170, "the 10 drawn Pulls of slow-medium are searched with the 160 of the starting Cells");
   // Live Pulls in a Cell the Fit judges only through its drawn Pulls, and in a starting Cell; different $ and inputs, so a Pull read would move the digest.
-  const extra = [...live("slow-medium", 12, { usd: 7, held: { criteria: "5" } }), ...live("slow-high", 12, { usd: 3 }), ...live("task-high", 12, { usd: 20, held: { criteria: "5" } })];
+  // Each source that is not "rule" is left out: "haiku", a jev classifier's, and blank.
+  const extra = [...live("slow-medium", 12, { usd: 7, held: { criteria: "5" } }), ...live("slow-high", 12, { usd: 3 }), ...live("task-high", 12, { usd: 20, held: { criteria: "5" } }),
+    ...live("slow-high", 12, { usd: 3, sizing: "jev:claude-haiku-4-5" }), ...live("slow-high", 12, { usd: 3, sizing: "" })];
   const withLive = fit([...own, ...extra]);
   assert.deepEqual([withLive.gate.records, withLive.gate.scored, withLive.gate.left_out], [base.gate.records, 170, 0], "the digest is the one the Fit without those rows computed");
   assert.deepEqual(withLive.gate, base.gate);
@@ -201,6 +204,10 @@ test("a live classifier's undrawn Pulls with no assignment probability are not c
   const base = fit(flip());
   const withLive = fit([...flip(), ...live("slow-high", 6, { prob: "" })]);
   assert.deepEqual([withLive.gate.scored, withLive.gate.left_out, withLive.gate.records], [base.gate.scored, 0, base.gate.records]);
+  // In a Cell the starting table lacks they leave it unjudged, so the gate has no such Cell to leave them out of.
+  const unjudged = fit([...flip(), ...live("slow-medium", 6, { prob: "" })]);
+  assert.deepEqual([unjudged.gate.scored, unjudged.gate.left_out, unjudged.gate.records], [base.gate.scored, 0, base.gate.records]);
+  assert.deepEqual(judgedIn(unjudged.table, "slow-medium"), [false, false, false, false]);
 });
 
 test("control: a Cell holding live undrawn Pulls is judged once it also holds one exploration-drawn counted Pull, and its Pulls are then searched", () => {
