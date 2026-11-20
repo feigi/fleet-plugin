@@ -4,7 +4,7 @@
 // to its group is the one function that must never read differently between
 // the two.
 //
-//   route [--session <dir|id>] [--objective cost|speed] --ticket <N> --arm A|B
+//   route [--session <dir|id>] [--objective cost|speed] [--baseline-cell <cell>] --ticket <N> --arm A|B
 //         --impl-row <k> --issue <issue.json> --guard <cost-guard.json>
 //         [--sizing <sizing.json>] [--table <router-table.json>]
 //         [--chain-head] [--pending <tsv>]
@@ -30,8 +30,12 @@
 //     an unreadable/invalid table: the caller does not dispatch then. With no
 //     `--session`, the session is the one the phase-0 receipt
 //     `.fleet/phase0.json` records, and with no `--objective` the objective
-//     is; a receipt that records none is exit 2. Every Pull reads what the
-//     install runs, burn-in, chain head and a missing guard included:
+//     is; a receipt that records none is exit 2. With no `--baseline-cell`, the
+//     Baseline Cell is the receipt's `baselineCell` (the Cell the router starts
+//     from, which the cost guard and the Fit compare every Cell with), else the
+//     saved value in `.fleet/baseline-cell.json`, else `slow-high`; one that is no
+//     Cell is exit 2. Every Pull reads what the install runs, burn-in, chain head
+//     and a missing guard included:
 //     `modelRoles` (`omp config get modelRoles --json`, or the file
 //     `--model-roles` names, holding that record), omp's model catalog
 //     (`omp models --json`, or the file `--catalog` names) and the
@@ -58,12 +62,13 @@ import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } fr
 import { fileURLToPath } from "node:url";
 import { isCLI } from "./is-cli.mjs";
 import { makeDie, defineFlags, isDigits } from "./arg.mjs";
-import { CELL, OBJECTIVES, POLICY_CELL, STARTING_CELLS, drawCell, formatRouting, isRulePath, parseMember } from "./ledger-grammar.mjs";
-import { objectiveFromReceipt, sessionFromReceipt } from "./phase0-receipt.mjs";
+import { CELL, DEFAULT_BASELINE_CELL, OBJECTIVES, drawCell, formatRouting, isRulePath, parseMember, startingSetOf } from "./ledger-grammar.mjs";
+import { baselineCellFromReceipt, objectiveFromReceipt, sessionFromReceipt } from "./phase0-receipt.mjs";
 import {
   AttributionError, FEATURE_COLUMNS, OPTIONAL_COLUMNS, TRIP_POINTS, attribute, compareCells, generations, tally,
 } from "./pull-attribution.mjs";
 import { searchSplits, standing } from "./split-gate.mjs";
+import { excludedCells, tripEntry, tripFault } from "./trip-reasons.mjs";
 import { LINE_REF, briefPaths, briefText } from "./ticket-text.mjs";
 import { catalogEntry, implementerCell, readOmpConfigValue, readOmpModelCatalog, resolveRole } from "./tier-roles.mjs";
 
@@ -83,9 +88,18 @@ const OMP_READ_TIMEOUT_MS = 10_000;
 // The fit's adoption floor (merged PRs per side) and margin.
 export const MIN_N = 20;
 const ADOPT_RATIO = 0.75;
-// Whether any starting Cell of `cells` (startingCellsOf's: the starting Cells the install runs) is short of MIN_N
-// merged PRs in a guard's `n`: burn-in holds while any is. A Cell the guard has no count for has 0.
-const anyStartingCellShort = (n, cells) => cells.some((c) => (n[c] ?? 0) < MIN_N);
+/**
+ * The merged PRs a starting Cell is counted on in burn-in, from a guard's counts (parseGuard's `n` and `shared`): the
+ * Baseline Cell's own, and any other Cell's on its thinner side of the stretches it shares with the Baseline Cell,
+ * the counts the cost guard judges it on. A Cell the guard has no count for has 0.
+ */
+export const burnInCount = (guard, cell, baseline) => (cell === baseline
+  ? guard.n[cell] ?? 0
+  : Math.min(guard.shared?.[cell]?.cell ?? 0, guard.shared?.[cell]?.base ?? 0));
+// Whether any starting Cell of `cells` (startingCellsOf's: the starting Cells the install runs), or the Baseline Cell
+// itself, is short of MIN_N merged PRs in a guard's counts: burn-in holds until the cost guard has judged every
+// Cell of the starting set.
+const anyStartingCellShort = (guard, cells, baseline) => [baseline, ...cells.filter((c) => c !== baseline)].some((c) => burnInCount(guard, c, baseline) < MIN_N);
 const KINDS = new Set(["bug", "enhancement", "documentation"]);
 const DAY_MS = 86_400_000;
 
@@ -364,9 +378,15 @@ export function validateTable(t) {
     }
   }
   if (typeof t.burn_in !== "boolean") return bad("`burn_in` is not a boolean");
+  // The Baseline Cell the table was computed under, which a Fit records and the starting table does not: the Cell
+  // `slow-high` when it records none.
+  if (t.baseline_cell !== undefined && (typeof t.baseline_cell !== "string" || !CELL.test(t.baseline_cell))) {
+    return bad("`baseline_cell` is not a cell token");
+  }
   // The starting Cells burn-in counted, which a Fit records and the starting table does not.
   const sc = t.starting_cells;
-  if (sc !== undefined && (!Array.isArray(sc) || sc.length === 0 || new Set(sc).size !== sc.length || !sc.every((c) => STARTING_CELLS.includes(c)))) {
+  const set = startingSetOf(fitBaselineOf(t));
+  if (sc !== undefined && (!Array.isArray(sc) || sc.length === 0 || new Set(sc).size !== sc.length || !sc.every((c) => set.includes(c)))) {
     return bad("`starting_cells` is not a non-empty list of starting Cells, each once");
   }
   const cl = t.classifier;
@@ -377,16 +397,18 @@ export function validateTable(t) {
   if (g === null || typeof g !== "object" || !Array.isArray(g.tripped) || g.n === null || typeof g.n !== "object") {
     return bad("`guard` is not `{ tripped: [], n: {} }`");
   }
+  const fault = g.tripped.map(tripFault).find((why) => why !== null);
+  if (fault !== undefined) return bad(`\`guard\`: ${fault}`);
   return t;
 }
 
 /**
  * Arm B runs only once a classifier has passed its gate and some row of the
- * run's own objective's set is not the default: it decides a paid classifier
- * call for one Pull, which the other set's rows never route.
+ * run's own objective's set is not the Baseline Cell: it decides a paid
+ * classifier call for one Pull, which the other set's rows never route.
  */
-export function bArmLive(table, objective) {
-  return table.classifier.b !== null && Object.values(table.rows[objective]).some((c) => c !== POLICY_CELL);
+export function bArmLive(table, objective, baseline = DEFAULT_BASELINE_CELL) {
+  return table.classifier.b !== null && Object.values(table.rows[objective]).some((c) => c !== baseline);
 }
 
 /** The row a group routes by: its own, else the `*` row's — as a name no node of the table holds does, such as a group a Routing filed under another table names. */
@@ -429,25 +451,28 @@ export function isRunnable(install, cell) {
 export const unrunnableCells = (install) => (install === null ? [] : [...install.defined].filter((c) => !isRunnable(install, c)).sort());
 
 /**
- * The starting Cells `install` runs, in their order: the Cells burn-in counts and draws. All three where the install
- * was not read, and where it runs none of them, so that an install that cannot run them is no reason to end burn-in.
+ * The starting Cells of `baseline` that `install` runs, in their order: the Cells burn-in counts and draws. All of
+ * them where the install was not read, and where it runs none of them, so that an install that cannot run them is no
+ * reason to end burn-in.
  */
-export function startingCellsOf(install) {
-  const runs = STARTING_CELLS.filter((c) => isRunnable(install, c));
-  return runs.length > 0 ? runs : [...STARTING_CELLS];
+export function startingCellsOf(install, baseline = DEFAULT_BASELINE_CELL) {
+  const set = startingSetOf(baseline);
+  const runs = set.filter((c) => isRunnable(install, c));
+  return runs.length > 0 ? runs : set;
 }
 
 /**
- * The Cell a Pull runs where the router holds no row's Cell back: POLICY_CELL while `install` (installOf's, or null)
- * runs it, else the nearest level of its role that the install runs and has an implementer definition for — downward
- * first, the direction omp lowers to, then upward. POLICY_CELL again when its role has no such level.
+ * The Cell a Pull runs where the router holds no row's Cell back: `baseline`, the run's Baseline Cell, while `install`
+ * (installOf's, or null) runs it, else the nearest level of its role that the install runs and has an implementer
+ * definition for — downward first, the direction omp lowers to, then upward. `baseline` again when its role has no
+ * such level.
  */
-export function defaultCellOf(install) {
-  if (isRunnable(install, POLICY_CELL)) return POLICY_CELL;
-  const [, role, level] = CELL.exec(POLICY_CELL);
+export function defaultCellOf(install, baseline = DEFAULT_BASELINE_CELL) {
+  if (isRunnable(install, baseline)) return baseline;
+  const [, role, level] = CELL.exec(baseline);
   const usable = install.ladders[role].filter((l) => install.defined.has(`${role}-${l}`));
   const at = usable.findLast((l) => rank(l) < rank(level)) ?? usable.find((l) => rank(l) > rank(level));
-  return at === undefined ? POLICY_CELL : `${role}-${at}`;
+  return at === undefined ? baseline : `${role}-${at}`;
 }
 
 /**
@@ -471,47 +496,56 @@ export function explorationCells(centre, ladders) {
 
 /**
  * The Cells an exploring Pull may draw, before the guard's tripped Cells and the install's unrunnable ones leave any
- * out: burn-in draws the starting Cells, whatever `cells` the table holds; a draw after it the exploration Cells
- * around `centre`, the group's `cost` row Cell, that `install` (installOf's) can run — none when the install was not
- * read (null). The fit judges `burn_in` over the starting Cells the install runs, so the Cells that end burn-in are
- * the Cells it draws.
+ * out: burn-in draws the starting set of `baseline`, whatever `cells` the table holds; a draw after it the exploration
+ * Cells around `centre`, the group's `cost` row Cell, that `install` (installOf's) can run — none when the install was
+ * not read (null). The fit judges `burn_in` over the starting Cells the install runs, so the Cells that end burn-in
+ * are the Cells it draws.
  */
-const drawPool = (table, centre, install) => {
-  if (table.burn_in) return STARTING_CELLS;
+const drawPool = (table, centre, install, baseline) => {
+  if (table.burn_in) return startingSetOf(baseline);
   if (install === null) return [];
   return explorationCells(centre, install.ladders).filter((c) => install.defined.has(c));
 };
 
 /**
- * What `route` does with one row under one guard, with no per-Pull input.
- * `guard` is readGuard's answer or null. `install` is installOf's answer, or
- * null where it was not read: no Cell is unrunnable there, and an every-5th
- * draw has no Cell. `policy` is the row's Cell, or the default cell
- * (defaultCellOf) when there is no guard, the row's Cell is tripped or the
- * row's Cell is unrunnable; `reason` is `guard-missing`,
- * `table-cell-unrunnable`, `table-cell-tripped` or `ok`, a Cell both
- * unrunnable and tripped being `table-cell-unrunnable`. `draw` is what an
- * exploring Pull picks from — `by` `burn-in` (every Pull) or `every-5th` —
- * over `cells`: drawPool()'s Cells less the tripped and the unrunnable,
- * centred on the `cost` row's Cell for the stratum as the guard and the
- * install leave it (the default cell when that row's Cell is tripped or
- * unrunnable), whichever objective routes the row. `draw` is null with no
- * guard and when no Cell is left.
+ * What `route` does with one row under one guard, with no per-Pull input. `guard` is readGuard's answer or null.
+ * `install` is installOf's answer, or null where it was not read: no Cell is unrunnable there, and an every-5th draw
+ * has no Cell. `baseline` is the run's Baseline Cell. The run's Objective excludes the tripped Cells whose reasons it
+ * holds a Cell back on (`cost` on `floor` or `usd`, `speed` on `floor` or `minutes`): `policy` is the row's Cell, or
+ * the default cell (defaultCellOf) when there is no guard, the row's Cell is excluded or the row's Cell is
+ * unrunnable; `reason` is `guard-missing`, `table-cell-unrunnable`, `table-cell-tripped` or `ok`, a Cell both
+ * unrunnable and excluded being `table-cell-unrunnable`. `draw` is what an exploring Pull picks from — `by`
+ * `burn-in` (every Pull) or `every-5th` — over `cells`: drawPool()'s Cells less those the Objective excludes and
+ * the unrunnable, centred on the `cost` row's Cell for the stratum as `cost`'s exclusions and the install leave it
+ * (the default cell when that row's Cell is excluded or unrunnable), whichever Objective routes the row. `draw` is
+ * null with no guard and when no Cell is left.
  * @returns {{ policy: string, reason: "guard-missing"|"table-cell-unrunnable"|"table-cell-tripped"|"ok", draw: null | { by: "burn-in"|"every-5th", cells: string[] } }}
  */
-export function rowDispatch({ table, guard, objective, stratum, install = null }) {
-  const fallback = defaultCellOf(install);
-  if (guard === null) return { policy: fallback, reason: "guard-missing", draw: null };
-  const tripped = new Set(guard.tripped);
+export const rowDispatch = ({ table, guard, objective, stratum, install = null, baseline = DEFAULT_BASELINE_CELL }) =>
+  dispatchRow({ table, guard, objective, stratum, install, baseline }).dispatch;
+
+// rowDispatch's answer as `dispatch`, and `heldBack`: whether the draw's pool for the group held a Cell `objective`
+// excludes, which the Routing records as `guard-tripped`. Under a guard the dispatch is worked out from `out`, the
+// Cells `objective` excludes; `unrunnable` and `adjust(cell, excluded)`, which replaces an excluded or unrunnable
+// Cell by the default; and `pool`, drawPool()'s Cells for the group, centred on its `cost` row's Cell as `cost`'s
+// exclusions leave it.
+function dispatchRow({ table, guard, objective, stratum, install, baseline }) {
+  const fallback = defaultCellOf(install, baseline);
+  if (guard === null) return { dispatch: { policy: fallback, reason: "guard-missing", draw: null }, heldBack: false };
+  const out = new Set(excludedCells(guard.tripped, objective));
+  const costOut = new Set(excludedCells(guard.tripped, "cost"));
   const unrunnable = (cell) => !isRunnable(install, cell);
-  const adjust = (cell) => (tripped.has(cell) || unrunnable(cell) ? fallback : cell);
+  const adjust = (cell, excluded) => (excluded.has(cell) || unrunnable(cell) ? fallback : cell);
+  const pool = drawPool(table, adjust(rowFor(table.rows.cost, stratum), costOut), install, baseline);
   const row = rowFor(table.rows[objective], stratum);
-  const by = table.burn_in ? "burn-in" : "every-5th";
-  const cells = drawPool(table, adjust(rowFor(table.rows.cost, stratum)), install).filter((c) => !tripped.has(c) && !unrunnable(c));
+  const cells = pool.filter((c) => !out.has(c) && !unrunnable(c));
   return {
-    policy: adjust(row),
-    reason: unrunnable(row) ? "table-cell-unrunnable" : tripped.has(row) ? "table-cell-tripped" : "ok",
-    draw: cells.length > 0 ? { by, cells } : null,
+    dispatch: {
+      policy: adjust(row, out),
+      reason: unrunnable(row) ? "table-cell-unrunnable" : out.has(row) ? "table-cell-tripped" : "ok",
+      draw: cells.length > 0 ? { by: table.burn_in ? "burn-in" : "every-5th", cells } : null,
+    },
+    heldBack: pool.some((c) => out.has(c)),
   };
 }
 
@@ -524,24 +558,39 @@ function readJson(path) {
   try { return JSON.parse(readFileSync(path, "utf8")); } catch { return null; }
 }
 
+// Orders `{ cell, … }` entries by their Cell's name.
+const byCellName = (a, b) => (a.cell < b.cell ? -1 : a.cell > b.cell ? 1 : 0);
+
 /**
  * `cost-guard.json` as the router reads it: `{ ok: true, guard }`, reduced to
  * what the router reads, or `{ ok: false, why }` when it refuses the file. `raw` is the parsed
- * file, `null` for one that is missing or will not parse.
+ * file, `null` for one that is missing or will not parse. `tripped` is each tripped Cell once, sorted, as
+ * `{ cell, on }` (trip-reasons.mjs's tripEntry): a bare Cell name, as a guard wrote before a trip recorded why, has
+ * `on` null. `n` is each Cell's merged PRs and `shared` the merged PRs on each side of the stretches it shares with
+ * the Baseline Cell, `{ cell, base }`: a Cell whose entry carries none has none.
  */
 export function parseGuard(raw) {
   if (raw === null || typeof raw !== "object") return { ok: false, why: "not a JSON object" };
   if (!Array.isArray(raw.tripped)) return { ok: false, why: "`tripped` is not a list" };
   if (!Array.isArray(raw.cells)) return { ok: false, why: "`cells` is not a list" };
-  const tripped = raw.tripped.map((t) => (typeof t === "string" ? t : t?.cell));
-  const bad = tripped.findIndex((t) => typeof t !== "string" || !CELL.test(t));
-  if (bad !== -1) return { ok: false, why: `\`tripped\` names ${JSON.stringify(raw.tripped[bad])}, which is not a Cell` };
+  const fault = raw.tripped.map(tripFault).find((why) => why !== null);
+  if (fault !== undefined) return { ok: false, why: fault };
+  const byCell = new Map();
+  for (const e of raw.tripped.map(tripEntry)) {
+    const held = byCell.get(e.cell);
+    if (held === undefined) byCell.set(e.cell, e);
+    else byCell.set(e.cell, { cell: e.cell, on: held.on === null || e.on === null ? null : [...new Set([...held.on, ...e.on])] });
+  }
   const n = {};
+  const shared = {};
+  const count = (v) => Number.isInteger(v) && v >= 0;
   for (const c of raw.cells) {
     if (typeof c?.cell !== "string" || !Number.isFinite(c?.n)) return { ok: false, why: "a `cells` entry has no string `cell` or no finite `n`" };
     n[c.cell] = c.n;
+    if (count(c.shared_merged?.cell) && count(c.shared_merged?.base)) shared[c.cell] = { cell: c.shared_merged.cell, base: c.shared_merged.base };
   }
-  return { ok: true, guard: { tripped: [...new Set(tripped)].sort(), n, window_start: typeof raw.window_start === "string" ? raw.window_start : null } };
+  const tripped = [...byCell.values()].sort(byCellName);
+  return { ok: true, guard: { tripped, n, shared, window_start: typeof raw.window_start === "string" ? raw.window_start : null } };
 }
 
 /** `cost-guard.json` reduced to what the router reads, or null when missing or unparseable. */
@@ -554,11 +603,31 @@ export function readGuard(raw) {
 export const FIT_FILE = "router-fit.json";
 
 /**
+ * The starting table `raw`, the table file the install ships, for a run whose Baseline Cell is `baseline`: the file
+ * names no Cell, so its `cells` are the starting set of `baseline` and every Cell it leaves open — each `*` row and
+ * each `*` reason's `cell` — is `baseline`. A table that names its Cells is its own, filled in none.
+ */
+export function startingTableOf(raw, baseline = DEFAULT_BASELINE_CELL) {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const isObject = (x) => x !== null && typeof x === "object" && !Array.isArray(x);
+  const filled = (set, fill) => (isObject(set) ? Object.fromEntries(Object.entries(set).map(([k, v]) => [k, fill(v)])) : set);
+  const perObjective = (field, fill) => (isObject(raw[field]) ? Object.fromEntries(Object.entries(raw[field]).map(([o, set]) => [o, filled(set, fill)])) : raw[field]);
+  return {
+    ...raw,
+    cells: raw.cells ?? startingSetOf(baseline),
+    rows: perObjective("rows", (cell) => cell ?? baseline),
+    reasons: perObjective("reasons", (record) => (isObject(record) ? { ...record, cell: record.cell ?? baseline } : record)),
+  };
+}
+
+/**
  * The table the Fit beside `guardPath` holds, `{ table, fallback: null }`, or `{ table: null, fallback }` when
  * there is none to route by: `fallback` is the Routing `REASON` that names why — `fit-missing` for no file,
- * `fit-unreadable` for one that will not read or parse, `fit-invalid` for one whose `table` validateTable refuses.
+ * `fit-unreadable` for one that will not read or parse, `fit-invalid` for one whose `table` validateTable refuses or
+ * that was computed under another Baseline Cell than `baseline`, the run's (a Fit that records none was computed
+ * under `slow-high`).
  */
-export function readFitBeside(guardPath) {
+export function readFitBeside(guardPath, baseline = DEFAULT_BASELINE_CELL) {
   let text;
   try {
     text = readFileSync(join(dirname(guardPath), FIT_FILE), "utf8");
@@ -568,8 +637,12 @@ export function readFitBeside(guardPath) {
   let fit;
   try { fit = JSON.parse(text); } catch { return { table: null, fallback: "fit-unreadable" }; }
   const table = validateTable(fit?.table);
-  return table instanceof Error ? { table: null, fallback: "fit-invalid" } : { table, fallback: null };
+  if (table instanceof Error || fitBaselineOf(table) !== baseline) return { table: null, fallback: "fit-invalid" };
+  return { table, fallback: null };
 }
+
+/** The Baseline Cell a validated Fit table was computed under: the one it records, else `slow-high`. */
+export const fitBaselineOf = (table) => table.baseline_cell ?? DEFAULT_BASELINE_CELL;
 
 /** The sizing verdict on a live B Pull: `{ src, label, usd }`, or null when it is unusable. */
 function readSizing(raw, classifier) {
@@ -617,12 +690,16 @@ export function assignmentProb({ burnIn, chainHead, cell, policy, cells }) {
  * but the paths the brief names, which `named_lines` reads under `root`, the
  * checkout. `version` is the install's, `plugin_version` on the row. The
  * ticket's group is the node the tree's walk ends at (stratumOf), and the row
- * set's row for it routes the Pull. The exploration draw ignores the objective:
- * it is centred on the cell the `cost` set routes the group to, whichever set
- * routes the Pull, so a Pull draws the same cell under both. `install` is
+ * set's row for it routes the Pull. `baseline` is the run's Baseline Cell. The
+ * Pull applies its own Objective's exclusions (rowDispatch): a Cell that
+ * Objective excludes is neither routed nor drawn, and a Cell it does not is
+ * both. The exploration draw is centred on the cell the `cost` set routes the
+ * group to, as `cost`'s exclusions leave it, whichever set routes the Pull.
+ * `install` is
  * installOf's answer, or null where it was not read, which checks no Cell
  * against the install and leaves an every-5th Pull nothing to draw. The
- * Routing's `UNRUNNABLE` is unrunnableCells(install). A live B Pull
+ * Routing's `UNRUNNABLE` is unrunnableCells(install), and its `TRIPPED` the
+ * Cells the Objective excludes. A live B Pull
  * records its sizing verdict and routes as an A Pull does: a label names no
  * group of the tree. `fallback` is readFitBeside's REASON when `table` is the
  * starting table standing in for a Fit, else null: it is the first thing that
@@ -632,8 +709,8 @@ export function assignmentProb({ burnIn, chainHead, cell, policy, cells }) {
  * @returns {{ line: string, row: Record<string,string> }}
  */
 export function route({
-  session, ticket, arm, implRow, chainHead = false, issue, sizing = null, guard, table, objective, now = Date.now(),
-  root = process.cwd(), version = installVersion(), fallback = null, install = null,
+  session, ticket, arm, implRow, chainHead = false, issue, sizing = null, guard, table, objective, baseline = DEFAULT_BASELINE_CELL,
+  now = Date.now(), root = process.cwd(), version = installVersion(), fallback = null, install = null,
 }) {
   let reason = null;
   const degrade = (r) => { reason ??= r; };
@@ -650,7 +727,7 @@ export function route({
   let sizingSrc = "rule";
   let sizingPre = "";
   let routerUsd = "";
-  if (arm === "B" && bArmLive(table, objective)) {
+  if (arm === "B" && bArmLive(table, objective, baseline)) {
     const sized = readSizing(sizing, table.classifier);
     if (sized === null) {
       degrade("no-sizing");
@@ -660,31 +737,29 @@ export function route({
     }
   }
 
-  const dispatch = (o) => rowDispatch({ table, guard, objective: o, stratum, install });
-  const policyRow = dispatch(objective);
-  const drawRow = dispatch("cost");
-  if (policyRow.reason !== "ok") degrade(policyRow.reason);
+  const { dispatch: dispatched, heldBack } = dispatchRow({ table, guard, objective, stratum, install, baseline });
+  if (dispatched.reason !== "ok") degrade(dispatched.reason);
   // With no guard the default cell is the only one: the guard cannot be
   // evaded by deleting it.
-  const policy = policyRow.policy;
+  const policy = dispatched.policy;
   let cell = policy;
   let draw = null;
   let by = null;
   if (guard !== null) {
     const exploring = table.burn_in || (implRow % EXPLORE_EVERY === 0 && !chainHead);
     if (exploring) {
-      if (drawPool(table, drawRow.policy, install).some((c) => guard.tripped.includes(c))) degrade("guard-tripped");
-      if (drawRow.draw !== null) {
+      if (heldBack) degrade("guard-tripped");
+      if (dispatched.draw !== null) {
         // rowDispatch's `cells` never hold the `cost` row's Cell: nothing more to withhold.
-        const d = drawCell({ session, ticket, policyCell: null, cells: drawRow.draw.cells });
+        const d = drawCell({ session, ticket, policyCell: null, cells: dispatched.draw.cells });
         cell = d.cell;
         draw = { k: d.k, K: d.K };
-        by = drawRow.draw.by;
+        by = dispatched.draw.by;
       }
     }
   }
   reason ??= "ok";
-  const prob = assignmentProb({ burnIn: table.burn_in, chainHead, cell, policy, cells: drawRow.draw?.cells ?? [] });
+  const prob = assignmentProb({ burnIn: table.burn_in, chainHead, cell, policy, cells: dispatched.draw?.cells ?? [] });
 
   const row = {
     run_date: sessionDate(session), session, agent: `impl-${ticket}`, ticket: String(ticket),
@@ -696,7 +771,7 @@ export function route({
     policy, cell, draw, by, stratum,
     brief: metrics === null ? null : Number(metrics.brief_chars), criteria: metrics === null ? null : Number(metrics.criteria),
     parent: m.parent === "" ? null : Number(m.parent),
-    sized: sizingPre === "" ? null : sizingPre, objective, tripped: guard?.tripped ?? [], unrunnable: unrunnableCells(install), reason,
+    sized: sizingPre === "" ? null : sizingPre, objective, tripped: guard === null ? [] : excludedCells(guard.tripped, objective), unrunnable: unrunnableCells(install), reason,
   });
   return { line, row };
 }
@@ -808,32 +883,36 @@ const unjudged = () => ({ cell: null, reason: "unjudged", cells: {}, pairs: [] }
 /**
  * One row's cell under one objective — a node's of the tree — and why. The
  * quality floor is held twice: by the guard over every group's Pulls together,
- * whose trip takes a cell out of every row and out of the exploration draw,
- * and per row by the fit, which refuses a cell under the floor that row alone.
- * The floor is measured against the default cell under both objectives. Every
- * figure read is the cell's newest generation's, the default cell's included,
+ * whose `floor` trip takes a cell out of every row and out of the exploration
+ * draw, and per row by the fit, which refuses a cell under the floor that row
+ * alone. The floor is measured against `baseline`, the run's Baseline Cell,
+ * under both objectives. Every
+ * figure read is the cell's newest generation's, the Baseline Cell's included,
  * and every comparison is `compareCells`': two cells over the stretches in
  * which both were drawn, the stretches pooled, so a base's other weeks move
  * no verdict and a shift that hits every cell at once cancels in every gap.
  * The one test it does not cancel in is ADOPT_RATIO's, a ratio of the two
  * figures: a shift that raises both by the same amount brings the ratio nearer
  * 1, so it can move a candidate from qualifying to `too-dear` or `too-slow`.
- * `pulls` holds the row's counted Pulls per cell (`estimate()`'s); `baseCell`
- * is the cell the row holds unless a candidate qualifies: the default cell
- * under `cost`, the `cost` row's cell under `speed`. The figure is $ per
+ * `pulls` holds the row's counted Pulls per cell (`estimate()`'s); `excluded`
+ * the Cells the run's objective excludes (the guard's trips on a reason it
+ * holds a Cell back on); `baseCell`
+ * is the cell the row holds unless a candidate qualifies: the Baseline Cell
+ * under `cost`, the `cost` row's cell under `speed` as `speed`'s exclusions
+ * leave it. The figure is $ per
  * merged PR under `cost` and minutes of work time per merged PR under `speed`.
  *
  * A candidate is a cell of `cells` other than the base. Its `verdict`, the
- * first that applies: `tripped` by the guard; `too-few`, under MIN_N merged
+ * first that applies: `tripped`, excluded by the guard under this objective; `too-few`, under MIN_N merged
  * PRs in the row, on either side, in the stretches it shares with the base or
- * with the default cell (none shared, none counted); `under-floor` against the
- * default cell there; `too-dear` (`cost`) or `too-slow` (`speed`), above
+ * with the Baseline Cell (none shared, none counted); `under-floor` against the
+ * Baseline Cell there; `too-dear` (`cost`) or `too-slow` (`speed`), above
  * ADOPT_RATIO of the base's figure, both figures over the stretches it shares
  * with the base; `not-reliably-cheaper` or `not-reliably-faster`, its `range`
  * does not lie wholly below zero (its upper end, as `bootstrapDiffCI` returns
  * it, is not below zero) or there is none; else it `qualifies`. A candidate
  * past `too-few` records whether it is `under_floor`, the floor's `bar` (the
- * default cell's fail rate over the stretches it shares with the candidate,
+ * Baseline Cell's fail rate over the stretches it shares with the candidate,
  * plus TRIP_POINTS, rounded as a fail rate is, for reading only: the floor
  * compares counts) and its `range`, the bootstrap 95% range of (candidate −
  * base) figure over the Pulls of those stretches; the others record null for
@@ -846,20 +925,20 @@ const unjudged = () => ({ cell: null, reason: "unjudged", cells: {}, pairs: [] }
  * lower fail rate wins, then the lower figure, then the name; each is the
  * qualifier's gap to the base over the stretches it shares with it.
  *
- * `reason`, why the row holds `cell`: `unjudged` (the default cell or the
- * base, or every untripped candidate, is under MIN_N merged PRs; `cell` is
+ * `reason`, why the row holds `cell`: `unjudged` (the Baseline Cell or the
+ * base, or every unexcluded candidate, is under MIN_N merged PRs; `cell` is
  * null), `no-qualifier` (the base), or, for the winner, `sole-qualifier`,
  * `reliably-cheaper` or `reliably-faster` (every other qualifier was
  * dropped), or what put it ahead of the next of the rest: `lower-fail-rate`,
  * `lower-usd` or `fewer-minutes`, or `name`.
  */
-function judge(objective, pulls = {}, cells, tripped, baseCell) {
+function judge(objective, pulls = {}, cells, excluded, baseCell, baseline) {
   const { figure, metric, over, unreliable, better, reliably, ahead } = JUDGE[objective];
   const record = unjudged();
   const pullsOf = (c) => pulls[c] ?? [];
   const mergedOf = (c) => pullsOf(c).filter((u) => u.merged).length;
-  // A default cell or base short of MIN_N merged PRs has none to give any candidate, whichever stretches they share.
-  if (mergedOf(POLICY_CELL) < MIN_N || mergedOf(baseCell) < MIN_N) return record;
+  // A Baseline Cell or base short of MIN_N merged PRs has none to give any candidate, whichever stretches they share.
+  if (mergedOf(baseline) < MIN_N || mergedOf(baseCell) < MIN_N) return record;
   // JSON writes −0 as 0, so a recorded end is 0 either way: normalise it here.
   const range = (m) => m.range(metric)?.map((x) => x + 0) ?? null;
   const reliablyBelow = (r) => r !== null && r[1] < 0;
@@ -871,12 +950,12 @@ function judge(objective, pulls = {}, cells, tripped, baseCell) {
   let judged = false;
   for (const c of cells) {
     if (c === baseCell) continue;
-    if (tripped.has(c)) {
+    if (excluded.has(c)) {
       record.cells[c] = { verdict: "tripped", under_floor: null, bar: null, range: null };
       continue;
     }
     const vsBase = compareCells(pullsOf(c), pullsOf(baseCell));
-    const vsFloor = baseCell === POLICY_CELL ? vsBase : compareCells(pullsOf(c), pullsOf(POLICY_CELL));
+    const vsFloor = baseCell === baseline ? vsBase : compareCells(pullsOf(c), pullsOf(baseline));
     if (!enough(vsBase) || !enough(vsFloor)) {
       record.cells[c] = { verdict: "too-few", under_floor: null, bar: null, range: null };
       continue;
@@ -921,79 +1000,92 @@ function judge(objective, pulls = {}, cells, tripped, baseCell) {
   return { ...record, cell: win, reason };
 }
 
-/** A `cost` row: `judge()` from the default cell, by $ per merged PR. */
-function judgeRow(pulls, cells, tripped) {
-  return judge("cost", pulls, cells, tripped, POLICY_CELL);
+/** A `cost` row: `judge()` from the Baseline Cell, by $ per merged PR, over the Cells `cost` excludes. */
+function judgeRow(pulls, cells, excluded, baseline) {
+  return judge("cost", pulls, cells, excluded, baseline, baseline);
 }
 
-/** A `speed` row: `judge()` from the `cost` row's cell, by minutes of work time per merged PR. */
-function judgeSpeedRow(pulls, cells, tripped, costCell) {
-  return judge("speed", pulls, cells, tripped, costCell);
+/** A `speed` row: `judge()` from `base`, the `cost` row's cell as `speed`'s exclusions leave it, by minutes of work time per merged PR, over the Cells `speed` excludes. */
+function judgeSpeedRow(pulls, cells, excluded, base, baseline) {
+  return judge("speed", pulls, cells, excluded, base, baseline);
 }
 
 /**
  * The re-fit table, over the tree `prior.splits` holds: this makes no split
- * and takes none away (fitTree grows the tree). `guard` is `{ tripped, n, window_start }` (readGuard's
- * shape). `rows` and `reasons` hold one set per
+ * and takes none away (fitTree grows the tree). `guard` is `{ tripped, n, shared, window_start }` (readGuard's
+ * shape). `baseline` is the run's Baseline Cell, which the table records as `baseline_cell`: its `cells` are the
+ * Baseline Cell's starting set (startingSetOf), the Cells the fit judges, and the fit adds no Cell. `rows` and
+ * `reasons` hold one set per
  * objective, and each a row or record for every node. `reasons.cost` holds
- * `judgeRow()`'s record, its `cell` the cell the node's `cost` row holds: a
+ * `judgeRow()`'s record, judged with the Cells `cost` excludes, its `cell` the cell the node's `cost` row holds: a
  * node whose record has no cell holds its parent's `cost` row, as a ticket
- * there follows the parent, and an unjudged root holds the default cell.
+ * there follows the parent, and an unjudged root holds the Baseline Cell.
  * `reasons.speed` holds `judgeSpeedRow()`'s record for each node with a `cost`
- * row of its own (the root always has one), from that row's cell, the base when
- * the record has no cell; a node with none holds its parent's `speed` row and
- * an `unjudged` record. `cells` is the prior's: the fit adds no Cell. `burn_in`
- * holds until every Cell of `startingCells` has MIN_N merged PRs on its newest
- * generation (`guard.n`, which starts again at 0 when a role's model changes):
- * no other Cell the table holds ends it or holds it, whatever its merged PRs.
+ * row of its own (the root always has one), judged with the Cells `speed` excludes, from that row's cell as
+ * `speed`'s exclusions leave it — the Baseline Cell where `speed` excludes it — which the record's `cell` falls
+ * back to when it has none; a node with none holds its parent's `speed` row and
+ * an `unjudged` record. `burn_in`
+ * holds until the guard has judged every Cell of `startingCells`: the Baseline Cell has MIN_N merged PRs on its
+ * newest generation (`guard.n`, which starts again at 0 when a role's model changes) and every other Cell MIN_N on
+ * each side of the stretches it shares with it (`guard.shared`): no other Cell the table holds ends it or holds it,
+ * whatever its merged PRs.
  * `startingCells` are the starting Cells the install runs (startingCellsOf) —
- * all three when absent — and the table records them as `starting_cells`, so
+ * the whole starting set when absent — and the table records them as `starting_cells`, so
  * the records, the guard, the prior and that set fit the same table again.
  * Throws on a `startingCells` that is empty, which would end burn-in on no
- * count at all, or that names a Cell that is no starting Cell.
+ * count at all, or that names a Cell that is no starting Cell of `baseline`.
  */
-export function fitTable({ prior, features, members, verdicts, guard, startingCells = STARTING_CELLS }) {
+export function fitTable({ prior, features, members, verdicts, guard, baseline = DEFAULT_BASELINE_CELL, startingCells = startingSetOf(baseline) }) {
   const window = guard.window_start ?? prior.window_start ?? null;
-  return tableOver({ prior, ...fitPulls({ features, members, verdicts, window }), guard, window, startingCells });
+  return tableOver({ prior, ...fitPulls({ features, members, verdicts, window }), guard, window, baseline, startingCells });
 }
 
 // The table over the tree `prior.splits` holds, from the fit's Pulls (fitPulls') booked to its groups.
-function tableOver({ prior, units: unbooked, order, guard, window, startingCells }) {
-  if (startingCells.length === 0 || !startingCells.every((c) => STARTING_CELLS.includes(c))) {
+function tableOver({ prior, units: unbooked, order, guard, window, baseline, startingCells }) {
+  const set = startingSetOf(baseline);
+  if (startingCells.length === 0 || !startingCells.every((c) => set.includes(c))) {
     throw new Error(`startingCells is not a non-empty list of starting Cells: ${JSON.stringify(startingCells)}`);
   }
   const nodes = treeNodes(prior.splits);
   const units = book(unbooked, prior);
   const { estimates, pulls } = estimate(units, order, nodes);
-  const tripped = new Set(guard.tripped);
+  const out = { cost: new Set(excludedCells(guard.tripped, "cost")), speed: new Set(excludedCells(guard.tripped, "speed")) };
 
   // The rows and their reasons over the table's `cells`: a fitted table's `reasons` cover exactly its `cells`.
   const rows = { cost: {}, speed: {} };
   const reasons = { cost: {}, speed: {} };
   for (const s of nodes) {
     const up = parentOf(s);
-    const cost = judgeRow(pulls[s], prior.cells, tripped);
+    const cost = judgeRow(pulls[s], set, out.cost, baseline);
     const own = cost.cell !== null || up === null;
-    const costCell = cost.cell ?? (up === null ? POLICY_CELL : rows.cost[up]);
-    const speed = own ? judgeSpeedRow(pulls[s], prior.cells, tripped, costCell) : unjudged();
-    const speedCell = speed.cell ?? (own ? costCell : rows.speed[up]);
+    const costCell = cost.cell ?? (up === null ? baseline : rows.cost[up]);
+    // `speed` starts from, and falls back to, the `cost` row's Cell as its own exclusions leave it.
+    const speedBase = out.speed.has(costCell) ? baseline : costCell;
+    const speed = own ? judgeSpeedRow(pulls[s], set, out.speed, speedBase, baseline) : unjudged();
+    const speedCell = speed.cell ?? (own ? speedBase : rows.speed[up]);
     rows.cost[s] = costCell;
     rows.speed[s] = speedCell;
     reasons.cost[s] = { ...cost, cell: costCell };
     reasons.speed[s] = { ...speed, cell: speedCell };
   }
+  const shared = guard.shared ?? {};
   return {
     window_start: window,
     n_rows: units.length,
-    cells: prior.cells,
-    burn_in: anyStartingCellShort(guard.n, startingCells),
+    baseline_cell: baseline,
+    cells: [...set],
+    burn_in: anyStartingCellShort(guard, startingCells, baseline),
     starting_cells: [...startingCells],
     splits: prior.splits,
     rows,
     classifier: prior.classifier,
     estimates,
     reasons,
-    guard: { tripped: [...tripped].sort(), n: Object.fromEntries(Object.keys(guard.n).sort().map((c) => [c, guard.n[c]])) },
+    guard: {
+      tripped: guard.tripped.map(tripEntry).sort(byCellName),
+      n: Object.fromEntries(Object.keys(guard.n).sort().map((c) => [c, guard.n[c]])),
+      shared: Object.fromEntries(Object.keys(shared).sort().map((c) => [c, shared[c]])),
+    },
   };
 }
 
@@ -1043,8 +1135,10 @@ function treeOf(cuts) {
 }
 
 /**
- * The tree the fit grows, and what the gate found. The group searched is every counted Pull of the table's Cells the
- * guard has not tripped, that records the probability its Cell was assigned with (the rest are `left_out`): the gate
+ * The tree the fit grows, and what the gate found. The group searched is every counted Pull of the run's starting set
+ * (`baseline`'s) that the guard has not tripped on a reason `cost` excludes (`excluded`: one tree serves both
+ * Objectives and is scored on $, so a Cell tripped on `minutes` alone stays in the search), that records the
+ * probability its Cell was assigned with (the rest are `left_out`): the gate
  * weighs each Pull by it. `previous` is the `gate` record of the last Fit that computed, or null. The tree is the root
  * and, when the best split passes both tests and passed on the same input or inputs at the last Fit too, that split;
  * the starting table's own tree is not read. `gate.records` is a digest of the Cells and Pulls searched: a Fit whose
@@ -1052,8 +1146,8 @@ function treeOf(cuts) {
  * keeps that Fit's `passed` and `stands`, and a first pass cannot stand on the same records twice. `gate.passed`,
  * `gate.stands` and `gate.records` are what the next Fit reads.
  */
-function growTree({ prior, units, order, tripped, previous }) {
-  const cells = prior.cells.includes(POLICY_CELL) ? [POLICY_CELL, ...prior.cells.filter((c) => c !== POLICY_CELL && !tripped.has(c))] : [];
+function growTree({ units, order, excluded, previous, baseline }) {
+  const cells = [baseline, ...startingSetOf(baseline).filter((c) => c !== baseline && !excluded.has(c))];
   const pulls = [];
   let leftOut = 0;
   for (const { pulls: counted } of tally(units, order).filter((t) => cells.includes(t.cell))) {
@@ -1099,11 +1193,11 @@ function growTree({ prior, units, order, tripped, previous }) {
  * fitTable's.
  * @returns {{ table: object, gate: { records: string, scored: number, left_out: number, best: object|null, passed: string[], stands: string[] } }}
  */
-export function fitTree({ prior, features, members, verdicts, guard, previous = null, startingCells = STARTING_CELLS }) {
+export function fitTree({ prior, features, members, verdicts, guard, previous = null, baseline = DEFAULT_BASELINE_CELL, startingCells = startingSetOf(baseline) }) {
   const window = guard.window_start ?? prior.window_start ?? null;
   const fitted = fitPulls({ features, members, verdicts, window });
-  const { gate, splits } = growTree({ prior, ...fitted, tripped: new Set(guard.tripped), previous });
-  return { table: tableOver({ prior: { ...prior, splits }, ...fitted, guard, window, startingCells }), gate };
+  const { gate, splits } = growTree({ ...fitted, excluded: new Set(excludedCells(guard.tripped, "cost")), previous, baseline });
+  return { table: tableOver({ prior: { ...prior, splits }, ...fitted, guard, window, baseline, startingCells }), gate };
 }
 
 /**
@@ -1140,7 +1234,7 @@ function main() {
   const die = makeDie(NAME);
   const F = defineFlags(die, {
     flags: {
-      session: "value", objective: "value", ticket: "value", arm: "value", "impl-row": "value", issue: "value",
+      session: "value", objective: "value", "baseline-cell": "value", ticket: "value", arm: "value", "impl-row": "value", issue: "value",
       sizing: "value", guard: "value", table: "value", pending: "value", "chain-head": "bool", "model-roles": "value", catalog: "value", agents: "value",
     },
     positionals: ["route"],
@@ -1150,12 +1244,17 @@ function main() {
   if (!process.argv.slice(2).includes("route")) die("usage: ticket-router.mjs route …");
   const need = (name) => F.arg(name) ?? die(`route needs --${name}`);
 
+  // `--baseline-cell` omitted is the Baseline Cell the receipt records, else the saved value, else `slow-high`.
+  let baseline = F.arg("baseline-cell");
+  if (baseline === null) baseline = baselineCellFromReceipt().cell;
+  else if (!CELL.test(baseline)) die(`--baseline-cell ${baseline} is not a Cell`);
+
   // With no `--table`, routes by the Fit beside `--guard`, else by the starting table.
-  const fit = F.arg("table") === null && F.arg("guard") !== null ? readFitBeside(F.arg("guard")) : null;
+  const fit = F.arg("table") === null && F.arg("guard") !== null ? readFitBeside(F.arg("guard"), baseline) : null;
   const tablePath = F.arg("table") ?? DEFAULT_TABLE;
   let table = fit?.table ?? null;
   if (table === null) {
-    try { table = JSON.parse(readFileSync(tablePath, "utf8")); } catch (e) { die(`cannot read the router table ${tablePath}: ${e.message}`); }
+    try { table = startingTableOf(JSON.parse(readFileSync(tablePath, "utf8")), baseline); } catch (e) { die(`cannot read the router table ${tablePath}: ${e.message}`); }
     const valid = validateTable(table);
     if (valid instanceof Error) die(`${tablePath}: ${valid.message}`);
   }
@@ -1196,7 +1295,7 @@ function main() {
   // draws after burn-in are the group's exploration Cells. A read that fails or does not answer in OMP_READ_TIMEOUT_MS,
   // a `modelRoles` that is no record and a catalog with no `models` list leave the Pull's Cells unchecked and its
   // every-5th draw empty, and warn, never the exit; so does a read that holds nothing to run: a role that runs at no
-  // level, no implementer definition, or no level of the default Cell's role that is both run and defined.
+  // level, no implementer definition, or no level of the Baseline Cell's role that is both run and defined.
   const warn = (what) => process.stderr.write(`${NAME}: WARNING ${what}\n`);
   const agents = F.arg("agents") ?? AGENTS_DIR;
   const { install, why } = readInstall({ modelRoles: F.arg("model-roles"), catalog: F.arg("catalog"), agents });
@@ -1208,13 +1307,13 @@ function main() {
       warn(`this install runs ${unrun.join(", ")} at no level (modelRoles names no model for it, or one omp's catalog lists at none) — no Cell of ${unrun.length === 1 ? "that role" : "those roles"} is routed or drawn`);
     }
     if (install.defined.size === 0) warn(`${agents} holds no implementer definition — no exploration Cell is drawn`);
-    if (!isRunnable(install, POLICY_CELL) && defaultCellOf(install) === POLICY_CELL) {
-      warn(`no level of ${POLICY_CELL}'s role runs here with an implementer definition — ${POLICY_CELL} stays the default Cell`);
+    if (!isRunnable(install, baseline) && defaultCellOf(install, baseline) === baseline) {
+      warn(`no level of ${baseline}'s role runs here with an implementer definition — ${baseline} stays the default Cell`);
     }
   }
   const { line, row } = route({
     session, ticket: Number(ticket), arm, implRow: Number(implRowArg), chainHead,
-    issue: readJson(issuePath), sizing: readJson(F.arg("sizing")), guard, table, objective, root, version,
+    issue: readJson(issuePath), sizing: readJson(F.arg("sizing")), guard, table, objective, baseline, root, version,
     fallback: fit?.fallback ?? null, install,
   });
   const pending = F.arg("pending") ?? join(dirname(guardPath), "ticket-features.pending.tsv");

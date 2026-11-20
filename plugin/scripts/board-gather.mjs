@@ -31,8 +31,8 @@
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { computeSpend, attributeTools, mergeTools } from "./compute-spend.mjs";
 import { ompSessionTranscripts, foldOmpTranscript, ompMemberRecord } from "./member-record.mjs";
-import { readReceipt } from "./phase0-receipt.mjs";
-import { RECEIPT, RECEIPT_HELD, CLOSEOUT_RECEIPT, OBJECTIVES, isOmpSessionDirName } from "./ledger-grammar.mjs";
+import { baselineIn, readReceipt } from "./phase0-receipt.mjs";
+import { RECEIPT, RECEIPT_HELD, CLOSEOUT_RECEIPT, DEFAULT_BASELINE_CELL, OBJECTIVES, isOmpSessionDirName } from "./ledger-grammar.mjs";
 import { lastSegment } from "./pull-attribution.mjs";
 import { NAME, warnOnce, execRead } from "./board-common.mjs";
 import { ghBudget } from "./arg.mjs";
@@ -40,7 +40,7 @@ import { mergedReadPrs, issuesOfPrs } from "./compute-board.mjs";
 import { readCostGuard } from "./fleet-tick.mjs";
 import { parseFrontmatter } from "./tier-roles.mjs";
 import { isImplementer } from "./member-outcomes.mjs";
-import { FIT_FILE, validateTable } from "./ticket-router.mjs";
+import { FIT_FILE, fitBaselineOf, startingTableOf, validateTable } from "./ticket-router.mjs";
 import { LabelMapUnreadable, readLabelMap } from "./label-map.mjs";
 import { FleetDirUnresolvable } from "./fleet-dir.mjs";
 // The heartbeat's liveness mark and the controller record beside it, read here
@@ -804,17 +804,17 @@ function damagedRecord(file, folded) {
   }
 }
 
-// The installed router table, `router-table.json` beside the scripts, when
-// `validateTable` accepts it, else null: a card words a policy row that has no
+// The installed router table, `router-table.json` beside the scripts, filled in for `baseline`, the run's
+// Baseline Cell, when `validateTable` accepts it, else null: a card words a policy row that has no
 // row for its Stratum ("follows *") only off a table it could read. The table
 // ships beside the scripts, so one that is missing, will not parse or is
 // refused is a broken install, said once on stderr per fault rather than
 // passed off as "no table".
-export function readRouterTable(scriptDir) {
+export function readRouterTable(scriptDir, baseline = DEFAULT_BASELINE_CELL) {
   const file = join(scriptDir, "router-table.json");
   let why;
   try {
-    const t = validateTable(JSON.parse(readFileSync(file, "utf8")));
+    const t = validateTable(startingTableOf(JSON.parse(readFileSync(file, "utf8")), baseline));
     if (!(t instanceof Error)) return t;
     why = t.message;
   } catch (e) {
@@ -859,12 +859,13 @@ export function readCloseoutPr(stateDir) {
 // `.fleet/router-fit.json`: `{ status: "ok", fit }`, `{ status: "missing" }`
 // or `{ status: "unreadable", why }`. It is read as `route` reads it
 // (ticket-router.mjs's readFitBeside): the Fit is read whenever its `table`
-// passes `validateTable`, so the tab never says the starting table routes while
-// `route` routes by the Fit. The fields only the tab reads decide nothing:
+// passes `validateTable` and was computed under `baseline`, the run's Baseline Cell, so the tab never says the
+// starting table routes while `route` routes by the Fit, nor the Fit while it does not. The fields only the tab
+// reads decide nothing:
 // `computed_at` and `guard_computed_at` are null where they are no string and
 // `tsv_blobs` null where it is no object, and the tab says each is not checked,
 // as it says of an `n_rows` that is no count.
-export function readFitFile(stateDir) {
+export function readFitFile(stateDir, baseline = DEFAULT_BASELINE_CELL) {
   let text;
   try {
     text = readFileSync(join(stateDir, FIT_FILE), "utf8");
@@ -876,6 +877,8 @@ export function readFitFile(stateDir) {
   if (!isJsonObject(p)) return { status: "unreadable", why: "not a JSON object" };
   const table = validateTable(p.table);
   if (table instanceof Error) return { status: "unreadable", why: table.message };
+  const under = fitBaselineOf(table);
+  if (under !== baseline) return { status: "unreadable", why: `it was computed under the Baseline Cell ${under}, not this run's ${baseline}` };
   const stringOrNull = (v) => (typeof v === "string" ? v : null);
   return { status: "ok", fit: { computed_at: stringOrNull(p.computed_at), guard_computed_at: stringOrNull(p.guard_computed_at), tsv_blobs: isJsonObject(p.tsv_blobs) ? p.tsv_blobs : null, table } };
 }
@@ -1337,7 +1340,8 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, stateDir 
     if (!existsSync(join(stateDir, RECEIPT))) readHeldImplementers(stateDir, implementers);
     readStampedImplementers(stateDir, ledger.sessions, implementers);
   }
-  const routerTable = readRouterTable(scriptDir);
+  const baselineCell = stateDir === null ? null : baselineIn(stateDir).cell;
+  const routerTable = readRouterTable(scriptDir, baselineCell ?? DEFAULT_BASELINE_CELL);
   // The heartbeat's mark, raw. readState() never throws — an absent
   // file is the ordinary state of a run whose heartbeat has not beaten yet,
   // and an unreadable or corrupt one announces itself on stderr and degrades
@@ -1374,7 +1378,7 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, stateDir 
   // receipts, the reads carried as they were).
   const guard = stateDir === null ? { status: "missing" } : readGuardFile(stateDir);
   const guardJson = stateDir === null ? null : readGuardJson(stateDir);
-  const fit = stateDir === null ? { status: "missing" } : readFitFile(stateDir);
+  const fit = stateDir === null ? { status: "missing" } : readFitFile(stateDir, baselineCell);
   const closeoutPr = stateDir === null ? null : readCloseoutPr(stateDir);
   const receipts = stateDir === null
     ? { phase0: null, closeout: null }
@@ -1388,6 +1392,6 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, stateDir 
     : await Promise.all([carryModelRoles(prev?.modelRoles, now), carryCatalog(prev?.catalog, now), carryMainMetrics(prev?.mainMetrics, now, repoUrl)]);
   return { ledger, issues, prs, merged, closed, closedIssues, ci, prev, repo, repoUrl, workspace, port, spend, beat, ticked, acted, controller, stallOwner: stallOwnerOf, poolOk,
     roles, labelMapError,
-    poolCapped, prsOk, prsCapped, guard, guardJson, fit, receipts, closeoutPr, agents, modelRoles, catalog, mainMetrics, objective, implementers: [...implementers.values()], routerTable,
+    poolCapped, prsOk, prsCapped, guard, guardJson, fit, receipts, closeoutPr, agents, modelRoles, catalog, mainMetrics, objective, baselineCell, implementers: [...implementers.values()], routerTable,
     now, interval };
 }

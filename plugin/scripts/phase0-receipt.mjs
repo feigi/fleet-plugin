@@ -11,9 +11,10 @@
 // Zero deps: node builtins and sibling modules only.
 
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { readSavedBaseline } from "./baseline-cell.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
-import { OBJECTIVES, RECEIPT } from "./ledger-grammar.mjs";
+import { CELL, DEFAULT_BASELINE_CELL, OBJECTIVES, RECEIPT } from "./ledger-grammar.mjs";
 
 const isRecord = (x) => x !== null && typeof x === "object" && !Array.isArray(x);
 
@@ -164,6 +165,42 @@ export function objectiveFromReceipt(opts) {
     : read.state === "unreadable" ? `unreadable: ${read.why}`
     : "it records no objective";
   throw new Error(`no objective given and none in the phase-0 receipt ${path} (${why}) — give one (${OBJECTIVES.join(" or ")}), or run ${phase0Command(null)} first`);
+}
+
+/**
+ * The run's Baseline Cell as its readers take it, `{ cell, source }`, off `read` (readReceipt's or readRunReceipt()'s
+ * `read`) and `fleetDir`, the `.fleet/` the saved value is in: the receipt's `baselineCell`, which phase 0 resolved
+ * once for the run — DEFAULT_BASELINE_CELL for a receipt that records none, as phase 0 resumes one — else, with no
+ * receipt to read, the saved value, else DEFAULT_BASELINE_CELL. Never throws, and never refuses: a reader that
+ * cannot be told the Cell runs the default.
+ */
+export function baselineOf(read, fleetDir) {
+  if (read.state === "ok") {
+    const recorded = read.receipt.baselineCell;
+    if (typeof recorded === "string" && CELL.test(recorded)) return { cell: recorded, source: "the receipt" };
+    if (recorded === undefined) return { cell: DEFAULT_BASELINE_CELL, source: "the default (the receipt records none)" };
+  }
+  const saved = fleetDir === null ? { state: "none" } : readSavedBaseline(fleetDir);
+  return saved.state === "ok" ? { cell: saved.cell, source: "the saved value" } : { cell: DEFAULT_BASELINE_CELL, source: "the default" };
+}
+
+/** baselineOf over the receipt and saved value in `fleetDir`, a `.fleet/` directory. */
+export const baselineIn = (fleetDir) => baselineOf(readReceipt(join(fleetDir, RECEIPT)), fleetDir);
+
+/**
+ * The Baseline Cell for a reader whose own flag was omitted, resolved the way `sessionFromReceipt` resolves the
+ * receipt: `{ cell, source }`, baselineOf's, over the run's `.fleet/`. Never throws: where the workspace cannot be
+ * resolved — a working directory removed under the run included — it is the default, since a Cell is no reason
+ * for a reader to refuse.
+ */
+export function baselineCellFromReceipt(opts) {
+  let fleetDir;
+  try {
+    fleetDir = dirname(fleetFile(RECEIPT, opts));
+  } catch {
+    return { cell: DEFAULT_BASELINE_CELL, source: "the default (no workspace)" };
+  }
+  return baselineIn(fleetDir);
 }
 
 // Whether a run's merge bot merges when nobody says: phase0.mjs records the

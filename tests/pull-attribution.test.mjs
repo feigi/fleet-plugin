@@ -851,7 +851,7 @@ let nextTicket = 1000;
 // `count` Pulls at `cell`, each its own ticket, dispatched on `model` in
 // `session` at `usd` and `work` seconds apiece, their PRs in `state` (merged
 // unless told); the first `fails` of them ruled a false claim.
-function addPulls(w, { cell, model, count, session = SESSION, usd = 1, work = 60, fails = 0, state = "MERGED" }) {
+function addPulls(w, { cell, model, count, session = SESSION, usd = 1, work = cell === "slow-high" ? 60 : 30, fails = 0, state = "MERGED" }) {
   for (let i = 0; i < count; i++) {
     const t = nextTicket++;
     w.features.push(pull(t, cell, { session }));
@@ -872,7 +872,7 @@ const baseline = (w, o = {}) => addPulls(w, { cell: "slow-high", model: "model-s
 
 test("a cell's newest generation is judged alone: 25 merged on A then 22 on B reads B, with A's figures beside it, and A's trip never trips B", () => {
   const w = world();
-  baseline(w);
+  baseline(w, { work: 1200 });
   addPulls(w, { cell: "task-high", model: "model-t", count: 20, usd: 9 });
   // A alone trips on both legs ($20 against the baseline's $10, 40% false claims); B alone trips on neither.
   addPulls(w, { cell: "smol-high", model: "model-a", count: 25, usd: 20, work: 1800, fails: 10 });
@@ -916,7 +916,7 @@ test("with every work_s doubled, adoption, the quality floor and the guard's tri
     return { tripped: report.tripped, verdict: report.verdict, retire: report.retire, rows: table.rows, reasons: table.reasons.cost, speed, floor: [floor.rows, floor.reasons.cost] };
   };
   const once = verdicts(w);
-  assert.deepEqual([once.tripped, once.rows.cost["*"], once.floor[1]["*"].cells["smol-high"].verdict], [["smol-high"], "task-high", "under-floor"]);
+  assert.deepEqual([once.tripped, once.rows.cost["*"], once.floor[1]["*"].cells["smol-high"].verdict], [[{ cell: "smol-high", on: ["floor"] }, { cell: "task-high", on: ["minutes"] }], "task-high", "under-floor"]);
   assert.deepEqual(verdicts(twice), once);
   assert.deepEqual([guarded(w), guarded(twice)].map(({ table }) => table.estimates["*"]["task-high"].minutes_per_merged), [100, 200], "the time itself was read");
 });

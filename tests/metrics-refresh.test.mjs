@@ -194,7 +194,7 @@ test("a tripped guard is a verdict and the script exits 0; a guard that cannot b
   }
   const t = fixture({ rows, prs }).run();
   assert.equal(t.status, 0, t.stderr);
-  assert.match(t.stdout, /cost guard: verdict tripped \(tripped: task-high\), pr-cost\.mjs exit 3/);
+  assert.match(t.stdout, /cost guard: verdict tripped \(tripped: task-high \([a-z, ]+\)\), pr-cost\.mjs exit 3/);
 
   const broken = fixture({ rows: corpus() });
   writeFileSync(join(broken.repo, "docs", "metrics", "tier-outcomes.tsv"), "short\trow\n");
@@ -364,17 +364,17 @@ test("a phase 0 over fixture records writes router-fit.json beside the fresh gua
   assert.ok(Date.parse(fit.computed_at) >= started - 1000, fit.computed_at);
   assert.equal(fit.guard_computed_at, guard.computed_at, "fitted beside the guard this run wrote");
   assert.deepEqual(fit.guard, {
-    computed_at: guard.computed_at, tripped: guard.tripped.map((t) => t.cell ?? t).sort(),
-    n: Object.fromEntries(guard.cells.map((c) => [c.cell, c.n])), window_start: guard.window_start,
+    computed_at: guard.computed_at, tripped: guard.tripped.map((t) => ({ cell: t.cell, on: t.on })),
+    n: Object.fromEntries(guard.cells.map((c) => [c.cell, c.n])), shared: Object.fromEntries(guard.cells.map((c) => [c.cell, c.shared_merged])), window_start: guard.window_start,
   }, "the guard it used: its tripped Cells, per-Cell n and its own computed_at");
   assert.deepEqual(fit.tsv_blobs, guard.tsv_blobs, "the same working-tree files the guard read, by the same keys");
   assert.equal(fit.tsv_blobs["docs/metrics/tier-outcomes.tsv"], git(f.repo, ["hash-object", "docs/metrics/tier-outcomes.tsv"]));
   assert.deepEqual(fit.prior, {
-    version: INSTALLED_VERSION, cells: SHIPPED.cells,
+    version: INSTALLED_VERSION, cells: ["slow-high", "task-high", "smol-high"],
     classifier: SHIPPED.classifier, splits: SHIPPED.splits, window_start: SHIPPED.window_start,
   });
   assert.equal(validateTable(fit.table) instanceof Error, false, "route reads it through validateTable");
-  assert.deepEqual(Object.keys(fit.table).sort(), ["burn_in", "cells", "classifier", "estimates", "guard", "n_rows", "reasons", "rows", "splits", "starting_cells", "window_start"], "the table carries no commit field");
+  assert.deepEqual(Object.keys(fit.table).sort(), ["baseline_cell", "burn_in", "cells", "classifier", "estimates", "guard", "n_rows", "reasons", "rows", "splits", "starting_cells", "window_start"], "the table carries no commit field");
   assert.deepEqual(fit.table.starting_cells, ["slow-high", "task-high", "smol-high"], "the Fit records the starting Cells it counted");
   assert.equal(fit.table.n_rows, 2);
   assert.equal(fit.table.window_start, guard.window_start);
@@ -545,12 +545,12 @@ test("a Fit counts only the starting Cells the install runs: smol-high at nothin
   assert.deepEqual([full.burn_in, full.starting_cells], [true, ["slow-high", "task-high", "smol-high"]]);
 });
 
-test("a Fit whose install cannot be read warns and counts all three starting Cells", () => {
+test("a Fit whose install cannot be read warns and counts every starting Cell of the Baseline Cell", () => {
   const { rows, prs } = mergedAt(["slow-high", "task-high"]);
   const f = fixture({ rows, prs, catalog: installCatalog({ smol: null }) });
   const r = f.run({ args: ["--repo", f.repo, "--catalog", join(f.root, "no-such-catalog.json")] });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stderr, /metrics-refresh: WARNING cannot read what this install runs: .*no-such-catalog\.json.* — burn-in counts all three starting Cells/);
+  assert.match(r.stderr, /metrics-refresh: WARNING cannot read what this install runs: .*no-such-catalog\.json.* — burn-in counts every starting Cell of slow-high/);
   const { table } = JSON.parse(readFileSync(join(f.repo, FIT), "utf8"));
   assert.deepEqual([table.burn_in, table.starting_cells], [true, ["slow-high", "task-high", "smol-high"]]);
 });

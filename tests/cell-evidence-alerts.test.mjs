@@ -235,6 +235,9 @@ test("each reader's reason for refusing is the reader's own rule: every fault it
     [(g) => ({ ...g, cells: [{ cell: "slow-high", n: 1, mean_usd: "3", fail_rate: null }] }), /^a `cells` entry is not/],
     [(g) => ({ ...g, min_n: "20" }), "`min_n` is not an integer"],
     [(g) => ({ ...g, tripped: "x" }), "`tripped` is not a list of Cell names"],
+    [(g) => ({ ...g, verdict: "tripped", tripped: [{ cell: "slow-high", on: 5 }] }), "`tripped` names slow-high on 5, which is not a list of floor, usd, minutes"],
+    [(g) => ({ ...g, verdict: "tripped", tripped: [{ cell: "slow-high", on: ["bogus"] }] }), "`tripped` names slow-high on [\"bogus\"], which is not a list of floor, usd, minutes"],
+    [(g) => ({ ...g, verdict: "tripped", tripped: [{ cell: "slow-high", on: [] }] }), "`tripped` names slow-high on [], which is not a list of floor, usd, minutes"],
     [(g) => ({ ...g, verdict: "tripped" }), "`verdict` and `tripped` disagree"],
     [(g) => ({ ...g, verdict: "tripped", tripped: ["smol-high"] }), "`tripped` names a Cell that `cells` does not report"],
     [(g) => ({ ...g, retire: "yes" }), "`retire` is not a boolean"],
@@ -248,7 +251,8 @@ test("each reader's reason for refusing is the reader's own rule: every fault it
   assert.deepEqual(parseGuard({ tripped: [], cells: "x" }), { ok: false, why: "`cells` is not a list" });
   assert.deepEqual(parseGuard({ tripped: "x", cells: [] }), { ok: false, why: "`tripped` is not a list" });
   assert.deepEqual(parseGuard({ tripped: [], cells: [{ cell: "slow-high" }] }), { ok: false, why: "a `cells` entry has no string `cell` or no finite `n`" });
-  assert.deepEqual(parseGuard({ tripped: [{ cell: "slow-high" }, "slow-high"], cells: [{ cell: "slow-high", n: 1 }] }).guard, { tripped: ["slow-high"], n: { "slow-high": 1 }, window_start: null });
+  assert.deepEqual(parseGuard({ tripped: [{ cell: "slow-high", on: [] }], cells: [{ cell: "slow-high", n: 1 }] }), { ok: false, why: "`tripped` names slow-high on [], which is not a list of floor, usd, minutes" }, "an empty `on` holds its Cell back under no Objective, so it is no entry");
+  assert.deepEqual(parseGuard({ tripped: [{ cell: "slow-high" }, "slow-high"], cells: [{ cell: "slow-high", n: 1 }] }).guard, { tripped: [{ cell: "slow-high", on: null }], n: { "slow-high": 1 }, shared: {}, window_start: null });
 });
 
 // -- the alert list -------------------------------------------------------------

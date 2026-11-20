@@ -33,7 +33,7 @@
 // fleet-tick.mjs's I/O and main() never run here, main() being guarded on
 // argv[1].
 import { assessBeat, isStalled, isReported, stallReport, NO_OWNER } from "./fleet-state.mjs";
-import { parseToken, rowPr, premisesOf, HALT_CAUSES, REVIEW, CELL, POLICY_CELL, parseRoutedEntry, tierValues, cellValues, isRulePath } from "./ledger-grammar.mjs";
+import { parseToken, rowPr, premisesOf, HALT_CAUSES, REVIEW, CELL, BARE_ROW_CELL, parseRoutedEntry, tierValues, cellValues, isRulePath } from "./ledger-grammar.mjs";
 import { latestFinisherAttempts, foldLedger, reviewOwed as reviewOwedState } from "./fleet-tick.mjs";
 import { computeCellEvidence } from "./compute-cell-evidence.mjs";
 import { admissibleRow, lastSegment } from "./pull-attribution.mjs";
@@ -438,7 +438,7 @@ export function cellLine({ row, issue, routed = [], agents = {}, members = new M
   const under = start === -1 ? names.slice(-1) : names.slice(start);
   const recorded = start === -1 ? null : entries.get(names[start]);
   const routing = recorded?.routing ?? null;
-  const cell = routing?.cell ?? tierValues(row)[0] ?? cellValues(row)[0] ?? POLICY_CELL;
+  const cell = routing?.cell ?? tierValues(row)[0] ?? cellValues(row)[0] ?? BARE_ROW_CELL;
   const level = CELL.exec(cell)?.[2] ?? null;
   const expected = `fleet-implementer-${cell}`;
 
@@ -885,6 +885,7 @@ export function computeBoard(inputs) {
       mainMetrics: inputs.mainMetrics,
       table: inputs.routerTable,
       objective: inputs.objective,
+      baselineCell: inputs.baselineCell,
       pulls: tickets.filter((t) => t.cellLine).map((t) => ({ issue: t.issue, cell: t.cellLine.cell, mark: t.cellLine.mark, targets: t.cellLine.targets })),
     }),
     // The `omp config get modelRoles` read, carried tick to tick the way `ci`

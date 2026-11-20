@@ -35,10 +35,11 @@
 // checked where its figure would show.
 
 import { isDeepStrictEqual } from "node:util";
-import { CELL, OBJECTIVES, POLICY_CELL, STARTING_CELLS } from "./ledger-grammar.mjs";
+import { CELL, DEFAULT_BASELINE_CELL, OBJECTIVES, startingSetOf } from "./ledger-grammar.mjs";
 import { costGuardFault } from "./fleet-tick.mjs";
-import { MIN_N, defaultCellOf, installOf, parseGuard, readGuard, rowDispatch, startingCellsOf, unrunnableCells } from "./ticket-router.mjs";
+import { MIN_N, burnInCount, defaultCellOf, fitBaselineOf, installOf, parseGuard, readGuard, rowDispatch, startingCellsOf, unrunnableCells } from "./ticket-router.mjs";
 import { implementerCell, modelsEqual, parseModelRoute, resolveRole } from "./tier-roles.mjs";
+import { tripEntry, tripWords } from "./trip-reasons.mjs";
 
 // The implementer Cells, in the order the guard section draws them: one per
 // definition, every role × level from low to max. All of them are drawn in
@@ -364,7 +365,7 @@ function guardHeading(g) {
   const state = g.verdict === "none" ? "holds-nothing-back" : g.verdict === "tripped" ? "trips" : "trips-nothing";
   const heading = state === "holds-nothing-back"
     ? `holds no Cell back until ${g.baseline.cell} has ${g.min_n} merged PRs: it has ${g.baseline.n}`
-    : state === "trips" ? `trips ${g.tripped.join(", ")}` : "trips nothing";
+    : state === "trips" ? `trips ${g.tripped.map(tripEntry).map(tripWords).join(", ")}` : "trips nothing";
   const trip = count(g.trip_points);
   const source = [
     "this repository's runs",
@@ -400,8 +401,9 @@ function booked(entry, pulls) {
 // The Cells drawn: CELLS, then any the guard holds or a card names beyond them.
 const drawOrder = (held, pulls) => [...new Set([...CELLS, ...held, ...pulls.flatMap((p) => p.targets.map((t) => t.cell)).filter((c) => CELL.test(c))])];
 
-// `step` is the receipts' newest `metrics` step, newestStep's pick.
-function guardSection(read, receipts, step, modelRoles, pulls, recordsNote = null) {
+// `step` is the receipts' newest `metrics` step, newestStep's pick; `baselineCell` the run's Baseline Cell, as
+// computeCellEvidence resolves it.
+function guardSection(read, receipts, step, modelRoles, pulls, recordsNote = null, baselineCell) {
   const label = readLabel(modelRoles);
   const refresh = newestRefresh(step);
   const notes = [];
@@ -418,7 +420,7 @@ function guardSection(read, receipts, step, modelRoles, pulls, recordsNote = nul
       : `${refresh.verb} at ${when(refresh.at)}: ${refresh.why}`);
     if (label !== null) notes.push(label);
     const byCell = new Map();
-    const stub = { baseline: { cell: "slow-high" } };
+    const stub = { baseline: { cell: baselineCell } };
     return {
       state: "no-guard",
       heading: "no cost guard",
@@ -490,30 +492,33 @@ function failedFitFlag(step, p) {
 }
 
 // How a Pull is dispatched, for every group alike: what `route` does under the guard and the install
-// (installOf's, or null where it was not read).
-function dispatchHeading(table, guard, install) {
-  if (guard === null) return `no cost guard: every Pull runs at ${defaultCellOf(install)}, the default Cell`;
+// (installOf's, or null where it was not read), from `baseline`, the run's Baseline Cell.
+function dispatchHeading(table, guard, install, baseline) {
+  if (guard === null) return `no cost guard: every Pull runs at ${defaultCellOf(install, baseline)}, the default Cell`;
   if (table === null) return null;
   if (table.burn_in) return "burn-in: every Pull is drawn over the starting Cells the guard has not tripped";
   return "every 5th Pull that is no chain head is drawn over its group's exploration Cells; the rest run the group's Cell";
 }
 
-// Merged PRs per counted starting Cell, against MIN_N: the counts burn-in is judged on —
-// the Fit's own guard counts while the Fit routes, the cost guard's while the
-// starting table does. Null with neither to count from. The Cells counted are
-// the ones the Fit recorded, or the install this cockpit reads runs while the
-// starting table routes (countedStartingCells); the heading says which set it
+// Merged PRs per counted starting Cell, against MIN_N: the counts burn-in is judged on, which the cost guard has
+// judged the starting set on — the Baseline Cell's own merged PRs and every other Cell's on the thinner side of the
+// stretches it shares with it (ticket-router.mjs's burnInCount) — the Fit's own guard counts while the Fit routes,
+// the cost guard's while the starting table does. Null with neither to count from. The Cells counted are
+// the ones the Fit recorded, or the install this cockpit reads runs while the starting table
+// routes (countedStartingCells); the heading says which set it
 // counted and which starting Cells it left out as unrunnable. It follows the
 // routing table's `burn_in`, and says "ended" only of counts that all reach
 // MIN_N: a Fit sets its flag off its own counts, but the starting table's flag
 // is its own, whatever the cost guard counts since.
-function burnInProgress(p, guard, table, inst) {
-  const n = p !== null ? p.table.guard.n : guard?.n;
-  if (!isRecord(n)) return null;
-  const counted = countedStartingCells(p, inst);
-  const left = STARTING_CELLS.filter((c) => !counted.includes(c));
+function burnInProgress(p, guard, table, inst, baseline) {
+  const counts = p !== null ? p.table.guard : guard;
+  if (!isRecord(counts) || !isRecord(counts.n)) return null;
+  const under = p !== null ? fitBaselineOf(p.table) : baseline;
+  const counted = countedStartingCells(p, inst, baseline);
+  const left = startingSetOf(under).filter((c) => !counted.includes(c));
   const subset = left.length > 0;
-  const cells = counted.map((cell) => ({ cell, n: count(n[cell]) ?? 0, of: MIN_N }));
+  const shared = isRecord(counts.shared) ? counts.shared : {};
+  const cells = counted.map((cell) => ({ cell, n: burnInCount({ n: counts.n, shared }, cell, under), of: MIN_N }));
   const done = cells.filter((c) => c.n >= MIN_N).length;
   const kind = subset ? "runnable starting" : "starting";
   const out = subset ? `; ${list(left)} unrunnable` : "";
@@ -528,22 +533,23 @@ function burnInProgress(p, guard, table, inst) {
 // The Cells the cost guard has tripped, in words, or null with no guard.
 function trippedWords(guard) {
   if (guard === null) return null;
-  return guard.tripped.length === 0 ? "the cost guard has tripped no Cell" : `tripped by the cost guard: ${list(guard.tripped)}`;
+  return guard.tripped.length === 0 ? "the cost guard has tripped no Cell" : `tripped by the cost guard: ${list(guard.tripped.map(tripWords))}`;
 }
 
 // The starting Cells burn-in counts, in their order: the set the Fit recorded
 // while a Fit routes — every starting Cell for a Fit that records none, as
-// every Fit did — else those the cockpit's own install read runs, all three
-// while it has none.
-function countedStartingCells(p, inst) {
-  return p === null ? startingCellsOf(inst.install) : fitStartingCells(p.table);
+// every Fit did — else those the cockpit's own install read runs, the whole
+// starting set while it has none.
+function countedStartingCells(p, inst, baseline) {
+  return p === null ? startingCellsOf(inst.install, baseline) : fitStartingCells(p.table);
 }
 
-// The starting Cells a Fit's table records, in their order: all three for a table that records none, or none usable.
+// The starting Cells a Fit's table records, in their order: its whole starting set for a table that records none, or none usable.
 function fitStartingCells(table) {
+  const set = startingSetOf(fitBaselineOf(table));
   const recorded = table.starting_cells;
-  const valid = Array.isArray(recorded) && recorded.length > 0 && recorded.every((c) => STARTING_CELLS.includes(c));
-  return valid ? STARTING_CELLS.filter((c) => recorded.includes(c)) : [...STARTING_CELLS];
+  const valid = Array.isArray(recorded) && recorded.length > 0 && recorded.every((c) => set.includes(c));
+  return valid ? set.filter((c) => recorded.includes(c)) : [...set];
 }
 
 // A notice for each counted starting Cell whose role's model changed and so restarted
@@ -553,10 +559,12 @@ function fitStartingCells(table) {
 function modelChanges(p) {
   if (p === null || !p.table.burn_in) return [];
   const root = isRecord(p.table.estimates?.["*"]) ? p.table.estimates["*"] : {};
+  const under = fitBaselineOf(p.table);
+  const counts = { n: p.table.guard.n, shared: isRecord(p.table.guard.shared) ? p.table.guard.shared : {} };
   return fitStartingCells(p.table).flatMap((cell) => {
     const e = root[cell];
     const older = isRecord(e?.older) ? Object.keys(e.older) : [];
-    const k = count(p.table.guard.n[cell]) ?? 0;
+    const k = count(burnInCount(counts, cell, under)) ?? 0;
     if (older.length === 0 || typeof e.generation !== "string" || k >= MIN_N) return [];
     return [`${cell}'s model changed to ${e.generation}, after ${list(older)}: burn-in restarted, at ${k} of the ${MIN_N} merged PRs it needs`];
   });
@@ -591,16 +599,16 @@ function unrunnableView(inst) {
   return { heading, cells };
 }
 
-// The Cells a group draws over, in words: rowDispatch's draw, which is centred on
-// the group's `cost` row Cell whichever Objective routes the Pull. Null with no
-// guard, when nothing is drawn.
-function exploringWords(table, guard, stratum, inst) {
+// The Cells a group draws over under `objective`, in words: rowDispatch's draw, which is centred on
+// the group's `cost` row Cell whichever Objective routes the Pull and leaves out the Cells that Objective
+// excludes. Null with no guard, when nothing is drawn. `baseline` is the run's Baseline Cell.
+function exploringWords(table, guard, stratum, inst, objective, baseline) {
   if (guard === null) return null;
   if (!table.burn_in && inst.install === null) return `exploring: not checked: ${inst.why}`;
-  const rd = rowDispatch({ table, guard, objective: "cost", stratum, install: inst.install });
+  const rd = rowDispatch({ table, guard, objective, stratum, install: inst.install, baseline });
   if (table.burn_in) {
     if (rd.draw !== null) return `drawn over ${list(rd.draw.cells)}`;
-    const orUnrunnable = unrunnableCells(inst.install).some((c) => STARTING_CELLS.includes(c)) ? " or unrunnable" : "";
+    const orUnrunnable = unrunnableCells(inst.install).some((c) => startingSetOf(baseline).includes(c)) ? " or unrunnable" : "";
     return `draws nothing: every starting Cell is tripped${orUnrunnable}`;
   }
   const words = rd.draw === null ? "exploring nothing: no exploration Cell this install runs is left untripped" : `exploring ${list(rd.draw.cells)}`;
@@ -634,8 +642,8 @@ function intervalWords(range, objective) {
 // install does not run it (`install` is installOf's answer, null where the
 // cockpit has not read one), and each candidate's n (null where the table
 // carries no count), verdict and interval.
-function rowEntry(table, guard, modelRoles, objective, stratum, install) {
-  const rd = rowDispatch({ table, guard, objective, stratum, install });
+function rowEntry(table, guard, modelRoles, objective, stratum, install, baseline) {
+  const rd = rowDispatch({ table, guard, objective, stratum, install, baseline });
   const row = table.rows[objective][stratum];
   const record = isRecord(table.reasons?.[objective]?.[stratum]) ? table.reasons[objective][stratum] : null;
   const estimates = isRecord(table.estimates?.[stratum]) ? table.estimates[stratum] : {};
@@ -703,7 +711,7 @@ function groupOf(stratum) {
  * `#cells/row/<objective>/<stratum>` link lands on. A candidate's generation
  * check moves to one model-name line when every candidate named differs.
  */
-function fitView({ fit, starting, guard, routed, modelRoles, catalog, agents, step, objective }) {
+function fitView({ fit, starting, guard, routed, modelRoles, catalog, agents, step, objective, baseline }) {
   const { fit: p, table, source } = routingTable(fit, starting);
   const raw = guard?.status === "ok" ? guard.guard : null;
   let labels = [];
@@ -718,15 +726,17 @@ function fitView({ fit, starting, guard, routed, modelRoles, catalog, agents, st
   const mark = "¹";
   const inst = installFrom(modelRoles, catalog, agents);
   const entry = (o, s) => {
-    const e = rowEntry(table, routed, modelRoles, o, s, inst.install);
+    const e = rowEntry(table, routed, modelRoles, o, s, inst.install, baseline);
     return { ...e, candidates: e.candidates.map((c) => ({ ...c, nMark: s === "*" && differ.includes(c.cell) ? mark : null })) };
   };
   // A group's exploration Cells are centred on its `cost` row whichever
-  // Objective routes the Pull, so each group's words are worked out once.
+  // Objective routes the Pull, but leave out the Cells the Objective itself excludes, so
+  // each Objective's words are worked out once.
   const exploring = new Map();
-  const exploringOf = (s) => {
-    if (!exploring.has(s)) exploring.set(s, exploringWords(table, routed, s, inst));
-    return exploring.get(s);
+  const exploringOf = (o, s) => {
+    const key = `${o}\0${s}`;
+    if (!exploring.has(key)) exploring.set(key, exploringWords(table, routed, s, inst, o, baseline));
+    return exploring.get(key);
   };
   const line = (o, s, rest) => ({ stratum: s, ...groupOf(s), ...rest, anchor: `cells-row-${o}-${s}`, href: `#cells/row/${o}/${s}` });
   const objectives = OBJECTIVES.map((o) => ({
@@ -734,7 +744,7 @@ function fitView({ fit, starting, guard, routed, modelRoles, catalog, agents, st
     live: o === objective,
     lines: table === null
       ? [line(o, "*", { entry: null, exploring: null, unread: "no starting table read: the rows are not known" })]
-      : Object.keys(table.rows[o]).map((s) => line(o, s, { entry: entry(o, s), exploring: exploringOf(s), unread: null })),
+      : Object.keys(table.rows[o]).map((s) => line(o, s, { entry: entry(o, s), exploring: exploringOf(o, s), unread: null })),
   }));
 
   const checks = objectives.flatMap((o) => o.lines.flatMap((l) => (l.entry === null ? [] : l.entry.candidates.map((c) => c.model)))).filter((m) => m !== null);
@@ -748,10 +758,10 @@ function fitView({ fit, starting, guard, routed, modelRoles, catalog, agents, st
     title: "The Fit that routes this run",
     flag: failedFitFlag(step, p),
     source,
-    heading: dispatchHeading(table, routed, inst.install),
+    heading: dispatchHeading(table, routed, inst.install, baseline),
     labels,
     notices: modelChanges(p),
-    burnIn: burnInProgress(p, routed, table, inst),
+    burnIn: burnInProgress(p, routed, table, inst, baseline),
     tripped: trippedWords(routed),
     unrunnable: unrunnableView(inst),
     modelLine,
@@ -929,14 +939,16 @@ function readersAlert(json) {
  * read, no Pull, no table, no Objective, no Fit.
  */
 export function computeCellEvidence({ guard, receipts, agents, modelRoles = null, catalog = null, pulls = [], table = null, objective = null, fit = null,
-  guardJson = null, mainMetrics = null, closeoutPr = null, openPrs = null }) {
+  guardJson = null, mainMetrics = null, closeoutPr = null, openPrs = null, baselineCell = null }) {
   const routed = guard?.status === "ok" ? readGuard(guard.guard) : null;
+  // The run's Baseline Cell: the receipt's, else the cost guard's own record of it, else `slow-high`.
+  const baseline = baselineCell ?? (guard?.status === "ok" ? guard.guard.baseline.cell : DEFAULT_BASELINE_CELL);
   const step = newestStep(receipts);
   const records = recordsAgainstMain({ read: guard, fit, main: mainMetrics, closeoutPr, openPrs });
   return {
     alerts: [records.alert, noRulingAlert(guard), readersAlert(guardJson)].filter((a) => a !== null),
-    policy: fitView({ fit, starting: table, guard, routed, modelRoles, catalog, agents, step: newestRefit(receipts), objective }),
-    guard: guardSection(guard, receipts, step, modelRoles, pulls, records.note),
+    policy: fitView({ fit, starting: table, guard, routed, modelRoles, catalog, agents, step: newestRefit(receipts), objective, baseline }),
+    guard: guardSection(guard, receipts, step, modelRoles, pulls, records.note, baseline),
     declared: declaredSection(agents, modelRoles),
   };
 }

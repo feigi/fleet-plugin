@@ -120,11 +120,14 @@ import { gitEnv } from "./git-env.mjs";
 import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { COLUMNS as MEMBER_COLUMNS, ENDINGS, isImplementer, parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
+import { DEFAULT_BASELINE_CELL } from "./ledger-grammar.mjs";
+import { baselineIn } from "./phase0-receipt.mjs";
 import { blobId } from "./pr-cost.mjs";
 import { FEATURE_COLUMNS, parseFeatures } from "./pull-attribution.mjs";
 import { REPORT_STATUSES } from "./report-files.mjs";
-import { DEFAULT_TABLE, FIT_FILE, INSTALL_PACKAGE, fitTree, installVersion, readGuard, readInstall, startingCellsOf, validateTable } from "./ticket-router.mjs";
+import { DEFAULT_TABLE, FIT_FILE, INSTALL_PACKAGE, fitBaselineOf, fitTree, installVersion, readGuard, readInstall, startingCellsOf, startingTableOf, validateTable } from "./ticket-router.mjs";
 import { parseTierOutcomes } from "./tier-outcomes.mjs";
+import { tripEntry, tripWords } from "./trip-reasons.mjs";
 
 const NAME = "metrics-refresh";
 const PR_COST = fileURLToPath(new URL("./pr-cost.mjs", import.meta.url));
@@ -285,30 +288,32 @@ function drain(repo) {
   say(`drain: ${added.length} row${added.length === 1 ? "" : "s"} from ${PENDING} into ${FEATURES} (${incoming.length - added.length} already there)`);
 }
 
-// The guard file it wrote, parsed, or null when it skipped and wrote none.
-function costGuard(repo) {
+// The guard file it wrote, parsed, or null when it skipped and wrote none. `baseline` is the run's Baseline Cell.
+function costGuard(repo, baseline) {
   const missing = CORPUS.filter((f) => !existsSync(join(repo, f)));
   if (missing.length) {
     say(`cost guard: skipped, ${missing.join(", ")} not found — no corpus to guard yet; ${GUARD} left as it is`);
     return null;
   }
   const out = join(repo, GUARD);
-  const r = spawnSync(process.execPath, [PR_COST, "--guard", "--out", out], {
+  const r = spawnSync(process.execPath, [PR_COST, "--guard", "--baseline-cell", baseline, "--out", out], {
     cwd: repo, encoding: "utf8", env: gitEnv(), maxBuffer: MAX_BUFFER,
   });
   if (!GUARD_VERDICT_EXITS.has(r.status)) {
     throw new Error(`pr-cost.mjs --guard exited ${r.error?.code ?? r.status ?? r.signal}: ${String(r.stderr ?? "").trim()}`);
   }
   const g = JSON.parse(readFileSync(out, "utf8"));
-  const tripped = g.tripped.map((t) => (typeof t === "string" ? t : t?.cell));
+  const tripped = g.tripped.map((t) => tripWords(tripEntry(t)));
   say(`cost guard: verdict ${g.verdict}${tripped.length ? ` (tripped: ${tripped.join(", ")})` : ""}, pr-cost.mjs exit ${r.status}; ${GUARD} computed ${g.computed_at}`);
   return g;
 }
 
 // What the last Fit that computed recorded of the split gate (its `gate`), or null where there is no such Fit to read:
-// no file, one that will not parse, or one written before the gate. Any other failure to read the file throws, as a
-// Fit that cannot read what it replaces cannot write it either.
-function previousGate(repo) {
+// no file, one that will not parse, one written before the gate, or one computed under another Baseline Cell than
+// `baseline`, the run's (a Fit that records none was computed under `slow-high`): a gate over another Cell's
+// records says nothing of this one's. Any other failure to read the file throws, as a Fit that cannot read what it
+// replaces cannot write it either.
+function previousGate(repo, baseline) {
   let text;
   try {
     text = readFileSync(join(repo, FIT), "utf8");
@@ -316,32 +321,37 @@ function previousGate(repo) {
     if (e.code === "ENOENT") return null;
     throw e;
   }
+  let fit;
   try {
-    return JSON.parse(text)?.gate ?? null;
+    fit = JSON.parse(text);
   } catch {
     return null;
   }
+  const table = validateTable(fit?.table);
+  if (!(table instanceof Error) && fitBaselineOf(table) !== baseline) return null;
+  return fit?.gate ?? null;
 }
 
 // The Fit over `repo`'s working-tree TSVs and `written`, the guard file the
 // guard duty just wrote (parsed), with the router table at `tablePath` as its
-// prior, written to `.fleet/router-fit.json` through a temp file and a rename.
-// Burn-in counts `startingCells`, the starting Cells the install runs — all
-// three when none is named — which the Fit's `table` records. Throws on anything
+// prior, filled in for `baseline`, the run's Baseline Cell (`slow-high` when none is named), written to
+// `.fleet/router-fit.json` through a temp file and a rename.
+// Burn-in counts `startingCells`, the starting Cells the install runs — the whole starting set of
+// `baseline` when none is named — which the Fit's `table` records. Throws on anything
 // it cannot read, fit or write, before the rename, so the
 // old file stays as it was: a Fit that throws is no look at the split gate,
 // and the next one reads the gate the old file holds.
-export function writeFit(repo, written, { tablePath = DEFAULT_TABLE, packagePath = INSTALL_PACKAGE, now = new Date(), startingCells } = {}) {
+export function writeFit(repo, written, { tablePath = DEFAULT_TABLE, packagePath = INSTALL_PACKAGE, now = new Date(), baseline = DEFAULT_BASELINE_CELL, startingCells } = {}) {
   const guard = readGuard(written);
   if (guard === null) throw new Error(`${GUARD} is not a guard the router reads`);
   let prior;
   try {
-    prior = validateTable(JSON.parse(readFileSync(tablePath, "utf8")));
+    prior = validateTable(startingTableOf(JSON.parse(readFileSync(tablePath, "utf8")), baseline));
   } catch (e) {
     throw new Error(`cannot read the starting router table ${tablePath}: ${e.code ?? e.message}`);
   }
   if (prior instanceof Error) throw new Error(`${tablePath}: ${prior.message}`);
-  const previous = previousGate(repo);
+  const previous = previousGate(repo, baseline);
   // Keyed by the path as the guard keys its own (pr-cost.mjs reads these, relative to the workspace).
   const tsvBlobs = {};
   const read = (rel, parse) => {
@@ -352,14 +362,14 @@ export function writeFit(repo, written, { tablePath = DEFAULT_TABLE, packagePath
   const members = read(MEMBERS, parseMemberTsv);
   const verdicts = read(TIERS, parseTierOutcomes);
   const features = read(FEATURES, parseFeatures);
-  const { table, gate } = fitTree({ prior, features, members, verdicts, guard, previous, startingCells });
+  const { table, gate } = fitTree({ prior, features, members, verdicts, guard, previous, baseline, startingCells });
   // The tree the gate grew is the one `route` will read it through.
   const valid = validateTable(table);
   if (valid instanceof Error) throw valid;
   const record = {
     computed_at: now.toISOString(),
     guard_computed_at: written.computed_at,
-    guard: { computed_at: written.computed_at, tripped: guard.tripped, n: guard.n, window_start: guard.window_start },
+    guard: { computed_at: written.computed_at, tripped: guard.tripped, n: guard.n, shared: guard.shared, window_start: guard.window_start },
     tsv_blobs: Object.fromEntries(Object.entries(tsvBlobs).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
     prior: {
       version: installVersion(packagePath),
@@ -380,16 +390,17 @@ export function writeFit(repo, written, { tablePath = DEFAULT_TABLE, packagePath
 // The Fit as the run calls it: only beside a guard the guard duty wrote, and
 // never a failure of the run — its error is a line, and the exit stays as it was.
 // `sources` name the files the install read takes in place of omp's own (ticket-router.mjs's
-// readInstall): burn-in counts the starting Cells that install runs, all three when it cannot be read.
-function fit(repo, written, sources) {
+// readInstall): burn-in counts the starting Cells that install runs, the whole starting set of
+// `baseline` when it cannot be read.
+function fit(repo, written, sources, baseline) {
   if (written === null) return say(`fit: skipped, no guard written — ${FIT} left as it is`);
   const { install, why } = readInstall(sources);
   if (install === null) {
-    process.stderr.write(`${NAME}: WARNING cannot read what this install runs: ${why} — burn-in counts all three starting Cells\n`);
+    process.stderr.write(`${NAME}: WARNING cannot read what this install runs: ${why} — burn-in counts every starting Cell of ${baseline}\n`);
   }
   let p;
   try {
-    p = writeFit(repo, written, { startingCells: startingCellsOf(install) });
+    p = writeFit(repo, written, { baseline, startingCells: startingCellsOf(install, baseline) });
   } catch (e) {
     return say(`fit: failed — ${e.message}`);
   }
@@ -410,10 +421,12 @@ function main() {
       die(`${e.message} — pass --repo <dir>`);
     }
   }
+  // The run's Baseline Cell, once: the receipt's, else the saved value, else `slow-high`.
+  const baseline = baselineIn(join(repo, ".fleet")).cell;
   let written = null;
   for (const [name, duty] of [["drain", drain], ["member-outcomes", widenMemberOutcomes], ["cost guard", costGuard]]) {
     try {
-      const out = duty(repo);
+      const out = duty(repo, baseline);
       if (duty === costGuard) written = out;
     } catch (e) {
       process.stderr.write(`${NAME}: ${name} failed: ${e.message}\n`);
@@ -421,7 +434,7 @@ function main() {
       return;
     }
   }
-  if (!F.has("no-fit")) fit(repo, written, { modelRoles: F.arg("model-roles"), catalog: F.arg("catalog") });
+  if (!F.has("no-fit")) fit(repo, written, { modelRoles: F.arg("model-roles"), catalog: F.arg("catalog") }, baseline);
 }
 
 if (isCLI(import.meta.url)) main();

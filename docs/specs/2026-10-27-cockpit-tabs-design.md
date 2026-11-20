@@ -214,6 +214,7 @@ the default Cell"; the guard column stands
 *Amended (#4462): where the install does not run slow-high, the no-cost-guard
 heading names the default Cell `route` derives in its place, e.g. "no cost
 guard: every Pull runs at slow-medium, the default Cell".*
+*Amended (#4463): the no-guard row's Cell is the run's Baseline Cell (the receipt's `baselineCell`), and the `none` row waits for the Baseline Cell to have `min_n` merged PRs.*
 
 **No cost guard: the guard section's heading** quotes metrics-refresh's own
 line, with its time, from the newest `metrics` step in the phase 0 and
@@ -360,6 +361,7 @@ judged generation with that Cell's Tier route model (`resolveRole` on
 "holds no Cell back until slow-high has 20 merged PRs: it has k", or "no cost
 guard". Under it, a source line: "this repository's runs · computed <t> ·
 window from <date> · min 20 merged PRs · floor 15 pts over slow-high" (from
+*Amended (#4463): the heading names every tripped Cell with the reasons it tripped on, e.g. "trips task-high (floor, usd)", and burn-in progress counts each starting Cell on the guard's `shared_merged` (the thinner side of the stretches it shares with the Baseline Cell).*
 `computed_at`, `window_start`, `min_n` and `trip_points`). Then any
 heading-level checks: "not checked" with why (§ 6.1), a failing `modelRoles`
 read, the no-guard quotes (§ 5.1), and an alert-level check that cannot run.
@@ -374,6 +376,7 @@ and no link may point at nothing.
 **Each entry's header line:** the Cell, "judged on <generation>", "Tier route:
 <model> · <level>" with "⚑ differs from the judged generation" where it does
 (charting decision 6), and a baseline mark on `slow-high`.
+*Amended (#4463): the baseline mark is on the guard's Baseline Cell.*
 
 **Three figures per entry**, each the newest generation's:
 

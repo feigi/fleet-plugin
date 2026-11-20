@@ -40,9 +40,9 @@ Nothing in this phase, or in any later one, asks the maintainer which tickets to
    cell in this main checkout, without `--session`:
    `subprocess.run([os.path.expanduser("~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-run"),
    "phase0.mjs", …], stderr=subprocess.STDOUT)`. Add `--in-flight <n>`,
-   `--objective <o>` and `--merge` or `--no-merge` as `$ARGUMENTS` gave them, `--spend-dir <dir>` for the
+   `--objective <o>`, `--baseline-cell <c>` and `--merge` or `--no-merge` as `$ARGUMENTS` gave them, `--spend-dir <dir>` for the
    spend panel, and `--workflow <name>` or `--declare-no-ci`
-   when the repository has no workflow named CI. Its steps and receipt: See
+   for no CI workflow. Its steps and receipt: See
    references/phase-0.md. Dispatch nothing before it exits 0. Exit 4 is a
    step that needs you: act on each `NEED` line below, then run it again. Once
    `rotate` has run, a re-run skips every `ok` step but `alarm` and resumes

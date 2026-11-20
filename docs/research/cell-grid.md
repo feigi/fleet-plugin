@@ -288,7 +288,7 @@ node docs/research/cell-grid-derive.mjs --no-omp   # B (pricing.json) and C, C2 
 ```
 
 Modules imported from the checkout: `tier-roles.mjs` (`readOmpConfigValue`, `readOmpModelCatalog`, `resolveRole`,
-`catalogEntry`, `stripLevel`), `member-outcomes.mjs` (`parseTsv`), `ledger-grammar.mjs` (`CELL`, `POLICY_CELL`,
-`parseMember`), `pull-attribution.mjs` (`bootstrapDiffCI`). Compute: ~4 s; the bootstrap uses the module's defaults
+`catalogEntry`, `stripLevel`), `member-outcomes.mjs` (`parseTsv`), `ledger-grammar.mjs` (`CELL`,
+`DEFAULT_BASELINE_CELL` — `POLICY_CELL` at `e5040b9a` — and `parseMember`), `pull-attribution.mjs` (`bootstrapDiffCI`). Compute: ~4 s; the bootstrap uses the module's defaults
 (2000 resamples, seed 1), so the ranges are exactly reproducible but are 2.5/97.5th percentiles of 2000 draws, not
 a precision claim beyond that.

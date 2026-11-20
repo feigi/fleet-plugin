@@ -13,7 +13,7 @@ import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import { SEARCH_STUB_SRC, fillerPrs, searchesOf } from "./support/gh-pr-search.mjs";
 import { COLUMNS as MEMBER_COLUMNS, formatTsv, parseTsv as parseMemberTsv } from "../plugin/scripts/member-outcomes.mjs";
 import { COLUMNS as TIER_COLUMNS, formatRow, parseTierOutcomes } from "../plugin/scripts/tier-outcomes.mjs";
-import { computeReport, trips, guardFile, formatReport, crossCheck, blobId, readPrs, PrListIncomplete, WINDOW_START, MIN_N } from "../plugin/scripts/pr-cost.mjs";
+import { computeReport, tripReasons, guardFile, formatReport, crossCheck, blobId, readPrs, PrListIncomplete, WINDOW_START, MIN_N } from "../plugin/scripts/pr-cost.mjs";
 import { FEATURE_COLUMNS, parseFeatures } from "../plugin/scripts/pull-attribution.mjs";
 import { readCostGuard, routerRows } from "../plugin/scripts/fleet-tick.mjs";
 import { readGuard } from "../plugin/scripts/ticket-router.mjs";
@@ -42,20 +42,22 @@ const tier = (o) => ({
   sizing: "light", profile: "small", loc: "10", files: "1", ...o,
 });
 
-// A whole ruled PR: one Pull at `cell` dated `date` costing `usd`, its verdict, its state.
-function addPr(w, { ticket, pr, cell, usd, fail = false, state = "MERGED", agent = `impl-${ticket}`, date = DAY }) {
+// A whole ruled PR: one Pull at `cell` dated `date` costing `usd` and working `workS` seconds, its verdict, its state.
+// A cell other than slow-high works faster than it unless the case says, so the minutes leg of the guard is idle
+// until a case sets it.
+function addPr(w, { ticket, pr, cell, usd, fail = false, state = "MERGED", agent = `impl-${ticket}`, date = DAY, workS = cell === "slow-high" ? 60 : 30 }) {
   const level = cell.split("-")[1];
   w.features.push(pull({ ticket: String(ticket), agent, chosen_cell: cell, run_date: date }));
-  w.members.push(member({ agent, ticket: String(ticket), cost: usd, effort: level, subagentType: `fleet-implementer-${cell}`, pr: String(pr) }));
+  w.members.push(member({ agent, ticket: String(ticket), cost: usd, effort: level, subagentType: `fleet-implementer-${cell}`, pr: String(pr), workS }));
   w.tiers.push(tier({ pr: String(pr), ticket: String(ticket), minted_false_claim: fail ? "yes" : "no" }));
   w.prs.push({ number: pr, state, mergedAt: state === "MERGED" ? `${DAY}T12:00:00Z` : null });
 }
-// `n` merged PRs at `cell` dated `date`, `failures` of them failing the floor, each costing `usd`.
+// `n` merged PRs at `cell` dated `date`, `failures` of them failing the floor, each costing `usd` and working `workS` seconds.
 let nextTicket = 1000;
-function addCell(w, cell, n, failures, usd, date = DAY) {
+function addCell(w, cell, n, failures, usd, date = DAY, workS) {
   for (let i = 0; i < n; i++) {
     const t = nextTicket++;
-    addPr(w, { ticket: t, pr: t + 5000, cell, usd, fail: i < failures, date });
+    addPr(w, { ticket: t, pr: t + 5000, cell, usd, fail: i < failures, date, ...(workS === undefined ? {} : { workS }) });
   }
 }
 
@@ -115,22 +117,22 @@ test("--guard: a cell exactly 15 points worse than the baseline trips, exits 3 a
   addCell(w, "smol-high", MIN_N, 8, 3);    // 40% fail: +10 points, under it
   const r = runCli(w);
   assert.equal(r.status, 3, r.stderr);
-  assert.deepEqual(r.guard.tripped, ["task-high"]);
+  assert.deepEqual(r.guard.tripped, [{ cell: "task-high", on: ["floor"] }]);
   assert.equal(r.guard.verdict, "tripped");
-  assert.deepEqual(r.guard.baseline, { cell: "slow-high", generation: "claude-opus-5", n: 20, mean_usd: 10, fail_rate: 0.3 });
+  assert.deepEqual(r.guard.baseline, { cell: "slow-high", generation: "claude-opus-5", n: 20, mean_usd: 10, mean_minutes: 1, fail_rate: 0.3 });
   assert.equal(r.guard.min_n, MIN_N);
   // The file is the router row's input: fleet-tick reads it as a verdict.
   const read = readCostGuard(r.guardPath);
   assert.equal(read.status, "ok");
   assert.deepEqual(routerRows({ router: read }).map((x) => [x.action, x.detail]),
-    [["DEFAULT-ONLY", `cost guard: task-high $5.00 vs $10.00, fail 45% vs 30%, n=20/20; guard computed ${r.guard.computed_at}`]]);
+    [["DEFAULT-ONLY", `cost guard: task-high (floor) $5.00 vs $10.00, fail 45% vs 30%, n=20/20; guard computed ${r.guard.computed_at}`]]);
   const rep = computeReport(parsed(w));
   const whole = (c) => JSON.parse(JSON.stringify({ ...c, n: c.n_merged }));
   assert.deepEqual(r.guard.cells.find((c) => c.cell === "task-high"), whole(rep.cells.find((c) => c.cell === "task-high")));
   assert.deepEqual(r.guard.cells.find((c) => c.cell === "task-high"), {
     cell: "task-high", generation: "claude-opus-5", n: 20, n_pulls: 20, n_merged: 20, n_claims: 20, n_failed: 9, fail_rate: 0.45,
-    mean_usd: 5, median_usd: 5, router_usd: 0, usd_diff_ci95: r.guard.cells.find((c) => c.cell === "task-high").usd_diff_ci95,
-    by_hand: 20, no_ruling: 0, no_ruling_prs: [], pending: 0, pending_prs: [], left_out: 0, unpriced: 0, untimed: 0, excluded: 0, older: [],
+    mean_usd: 5, mean_minutes: 0.5, median_usd: 5, router_usd: 0, usd_diff_ci95: r.guard.cells.find((c) => c.cell === "task-high").usd_diff_ci95,
+    by_hand: 20, no_ruling: 0, no_ruling_prs: [], pending: 0, pending_prs: [], left_out: 0, unpriced: 0, untimed: 0, shared_merged: { cell: 20, base: 20 }, excluded: 0, older: [],
   }, "the whole entry, so the gap to the floor is exact: 9 of 20 claims failed");
   assert.equal(r.guard.window_start, WINDOW_START);
   assert.ok(!Number.isNaN(Date.parse(r.guard.computed_at)));
@@ -156,7 +158,7 @@ test("--guard: a cell at least as dear as the baseline trips on $ alone, at an e
   addCell(w, "task-high", MIN_N, 4, 10);
   const r = runCli(w);
   assert.equal(r.status, 3, r.stderr);
-  assert.deepEqual(r.guard.tripped, ["task-high"]);
+  assert.deepEqual(r.guard.tripped, [{ cell: "task-high", on: ["usd"] }]);
 });
 
 test("--guard: the $ leg compares unrounded means, so a cell cheaper by under half a cent does not trip on rounding", () => {
@@ -455,18 +457,18 @@ test("without --guard the report prints and exits 0, writing nothing", () => {
     "--limit", "1000", "--json", "number,state,mergedAt"]]);
   assert.match(r.stdout, /^cell\tgeneration\tn_pulls\tn_merged\tn_claims\tn_failed\tfail_rate\tmean_usd\tmedian_usd\trouter_usd\tusd_diff_ci95\texcluded\tleft_out\tunpriced\tuntimed\tguard$/m);
   const json = JSON.parse(runCli(w, ["--json"]).stdout);
-  assert.deepEqual(json.tripped, ["task-high"]);
+  assert.deepEqual(json.tripped, [{ cell: "task-high", on: ["floor", "usd"] }]);
 });
 
-test("the retire condition holds once every non-default starting Cell has tripped, and only then", () => {
+test("the retire condition holds once every starting Cell but the Baseline Cell is excluded under cost, and only then", () => {
   const w = world();
   addCell(w, "slow-high", MIN_N, 0, 10);
   addCell(w, "task-high", MIN_N, 0, 11);
   const one = computeReport(parsed(w));
-  assert.deepEqual([one.tripped, one.retire], [["task-high"], false]);
+  assert.deepEqual([one.tripped, one.retire], [[{ cell: "task-high", on: ["usd"] }], false]);
   addCell(w, "smol-high", MIN_N, 5, 1);
   const both = computeReport(parsed(w));
-  assert.deepEqual([both.tripped, both.retire], [["smol-high", "task-high"], true]);
+  assert.deepEqual([both.tripped, both.retire], [[{ cell: "smol-high", on: ["floor"] }, { cell: "task-high", on: ["usd"] }], true]);
   assert.equal(guardFile(both, "t").retire, true);
   // A row of either objective's set that already adopted a non-default cell keeps the router.
   const sets = (cost, speed = cost) => ({ rows: { cost, speed } });
@@ -475,18 +477,19 @@ test("the retire condition holds once every non-default starting Cell has trippe
   assert.equal(computeReport({ ...parsed(w), routerTable: sets({ "*": "slow-high" }) }).retire, true, "every row of both sets at the default is no adoption");
 });
 
-// `n` counted Pulls in one stretch, merged, one claim apiece, the first `failed` of them a false claim, each spending `usd`.
-const pulls = (n, failed, usd, stretch = "2026-10-05/0") => Array.from({ length: n }, (_, i) => ({
-  stretch, merged: true, claims: 1, falseClaims: i < failed ? 1 : 0, spend: usd, workS: 60,
+// `n` counted Pulls in one stretch, merged, one claim apiece, the first `failed` of them a false claim, each spending `usd`
+// and working `workS` seconds: a minute, which the base's two minutes leave the cell under.
+const pulls = (n, failed, usd, stretch = "2026-10-05/0", workS = 60) => Array.from({ length: n }, (_, i) => ({
+  stretch, merged: true, claims: 1, falseClaims: i < failed ? 1 : 0, spend: usd, workS,
 }));
 
-test("trips() takes the 15-point margin in counts, so 3 of 20 is exactly the margin", () => {
-  const base = pulls(20, 4, 10);
-  assert.equal(trips(pulls(20, 7, 1), base), true, "7 of 20 failing vs 4 of 20 is +15 points");
-  assert.equal(trips(pulls(20, 6, 1), base), false, "6 of 20 vs 4 of 20 is +10 points");
-  assert.equal(trips(pulls(40, 14, 1), base), true, "35% vs 20% across different n");
-  assert.equal(trips(pulls(20, 0, 10), base), true, "equal $ trips");
-  assert.equal(trips(pulls(20, 0, 9.99), base), false);
+test("tripReasons() takes the 15-point margin in counts, so 3 of 20 is exactly the margin", () => {
+  const base = pulls(20, 4, 10, undefined, 120);
+  assert.deepEqual(tripReasons(pulls(20, 7, 1), base), ["floor"], "7 of 20 failing vs 4 of 20 is +15 points");
+  assert.deepEqual(tripReasons(pulls(20, 6, 1), base), [], "6 of 20 vs 4 of 20 is +10 points");
+  assert.deepEqual(tripReasons(pulls(40, 14, 1), base), ["floor"], "35% vs 20% across different n");
+  assert.deepEqual(tripReasons(pulls(20, 0, 10), base), ["usd"], "equal $ trips");
+  assert.deepEqual(tripReasons(pulls(20, 0, 9.99), base), []);
 });
 
 // ---------------------------------------------------------------------------
@@ -592,11 +595,11 @@ test("a top-level booked row with a blank work_s makes its Pull untimed: out of 
   w.members.push(member({ agent: "review-pr-101", cost: 2, workS: "" }));
   const r = runCli(w);
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(r.guard.baseline, { cell: "slow-high", generation: "claude-opus-5", n: MIN_N, mean_usd: 10, fail_rate: 0 });
+  assert.deepEqual(r.guard.baseline, { cell: "slow-high", generation: "claude-opus-5", n: MIN_N, mean_usd: 10, mean_minutes: 1, fail_rate: 0 });
   assert.deepEqual(r.guard.cells, [{
     cell: "slow-high", generation: "claude-opus-5", n: MIN_N, n_pulls: MIN_N, n_merged: MIN_N, n_claims: MIN_N, n_failed: 0, fail_rate: 0,
-    mean_usd: 10, median_usd: 10, router_usd: 0, usd_diff_ci95: null, by_hand: MIN_N, no_ruling: 0, no_ruling_prs: [], pending: 0, pending_prs: [], left_out: 0,
-    unpriced: 0, untimed: 1, excluded: 0, older: [],
+    mean_usd: 10, mean_minutes: 1, median_usd: 10, router_usd: 0, usd_diff_ci95: null, by_hand: MIN_N, no_ruling: 0, no_ruling_prs: [], pending: 0, pending_prs: [], left_out: 0,
+    unpriced: 0, untimed: 1, shared_merged: { cell: MIN_N, base: MIN_N }, excluded: 0, older: [],
   }]);
   assert.match(r.stdout, /^slow-high\tclaude-opus-5\t20\t20\t20\t0\t0\t10\t10\t0\t\t0\t0\t0\t1\tbaseline$/m);
   assert.doesNotMatch(r.stdout, /minute/, "the guard prints no time figure");
@@ -639,10 +642,10 @@ test("the A/B report is underpowered until B disagrees with the policy on MIN_N 
   assert.notEqual(enough.status, "underpowered");
 });
 
-test("trips() draws the 15-point line at counts that are not multiples of 5", () => {
-  const base = pulls(20, 0, 10);
-  assert.equal(trips(pulls(50, 7, 1), base), false, "7 of 50 failing is +14 points");
-  assert.equal(trips(pulls(100, 15, 1), base), true, "15 of 100 failing is +15 points");
+test("tripReasons() draws the 15-point line at counts that are not multiples of 5", () => {
+  const base = pulls(20, 0, 10, undefined, 120);
+  assert.deepEqual(tripReasons(pulls(50, 7, 1), base), [], "7 of 50 failing is +14 points");
+  assert.deepEqual(tripReasons(pulls(100, 15, 1), base), ["floor"], "15 of 100 failing is +15 points");
 });
 
 test("the table labels a non-baseline cell under MIN_N as n<MIN_N rather than ok", () => {
@@ -1016,7 +1019,9 @@ test("the extended guard file is accepted by the router's reader and the tick's,
   addCell(w, "task-high", MIN_N, 0, 5);
   const r = runCli(w);
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(readGuard(r.guard), { tripped: [], n: { "slow-high": MIN_N, "task-high": MIN_N }, window_start: WINDOW_START });
+  assert.deepEqual(readGuard(r.guard), {
+    tripped: [], n: { "slow-high": MIN_N, "task-high": MIN_N }, shared: { "slow-high": { cell: MIN_N, base: MIN_N }, "task-high": { cell: MIN_N, base: MIN_N } }, window_start: WINDOW_START,
+  });
   assert.equal(readCostGuard(r.guardPath).status, "ok");
   const refused = (mutate) => {
     const g = JSON.parse(JSON.stringify(r.guard));
@@ -1056,19 +1061,19 @@ test("--guard: a cell drawn in one week is held to the baseline's Pulls of that 
   assert.deepEqual(r.guard.cells.find((c) => c.cell === "smol-high").usd_diff_ci95, [-7, -7], "the interval is the matched one: $3 against $10");
   assert.match(r.stdout, /^smol-high\t.*\tok$/m);
   // The baseline's own figures are its whole run's.
-  assert.deepEqual(r.guard.baseline, { cell: "slow-high", generation: "claude-opus-5", n: 40, mean_usd: 10, fail_rate: 0.15 });
+  assert.deepEqual(r.guard.baseline, { cell: "slow-high", generation: "claude-opus-5", n: 40, mean_usd: 10, mean_minutes: 1, fail_rate: 0.15 });
 });
 
 test("--guard: Pulls of the baseline alone in a later week neither trip a cell nor un-trip one", () => {
   const w = world();
   addCell(w, "slow-high", MIN_N, 4, 10, MON1);       // 20%
   addCell(w, "smol-high", MIN_N, 8, 3, MON1);        // 40%: +20 points, tripped
-  assert.deepEqual(computeReport(parsed(w)).tripped, ["smol-high"]);
+  assert.deepEqual(computeReport(parsed(w)).tripped, [{ cell: "smol-high", on: ["floor"] }]);
   // A later week the baseline failed every PR in, at $50: its whole run now reads 60% and $30, past smol-high's 40% and $3.
   addCell(w, "slow-high", MIN_N, MIN_N, 50, MON3);
   const r = runCli(w);
   assert.equal(r.status, 3, r.stderr);
-  assert.deepEqual(r.guard.tripped, ["smol-high"]);
+  assert.deepEqual(r.guard.tripped, [{ cell: "smol-high", on: ["floor"] }]);
   assert.equal(r.guard.baseline.fail_rate, 0.6, "it is in the baseline's own figures all the same");
 });
 
@@ -1097,7 +1102,7 @@ test("--guard: MIN_N counts the merged PRs of the weeks both were drawn in, not 
   assert.deepEqual([few.tripped, few.unmatched], [[], ["smol-high"]], "39 merged PRs of its own, 19 of them matched");
   assert.equal(few.cells.find((c) => c.cell === "smol-high").n_merged, 39);
   const enough = build(MIN_N);
-  assert.deepEqual([enough.tripped, enough.unmatched], [["smol-high"], []]);
+  assert.deepEqual([enough.tripped, enough.unmatched], [[{ cell: "smol-high", on: ["floor"] }], []]);
 });
 
 test("--guard: adding the same shift to every cell's Pulls within each week, a different one in each, leaves every trip as it was", () => {
@@ -1114,23 +1119,139 @@ test("--guard: adding the same shift to every cell's Pulls within each week, a d
   const before = build([{ usd: 0, rate: 0 }, { usd: 0, rate: 0 }]);
   // 10 more points of false claims and $3 a PR in the first week; 30 points and $20 in the second.
   const after = build([{ usd: 3, rate: 10 }, { usd: 20, rate: 30 }]);
-  assert.deepEqual(before.tripped, ["smol-high"], "+30 points where task-high's +10 is within the floor and its $2 under the baseline's $10");
-  assert.deepEqual([after.tripped, after.unmatched, after.verdict], [["smol-high"], [], "tripped"]);
+  assert.deepEqual(before.tripped, [{ cell: "smol-high", on: ["floor"] }], "+30 points where task-high's +10 is within the floor and its $2 under the baseline's $10");
+  assert.deepEqual([after.tripped, after.unmatched, after.verdict], [[{ cell: "smol-high", on: ["floor"] }], [], "tripped"]);
   assert.notEqual(after.baseline.fail_rate, before.baseline.fail_rate, "the shift did move the baseline's own figures");
 });
 
-test("trips() holds a cell to MIN_N merged PRs on each side in the stretches it shares, and is never true of a cell that shares none", () => {
-  const base = pulls(20, 0, 10);
-  assert.equal(trips(pulls(19, 19, 1), base), false, "19 merged PRs, however bad");
-  assert.equal(trips(pulls(20, 20, 1), pulls(19, 0, 10)), false, "a baseline of 19");
-  assert.equal(trips(pulls(20, 20, 1, "2026-10-12/0"), base), false, "no stretch in common");
-  assert.equal(trips(pulls(20, 20, 1), base), true);
+test("tripReasons() holds a cell to MIN_N merged PRs on each side in the stretches it shares, and names none for a cell that shares none", () => {
+  const base = pulls(20, 0, 10, undefined, 120);
+  assert.deepEqual(tripReasons(pulls(19, 19, 1), base), [], "19 merged PRs, however bad");
+  assert.deepEqual(tripReasons(pulls(20, 20, 1), pulls(19, 0, 10, undefined, 120)), [], "a baseline of 19");
+  assert.deepEqual(tripReasons(pulls(20, 20, 1, "2026-10-12/0"), base), [], "no stretch in common");
+  assert.deepEqual(tripReasons(pulls(20, 20, 1), base), ["floor"]);
 });
 
-test("trips() judges a cell whose merged PRs fall in other stretches than the baseline's on the $ each side spent: 100 times the baseline's cost trips", () => {
+test("tripReasons() judges a cell whose merged PRs fall in other stretches than the baseline's on the $ each side spent: 100 times the baseline's cost trips", () => {
   const unmerged = (units) => units.map((u) => ({ ...u, merged: false, claims: 0, falseClaims: 0 }));
   // Each side merged in one week and abandoned one Pull in the other; the cell spent $100 a Pull, the baseline $1.
-  const base = [...unmerged(pulls(1, 0, 1, "a")), ...pulls(25, 0, 1, "b")];
-  assert.equal(trips([...pulls(25, 0, 100, "a"), ...unmerged(pulls(1, 0, 100, "b"))], base), true);
-  assert.equal(trips([...pulls(25, 0, 0.5, "a"), ...unmerged(pulls(1, 0, 0.5, "b"))], base), false, "half the baseline's cost does not");
+  const base = [...unmerged(pulls(1, 0, 1, "a", 120)), ...pulls(25, 0, 1, "b", 120)];
+  assert.deepEqual(tripReasons([...pulls(25, 0, 100, "a"), ...unmerged(pulls(1, 0, 100, "b"))], base), ["usd"]);
+  assert.deepEqual(tripReasons([...pulls(25, 0, 0.5, "a"), ...unmerged(pulls(1, 0, 0.5, "b"))], base), [], "half the baseline's cost does not");
+});
+
+// ---------------------------------------------------------------------------
+// The Baseline Cell, and why a cell tripped.
+
+test("a cell faster than the baseline and dearer per merged PR, within the floor, trips on usd alone; one cheaper and slower, on minutes alone", () => {
+  const w = world();
+  addCell(w, "slow-high", MIN_N, 4, 10, DAY, 60);
+  addCell(w, "task-high", MIN_N, 4, 12, DAY, 30);    // dearer, faster, the same fail rate
+  addCell(w, "smol-high", MIN_N, 4, 3, DAY, 90);     // cheaper, slower, the same fail rate
+  const report = computeReport(parsed(w));
+  assert.deepEqual(report.tripped, [{ cell: "smol-high", on: ["minutes"] }, { cell: "task-high", on: ["usd"] }]);
+  assert.equal(report.verdict, "tripped", "a trip on any reason is a trip");
+  assert.deepEqual([report.baseline.mean_minutes, report.cells.find((c) => c.cell === "smol-high").mean_minutes], [1, 1.5]);
+  const r = runCli(w);
+  assert.equal(r.status, 3, r.stderr);
+  assert.deepEqual(r.guard.tripped, report.tripped);
+  // The tick names each tripped Cell with its reasons, and a minutes trip's work time beside the baseline's.
+  assert.deepEqual(routerRows({ router: readCostGuard(r.guardPath) }).map((x) => x.detail), [
+    `cost guard: smol-high (minutes) $3.00 vs $10.00, fail 20% vs 20%, n=20/20, 1.5 min vs 1.0 min work time per merged PR; task-high (usd) $12.00 vs $10.00, fail 20% vs 20%, n=20/20; guard computed ${r.guard.computed_at}`,
+  ]);
+  assert.match(r.stdout, /^# verdict: tripped \(baseline slow-high n=20\/20; tripped smol-high \(minutes\); task-high \(usd\)\)/m);
+});
+
+test("a cell under the floor has floor among its reasons, whatever else it trips on", () => {
+  const w = world();
+  addCell(w, "slow-high", MIN_N, 4, 10, DAY, 60);
+  addCell(w, "task-high", MIN_N, 8, 12, DAY, 90);    // +20 points, dearer and slower
+  addCell(w, "smol-high", MIN_N, 8, 3, DAY, 30);     // +20 points, cheaper and faster
+  assert.deepEqual(computeReport(parsed(w)).tripped, [{ cell: "smol-high", on: ["floor"] }, { cell: "task-high", on: ["floor", "usd", "minutes"] }]);
+});
+
+test("a cell with no minutes figure never trips on minutes: its untimed Pulls are counted in none", () => {
+  const w = world();
+  addCell(w, "slow-high", MIN_N, 4, 10, DAY, 60);
+  addCell(w, "task-high", MIN_N, 4, 5, DAY, "");     // every Pull untimed: no work time on record
+  const none = computeReport(parsed(w));
+  assert.deepEqual([none.tripped, none.unmatched], [[], []]);
+  const entry = none.cells.find((c) => c.cell === "task-high");
+  assert.deepEqual([entry.n_merged, entry.untimed, entry.mean_minutes], [0, MIN_N, null]);
+  // Timed Pulls beside untimed ones are judged on the timed.
+  addCell(w, "task-high", MIN_N, 4, 5, DAY, 90);
+  assert.deepEqual(computeReport(parsed(w)).tripped, [{ cell: "task-high", on: ["minutes"] }]);
+});
+
+test("each cell's entry records its shared merged PRs on both sides, a cell under MIN_N of its own included, and the guard file carries them", () => {
+  const w = world();
+  addCell(w, "slow-high", MIN_N + 5, 0, 10, MON1);
+  addCell(w, "slow-high", 7, 0, 10, MON2);
+  addCell(w, "task-high", MIN_N, 0, 5, MON1);
+  addCell(w, "task-high", 9, 0, 5, MON3);            // a week the baseline was not drawn in
+  addCell(w, "smol-high", 6, 0, 5, MON2);            // 6 merged PRs of its own
+  addCell(w, "slow-medium", 4, 0, 5, MON3);          // shares no week with the baseline
+  const report = computeReport(parsed(w));
+  const shared = (cell) => report.cells.find((c) => c.cell === cell).shared_merged;
+  assert.deepEqual(shared("slow-high"), { cell: MIN_N + 12, base: MIN_N + 12 }, "the baseline shares every stretch with itself");
+  assert.deepEqual(shared("task-high"), { cell: MIN_N, base: MIN_N + 5 }, "only the week both were drawn in");
+  assert.deepEqual(shared("smol-high"), { cell: 6, base: 7 }, "under MIN_N of its own, and still counted");
+  assert.deepEqual(shared("slow-medium"), { cell: 0, base: 0 }, "no shared week");
+  assert.deepEqual(guardFile(report, "t").cells.map((c) => [c.cell, c.shared_merged]), report.cells.map((c) => [c.cell, c.shared_merged]));
+});
+
+test("a cell the old baseline tripped is not tripped against a baseline it shares no stretch with; one that ran beside the others keeps its comparison", () => {
+  const w = world();
+  addCell(w, "slow-high", MIN_N, 0, 10, MON1);
+  addCell(w, "task-high", MIN_N, 10, 5, MON1);       // +50 points against slow-high
+  addCell(w, "smol-high", MIN_N, 0, 4, MON2);        // never drawn beside either
+  assert.deepEqual(computeReport(parsed(w)).tripped, [{ cell: "task-high", on: ["floor"] }]);
+  const switched = computeReport({ ...parsed(w), baselineCell: "smol-high" });
+  assert.deepEqual([switched.tripped, switched.unmatched], [[], ["slow-high", "task-high"]], "every trip judged against the old baseline lifts, the floor's included");
+  assert.equal(switched.verdict, "ok");
+  addCell(w, "smol-high", MIN_N, 0, 4, MON1);        // now drawn beside them
+  assert.deepEqual(computeReport({ ...parsed(w), baselineCell: "slow-high" }).tripped, [{ cell: "task-high", on: ["floor"] }]);
+  assert.deepEqual(computeReport({ ...parsed(w), baselineCell: "slow-high" }).cells.find((c) => c.cell === "task-high").shared_merged, { cell: MIN_N, base: MIN_N });
+});
+
+test("a Baseline Cell other than slow-high is the guard's baseline, and every cell is compared with it", () => {
+  const w = world();
+  addCell(w, "task-medium", MIN_N, 4, 10, DAY, 60);
+  addCell(w, "slow-medium", MIN_N, 4, 12, DAY, 30);
+  addCell(w, "slow-high", MIN_N, 4, 99, DAY, 30);    // no longer the baseline: slow-high is a cell like another
+  const report = computeReport({ ...parsed(w), baselineCell: "task-medium" });
+  assert.deepEqual([report.baseline.cell, report.baseline.n, report.tripped], ["task-medium", MIN_N, [{ cell: "slow-high", on: ["usd"] }, { cell: "slow-medium", on: ["usd"] }]]);
+  assert.equal(report.cells.find((c) => c.cell === "task-medium").usd_diff_ci95, null, "the baseline has no interval against itself");
+  // The starting set is the Baseline Cell's: retire needs slow-medium and smol-medium out under cost.
+  assert.equal(report.retire, false, "smol-medium, a starting Cell, has not tripped");
+  addCell(w, "smol-medium", MIN_N, 4, 11, DAY, 30);
+  const all = computeReport({ ...parsed(w), baselineCell: "task-medium" });
+  assert.equal(all.retire, true);
+  assert.equal(computeReport({ ...parsed(w), baselineCell: "task-medium", routerTable: { rows: { cost: { "*": "smol-medium" }, speed: { "*": "task-medium" } } } }).retire, false, "a row adopting another Cell than the Baseline Cell keeps the router");
+  assert.equal(computeReport({ ...parsed(w), baselineCell: "task-medium", routerTable: { rows: { cost: { "*": "task-medium" }, speed: { "*": "task-medium" } } } }).retire, true);
+  const r = runCli(w, ["--guard", "--baseline-cell", "task-medium"]);
+  assert.equal(r.status, 3, r.stderr);
+  assert.deepEqual([r.guard.baseline.cell, r.guard.retire], ["task-medium", true]);
+  assert.match(r.stdout, /^task-medium\t.*\tbaseline$/m);
+  assert.equal(runCli(w, ["--guard", "--baseline-cell", "huge-high"]).status, 2);
+});
+
+test("with no --baseline-cell the baseline is the run's receipt's, else the saved value, else slow-high", () => {
+  const w = world();
+  addCell(w, "task-medium", MIN_N, 0, 10);
+  addCell(w, "slow-high", MIN_N, 0, 10);
+  const under = (files) => runCli(w, ["--guard"], {
+    at: (dir) => {
+      mkdirSync(join(dir, ".fleet"));
+      for (const [name, content] of Object.entries(files)) writeFileSync(join(dir, ".fleet", name), JSON.stringify(content));
+      return { cwd: dir, args: ["--guard", "--out", join(dir, ".fleet", "cost-guard.json")] };
+    },
+  }).guard?.baseline.cell;
+  const receipt = (baselineCell) => ({ run: null, session: "s", steps: {}, ...(baselineCell === undefined ? {} : { baselineCell }) });
+  assert.equal(under({}), "slow-high", "neither: the default");
+  assert.equal(under({ "baseline-cell.json": { cell: "task-medium" } }), "task-medium", "the saved value");
+  assert.equal(under({ "baseline-cell.json": { cell: "task-medium" }, "phase0.json": receipt("slow-high") }), "slow-high", "the receipt's, over the saved value");
+  assert.equal(under({ "baseline-cell.json": { cell: "task-medium" }, "phase0.json": receipt() }), "slow-high", "a receipt that records none is the default, as phase 0 resumes it");
+  assert.equal(under({ "phase0.json": receipt("task-medium") }), "task-medium");
+  assert.equal(under({ "baseline-cell.json": { cell: "nope-high" } }), "slow-high", "an invalid saved value is the default");
 });

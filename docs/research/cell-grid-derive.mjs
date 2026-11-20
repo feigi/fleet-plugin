@@ -21,7 +21,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { bootstrapDiffCI } from "../../plugin/scripts/pull-attribution.mjs";
 import { parseTsv } from "../../plugin/scripts/member-outcomes.mjs";
-import { CELL, POLICY_CELL, parseMember } from "../../plugin/scripts/ledger-grammar.mjs";
+import { CELL, DEFAULT_BASELINE_CELL, parseMember } from "../../plugin/scripts/ledger-grammar.mjs";
 import { catalogEntry, readOmpConfigValue, readOmpModelCatalog, resolveRole, stripLevel } from "../../plugin/scripts/tier-roles.mjs";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -76,7 +76,7 @@ else {
     const k = byPrice.indexOf(role);
     const dearer = k + 1 < byPrice.length ? tag(byPrice[k + 1], level) : "none";
     const cheaper = k > 0 ? tag(byPrice[k - 1], level) : "none";
-    out(`${cell}${cell === POLICY_CELL ? " (policy)" : ""}\t${up}\t${down}\t${dearer}\t${cheaper}`);
+    out(`${cell}${cell === DEFAULT_BASELINE_CELL ? " (policy)" : ""}\t${up}\t${down}\t${dearer}\t${cheaper}`);
   }
 }
 out();

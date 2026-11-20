@@ -1,19 +1,15 @@
 {
   "window_start": null,
   "n_rows": 0,
-  "cells": [
-    "slow-high",
-    "task-high",
-    "smol-high"
-  ],
+  "cells": null,
   "burn_in": true,
   "splits": {},
   "rows": {
     "cost": {
-      "*": "slow-high"
+      "*": null
     },
     "speed": {
-      "*": "slow-high"
+      "*": null
     }
   },
   "classifier": {
@@ -24,7 +20,7 @@
   "reasons": {
     "cost": {
       "*": {
-        "cell": "slow-high",
+        "cell": null,
         "reason": "unjudged",
         "cells": {},
         "pairs": []
@@ -32,7 +28,7 @@
     },
     "speed": {
       "*": {
-        "cell": "slow-high",
+        "cell": null,
         "reason": "unjudged",
         "cells": {},
         "pairs": []

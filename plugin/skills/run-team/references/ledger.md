@@ -74,7 +74,7 @@ One line per ticket, rewritten in place (`ledger.mjs row <ticket> <text>`; `ledg
 #<t5> excluded · behind-issue:#<t3>
 ```
 
-A row's cell is its `tier=` (the cell a draw picked), else its `cell=` (the cell the router printed for a Pull it routed without a draw, like `#<t6> impl-<t6> · cell=task-high`; `row` writes it, `token` refuses it), else the policy cell, `slow-high`.
+A row's cell is its `tier=` (the cell a draw picked), else its `cell=` (the cell the router printed for a Pull it routed without a draw, like `#<t6> impl-<t6> · cell=task-high`; `row` writes it, `token` refuses it), else `slow-high`, the Cell a bare row runs whatever Baseline Cell routed it.
 
 ## Writing before dispatch
 

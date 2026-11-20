@@ -34,6 +34,15 @@ condition ("every non-default cell of stage 1") reads over the starting table's
 Cells, and its cumulative baseline compares time-matched, as ADR 0037 and the
 spec say. The exploration draw is over the Pull's group's exploration Cells, one
 Pull in five.
+Amended by #4463 (ruled 2026-11-19 by the maintainer, from a grilling session):
+the Baseline Cell is a setting — each repository names the Cell the router starts
+from, the cost guard compares every Cell with and the quality floor reads, in place
+of the fixed `slow-high` (#3678's `slow-high` above reads the Baseline Cell). The
+guard records why a Cell tripped — `floor`, `usd`, or `minutes` (a Cell's Work time per
+merged PR at or above the Baseline Cell's) — and each Objective applies the reasons
+it excludes on: `cost` excludes `floor` and `usd`, `speed` excludes `floor` and
+`minutes`, which retires #3680's "the guard ignores the objective". A Cell tripped on
+one leg alone is still drawn by the other Objective's runs.
 
 ## Context
 
@@ -119,11 +128,13 @@ real signal. `#2038` amended it before this ADR shipped (see Guard, below).
   tripped, `4` no verdict (baseline n<20), `2` input error — consumed by
   `fleet-tick.mjs`'s `router` row. The verdict never lives in prose alone
   (`#1111`).
-- **Baseline:** `slow-high`, strictly, cumulative from a `WINDOW_START`
+- **Baseline:** each repository's Baseline Cell (`slow-high` until it names its own),
+  cumulative from a `WINDOW_START`
   constant in `pr-cost.mjs`. Never rolling; reset only by editing the
   constant in a PR.
-- **Trip rule** (amends `#2037`'s first draft): per cell, n≥20 each side,
-  `fail_rate − baseline ≥ 15 pts` **∨** `mean_usd ≥ baseline`. At n=20 the
+- **Trip rule** (amends `#2037`'s first draft): per cell, n≥20 each side, it trips on
+  `floor` (`fail_rate − baseline ≥ 15 pts`), `usd` (`mean_usd ≥ baseline`) or `minutes`
+  (Work time per merged PR at or above the baseline's), each recorded in the entry's `on`. At n=20 the
   15-point margin is exactly a 3-of-20 count difference; the `fail_rate`
   disjunct alone brings false eviction at equal true fail rates from 0.44
   down to ≈0.21 (exact binomial for the stated `≥`; ≈0.13 if read as
@@ -132,9 +143,9 @@ real signal. `#2038` amended it before this ADR shipped (see Guard, below).
   two figures applies.
   Still point estimates — a bootstrap 95% CI on the $ difference is printed
   beside the verdict for reading, never for judging. Sticky by construction:
-  a tripped cell gets no new rows and cannot be adopted by a later fit; the
-  route script substitutes `slow-high` for a tripped table row without
-  waiting for a re-fit.
+  a cell tripped under the run's own Objective gets no new rows and cannot be adopted
+  by a later fit while the Baseline Cell stands; the route script substitutes the
+  Baseline Cell for a table row the Objective excludes without waiting for a re-fit.
 - **Guard/table asymmetry, on purpose:** the guard is pooled, the router
   table is per-stratum — a cell evicted pooled cannot win a stratum.
   Conservative by design.

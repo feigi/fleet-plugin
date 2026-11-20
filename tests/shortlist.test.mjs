@@ -49,6 +49,8 @@ const HERE = fileURLToPath(new URL("../plugin/scripts", import.meta.url));
 const COPIED = ["shortlist.mjs", "candidates.mjs", "ledger.mjs", "ledger-grammar.mjs", "arg.mjs", "fleet-dir.mjs", "git-env.mjs", "is-cli.mjs",
   // ledger.mjs reads the tick's conflict hold for the finisher gate off fleet-tick.mjs's deriveRun (#2299).
   "fleet-tick.mjs", "gh-aliased-read.mjs", "fleet-state.mjs", "main-checkout.mjs", "phase0-receipt.mjs", "pid-lock.mjs", "proc.mjs",
+  // phase0-receipt.mjs reads the Baseline Cell the run saved, and fleet-tick.mjs the reasons a Cell tripped.
+  "baseline-cell.mjs", "trip-reasons.mjs",
   // ledger.mjs and fleet-tick.mjs count a PR's closing references by its rule.
   "closing-refs.mjs",
   // ledger.mjs counts a finisher's PR's release labels by their shared vocabulary.

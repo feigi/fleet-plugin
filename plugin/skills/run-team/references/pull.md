@@ -257,7 +257,7 @@ terminating in exactly one dispatch or an empty shortlist:
    the line verbatim under that name in `## Routed` in one write; then the
    dispatch at once: claim what you are about to dispatch; dispatch what you
    have just claimed. A Pull routed without a draw writes `cell=<CELL>` instead,
-   unless `CELL` is the policy cell, `slow-high`, which a row with neither runs.
+   unless `CELL` is `slow-high`, the Cell a row with neither runs, whatever Baseline Cell routed the Pull.
    `ledger.mjs` refuses a line that is not a Routing and a second, different
    Routing for that name; the same line again — the row step re-run after its
    write landed — rewrites the row and leaves the entry as it was. Router
@@ -674,7 +674,7 @@ pooled across cells, and stop until
 there are at least ten of them across five or more distinct `run_date`s; below
 that, a comparison count is a number, not evidence. SKILL.md's **Report**
 reports the count `cell-readout.mjs` prints, which holds a cell below that
-floor to a count on stderr.
+floor to a count on stderr. The readout compares each cell with the Baseline Cell (`slow-high` until the repository names its own).
 
 ## A Pull's entry and exits, in full
 
