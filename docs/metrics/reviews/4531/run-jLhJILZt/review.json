@@ -1,0 +1,57 @@
+{
+  "pr": 4531,
+  "head": "1e4a5db08cb905b7d399d0a7cf6f91939a924557",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: Verify branch is rebased on base (needs pull-request context and full git history, not the worktree); Validate renovate.json (fetches renovate from the npm registry via npx on every run); smoke-omp (needs bun and a globally installed pinned omp binary); install-and-smoke (needs bun and a globally installed pinned omp binary).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "tests",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "comments",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ` M docs/metrics/tier-outcomes.tsv` and untracked docs/metrics/runs/2026-11-20T165122Z/{closeout.json,ledger.md,phase0.json,plugin-version}. I made no edits there; these look like controller run-metrics output."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — `git status --porcelain -uall` printed ' M docs/metrics/tier-outcomes.tsv' and '?? docs/metrics/runs/2026-11-20T165122Z/{closeout.json,ledger.md,phase0.json,plugin-version}'. I ran no writes there, so these come from the controller or other agents."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin —  M docs/metrics/tier-outcomes.tsv; ?? docs/metrics/runs/2026-11-20T165122Z/closeout.json; ?? docs/metrics/runs/2026-11-20T165122Z/ledger.md; ?? docs/metrics/runs/2026-11-20T165122Z/phase0.json; ?? docs/metrics/runs/2026-11-20T165122Z/plugin-version (this review did not write these: its only commands in that directory were `pwd` and a read-only `git -C … remote get-url`; they look like the controller's run metrics)"
+    }
+  ],
+  "counts": {
+    "survived": 0,
+    "refuted": 0,
+    "unverified": 1,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4531/run-jLhJILZt/snapshot-1e4a5db0",
+  "survived": [],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 339,
+      "claim": "The new cases only pin the `.` in `(?<![\\w$.])import\\s*\\(`. A property call with whitespace before the member name, `o . import(name);`, is still treated as a dynamic import and refused, and no accepted case covers that spelling.",
+      "evidence": "red: ./agent-test --test-name-pattern='the sweep accepts a gh timeout it can follow beside writes it need not' tests/gh-spawn-bound.test.mjs → exit 1, fail 1 incl 'the sweep accepts a gh timeout it can follow beside writes it need not' (probe case `o . import(name);` added; the sweep reported 'reached through an import() of a path it does not spell out'); baseline: same command on the unmodified tree → exit 0, test pass. This is a probe, not a mutation kill; the source is unchanged by the PR.",
+      "suggested_fix": "Add the spaced form `o . import(name);` as an accepted case, together with a source fix (e.g. look back past whitespace for a `.`), or record it as a known limit.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

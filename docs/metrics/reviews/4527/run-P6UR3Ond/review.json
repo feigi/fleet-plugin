@@ -1,0 +1,106 @@
+{
+  "pr": 4527,
+  "head": "330e684918abf1b4669559b8852a7945da6862fc",
+  "resume": null,
+  "testEnvironment": "Test environment: the snapshot is a git repository whose single commit holds\nthe reviewed tree — its tree hash was compared against the commit under review\nwhen the snapshot was cut. A suite run here collects and runs what a checkout at\nthat commit does, so a failing or skipped test is a fact about the tree, not\nabout this copy of it. Its history is that one synthetic commit: 'git log',\n'git diff' and every ancestry question answer about the snapshot and never about\nthe PR.\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: Verify branch is rebased on base (needs pull-request context and full git history, not the worktree); Validate renovate.json (fetches renovate from the npm registry via npx on every run); smoke-omp (needs bun and a globally installed pinned omp binary); install-and-smoke (needs bun and a globally installed pinned omp binary).",
+  "suiteVerdict": {
+    "usable": true,
+    "reason": null
+  },
+  "dimensionsRun": [
+    "correctness",
+    "tests",
+    "comments"
+  ],
+  "dimensionsUnrun": [],
+  "cwdAudit": [
+    {
+      "dimension": "comments",
+      "state": "clean",
+      "line": "CWD-AUDIT: clean /Users/chris/dev/fleet-plugin — not run: the audit command was never executed, so 'clean' is not observed, and the only command run from that directory was `pwd`."
+    },
+    {
+      "dimension": "tests",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — untracked docs/metrics/runs/2026-11-20T165122Z/{closeout.json,ledger.md,phase0.json,plugin-version} (controller's own run metrics, not written by me)."
+    },
+    {
+      "dimension": "correctness",
+      "state": "dirty",
+      "line": "CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — ?? docs/metrics/runs/2026-11-20T165122Z/closeout.json, ?? docs/metrics/runs/2026-11-20T165122Z/ledger.md, ?? docs/metrics/runs/2026-11-20T165122Z/phase0.json, ?? docs/metrics/runs/2026-11-20T165122Z/plugin-version (not written by this reviewer: every command here chained a cd into the snapshot or scratch dirs; these look like the controller's own metrics-run output)"
+    }
+  ],
+  "counts": {
+    "survived": 1,
+    "refuted": 0,
+    "unverified": 3,
+    "crashed": 0
+  },
+  "snapshot": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4527/run-P6UR3Ond/snapshot-330e6849",
+  "survived": [
+    {
+      "severity": "important",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 329,
+      "claim": "The new staticImport quoted-name alternative `\"(?:[^\"\\\\\\n]|\\\\.)*\"` cannot read a string-named specifier holding a line continuation (backslash + LF, CRLF or U+2028), so `import { \"C\\<LF>FG\" as C } from \"./common.mjs\"` — which Node resolves to the export CFG — is neither read by the line-start reader (its clause holds a quote) nor refused, and a write `C.ms = <env read>` through it is silently accepted with problems [] and reaches [].",
+      "evidence": "cd correctness/probe && node --test --test-name-pattern=PROBE4527 tests/gh-spawn-bound.test.mjs →\nPROBE lf-continuation {\"problems\":[],\"spawns\":[{\"where\":\"x.mjs:3\",\"bounded\":true,\"reaches\":[],\"range\":[]}]}\nPROBE crlf-continuation {\"problems\":[], ... \"reaches\":[] ...}\nPROBE ls-continuation {\"problems\":[], ... \"reaches\":[] ...}\nPROBE default+lf-continuation {\"problems\":[], ... \"reaches\":[] ...}\nPROBE plain-control (import { \"CFG\" as C }) {\"problems\":[\"y.mjs:1 imports \\\"./common.mjs\\\" in a form this sweep cannot follow\"], ...}\nPROBE unrefused-baseline-plain-named-unbounded (import { CFG as C }) {\"problems\":[], ... \"reaches\":[\"reads process.env.TICKETLESS_TIMEOUT\"] ...}  (so the write is traced when the import is read, and lost in the continuation case)\nℹ tests 1 pass 1 fail 0.\nNode validity: correctness/nodecheck/y.mjs = `import { \"C\\<LF>FG\" as C } from \"./common.mjs\"; C.ms = 1; console.log(..., C.ms)` → `node y.mjs` prints `lf-continuation resolves to CFG: 1`, exit 0. The brief asks the refusal to 'read quoted names that contain backslash-escaped characters', and the new comment says 'its escapes read as one character each'; `\\\\.` does not match a backslash before a line terminator because `.` excludes \\n, \\r, U+2028, U+2029.",
+      "suggested_fix": "Let the escape alternative take any following character: `\"(?:[^\"\\\\\\n]|\\\\[\\s\\S])*\"` and `'(?:[^'\\\\\\n]|\\\\[\\s\\S])*'` (\\r\\n works because the lazy loop then reads the \\n as a separate `[^\"\\\\\\n]`… no — \\n is excluded, so use `\\\\(?:\\r\\n|[\\s\\S])`). Add refused cases for `\"C\\\\\\nFG\" as C` (LF and CRLF) to the 'refuses a static import … it cannot read' test.",
+      "dimension": "correctness",
+      "verdict": "survived",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Ran the snapshot copy's exact staticImport regex (tests/gh-spawn-bound.test.mjs:329). For `import { \"C\\<LF>FG\" as C } from \"./common.mjs\"` (also CRLF and U+2028 variants) exec returns no match, so the refusal path (line 333 `?.[3]`) never fires; the plain `\"CFG\"` control matches ./common.mjs. Node accepts the continuation form: `node y.mjs` with `C.ms=1; console.log(C.ms)` printed 1, exit 0. This confirms the regex gap. I did not rerun the full sweep to see problems [] (I relied on the claim's probe output for that), but no other refusal appears in the surrounding code I read. CWD-AUDIT: dirty /Users/chris/dev/fleet-plugin — untracked docs/metrics/runs/2026-11-20T165122Z/{closeout.json,ledger.md,phase0.json,plugin-version}; I wrote nothing there, those are controller files."
+        },
+        {
+          "refuted": false,
+          "reason": "The regex gap is real. I ran the new staticImport regex in node on `import { \"C\\<LF>FG\" as C } from \"./common.mjs\"`: it returns false (no match), while the plain `import { \"CFG\" as C } ...` control returns true. `\\\\.` cannot consume a backslash followed by a line terminator. The diff shows the line-start reader was also changed to exclude quotes in its clause (`[^}\"']*`), so neither reader handles this case. I did not rebuild the copy or rerun the PROBE test, so the claim's `problems: []` output rests on the finding's evidence and my reading of the diff, not my own run. No other handling of this case appears in the diff. This is a narrow gap; the regex observation supports the claim only up to the unmatched import. CWD-AUDIT: not run; this cell only read files and ran a stateless node -e in /tmp. The checkout at /Users/chris/dev/fleet-plugin was never modified.",
+          "inconclusive": false
+        }
+      ],
+      "refutersDispatched": 2,
+      "refutersInconclusive": 0
+    }
+  ],
+  "refuted": [],
+  "unverified": [
+    {
+      "severity": "suggestion",
+      "file": "tests/board-server.test.mjs",
+      "line": 1375,
+      "claim": "All 8 failures of the shared ./agent-test run pass in narrowed reruns at the reviewed head, so they are environment/load artifacts of the shared run (each took 476–699 s, with ETIMEDOUT and 'ticks did not happen' errors) and not regressions from this test-only PR, which touches none of their files; reproduce in the worktree before acting on them.",
+      "evidence": "red: ./agent-test (shared review run, test-run.log) → exit 1, fail 8 incl 'CLI: an exhausted derived range exits non-zero and names the ports it tried' (tests/board-server.test.mjs:1375, 482241ms, actual null expected 2), 'system jq: the three class-position fixes actually changed behaviour on the engine that has the bug (#383)' (tests/candidates.test.mjs:1140, 699248ms, gh issue list ETIMEDOUT), 'CLI: launched while the record names a dead controller, it serves on, then arms on a live one' (tests/cockpit-lifetime.test.mjs:216, '3 ticks did not happen'), 'CLI: an unreadable heartbeat file or process table is not a death' (tests/cockpit-lifetime.test.mjs:257, '2 ticks did not happen'), 'CLI: a process table that cannot be read is said once per outage, and again after it reads' (tests/cockpit-lifetime.test.mjs:299), 'an unparseable or unproven cache refuses, naming what is missing' (tests/derive-testcmd.test.mjs:286, install null !== 1), '`check` prints `true` or its command, and a cache that cannot say what it checks is refused' (tests/derive-testcmd.test.mjs:385), 'CLI: a gh that answers slowly, inside the bound, is read as usual' (tests/diff-stats.test.mjs:318, gh pr view ETIMEDOUT); baseline: cd correctness/copy && ./agent-test tests/board-server.test.mjs → exit 0, tests 69 pass 69, 'CLI: an exhausted derived range…' pass (16190ms); ./agent-test tests/candidates.test.mjs → exit 0, 102/102, 'system jq: … (#383)' pass; ./agent-test tests/cockpit-lifetime.test.mjs → exit 0, 14/14, all three CLI tests pass; ./agent-test tests/derive-testcmd.test.mjs → exit 0, 132/132, both tests pass; ./agent-test tests/diff-stats.test.mjs → exit 0, 31/31, 'CLI: a gh that answers slowly…' pass. Also ./agent-test tests/gh-spawn-bound.test.mjs → exit 0, 26/26, 'the sweep refuses a static import of a relative module that it cannot read' pass.",
+      "suggested_fix": "None in this PR; if they recur, investigate host load / timeouts in the shared full-suite run.",
+      "dimension": "correctness",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 2565,
+      "claim": "The new string-named-import cases discriminate: every mutation of the quote-exclusion and escape-aware regex changes tested, and equivalent rewrites do not.",
+      "evidence": "red: ./agent-test tests/gh-spawn-bound.test.mjs → exit 1, fail 1 incl 'the sweep refuses a static import of a relative module that it cannot read' (M1,M2,M3,M3b,M4,M5); baseline: ./agent-test tests/gh-spawn-bound.test.mjs → exit 0, same test pass (tests 26, pass 26, cancelled 0). Benign B1/B2 → exit 0, test pass.",
+      "dimension": "tests",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    },
+    {
+      "severity": "suggestion",
+      "file": "tests/gh-spawn-bound.test.mjs",
+      "line": 325,
+      "claim": "The new comment says the quoted-name alternatives read escapes 'as one character each', but the pattern `\\\\.` consumes a backslash plus one following character, so `\\u0043` is read as `\\u` followed by plain characters, not as one unit.",
+      "evidence": "The staticImport regex at lines ~325-329 uses `\"(?:[^\"\\\\\\n]|\\\\.)*\"`. The `\\\\.` alternative matches exactly two characters. `\\u0043` is six characters and is read as `\\u` then `0043`. The result is still correct: the unicode-escape test case is refused.",
+      "suggested_fix": "Reword to 'a backslash and the character after it are read as a pair', or 'a backslash escapes the next character'.",
+      "dimension": "comments",
+      "verdict": "unverified",
+      "votes": [],
+      "refutersDispatched": 0,
+      "refutersInconclusive": 0
+    }
+  ]
+}

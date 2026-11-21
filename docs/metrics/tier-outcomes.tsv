@@ -1906,3 +1906,5 @@
 2026-11-20	4519	4516		task-high	yes	no	review run-LbWj7aJn at 9e41604, record dispositions-fix-pr-4519.json: no finding stands	light			
 2026-11-20	4521	4515		task-high	yes	no	review run-PbFA8LeF at c8b5708, record dispositions-fix-pr-4521.json: no finding stands	light			
 2026-11-20	4520	4507		task-high	yes	no	review run-so2HgVzs at 4399e0f, record dispositions-fix-pr-4520.json: no finding stands	light			
+2026-11-20	4527	4524		task-high	yes	yes	review run-P6UR3Ond at 330e684, record dispositions-fix-pr-4527.json: survived[0] false-claim "The new staticImport quoted-name alternative `"(?:[^"\\\n]|\\.)*"` cannot read a string-named specifier holding a line continuation (backslash + LF, CRLF or U+2028), so `import { "C\<LF>FG" as C } from "./common.mjs"` — which Node resolves to the export CFG — is neither read by the line-start reader (its clause holds a quote) nor refused, and a write `C.ms = <env read>` through it is silently accepted with problems [] and reaches []."	light			
+2026-11-20	4531	4525		task-high	yes	no	review run-jLhJILZt at 1e4a5db, record dispositions-fix-pr-4531.json: no finding stands	light			

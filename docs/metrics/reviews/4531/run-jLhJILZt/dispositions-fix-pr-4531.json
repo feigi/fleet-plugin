@@ -1,0 +1,7 @@
+{"head": "1e4a5db08cb905b7d399d0a7cf6f91939a924557", "run": "run-jLhJILZt", "entries": [
+  {"bucket": "unverified", "index": 0, "scope": "out", "claimKind": "behavior", "disposition": "defer",
+   "reason": "Out of scope: ticket #4525 rules out any change to the lookbehind or the sweep's logic; line 339 is outside the PR diff. Out-of-scope refuter let the claim survive (refuted=false), so filed open needs-triage.",
+   "issue": 4532,
+   "verdictPath": "/Users/chris/.fleet/scratch/fleet-plugin-28971265/pr4531/fix-4c64KLtM/unverified-0/verdict.json",
+   "remedyFiles": ["tests/gh-spawn-bound.test.mjs"]}
+]}
